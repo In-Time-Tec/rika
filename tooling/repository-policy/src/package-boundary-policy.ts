@@ -63,28 +63,26 @@ const languageModelProviderPackages = new Set([
 ])
 const validKinds = new Set(["domain", "capability", "adapter", "application", "tooling"])
 const allowedPackageEdges: Readonly<Record<string, ReadonlySet<string>>> = {
-  "@rika/tools": new Set(["@rika/config"]),
-  "@rika/transcript": new Set(["@rika/tools"]),
-  "@rika/persistence": new Set(["@rika/config", "@rika/tools", "@rika/transcript"]),
-  "@rika/runtime": new Set(["@rika/config", "@rika/tools"]),
-  "@rika/app": new Set([
-    "@rika/config",
+  "@rika/coding-tools": new Set(["@rika/configuration"]),
+  "@rika/transcript": new Set(["@rika/coding-tools"]),
+  "@rika/product-store": new Set(["@rika/product", "@rika/transcript"]),
+  "@rika/relay-execution": new Set(["@rika/configuration", "@rika/coding-tools", "@rika/product"]),
+  "@rika/product": new Set([
+    "@rika/configuration",
     "@rika/extensions",
-    "@rika/persistence",
-    "@rika/runtime",
-    "@rika/tools",
+    "@rika/coding-tools",
     "@rika/transcript",
   ]),
-  "@rika/tui": new Set(["@rika/config", "@rika/transcript"]),
+  "@rika/terminal": new Set(["@rika/configuration", "@rika/transcript"]),
   "@rika/cli": new Set([
-    "@rika/config",
+    "@rika/configuration",
     "@rika/extensions",
-    "@rika/persistence",
-    "@rika/runtime",
-    "@rika/tools",
+    "@rika/product-store",
+    "@rika/relay-execution",
+    "@rika/coding-tools",
     "@rika/transcript",
-    "@rika/app",
-    "@rika/tui",
+    "@rika/product",
+    "@rika/terminal",
   ]),
 }
 const allDependencies = (manifest: PackageManifest) => [
@@ -116,8 +114,8 @@ export const checkDependencyManifests = (manifests: ReadonlyArray<NamedManifest>
       if (isForbiddenLocalLink(version)) return [`${path}: ${name} uses ${version}`]
       if (externalFrameworks.has(name) && version.startsWith("workspace:"))
         return [`${path}: ${name} uses external workspace linking`]
-      if (manifest.name === "@rika/tools" && isProvider(name))
-        return [`${path}: @rika/tools cannot depend on language-model provider ${name}`]
+      if (manifest.name === "@rika/coding-tools" && isProvider(name))
+        return [`${path}: @rika/coding-tools cannot depend on language-model provider ${name}`]
       return []
     }),
   )

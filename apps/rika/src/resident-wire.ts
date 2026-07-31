@@ -1,4 +1,4 @@
-import * as ResidentService from "@rika/app/resident-service"
+import * as ResidentService from "@rika/product/resident-service"
 import { Cause, Function, Schema } from "effect"
 
 const decodeClientImpl = Schema.decodeUnknownSync(ResidentService.ClientMessage)

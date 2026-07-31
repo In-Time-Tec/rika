@@ -1,7 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
 import { Crypto, Effect, FileSystem, Layer, PlatformError } from "effect"
-import { McpConfig, McpRuntime, PluginLoader, PluginRegistry, SkillRegistry } from "../src"
+import { McpConfig, McpRuntime, PluginLoader, PluginRegistry, SkillRegistry } from "@rika/extensions/plugin-contract"
 
 const document = (name: string) => `---\nname: ${name}\ndescription: ${name}\n---\nbody`
 

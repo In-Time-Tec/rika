@@ -821,6 +821,14 @@
       "package": "effect"
     },
     {
+      "id": "external:fs",
+      "workspace": "root",
+      "kind": "external",
+      "production": true,
+      "publicExports": [],
+      "package": "fs"
+    },
+    {
       "id": "external:fs/promises",
       "workspace": "root",
       "kind": "external",
@@ -1021,340 +1029,170 @@
       "package": "vitest"
     },
     {
-      "id": "packages/app/test/config-operations.test.ts",
-      "path": "packages/app/test/config-operations.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
+      "id": "packages/coding-tools/test/local-path.test.ts",
+      "path": "packages/coding-tools/test/local-path.test.ts",
+      "workspace": "@rika/coding-tools",
+      "package": "@rika/coding-tools",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/app/test/context-file-system.test.ts",
-      "path": "packages/app/test/context-file-system.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
+      "id": "packages/coding-tools/test/local-safety-policy.test.ts",
+      "path": "packages/coding-tools/test/local-safety-policy.test.ts",
+      "workspace": "@rika/coding-tools",
+      "package": "@rika/coding-tools",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/app/test/context-usage.test.ts",
-      "path": "packages/app/test/context-usage.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
+      "id": "packages/coding-tools/test/media-view.test.ts",
+      "path": "packages/coding-tools/test/media-view.test.ts",
+      "workspace": "@rika/coding-tools",
+      "package": "@rika/coding-tools",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/app/test/execution-ingest.test.ts",
-      "path": "packages/app/test/execution-ingest.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
+      "id": "packages/coding-tools/test/parallel-search.test.ts",
+      "path": "packages/coding-tools/test/parallel-search.test.ts",
+      "workspace": "@rika/coding-tools",
+      "package": "@rika/coding-tools",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/app/test/extension-operations.test.ts",
-      "path": "packages/app/test/extension-operations.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
+      "id": "packages/coding-tools/test/process-registry.test.ts",
+      "path": "packages/coding-tools/test/process-registry.test.ts",
+      "workspace": "@rika/coding-tools",
+      "package": "@rika/coding-tools",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/app/test/file-mentions.test.ts",
-      "path": "packages/app/test/file-mentions.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
+      "id": "packages/coding-tools/test/read-web-page.test.ts",
+      "path": "packages/coding-tools/test/read-web-page.test.ts",
+      "workspace": "@rika/coding-tools",
+      "package": "@rika/coding-tools",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/app/test/interactive-feed-overflow.test.ts",
-      "path": "packages/app/test/interactive-feed-overflow.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
+      "id": "packages/coding-tools/test/tool-contract.test.ts",
+      "path": "packages/coding-tools/test/tool-contract.test.ts",
+      "workspace": "@rika/coding-tools",
+      "package": "@rika/coding-tools",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/app/test/interactive-session.test.ts",
-      "path": "packages/app/test/interactive-session.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
+      "id": "packages/coding-tools/test/tool-runtime-filesystem.proc.test.ts",
+      "path": "packages/coding-tools/test/tool-runtime-filesystem.proc.test.ts",
+      "workspace": "@rika/coding-tools",
+      "package": "@rika/coding-tools",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "process-test"
+    },
+    {
+      "id": "packages/coding-tools/test/tool-runtime.test.ts",
+      "path": "packages/coding-tools/test/tool-runtime.test.ts",
+      "workspace": "@rika/coding-tools",
+      "package": "@rika/coding-tools",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/app/test/openai-auth.test.ts",
-      "path": "packages/app/test/openai-auth.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
+      "id": "packages/coding-tools/test/web-search.test.ts",
+      "path": "packages/coding-tools/test/web-search.test.ts",
+      "workspace": "@rika/coding-tools",
+      "package": "@rika/coding-tools",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/app/test/operation-churn.test.ts",
-      "path": "packages/app/test/operation-churn.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
+      "id": "packages/coding-tools/test/workspace-boundary.test.ts",
+      "path": "packages/coding-tools/test/workspace-boundary.test.ts",
+      "workspace": "@rika/coding-tools",
+      "package": "@rika/coding-tools",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/app/test/operation-interactive-extensions.test.ts",
-      "path": "packages/app/test/operation-interactive-extensions.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
+      "id": "packages/coding-tools/test/workspace-index.test.ts",
+      "path": "packages/coding-tools/test/workspace-index.test.ts",
+      "workspace": "@rika/coding-tools",
+      "package": "@rika/coding-tools",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/app/test/operation-projection-admission.test.ts",
-      "path": "packages/app/test/operation-projection-admission.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
+      "id": "packages/configuration/test/config-contract.test.ts",
+      "path": "packages/configuration/test/config-contract.test.ts",
+      "workspace": "@rika/configuration",
+      "package": "@rika/configuration",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/app/test/operation-review.test.ts",
-      "path": "packages/app/test/operation-review.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
+      "id": "packages/configuration/test/config-service.test.ts",
+      "path": "packages/configuration/test/config-service.test.ts",
+      "workspace": "@rika/configuration",
+      "package": "@rika/configuration",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/app/test/operation-thread-actions.test.ts",
-      "path": "packages/app/test/operation-thread-actions.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
+      "id": "packages/configuration/test/data-root.test.ts",
+      "path": "packages/configuration/test/data-root.test.ts",
+      "workspace": "@rika/configuration",
+      "package": "@rika/configuration",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/app/test/operation.test.ts",
-      "path": "packages/app/test/operation.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
+      "id": "packages/configuration/test/modes.test.ts",
+      "path": "packages/configuration/test/modes.test.ts",
+      "workspace": "@rika/configuration",
+      "package": "@rika/configuration",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/app/test/product-agent-workflow.test.ts",
-      "path": "packages/app/test/product-agent-workflow.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/app/test/product-agent.test.ts",
-      "path": "packages/app/test/product-agent.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/app/test/queued-turn-policy.test.ts",
-      "path": "packages/app/test/queued-turn-policy.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/app/test/recorded-shell-session.test.ts",
-      "path": "packages/app/test/recorded-shell-session.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/app/test/resident-service.test.ts",
-      "path": "packages/app/test/resident-service.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/app/test/resolved-context.test.ts",
-      "path": "packages/app/test/resolved-context.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/app/test/root-turn-owner.test.ts",
-      "path": "packages/app/test/root-turn-owner.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/app/test/specialty-transcripts.test.ts",
-      "path": "packages/app/test/specialty-transcripts.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/app/test/status-parity.test.ts",
-      "path": "packages/app/test/status-parity.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/app/test/thread-activity.test.ts",
-      "path": "packages/app/test/thread-activity.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/app/test/thread-query.test.ts",
-      "path": "packages/app/test/thread-query.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/app/test/thread-title.test.ts",
-      "path": "packages/app/test/thread-title.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/app/test/thread-tool-gateway.test.ts",
-      "path": "packages/app/test/thread-tool-gateway.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/app/test/usage-cost.test.ts",
-      "path": "packages/app/test/usage-cost.test.ts",
-      "workspace": "@rika/app",
-      "package": "@rika/app",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/config/test/config-contract.test.ts",
-      "path": "packages/config/test/config-contract.test.ts",
-      "workspace": "@rika/config",
-      "package": "@rika/config",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/config/test/config-service.test.ts",
-      "path": "packages/config/test/config-service.test.ts",
-      "workspace": "@rika/config",
-      "package": "@rika/config",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/config/test/data-root.test.ts",
-      "path": "packages/config/test/data-root.test.ts",
-      "workspace": "@rika/config",
-      "package": "@rika/config",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/config/test/modes.test.ts",
-      "path": "packages/config/test/modes.test.ts",
-      "workspace": "@rika/config",
-      "package": "@rika/config",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/config/test/paths.test.ts",
-      "path": "packages/config/test/paths.test.ts",
-      "workspace": "@rika/config",
-      "package": "@rika/config",
+      "id": "packages/configuration/test/paths.test.ts",
+      "path": "packages/configuration/test/paths.test.ts",
+      "workspace": "@rika/configuration",
+      "package": "@rika/configuration",
       "kind": "source",
       "production": false,
       "publicExports": [],
@@ -1431,510 +1269,1180 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/persistence/test/contract/transcript-checkpoint-delta.test.ts",
-      "path": "packages/persistence/test/contract/transcript-checkpoint-delta.test.ts",
-      "workspace": "@rika/persistence",
-      "package": "@rika/persistence",
+      "id": "packages/product-store/test/contract/transcript-checkpoint-delta.test.ts",
+      "path": "packages/product-store/test/contract/transcript-checkpoint-delta.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "contract-test"
     },
     {
-      "id": "packages/persistence/test/fixtures/product-migration-oracle-v27.fixture.json",
-      "path": "packages/persistence/test/fixtures/product-migration-oracle-v27.fixture.json",
-      "workspace": "@rika/persistence",
-      "package": "@rika/persistence",
+      "id": "packages/product-store/test/fixtures/product-migration-oracle-v27.fixture.json",
+      "path": "packages/product-store/test/fixtures/product-migration-oracle-v27.fixture.json",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
       "kind": "asset",
       "production": false,
       "publicExports": [],
       "testKind": "fixture"
     },
     {
-      "id": "packages/persistence/test/product-database.test.ts",
-      "path": "packages/persistence/test/product-database.test.ts",
-      "workspace": "@rika/persistence",
-      "package": "@rika/persistence",
+      "id": "packages/product-store/test/product-database.test.ts",
+      "path": "packages/product-store/test/product-database.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/persistence/test/product-migration-oracle-v27.test.ts",
-      "path": "packages/persistence/test/product-migration-oracle-v27.test.ts",
-      "workspace": "@rika/persistence",
-      "package": "@rika/persistence",
+      "id": "packages/product-store/test/product-migration-oracle-v27.test.ts",
+      "path": "packages/product-store/test/product-migration-oracle-v27.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/persistence/test/recorded-shell-repository.test.ts",
-      "path": "packages/persistence/test/recorded-shell-repository.test.ts",
-      "workspace": "@rika/persistence",
-      "package": "@rika/persistence",
+      "id": "packages/product-store/test/recorded-shell-repository.test.ts",
+      "path": "packages/product-store/test/recorded-shell-repository.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/persistence/test/sqlite.test.ts",
-      "path": "packages/persistence/test/sqlite.test.ts",
-      "workspace": "@rika/persistence",
-      "package": "@rika/persistence",
+      "id": "packages/product-store/test/sqlite.test.ts",
+      "path": "packages/product-store/test/sqlite.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/persistence/test/thread-interaction-repository.test.ts",
-      "path": "packages/persistence/test/thread-interaction-repository.test.ts",
-      "workspace": "@rika/persistence",
-      "package": "@rika/persistence",
+      "id": "packages/product-store/test/thread-interaction-repository.test.ts",
+      "path": "packages/product-store/test/thread-interaction-repository.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/persistence/test/thread-repository.test.ts",
-      "path": "packages/persistence/test/thread-repository.test.ts",
-      "workspace": "@rika/persistence",
-      "package": "@rika/persistence",
+      "id": "packages/product-store/test/thread-repository.test.ts",
+      "path": "packages/product-store/test/thread-repository.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/persistence/test/thread-search-repository.test.ts",
-      "path": "packages/persistence/test/thread-search-repository.test.ts",
-      "workspace": "@rika/persistence",
-      "package": "@rika/persistence",
+      "id": "packages/product-store/test/thread-search-repository.test.ts",
+      "path": "packages/product-store/test/thread-search-repository.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/persistence/test/thread-state.test.ts",
-      "path": "packages/persistence/test/thread-state.test.ts",
-      "workspace": "@rika/persistence",
-      "package": "@rika/persistence",
+      "id": "packages/product-store/test/thread-state.test.ts",
+      "path": "packages/product-store/test/thread-state.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/persistence/test/thread-summary-repository.test.ts",
-      "path": "packages/persistence/test/thread-summary-repository.test.ts",
-      "workspace": "@rika/persistence",
-      "package": "@rika/persistence",
+      "id": "packages/product-store/test/thread-summary-repository.test.ts",
+      "path": "packages/product-store/test/thread-summary-repository.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/persistence/test/transcript-repository-sqlite.test.ts",
-      "path": "packages/persistence/test/transcript-repository-sqlite.test.ts",
-      "workspace": "@rika/persistence",
-      "package": "@rika/persistence",
+      "id": "packages/product-store/test/transcript-repository-sqlite.test.ts",
+      "path": "packages/product-store/test/transcript-repository-sqlite.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/persistence/test/transcript-repository.test.ts",
-      "path": "packages/persistence/test/transcript-repository.test.ts",
-      "workspace": "@rika/persistence",
-      "package": "@rika/persistence",
+      "id": "packages/product-store/test/transcript-repository.test.ts",
+      "path": "packages/product-store/test/transcript-repository.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/persistence/test/turn-repository.test.ts",
-      "path": "packages/persistence/test/turn-repository.test.ts",
-      "workspace": "@rika/persistence",
-      "package": "@rika/persistence",
+      "id": "packages/product-store/test/turn-repository.test.ts",
+      "path": "packages/product-store/test/turn-repository.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/persistence/test/usage-repository.test.ts",
-      "path": "packages/persistence/test/usage-repository.test.ts",
-      "workspace": "@rika/persistence",
-      "package": "@rika/persistence",
+      "id": "packages/product-store/test/usage-repository.test.ts",
+      "path": "packages/product-store/test/usage-repository.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/runtime/test/agent-depth.test.ts",
-      "path": "packages/runtime/test/agent-depth.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/product/test/config-operations.test.ts",
+      "path": "packages/product/test/config-operations.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/runtime/test/agent-label.test.ts",
-      "path": "packages/runtime/test/agent-label.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/product/test/context-file-system.test.ts",
+      "path": "packages/product/test/context-file-system.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/runtime/test/agent-profiles.test.ts",
-      "path": "packages/runtime/test/agent-profiles.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/product/test/context-usage.test.ts",
+      "path": "packages/product/test/context-usage.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/runtime/test/await-child-result.test.ts",
-      "path": "packages/runtime/test/await-child-result.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/product/test/contract/execution-route-snapshot.test.ts",
+      "path": "packages/product/test/contract/execution-route-snapshot.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "contract-test"
+    },
+    {
+      "id": "packages/product/test/contract/package-export-contract.test.ts",
+      "path": "packages/product/test/contract/package-export-contract.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "contract-test"
+    },
+    {
+      "id": "packages/product/test/execution-ingest.test.ts",
+      "path": "packages/product/test/execution-ingest.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/runtime/test/context-compaction.test.ts",
-      "path": "packages/runtime/test/context-compaction.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/product/test/extension-operations.test.ts",
+      "path": "packages/product/test/extension-operations.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/runtime/test/context-tokenizer.test.ts",
-      "path": "packages/runtime/test/context-tokenizer.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/product/test/file-mentions.test.ts",
+      "path": "packages/product/test/file-mentions.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/runtime/test/data-blob-store.test.ts",
-      "path": "packages/runtime/test/data-blob-store.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/product/test/interactive-feed-overflow.test.ts",
+      "path": "packages/product/test/interactive-feed-overflow.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/runtime/test/execution-backend-relay.test.ts",
-      "path": "packages/runtime/test/execution-backend-relay.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/product/test/interactive-session.test.ts",
+      "path": "packages/product/test/interactive-session.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/runtime/test/execution-backend.test.ts",
-      "path": "packages/runtime/test/execution-backend.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/product/test/openai-auth.test.ts",
+      "path": "packages/product/test/openai-auth.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/runtime/test/fixtures/deterministic-model-evidence.json",
-      "path": "packages/runtime/test/fixtures/deterministic-model-evidence.json",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/product/test/operation-churn.test.ts",
+      "path": "packages/product/test/operation-churn.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/operation-interactive-extensions.test.ts",
+      "path": "packages/product/test/operation-interactive-extensions.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/operation-projection-admission.test.ts",
+      "path": "packages/product/test/operation-projection-admission.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/operation-review.test.ts",
+      "path": "packages/product/test/operation-review.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/operation-thread-actions.test.ts",
+      "path": "packages/product/test/operation-thread-actions.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/operation.test.ts",
+      "path": "packages/product/test/operation.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/product-agent-workflow.test.ts",
+      "path": "packages/product/test/product-agent-workflow.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/product-agent.test.ts",
+      "path": "packages/product/test/product-agent.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/queued-turn-policy.test.ts",
+      "path": "packages/product/test/queued-turn-policy.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/recorded-shell-session.test.ts",
+      "path": "packages/product/test/recorded-shell-session.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/resident-service.test.ts",
+      "path": "packages/product/test/resident-service.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/resolved-context.test.ts",
+      "path": "packages/product/test/resolved-context.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/root-turn-owner.test.ts",
+      "path": "packages/product/test/root-turn-owner.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/specialty-transcripts.test.ts",
+      "path": "packages/product/test/specialty-transcripts.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/status-parity.test.ts",
+      "path": "packages/product/test/status-parity.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/thread-activity.test.ts",
+      "path": "packages/product/test/thread-activity.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/thread-query.test.ts",
+      "path": "packages/product/test/thread-query.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/thread-title.test.ts",
+      "path": "packages/product/test/thread-title.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/thread-tool-gateway.test.ts",
+      "path": "packages/product/test/thread-tool-gateway.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/usage-cost.test.ts",
+      "path": "packages/product/test/usage-cost.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/relay-execution/test/agent-depth.test.ts",
+      "path": "packages/relay-execution/test/agent-depth.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/relay-execution/test/agent-label.test.ts",
+      "path": "packages/relay-execution/test/agent-label.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/relay-execution/test/agent-profiles.test.ts",
+      "path": "packages/relay-execution/test/agent-profiles.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/relay-execution/test/await-child-result.test.ts",
+      "path": "packages/relay-execution/test/await-child-result.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/relay-execution/test/context-compaction.test.ts",
+      "path": "packages/relay-execution/test/context-compaction.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/relay-execution/test/context-tokenizer.test.ts",
+      "path": "packages/relay-execution/test/context-tokenizer.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/relay-execution/test/data-blob-store.test.ts",
+      "path": "packages/relay-execution/test/data-blob-store.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/relay-execution/test/execution-backend-relay.test.ts",
+      "path": "packages/relay-execution/test/execution-backend-relay.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/relay-execution/test/execution-backend.test.ts",
+      "path": "packages/relay-execution/test/execution-backend.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/relay-execution/test/fixtures/deterministic-model-evidence.json",
+      "path": "packages/relay-execution/test/fixtures/deterministic-model-evidence.json",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
       "kind": "asset",
       "production": false,
       "publicExports": [],
       "testKind": "fixture"
     },
     {
-      "id": "packages/runtime/test/lazy-model-registry.test.ts",
-      "path": "packages/runtime/test/lazy-model-registry.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/relay-execution/test/lazy-model-registry.test.ts",
+      "path": "packages/relay-execution/test/lazy-model-registry.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/runtime/test/media-analyzer.test.ts",
-      "path": "packages/runtime/test/media-analyzer.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/relay-execution/test/media-analyzer.test.ts",
+      "path": "packages/relay-execution/test/media-analyzer.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/runtime/test/multi-agent.test.ts",
-      "path": "packages/runtime/test/multi-agent.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/relay-execution/test/multi-agent.test.ts",
+      "path": "packages/relay-execution/test/multi-agent.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/runtime/test/prompt-cache.test.ts",
-      "path": "packages/runtime/test/prompt-cache.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/relay-execution/test/prompt-cache.test.ts",
+      "path": "packages/relay-execution/test/prompt-cache.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/runtime/test/recovery.proc.test.ts",
-      "path": "packages/runtime/test/recovery.proc.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/relay-execution/test/recovery.proc.test.ts",
+      "path": "packages/relay-execution/test/recovery.proc.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "process-test"
     },
     {
-      "id": "packages/runtime/test/standard-tool-transcripts.test.ts",
-      "path": "packages/runtime/test/standard-tool-transcripts.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/relay-execution/test/standard-tool-transcripts.test.ts",
+      "path": "packages/relay-execution/test/standard-tool-transcripts.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/runtime/test/streaming-only-model.test.ts",
-      "path": "packages/runtime/test/streaming-only-model.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/relay-execution/test/streaming-only-model.test.ts",
+      "path": "packages/relay-execution/test/streaming-only-model.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/runtime/test/subagent-join.test.ts",
-      "path": "packages/runtime/test/subagent-join.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/relay-execution/test/subagent-join.test.ts",
+      "path": "packages/relay-execution/test/subagent-join.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/runtime/test/subagent-spawn.test.ts",
-      "path": "packages/runtime/test/subagent-spawn.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/relay-execution/test/subagent-spawn.test.ts",
+      "path": "packages/relay-execution/test/subagent-spawn.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/runtime/test/thread-host.test.ts",
-      "path": "packages/runtime/test/thread-host.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/relay-execution/test/thread-host.test.ts",
+      "path": "packages/relay-execution/test/thread-host.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/runtime/test/tool-call-identifiers.test.ts",
-      "path": "packages/runtime/test/tool-call-identifiers.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/relay-execution/test/tool-call-identifiers.test.ts",
+      "path": "packages/relay-execution/test/tool-call-identifiers.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/runtime/test/workflow-definitions.test.ts",
-      "path": "packages/runtime/test/workflow-definitions.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/relay-execution/test/workflow-definitions.test.ts",
+      "path": "packages/relay-execution/test/workflow-definitions.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/runtime/test/workflow-id.test.ts",
-      "path": "packages/runtime/test/workflow-id.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/relay-execution/test/workflow-id.test.ts",
+      "path": "packages/relay-execution/test/workflow-id.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/runtime/test/workflow.proc.test.ts",
-      "path": "packages/runtime/test/workflow.proc.test.ts",
-      "workspace": "@rika/runtime",
-      "package": "@rika/runtime",
+      "id": "packages/relay-execution/test/workflow.proc.test.ts",
+      "path": "packages/relay-execution/test/workflow.proc.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "process-test"
     },
     {
-      "id": "packages/tools/test/local-path.test.ts",
-      "path": "packages/tools/test/local-path.test.ts",
-      "workspace": "@rika/tools",
-      "package": "@rika/tools",
+      "id": "packages/terminal/test/adapter.test.ts",
+      "path": "packages/terminal/test/adapter.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/tools/test/local-safety-policy.test.ts",
-      "path": "packages/tools/test/local-safety-policy.test.ts",
-      "workspace": "@rika/tools",
-      "package": "@rika/tools",
+      "id": "packages/terminal/test/execution-events.test.ts",
+      "path": "packages/terminal/test/execution-events.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/tools/test/media-view.test.ts",
-      "path": "packages/tools/test/media-view.test.ts",
-      "workspace": "@rika/tools",
-      "package": "@rika/tools",
+      "id": "packages/terminal/test/fixtures/visual/cancelled-subagent.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/cancelled-subagent.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/changed-files-loading.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/changed-files-loading.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/changed-files-ready.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/changed-files-ready.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/child-workflow.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/child-workflow.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/diff-complex.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/diff-complex.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/diff-highlighted.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/diff-highlighted.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/diff.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/diff.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/edit-streaming.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/edit-streaming.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/file-picker.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/file-picker.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/image.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/image.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/markdown.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/markdown.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/metadata.json",
+      "path": "packages/terminal/test/fixtures/visual/metadata.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/mode-picker.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/mode-picker.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/narrow-layout.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/narrow-layout.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/narrow-mode-overlay.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/narrow-mode-overlay.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/narrow-palette-overlay.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/narrow-palette-overlay.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/palette.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/palette.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/prompt.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/prompt.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/queued-turn.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/queued-turn.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/reasoning-collapsed.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/reasoning-collapsed.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/reasoning-expanded.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/reasoning-expanded.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/restart-replay.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/restart-replay.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/shortcuts.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/shortcuts.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/sidebar.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/sidebar.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/streaming.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/streaming.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/thread-switcher-stacked.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/thread-switcher-stacked.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/thread-switcher.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/thread-switcher.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/tool-expanded.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/tool-expanded.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/tool-group-states.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/tool-group-states.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/tool.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/tool.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/welcome.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/welcome.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/format.test.ts",
+      "path": "packages/terminal/test/format.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/tools/test/parallel-search.test.ts",
-      "path": "packages/tools/test/parallel-search.test.ts",
-      "workspace": "@rika/tools",
-      "package": "@rika/tools",
+      "id": "packages/terminal/test/mode-toggle.test.ts",
+      "path": "packages/terminal/test/mode-toggle.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/tools/test/process-registry.test.ts",
-      "path": "packages/tools/test/process-registry.test.ts",
-      "workspace": "@rika/tools",
-      "package": "@rika/tools",
+      "id": "packages/terminal/test/opentui-adapter.test.ts",
+      "path": "packages/terminal/test/opentui-adapter.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/tools/test/read-web-page.test.ts",
-      "path": "packages/tools/test/read-web-page.test.ts",
-      "workspace": "@rika/tools",
-      "package": "@rika/tools",
+      "id": "packages/terminal/test/opentui-session.test.ts",
+      "path": "packages/terminal/test/opentui-session.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/tools/test/tool-contract.test.ts",
-      "path": "packages/tools/test/tool-contract.test.ts",
-      "workspace": "@rika/tools",
-      "package": "@rika/tools",
+      "id": "packages/terminal/test/pasted-text.test.ts",
+      "path": "packages/terminal/test/pasted-text.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/tools/test/tool-runtime-filesystem.proc.test.ts",
-      "path": "packages/tools/test/tool-runtime-filesystem.proc.test.ts",
-      "workspace": "@rika/tools",
-      "package": "@rika/tools",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "process-test"
-    },
-    {
-      "id": "packages/tools/test/tool-runtime.test.ts",
-      "path": "packages/tools/test/tool-runtime.test.ts",
-      "workspace": "@rika/tools",
-      "package": "@rika/tools",
+      "id": "packages/terminal/test/pierre-diff.test.ts",
+      "path": "packages/terminal/test/pierre-diff.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/tools/test/web-search.test.ts",
-      "path": "packages/tools/test/web-search.test.ts",
-      "workspace": "@rika/tools",
-      "package": "@rika/tools",
+      "id": "packages/terminal/test/session.test.ts",
+      "path": "packages/terminal/test/session.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/tools/test/workspace-boundary.test.ts",
-      "path": "packages/tools/test/workspace-boundary.test.ts",
-      "workspace": "@rika/tools",
-      "package": "@rika/tools",
+      "id": "packages/terminal/test/syntax-highlight.test.ts",
+      "path": "packages/terminal/test/syntax-highlight.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
       "kind": "source",
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
     },
     {
-      "id": "packages/tools/test/workspace-index.test.ts",
-      "path": "packages/tools/test/workspace-index.test.ts",
-      "workspace": "@rika/tools",
-      "package": "@rika/tools",
+      "id": "packages/terminal/test/tool-presentation.test.ts",
+      "path": "packages/terminal/test/tool-presentation.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/terminal/test/transcript-bounds.test.ts",
+      "path": "packages/terminal/test/transcript-bounds.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/terminal/test/transcript-presenter.test.ts",
+      "path": "packages/terminal/test/transcript-presenter.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/terminal/test/transcript-renderers.test.ts",
+      "path": "packages/terminal/test/transcript-renderers.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/terminal/test/transcript-viewport.test.ts",
+      "path": "packages/terminal/test/transcript-viewport.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/terminal/test/view-state.test.ts",
+      "path": "packages/terminal/test/view-state.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/terminal/test/visual.test.ts",
+      "path": "packages/terminal/test/visual.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
       "kind": "source",
       "production": false,
       "publicExports": [],
@@ -2015,486 +2523,6 @@
       "path": "packages/transcript/test/unit-order.test.ts",
       "workspace": "@rika/transcript",
       "package": "@rika/transcript",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/tui/test/adapter.test.ts",
-      "path": "packages/tui/test/adapter.test.ts",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/tui/test/execution-events.test.ts",
-      "path": "packages/tui/test/execution-events.test.ts",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/cancelled-subagent.styles.json",
-      "path": "packages/tui/test/fixtures/visual/cancelled-subagent.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/changed-files-loading.styles.json",
-      "path": "packages/tui/test/fixtures/visual/changed-files-loading.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/changed-files-ready.styles.json",
-      "path": "packages/tui/test/fixtures/visual/changed-files-ready.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/child-workflow.styles.json",
-      "path": "packages/tui/test/fixtures/visual/child-workflow.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/diff-complex.styles.json",
-      "path": "packages/tui/test/fixtures/visual/diff-complex.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/diff-highlighted.styles.json",
-      "path": "packages/tui/test/fixtures/visual/diff-highlighted.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/diff.styles.json",
-      "path": "packages/tui/test/fixtures/visual/diff.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/edit-streaming.styles.json",
-      "path": "packages/tui/test/fixtures/visual/edit-streaming.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/file-picker.styles.json",
-      "path": "packages/tui/test/fixtures/visual/file-picker.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/image.styles.json",
-      "path": "packages/tui/test/fixtures/visual/image.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/markdown.styles.json",
-      "path": "packages/tui/test/fixtures/visual/markdown.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/metadata.json",
-      "path": "packages/tui/test/fixtures/visual/metadata.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/mode-picker.styles.json",
-      "path": "packages/tui/test/fixtures/visual/mode-picker.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/narrow-layout.styles.json",
-      "path": "packages/tui/test/fixtures/visual/narrow-layout.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/narrow-mode-overlay.styles.json",
-      "path": "packages/tui/test/fixtures/visual/narrow-mode-overlay.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/narrow-palette-overlay.styles.json",
-      "path": "packages/tui/test/fixtures/visual/narrow-palette-overlay.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/palette.styles.json",
-      "path": "packages/tui/test/fixtures/visual/palette.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/prompt.styles.json",
-      "path": "packages/tui/test/fixtures/visual/prompt.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/queued-turn.styles.json",
-      "path": "packages/tui/test/fixtures/visual/queued-turn.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/reasoning-collapsed.styles.json",
-      "path": "packages/tui/test/fixtures/visual/reasoning-collapsed.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/reasoning-expanded.styles.json",
-      "path": "packages/tui/test/fixtures/visual/reasoning-expanded.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/restart-replay.styles.json",
-      "path": "packages/tui/test/fixtures/visual/restart-replay.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/shortcuts.styles.json",
-      "path": "packages/tui/test/fixtures/visual/shortcuts.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/sidebar.styles.json",
-      "path": "packages/tui/test/fixtures/visual/sidebar.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/streaming.styles.json",
-      "path": "packages/tui/test/fixtures/visual/streaming.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/thread-switcher-stacked.styles.json",
-      "path": "packages/tui/test/fixtures/visual/thread-switcher-stacked.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/thread-switcher.styles.json",
-      "path": "packages/tui/test/fixtures/visual/thread-switcher.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/tool-expanded.styles.json",
-      "path": "packages/tui/test/fixtures/visual/tool-expanded.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/tool-group-states.styles.json",
-      "path": "packages/tui/test/fixtures/visual/tool-group-states.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/tool.styles.json",
-      "path": "packages/tui/test/fixtures/visual/tool.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/fixtures/visual/welcome.styles.json",
-      "path": "packages/tui/test/fixtures/visual/welcome.styles.json",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "asset",
-      "production": false,
-      "publicExports": [],
-      "testKind": "fixture"
-    },
-    {
-      "id": "packages/tui/test/format.test.ts",
-      "path": "packages/tui/test/format.test.ts",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/tui/test/mode-toggle.test.ts",
-      "path": "packages/tui/test/mode-toggle.test.ts",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/tui/test/opentui-adapter.test.ts",
-      "path": "packages/tui/test/opentui-adapter.test.ts",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/tui/test/opentui-session.test.ts",
-      "path": "packages/tui/test/opentui-session.test.ts",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/tui/test/pasted-text.test.ts",
-      "path": "packages/tui/test/pasted-text.test.ts",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/tui/test/pierre-diff.test.ts",
-      "path": "packages/tui/test/pierre-diff.test.ts",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/tui/test/session.test.ts",
-      "path": "packages/tui/test/session.test.ts",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/tui/test/syntax-highlight.test.ts",
-      "path": "packages/tui/test/syntax-highlight.test.ts",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/tui/test/tool-presentation.test.ts",
-      "path": "packages/tui/test/tool-presentation.test.ts",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/tui/test/transcript-bounds.test.ts",
-      "path": "packages/tui/test/transcript-bounds.test.ts",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/tui/test/transcript-presenter.test.ts",
-      "path": "packages/tui/test/transcript-presenter.test.ts",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/tui/test/transcript-renderers.test.ts",
-      "path": "packages/tui/test/transcript-renderers.test.ts",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/tui/test/transcript-viewport.test.ts",
-      "path": "packages/tui/test/transcript-viewport.test.ts",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/tui/test/view-state.test.ts",
-      "path": "packages/tui/test/view-state.test.ts",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/tui/test/visual.test.ts",
-      "path": "packages/tui/test/visual.test.ts",
-      "workspace": "@rika/tui",
-      "package": "@rika/tui",
       "kind": "source",
       "production": false,
       "publicExports": [],
@@ -3814,31 +3842,7 @@
       "production": false
     },
     {
-      "from": "packages/app/test/config-operations.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/config-operations.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/config-operations.test.ts",
-      "to": "external:effect/testing",
-      "specifier": "effect/testing",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/context-file-system.test.ts",
+      "from": "packages/coding-tools/test/local-path.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -3846,7 +3850,7 @@
       "production": false
     },
     {
-      "from": "packages/app/test/context-file-system.test.ts",
+      "from": "packages/coding-tools/test/local-path.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -3854,7 +3858,7 @@
       "production": false
     },
     {
-      "from": "packages/app/test/context-file-system.test.ts",
+      "from": "packages/coding-tools/test/local-path.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -3862,15 +3866,7 @@
       "production": false
     },
     {
-      "from": "packages/app/test/context-usage.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/execution-ingest.test.ts",
+      "from": "packages/coding-tools/test/local-safety-policy.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -3878,23 +3874,7 @@
       "production": false
     },
     {
-      "from": "packages/app/test/execution-ingest.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/execution-ingest.test.ts",
-      "to": "external:effect/testing",
-      "specifier": "effect/testing",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/extension-operations.test.ts",
+      "from": "packages/coding-tools/test/media-view.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -3902,7 +3882,7 @@
       "production": false
     },
     {
-      "from": "packages/app/test/extension-operations.test.ts",
+      "from": "packages/coding-tools/test/media-view.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -3910,7 +3890,7 @@
       "production": false
     },
     {
-      "from": "packages/app/test/extension-operations.test.ts",
+      "from": "packages/coding-tools/test/media-view.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -3918,7 +3898,47 @@
       "production": false
     },
     {
-      "from": "packages/app/test/extension-operations.test.ts",
+      "from": "packages/coding-tools/test/parallel-search.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/coding-tools/test/parallel-search.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/coding-tools/test/parallel-search.test.ts",
+      "to": "external:effect/unstable/http",
+      "specifier": "effect/unstable/http",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/coding-tools/test/process-registry.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/coding-tools/test/process-registry.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/coding-tools/test/process-registry.test.ts",
       "to": "external:effect/testing",
       "specifier": "effect/testing",
       "kind": "import",
@@ -3926,7 +3946,15 @@
       "production": false
     },
     {
-      "from": "packages/app/test/file-mentions.test.ts",
+      "from": "packages/coding-tools/test/process-registry.test.ts",
+      "to": "external:effect/unstable/process",
+      "specifier": "effect/unstable/process",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/coding-tools/test/read-web-page.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -3934,7 +3962,7 @@
       "production": false
     },
     {
-      "from": "packages/app/test/file-mentions.test.ts",
+      "from": "packages/coding-tools/test/read-web-page.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -3942,7 +3970,15 @@
       "production": false
     },
     {
-      "from": "packages/app/test/interactive-feed-overflow.test.ts",
+      "from": "packages/coding-tools/test/read-web-page.test.ts",
+      "to": "external:effect/unstable/http",
+      "specifier": "effect/unstable/http",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/coding-tools/test/tool-contract.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -3950,15 +3986,7 @@
       "production": false
     },
     {
-      "from": "packages/app/test/interactive-session.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/interactive-session.test.ts",
+      "from": "packages/coding-tools/test/tool-contract.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -3966,247 +3994,15 @@
       "production": false
     },
     {
-      "from": "packages/app/test/interactive-session.test.ts",
-      "to": "external:effect/testing",
-      "specifier": "effect/testing",
+      "from": "packages/coding-tools/test/tool-contract.test.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
       "kind": "import",
       "relationship": "test",
       "production": false
     },
     {
-      "from": "packages/app/test/openai-auth.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/openai-auth.test.ts",
-      "to": "external:crypto",
-      "specifier": "crypto",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/openai-auth.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/openai-auth.test.ts",
-      "to": "external:effect/testing",
-      "specifier": "effect/testing",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/operation-churn.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/operation-churn.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/operation-interactive-extensions.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/operation-interactive-extensions.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/operation-projection-admission.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/operation-projection-admission.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/operation-review.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/operation-review.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/operation-review.test.ts",
-      "to": "external:effect/testing",
-      "specifier": "effect/testing",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/operation-thread-actions.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/operation-thread-actions.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/operation-thread-actions.test.ts",
-      "to": "external:effect/testing",
-      "specifier": "effect/testing",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/operation.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/operation.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/operation.test.ts",
-      "to": "external:effect/testing",
-      "specifier": "effect/testing",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/operation.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/product-agent-workflow.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/product-agent-workflow.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/product-agent.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/product-agent.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/queued-turn-policy.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/recorded-shell-session.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/recorded-shell-session.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/resident-service.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/resident-service.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/resolved-context.test.ts",
+      "from": "packages/coding-tools/test/tool-runtime-filesystem.proc.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -4214,15 +4010,7 @@
       "production": false
     },
     {
-      "from": "packages/app/test/resolved-context.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/resolved-context.test.ts",
+      "from": "packages/coding-tools/test/tool-runtime-filesystem.proc.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4230,39 +4018,7 @@
       "production": false
     },
     {
-      "from": "packages/app/test/root-turn-owner.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/root-turn-owner.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/specialty-transcripts.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/specialty-transcripts.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/status-parity.test.ts",
+      "from": "packages/coding-tools/test/tool-runtime-filesystem.proc.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -4270,7 +4026,7 @@
       "production": false
     },
     {
-      "from": "packages/app/test/thread-activity.test.ts",
+      "from": "packages/coding-tools/test/tool-runtime.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -4278,15 +4034,7 @@
       "production": false
     },
     {
-      "from": "packages/app/test/thread-query.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/thread-query.test.ts",
+      "from": "packages/coding-tools/test/tool-runtime.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4294,7 +4042,55 @@
       "production": false
     },
     {
-      "from": "packages/app/test/thread-title.test.ts",
+      "from": "packages/coding-tools/test/tool-runtime.test.ts",
+      "to": "external:effect/testing",
+      "specifier": "effect/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/coding-tools/test/tool-runtime.test.ts",
+      "to": "external:effect/unstable/process",
+      "specifier": "effect/unstable/process",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/coding-tools/test/web-search.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/coding-tools/test/web-search.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/coding-tools/test/web-search.test.ts",
+      "to": "external:effect/testing",
+      "specifier": "effect/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/coding-tools/test/web-search.test.ts",
+      "to": "external:effect/unstable/http",
+      "specifier": "effect/unstable/http",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/coding-tools/test/workspace-boundary.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -4302,63 +4098,7 @@
       "production": false
     },
     {
-      "from": "packages/app/test/thread-tool-gateway.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/thread-tool-gateway.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/usage-cost.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/app/test/usage-cost.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/config/test/config-contract.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/config/test/config-service.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/config/test/config-service.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/config/test/data-root.test.ts",
+      "from": "packages/coding-tools/test/workspace-index.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -4366,7 +4106,7 @@
       "production": false
     },
     {
-      "from": "packages/config/test/data-root.test.ts",
+      "from": "packages/coding-tools/test/workspace-index.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4374,7 +4114,7 @@
       "production": false
     },
     {
-      "from": "packages/config/test/data-root.test.ts",
+      "from": "packages/coding-tools/test/workspace-index.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -4382,7 +4122,47 @@
       "production": false
     },
     {
-      "from": "packages/config/test/modes.test.ts",
+      "from": "packages/configuration/test/config-contract.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/configuration/test/config-service.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/configuration/test/config-service.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/configuration/test/data-root.test.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/configuration/test/data-root.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/configuration/test/data-root.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -4390,7 +4170,15 @@
       "production": false
     },
     {
-      "from": "packages/config/test/paths.test.ts",
+      "from": "packages/configuration/test/modes.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/configuration/test/paths.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -4614,7 +4402,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/contract/transcript-checkpoint-delta.test.ts",
+      "from": "packages/product-store/test/contract/transcript-checkpoint-delta.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -4622,7 +4410,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/contract/transcript-checkpoint-delta.test.ts",
+      "from": "packages/product-store/test/contract/transcript-checkpoint-delta.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -4630,7 +4418,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/contract/transcript-checkpoint-delta.test.ts",
+      "from": "packages/product-store/test/contract/transcript-checkpoint-delta.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4638,7 +4426,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/product-database.test.ts",
+      "from": "packages/product-store/test/product-database.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -4646,7 +4434,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/product-database.test.ts",
+      "from": "packages/product-store/test/product-database.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -4654,7 +4442,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/product-database.test.ts",
+      "from": "packages/product-store/test/product-database.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4662,7 +4450,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/product-database.test.ts",
+      "from": "packages/product-store/test/product-database.test.ts",
       "to": "external:effect/unstable/sql/SqlClient",
       "specifier": "effect/unstable/sql/SqlClient",
       "kind": "import",
@@ -4670,7 +4458,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/product-migration-oracle-v27.test.ts",
+      "from": "packages/product-store/test/product-migration-oracle-v27.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -4678,7 +4466,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/product-migration-oracle-v27.test.ts",
+      "from": "packages/product-store/test/product-migration-oracle-v27.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -4686,7 +4474,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/product-migration-oracle-v27.test.ts",
+      "from": "packages/product-store/test/product-migration-oracle-v27.test.ts",
       "to": "external:bun:sqlite",
       "specifier": "bun:sqlite",
       "kind": "import",
@@ -4694,7 +4482,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/product-migration-oracle-v27.test.ts",
+      "from": "packages/product-store/test/product-migration-oracle-v27.test.ts",
       "to": "external:crypto",
       "specifier": "crypto",
       "kind": "import",
@@ -4702,7 +4490,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/product-migration-oracle-v27.test.ts",
+      "from": "packages/product-store/test/product-migration-oracle-v27.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4710,7 +4498,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/product-migration-oracle-v27.test.ts",
+      "from": "packages/product-store/test/product-migration-oracle-v27.test.ts",
       "to": "external:effect/unstable/sql/SqlClient",
       "specifier": "effect/unstable/sql/SqlClient",
       "kind": "import",
@@ -4718,15 +4506,15 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/product-migration-oracle-v27.test.ts",
-      "to": "packages/persistence/test/fixtures/product-migration-oracle-v27.fixture.json",
+      "from": "packages/product-store/test/product-migration-oracle-v27.test.ts",
+      "to": "packages/product-store/test/fixtures/product-migration-oracle-v27.fixture.json",
       "specifier": "./fixtures/product-migration-oracle-v27.fixture.json",
       "kind": "import",
       "relationship": "asset",
       "production": true
     },
     {
-      "from": "packages/persistence/test/recorded-shell-repository.test.ts",
+      "from": "packages/product-store/test/recorded-shell-repository.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -4734,7 +4522,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/recorded-shell-repository.test.ts",
+      "from": "packages/product-store/test/recorded-shell-repository.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -4742,7 +4530,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/recorded-shell-repository.test.ts",
+      "from": "packages/product-store/test/recorded-shell-repository.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4750,7 +4538,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/recorded-shell-repository.test.ts",
+      "from": "packages/product-store/test/recorded-shell-repository.test.ts",
       "to": "external:effect/unstable/sql/SqlClient",
       "specifier": "effect/unstable/sql/SqlClient",
       "kind": "import",
@@ -4758,7 +4546,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/sqlite.test.ts",
+      "from": "packages/product-store/test/sqlite.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -4766,7 +4554,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/sqlite.test.ts",
+      "from": "packages/product-store/test/sqlite.test.ts",
       "to": "external:bun:sqlite",
       "specifier": "bun:sqlite",
       "kind": "import",
@@ -4774,7 +4562,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/sqlite.test.ts",
+      "from": "packages/product-store/test/sqlite.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4782,7 +4570,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/sqlite.test.ts",
+      "from": "packages/product-store/test/sqlite.test.ts",
       "to": "external:effect/unstable/sql/SqlClient",
       "specifier": "effect/unstable/sql/SqlClient",
       "kind": "import",
@@ -4790,7 +4578,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/sqlite.test.ts",
+      "from": "packages/product-store/test/sqlite.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -4798,7 +4586,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/thread-interaction-repository.test.ts",
+      "from": "packages/product-store/test/thread-interaction-repository.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -4806,7 +4594,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/thread-interaction-repository.test.ts",
+      "from": "packages/product-store/test/thread-interaction-repository.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -4814,7 +4602,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/thread-interaction-repository.test.ts",
+      "from": "packages/product-store/test/thread-interaction-repository.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4822,7 +4610,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/thread-repository.test.ts",
+      "from": "packages/product-store/test/thread-repository.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -4830,7 +4618,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/thread-repository.test.ts",
+      "from": "packages/product-store/test/thread-repository.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4838,7 +4626,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/thread-search-repository.test.ts",
+      "from": "packages/product-store/test/thread-search-repository.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -4846,7 +4634,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/thread-search-repository.test.ts",
+      "from": "packages/product-store/test/thread-search-repository.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -4854,7 +4642,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/thread-search-repository.test.ts",
+      "from": "packages/product-store/test/thread-search-repository.test.ts",
       "to": "external:bun:sqlite",
       "specifier": "bun:sqlite",
       "kind": "import",
@@ -4862,7 +4650,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/thread-search-repository.test.ts",
+      "from": "packages/product-store/test/thread-search-repository.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4870,7 +4658,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/thread-state.test.ts",
+      "from": "packages/product-store/test/thread-state.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -4878,7 +4666,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/thread-summary-repository.test.ts",
+      "from": "packages/product-store/test/thread-summary-repository.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -4886,7 +4674,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/thread-summary-repository.test.ts",
+      "from": "packages/product-store/test/thread-summary-repository.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4894,7 +4682,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/transcript-repository-sqlite.test.ts",
+      "from": "packages/product-store/test/transcript-repository-sqlite.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -4902,7 +4690,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/transcript-repository-sqlite.test.ts",
+      "from": "packages/product-store/test/transcript-repository-sqlite.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -4910,7 +4698,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/transcript-repository-sqlite.test.ts",
+      "from": "packages/product-store/test/transcript-repository-sqlite.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4918,7 +4706,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/transcript-repository-sqlite.test.ts",
+      "from": "packages/product-store/test/transcript-repository-sqlite.test.ts",
       "to": "external:effect/unstable/sql/SqlClient",
       "specifier": "effect/unstable/sql/SqlClient",
       "kind": "import",
@@ -4926,7 +4714,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/transcript-repository.test.ts",
+      "from": "packages/product-store/test/transcript-repository.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -4934,7 +4722,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/transcript-repository.test.ts",
+      "from": "packages/product-store/test/transcript-repository.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4942,7 +4730,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/turn-repository.test.ts",
+      "from": "packages/product-store/test/turn-repository.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -4950,7 +4738,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/turn-repository.test.ts",
+      "from": "packages/product-store/test/turn-repository.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4958,7 +4746,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/usage-repository.test.ts",
+      "from": "packages/product-store/test/usage-repository.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -4966,7 +4754,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/usage-repository.test.ts",
+      "from": "packages/product-store/test/usage-repository.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -4974,7 +4762,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/usage-repository.test.ts",
+      "from": "packages/product-store/test/usage-repository.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4982,7 +4770,7 @@
       "production": false
     },
     {
-      "from": "packages/persistence/test/usage-repository.test.ts",
+      "from": "packages/product-store/test/usage-repository.test.ts",
       "to": "external:effect/unstable/sql/SqlClient",
       "specifier": "effect/unstable/sql/SqlClient",
       "kind": "import",
@@ -4990,7 +4778,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/agent-depth.test.ts",
+      "from": "packages/product/test/config-operations.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -4998,7 +4786,47 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/agent-label.test.ts",
+      "from": "packages/product/test/config-operations.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/config-operations.test.ts",
+      "to": "external:effect/testing",
+      "specifier": "effect/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/context-file-system.test.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/context-file-system.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/context-file-system.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/context-usage.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -5006,7 +4834,519 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/agent-profiles.test.ts",
+      "from": "packages/product/test/contract/execution-route-snapshot.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/contract/package-export-contract.test.ts",
+      "to": "external:fs",
+      "specifier": "fs",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/contract/package-export-contract.test.ts",
+      "to": "external:path",
+      "specifier": "path",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/contract/package-export-contract.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/execution-ingest.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/execution-ingest.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/execution-ingest.test.ts",
+      "to": "external:effect/testing",
+      "specifier": "effect/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/extension-operations.test.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/extension-operations.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/extension-operations.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/extension-operations.test.ts",
+      "to": "external:effect/testing",
+      "specifier": "effect/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/file-mentions.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/file-mentions.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/interactive-feed-overflow.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/interactive-session.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/interactive-session.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/interactive-session.test.ts",
+      "to": "external:effect/testing",
+      "specifier": "effect/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/openai-auth.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/openai-auth.test.ts",
+      "to": "external:crypto",
+      "specifier": "crypto",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/openai-auth.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/openai-auth.test.ts",
+      "to": "external:effect/testing",
+      "specifier": "effect/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation-churn.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation-churn.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation-interactive-extensions.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation-interactive-extensions.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation-projection-admission.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation-projection-admission.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation-review.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation-review.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation-review.test.ts",
+      "to": "external:effect/testing",
+      "specifier": "effect/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation-thread-actions.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation-thread-actions.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation-thread-actions.test.ts",
+      "to": "external:effect/testing",
+      "specifier": "effect/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation.test.ts",
+      "to": "external:effect/testing",
+      "specifier": "effect/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/product-agent-workflow.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/product-agent-workflow.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/product-agent.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/product-agent.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/queued-turn-policy.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/recorded-shell-session.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/recorded-shell-session.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/resident-service.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/resident-service.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/resolved-context.test.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/resolved-context.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/resolved-context.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/root-turn-owner.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/root-turn-owner.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/specialty-transcripts.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/specialty-transcripts.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/status-parity.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/thread-activity.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/thread-query.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/thread-query.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/thread-title.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/thread-tool-gateway.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/thread-tool-gateway.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/usage-cost.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/usage-cost.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/agent-depth.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/agent-label.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/agent-profiles.test.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
       "kind": "import",
@@ -5014,7 +5354,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/agent-profiles.test.ts",
+      "from": "packages/relay-execution/test/agent-profiles.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -5022,7 +5362,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/agent-profiles.test.ts",
+      "from": "packages/relay-execution/test/agent-profiles.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5030,7 +5370,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/await-child-result.test.ts",
+      "from": "packages/relay-execution/test/await-child-result.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -5038,7 +5378,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/await-child-result.test.ts",
+      "from": "packages/relay-execution/test/await-child-result.test.ts",
       "to": "external:@relayfx/sdk",
       "specifier": "@relayfx/sdk",
       "kind": "import",
@@ -5046,7 +5386,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/context-compaction.test.ts",
+      "from": "packages/relay-execution/test/context-compaction.test.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
       "kind": "import",
@@ -5054,7 +5394,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/context-compaction.test.ts",
+      "from": "packages/relay-execution/test/context-compaction.test.ts",
       "to": "external:@batonfx/test",
       "specifier": "@batonfx/test",
       "kind": "import",
@@ -5062,7 +5402,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/context-compaction.test.ts",
+      "from": "packages/relay-execution/test/context-compaction.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -5070,7 +5410,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/context-compaction.test.ts",
+      "from": "packages/relay-execution/test/context-compaction.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5078,7 +5418,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/context-compaction.test.ts",
+      "from": "packages/relay-execution/test/context-compaction.test.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
       "kind": "import",
@@ -5086,7 +5426,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/context-tokenizer.test.ts",
+      "from": "packages/relay-execution/test/context-tokenizer.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -5094,7 +5434,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/context-tokenizer.test.ts",
+      "from": "packages/relay-execution/test/context-tokenizer.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5102,7 +5442,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/context-tokenizer.test.ts",
+      "from": "packages/relay-execution/test/context-tokenizer.test.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
       "kind": "import",
@@ -5110,7 +5450,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/data-blob-store.test.ts",
+      "from": "packages/relay-execution/test/data-blob-store.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -5118,7 +5458,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/data-blob-store.test.ts",
+      "from": "packages/relay-execution/test/data-blob-store.test.ts",
       "to": "external:@relayfx/sdk",
       "specifier": "@relayfx/sdk",
       "kind": "import",
@@ -5126,7 +5466,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/data-blob-store.test.ts",
+      "from": "packages/relay-execution/test/data-blob-store.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5134,7 +5474,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/execution-backend-relay.test.ts",
+      "from": "packages/relay-execution/test/execution-backend-relay.test.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
       "kind": "import",
@@ -5142,7 +5482,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/execution-backend-relay.test.ts",
+      "from": "packages/relay-execution/test/execution-backend-relay.test.ts",
       "to": "external:@batonfx/providers/openai",
       "specifier": "@batonfx/providers/openai",
       "kind": "import",
@@ -5150,7 +5490,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/execution-backend-relay.test.ts",
+      "from": "packages/relay-execution/test/execution-backend-relay.test.ts",
       "to": "external:@batonfx/test",
       "specifier": "@batonfx/test",
       "kind": "import",
@@ -5158,7 +5498,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/execution-backend-relay.test.ts",
+      "from": "packages/relay-execution/test/execution-backend-relay.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -5166,7 +5506,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/execution-backend-relay.test.ts",
+      "from": "packages/relay-execution/test/execution-backend-relay.test.ts",
       "to": "external:bun:sqlite",
       "specifier": "bun:sqlite",
       "kind": "import",
@@ -5174,7 +5514,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/execution-backend-relay.test.ts",
+      "from": "packages/relay-execution/test/execution-backend-relay.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5182,7 +5522,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/execution-backend-relay.test.ts",
+      "from": "packages/relay-execution/test/execution-backend-relay.test.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
       "kind": "import",
@@ -5190,7 +5530,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/execution-backend-relay.test.ts",
+      "from": "packages/relay-execution/test/execution-backend-relay.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -5198,7 +5538,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/execution-backend.test.ts",
+      "from": "packages/relay-execution/test/execution-backend.test.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
       "kind": "import",
@@ -5206,7 +5546,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/execution-backend.test.ts",
+      "from": "packages/relay-execution/test/execution-backend.test.ts",
       "to": "external:@batonfx/test",
       "specifier": "@batonfx/test",
       "kind": "import",
@@ -5214,7 +5554,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/execution-backend.test.ts",
+      "from": "packages/relay-execution/test/execution-backend.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -5222,7 +5562,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/execution-backend.test.ts",
+      "from": "packages/relay-execution/test/execution-backend.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -5230,7 +5570,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/execution-backend.test.ts",
+      "from": "packages/relay-execution/test/execution-backend.test.ts",
       "to": "external:@relayfx/sdk",
       "specifier": "@relayfx/sdk",
       "kind": "import",
@@ -5238,7 +5578,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/execution-backend.test.ts",
+      "from": "packages/relay-execution/test/execution-backend.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5246,7 +5586,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/execution-backend.test.ts",
+      "from": "packages/relay-execution/test/execution-backend.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5254,7 +5594,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/execution-backend.test.ts",
+      "from": "packages/relay-execution/test/execution-backend.test.ts",
       "to": "external:effect/testing",
       "specifier": "effect/testing",
       "kind": "import",
@@ -5262,7 +5602,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/execution-backend.test.ts",
+      "from": "packages/relay-execution/test/execution-backend.test.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
       "kind": "import",
@@ -5270,7 +5610,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/execution-backend.test.ts",
+      "from": "packages/relay-execution/test/execution-backend.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -5278,7 +5618,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/lazy-model-registry.test.ts",
+      "from": "packages/relay-execution/test/lazy-model-registry.test.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
       "kind": "import",
@@ -5286,7 +5626,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/lazy-model-registry.test.ts",
+      "from": "packages/relay-execution/test/lazy-model-registry.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -5294,7 +5634,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/lazy-model-registry.test.ts",
+      "from": "packages/relay-execution/test/lazy-model-registry.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5302,7 +5642,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/lazy-model-registry.test.ts",
+      "from": "packages/relay-execution/test/lazy-model-registry.test.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
       "kind": "import",
@@ -5310,7 +5650,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/media-analyzer.test.ts",
+      "from": "packages/relay-execution/test/media-analyzer.test.ts",
       "to": "external:@batonfx/test",
       "specifier": "@batonfx/test",
       "kind": "import",
@@ -5318,7 +5658,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/media-analyzer.test.ts",
+      "from": "packages/relay-execution/test/media-analyzer.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -5326,7 +5666,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/media-analyzer.test.ts",
+      "from": "packages/relay-execution/test/media-analyzer.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5334,7 +5674,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/media-analyzer.test.ts",
+      "from": "packages/relay-execution/test/media-analyzer.test.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
       "kind": "import",
@@ -5342,7 +5682,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/multi-agent.test.ts",
+      "from": "packages/relay-execution/test/multi-agent.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -5350,7 +5690,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/multi-agent.test.ts",
+      "from": "packages/relay-execution/test/multi-agent.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5358,7 +5698,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/multi-agent.test.ts",
+      "from": "packages/relay-execution/test/multi-agent.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -5366,7 +5706,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/prompt-cache.test.ts",
+      "from": "packages/relay-execution/test/prompt-cache.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -5374,7 +5714,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/prompt-cache.test.ts",
+      "from": "packages/relay-execution/test/prompt-cache.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5382,7 +5722,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/prompt-cache.test.ts",
+      "from": "packages/relay-execution/test/prompt-cache.test.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
       "kind": "import",
@@ -5390,7 +5730,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/recovery.proc.test.ts",
+      "from": "packages/relay-execution/test/recovery.proc.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -5398,7 +5738,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/recovery.proc.test.ts",
+      "from": "packages/relay-execution/test/recovery.proc.test.ts",
       "to": "external:bun:sqlite",
       "specifier": "bun:sqlite",
       "kind": "import",
@@ -5406,7 +5746,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/recovery.proc.test.ts",
+      "from": "packages/relay-execution/test/recovery.proc.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5414,7 +5754,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/recovery.proc.test.ts",
+      "from": "packages/relay-execution/test/recovery.proc.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -5422,7 +5762,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/standard-tool-transcripts.test.ts",
+      "from": "packages/relay-execution/test/standard-tool-transcripts.test.ts",
       "to": "external:@batonfx/test",
       "specifier": "@batonfx/test",
       "kind": "import",
@@ -5430,7 +5770,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/standard-tool-transcripts.test.ts",
+      "from": "packages/relay-execution/test/standard-tool-transcripts.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -5438,7 +5778,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/standard-tool-transcripts.test.ts",
+      "from": "packages/relay-execution/test/standard-tool-transcripts.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5446,7 +5786,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/standard-tool-transcripts.test.ts",
+      "from": "packages/relay-execution/test/standard-tool-transcripts.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -5454,7 +5794,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/streaming-only-model.test.ts",
+      "from": "packages/relay-execution/test/streaming-only-model.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -5462,7 +5802,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/streaming-only-model.test.ts",
+      "from": "packages/relay-execution/test/streaming-only-model.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5470,7 +5810,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/streaming-only-model.test.ts",
+      "from": "packages/relay-execution/test/streaming-only-model.test.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
       "kind": "import",
@@ -5478,7 +5818,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/subagent-join.test.ts",
+      "from": "packages/relay-execution/test/subagent-join.test.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
       "kind": "import",
@@ -5486,7 +5826,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/subagent-join.test.ts",
+      "from": "packages/relay-execution/test/subagent-join.test.ts",
       "to": "external:@batonfx/test",
       "specifier": "@batonfx/test",
       "kind": "import",
@@ -5494,7 +5834,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/subagent-join.test.ts",
+      "from": "packages/relay-execution/test/subagent-join.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -5502,7 +5842,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/subagent-join.test.ts",
+      "from": "packages/relay-execution/test/subagent-join.test.ts",
       "to": "external:bun:sqlite",
       "specifier": "bun:sqlite",
       "kind": "import",
@@ -5510,7 +5850,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/subagent-join.test.ts",
+      "from": "packages/relay-execution/test/subagent-join.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5518,7 +5858,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/subagent-join.test.ts",
+      "from": "packages/relay-execution/test/subagent-join.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -5526,7 +5866,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/subagent-spawn.test.ts",
+      "from": "packages/relay-execution/test/subagent-spawn.test.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
       "kind": "import",
@@ -5534,7 +5874,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/subagent-spawn.test.ts",
+      "from": "packages/relay-execution/test/subagent-spawn.test.ts",
       "to": "external:@batonfx/test",
       "specifier": "@batonfx/test",
       "kind": "import",
@@ -5542,7 +5882,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/subagent-spawn.test.ts",
+      "from": "packages/relay-execution/test/subagent-spawn.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -5550,7 +5890,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/subagent-spawn.test.ts",
+      "from": "packages/relay-execution/test/subagent-spawn.test.ts",
       "to": "external:bun:sqlite",
       "specifier": "bun:sqlite",
       "kind": "import",
@@ -5558,7 +5898,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/subagent-spawn.test.ts",
+      "from": "packages/relay-execution/test/subagent-spawn.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5566,7 +5906,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/subagent-spawn.test.ts",
+      "from": "packages/relay-execution/test/subagent-spawn.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -5574,7 +5914,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/thread-host.test.ts",
+      "from": "packages/relay-execution/test/thread-host.test.ts",
       "to": "external:@effect/platform-bun/BunCrypto",
       "specifier": "@effect/platform-bun/BunCrypto",
       "kind": "import",
@@ -5582,7 +5922,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/thread-host.test.ts",
+      "from": "packages/relay-execution/test/thread-host.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -5590,7 +5930,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/thread-host.test.ts",
+      "from": "packages/relay-execution/test/thread-host.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5598,7 +5938,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/thread-host.test.ts",
+      "from": "packages/relay-execution/test/thread-host.test.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
       "kind": "import",
@@ -5606,7 +5946,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/tool-call-identifiers.test.ts",
+      "from": "packages/relay-execution/test/tool-call-identifiers.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -5614,7 +5954,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/tool-call-identifiers.test.ts",
+      "from": "packages/relay-execution/test/tool-call-identifiers.test.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
       "kind": "import",
@@ -5622,7 +5962,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/workflow-definitions.test.ts",
+      "from": "packages/relay-execution/test/workflow-definitions.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -5630,7 +5970,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/workflow-id.test.ts",
+      "from": "packages/relay-execution/test/workflow-id.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -5638,7 +5978,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/workflow.proc.test.ts",
+      "from": "packages/relay-execution/test/workflow.proc.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -5646,7 +5986,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/workflow.proc.test.ts",
+      "from": "packages/relay-execution/test/workflow.proc.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5654,7 +5994,7 @@
       "production": false
     },
     {
-      "from": "packages/runtime/test/workflow.proc.test.ts",
+      "from": "packages/relay-execution/test/workflow.proc.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -5662,15 +6002,7 @@
       "production": false
     },
     {
-      "from": "packages/tools/test/local-path.test.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/local-path.test.ts",
+      "from": "packages/terminal/test/adapter.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -5678,7 +6010,7 @@
       "production": false
     },
     {
-      "from": "packages/tools/test/local-path.test.ts",
+      "from": "packages/terminal/test/adapter.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5686,159 +6018,15 @@
       "production": false
     },
     {
-      "from": "packages/tools/test/local-safety-policy.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
+      "from": "packages/terminal/test/adapter.test.ts",
+      "to": "external:string-width",
+      "specifier": "string-width",
       "kind": "import",
       "relationship": "test",
       "production": false
     },
     {
-      "from": "packages/tools/test/media-view.test.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/media-view.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/media-view.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/parallel-search.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/parallel-search.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/parallel-search.test.ts",
-      "to": "external:effect/unstable/http",
-      "specifier": "effect/unstable/http",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/process-registry.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/process-registry.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/process-registry.test.ts",
-      "to": "external:effect/testing",
-      "specifier": "effect/testing",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/process-registry.test.ts",
-      "to": "external:effect/unstable/process",
-      "specifier": "effect/unstable/process",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/read-web-page.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/read-web-page.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/read-web-page.test.ts",
-      "to": "external:effect/unstable/http",
-      "specifier": "effect/unstable/http",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/tool-contract.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/tool-contract.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/tool-contract.test.ts",
-      "to": "external:effect/unstable/ai",
-      "specifier": "effect/unstable/ai",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/tool-runtime-filesystem.proc.test.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/tool-runtime-filesystem.proc.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/tool-runtime-filesystem.proc.test.ts",
+      "from": "packages/terminal/test/adapter.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -5846,71 +6034,7 @@
       "production": false
     },
     {
-      "from": "packages/tools/test/tool-runtime.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/tool-runtime.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/tool-runtime.test.ts",
-      "to": "external:effect/testing",
-      "specifier": "effect/testing",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/tool-runtime.test.ts",
-      "to": "external:effect/unstable/process",
-      "specifier": "effect/unstable/process",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/web-search.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/web-search.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/web-search.test.ts",
-      "to": "external:effect/testing",
-      "specifier": "effect/testing",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/web-search.test.ts",
-      "to": "external:effect/unstable/http",
-      "specifier": "effect/unstable/http",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tools/test/workspace-boundary.test.ts",
+      "from": "packages/terminal/test/execution-events.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -5918,15 +6042,47 @@
       "production": false
     },
     {
-      "from": "packages/tools/test/workspace-index.test.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
+      "from": "packages/terminal/test/format.test.ts",
+      "to": "external:string-width",
+      "specifier": "string-width",
       "kind": "import",
       "relationship": "test",
       "production": false
     },
     {
-      "from": "packages/tools/test/workspace-index.test.ts",
+      "from": "packages/terminal/test/format.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/mode-toggle.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/opentui-adapter.test.ts",
+      "to": "external:@opentui/core",
+      "specifier": "@opentui/core",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/opentui-adapter.test.ts",
+      "to": "external:@opentui/core/testing",
+      "specifier": "@opentui/core/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/opentui-adapter.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5934,7 +6090,199 @@
       "production": false
     },
     {
-      "from": "packages/tools/test/workspace-index.test.ts",
+      "from": "packages/terminal/test/opentui-adapter.test.ts",
+      "to": "external:string-width",
+      "specifier": "string-width",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/opentui-adapter.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/opentui-session.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/pasted-text.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/pierre-diff.test.ts",
+      "to": "external:@opentui/core",
+      "specifier": "@opentui/core",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/pierre-diff.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/session.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/syntax-highlight.test.ts",
+      "to": "external:@opentui/core",
+      "specifier": "@opentui/core",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/syntax-highlight.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/tool-presentation.test.ts",
+      "to": "external:@opentui/core",
+      "specifier": "@opentui/core",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/tool-presentation.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/transcript-bounds.test.ts",
+      "to": "external:string-width",
+      "specifier": "string-width",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/transcript-bounds.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/transcript-presenter.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/transcript-renderers.test.ts",
+      "to": "external:@opentui/core",
+      "specifier": "@opentui/core",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/transcript-renderers.test.ts",
+      "to": "external:string-width",
+      "specifier": "string-width",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/transcript-renderers.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/transcript-viewport.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/view-state.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/view-state.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/view-state.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/visual.test.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/visual.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/visual.test.ts",
+      "to": "external:url",
+      "specifier": "url",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/visual.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -6001,294 +6349,6 @@
       "from": "packages/transcript/test/unit-order.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/adapter.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/adapter.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/adapter.test.ts",
-      "to": "external:string-width",
-      "specifier": "string-width",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/adapter.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/execution-events.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/format.test.ts",
-      "to": "external:string-width",
-      "specifier": "string-width",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/format.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/mode-toggle.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/opentui-adapter.test.ts",
-      "to": "external:@opentui/core",
-      "specifier": "@opentui/core",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/opentui-adapter.test.ts",
-      "to": "external:@opentui/core/testing",
-      "specifier": "@opentui/core/testing",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/opentui-adapter.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/opentui-adapter.test.ts",
-      "to": "external:string-width",
-      "specifier": "string-width",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/opentui-adapter.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/opentui-session.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/pasted-text.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/pierre-diff.test.ts",
-      "to": "external:@opentui/core",
-      "specifier": "@opentui/core",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/pierre-diff.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/session.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/syntax-highlight.test.ts",
-      "to": "external:@opentui/core",
-      "specifier": "@opentui/core",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/syntax-highlight.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/tool-presentation.test.ts",
-      "to": "external:@opentui/core",
-      "specifier": "@opentui/core",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/tool-presentation.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/transcript-bounds.test.ts",
-      "to": "external:string-width",
-      "specifier": "string-width",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/transcript-bounds.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/transcript-presenter.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/transcript-renderers.test.ts",
-      "to": "external:@opentui/core",
-      "specifier": "@opentui/core",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/transcript-renderers.test.ts",
-      "to": "external:string-width",
-      "specifier": "string-width",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/transcript-renderers.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/transcript-viewport.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/view-state.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/view-state.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/view-state.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/visual.test.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/visual.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/visual.test.ts",
-      "to": "external:url",
-      "specifier": "url",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/tui/test/visual.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
       "kind": "import",
       "relationship": "test",
       "production": false

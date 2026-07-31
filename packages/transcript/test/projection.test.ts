@@ -13,7 +13,7 @@ import {
   unitOrder,
   withNestedProjections,
   type SourceEvent,
-} from "../src"
+} from "@rika/transcript/transcript-unit"
 
 const usage = (cursor: string, sequence: number): SourceEvent => ({
   cursor,

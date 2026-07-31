@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/relay-execution",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./baton-agent-definition": "./src/agent-profiles.ts",
+    "./media-analysis-adapter": "./src/media-analyzer.ts",
+    "./model-provider-runtime": "./src/streaming-only-model.ts",
+    "./scripted-model-runtime": "./src/execution-backend.ts",
+    "./relay-execution-layer": "./src/relay-execution-layer.ts",
+    "./relay-workflow-compiler": "./src/workflow-definitions.ts"
+  },
+  "dependencies": {
+    "@rika/configuration": "workspace:*",
+    "@batonfx/core": "catalog:",
+    "@rika/coding-tools": "workspace:*",
+    "@relayfx/sdk": "catalog:",
+    "effect": "catalog:",
+    "@rika/product": "workspace:*"
+  },
+  "devDependencies": {
+    "@batonfx/test": "catalog:",
+    "@effect/platform-bun": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@types/bun": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "rika": {
+    "kind": "adapter",
+    "domain": "relay-execution"
+  },
+  "scripts": {
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/relay-execution/src packages/relay-execution/test",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
+  }
+}

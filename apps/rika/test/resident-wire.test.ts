@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import * as ResidentService from "@rika/app/resident-service"
+import * as ResidentService from "@rika/product/resident-service"
 import { Schema } from "effect"
 import {
   clientMessageFrames,

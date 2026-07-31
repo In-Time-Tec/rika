@@ -1,4 +1,4 @@
-import { Catalog } from "@rika/tools"
+import { Catalog } from "@rika/coding-tools/coding-tool-catalog"
 import { Function, Option, Schema } from "effect"
 import { candidateCallId, childScopeAndCallId, executionKey, type ChildParentCandidate } from "./child-parent"
 import { partialInputRecord } from "./partial-input"

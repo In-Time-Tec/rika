@@ -16,7 +16,7 @@ const packages = [
 const consumers = [
   [".", packages.map(([name]) => name)],
   ["apps/rika", ["@batonfx/providers"]],
-  ["packages/runtime", ["@batonfx/core", "@batonfx/test", "@relayfx/sdk"]],
+  ["packages/relay-execution", ["@batonfx/core", "@batonfx/test", "@relayfx/sdk"]],
 ] as const
 
 class UpstreamError extends Data.TaggedError("UpstreamError")<{ readonly message: string }> {}

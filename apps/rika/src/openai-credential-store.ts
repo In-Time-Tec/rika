@@ -1,4 +1,4 @@
-import { OpenAiAuth } from "@rika/app"
+import { OpenAiAuth } from "@rika/product/product-operation"
 import { Clock, Effect, Function, Layer, Option, Schema, Semaphore } from "effect"
 import { randomBytes } from "node:crypto"
 

@@ -29,5 +29,5 @@ never reopens the active interval and the status line keeps showing only the
 work measured before the approval. Relay's durable event log is complete, so the
 value is correct again as soon as the thread is reopened, and reopening is what
 `apps/rika/test/app.tui.test.ts` asserts. Fixing this needs the actionable-wait
-stop and resume path in `packages/runtime/src/execution-backend.ts` to prove it
+stop and resume path in `packages/relay-execution/src/execution-backend.ts` to prove it
 cannot skip an event between the stop cursor and the resume cursor.

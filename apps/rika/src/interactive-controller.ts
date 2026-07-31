@@ -1,8 +1,8 @@
-import type * as Operation from "@rika/app/operation"
-import type * as TranscriptRepository from "@rika/persistence/transcript-repository"
-import * as Turn from "@rika/persistence/turn"
-import * as Transcript from "@rika/transcript"
-import { TranscriptPresenter, ViewState } from "@rika/tui"
+import type * as Operation from "@rika/product/product-operation"
+import type * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
+import * as Turn from "@rika/product-store/sqlite-turn-repository"
+import * as Transcript from "@rika/transcript/transcript-unit"
+import { TranscriptPresenter, ViewState } from "@rika/terminal/terminal-state"
 import { Effect, Function, HashMap } from "effect"
 
 type TranscriptEvent = Extract<

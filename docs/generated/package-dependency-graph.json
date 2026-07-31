@@ -3,14 +3,6 @@
   "graphKind": "package",
   "nodes": [
     {
-      "id": "package:@rika/app",
-      "package": "@rika/app",
-      "workspace": "@rika/app",
-      "kind": "package",
-      "production": true,
-      "publicExports": [".", "./interactive-feed-overflow", "./operation", "./operation-contract", "./resident-service"]
-    },
-    {
       "id": "package:@rika/cli",
       "package": "@rika/cli",
       "workspace": "@rika/cli",
@@ -19,12 +11,59 @@
       "publicExports": []
     },
     {
-      "id": "package:@rika/config",
-      "package": "@rika/config",
-      "workspace": "@rika/config",
+      "id": "package:@rika/coding-tools",
+      "package": "@rika/coding-tools",
+      "workspace": "@rika/coding-tools",
       "kind": "package",
       "production": true,
-      "publicExports": [".", "./data-root", "./modes", "./paths"]
+      "publicExports": [
+        "./agent-tool-contract",
+        "./agent-tool-result",
+        "./bash-tool",
+        "./coding-tool-catalog",
+        "./coding-tool-policy",
+        "./coding-tool-runtime",
+        "./edit-file-tool",
+        "./grep-files-tool",
+        "./local-path",
+        "./local-safety-policy",
+        "./media-view-service",
+        "./parallel-web-search",
+        "./read-file-tool",
+        "./read-web-page-service",
+        "./read-web-page-tool",
+        "./shell-command-status-tool",
+        "./shell-process-registry",
+        "./thread-tool-contract",
+        "./tool-invocation",
+        "./unified-diff",
+        "./view-media-tool",
+        "./web-search-provider",
+        "./web-search-service",
+        "./web-search-tool",
+        "./workspace-file-search",
+        "./write-file-tool"
+      ]
+    },
+    {
+      "id": "package:@rika/configuration",
+      "package": "@rika/configuration",
+      "workspace": "@rika/configuration",
+      "kind": "package",
+      "production": true,
+      "publicExports": [
+        "./behavior-mode",
+        "./canonical-data-root",
+        "./configuration-paths",
+        "./configuration-service",
+        "./configuration-settings",
+        "./model-catalog",
+        "./model-preset",
+        "./model-route",
+        "./model-route-label",
+        "./model-route-resolution",
+        "./profile-data-paths"
+      ]
     },
     {
       "id": "package:@rika/extensions",
@@ -32,30 +71,112 @@
       "workspace": "@rika/extensions",
       "kind": "package",
       "production": true,
-      "publicExports": ["."]
+      "publicExports": [
+        "./execution-extension-service",
+        "./mcp-configuration",
+        "./mcp-oauth-service",
+        "./mcp-runtime",
+        "./plugin-contract",
+        "./plugin-digest",
+        "./plugin-registry",
+        "./skill-registry"
+      ]
     },
     {
-      "id": "package:@rika/persistence",
-      "package": "@rika/persistence",
-      "workspace": "@rika/persistence",
+      "id": "package:@rika/product",
+      "package": "@rika/product",
+      "workspace": "@rika/product",
       "kind": "package",
       "production": true,
       "publicExports": [
-        ".",
-        "./database",
-        "./repository",
-        "./thread",
+        "./agent-profile",
+        "./configuration-operation",
+        "./context-file-system",
+        "./context-resolution-service",
+        "./execution-approval",
+        "./execution-child-run",
+        "./execution-event",
+        "./execution-identifier",
+        "./execution-inspection",
+        "./execution-request",
+        "./execution-route-snapshot",
+        "./execution-service",
+        "./execution-status",
+        "./execution-workflow",
+        "./extension-operation",
+        "./interactive-command",
+        "./interactive-event",
+        "./interactive-operation",
+        "./interactive-session",
+        "./model-registration-identity",
+        "./openai-auth-contract",
+        "./openai-auth-service",
+        "./pending-turn",
+        "./product-agent-service",
+        "./product-operation",
+        "./product-operation-service",
+        "./provider-connection-snapshot",
+        "./resident-interactive-feed",
+        "./resident-operation-request",
+        "./resident-service",
+        "./resident-service-handshake",
+        "./resolved-context",
         "./thread-interaction-repository",
+        "./thread-operation",
+        "./thread-query-service",
+        "./thread-record",
+        "./thread-relationship",
+        "./thread-repository",
+        "./thread-result",
         "./thread-search-repository",
         "./thread-state",
         "./thread-summary",
         "./thread-summary-repository",
+        "./thread-tool-service",
         "./transcript-page",
         "./transcript-repository",
-        "./transcript-repository-test",
-        "./turn",
+        "./turn-record",
         "./turn-repository",
-        "./usage-repository"
+        "./usage-projection",
+        "./usage-repository",
+        "./usage-snapshot",
+        "./usage-snapshot-codec",
+        "./workflow-definition",
+        "./workflow-operation",
+        "./workflow-service",
+        "./workspace-record"
+      ]
+    },
+    {
+      "id": "package:@rika/product-store",
+      "package": "@rika/product-store",
+      "workspace": "@rika/product-store",
+      "kind": "package",
+      "production": true,
+      "publicExports": [
+        "./product-database-layer",
+        "./sqlite-thread-interaction-repository",
+        "./sqlite-thread-repository",
+        "./sqlite-thread-search-repository",
+        "./sqlite-thread-summary-repository",
+        "./sqlite-transcript-repository",
+        "./sqlite-turn-repository",
+        "./sqlite-usage-repository"
+      ]
+    },
+    {
+      "id": "package:@rika/relay-execution",
+      "package": "@rika/relay-execution",
+      "workspace": "@rika/relay-execution",
+      "kind": "package",
+      "production": true,
+      "publicExports": [
+        "./baton-agent-definition",
+        "./media-analysis-adapter",
+        "./model-provider-runtime",
+        "./relay-execution-layer",
+        "./relay-workflow-compiler",
+        "./scripted-model-runtime"
       ]
     },
     {
@@ -75,20 +196,21 @@
       "publicExports": []
     },
     {
-      "id": "package:@rika/runtime",
-      "package": "@rika/runtime",
-      "workspace": "@rika/runtime",
+      "id": "package:@rika/terminal",
+      "package": "@rika/terminal",
+      "workspace": "@rika/terminal",
       "kind": "package",
       "production": true,
-      "publicExports": [".", "./contract", "./relay"]
-    },
-    {
-      "id": "package:@rika/tools",
-      "package": "@rika/tools",
-      "workspace": "@rika/tools",
-      "kind": "package",
-      "production": true,
-      "publicExports": [".", "./local-path", "./workspace-index"]
+      "publicExports": [
+        "./opentui-surface",
+        "./terminal-message",
+        "./terminal-performance-evaluation",
+        "./terminal-session",
+        "./terminal-state",
+        "./terminal-state-reducer",
+        "./terminal-transcript-presentation",
+        "./transcript-viewport"
+      ]
     },
     {
       "id": "package:@rika/transcript",
@@ -96,67 +218,28 @@
       "workspace": "@rika/transcript",
       "kind": "package",
       "production": true,
-      "publicExports": [".", "./fold", "./schema"]
-    },
-    {
-      "id": "package:@rika/tui",
-      "package": "@rika/tui",
-      "workspace": "@rika/tui",
-      "kind": "package",
-      "production": true,
-      "publicExports": [".", "./adapter", "./performance"]
+      "publicExports": [
+        "./child-parent-correlation",
+        "./model-usage-fallback",
+        "./nested-transcript-projection",
+        "./partial-tool-input",
+        "./recorded-shell-presentation",
+        "./transcript-presentation-model",
+        "./transcript-projection",
+        "./transcript-projection-model",
+        "./transcript-settlement",
+        "./transcript-source-event",
+        "./transcript-unit",
+        "./transcript-unit-identity",
+        "./transcript-unit-order"
+      ]
     }
   ],
   "edges": [
     {
-      "from": "package:@rika/app",
-      "to": "package:@rika/config",
-      "specifier": "@rika/config",
-      "kind": "package",
-      "relationship": "runtime",
-      "production": true,
-      "dependencySection": "dependencies"
-    },
-    {
-      "from": "package:@rika/app",
-      "to": "package:@rika/extensions",
-      "specifier": "@rika/extensions",
-      "kind": "package",
-      "relationship": "runtime",
-      "production": true,
-      "dependencySection": "dependencies"
-    },
-    {
-      "from": "package:@rika/app",
-      "to": "package:@rika/persistence",
-      "specifier": "@rika/persistence",
-      "kind": "package",
-      "relationship": "runtime",
-      "production": true,
-      "dependencySection": "dependencies"
-    },
-    {
-      "from": "package:@rika/app",
-      "to": "package:@rika/runtime",
-      "specifier": "@rika/runtime",
-      "kind": "package",
-      "relationship": "runtime",
-      "production": true,
-      "dependencySection": "dependencies"
-    },
-    {
-      "from": "package:@rika/app",
-      "to": "package:@rika/tools",
-      "specifier": "@rika/tools",
-      "kind": "package",
-      "relationship": "runtime",
-      "production": true,
-      "dependencySection": "dependencies"
-    },
-    {
-      "from": "package:@rika/app",
-      "to": "package:@rika/transcript",
-      "specifier": "@rika/transcript",
+      "from": "package:@rika/cli",
+      "to": "package:@rika/coding-tools",
+      "specifier": "@rika/coding-tools",
       "kind": "package",
       "relationship": "runtime",
       "production": true,
@@ -164,17 +247,8 @@
     },
     {
       "from": "package:@rika/cli",
-      "to": "package:@rika/app",
-      "specifier": "@rika/app",
-      "kind": "package",
-      "relationship": "runtime",
-      "production": true,
-      "dependencySection": "dependencies"
-    },
-    {
-      "from": "package:@rika/cli",
-      "to": "package:@rika/config",
-      "specifier": "@rika/config",
+      "to": "package:@rika/configuration",
+      "specifier": "@rika/configuration",
       "kind": "package",
       "relationship": "runtime",
       "production": true,
@@ -191,8 +265,8 @@
     },
     {
       "from": "package:@rika/cli",
-      "to": "package:@rika/persistence",
-      "specifier": "@rika/persistence",
+      "to": "package:@rika/product-store",
+      "specifier": "@rika/product-store",
       "kind": "package",
       "relationship": "runtime",
       "production": true,
@@ -200,8 +274,8 @@
     },
     {
       "from": "package:@rika/cli",
-      "to": "package:@rika/runtime",
-      "specifier": "@rika/runtime",
+      "to": "package:@rika/product",
+      "specifier": "@rika/product",
       "kind": "package",
       "relationship": "runtime",
       "production": true,
@@ -209,8 +283,17 @@
     },
     {
       "from": "package:@rika/cli",
-      "to": "package:@rika/tools",
-      "specifier": "@rika/tools",
+      "to": "package:@rika/relay-execution",
+      "specifier": "@rika/relay-execution",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
+    {
+      "from": "package:@rika/cli",
+      "to": "package:@rika/terminal",
+      "specifier": "@rika/terminal",
       "kind": "package",
       "relationship": "runtime",
       "production": true,
@@ -226,36 +309,90 @@
       "dependencySection": "dependencies"
     },
     {
-      "from": "package:@rika/cli",
-      "to": "package:@rika/tui",
-      "specifier": "@rika/tui",
+      "from": "package:@rika/coding-tools",
+      "to": "package:@rika/configuration",
+      "specifier": "@rika/configuration",
       "kind": "package",
       "relationship": "runtime",
       "production": true,
       "dependencySection": "dependencies"
     },
     {
-      "from": "package:@rika/persistence",
-      "to": "package:@rika/config",
-      "specifier": "@rika/config",
+      "from": "package:@rika/product-store",
+      "to": "package:@rika/product",
+      "specifier": "@rika/product",
       "kind": "package",
       "relationship": "runtime",
       "production": true,
       "dependencySection": "dependencies"
     },
     {
-      "from": "package:@rika/persistence",
-      "to": "package:@rika/tools",
-      "specifier": "@rika/tools",
-      "kind": "package",
-      "relationship": "runtime",
-      "production": true,
-      "dependencySection": "dependencies"
-    },
-    {
-      "from": "package:@rika/persistence",
+      "from": "package:@rika/product-store",
       "to": "package:@rika/transcript",
       "specifier": "@rika/transcript",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
+    {
+      "from": "package:@rika/product",
+      "to": "package:@rika/coding-tools",
+      "specifier": "@rika/coding-tools",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
+    {
+      "from": "package:@rika/product",
+      "to": "package:@rika/configuration",
+      "specifier": "@rika/configuration",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
+    {
+      "from": "package:@rika/product",
+      "to": "package:@rika/extensions",
+      "specifier": "@rika/extensions",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
+    {
+      "from": "package:@rika/product",
+      "to": "package:@rika/transcript",
+      "specifier": "@rika/transcript",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
+    {
+      "from": "package:@rika/relay-execution",
+      "to": "package:@rika/coding-tools",
+      "specifier": "@rika/coding-tools",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
+    {
+      "from": "package:@rika/relay-execution",
+      "to": "package:@rika/configuration",
+      "specifier": "@rika/configuration",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
+    {
+      "from": "package:@rika/relay-execution",
+      "to": "package:@rika/product",
+      "specifier": "@rika/product",
       "kind": "package",
       "relationship": "runtime",
       "production": true,
@@ -263,8 +400,8 @@
     },
     {
       "from": "package:@rika/repository-graph",
-      "to": "package:@rika/app",
-      "specifier": "@rika/app",
+      "to": "package:@rika/coding-tools",
+      "specifier": "@rika/coding-tools",
       "kind": "package",
       "relationship": "test",
       "production": false,
@@ -272,8 +409,8 @@
     },
     {
       "from": "package:@rika/repository-graph",
-      "to": "package:@rika/config",
-      "specifier": "@rika/config",
+      "to": "package:@rika/configuration",
+      "specifier": "@rika/configuration",
       "kind": "package",
       "relationship": "test",
       "production": false,
@@ -290,8 +427,8 @@
     },
     {
       "from": "package:@rika/repository-graph",
-      "to": "package:@rika/persistence",
-      "specifier": "@rika/persistence",
+      "to": "package:@rika/product-store",
+      "specifier": "@rika/product-store",
       "kind": "package",
       "relationship": "test",
       "production": false,
@@ -299,8 +436,8 @@
     },
     {
       "from": "package:@rika/repository-graph",
-      "to": "package:@rika/runtime",
-      "specifier": "@rika/runtime",
+      "to": "package:@rika/product",
+      "specifier": "@rika/product",
       "kind": "package",
       "relationship": "test",
       "production": false,
@@ -308,8 +445,17 @@
     },
     {
       "from": "package:@rika/repository-graph",
-      "to": "package:@rika/tools",
-      "specifier": "@rika/tools",
+      "to": "package:@rika/relay-execution",
+      "specifier": "@rika/relay-execution",
+      "kind": "package",
+      "relationship": "test",
+      "production": false,
+      "dependencySection": "devDependencies"
+    },
+    {
+      "from": "package:@rika/repository-graph",
+      "to": "package:@rika/terminal",
+      "specifier": "@rika/terminal",
       "kind": "package",
       "relationship": "test",
       "production": false,
@@ -325,36 +471,18 @@
       "dependencySection": "devDependencies"
     },
     {
-      "from": "package:@rika/repository-graph",
-      "to": "package:@rika/tui",
-      "specifier": "@rika/tui",
-      "kind": "package",
-      "relationship": "test",
-      "production": false,
-      "dependencySection": "devDependencies"
-    },
-    {
-      "from": "package:@rika/runtime",
-      "to": "package:@rika/config",
-      "specifier": "@rika/config",
+      "from": "package:@rika/terminal",
+      "to": "package:@rika/configuration",
+      "specifier": "@rika/configuration",
       "kind": "package",
       "relationship": "runtime",
       "production": true,
       "dependencySection": "dependencies"
     },
     {
-      "from": "package:@rika/runtime",
-      "to": "package:@rika/tools",
-      "specifier": "@rika/tools",
-      "kind": "package",
-      "relationship": "runtime",
-      "production": true,
-      "dependencySection": "dependencies"
-    },
-    {
-      "from": "package:@rika/tools",
-      "to": "package:@rika/config",
-      "specifier": "@rika/config",
+      "from": "package:@rika/terminal",
+      "to": "package:@rika/transcript",
+      "specifier": "@rika/transcript",
       "kind": "package",
       "relationship": "runtime",
       "production": true,
@@ -362,26 +490,8 @@
     },
     {
       "from": "package:@rika/transcript",
-      "to": "package:@rika/tools",
-      "specifier": "@rika/tools",
-      "kind": "package",
-      "relationship": "runtime",
-      "production": true,
-      "dependencySection": "dependencies"
-    },
-    {
-      "from": "package:@rika/tui",
-      "to": "package:@rika/config",
-      "specifier": "@rika/config",
-      "kind": "package",
-      "relationship": "runtime",
-      "production": true,
-      "dependencySection": "dependencies"
-    },
-    {
-      "from": "package:@rika/tui",
-      "to": "package:@rika/transcript",
-      "specifier": "@rika/transcript",
+      "to": "package:@rika/coding-tools",
+      "specifier": "@rika/coding-tools",
       "kind": "package",
       "relationship": "runtime",
       "production": true,

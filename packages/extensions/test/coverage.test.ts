@@ -2,10 +2,10 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { McpToolSource } from "@batonfx/mcp"
 import { expect, it } from "@effect/vitest"
 import { Crypto, Effect, Layer, PlatformError } from "effect"
-import * as Extensions from "../src"
+import * as Extensions from "@rika/extensions/plugin-contract"
 import { provideLayer } from "./layer"
 
-const loadEntrypoint = Effect.fn("ExtensionsTest.loadEntrypoint")(() => Effect.tryPromise(() => import("../src/index")))
+const loadEntrypoint = Effect.fn("ExtensionsTest.loadEntrypoint")(() => Effect.tryPromise(() => import("@rika/extensions/plugin-contract")))
 
 it.effect("exports every extension namespace from the package entrypoint", () =>
   Effect.gen(function* () {

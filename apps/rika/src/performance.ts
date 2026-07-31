@@ -2,7 +2,7 @@ import {
   performanceEvaluation as evaluateTui,
   type PerformanceMetric,
   type PerformancePhase,
-} from "@rika/tui/performance"
+} from "@rika/terminal/terminal-performance-evaluation"
 import { DateTime, Effect } from "effect"
 import { observeProcesses, type ProcessObservation } from "./performance-platform"
 

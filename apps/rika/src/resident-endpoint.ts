@@ -1,4 +1,4 @@
-import * as ResidentService from "@rika/app/resident-service"
+import * as ResidentService from "@rika/product/resident-service"
 import { Crypto, Effect, Encoding, FileSystem, Option, Path } from "effect"
 
 const tokenName = "resident.token"

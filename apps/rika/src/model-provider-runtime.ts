@@ -1,13 +1,13 @@
-import { ConfigContract, Models } from "@rika/config"
-import type * as Turn from "@rika/persistence/turn"
-import { PromptCache } from "@rika/runtime"
-import { withStreamingOnlyModel } from "@rika/runtime/relay"
+import { ConfigContract, Models } from "@rika/configuration/configuration-settings"
+import type * as Turn from "@rika/product-store/sqlite-turn-repository"
+import { PromptCache } from "@rika/relay-execution/relay-execution-layer"
+import { withStreamingOnlyModel } from "@rika/relay-execution/relay-execution-layer"
 import { Compaction, ModelRegistry } from "@batonfx/core"
 import * as Anthropic from "@batonfx/providers/anthropic"
 import * as AmazonBedrock from "@batonfx/providers/amazon-bedrock"
 import * as OpenAi from "@batonfx/providers/openai"
 import { OpenAiAccountCredentialError, type OpenAiAccountCredentials } from "@batonfx/providers/openai"
-import { OpenAiAuth } from "@rika/app"
+import { OpenAiAuth } from "@rika/product/product-operation"
 import {
   Config,
   Context,

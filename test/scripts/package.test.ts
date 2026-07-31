@@ -127,8 +127,8 @@ describe("release target construction", () => {
       "/turn-repository.ts",
       "/transcript-repository.ts",
       "/execution-backend.ts",
-      "/packages/tools/",
-      "/packages/tui/",
+      "/packages/coding-tools/",
+      "/packages/terminal/",
     ])
       expect(files).not.toContain(forbidden)
     for (const forbidden of ["@batonfx/providers", "@relayfx/", "@opentui/", "@ff-labs/"])
@@ -145,7 +145,7 @@ describe("release target construction", () => {
     expect(interactiveFiles).not.toContain("/resident-host-transport.ts")
     expect(interactiveFiles).not.toContain("/model-provider-runtime.ts")
     expect([...interactive.external].join("\n")).not.toContain("@batonfx/providers")
-    expect(residentFiles).not.toContain("/packages/tui/")
+    expect(residentFiles).not.toContain("/packages/terminal/")
     expect([...resident.external].join("\n")).not.toContain("@opentui/")
   })
 })

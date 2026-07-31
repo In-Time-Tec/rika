@@ -9,7 +9,7 @@ import {
   snapshotFoldProjection,
   type Projection,
   type SourceEvent,
-} from "../src"
+} from "@rika/transcript/transcript-unit"
 
 const attemptData = (attempt: string) => ({ model_call_id: `call-${attempt}`, model_attempt_id: `attempt-${attempt}` })
 

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/coding-tools",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./coding-tool-catalog": "./src/coding-tool-catalog.ts",
+    "./thread-tool-contract": "./src/thread-tools.ts",
+    "./tool-invocation": "./src/tool-invocation.ts",
+    "./agent-tool-contract": "./src/agent-tools.ts",
+    "./agent-tool-result": "./src/agent-tools.ts",
+    "./media-view-service": "./src/media-view.ts",
+    "./view-media-tool": "./src/tools/view-media.ts",
+    "./coding-tool-policy": "./src/tool-policy.ts",
+    "./local-safety-policy": "./src/local-safety-policy.ts",
+    "./bash-tool": "./src/tools/bash.ts",
+    "./shell-command-status-tool": "./src/tools/shell-command-status.ts",
+    "./shell-process-registry": "./src/process-registry.ts",
+    "./coding-tool-runtime": "./src/tool-runtime.ts",
+    "./parallel-web-search": "./src/parallel-search.ts",
+    "./read-web-page-service": "./src/read-web-page.ts",
+    "./read-web-page-tool": "./src/tools/read-web-page.ts",
+    "./web-search-provider": "./src/web-search-providers.ts",
+    "./web-search-service": "./src/web-search.ts",
+    "./web-search-tool": "./src/tools/web-search.ts",
+    "./edit-file-tool": "./src/tools/edit.ts",
+    "./grep-files-tool": "./src/tools/grep.ts",
+    "./local-path": "./src/local-path.ts",
+    "./read-file-tool": "./src/tools/read.ts",
+    "./unified-diff": "./src/unified-diff.ts",
+    "./workspace-file-search": "./src/workspace-index.ts",
+    "./write-file-tool": "./src/tools/write.ts"
+  },
+  "dependencies": {
+    "@rika/configuration": "workspace:*",
+    "effect": "catalog:",
+    "parallel-web": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@types/bun": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "rika": {
+    "kind": "capability",
+    "domain": "coding-tools"
+  },
+  "scripts": {
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/coding-tools/src packages/coding-tools/test",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
+  }
+}

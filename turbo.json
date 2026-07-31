@@ -52,7 +52,7 @@
         "!plans/**",
         "!**/dist/**",
         "!coverage/**",
-        "!packages/tui/test/fixtures/visual/*.styles.json"
+        "!packages/terminal/test/fixtures/visual/*.styles.json"
       ]
     },
     "//#lint": {

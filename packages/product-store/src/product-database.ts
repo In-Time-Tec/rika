@@ -1,0 +1,1246 @@
+import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient"
+import * as SqliteMigrator from "@effect/sql-sqlite-bun/SqliteMigrator"
+import { Cause, Effect, Exit, FileSystem, Layer, Option, Path, Schema } from "effect"
+import { SqlClient } from "effect/unstable/sql/SqlClient"
+import { productRouteSnapshot } from "./migration/execution/product-migration-028-product-route-snapshot"
+
+const baseline = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`CREATE TABLE rika_workspaces (
+    path TEXT PRIMARY KEY NOT NULL,
+    created_at INTEGER NOT NULL
+  )`
+  yield* sql`CREATE TABLE rika_threads (
+    id TEXT PRIMARY KEY NOT NULL,
+    session_id TEXT NOT NULL UNIQUE,
+    workspace TEXT NOT NULL REFERENCES rika_workspaces(path),
+    title TEXT NOT NULL,
+    labels_json TEXT NOT NULL DEFAULT '[]',
+    pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
+    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`
+  yield* sql`CREATE INDEX rika_threads_listing ON rika_threads (pinned DESC, updated_at DESC, id ASC)`
+})
+
+const turns = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`CREATE TABLE rika_turns (
+    id TEXT PRIMARY KEY NOT NULL,
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    prompt TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('accepted', 'running', 'waiting', 'completed', 'failed', 'cancelled')),
+    last_cursor TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`
+  yield* sql`CREATE INDEX rika_turns_thread ON rika_turns (thread_id, created_at ASC, id ASC)`
+})
+
+const queuedTurns = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`CREATE TABLE rika_turns_next (
+    id TEXT PRIMARY KEY NOT NULL,
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    prompt TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('accepted', 'queued', 'running', 'waiting', 'completed', 'failed', 'cancelled')),
+    last_cursor TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`
+  yield* sql`INSERT INTO rika_turns_next SELECT * FROM rika_turns`
+  yield* sql`DROP TABLE rika_turns`
+  yield* sql`ALTER TABLE rika_turns_next RENAME TO rika_turns`
+  yield* sql`CREATE INDEX rika_turns_thread ON rika_turns (thread_id, created_at ASC, id ASC)`
+})
+
+const executionExtensionPins = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`ALTER TABLE rika_turns ADD COLUMN extension_pin_json TEXT`
+})
+
+const turnPromptParts = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`ALTER TABLE rika_turns ADD COLUMN prompt_parts_json TEXT`
+})
+
+const dropThreadSessionId = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`CREATE TABLE rika_threads_next (
+    id TEXT PRIMARY KEY NOT NULL,
+    workspace TEXT NOT NULL REFERENCES rika_workspaces(path),
+    title TEXT NOT NULL,
+    labels_json TEXT NOT NULL DEFAULT '[]',
+    pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
+    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`
+  yield* sql`INSERT INTO rika_threads_next SELECT id, workspace, title, labels_json, pinned, archived, created_at, updated_at FROM rika_threads`
+  yield* sql`DROP TABLE rika_threads`
+  yield* sql`ALTER TABLE rika_threads_next RENAME TO rika_threads`
+  yield* sql`CREATE INDEX rika_threads_listing ON rika_threads (pinned DESC, updated_at DESC, id ASC)`
+})
+
+const executionRoutePins = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`ALTER TABLE rika_turns ADD COLUMN execution_route_json TEXT`
+})
+
+const reviewFanOutOwners = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`ALTER TABLE rika_turns ADD COLUMN review_fan_out_id TEXT`
+})
+
+const transcriptProjection = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`CREATE TABLE rika_transcript_entries (
+    turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    prompt TEXT NOT NULL,
+    status TEXT NOT NULL,
+    events_json TEXT NOT NULL DEFAULT '[]',
+    revision INTEGER NOT NULL DEFAULT 1,
+    projection_version INTEGER NOT NULL DEFAULT 1,
+    oldest_cursor TEXT,
+    checkpoint_cursor TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`
+  yield* sql`CREATE INDEX rika_transcript_page ON rika_transcript_entries (thread_id, created_at DESC, turn_id DESC)`
+})
+
+const threadSummaries = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`CREATE TABLE rika_thread_turn_activity (
+    turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    projected_cursor TEXT,
+    complete INTEGER NOT NULL DEFAULT 0 CHECK (complete IN (0, 1)),
+    added INTEGER NOT NULL DEFAULT 0 CHECK (added >= 0),
+    modified INTEGER NOT NULL DEFAULT 0 CHECK (modified >= 0),
+    removed INTEGER NOT NULL DEFAULT 0 CHECK (removed >= 0),
+    last_event_at INTEGER,
+    updated_at INTEGER NOT NULL
+  )`
+  yield* sql`CREATE INDEX rika_thread_turn_activity_summary ON rika_thread_turn_activity (thread_id, last_event_at DESC)`
+  yield* sql`CREATE TABLE rika_thread_read_state (
+    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    last_read_at INTEGER NOT NULL
+  )`
+})
+
+const semanticTranscriptProjection = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`CREATE TABLE rika_transcript_checkpoints (
+    turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    drafts_json TEXT NOT NULL DEFAULT '[]',
+    revision INTEGER NOT NULL DEFAULT -1,
+    projection_version INTEGER NOT NULL DEFAULT 2,
+    oldest_cursor TEXT,
+    checkpoint_cursor TEXT,
+    cost_usd REAL,
+    updated_at INTEGER NOT NULL
+  )`
+  yield* sql`CREATE TABLE rika_transcript_units (
+    unit_key TEXT PRIMARY KEY NOT NULL,
+    turn_id TEXT NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    unit_sequence INTEGER NOT NULL,
+    unit_part INTEGER NOT NULL,
+    revision INTEGER NOT NULL,
+    unit_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`
+  yield* sql`CREATE INDEX rika_transcript_units_page ON rika_transcript_units (
+    thread_id, created_at DESC, turn_id DESC, unit_sequence DESC, unit_part DESC, unit_key DESC
+  )`
+  yield* sql`CREATE INDEX rika_transcript_units_turn ON rika_transcript_units (
+    turn_id, unit_sequence ASC, unit_part ASC, unit_key ASC
+  )`
+})
+
+const legacyExecutionRoute = JSON.stringify({
+  version: 1,
+  mode: "test",
+  main: {
+    role: "main",
+    alias: "legacy-unavailable",
+    provider: "legacy-unavailable",
+    model: "legacy-unavailable",
+    registrationKey: "legacy-unavailable",
+    gatewayProtocol: "test",
+    gatewayBaseUrl: "test://legacy-unavailable",
+    gatewayAuth: "none",
+    effort: "medium",
+    fast: false,
+    requestVariant: "legacy-unavailable",
+    compaction: { contextWindow: 1, reserveTokens: 0, keepRecentTokens: 0 },
+  },
+  oracle: {
+    role: "oracle",
+    alias: "legacy-unavailable",
+    provider: "legacy-unavailable",
+    model: "legacy-unavailable",
+    registrationKey: "legacy-unavailable",
+    gatewayProtocol: "test",
+    gatewayBaseUrl: "test://legacy-unavailable",
+    gatewayAuth: "none",
+    effort: "medium",
+    fast: false,
+    requestVariant: "legacy-unavailable",
+    compaction: { contextWindow: 1, reserveTokens: 0, keepRecentTokens: 0 },
+  },
+})
+
+const queueStateAndCurrentTranscripts = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`UPDATE rika_turns SET execution_route_json = ${legacyExecutionRoute} WHERE execution_route_json IS NULL`
+  yield* sql`ALTER TABLE rika_transcript_checkpoints ADD COLUMN model_phase INTEGER NOT NULL DEFAULT -1`
+  yield* sql`CREATE INDEX rika_turns_queue ON rika_turns (thread_id, status, created_at ASC, id ASC)`
+  yield* sql`CREATE TABLE rika_thread_queue_state (
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    queued_count INTEGER NOT NULL DEFAULT 0 CHECK (queued_count >= 0),
+    wake_generation INTEGER NOT NULL DEFAULT 0 CHECK (wake_generation >= 0),
+    wake_pending INTEGER NOT NULL DEFAULT 0 CHECK (wake_pending IN (0, 1)),
+    PRIMARY KEY (thread_id)
+  )`
+  yield* sql`INSERT INTO rika_thread_queue_state (thread_id, revision, queued_count)
+    SELECT thread_id, COUNT(*), COUNT(*)
+    FROM rika_turns
+    WHERE status = 'queued'
+    GROUP BY thread_id`
+})
+
+const rewriteModelRouteProvider = (value: unknown): unknown => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return value
+  const source = value as Record<string, unknown>
+  const result = Object.fromEntries(
+    Object.entries(source).filter(
+      ([key]) => key !== "gatewayProtocol" && key !== "gatewayBaseUrl" && key !== "gatewayAuth",
+    ),
+  )
+  if (typeof source.gatewayProtocol === "string") result.providerProtocol = source.gatewayProtocol
+  if (typeof source.gatewayBaseUrl === "string") result.providerBaseUrl = source.gatewayBaseUrl
+  if (typeof source.gatewayAuth === "string" && source.gatewayAuth.startsWith("bearer-env:"))
+    result.providerApiKeyEnv = source.gatewayAuth.slice("bearer-env:".length)
+  return result
+}
+
+const providerExecutionRoutes = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  const rows = yield* sql<{ readonly id: string; readonly route: string }>`
+    SELECT id, execution_route_json AS route FROM rika_turns WHERE execution_route_json IS NOT NULL
+  `
+  for (const row of rows) {
+    const source = (yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(row.route)) as Record<
+      string,
+      unknown
+    >
+    const agents = source.agents as Record<string, unknown> | undefined
+    const route = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)({
+      ...source,
+      main: rewriteModelRouteProvider(source.main),
+      oracle: rewriteModelRouteProvider(source.oracle),
+      ...(source.title === undefined ? {} : { title: rewriteModelRouteProvider(source.title) }),
+      ...(source.compactionSummary === undefined
+        ? {}
+        : { compactionSummary: rewriteModelRouteProvider(source.compactionSummary) }),
+      ...(agents === undefined
+        ? {}
+        : {
+            agents: Object.fromEntries(
+              Object.entries(agents).map(([name, value]) => [name, rewriteModelRouteProvider(value)]),
+            ),
+          }),
+    })
+    yield* sql`UPDATE rika_turns SET execution_route_json = ${route} WHERE id = ${row.id}`
+  }
+})
+
+const durableQueueClaims = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`ALTER TABLE rika_turns ADD COLUMN queue_claim_token TEXT`
+  yield* sql`CREATE UNIQUE INDEX rika_turns_queue_claim ON rika_turns (thread_id) WHERE queue_claim_token IS NOT NULL`
+})
+
+const usageCursorCheckpoints = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`ALTER TABLE rika_transcript_checkpoints ADD COLUMN usage_cursors_json TEXT`
+})
+
+const pricingVersionCheckpoints = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`ALTER TABLE rika_transcript_checkpoints ADD COLUMN pricing_version TEXT`
+})
+
+const threadSearchProjection = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`CREATE VIRTUAL TABLE rika_thread_search USING fts5(
+    thread_id UNINDEXED,
+    title,
+    labels,
+    human_prompts,
+    agent_prompts,
+    root_assistant,
+    child_assistant,
+    files,
+    tokenize = 'unicode61'
+  )`
+  yield* sql`CREATE TABLE rika_thread_search_files (
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    PRIMARY KEY (thread_id, path)
+  )`
+  yield* sql`CREATE INDEX rika_thread_search_files_path ON rika_thread_search_files (path, thread_id)`
+  yield* sql`INSERT INTO rika_thread_search (
+    thread_id, title, labels, human_prompts, agent_prompts, root_assistant, child_assistant, files
+  )
+  SELECT t.id, t.title, t.labels_json,
+    COALESCE((SELECT group_concat(prompt, char(10)) FROM rika_turns WHERE thread_id = t.id), ''),
+    '', '', '', ''
+  FROM rika_threads t`
+})
+
+const durableThreadCoordination = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`ALTER TABLE rika_threads ADD COLUMN lineage_json TEXT NOT NULL DEFAULT '{"_tag":"Original"}'`
+  yield* sql`ALTER TABLE rika_turns ADD COLUMN author_json TEXT NOT NULL DEFAULT '{"_tag":"Human"}'`
+  yield* sql`ALTER TABLE rika_turns ADD COLUMN lineage_json TEXT NOT NULL DEFAULT '{"_tag":"Original"}'`
+  yield* sql`CREATE TABLE rika_thread_relationships (
+    id TEXT PRIMARY KEY NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('created', 'message', 'reply', 'fork')),
+    source_thread_id TEXT NOT NULL,
+    source_turn_id TEXT,
+    target_thread_id TEXT NOT NULL,
+    target_turn_id TEXT,
+    created_at INTEGER NOT NULL,
+    CHECK (source_thread_id <> target_thread_id OR kind <> 'message')
+  )`
+  yield* sql`CREATE UNIQUE INDEX rika_thread_relationship_identity ON rika_thread_relationships
+    (kind, source_thread_id, COALESCE(source_turn_id, ''), target_thread_id, COALESCE(target_turn_id, ''))`
+  yield* sql`CREATE TABLE rika_thread_invocation_receipts (
+    invocation_digest TEXT PRIMARY KEY NOT NULL,
+    schema_input_digest TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('create', 'message', 'steer', 'cancel', 'stop')),
+    outcome TEXT NOT NULL,
+    source_thread_id TEXT NOT NULL,
+    source_root_turn_id TEXT,
+    target_thread_id TEXT,
+    target_turn_id TEXT,
+    queue_revision INTEGER CHECK (queue_revision IS NULL OR queue_revision >= 0),
+    created_at INTEGER NOT NULL
+  )`
+  yield* sql`CREATE INDEX rika_thread_invocation_source_root ON rika_thread_invocation_receipts
+    (source_thread_id, source_root_turn_id, kind)`
+  yield* sql`CREATE TABLE rika_thread_result_routes (
+    id TEXT PRIMARY KEY NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('manual', 'reply')),
+    source_thread_id TEXT,
+    source_turn_id TEXT,
+    target_thread_id TEXT NOT NULL,
+    target_turn_id TEXT NOT NULL,
+    delivery TEXT NOT NULL CHECK (delivery IN ('awaiting-result', 'ready', 'delivered', 'source-unavailable')),
+    ready_sequence INTEGER CHECK (ready_sequence IS NULL OR ready_sequence >= 0),
+    delivered_turn_id TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    CHECK ((kind = 'manual' AND source_thread_id IS NULL AND source_turn_id IS NULL) OR
+      (kind = 'reply' AND source_thread_id IS NOT NULL AND source_turn_id IS NOT NULL)),
+    CHECK ((delivery = 'delivered' AND delivered_turn_id IS NOT NULL) OR delivery <> 'delivered'),
+    UNIQUE (target_turn_id)
+  )`
+  yield* sql`CREATE INDEX rika_thread_result_ready ON rika_thread_result_routes
+    (delivery, ready_sequence, created_at, id)`
+  yield* sql`CREATE TABLE rika_thread_root_readiness (
+    turn_id TEXT PRIMARY KEY NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('WaitingReady', 'TerminalReady', 'CancelledBeforeStartReady')),
+    cursor TEXT,
+    sequence INTEGER CHECK (sequence IS NULL OR sequence >= 0),
+    output TEXT,
+    backfill INTEGER NOT NULL DEFAULT 0 CHECK (backfill IN (0, 1)),
+    updated_at INTEGER NOT NULL,
+    CHECK ((state = 'WaitingReady' AND cursor IS NOT NULL) OR state <> 'WaitingReady')
+  )`
+})
+
+const turnStopIntent = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`ALTER TABLE rika_turns ADD COLUMN stop_intent TEXT NOT NULL DEFAULT 'none'
+    CHECK (stop_intent IN ('none', 'requested'))`
+})
+
+const usageProjection = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`CREATE TABLE rika_turn_usage (
+    turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    projection_version INTEGER NOT NULL DEFAULT 1,
+    fold_json TEXT,
+    cost_nano_usd INTEGER CHECK (cost_nano_usd IS NULL OR cost_nano_usd >= 0),
+    tokens INTEGER CHECK (tokens IS NULL OR tokens >= 0),
+    active_millis INTEGER CHECK (active_millis IS NULL OR active_millis >= 0),
+    active_intervals_json TEXT,
+    priced_attempts INTEGER NOT NULL DEFAULT 0 CHECK (priced_attempts >= 0),
+    unpriced_attempts INTEGER NOT NULL DEFAULT 0 CHECK (unpriced_attempts >= 0),
+    counted_attempts INTEGER NOT NULL DEFAULT 0 CHECK (counted_attempts >= 0),
+    uncounted_attempts INTEGER NOT NULL DEFAULT 0 CHECK (uncounted_attempts >= 0),
+    source_complete INTEGER NOT NULL DEFAULT 0 CHECK (source_complete IN (0, 1)),
+    updated_at INTEGER NOT NULL
+  )`
+  yield* sql`CREATE INDEX rika_turn_usage_thread ON rika_turn_usage (thread_id, turn_id)`
+  yield* sql`CREATE TABLE rika_usage_repairs (
+    turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    claim_token TEXT,
+    checkpoint_json TEXT,
+    updated_at INTEGER NOT NULL
+  )`
+  yield* sql`INSERT INTO rika_turn_usage (
+    turn_id, thread_id, cost_nano_usd, source_complete, updated_at
+  )
+  SELECT t.id, t.thread_id,
+    NULL,
+    0, t.updated_at
+  FROM rika_turns t
+  WHERE t.status <> 'queued'`
+})
+
+const materializedThreadSummaries = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`CREATE INDEX rika_turns_thread_updated ON rika_turns (thread_id, updated_at DESC)`
+  yield* sql`CREATE INDEX rika_turns_thread_nonqueued ON rika_turns (thread_id, created_at DESC, id DESC)
+    WHERE status <> 'queued'`
+  yield* sql`CREATE TABLE rika_thread_picker_summary (
+    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    workspace TEXT NOT NULL,
+    title TEXT NOT NULL,
+    pinned INTEGER NOT NULL CHECK (pinned IN (0, 1)),
+    archived INTEGER NOT NULL CHECK (archived IN (0, 1)),
+    status_rank INTEGER NOT NULL,
+    waiting_count INTEGER NOT NULL CHECK (waiting_count >= 0),
+    running_count INTEGER NOT NULL CHECK (running_count >= 0),
+    queued_count INTEGER NOT NULL CHECK (queued_count >= 0),
+    last_status TEXT,
+    last_turn_created_at INTEGER,
+    last_turn_id TEXT,
+    last_activity_at INTEGER NOT NULL,
+    turn_count INTEGER NOT NULL CHECK (turn_count >= 0),
+    current_activity_count INTEGER NOT NULL CHECK (current_activity_count >= 0),
+    added INTEGER NOT NULL CHECK (added >= 0),
+    modified INTEGER NOT NULL CHECK (modified >= 0),
+    removed INTEGER NOT NULL CHECK (removed >= 0)
+  )`
+  yield* sql`CREATE INDEX rika_thread_picker_summary_listing ON rika_thread_picker_summary (
+    archived, pinned DESC, last_activity_at DESC, thread_id ASC
+  )`
+  yield* sql`INSERT INTO rika_thread_picker_summary (
+    thread_id, workspace, title, pinned, archived, status_rank, waiting_count, running_count, queued_count,
+    last_status, last_turn_created_at, last_turn_id, last_activity_at, turn_count, current_activity_count,
+    added, modified, removed
+  ) SELECT
+    thread.id, thread.workspace, thread.title, thread.pinned, thread.archived,
+    CASE
+      WHEN SUM(CASE WHEN turn.status = 'waiting' THEN 1 ELSE 0 END) > 0 THEN 3
+      WHEN SUM(CASE WHEN turn.status IN ('accepted', 'running') THEN 1 ELSE 0 END) > 0 THEN 2
+      WHEN SUM(CASE WHEN turn.status = 'queued' THEN 1 ELSE 0 END) > 0 THEN 1
+      ELSE 0
+    END,
+    SUM(CASE WHEN turn.status = 'waiting' THEN 1 ELSE 0 END),
+    SUM(CASE WHEN turn.status IN ('accepted', 'running') THEN 1 ELSE 0 END),
+    SUM(CASE WHEN turn.status = 'queued' THEN 1 ELSE 0 END),
+    (SELECT last.status FROM rika_turns AS last WHERE last.thread_id = thread.id
+      ORDER BY last.created_at DESC, last.id DESC LIMIT 1),
+    (SELECT last.created_at FROM rika_turns AS last WHERE last.thread_id = thread.id
+      ORDER BY last.created_at DESC, last.id DESC LIMIT 1),
+    (SELECT last.id FROM rika_turns AS last WHERE last.thread_id = thread.id
+      ORDER BY last.created_at DESC, last.id DESC LIMIT 1),
+    MAX(thread.created_at, COALESCE(MAX(turn.updated_at), thread.created_at),
+      COALESCE(MAX(activity.last_event_at), thread.created_at)),
+    COUNT(turn.id),
+    COALESCE(SUM(CASE WHEN activity.turn_id IS NOT NULL
+      AND activity.projected_cursor IS turn.last_cursor
+      AND (turn.status NOT IN ('completed', 'failed', 'cancelled') OR activity.complete = 1)
+      THEN 1 ELSE 0 END), 0),
+    COALESCE(SUM(activity.added), 0), COALESCE(SUM(activity.modified), 0), COALESCE(SUM(activity.removed), 0)
+  FROM rika_threads AS thread
+  LEFT JOIN rika_turns AS turn ON turn.thread_id = thread.id
+  LEFT JOIN rika_thread_turn_activity AS activity ON activity.turn_id = turn.id
+  GROUP BY thread.id`
+  yield* sql`CREATE TRIGGER rika_thread_picker_summary_thread_insert
+    AFTER INSERT ON rika_threads BEGIN
+      INSERT INTO rika_thread_picker_summary (
+        thread_id, workspace, title, pinned, archived, status_rank, waiting_count, running_count, queued_count,
+        last_activity_at, turn_count, current_activity_count, added, modified, removed
+      ) VALUES (NEW.id, NEW.workspace, NEW.title, NEW.pinned, NEW.archived, 0, 0, 0, 0,
+        NEW.created_at, 0, 0, 0, 0, 0);
+    END`
+  yield* sql`CREATE TRIGGER rika_thread_picker_summary_thread_update
+    AFTER UPDATE OF workspace, title, pinned, archived ON rika_threads BEGIN
+      UPDATE rika_thread_picker_summary SET workspace = NEW.workspace, title = NEW.title,
+        pinned = NEW.pinned, archived = NEW.archived WHERE thread_id = NEW.id;
+    END`
+  yield* sql`CREATE TRIGGER rika_thread_picker_summary_turn_insert
+    AFTER INSERT ON rika_turns BEGIN
+      UPDATE rika_thread_picker_summary SET
+        waiting_count = waiting_count + (NEW.status = 'waiting'),
+        running_count = running_count + (NEW.status IN ('accepted', 'running')),
+        queued_count = queued_count + (NEW.status = 'queued'),
+        status_rank = MAX(status_rank, CASE WHEN NEW.status = 'waiting' THEN 3
+          WHEN NEW.status IN ('accepted', 'running') THEN 2 WHEN NEW.status = 'queued' THEN 1 ELSE 0 END),
+        last_status = CASE WHEN last_turn_created_at IS NULL OR (NEW.created_at, NEW.id) >
+          (last_turn_created_at, last_turn_id) THEN NEW.status ELSE last_status END,
+        last_turn_created_at = CASE WHEN last_turn_created_at IS NULL OR (NEW.created_at, NEW.id) >
+          (last_turn_created_at, last_turn_id) THEN NEW.created_at ELSE last_turn_created_at END,
+        last_turn_id = CASE WHEN last_turn_created_at IS NULL OR (NEW.created_at, NEW.id) >
+          (last_turn_created_at, last_turn_id) THEN NEW.id ELSE last_turn_id END,
+        last_activity_at = MAX(last_activity_at, NEW.updated_at),
+        turn_count = turn_count + 1
+      WHERE thread_id = NEW.thread_id;
+    END`
+  yield* sql`CREATE TRIGGER rika_thread_picker_summary_turn_update
+    AFTER UPDATE OF status, last_cursor, updated_at ON rika_turns BEGIN
+      UPDATE rika_thread_picker_summary SET
+        waiting_count = waiting_count - (OLD.status = 'waiting') + (NEW.status = 'waiting'),
+        running_count = running_count - (OLD.status IN ('accepted', 'running')) +
+          (NEW.status IN ('accepted', 'running')),
+        queued_count = queued_count - (OLD.status = 'queued') + (NEW.status = 'queued'),
+        status_rank = CASE
+          WHEN waiting_count - (OLD.status = 'waiting') + (NEW.status = 'waiting') > 0 THEN 3
+          WHEN running_count - (OLD.status IN ('accepted', 'running')) +
+            (NEW.status IN ('accepted', 'running')) > 0 THEN 2
+          WHEN queued_count - (OLD.status = 'queued') + (NEW.status = 'queued') > 0 THEN 1 ELSE 0 END,
+        last_status = CASE WHEN last_turn_id = NEW.id THEN NEW.status ELSE last_status END,
+        last_activity_at = MAX(last_activity_at, NEW.updated_at),
+        current_activity_count = current_activity_count + COALESCE((SELECT
+          (activity.projected_cursor IS NEW.last_cursor AND
+            (NEW.status NOT IN ('completed', 'failed', 'cancelled') OR activity.complete = 1)) -
+          (activity.projected_cursor IS OLD.last_cursor AND
+            (OLD.status NOT IN ('completed', 'failed', 'cancelled') OR activity.complete = 1))
+          FROM rika_thread_turn_activity AS activity WHERE activity.turn_id = NEW.id), 0)
+      WHERE thread_id = NEW.thread_id;
+    END`
+  yield* sql`CREATE TRIGGER rika_thread_picker_summary_turn_before_delete
+    BEFORE DELETE ON rika_turns BEGIN
+      UPDATE rika_thread_picker_summary SET
+        current_activity_count = current_activity_count - COALESCE((SELECT
+          activity.projected_cursor IS OLD.last_cursor AND
+          (OLD.status NOT IN ('completed', 'failed', 'cancelled') OR activity.complete = 1)
+          FROM rika_thread_turn_activity AS activity WHERE activity.turn_id = OLD.id), 0),
+        added = added - COALESCE((SELECT added FROM rika_thread_turn_activity WHERE turn_id = OLD.id), 0),
+        modified = modified - COALESCE((SELECT modified FROM rika_thread_turn_activity WHERE turn_id = OLD.id), 0),
+        removed = removed - COALESCE((SELECT removed FROM rika_thread_turn_activity WHERE turn_id = OLD.id), 0)
+      WHERE thread_id = OLD.thread_id;
+    END`
+  yield* sql`CREATE TRIGGER rika_thread_picker_summary_turn_delete
+    AFTER DELETE ON rika_turns BEGIN
+      UPDATE rika_thread_picker_summary SET
+        waiting_count = waiting_count - (OLD.status = 'waiting'),
+        running_count = running_count - (OLD.status IN ('accepted', 'running')),
+        queued_count = queued_count - (OLD.status = 'queued'),
+        status_rank = CASE WHEN waiting_count - (OLD.status = 'waiting') > 0 THEN 3
+          WHEN running_count - (OLD.status IN ('accepted', 'running')) > 0 THEN 2
+          WHEN queued_count - (OLD.status = 'queued') > 0 THEN 1 ELSE 0 END,
+        turn_count = turn_count - 1,
+        last_status = CASE WHEN last_turn_id = OLD.id THEN
+          (SELECT status FROM rika_turns WHERE thread_id = OLD.thread_id
+            ORDER BY created_at DESC, id DESC LIMIT 1) ELSE last_status END,
+        last_turn_created_at = CASE WHEN last_turn_id = OLD.id THEN
+          (SELECT created_at FROM rika_turns WHERE thread_id = OLD.thread_id
+            ORDER BY created_at DESC, id DESC LIMIT 1) ELSE last_turn_created_at END,
+        last_turn_id = CASE WHEN last_turn_id = OLD.id THEN
+          (SELECT id FROM rika_turns WHERE thread_id = OLD.thread_id
+            ORDER BY created_at DESC, id DESC LIMIT 1) ELSE last_turn_id END,
+        last_activity_at = MAX(
+          (SELECT created_at FROM rika_threads WHERE id = OLD.thread_id),
+          COALESCE((SELECT MAX(updated_at) FROM rika_turns WHERE thread_id = OLD.thread_id), 0),
+          COALESCE((SELECT MAX(last_event_at) FROM rika_thread_turn_activity WHERE thread_id = OLD.thread_id), 0)
+        )
+      WHERE thread_id = OLD.thread_id;
+    END`
+  yield* sql`CREATE TRIGGER rika_thread_picker_summary_activity_insert
+    AFTER INSERT ON rika_thread_turn_activity BEGIN
+      UPDATE rika_thread_picker_summary SET
+        current_activity_count = current_activity_count + COALESCE((SELECT
+          NEW.projected_cursor IS turn.last_cursor AND
+          (turn.status NOT IN ('completed', 'failed', 'cancelled') OR NEW.complete = 1)
+          FROM rika_turns AS turn WHERE turn.id = NEW.turn_id), 0),
+        added = added + NEW.added, modified = modified + NEW.modified, removed = removed + NEW.removed,
+        last_activity_at = MAX(last_activity_at, COALESCE(NEW.last_event_at, last_activity_at))
+      WHERE thread_id = NEW.thread_id;
+    END`
+  yield* sql`CREATE TRIGGER rika_thread_picker_summary_activity_update
+    AFTER UPDATE OF projected_cursor, complete, added, modified, removed, last_event_at ON rika_thread_turn_activity BEGIN
+      UPDATE rika_thread_picker_summary SET
+        current_activity_count = current_activity_count + COALESCE((SELECT
+          (NEW.projected_cursor IS turn.last_cursor AND
+            (turn.status NOT IN ('completed', 'failed', 'cancelled') OR NEW.complete = 1)) -
+          (OLD.projected_cursor IS turn.last_cursor AND
+            (turn.status NOT IN ('completed', 'failed', 'cancelled') OR OLD.complete = 1))
+          FROM rika_turns AS turn WHERE turn.id = NEW.turn_id), 0),
+        added = added - OLD.added + NEW.added,
+        modified = modified - OLD.modified + NEW.modified,
+        removed = removed - OLD.removed + NEW.removed,
+        last_activity_at = CASE WHEN OLD.last_event_at = last_activity_at AND
+          COALESCE(NEW.last_event_at, 0) < OLD.last_event_at THEN MAX(
+            (SELECT created_at FROM rika_threads WHERE id = NEW.thread_id),
+            COALESCE((SELECT MAX(updated_at) FROM rika_turns WHERE thread_id = NEW.thread_id), 0),
+            COALESCE((SELECT MAX(last_event_at) FROM rika_thread_turn_activity WHERE thread_id = NEW.thread_id), 0)
+          ) ELSE MAX(last_activity_at, COALESCE(NEW.last_event_at, last_activity_at)) END
+      WHERE thread_id = NEW.thread_id;
+    END`
+  yield* sql`CREATE TRIGGER rika_thread_picker_summary_activity_delete
+    AFTER DELETE ON rika_thread_turn_activity
+    WHEN EXISTS (SELECT 1 FROM rika_turns WHERE id = OLD.turn_id) BEGIN
+      UPDATE rika_thread_picker_summary SET
+        current_activity_count = current_activity_count - COALESCE((SELECT
+          OLD.projected_cursor IS turn.last_cursor AND
+          (turn.status NOT IN ('completed', 'failed', 'cancelled') OR OLD.complete = 1)
+          FROM rika_turns AS turn WHERE turn.id = OLD.turn_id), 0),
+        added = added - OLD.added, modified = modified - OLD.modified, removed = removed - OLD.removed,
+        last_activity_at = CASE WHEN OLD.last_event_at = last_activity_at THEN MAX(
+          (SELECT created_at FROM rika_threads WHERE id = OLD.thread_id),
+          COALESCE((SELECT MAX(updated_at) FROM rika_turns WHERE thread_id = OLD.thread_id), 0),
+          COALESCE((SELECT MAX(last_event_at) FROM rika_thread_turn_activity WHERE thread_id = OLD.thread_id), 0)
+        ) ELSE last_activity_at END
+      WHERE thread_id = OLD.thread_id;
+    END`
+})
+
+const reconciledChildTrees = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`ALTER TABLE rika_transcript_checkpoints ADD COLUMN child_tree_reconciled INTEGER NOT NULL DEFAULT 0
+    CHECK (child_tree_reconciled IN (0, 1))`
+  yield* sql`ALTER TABLE rika_transcript_checkpoints ADD COLUMN projection_generation INTEGER NOT NULL DEFAULT 0
+    CHECK (projection_generation >= 0)`
+})
+
+const consumedExecutionCheckpoints = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`CREATE TABLE rika_transcript_checkpoints_next (
+    turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL DEFAULT -1,
+    projection_version INTEGER NOT NULL DEFAULT 1 CHECK (projection_version >= 1),
+    model_phase INTEGER NOT NULL DEFAULT -1,
+    oldest_cursor TEXT,
+    checkpoint_cursor TEXT,
+    cost_usd REAL,
+    usage_cursors_json TEXT,
+    consumed_json TEXT,
+    pricing_version TEXT,
+    child_tree_reconciled INTEGER NOT NULL DEFAULT 0 CHECK (child_tree_reconciled IN (0, 1)),
+    projection_generation INTEGER NOT NULL DEFAULT 0 CHECK (projection_generation >= 0),
+    updated_at INTEGER NOT NULL
+  )`
+  yield* sql`INSERT INTO rika_transcript_checkpoints_next (
+    turn_id, thread_id, revision, projection_version, model_phase, oldest_cursor, checkpoint_cursor,
+    cost_usd, usage_cursors_json, consumed_json, pricing_version, child_tree_reconciled,
+    projection_generation, updated_at
+  )
+  SELECT turn_id, thread_id, revision, 1, model_phase, oldest_cursor, checkpoint_cursor,
+    cost_usd, usage_cursors_json, NULL, pricing_version, child_tree_reconciled,
+    projection_generation, updated_at
+  FROM rika_transcript_checkpoints`
+  yield* sql`DROP TABLE rika_transcript_checkpoints`
+  yield* sql`ALTER TABLE rika_transcript_checkpoints_next RENAME TO rika_transcript_checkpoints`
+})
+
+const dropUsageRepairs = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`DROP TABLE IF EXISTS rika_usage_repairs`
+})
+
+const stableTranscriptUnitOrder = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`DROP TABLE rika_transcript_entries`
+  yield* sql`DROP TABLE rika_transcript_units`
+  yield* sql`CREATE TABLE rika_transcript_units (
+    turn_id TEXT NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    unit_key TEXT NOT NULL,
+    execution_key TEXT COLLATE BINARY NOT NULL CHECK (length(execution_key) > 0),
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    unit_order_key TEXT COLLATE BINARY NOT NULL,
+    tool_id TEXT,
+    parent_id TEXT,
+    revision INTEGER NOT NULL,
+    unit_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (turn_id, unit_key),
+    UNIQUE (turn_id, unit_order_key),
+    UNIQUE (turn_id, unit_key, execution_key, unit_order_key, tool_id),
+    FOREIGN KEY (turn_id, execution_key)
+      REFERENCES rika_transcript_execution_checkpoints(turn_id, execution_key)
+      ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
+  )`
+  yield* sql`CREATE INDEX rika_transcript_units_page ON rika_transcript_units (
+    thread_id, created_at DESC, turn_id DESC, unit_order_key DESC
+  )`
+  yield* sql`CREATE INDEX rika_transcript_units_turn ON rika_transcript_units (
+    turn_id, unit_order_key ASC
+  )`
+  yield* sql`CREATE TABLE rika_transcript_checkpoints_next (
+    turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    checkpoint_generation INTEGER NOT NULL DEFAULT 0 CHECK (checkpoint_generation >= 0),
+    revision INTEGER NOT NULL DEFAULT -1 CHECK (revision >= -1),
+    projection_version INTEGER NOT NULL DEFAULT 1 CHECK (projection_version >= 1),
+    model_phase INTEGER NOT NULL DEFAULT -1 CHECK (model_phase >= -1),
+    usable_completion_sequence INTEGER CHECK (
+      usable_completion_sequence IS NULL OR usable_completion_sequence >= 0
+    ),
+    oldest_cursor TEXT,
+    checkpoint_cursor TEXT,
+    cost_usd REAL CHECK (cost_usd IS NULL OR cost_usd >= 0),
+    usage_cursors_json TEXT,
+    pricing_version TEXT,
+    updated_at INTEGER NOT NULL
+  )`
+  yield* sql`INSERT INTO rika_transcript_checkpoints_next (
+    turn_id, thread_id, checkpoint_generation, revision, projection_version, model_phase, updated_at
+  )
+  SELECT turn_id, thread_id, projection_generation, revision, 2, -1, updated_at
+  FROM rika_transcript_checkpoints`
+  yield* sql`DROP TABLE rika_transcript_checkpoints`
+  yield* sql`ALTER TABLE rika_transcript_checkpoints_next RENAME TO rika_transcript_checkpoints`
+  yield* sql`CREATE TABLE rika_transcript_execution_checkpoints (
+    turn_id TEXT NOT NULL REFERENCES rika_transcript_checkpoints(turn_id) ON DELETE CASCADE,
+    execution_key TEXT COLLATE BINARY NOT NULL CHECK (length(execution_key) > 0),
+    execution_id TEXT NOT NULL CHECK (length(execution_id) > 0),
+    cursor TEXT NOT NULL,
+    sequence INTEGER NOT NULL CHECK (sequence >= -1),
+    status TEXT CHECK (status IS NULL OR status IN ('completed', 'failed', 'cancelled')),
+    revision INTEGER NOT NULL CHECK (revision >= -1),
+    model_phase INTEGER NOT NULL CHECK (model_phase >= -1),
+    usable_completion_sequence INTEGER CHECK (
+      usable_completion_sequence IS NULL OR usable_completion_sequence >= 0
+    ),
+    oldest_cursor TEXT,
+    checkpoint_cursor TEXT,
+    cost_usd REAL CHECK (cost_usd IS NULL OR cost_usd >= 0),
+    usage_cursors_json TEXT,
+    pricing_version TEXT,
+    parent_execution_key TEXT COLLATE BINARY,
+    parent_unit_key TEXT,
+    parent_id TEXT,
+    parent_order_key TEXT COLLATE BINARY,
+    is_root INTEGER NOT NULL CHECK (is_root IN (0, 1)),
+    CHECK (revision = sequence),
+    CHECK (coalesce(checkpoint_cursor, '') = cursor),
+    CHECK (
+      (is_root = 1 AND parent_execution_key IS NULL AND parent_unit_key IS NULL AND parent_id IS NULL AND parent_order_key IS NULL)
+      OR
+      (is_root = 0 AND parent_execution_key IS NOT NULL AND parent_unit_key IS NOT NULL AND parent_id IS NOT NULL AND parent_order_key IS NOT NULL)
+    ),
+    PRIMARY KEY (turn_id, execution_key),
+    FOREIGN KEY (turn_id, parent_execution_key)
+      REFERENCES rika_transcript_execution_checkpoints(turn_id, execution_key)
+      DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (turn_id, parent_unit_key, parent_execution_key, parent_order_key, parent_id)
+      REFERENCES rika_transcript_units(turn_id, unit_key, execution_key, unit_order_key, tool_id)
+      DEFERRABLE INITIALLY DEFERRED
+  )`
+  yield* sql`DROP TABLE rika_thread_root_readiness`
+  yield* sql`DROP TABLE rika_thread_result_routes`
+  yield* sql`CREATE TABLE rika_thread_result_routes (
+    id TEXT PRIMARY KEY NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('manual', 'reply')),
+    source_thread_id TEXT REFERENCES rika_threads(id) ON DELETE CASCADE,
+    source_turn_id TEXT REFERENCES rika_turns(id) ON DELETE CASCADE,
+    target_thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    target_turn_id TEXT NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    delivery TEXT NOT NULL CHECK (
+      delivery IN ('awaiting-result', 'ready', 'delivered', 'failed', 'cancelled', 'source-unavailable')
+    ),
+    ready_sequence INTEGER CHECK (ready_sequence IS NULL OR ready_sequence >= 0),
+    delivered_turn_id TEXT REFERENCES rika_turns(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    CHECK ((kind = 'manual' AND source_thread_id IS NULL AND source_turn_id IS NULL) OR
+      (kind = 'reply' AND source_thread_id IS NOT NULL AND source_turn_id IS NOT NULL)),
+    CHECK (
+      (delivery IN ('awaiting-result', 'failed', 'cancelled') AND ready_sequence IS NULL AND delivered_turn_id IS NULL)
+      OR (delivery IN ('ready', 'source-unavailable') AND ready_sequence IS NOT NULL AND delivered_turn_id IS NULL)
+      OR (delivery = 'delivered' AND ready_sequence IS NOT NULL AND delivered_turn_id IS NOT NULL)
+    ),
+    UNIQUE (target_turn_id)
+  )`
+  yield* sql`CREATE INDEX rika_thread_result_ready ON rika_thread_result_routes
+    (delivery, ready_sequence, created_at, id)`
+  yield* sql`CREATE TABLE rika_thread_root_results (
+    turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    status TEXT NOT NULL CHECK (status IN ('completed', 'failed', 'cancelled')),
+    cursor TEXT,
+    sequence INTEGER CHECK (sequence IS NULL OR sequence >= 0),
+    output TEXT,
+    reason TEXT,
+    updated_at INTEGER NOT NULL,
+    CHECK (
+      (status = 'completed' AND cursor IS NOT NULL AND sequence IS NOT NULL AND output IS NOT NULL AND reason IS NULL)
+      OR (status = 'failed' AND cursor IS NOT NULL AND sequence IS NOT NULL AND output IS NULL)
+      OR (status = 'cancelled' AND output IS NULL AND ((cursor IS NULL AND sequence IS NULL) OR (cursor IS NOT NULL AND sequence IS NOT NULL)))
+    )
+  )`
+})
+
+const discriminatedTurns = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`ALTER TABLE rika_turns ADD COLUMN shell_command TEXT`
+  yield* sql`ALTER TABLE rika_turns ADD COLUMN shell_result_text TEXT`
+  yield* sql`ALTER TABLE rika_turns ADD COLUMN shell_result_truncated INTEGER`
+  yield* sql`ALTER TABLE rika_turns ADD COLUMN shell_result_exit_code INTEGER`
+  yield* sql`ALTER TABLE rika_turns ADD COLUMN turn_kind TEXT NOT NULL DEFAULT 'AgentExecution'
+    CHECK (
+      (
+        turn_kind = 'AgentExecution'
+        AND execution_route_json IS NOT NULL
+        AND shell_command IS NULL
+        AND shell_result_text IS NULL
+        AND shell_result_truncated IS NULL
+        AND shell_result_exit_code IS NULL
+      )
+      OR
+      (
+        turn_kind = 'RecordedShell'
+        AND shell_command IS NOT NULL
+        AND length(shell_command) > 0
+        AND prompt = '$ ' || shell_command
+        AND prompt_parts_json IS NULL
+        AND execution_route_json IS NULL
+        AND last_cursor IS NULL
+        AND extension_pin_json IS NULL
+        AND review_fan_out_id IS NULL
+        AND queue_claim_token IS NULL
+        AND stop_intent = 'none'
+        AND author_json = '{"_tag":"Human"}'
+        AND lineage_json = '{"_tag":"Original"}'
+        AND status IN ('running', 'completed', 'failed', 'cancelled')
+        AND (
+          (
+            status = 'running'
+            AND shell_result_text IS NULL
+            AND shell_result_truncated IS NULL
+            AND shell_result_exit_code IS NULL
+          )
+          OR
+          (
+            status IN ('completed', 'failed', 'cancelled')
+            AND shell_result_text IS NOT NULL
+            AND shell_result_truncated IN (0, 1)
+            AND (shell_result_exit_code IS NULL OR typeof(shell_result_exit_code) = 'integer')
+          )
+        )
+      )
+    )`
+  yield* sql`PRAGMA defer_foreign_keys = ON`
+  yield* sql`DROP INDEX rika_transcript_units_page`
+  yield* sql`DROP INDEX rika_transcript_units_turn`
+  yield* sql`CREATE TABLE rika_transcript_units_next (
+    turn_id TEXT NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    unit_key TEXT NOT NULL,
+    execution_key TEXT COLLATE BINARY CHECK (execution_key IS NULL OR length(execution_key) > 0),
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    unit_order_key TEXT COLLATE BINARY NOT NULL,
+    tool_id TEXT,
+    parent_id TEXT,
+    revision INTEGER NOT NULL,
+    unit_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (turn_id, unit_key),
+    UNIQUE (turn_id, unit_order_key),
+    UNIQUE (turn_id, unit_key, execution_key, unit_order_key, tool_id),
+    FOREIGN KEY (turn_id, execution_key)
+      REFERENCES rika_transcript_execution_checkpoints(turn_id, execution_key)
+      ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
+  )`
+  yield* sql`INSERT INTO rika_transcript_units_next (
+      turn_id, unit_key, execution_key, thread_id, unit_order_key, tool_id,
+      parent_id, revision, unit_json, created_at, updated_at
+    ) SELECT
+      turn_id, unit_key, execution_key, thread_id, unit_order_key, tool_id,
+      parent_id, revision, unit_json, created_at, updated_at
+    FROM rika_transcript_units`
+  yield* sql`DROP TABLE rika_transcript_units`
+  yield* sql`ALTER TABLE rika_transcript_units_next RENAME TO rika_transcript_units`
+  yield* sql`CREATE INDEX rika_transcript_units_page ON rika_transcript_units (
+    thread_id, created_at DESC, turn_id DESC, unit_order_key DESC
+  )`
+  yield* sql`CREATE INDEX rika_transcript_units_turn ON rika_transcript_units (
+    turn_id, unit_order_key ASC
+  )`
+})
+
+const usageProjectionSources = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`DROP INDEX rika_turn_usage_thread`
+  yield* sql`CREATE TABLE rika_turn_usage_next (
+    source_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    projection_version INTEGER NOT NULL DEFAULT 2,
+    fold_json TEXT,
+    cost_nano_usd INTEGER CHECK (cost_nano_usd IS NULL OR cost_nano_usd >= 0),
+    tokens INTEGER CHECK (tokens IS NULL OR tokens >= 0),
+    active_millis INTEGER CHECK (active_millis IS NULL OR active_millis >= 0),
+    active_intervals_json TEXT,
+    priced_attempts INTEGER NOT NULL DEFAULT 0 CHECK (priced_attempts >= 0),
+    unpriced_attempts INTEGER NOT NULL DEFAULT 0 CHECK (unpriced_attempts >= 0),
+    counted_attempts INTEGER NOT NULL DEFAULT 0 CHECK (counted_attempts >= 0),
+    uncounted_attempts INTEGER NOT NULL DEFAULT 0 CHECK (uncounted_attempts >= 0),
+    source_complete INTEGER NOT NULL DEFAULT 0 CHECK (source_complete IN (0, 1)),
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (turn_id, source_id)
+  )`
+  yield* sql`INSERT INTO rika_turn_usage_next (
+    source_id, turn_id, thread_id, revision, projection_version, updated_at
+  ) SELECT turn_id, turn_id, thread_id, revision, 1, updated_at FROM rika_turn_usage`
+  yield* sql`DROP TABLE rika_turn_usage`
+  yield* sql`ALTER TABLE rika_turn_usage_next RENAME TO rika_turn_usage`
+  yield* sql`CREATE INDEX rika_turn_usage_thread ON rika_turn_usage (thread_id, turn_id, source_id)`
+})
+
+const migrationNames = [
+  "product_baseline",
+  "turns",
+  "queued_turn_status",
+  "execution_extension_pins",
+  "turn_prompt_parts",
+  "drop_thread_session_id",
+  "execution_route_pins",
+  "review_fan_out_owners",
+  "transcript_projection",
+  "thread_summaries",
+  "semantic_transcript_projection",
+  "queue_state_and_current_transcripts",
+  "provider_execution_routes",
+  "durable_queue_claims",
+  "usage_cursor_checkpoints",
+  "pricing_version_checkpoints",
+  "thread_search_projection",
+  "durable_thread_coordination",
+  "turn_stop_intent",
+  "usage_projection",
+  "materialized_thread_summaries",
+  "reconciled_child_trees",
+  "consumed_execution_checkpoints",
+  "drop_usage_repairs",
+  "stable_transcript_unit_order",
+  "discriminated_turns",
+  "usage_projection_sources",
+  "product_route_snapshot",
+] as const
+
+const migrations = SqliteMigrator.fromRecord({
+  "1_product_baseline": baseline,
+  "2_turns": turns,
+  "3_queued_turn_status": queuedTurns,
+  "4_execution_extension_pins": executionExtensionPins,
+  "5_turn_prompt_parts": turnPromptParts,
+  "6_drop_thread_session_id": dropThreadSessionId,
+  "7_execution_route_pins": executionRoutePins,
+  "8_review_fan_out_owners": reviewFanOutOwners,
+  "9_transcript_projection": transcriptProjection,
+  "10_thread_summaries": threadSummaries,
+  "11_semantic_transcript_projection": semanticTranscriptProjection,
+  "12_queue_state_and_current_transcripts": queueStateAndCurrentTranscripts,
+  "13_provider_execution_routes": providerExecutionRoutes,
+  "14_durable_queue_claims": durableQueueClaims,
+  "15_usage_cursor_checkpoints": usageCursorCheckpoints,
+  "16_pricing_version_checkpoints": pricingVersionCheckpoints,
+  "17_thread_search_projection": threadSearchProjection,
+  "18_durable_thread_coordination": durableThreadCoordination,
+  "19_turn_stop_intent": turnStopIntent,
+  "20_usage_projection": usageProjection,
+  "21_materialized_thread_summaries": materializedThreadSummaries,
+  "22_reconciled_child_trees": reconciledChildTrees,
+  "23_consumed_execution_checkpoints": consumedExecutionCheckpoints,
+  "24_drop_usage_repairs": dropUsageRepairs,
+  "25_stable_transcript_unit_order": stableTranscriptUnitOrder,
+  "26_discriminated_turns": discriminatedTurns,
+  "27_usage_projection_sources": usageProjectionSources,
+  "28_product_route_snapshot": productRouteSnapshot,
+})
+
+const migrationTableObjects = ["table:rika_migrations"]
+const baselineObjects = [
+  ...migrationTableObjects,
+  "table:rika_workspaces",
+  "table:rika_threads",
+  "index:rika_threads_listing",
+]
+const turnObjects = [...baselineObjects, "table:rika_turns", "index:rika_turns_thread"]
+const transcriptObjects = [...turnObjects, "table:rika_transcript_entries", "index:rika_transcript_page"]
+const summaryObjects = [
+  ...transcriptObjects,
+  "table:rika_thread_turn_activity",
+  "index:rika_thread_turn_activity_summary",
+  "table:rika_thread_read_state",
+]
+const semanticTranscriptObjects = [
+  ...summaryObjects,
+  "table:rika_transcript_checkpoints",
+  "table:rika_transcript_units",
+  "index:rika_transcript_units_page",
+  "index:rika_transcript_units_turn",
+]
+const queueObjects = [...semanticTranscriptObjects, "index:rika_turns_queue", "table:rika_thread_queue_state"]
+const currentObjects = [...queueObjects, "index:rika_turns_queue_claim"]
+const searchObjects = [
+  ...currentObjects,
+  "table:rika_thread_search",
+  "table:rika_thread_search_data",
+  "table:rika_thread_search_idx",
+  "table:rika_thread_search_content",
+  "table:rika_thread_search_docsize",
+  "table:rika_thread_search_config",
+  "table:rika_thread_search_files",
+  "index:rika_thread_search_files_path",
+]
+const coordinationObjects = [
+  ...searchObjects,
+  "table:rika_thread_relationships",
+  "index:rika_thread_relationship_identity",
+  "table:rika_thread_invocation_receipts",
+  "index:rika_thread_invocation_source_root",
+  "table:rika_thread_result_routes",
+  "index:rika_thread_result_ready",
+  "table:rika_thread_root_readiness",
+]
+const usageObjects = [
+  ...coordinationObjects,
+  "table:rika_turn_usage",
+  "index:rika_turn_usage_thread",
+  "table:rika_usage_repairs",
+]
+const materializedSummaryObjects = [
+  ...usageObjects,
+  "index:rika_turns_thread_updated",
+  "index:rika_turns_thread_nonqueued",
+  "table:rika_thread_picker_summary",
+  "index:rika_thread_picker_summary_listing",
+  "trigger:rika_thread_picker_summary_thread_insert",
+  "trigger:rika_thread_picker_summary_thread_update",
+  "trigger:rika_thread_picker_summary_turn_insert",
+  "trigger:rika_thread_picker_summary_turn_update",
+  "trigger:rika_thread_picker_summary_turn_before_delete",
+  "trigger:rika_thread_picker_summary_turn_delete",
+  "trigger:rika_thread_picker_summary_activity_insert",
+  "trigger:rika_thread_picker_summary_activity_update",
+  "trigger:rika_thread_picker_summary_activity_delete",
+]
+const droppedUsageRepairObjects = materializedSummaryObjects.filter((object) => object !== "table:rika_usage_repairs")
+const stableTranscriptObjects = [
+  ...droppedUsageRepairObjects.filter(
+    (object) =>
+      object !== "table:rika_transcript_entries" &&
+      object !== "index:rika_transcript_page" &&
+      object !== "table:rika_thread_root_readiness",
+  ),
+  "table:rika_transcript_execution_checkpoints",
+  "table:rika_thread_root_results",
+]
+const schemaObjectsByMigration: ReadonlyArray<ReadonlyArray<string>> = [
+  migrationTableObjects,
+  baselineObjects,
+  turnObjects,
+  turnObjects,
+  turnObjects,
+  turnObjects,
+  turnObjects,
+  turnObjects,
+  turnObjects,
+  transcriptObjects,
+  summaryObjects,
+  semanticTranscriptObjects,
+  queueObjects,
+  queueObjects,
+  currentObjects,
+  currentObjects,
+  currentObjects,
+  searchObjects,
+  coordinationObjects,
+  coordinationObjects,
+  usageObjects,
+  materializedSummaryObjects,
+  materializedSummaryObjects,
+  materializedSummaryObjects,
+  droppedUsageRepairObjects,
+  stableTranscriptObjects,
+  stableTranscriptObjects,
+  stableTranscriptObjects,
+]
+
+const SchemaObject = Schema.Struct({ type: Schema.String, name: Schema.String })
+const MigrationRow = Schema.Struct({ migration_id: Schema.Finite, name: Schema.String })
+
+export class ProductDatabaseError extends Schema.TaggedErrorClass<ProductDatabaseError>()("ProductDatabaseError", {
+  message: Schema.String,
+}) {}
+
+const incompatible = "Rika product database does not match the current schema. Use a fresh Rika data root."
+const fail = (message: string) => ProductDatabaseError.make({ message })
+const inspectDatabase = Effect.fn("ProductDatabase.inspect")(function* () {
+  const sql = yield* SqlClient
+  const objects = yield* sql`SELECT type, name
+    FROM sqlite_schema
+    WHERE type IN ('table', 'index', 'trigger', 'view') AND name NOT LIKE 'sqlite_%'
+    ORDER BY type ASC, name ASC`.pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(SchemaObject))),
+    Effect.mapError((error) => fail(`Could not inspect the Rika product database: ${String(error)}`)),
+  )
+  const hasMigrationTable = objects.some((object) => object.type === "table" && object.name === "rika_migrations")
+  const migrationRows = hasMigrationTable
+    ? yield* sql`SELECT migration_id, name FROM rika_migrations ORDER BY migration_id ASC`.pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(MigrationRow))),
+        Effect.mapError((error) => fail(`Could not inspect Rika product database migrations: ${String(error)}`)),
+      )
+    : []
+  return { objects, migrationRows }
+})
+
+const validateKnown = (state: Effect.Success<ReturnType<typeof inspectDatabase>>) =>
+  Effect.gen(function* () {
+    if (state.objects.length === 0) return "fresh" as const
+    for (const [index, row] of state.migrationRows.entries())
+      if (row.migration_id !== index + 1 || row.name !== migrationNames[index]) return yield* fail(incompatible)
+    const expected = schemaObjectsByMigration[state.migrationRows.length]
+    if (expected === undefined) return yield* fail(incompatible)
+    const actual = new Set(state.objects.map((object) => `${object.type}:${object.name}`))
+    if (actual.size !== expected.length || expected.some((key) => !actual.has(key))) return yield* fail(incompatible)
+    return "tracked" as const
+  })
+
+const inspectExisting = (filename: string) =>
+  Effect.gen(function* () {
+    const inspect = (candidate: string) =>
+      Effect.exit(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const context = yield* Layer.build(
+              SqliteClient.layer({
+                filename: candidate,
+                readonly: true,
+                readwrite: false,
+                create: false,
+                disableWAL: true,
+              }),
+            )
+            return yield* inspectDatabase().pipe(Effect.provide(context))
+          }),
+        ),
+      )
+    const initial = yield* inspect(filename)
+    const outcome = yield* Exit.match(initial, {
+      onSuccess: (value) => Effect.succeed(Exit.succeed(value)),
+      onFailure: () =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem
+          if (yield* fileSystem.exists(`${filename}-wal`)) return initial
+          const path = yield* Path.Path
+          const fileUrl = yield* path
+            .toFileUrl(filename)
+            .pipe(
+              Effect.mapError((error) => fail(`Could not resolve the Rika product database path: ${String(error)}`)),
+            )
+          fileUrl.searchParams.set("immutable", "1")
+          return yield* inspect(fileUrl.href)
+        }),
+    })
+    if (Exit.isFailure(outcome))
+      return yield* fail(
+        `Could not open the Rika product database without changing it: ${Cause.pretty(outcome.cause)}. Use a fresh Rika data root.`,
+      )
+    return outcome.value
+  })
+
+const sqliteHeader = new TextEncoder().encode("SQLite format 3\u0000")
+const readPrefix = Effect.fn("ProductDatabase.readPrefix")(function* (filename: string, length: number) {
+  const fileSystem = yield* FileSystem.FileSystem
+  return yield* Effect.scoped(
+    fileSystem.open(filename, { flag: "r" }).pipe(
+      Effect.flatMap((file) => file.readAlloc(length)),
+      Effect.map(Option.getOrElse(() => new Uint8Array())),
+    ),
+  )
+})
+
+const isFreshDatabaseFile = Effect.fn("ProductDatabase.isFreshDatabaseFile")(function* (filename: string) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const bytes = yield* readPrefix(filename, 105).pipe(
+    Effect.mapError((error) => fail(`Could not inspect the Rika product database file: ${String(error)}`)),
+  )
+  const structurallyFresh = (() => {
+    if (bytes.length === 0) return true
+    if (bytes.length < 105 || sqliteHeader.some((byte, index) => bytes[index] !== byte)) return false
+    const pageCount = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(28)
+    const cellCount = ((bytes[103] ?? 0) << 8) | (bytes[104] ?? 0)
+    return pageCount === 1 && bytes[100] === 13 && cellCount === 0
+  })()
+  if (!structurallyFresh) return false
+  const [walExists, shmExists] = yield* Effect.all([
+    fileSystem.exists(`${filename}-wal`),
+    fileSystem.exists(`${filename}-shm`),
+  ]).pipe(Effect.mapError((error) => fail(`Could not inspect the Rika product database files: ${String(error)}`)))
+  if (!walExists && !shmExists) return true
+  if (bytes.length === 0 || !walExists) return yield* fail(incompatible)
+  const wal = yield* readPrefix(`${filename}-wal`, 32).pipe(
+    Effect.mapError((error) => fail(`Could not inspect the Rika product database WAL: ${String(error)}`)),
+  )
+  if (wal.length < 32) return yield* fail(incompatible)
+  const walMagic = new DataView(wal.buffer, wal.byteOffset, wal.byteLength).getUint32(0)
+  if (walMagic !== 0x377f0682 && walMagic !== 0x377f0683) return yield* fail(incompatible)
+  return false
+})
+
+const preflight = Effect.fn("ProductDatabase.preflight")(function* (filename: string) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const exists = yield* fileSystem
+    .exists(filename)
+    .pipe(Effect.mapError((error) => fail(`Could not inspect the Rika product database path: ${String(error)}`)))
+  if (!exists) return "fresh" as const
+  if (yield* isFreshDatabaseFile(filename)) return "fresh" as const
+  return yield* validateKnown(yield* inspectExisting(filename))
+})
+
+const enableForeignKeys = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`PRAGMA foreign_keys = ON`.pipe(
+    Effect.mapError((error) => fail(`Could not enable Rika product database constraints: ${String(error)}`)),
+  )
+})
+
+const validateCurrent = Effect.gen(function* () {
+  const state = yield* inspectDatabase()
+  yield* validateKnown(state)
+  if (state.migrationRows.length !== migrationNames.length) return yield* fail(incompatible)
+})
+
+const prepare = SqliteMigrator.run({ loader: migrations, table: "rika_migrations" }).pipe(
+  Effect.mapError((error) => fail(`Could not migrate the Rika product database: ${String(error)}`)),
+  Effect.andThen(enableForeignKeys),
+  Effect.andThen(validateCurrent),
+)
+
+const directoryLayer = (filename: string) =>
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      yield* fileSystem.makeDirectory(path.dirname(filename), { recursive: true })
+    }),
+  )
+
+const currentLayer = (filename: string) =>
+  Layer.effectDiscard(prepare).pipe(Layer.provideMerge(SqliteClient.layer({ filename })))
+
+export const layer = (filename: string) =>
+  Layer.unwrap(preflight(filename).pipe(Effect.as(currentLayer(filename)))).pipe(
+    Layer.provideMerge(directoryLayer(filename)),
+  )

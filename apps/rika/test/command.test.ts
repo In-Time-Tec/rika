@@ -1,5 +1,5 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Operation } from "@rika/app"
+import { Operation } from "@rika/product/product-operation"
 import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, Ref, Stream } from "effect"
 import { TestConsole } from "effect/testing"
 import { expect, it } from "@effect/vitest"

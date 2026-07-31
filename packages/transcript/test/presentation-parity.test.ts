@@ -1,4 +1,4 @@
-import { ToolPolicy } from "@rika/tools"
+import { ToolPolicy } from "@rika/coding-tools/coding-tool-catalog"
 import { describe, expect, it } from "vitest"
 import { Presentation } from "../src/schema"
 

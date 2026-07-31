@@ -2,7 +2,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { McpToolSource } from "@batonfx/mcp"
 import { expect, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { McpConfig, McpRuntime } from "../src"
+import { McpConfig, McpRuntime } from "@rika/extensions/plugin-contract"
 import { provideLayer } from "./layer"
 
 it.effect("skill MCP configuration is composed only from activated skill resources", () =>

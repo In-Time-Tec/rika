@@ -1,5 +1,5 @@
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
-import { OpenAiAuth } from "@rika/app"
+import { OpenAiAuth } from "@rika/product/product-operation"
 import { Console, Deferred, Effect, Layer, Option, Redacted, Schema } from "effect"
 import {
   HttpClient,

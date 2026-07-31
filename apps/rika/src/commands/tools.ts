@@ -1,7 +1,7 @@
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import { Option } from "effect"
 import { dispatch } from "./shared"
-import { modeIds } from "@rika/config/modes"
+import { modeIds } from "@rika/configuration/behavior-mode"
 
 export const command = Command.make("tools").pipe(
   Command.withDescription("Inspect the static built-in tool catalog"),

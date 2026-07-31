@@ -1,4 +1,4 @@
-import { ConfigContract } from "@rika/config"
+import { ConfigContract } from "@rika/configuration/configuration-settings"
 import { describe, expect, it } from "@effect/vitest"
 import { ModelRegistry } from "@batonfx/core"
 import * as OpenAi from "@batonfx/providers/openai"

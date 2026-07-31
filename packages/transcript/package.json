@@ -5,17 +5,22 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./fold": "./src/fold.ts",
-    "./schema": "./src/schema.ts"
-  },
-  "scripts": {
-    "build": "bun build ./src/index.ts --outdir dist --target bun --format esm --external effect --external 'effect/*'",
-    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/transcript/src packages/transcript/test",
-    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
+    "./child-parent-correlation": "./src/child-parent.ts",
+    "./transcript-unit-identity": "./src/unit-identity.ts",
+    "./transcript-unit-order": "./src/unit-order.ts",
+    "./model-usage-fallback": "./src/model-cost.ts",
+    "./recorded-shell-presentation": "./src/recorded-shell.ts",
+    "./nested-transcript-projection": "./src/index.ts",
+    "./partial-tool-input": "./src/partial-input.ts",
+    "./transcript-projection": "./src/index.ts",
+    "./transcript-settlement": "./src/index.ts",
+    "./transcript-presentation-model": "./src/schema.ts",
+    "./transcript-projection-model": "./src/schema.ts",
+    "./transcript-source-event": "./src/schema.ts",
+    "./transcript-unit": "./src/transcript-unit.ts"
   },
   "dependencies": {
-    "@rika/tools": "workspace:*",
+    "@rika/coding-tools": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {
@@ -27,5 +32,9 @@
   "rika": {
     "kind": "capability",
     "domain": "transcript"
+  },
+  "scripts": {
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/transcript/src packages/transcript/test",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   }
 }

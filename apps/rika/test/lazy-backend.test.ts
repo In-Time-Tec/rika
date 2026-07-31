@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import * as ExecutionBackend from "@rika/runtime/contract"
+import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import { Context, Effect, Layer } from "effect"
 import { lazyBackendLayer } from "../src/lazy-backend"
 

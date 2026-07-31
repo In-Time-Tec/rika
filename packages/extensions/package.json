@@ -5,12 +5,14 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
-  },
-  "scripts": {
-    "build": "bun build ./src/index.ts --outdir dist --target bun --format esm --external effect --external 'effect/*' --external '@batonfx/*'",
-    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/extensions/src packages/extensions/test",
-    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
+    "./execution-extension-service": "./src/execution-extensions.ts",
+    "./mcp-configuration": "./src/mcp-config.ts",
+    "./mcp-oauth-service": "./src/mcp-oauth.ts",
+    "./mcp-runtime": "./src/mcp-runtime.ts",
+    "./plugin-contract": "./src/plugin-contract.ts",
+    "./plugin-digest": "./src/plugin-digest.ts",
+    "./plugin-registry": "./src/plugin-registry.ts",
+    "./skill-registry": "./src/skill-registry.ts"
   },
   "dependencies": {
     "@batonfx/core": "catalog:",
@@ -28,5 +30,9 @@
   "rika": {
     "kind": "capability",
     "domain": "extensions"
+  },
+  "scripts": {
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/extensions/src packages/extensions/test",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   }
 }

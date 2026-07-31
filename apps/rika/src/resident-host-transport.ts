@@ -1,7 +1,7 @@
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
-import * as Operation from "@rika/app/operation-contract"
-import * as InteractiveFeedOverflow from "@rika/app/interactive-feed-overflow"
-import * as ResidentService from "@rika/app/resident-service"
+import * as Operation from "@rika/product/product-operation"
+import * as InteractiveFeedOverflow from "@rika/product/resident-interactive-feed"
+import * as ResidentService from "@rika/product/resident-service"
 import {
   Cause,
   Clock,

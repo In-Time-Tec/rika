@@ -1,9 +1,9 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as Thread from "@rika/persistence/thread"
-import * as Turn from "@rika/persistence/turn"
-import * as Transcript from "@rika/transcript"
-import { ViewState } from "@rika/tui"
+import * as Thread from "@rika/product-store/sqlite-thread-repository"
+import * as Turn from "@rika/product-store/sqlite-turn-repository"
+import * as Transcript from "@rika/transcript/transcript-unit"
+import { ViewState } from "@rika/terminal/terminal-state"
 import {
   Clock,
   Config,

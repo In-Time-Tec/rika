@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as Operation from "@rika/app/operation-contract"
-import * as ResidentService from "@rika/app/resident-service"
+import * as Operation from "@rika/product/product-operation"
+import * as ResidentService from "@rika/product/resident-service"
 import {
   Cause,
   Config,
@@ -27,8 +27,8 @@ import { command, version } from "./command"
 import * as Logging from "./logging"
 import { layer as residentLayer } from "./resident-client-transport"
 import * as ResidentProcessStartup from "./resident-process-startup"
-import * as DataRoot from "@rika/config/data-root"
-import { dataPaths } from "@rika/config/paths"
+import * as DataRoot from "@rika/configuration/canonical-data-root"
+import { dataPaths } from "@rika/configuration/configuration-paths"
 
 const encodeLaunchArguments = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)))
 

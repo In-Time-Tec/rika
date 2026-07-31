@@ -1,4 +1,4 @@
-import * as Operation from "@rika/app/operation-contract"
+import * as Operation from "@rika/product/product-operation"
 import { Console, Effect, FileSystem, Option, Schema, Stdio, Stream } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import { command as AuthCommand } from "./commands/auth"
@@ -12,7 +12,7 @@ import { command as ThreadsCommand } from "./commands/threads"
 import { command as ToolsCommand } from "./commands/tools"
 import { command as WorkflowsCommand } from "./commands/workflows"
 import * as ReleaseUpdate from "./release-update"
-import { modeIds, type ModeId } from "@rika/config/modes"
+import { modeIds, type ModeId } from "@rika/configuration/behavior-mode"
 import { version } from "./version"
 
 export { version }

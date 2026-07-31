@@ -5,7 +5,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, FileSystem, Layer, Option, Redacted, Ref } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { McpOAuth } from "../src"
+import { McpOAuth } from "@rika/extensions/plugin-contract"
 import { provideLayer } from "./layer"
 
 const spawnerLayer = (exitCode: Ref.Ref<number>) =>

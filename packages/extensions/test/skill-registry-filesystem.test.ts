@@ -1,7 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, test } from "vitest"
 import { Effect, FileSystem, Layer } from "effect"
-import { SkillRegistry } from "../src"
+import { SkillRegistry } from "@rika/extensions/plugin-contract"
 import { provideLayer } from "./layer"
 
 const document = (name: string, description: string, body: string) =>

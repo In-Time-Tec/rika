@@ -1,5 +1,5 @@
 import { Clock, Crypto, Effect, FileSystem, PlatformError, Schema } from "effect"
-import * as ResidentService from "@rika/app/resident-service"
+import * as ResidentService from "@rika/product/resident-service"
 
 const StartupLease = Schema.Struct({
   identity: Schema.String,

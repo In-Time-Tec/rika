@@ -1,4 +1,4 @@
-import type { ModeId } from "@rika/config/modes"
+import type { ModeId } from "@rika/configuration/behavior-mode"
 export type GoodbyeMode = ModeId
 
 export interface GoodbyeInput {

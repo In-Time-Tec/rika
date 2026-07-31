@@ -1,7 +1,7 @@
 import { Config, Console, Effect, Option, Path } from "effect"
 import { Argument, Command } from "effect/unstable/cli"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import * as DataRoot from "@rika/config/data-root"
+import * as DataRoot from "@rika/configuration/canonical-data-root"
 import * as Logging from "../logging"
 
 const dataRoot = Effect.fn("DiagnosticsCommand.dataRoot")(function* () {

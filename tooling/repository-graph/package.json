@@ -25,14 +25,14 @@
     "@types/bun": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:",
-    "@rika/app": "workspace:*",
-    "@rika/config": "workspace:*",
+    "@rika/product": "workspace:*",
+    "@rika/configuration": "workspace:*",
     "@rika/extensions": "workspace:*",
-    "@rika/persistence": "workspace:*",
-    "@rika/runtime": "workspace:*",
-    "@rika/tools": "workspace:*",
+    "@rika/product-store": "workspace:*",
+    "@rika/relay-execution": "workspace:*",
+    "@rika/coding-tools": "workspace:*",
     "@rika/transcript": "workspace:*",
-    "@rika/tui": "workspace:*",
+    "@rika/terminal": "workspace:*",
     "@typescript-eslint/parser": "catalog:"
   }
 }

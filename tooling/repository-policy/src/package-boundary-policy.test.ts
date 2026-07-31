@@ -17,8 +17,8 @@ const manifest = (name: string, dependencies: Record<string, string>, extra: Rec
 
 describe("repository policy", () => {
   test("rejects forbidden local links and external framework workspace links", () => {
-    expect(checkDependencyManifests([manifest("@rika/runtime", { "@relayfx/sdk": "workspace:*" })])).toEqual([
-      "@rika/runtime/package.json: @relayfx/sdk uses external workspace linking",
+    expect(checkDependencyManifests([manifest("@rika/relay-execution", { "@relayfx/sdk": "workspace:*" })])).toEqual([
+      "@rika/relay-execution/package.json: @relayfx/sdk uses external workspace linking",
     ])
     expect(checkDependencyManifests([manifest("@rika/cli", { "@relayfx/sdk": "file:/tmp/other/a.tgz" })])).toEqual([
       "@rika/cli/package.json: @relayfx/sdk uses file:/tmp/other/a.tgz",
@@ -31,15 +31,15 @@ describe("repository policy", () => {
         manifest("@rika/cli", { "@relayfx/sdk": "file:/private/tmp/rika-autoresearch-links/a.tgz" }),
       ]),
     ).toEqual([])
-    expect(checkDependencyManifests([manifest("@rika/tools", { "parallel-web": "1.1.0" })])).toEqual([])
+    expect(checkDependencyManifests([manifest("@rika/coding-tools", { "parallel-web": "1.1.0" })])).toEqual([])
   })
 
   test("rejects model providers only in tools", () => {
     expect(
-      checkDependencyManifests([manifest("@rika/tools", { openai: "6.0.0", "@ai-sdk/anthropic": "2.0.0" })]),
+      checkDependencyManifests([manifest("@rika/coding-tools", { openai: "6.0.0", "@ai-sdk/anthropic": "2.0.0" })]),
     ).toEqual([
-      "@rika/tools/package.json: @rika/tools cannot depend on language-model provider openai",
-      "@rika/tools/package.json: @rika/tools cannot depend on language-model provider @ai-sdk/anthropic",
+      "@rika/coding-tools/package.json: @rika/coding-tools cannot depend on language-model provider openai",
+      "@rika/coding-tools/package.json: @rika/coding-tools cannot depend on language-model provider @ai-sdk/anthropic",
     ])
   })
 

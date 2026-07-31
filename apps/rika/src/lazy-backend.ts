@@ -1,4 +1,4 @@
-import * as ExecutionBackend from "@rika/runtime/contract"
+import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import { Context, Effect, Fiber, Layer, Ref } from "effect"
 
 export const lazyBackendLayer = <E>(backendLayer: Layer.Layer<ExecutionBackend.Service, E>) =>

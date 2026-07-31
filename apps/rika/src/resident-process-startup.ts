@@ -1,4 +1,4 @@
-import * as ResidentService from "@rika/app/resident-service"
+import * as ResidentService from "@rika/product/resident-service"
 import { Config, Effect, FileSystem, Option, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import * as Net from "node:net"

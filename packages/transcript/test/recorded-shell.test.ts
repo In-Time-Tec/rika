@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { recordedShellProjection, settleRecordedShellProjection, unitOrder } from "../src"
+import { recordedShellProjection, settleRecordedShellProjection, unitOrder } from "@rika/transcript/transcript-unit"
 
 describe("recorded shell transcript projection", () => {
   it("projects a running shell turn as one intrinsic tool call without a user unit", () => {

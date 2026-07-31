@@ -3,7 +3,7 @@ import { afterEach, expect, test } from "vitest"
 import { Config, Data, Effect, FileSystem, Layer, Path, Stream } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
-import { ViewState } from "@rika/tui"
+import { ViewState } from "@rika/terminal/terminal-state"
 import {
   defaultOpenArguments,
   initialSubmitAction,
@@ -208,12 +208,12 @@ test("parses nested changed paths, rename destinations, and diff counts", () =>
     Effect.gen(function* () {
       expect(
         parseChangedFiles(
-          "?? apps/rika/src/new file.ts\0 M packages/tui/src/adapter.ts\0R  docs/new -> name.ts\0old.ts\0?? odd\tline\nname.ts\0",
-          ["4\t1\tpackages/tui/src/adapter.ts", "2\t0\t", "old.ts", "docs/new -> name.ts", ""].join("\0"),
+          "?? apps/rika/src/new file.ts\0 M packages/terminal/src/adapter.ts\0R  docs/new -> name.ts\0old.ts\0?? odd\tline\nname.ts\0",
+          ["4\t1\tpackages/terminal/src/adapter.ts", "2\t0\t", "old.ts", "docs/new -> name.ts", ""].join("\0"),
         ),
       ).toEqual([
         { path: "apps/rika/src/new file.ts", status: "??" },
-        { path: "packages/tui/src/adapter.ts", status: "M", added: 4, removed: 1 },
+        { path: "packages/terminal/src/adapter.ts", status: "M", added: 4, removed: 1 },
         { path: "docs/new -> name.ts", status: "R", added: 2, removed: 0 },
         { path: "odd\tline\nname.ts", status: "??" },
       ])

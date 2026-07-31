@@ -51,14 +51,14 @@
         "@batonfx/providers": "catalog:",
         "@effect/platform-bun": "catalog:",
         "@opentui/core": "catalog:",
-        "@rika/app": "workspace:*",
-        "@rika/config": "workspace:*",
+        "@rika/coding-tools": "workspace:*",
+        "@rika/configuration": "workspace:*",
         "@rika/extensions": "workspace:*",
-        "@rika/persistence": "workspace:*",
-        "@rika/runtime": "workspace:*",
-        "@rika/tools": "workspace:*",
+        "@rika/product": "workspace:*",
+        "@rika/product-store": "workspace:*",
+        "@rika/relay-execution": "workspace:*",
+        "@rika/terminal": "workspace:*",
         "@rika/transcript": "workspace:*",
-        "@rika/tui": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {
@@ -78,27 +78,24 @@
         "@opentui/core-win32-x64": "catalog:",
       },
     },
-    "packages/app": {
-      "name": "@rika/app",
+    "packages/coding-tools": {
+      "name": "@rika/coding-tools",
       "version": "0.0.0",
       "dependencies": {
-        "@rika/config": "workspace:*",
-        "@rika/extensions": "workspace:*",
-        "@rika/persistence": "workspace:*",
-        "@rika/runtime": "workspace:*",
-        "@rika/tools": "workspace:*",
-        "@rika/transcript": "workspace:*",
+        "@rika/configuration": "workspace:*",
         "effect": "catalog:",
+        "parallel-web": "catalog:",
       },
       "devDependencies": {
+        "@effect/platform-bun": "catalog:",
         "@effect/vitest": "catalog:",
         "@types/bun": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",
       },
     },
-    "packages/config": {
-      "name": "@rika/config",
+    "packages/configuration": {
+      "name": "@rika/configuration",
       "version": "0.0.0",
       "dependencies": {
         "effect": "catalog:",
@@ -128,13 +125,29 @@
         "vitest": "catalog:",
       },
     },
-    "packages/persistence": {
-      "name": "@rika/persistence",
+    "packages/product": {
+      "name": "@rika/product",
+      "version": "0.0.0",
+      "dependencies": {
+        "@rika/coding-tools": "workspace:*",
+        "@rika/configuration": "workspace:*",
+        "@rika/extensions": "workspace:*",
+        "@rika/transcript": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "packages/product-store": {
+      "name": "@rika/product-store",
       "version": "0.0.0",
       "dependencies": {
         "@effect/sql-sqlite-bun": "catalog:",
-        "@rika/config": "workspace:*",
-        "@rika/tools": "workspace:*",
+        "@rika/product": "workspace:*",
         "@rika/transcript": "workspace:*",
         "effect": "catalog:",
       },
@@ -146,14 +159,15 @@
         "vitest": "catalog:",
       },
     },
-    "packages/runtime": {
-      "name": "@rika/runtime",
+    "packages/relay-execution": {
+      "name": "@rika/relay-execution",
       "version": "0.0.0",
       "dependencies": {
         "@batonfx/core": "catalog:",
         "@relayfx/sdk": "catalog:",
-        "@rika/config": "workspace:*",
-        "@rika/tools": "workspace:*",
+        "@rika/coding-tools": "workspace:*",
+        "@rika/configuration": "workspace:*",
+        "@rika/product": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {
@@ -165,43 +179,13 @@
         "vitest": "catalog:",
       },
     },
-    "packages/tools": {
-      "name": "@rika/tools",
-      "version": "0.0.0",
-      "dependencies": {
-        "@rika/config": "workspace:*",
-        "effect": "catalog:",
-        "parallel-web": "catalog:",
-      },
-      "devDependencies": {
-        "@effect/platform-bun": "catalog:",
-        "@effect/vitest": "catalog:",
-        "@types/bun": "catalog:",
-        "typescript": "catalog:",
-        "vitest": "catalog:",
-      },
-    },
-    "packages/transcript": {
-      "name": "@rika/transcript",
-      "version": "0.0.0",
-      "dependencies": {
-        "@rika/tools": "workspace:*",
-        "effect": "catalog:",
-      },
-      "devDependencies": {
-        "@effect/vitest": "catalog:",
-        "@types/bun": "catalog:",
-        "typescript": "catalog:",
-        "vitest": "catalog:",
-      },
-    },
-    "packages/tui": {
-      "name": "@rika/tui",
+    "packages/terminal": {
+      "name": "@rika/terminal",
       "version": "0.0.0",
       "dependencies": {
         "@opentui/core": "catalog:",
         "@pierre/diffs": "catalog:",
-        "@rika/config": "workspace:*",
+        "@rika/configuration": "workspace:*",
         "@rika/transcript": "workspace:*",
         "cli-spinners": "catalog:",
         "effect": "catalog:",
@@ -217,6 +201,20 @@
         "vitest": "catalog:",
       },
     },
+    "packages/transcript": {
+      "name": "@rika/transcript",
+      "version": "0.0.0",
+      "dependencies": {
+        "@rika/coding-tools": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "tooling/repository-graph": {
       "name": "@rika/repository-graph",
       "version": "0.0.0",
@@ -227,14 +225,14 @@
         "prettier": "catalog:",
       },
       "devDependencies": {
-        "@rika/app": "workspace:*",
-        "@rika/config": "workspace:*",
+        "@rika/coding-tools": "workspace:*",
+        "@rika/configuration": "workspace:*",
         "@rika/extensions": "workspace:*",
-        "@rika/persistence": "workspace:*",
-        "@rika/runtime": "workspace:*",
-        "@rika/tools": "workspace:*",
+        "@rika/product": "workspace:*",
+        "@rika/product-store": "workspace:*",
+        "@rika/relay-execution": "workspace:*",
+        "@rika/terminal": "workspace:*",
         "@rika/transcript": "workspace:*",
-        "@rika/tui": "workspace:*",
         "@types/bun": "catalog:",
         "@typescript-eslint/parser": "catalog:",
         "typescript": "catalog:",
@@ -621,27 +619,27 @@
 
     "@relayfx/sdk": ["@relayfx/sdk@0.7.32", "", { "dependencies": { "@aws-sdk/client-s3": "3.1094.0", "@batonfx/core": "0.11.13", "@batonfx/providers": "0.11.13", "@effect/ai-anthropic": "4.0.0-beta.98", "@effect/ai-openai": "4.0.0-beta.98", "@effect/ai-openai-compat": "4.0.0-beta.98", "@effect/ai-openrouter": "4.0.0-beta.98", "@effect/platform-bun": "4.0.0-beta.98", "@effect/sql-mysql2": "4.0.0-beta.98", "@effect/sql-pg": "4.0.0-beta.98", "@effect/sql-sqlite-bun": "4.0.0-beta.98", "drizzle-orm": "1.0.0-rc.3", "effect": "4.0.0-beta.98", "pg": "8.21.0" } }, "sha512-Et2nc6yOqmZIfrruAqSjIpu9NOADgKKZRCavOE/SyN9APIyWpXm0lVXsLn3RNV8IUhVQq3LUiaea9t1AYMYzZA=="],
 
-    "@rika/app": ["@rika/app@workspace:packages/app"],
-
     "@rika/cli": ["@rika/cli@workspace:apps/rika"],
 
-    "@rika/config": ["@rika/config@workspace:packages/config"],
+    "@rika/coding-tools": ["@rika/coding-tools@workspace:packages/coding-tools"],
+
+    "@rika/configuration": ["@rika/configuration@workspace:packages/configuration"],
 
     "@rika/extensions": ["@rika/extensions@workspace:packages/extensions"],
 
-    "@rika/persistence": ["@rika/persistence@workspace:packages/persistence"],
+    "@rika/product": ["@rika/product@workspace:packages/product"],
+
+    "@rika/product-store": ["@rika/product-store@workspace:packages/product-store"],
+
+    "@rika/relay-execution": ["@rika/relay-execution@workspace:packages/relay-execution"],
 
     "@rika/repository-graph": ["@rika/repository-graph@workspace:tooling/repository-graph"],
 
     "@rika/repository-policy": ["@rika/repository-policy@workspace:tooling/repository-policy"],
 
-    "@rika/runtime": ["@rika/runtime@workspace:packages/runtime"],
-
-    "@rika/tools": ["@rika/tools@workspace:packages/tools"],
+    "@rika/terminal": ["@rika/terminal@workspace:packages/terminal"],
 
     "@rika/transcript": ["@rika/transcript@workspace:packages/transcript"],
-
-    "@rika/tui": ["@rika/tui@workspace:packages/tui"],
 
     "@rollup/rollup-android-arm-eabi": ["@rollup/rollup-android-arm-eabi@4.62.2", "", { "os": "android", "cpu": "arm" }, "sha512-6o7ZLZK+BeenkZCFNDXqpbjw9bD6nuWonvS/lwQJp7NoVVxm6p3qE7qQ5jGuBjiFsgvqjD8mZAU5oWxTmbOeOg=="],
 

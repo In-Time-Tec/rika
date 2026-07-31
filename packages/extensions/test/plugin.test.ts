@@ -1,7 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
-import { ExecutionExtensions, PluginApi, PluginLoader, PluginRegistry } from "../src"
+import { ExecutionExtensions, PluginApi, PluginLoader, PluginRegistry } from "@rika/extensions/plugin-contract"
 import { provideLayer } from "./layer"
 
 const tool = (description: string): PluginApi.Tool => ({

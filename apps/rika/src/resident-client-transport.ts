@@ -1,7 +1,7 @@
 import * as BunSocket from "@effect/platform-bun/BunSocket"
-import * as Operation from "@rika/app/operation-contract"
-import * as ResidentService from "@rika/app/resident-service"
-import * as Thread from "@rika/persistence/thread"
+import * as Operation from "@rika/product/product-operation"
+import * as ResidentService from "@rika/product/resident-service"
+import * as Thread from "@rika/product-store/sqlite-thread-repository"
 import {
   Cause,
   Clock,

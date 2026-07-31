@@ -1,5 +1,5 @@
 import { expect, test } from "vitest"
-import { Theme } from "@rika/tui"
+import { Theme } from "@rika/terminal/terminal-state"
 import { Deferred, Effect, FileSystem, Path } from "effect"
 import * as TuiApp from "./tui-app"
 

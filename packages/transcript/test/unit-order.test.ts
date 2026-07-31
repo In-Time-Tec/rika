@@ -10,7 +10,7 @@ import {
   withNestedProjections,
   type SourceEvent,
   type UnitOrder,
-} from "../src"
+} from "@rika/transcript/transcript-unit"
 
 describe("intrinsic transcript unit order", () => {
   it("uses one injective total order in TypeScript and durable binary text", () => {

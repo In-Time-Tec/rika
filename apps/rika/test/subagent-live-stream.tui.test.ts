@@ -1,4 +1,4 @@
-import * as Turn from "@rika/persistence/turn"
+import * as Turn from "@rika/product-store/sqlite-turn-repository"
 import { Effect, Schema } from "effect"
 import { expect, test } from "vitest"
 import * as TuiApp from "./tui-app"
