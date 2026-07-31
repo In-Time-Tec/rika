@@ -3,10 +3,10 @@ export { Service }
 import * as ExecutionStatus from "@rika/product/execution-status"
 import { Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import * as ThreadRepository from "../thread/sqlite-thread-repository"
+import * as ThreadRepository from "../thread/memory-thread-repository"
 import { ThreadId } from "@rika/product/thread-record"
 import { EditTotals, RepairCandidate, ThreadSummary } from "@rika/product/thread-summary"
-import * as TurnRepository from "../turn/sqlite-turn-repository"
+import * as TurnRepository from "../turn/memory-turn-repository"
 import { Status, TurnId, isAgentExecution } from "@rika/product/turn-record"
 import * as ThreadState from "@rika/product/thread-state"
 
@@ -251,83 +251,3 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
 })
 
 export const memoryLayer = Layer.effect(Service, makeMemory())
-
-export const layer = Layer.effect(
-  Service,
-  Effect.gen(function* () {
-    const sql = yield* SqlClient
-    return Service.of({
-      list: Effect.fn("ThreadSummaryRepository.list")(function* (input: ListInput = {}) {
-        const rows = yield* sql`SELECT
-          summary.thread_id AS id,
-          summary.workspace,
-          summary.title,
-          summary.pinned,
-          summary.archived,
-          summary.status_rank,
-          summary.last_status,
-          summary.last_activity_at,
-          read_state.last_read_at,
-          summary.turn_count,
-          summary.current_activity_count,
-          summary.added,
-          summary.modified,
-          summary.removed
-        FROM rika_thread_picker_summary AS summary
-        LEFT JOIN rika_thread_read_state AS read_state ON read_state.thread_id = summary.thread_id
-        WHERE (${input.includeArchived === true ? 1 : 0} = 1 OR summary.archived = 0)
-        ORDER BY summary.pinned DESC, summary.last_activity_at DESC, summary.thread_id ASC
-        LIMIT ${listLimit(input.limit)}`.pipe(Effect.mapError(repositoryError))
-        return yield* Effect.all(rows.map(decodeSummary))
-      }),
-      ensureTurn: Effect.fn("ThreadSummaryRepository.ensureTurn")(function* (turnId, threadId, now) {
-        yield* sql`INSERT INTO rika_thread_turn_activity
-          (turn_id, thread_id, projected_cursor, complete, added, modified, removed, last_event_at, updated_at)
-          VALUES (${turnId}, ${threadId}, NULL, 0, 0, 0, 0, NULL, ${now})
-          ON CONFLICT(turn_id) DO NOTHING`.pipe(Effect.mapError(repositoryError))
-      }),
-      replaceTurn: Effect.fn("ThreadSummaryRepository.replaceTurn")(function* (input) {
-        yield* sql`INSERT INTO rika_thread_turn_activity
-          (turn_id, thread_id, projected_cursor, complete, added, modified, removed, last_event_at, updated_at)
-          VALUES (${input.turnId}, ${input.threadId}, ${input.projectedCursor ?? null}, ${Number(input.complete)},
-            ${input.editTotals.added}, ${input.editTotals.modified}, ${input.editTotals.removed},
-            ${input.lastEventAt ?? null}, ${input.now})
-          ON CONFLICT(turn_id) DO UPDATE SET
-            thread_id = excluded.thread_id,
-            projected_cursor = excluded.projected_cursor,
-            complete = excluded.complete,
-            added = excluded.added,
-            modified = excluded.modified,
-            removed = excluded.removed,
-            last_event_at = excluded.last_event_at,
-            updated_at = excluded.updated_at
-          WHERE excluded.updated_at >= rika_thread_turn_activity.updated_at`.pipe(Effect.mapError(repositoryError))
-      }),
-      markRead: Effect.fn("ThreadSummaryRepository.markRead")(function* (threadId, now) {
-        yield* sql`INSERT INTO rika_thread_read_state (thread_id, last_read_at)
-          VALUES (${threadId}, ${now})
-          ON CONFLICT(thread_id) DO UPDATE SET
-            last_read_at = MAX(rika_thread_read_state.last_read_at, excluded.last_read_at)`.pipe(
-          Effect.mapError(repositoryError),
-        )
-      }),
-      listRepairCandidates: Effect.fn("ThreadSummaryRepository.listRepairCandidates")(function* (limit = 25) {
-        const rows = yield* sql`SELECT
-          turn.id AS turn_id,
-          turn.thread_id,
-          turn.status,
-          turn.last_cursor
-        FROM rika_turns AS turn
-        LEFT JOIN rika_thread_turn_activity AS activity ON activity.turn_id = turn.id
-        WHERE turn.turn_kind = 'AgentExecution' AND (
-          activity.turn_id IS NULL
-          OR activity.projected_cursor IS NOT turn.last_cursor
-          OR (turn.status IN ('completed', 'failed', 'cancelled') AND activity.complete = 0)
-        )
-        ORDER BY turn.created_at ASC, turn.rowid ASC
-        LIMIT ${listLimit(limit)}`.pipe(Effect.mapError(repositoryError))
-        return yield* Effect.all(rows.map(decodeRepair))
-      }),
-    })
-  }),
-)

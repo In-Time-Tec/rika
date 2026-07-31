@@ -219,44 +219,7 @@ const selected = (documents: ReadonlyArray<Document>, input: SearchInput, parsed
       results.length > limit && last !== undefined ? { updatedAt: last.updatedAt, threadId: last.threadId } : undefined,
   }
 }
-export const makeMemory = Effect.gen(function* () {
-  const state = yield* Ref.make(new Map<ThreadId, Document>())
-  return Service.of({
-    search: Effect.fn("ThreadSearchRepository.search")(function* (input) {
-      const parsed = yield* Effect.try({ try: () => parseQuery(input.query), catch: error })
-      return selected([...(yield* Ref.get(state)).values()], input, parsed)
-    }),
-    rebuildThread: Effect.fn("ThreadSearchRepository.rebuildThread")(function* (input) {
-      yield* Ref.update(state, (documents) => new Map(documents).set(input.thread.id, makeDocument(input)))
-    }),
-    removeThread: Effect.fn("ThreadSearchRepository.removeThread")(function* (threadId) {
-      yield* Ref.update(state, (documents) => {
-        const next = new Map(documents)
-        next.delete(threadId)
-        return next
-      })
-    }),
-  })
-})
-export const memoryLayer = Layer.effect(Service, makeMemory)
-const Row = Schema.Struct({
-  id: Schema.String,
-  workspace: Schema.String,
-  title: Schema.String,
-  labels_json: Schema.String,
-  pinned: Schema.Finite,
-  archived: Schema.Finite,
-  lineage_json: Schema.String,
-  created_at: Schema.Finite,
-  updated_at: Schema.Finite,
-  search_title: Schema.String,
-  search_labels: Schema.String,
-  human_prompts: Schema.String,
-  agent_prompts: Schema.String,
-  root_assistant: Schema.String,
-  child_assistant: Schema.String,
-  files: Schema.String,
-})
+import { ThreadSearchRow as Row } from "./thread-search-row-codec"
 const LabelsJson = Schema.fromJsonString(Schema.Array(Schema.String))
 const LineageJson = Schema.fromJsonString(ThreadLineage)
 export const layer = Layer.effect(
@@ -347,3 +310,5 @@ export const layer = Layer.effect(
     })
   }),
 )
+
+export { makeMemory, memoryLayer } from "./memory-thread-search-repository"

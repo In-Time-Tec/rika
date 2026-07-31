@@ -40,18 +40,7 @@ export interface Interface {
   readonly remove: (id: ThreadId) => Effect.Effect<void, RepositoryError>
 }
 
-const Row = Schema.Struct({
-  id: Schema.String,
-  workspace: Schema.String,
-  title: Schema.String,
-  labels_json: Schema.String,
-  pinned: Schema.Finite,
-  archived: Schema.Finite,
-  lineage_json: Schema.String,
-  created_at: Schema.Finite,
-  updated_at: Schema.Finite,
-})
-
+import { ThreadRow as Row } from "./thread-row-codec"
 const LabelsJson = Schema.fromJsonString(Schema.Array(Schema.String))
 const LineageJson = Schema.fromJsonString(ThreadLineage)
 const repositoryError = (error: unknown) => RepositoryError.make({ message: String(error) })
@@ -165,91 +154,3 @@ export const makeMemory = (initial: ReadonlyArray<Thread> = []) =>
   })
 
 export const memoryLayer = (initial: ReadonlyArray<Thread> = []) => Layer.effect(Service, makeMemory(initial))
-
-export const layer = Layer.effect(
-  Service,
-  Effect.gen(function* () {
-    const sql = yield* SqlClient
-    const get = Effect.fn("ThreadRepository.get")(function* (id: ThreadId) {
-      const rows = yield* sql`SELECT * FROM rika_threads WHERE id = ${id}`.pipe(Effect.mapError(repositoryError))
-      return rows[0] === undefined ? undefined : yield* decode(rows[0])
-    })
-    const requireThread = Effect.fn("ThreadRepository.requireThread")(function* (id: ThreadId) {
-      const thread = yield* get(id)
-      if (thread === undefined) return yield* missing(id)
-      return thread
-    })
-    const update = Effect.fn("ThreadRepository.update")(function* (
-      id: ThreadId,
-      now: number,
-      fields: {
-        readonly title?: string
-        readonly labels?: ReadonlyArray<string>
-        readonly pinned?: boolean
-        readonly archived?: boolean
-      },
-    ) {
-      yield* requireThread(id)
-      yield* sql`UPDATE rika_threads SET
-        title = COALESCE(${fields.title ?? null}, title),
-        labels_json = COALESCE(${fields.labels === undefined ? null : yield* Schema.encodeEffect(LabelsJson)(fields.labels).pipe(Effect.mapError(repositoryError))}, labels_json),
-        pinned = COALESCE(${fields.pinned === undefined ? null : Number(fields.pinned)}, pinned),
-        archived = COALESCE(${fields.archived === undefined ? null : Number(fields.archived)}, archived),
-        updated_at = ${now}
-        WHERE id = ${id}`.pipe(Effect.mapError(repositoryError))
-      return yield* requireThread(id)
-    })
-    return Service.of({
-      create: Effect.fn("ThreadRepository.create")(function* (input) {
-        return yield* sql
-          .withTransaction(
-            Effect.gen(function* () {
-              yield* sql`INSERT INTO rika_workspaces (path, created_at) VALUES (${input.workspace}, ${input.now}) ON CONFLICT(path) DO NOTHING`.pipe(
-                Effect.mapError(repositoryError),
-              )
-              const lineage = yield* Schema.encodeEffect(LineageJson)(input.lineage ?? { _tag: "Original" }).pipe(
-                Effect.mapError(repositoryError),
-              )
-              yield* sql`INSERT INTO rika_threads (id, workspace, title, labels_json, pinned, archived, lineage_json, created_at, updated_at)
-                VALUES (${input.id}, ${input.workspace}, ${input.title}, '[]', 0, 0, ${lineage}, ${input.now}, ${input.now})`.pipe(
-                Effect.mapError(repositoryError),
-              )
-              return yield* requireThread(input.id)
-            }),
-          )
-          .pipe(Effect.mapError(repositoryError))
-      }),
-      get,
-      list: Effect.fn("ThreadRepository.list")(function* (input = {}) {
-        const rows = yield* sql`SELECT * FROM rika_threads
-          WHERE (${input.includeArchived === true ? 1 : 0} = 1 OR archived = 0)
-            AND (${input.query === undefined ? 1 : 0} = 1
-              OR INSTR(LOWER(title), LOWER(${input.query ?? ""})) > 0
-              OR INSTR(LOWER(workspace), LOWER(${input.query ?? ""})) > 0
-              OR EXISTS (SELECT 1 FROM json_each(labels_json)
-                WHERE INSTR(LOWER(CAST(value AS TEXT)), LOWER(${input.query ?? ""})) > 0))
-          ORDER BY pinned DESC, updated_at DESC, id ASC
-          LIMIT ${listLimit(input.limit)}`.pipe(Effect.mapError(repositoryError))
-        const threads = yield* Effect.all(rows.map(decode))
-        return select(threads, input)
-      }),
-      listAll: Effect.gen(function* () {
-        const rows = yield* sql`SELECT * FROM rika_threads`.pipe(Effect.mapError(repositoryError))
-        return (yield* Effect.all(rows.map(decode))).toSorted(compare)
-      }),
-      rename: (id, title, now) => update(id, now, { title }),
-      renameIfTitle: Effect.fn("ThreadRepository.renameIfTitle")(function* (id, expected, title, now) {
-        const rows = yield* sql`UPDATE rika_threads SET title = ${title}, updated_at = ${now}
-          WHERE id = ${id} AND title = ${expected} RETURNING *`.pipe(Effect.mapError(repositoryError))
-        return rows[0] === undefined ? undefined : yield* decode(rows[0])
-      }),
-      label: (id, labels, now) => update(id, now, { labels: [...new Set(labels)] }),
-      setPinned: (id, pinned, now) => update(id, now, { pinned }),
-      setArchived: (id, archived, now) => update(id, now, { archived }),
-      remove: Effect.fn("ThreadRepository.remove")(function* (id) {
-        yield* requireThread(id)
-        yield* sql`DELETE FROM rika_threads WHERE id = ${id}`.pipe(Effect.mapError(repositoryError))
-      }),
-    })
-  }),
-)

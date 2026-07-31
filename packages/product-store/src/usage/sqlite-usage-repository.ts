@@ -49,9 +49,8 @@ export type CommitResult =
   | { readonly _tag: "Applied"; readonly value: SourceUsage }
   | { readonly _tag: "Conflict"; readonly value: SourceUsage | undefined }
 
-export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("UsageRepositoryError", {
-  message: Schema.String,
-}) {}
+export { RepositoryError } from "@rika/product/usage-repository"
+import { RepositoryError } from "@rika/product/usage-repository"
 
 export interface Interface {
   readonly admitSource: (
@@ -198,144 +197,7 @@ const aggregate = (values: ReadonlyArray<SourceUsage>): Aggregate => ({
   ...materialize(values),
 })
 
-export interface MemoryOptions {
-  readonly initial?: ReadonlyArray<SourceUsage>
-}
-
-export const makeMemory = (options: MemoryOptions = {}) =>
-  Effect.gen(function* () {
-    const initial = yield* Effect.try({
-      try: () => {
-        const values = options.initial ?? []
-        assertTurnOwnership(values)
-        const rows = new Map<string, SourceUsage>()
-        for (const value of values) {
-          validate(value)
-          const key = memoryKey(value.sourceId, value.turnId)
-          if (rows.has(key)) throw new Error(`Usage source ${value.sourceId} for Turn ${value.turnId} is duplicated`)
-          rows.set(key, clone(value))
-        }
-        return rows
-      },
-      catch: error,
-    })
-    const rows = yield* Ref.make(initial)
-    const readSource = Effect.fn("UsageRepository.readSource")(function* (sourceId: string, turnId: string) {
-      const value = (yield* Ref.get(rows)).get(memoryKey(sourceId, turnId))
-      return value === undefined ? undefined : clone(value)
-    })
-    const replace = (
-      sourceId: string,
-      turnId: string,
-      threadId: string,
-      expectedVersion: number,
-      expectedRevision: number,
-      foldJson: string,
-      totals: Materialized,
-    ) =>
-      Effect.gen(function* () {
-        yield* Effect.try({ try: () => validate(totals), catch: error })
-        return yield* Ref.modify(rows, (current): [CommitResult, Map<string, SourceUsage>] => {
-          const identity = memoryKey(sourceId, turnId)
-          const previous = current.get(identity)
-          if (previous !== undefined && previous.threadId !== threadId)
-            return [{ _tag: "Conflict", value: clone(previous) }, current]
-          if (
-            previous?.projectionVersion === projectionVersion ||
-            (previous !== undefined &&
-              (previous.projectionVersion !== expectedVersion || previous.revision !== expectedRevision))
-          )
-            return [{ _tag: "Conflict", value: previous === undefined ? undefined : clone(previous) }, current]
-          const value: SourceUsage = clone({
-            sourceId,
-            turnId,
-            threadId,
-            revision: (previous?.revision ?? 0) + 1,
-            projectionVersion,
-            foldJson,
-            ...totals,
-          })
-          return [{ _tag: "Applied", value: clone(value) }, new Map(current).set(identity, value)]
-        })
-      })
-    return Service.of({
-      admitSource: Effect.fn("UsageRepository.admitSource")(function* (sourceId, turnId, threadId) {
-        const existing = (yield* Ref.get(rows)).get(memoryKey(sourceId, turnId))
-        if (existing !== undefined && existing.threadId !== threadId)
-          return yield* RepositoryError.make({
-            message: `Usage source ${sourceId} for Turn ${turnId} belongs to thread ${existing.threadId}`,
-          })
-        return yield* Ref.modify(rows, (current) => {
-          const identity = memoryKey(sourceId, turnId)
-          const previous = current.get(identity)
-          if (previous !== undefined) return [clone(previous), current]
-          const value: SourceUsage = { sourceId, turnId, threadId, revision: 0, projectionVersion, ...zero }
-          return [clone(value), new Map(current).set(identity, value)]
-        })
-      }),
-      readSource,
-      readTurn: Effect.fn("UsageRepository.readTurn")(function* (turnId) {
-        return yield* checked(
-          [...(yield* Ref.get(rows)).values()].filter((value) => value.turnId === turnId),
-          turnAggregate,
-        )
-      }),
-      readThread: Effect.fn("UsageRepository.readThread")(function* (threadId) {
-        const values = [...(yield* Ref.get(rows)).values()]
-        yield* checked(values, () => undefined)
-        return aggregate(values.filter((value) => value.threadId === threadId))
-      }),
-      readGlobal: Ref.get(rows).pipe(Effect.flatMap((current) => checked([...current.values()], aggregate))),
-      loadSourceFold: Effect.fn("UsageRepository.loadSourceFold")(function* (sourceId, turnId) {
-        const value = yield* readSource(sourceId, turnId)
-        return value === undefined
-          ? undefined
-          : {
-              revision: value.revision,
-              projectionVersion: value.projectionVersion,
-              ...(value.foldJson === undefined ? {} : { foldJson: value.foldJson }),
-            }
-      }),
-      commitSource: Effect.fn("UsageRepository.commitSource")(
-        function* (sourceId, turnId, expectedRevision, foldJson, totals) {
-          yield* Effect.try({ try: () => validate(totals), catch: error })
-          return yield* Ref.modify(rows, (current): [CommitResult, Map<string, SourceUsage>] => {
-            const identity = memoryKey(sourceId, turnId)
-            const previous = current.get(identity)
-            if (
-              previous === undefined ||
-              previous.revision !== expectedRevision ||
-              previous.projectionVersion !== projectionVersion
-            )
-              return [{ _tag: "Conflict", value: previous === undefined ? undefined : clone(previous) }, current]
-            const value = clone({ ...previous, ...totals, foldJson, revision: previous.revision + 1 })
-            return [{ _tag: "Applied", value: clone(value) }, new Map(current).set(identity, value)]
-          })
-        },
-      ),
-      replaceSource: Effect.fn("UsageRepository.replaceSource")(replace),
-    })
-  })
-
-export const memoryLayer = Layer.effect(Service, makeMemory())
-
-const Row = Schema.Struct({
-  source_id: Schema.String,
-  turn_id: Schema.String,
-  thread_id: Schema.String,
-  revision: Schema.Finite,
-  projection_version: Schema.Finite,
-  fold_json: Schema.NullOr(Schema.String),
-  cost_nano_usd: Schema.NullOr(Schema.Finite),
-  tokens: Schema.NullOr(Schema.Finite),
-  active_millis: Schema.NullOr(Schema.Finite),
-  active_intervals_json: Schema.NullOr(Schema.String),
-  priced_attempts: Schema.Finite,
-  unpriced_attempts: Schema.Finite,
-  counted_attempts: Schema.Finite,
-  uncounted_attempts: Schema.Finite,
-  source_complete: Schema.Finite,
-})
+import { UsageRow as Row } from "./usage-row-codec"
 const ActiveIntervalSchema = Schema.Struct({ start: Schema.Finite, end: Schema.optionalKey(Schema.Finite) })
 const ActiveIntervalsJson = Schema.fromJsonString(Schema.Array(ActiveIntervalSchema))
 const decodeRow = (input: unknown) =>
@@ -470,3 +332,5 @@ export const layer = Layer.effect(
     })
   }),
 )
+
+export { makeMemory, memoryLayer } from "./memory-usage-repository"

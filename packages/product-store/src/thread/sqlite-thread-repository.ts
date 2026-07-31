@@ -40,18 +40,7 @@ export interface Interface {
   readonly remove: (id: ThreadId) => Effect.Effect<void, RepositoryError>
 }
 
-const Row = Schema.Struct({
-  id: Schema.String,
-  workspace: Schema.String,
-  title: Schema.String,
-  labels_json: Schema.String,
-  pinned: Schema.Finite,
-  archived: Schema.Finite,
-  lineage_json: Schema.String,
-  created_at: Schema.Finite,
-  updated_at: Schema.Finite,
-})
-
+import { ThreadRow as Row } from "./thread-row-codec"
 const LabelsJson = Schema.fromJsonString(Schema.Array(Schema.String))
 const LineageJson = Schema.fromJsonString(ThreadLineage)
 const repositoryError = (error: unknown) => RepositoryError.make({ message: String(error) })
@@ -93,78 +82,6 @@ const decode = (row: unknown) =>
       updatedAt: value.updated_at,
     }
   }).pipe(Effect.mapError(repositoryError))
-
-export const makeMemory = (initial: ReadonlyArray<Thread> = []) =>
-  Effect.gen(function* () {
-    const state = yield* Ref.make(new Map(initial.map((thread) => [thread.id, clone(thread)])))
-    const requireThread = Effect.fn("ThreadRepository.requireThread")(function* (id: ThreadId) {
-      const thread = (yield* Ref.get(state)).get(id)
-      if (thread === undefined) return yield* missing(id)
-      return thread
-    })
-    const update = Effect.fn("ThreadRepository.update")(function* (
-      id: ThreadId,
-      now: number,
-      change: (thread: Thread) => Thread,
-    ) {
-      const thread = yield* requireThread(id)
-      const next = change({ ...thread, updatedAt: now })
-      yield* Ref.update(state, (threads) => new Map(threads).set(id, next))
-      return clone(next)
-    })
-    return Service.of({
-      create: Effect.fn("ThreadRepository.create")(function* (input) {
-        const threads = yield* Ref.get(state)
-        if (threads.has(input.id)) {
-          return yield* RepositoryError.make({ message: `Thread ${input.id} exists` })
-        }
-        const thread: Thread = {
-          id: input.id,
-          workspace: input.workspace,
-          title: input.title,
-          labels: [],
-          pinned: false,
-          archived: false,
-          lineage: input.lineage ?? { _tag: "Original" },
-          createdAt: input.now,
-          updatedAt: input.now,
-        }
-        yield* Ref.update(state, (values) => new Map(values).set(thread.id, thread))
-        return clone(thread)
-      }),
-      get: Effect.fn("ThreadRepository.get")(function* (id) {
-        const thread = (yield* Ref.get(state)).get(id)
-        return thread === undefined ? undefined : clone(thread)
-      }),
-      list: Effect.fn("ThreadRepository.list")(function* (input = {}) {
-        return select([...(yield* Ref.get(state)).values()], input)
-      }),
-      listAll: Ref.get(state).pipe(Effect.map((threads) => [...threads.values()].toSorted(compare).map(clone))),
-      rename: (id, title, now) => update(id, now, (thread) => ({ ...thread, title })),
-      renameIfTitle: Effect.fn("ThreadRepository.renameIfTitle")(function* (id, expected, title, now) {
-        const result = yield* Ref.modify(state, (threads) => {
-          const thread = threads.get(id)
-          if (thread === undefined || thread.title !== expected) return [undefined, threads] as const
-          const next = { ...thread, title, updatedAt: now }
-          return [clone(next), new Map(threads).set(id, next)] as const
-        })
-        return result
-      }),
-      label: (id, labels, now) => update(id, now, (thread) => ({ ...thread, labels: [...new Set(labels)] })),
-      setPinned: (id, pinned, now) => update(id, now, (thread) => ({ ...thread, pinned })),
-      setArchived: (id, archived, now) => update(id, now, (thread) => ({ ...thread, archived })),
-      remove: Effect.fn("ThreadRepository.remove")(function* (id) {
-        yield* requireThread(id)
-        yield* Ref.update(state, (threads) => {
-          const next = new Map(threads)
-          next.delete(id)
-          return next
-        })
-      }),
-    })
-  })
-
-export const memoryLayer = (initial: ReadonlyArray<Thread> = []) => Layer.effect(Service, makeMemory(initial))
 
 export const layer = Layer.effect(
   Service,
@@ -253,3 +170,5 @@ export const layer = Layer.effect(
     })
   }),
 )
+
+export { makeMemory, memoryLayer } from "./memory-thread-repository"

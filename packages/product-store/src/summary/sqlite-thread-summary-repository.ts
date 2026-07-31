@@ -47,22 +47,7 @@ interface Activity {
   readonly updatedAt: number
 }
 
-const SummaryRow = Schema.Struct({
-  id: Schema.String,
-  workspace: Schema.String,
-  title: Schema.String,
-  pinned: Schema.Finite,
-  archived: Schema.Finite,
-  status_rank: Schema.Finite,
-  last_status: Schema.NullOr(Schema.String),
-  last_activity_at: Schema.Finite,
-  last_read_at: Schema.NullOr(Schema.Finite),
-  turn_count: Schema.Finite,
-  current_activity_count: Schema.Finite,
-  added: Schema.Finite,
-  modified: Schema.Finite,
-  removed: Schema.Finite,
-})
+import { ThreadSummaryRow as SummaryRow } from "./thread-summary-row-codec"
 
 const RepairRow = Schema.Struct({
   turn_id: Schema.String,
@@ -124,133 +109,6 @@ const compareSummaries = (left: ThreadSummary, right: ThreadSummary) =>
   Number(right.pinned) - Number(left.pinned) ||
   right.lastActivityAt - left.lastActivityAt ||
   left.id.localeCompare(right.id)
-
-export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(function* () {
-  const threads = yield* ThreadRepository.Service
-  const turns = yield* TurnRepository.Service
-  const activities = yield* Ref.make(new Map<TurnId, Activity>())
-  const readAt = yield* Ref.make(new Map<ThreadId, number>())
-
-  const list = Effect.fn("ThreadSummaryRepository.list")(function* (input: ListInput = {}) {
-    const threadValues = yield* threads
-      .list({ includeArchived: true, limit: 100 })
-      .pipe(Effect.mapError(repositoryError))
-    const activityValues = yield* Ref.get(activities)
-    const readValues = yield* Ref.get(readAt)
-    const summaries = yield* Effect.forEach(threadValues, (thread) =>
-      Effect.gen(function* () {
-        const history = yield* turns.list(thread.id).pipe(Effect.mapError(repositoryError))
-        const projected = history.flatMap((turn) => {
-          const activity = activityValues.get(turn.id)
-          return activity === undefined ? [] : [activity]
-        })
-        const currentProjected = history.flatMap((turn) => {
-          const activity = activityValues.get(turn.id)
-          return activity !== undefined &&
-            (isAgentExecution(turn)
-              ? activity.projectedCursor === turn.lastCursor &&
-                (!ExecutionStatus.isTerminalStatus(turn.status) || activity.complete)
-              : !ExecutionStatus.isTerminalStatus(turn.status) || activity.complete)
-            ? [activity]
-            : []
-        })
-        const lastActivityAt = Math.max(
-          thread.createdAt,
-          ...history.map((turn) => turn.updatedAt),
-          ...projected.flatMap((activity) => (activity.lastEventAt === undefined ? [] : [activity.lastEventAt])),
-        )
-        const totals = currentProjected.reduce(
-          (total, activity) => ({
-            added: total.added + activity.editTotals.added,
-            modified: total.modified + activity.editTotals.modified,
-            removed: total.removed + activity.editTotals.removed,
-          }),
-          { added: 0, modified: 0, removed: 0 },
-        )
-        return ThreadSummary.make({
-          id: thread.id,
-          workspace: thread.workspace,
-          title: thread.title,
-          pinned: thread.pinned,
-          archived: thread.archived,
-          status: ThreadState.threadState(history.map((turn) => turn.status)),
-          unread: lastActivityAt > (readValues.get(thread.id) ?? 0),
-          lastActivityAt,
-          ...(history.length > 0 && currentProjected.length === history.length ? { editTotals: totals } : {}),
-        })
-      }),
-    )
-    return summaries
-      .filter((summary) => input.includeArchived === true || !summary.archived)
-      .toSorted(compareSummaries)
-      .slice(0, listLimit(input.limit))
-  })
-
-  return Service.of({
-    list,
-    ensureTurn: Effect.fn("ThreadSummaryRepository.ensureTurn")(function* (turnId, threadId, now) {
-      yield* Ref.update(activities, (current) =>
-        current.has(turnId)
-          ? current
-          : new Map(current).set(turnId, {
-              turnId,
-              threadId,
-              complete: false,
-              editTotals: { added: 0, modified: 0, removed: 0 },
-              updatedAt: now,
-            }),
-      )
-    }),
-    replaceTurn: Effect.fn("ThreadSummaryRepository.replaceTurn")(function* (input) {
-      yield* Ref.update(activities, (current) =>
-        (current.get(input.turnId)?.updatedAt ?? Number.NEGATIVE_INFINITY) > input.now
-          ? current
-          : new Map(current).set(input.turnId, {
-              turnId: input.turnId,
-              threadId: input.threadId,
-              ...(input.projectedCursor === undefined ? {} : { projectedCursor: input.projectedCursor }),
-              complete: input.complete,
-              editTotals: structuredClone(input.editTotals),
-              ...(input.lastEventAt === undefined ? {} : { lastEventAt: input.lastEventAt }),
-              updatedAt: input.now,
-            }),
-      )
-    }),
-    markRead: Effect.fn("ThreadSummaryRepository.markRead")(function* (threadId, now) {
-      yield* Ref.update(readAt, (current) => new Map(current).set(threadId, Math.max(current.get(threadId) ?? 0, now)))
-    }),
-    listRepairCandidates: Effect.fn("ThreadSummaryRepository.listRepairCandidates")(function* (limit = 25) {
-      const activityValues = yield* Ref.get(activities)
-      const threadValues = yield* threads
-        .list({ includeArchived: true, limit: 100 })
-        .pipe(Effect.mapError(repositoryError))
-      const history = (yield* Effect.forEach(threadValues, (thread) =>
-        turns.list(thread.id).pipe(Effect.mapError(repositoryError)),
-      )).flat()
-      return history
-        .filter(isAgentExecution)
-        .filter((turn) => {
-          const activity = activityValues.get(turn.id)
-          return (
-            activity === undefined ||
-            activity.projectedCursor !== turn.lastCursor ||
-            (ExecutionStatus.isTerminalStatus(turn.status) && !activity.complete)
-          )
-        })
-        .slice(0, listLimit(limit))
-        .map((turn) =>
-          RepairCandidate.make({
-            turnId: turn.id,
-            threadId: turn.threadId,
-            status: turn.status,
-            ...(turn.lastCursor === undefined ? {} : { lastCursor: turn.lastCursor }),
-          }),
-        )
-    }),
-  })
-})
-
-export const memoryLayer = Layer.effect(Service, makeMemory())
 
 export const layer = Layer.effect(
   Service,
@@ -331,3 +189,5 @@ export const layer = Layer.effect(
     })
   }),
 )
+
+export { makeMemory, memoryLayer } from "./memory-thread-summary-repository"
