@@ -1,5 +1,5 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { ModelRegistry } from "@batonfx/core"
+import { ModelRegistry, ModelResilience } from "@batonfx/core"
 import { expect, test } from "vitest"
 import { OpenAiAuth } from "@rika/app"
 import { ConfigContract } from "@rika/config"
@@ -9,7 +9,7 @@ import * as RelayExecutionBackend from "@rika/runtime/relay"
 import { Runtime as RikaToolRuntime } from "@rika/tools"
 import { Database } from "bun:sqlite"
 import { Cause, ConfigProvider, Context, Effect, FileSystem, Layer, Redacted, Schema, Scope, Stream } from "effect"
-import { LanguageModel, Response as AiResponse } from "effect/unstable/ai"
+import { AiError, LanguageModel, Response as AiResponse } from "effect/unstable/ai"
 import {
   executionModelRoutes,
   executionRoutePin,
@@ -288,7 +288,7 @@ test("rejects a malformed OpenAI terminal without completing a partial function 
   )
 })
 
-test("classifies a nested OpenAI Responses context error without exposing the Effect AI decoder failure", () => {
+test("fails with a classified OpenAI context error without exposing the Effect AI decoder failure", () => {
   const server = Bun.serve({
     port: 0,
     fetch: () =>
@@ -314,18 +314,121 @@ test("classifies a nested OpenAI Responses context error without exposing the Ef
           const prepared = yield* runtime.prepare([route])
           const registration = prepared.registrations[0]!
           const context = yield* Layer.build(registration.layer)
-          const parts = yield* LanguageModel.streamText({ prompt: "overflow" }).pipe(
-            Stream.runCollect,
+          const failure = yield* LanguageModel.streamText({ prompt: "overflow" }).pipe(
+            Stream.runDrain,
             Effect.provide(context),
+            Effect.flip,
           )
-          const error = parts.find((part) => part.type === "error")
-          expect(error?.type).toBe("error")
-          if (error?.type !== "error") return
-          const rendered = encodeJson(error.error)
+          expect(AiError.isAiError(failure)).toBe(true)
+          if (!AiError.isAiError(failure)) return
+          const rendered = encodeJson(failure)
 
-          expect(registration.classifyFailure?.(error.error)).toBe("context-overflow")
+          expect(failure.reason._tag).toBe("InvalidRequestError")
+          expect(registration.classifyFailure?.(failure)).toBe("context-overflow")
           expect(rendered).toContain("context_length_exceeded")
           expect(rendered).not.toContain("Invalid output: Missing key")
+        }),
+      { OPENAI_API_KEY: "test-api-key" },
+    ).pipe(Effect.ensuring(Effect.promise(() => server.stop(true)))),
+  )
+})
+
+test("retries a pre-output OpenAI overload with Rika's default resilience", () => {
+  let modelCalls = 0
+  const server = Bun.serve({
+    port: 0,
+    fetch: () => {
+      modelCalls += 1
+      return modelCalls === 1
+        ? sseResponse([
+            {
+              type: "error",
+              code: "server_is_overloaded",
+              message: "Our servers are currently overloaded. Please try again later.",
+              sequence_number: 2,
+            },
+          ])
+        : sseResponse([
+            {
+              type: "response.output_text.delta",
+              item_id: "recovered-item",
+              output_index: 0,
+              content_index: 0,
+              delta: "recovered",
+              sequence_number: 0,
+            },
+            { type: "response.completed", sequence_number: 1, response: response("response-recovered") },
+          ])
+    },
+  })
+  return Effect.runPromise(
+    withRuntime(
+      authService(),
+      (runtime) =>
+        Effect.gen(function* () {
+          const route = ConfigContract.resolveModelRoute(openAiSettings(server.url.toString()), "medium", "main")
+          const prepared = yield* runtime.prepare([route])
+          const context = yield* Layer.build(prepared.registrations[0]!.layer)
+          const model = Context.get(context, LanguageModel.LanguageModel)
+          const parts = yield* ModelResilience.apply(model, RelayExecutionBackend.defaultModelResilience)
+            .streamText({ prompt: "recover from overload" })
+            .pipe(Stream.runCollect)
+
+          expect(modelCalls).toBe(2)
+          expect(
+            Array.from(parts)
+              .filter((part) => part.type === "text-delta")
+              .map((part) => part.delta)
+              .join(""),
+          ).toBe("recovered")
+          expect(Array.from(parts).some((part) => part.type === "error")).toBe(false)
+        }),
+      { OPENAI_API_KEY: "test-api-key" },
+    ).pipe(Effect.ensuring(Effect.promise(() => server.stop(true)))),
+  )
+})
+
+test("does not replay an OpenAI overload after streamed output escapes", () => {
+  let modelCalls = 0
+  const server = Bun.serve({
+    port: 0,
+    fetch: () => {
+      modelCalls += 1
+      return sseResponse([
+        {
+          type: "response.output_text.delta",
+          item_id: "partial-item",
+          output_index: 0,
+          content_index: 0,
+          delta: "partial",
+          sequence_number: 0,
+        },
+        {
+          type: "error",
+          code: "server_is_overloaded",
+          message: "Our servers are currently overloaded. Please try again later.",
+          sequence_number: 1,
+        },
+      ])
+    },
+  })
+  return Effect.runPromise(
+    withRuntime(
+      authService(),
+      (runtime) =>
+        Effect.gen(function* () {
+          const route = ConfigContract.resolveModelRoute(openAiSettings(server.url.toString()), "medium", "main")
+          const prepared = yield* runtime.prepare([route])
+          const context = yield* Layer.build(prepared.registrations[0]!.layer)
+          const model = Context.get(context, LanguageModel.LanguageModel)
+          const parts = yield* ModelResilience.apply(model, RelayExecutionBackend.defaultModelResilience)
+            .streamText({ prompt: "do not replay partial output" })
+            .pipe(Stream.runCollect)
+          const error = Array.from(parts).find((part) => part.type === "error")
+
+          expect(modelCalls).toBe(1)
+          expect(Array.from(parts).some((part) => part.type === "text-delta")).toBe(true)
+          expect(error?.type === "error" && AiError.isAiError(error.error)).toBe(true)
         }),
       { OPENAI_API_KEY: "test-api-key" },
     ).pipe(Effect.ensuring(Effect.promise(() => server.stop(true)))),
