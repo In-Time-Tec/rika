@@ -1,45 +1,90 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join, resolve } from "node:path"
-import { Effect } from "effect"
+import { Console, Effect, Layer, Schema } from "effect"
+import { FileSystem } from "effect/FileSystem"
+import { Path } from "effect/Path"
 import { Argument, Command } from "effect/unstable/cli"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { graphFilePath, readGraph, writeGraphs, type GraphArtifact, type GraphKind } from "./repository-graph"
+import {
+  graphFilePath,
+  readGraph,
+  writeGraphs,
+  type GraphArtifact,
+  type GraphKind,
+  type GraphNode,
+} from "./repository-graph"
 
 const kinds = ["all", "production", "test", "package"] as const
-const print = (value: unknown) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
+const operations = ["dependencies", "users", "impact", "tests", "why", "graph", "violations", "check"] as const
+type QueryOperation = (typeof operations)[number]
+type QueryOutput = unknown
+class QueryError extends Schema.TaggedErrorClass<QueryError>()("RepositoryGraphQueryError", {
+  message: Schema.String,
+}) {}
 
-const query = async (kind: GraphKind, operation: string, subject?: string) => {
-  const graph = await readGraph(kind)
-  const edges = graph.edges
+type CheckOutput = {
+  readonly subject: string | undefined
+  readonly affectedPackages: ReadonlyArray<string>
+  readonly rankedTests: ReadonlyArray<string>
+  readonly commands: ReadonlyArray<string>
+}
+
+const nodeMatches = (node: GraphNode, subject: string) =>
+  node.id === subject ||
+  node.path === subject ||
+  node.id.includes(subject) ||
+  (node.path !== undefined && node.path.includes(subject))
+const edgeMatches = (graph: GraphArtifact, subject: string | undefined) =>
+  subject === undefined
+    ? graph.edges
+    : graph.edges.filter((edge) => edge.from.includes(subject) || edge.to.includes(subject))
+const testRank = (node: GraphNode) => {
+  if (node.testKind === "unit-test") return 1
+  if (node.testKind === "integration-test" || node.testKind === "contract-test") return 2
+  if (node.testKind === "tui-test" || node.testKind === "process-test") return 3
+  return 4
+}
+
+export const queryGraph = Effect.fn("RepositoryGraph.queryGraph")(function* (
+  kind: GraphKind,
+  operation: QueryOperation,
+  subject?: string,
+  inputDirectory = "docs/generated",
+): Effect.fn.Return<QueryOutput, Error, FileSystem> {
+  const graph = yield* readGraph(kind, inputDirectory)
+  const subjectNode = subject === undefined ? undefined : graph.nodes.find((node) => nodeMatches(node, subject))
+  if (subject !== undefined && subjectNode === undefined && operation !== "violations")
+    return yield* QueryError.make({ message: `query subject is not present in ${kind} graph: ${subject}` })
   if (operation === "graph") return graph
-  if (operation === "violations") return graph.violations
-  if (operation === "check")
-    return graph.violations.filter((violation) => subject === undefined || violation.startsWith(subject))
-  const matches =
-    subject === undefined
-      ? edges
-      : edges.filter(
-          (edge) =>
-            edge.from === subject || edge.to === subject || edge.from.includes(subject) || edge.to.includes(subject),
-        )
+  if (operation === "violations")
+    return graph.violations.filter((violation) => subject === undefined || violation.includes(subject))
+  const matches = edgeMatches(graph, subject)
   if (operation === "dependencies")
-    return matches.filter((edge) => edge.from === subject || edge.from.includes(subject ?? "")).map((edge) => edge.to)
+    return matches
+      .filter((edge) => subject === undefined || edge.from.includes(subject))
+      .map((edge) => edge.to)
+      .toSorted()
   if (operation === "users")
-    return matches.filter((edge) => edge.to === subject || edge.to.includes(subject ?? "")).map((edge) => edge.from)
-  if (operation === "tests")
-    return edges
-      .filter((edge) => edge.from.endsWith(".test.ts") || edge.from.includes("/test/"))
-      .filter((edge) => subject === undefined || edge.to === subject || edge.to.includes(subject))
+    return matches
+      .filter((edge) => subject === undefined || edge.to.includes(subject))
       .map((edge) => edge.from)
+      .toSorted()
   if (operation === "why") return matches
+  if (operation === "tests") {
+    return graph.nodes
+      .filter((node) => node.testKind !== undefined)
+      .filter(
+        (node) =>
+          subject === undefined || graph.edges.some((edge) => edge.from === node.id && edge.to.includes(subject)),
+      )
+      .toSorted((a, b) => testRank(a) - testRank(b) || a.id.localeCompare(b.id))
+      .map((node) => node.id)
+  }
   if (operation === "impact") {
-    const impacted = new Set<string>(subject ? [subject] : [])
+    const impacted = new Set<string>(subject === undefined ? [] : [subjectNode?.id ?? subject])
     let changed = true
     while (changed) {
       changed = false
-      for (const edge of edges)
+      for (const edge of graph.edges)
         if (impacted.has(edge.to) && !impacted.has(edge.from)) {
           impacted.add(edge.from)
           changed = true
@@ -47,60 +92,125 @@ const query = async (kind: GraphKind, operation: string, subject?: string) => {
     }
     return [...impacted].toSorted()
   }
-  throw new Error(`unknown query ${operation}`)
-}
+  const impacted = (yield* queryGraph(kind, "impact", subject, inputDirectory)) as ReadonlyArray<string>
+  const impactedSet = new Set(impacted)
+  const affectedNames = new Set(
+    graph.nodes.filter((node) => impactedSet.has(node.id) && node.package !== undefined).map((node) => node.package),
+  )
+  const packageIds = new Set(
+    graph.nodes
+      .filter((node) => node.kind === "package" && node.package !== undefined && affectedNames.has(node.package))
+      .map((node) => node.id),
+  )
+  const rankedTests = graph.nodes
+    .filter((node) => node.testKind !== undefined)
+    .filter((node) => graph.edges.some((edge) => edge.from === node.id && impactedSet.has(edge.to)))
+    .toSorted((a, b) => testRank(a) - testRank(b) || a.id.localeCompare(b.id))
+    .map((node) => node.id)
+  const commands = [...packageIds].toSorted().map((id) => `bun run test-unit -- ${id.slice("package:".length)}`)
+  return { subject, affectedPackages: [...packageIds].toSorted(), rankedTests, commands } satisfies CheckOutput
+})
 
-const checkGenerated = async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rika-repository-graph-"))
-  try {
-    await writeGraphs(directory)
-    const comparisons = await Promise.all(
-      kinds.map(
-        async (kind) =>
-          [
-            await readFile(graphFilePath(kind), "utf8"),
-            await readFile(graphFilePath(kind, directory), "utf8"),
-          ] as const,
-      ),
-    )
-    const stale = comparisons.findIndex(([expected, actual]) => expected !== actual)
-    if (stale !== -1)
-      throw new Error(
-        `${graphFilePath(kinds[stale] ?? "all")} is stale; run bun --cwd tooling/repository-graph generate`,
-      )
-  } finally {
-    await rm(directory, { recursive: true, force: true })
+const parseQueryArguments = (args: ReadonlyArray<string>) => {
+  const values = args.filter((value) => value !== "--")
+  const projectionFirst = kinds.includes(values[0] as GraphKind)
+  const operation = (projectionFirst ? values[1] : values[0]) as QueryOperation | undefined
+  let projection: GraphKind = "all"
+  let subject = values[1]
+  if (projectionFirst) {
+    projection = values[0] as GraphKind
+    subject = values[2]
+  } else if (kinds.includes(values[1] as GraphKind)) {
+    projection = values[1] as GraphKind
+    subject = values[2]
   }
-  process.stdout.write("repository graphs are fresh\n")
+  const format = "json"
+  if (operation === undefined || !operations.includes(operation))
+    throw new Error(`unknown query ${operation ?? "<missing>"}`)
+  if (projection === undefined || !kinds.includes(projection as GraphKind))
+    throw new Error(`unknown graph projection ${projection ?? "<missing>"}`)
+  if (format !== undefined && format !== "json" && format !== "text") throw new Error(`unknown query format ${format}`)
+  return { operation, projection: projection as GraphKind, subject, format }
 }
 
-const main = async (args: ReadonlyArray<string>) => {
-  const [command, ...rest] = args
+const rootPath = Effect.fn("RepositoryGraph.rootPath")(function* () {
+  const path = yield* Path
+  return path.resolve(import.meta.dirname, "../../..")
+})
+
+const printQuery = (value: QueryOutput, format: string | undefined) =>
+  format === "text" && typeof value === "object" && value !== null
+    ? JSON.stringify(value)
+    : JSON.stringify(value, null, 2)
+
+const checkGenerated = Effect.fn("RepositoryGraph.checkGenerated")(function* () {
+  const fileSystem = yield* FileSystem
+  const path = yield* Path
+  const root = path.resolve(import.meta.dirname, "../../..")
+  const temporary = yield* fileSystem.makeTempDirectory({ prefix: "rika-repository-graph-" })
+  const generated = yield* writeGraphs(root, temporary)
+  const comparisons = yield* Effect.all(
+    kinds.map((kind) =>
+      Effect.gen(function* () {
+        const expected = yield* fileSystem.readFileString(path.resolve(root, graphFilePath.resolve(kind)))
+        const actual = yield* fileSystem.readFileString(graphFilePath.resolve(kind, temporary))
+        return { kind, expected, actual }
+      }),
+    ),
+    { concurrency: "unbounded" },
+  )
+  const stale = comparisons.find((entry) => entry.expected !== entry.actual)
+  if (stale !== undefined)
+    return yield* QueryError.make({
+      message: `${graphFilePath.resolve(stale.kind)} is stale; run bun --cwd tooling/repository-graph generate`,
+    })
+  const unresolved = generated.all.violations
+  if (unresolved.length > 0) return yield* QueryError.make({ message: unresolved.join("\n") })
+  yield* fileSystem.remove(temporary, { recursive: true })
+  yield* Console.log("repository graphs are fresh")
+})
+
+const main = Effect.fn("RepositoryGraph.main")(function* (args: ReadonlyArray<string>) {
+  const root = yield* rootPath()
+  const command = args[0]
   if (command === "generate") {
-    await writeGraphs()
-    process.stdout.write("generated dependency graph artifacts\n")
+    const path = yield* Path
+    yield* writeGraphs(root, path.join(root, "docs/generated"))
+    yield* Console.log("generated dependency graph artifacts")
     return
   }
   if (command === "check-generated") {
-    await checkGenerated()
+    yield* checkGenerated()
     return
   }
   if (command === "query") {
-    const [operation, subject] = rest
-    const kind = operation === "check" ? "all" : "all"
-    print(await query(kind, operation ?? "graph", subject))
+    const path = yield* Path
+    const parsed = parseQueryArguments(args.slice(1))
+    const value = yield* queryGraph(
+      parsed.projection,
+      parsed.operation,
+      parsed.subject,
+      path.join(root, "docs/generated"),
+    )
+    yield* Console.log(printQuery(value, parsed.format))
     return
   }
-  throw new Error("usage: repository-graph-main.ts generate | check-generated | query <operation> [subject]")
-}
+  return yield* QueryError.make({
+    message: "usage: repository-graph-main.ts generate | check-generated | query <operation> [subject]",
+  })
+})
 
 const command = Command.make("repository-graph", { args: Argument.variadic(Argument.string("argument")) }, ({ args }) =>
-  Effect.promise(() => main(args)),
+  main(args),
 )
 
-if (import.meta.main) {
-  process.chdir(resolve(import.meta.dirname, "../../.."))
-  BunRuntime.runMain(Command.run(command, { version: "0.0.0" }).pipe(Effect.provide(BunServices.layer)))
-}
+if (import.meta.main)
+  BunRuntime.runMain(
+    Effect.scoped(
+      Effect.flatMap(Layer.build(BunServices.layer), (context) =>
+        Effect.provide(Command.run(command, { version: "0.0.0" }), context),
+      ),
+    ),
+  )
 
 export type { GraphArtifact }

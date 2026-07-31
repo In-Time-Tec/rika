@@ -1,8 +1,11 @@
 [
   {
-    "rule": "legacy-package-boundaries",
-    "paths": ["packages/*", "apps/rika"],
-    "removalSlice": 10,
-    "reason": "Legacy package names and broad export maps are removed after package ownership migration."
+    "rule": "export-count",
+    "paths": [
+      "tooling/repository-graph/src/repository-graph.ts",
+      "tooling/repository-policy/src/package-boundary-policy.ts"
+    ],
+    "removalSlice": 2,
+    "reason": "Slice 1 keeps graph and policy contracts together until the owning tooling decomposition slice."
   }
 ]

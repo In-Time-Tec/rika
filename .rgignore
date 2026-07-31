@@ -7,6 +7,10 @@ tmp/
 artifacts/
 repos/
 docs/generated/
-**/__snapshots__/
-**/visual-fixtures/
-**/*.styles.json
+**/*.snap
+**/*.snapshot.*
+**/*.recording.*
+**/*.payload.*
+**/test/fixtures/visual/*.frame.txt
+**/test/fixtures/visual/*.ppm
+**/test/fixtures/visual/*.styles.json

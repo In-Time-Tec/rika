@@ -18,7 +18,8 @@
   "dependencies": {
     "@effect/platform-bun": "catalog:",
     "dependency-cruiser": "catalog:",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "prettier": "catalog:"
   },
   "devDependencies": {
     "@types/bun": "catalog:",

@@ -19,7 +19,8 @@
   "devDependencies": {
     "@effect/platform-bun": "catalog:",
     "@types/bun": "catalog:",
-    "typescript": "catalog:",
-    "vitest": "catalog:"
+    "typescript": "5.8.3",
+    "vitest": "catalog:",
+    "@typescript-eslint/parser": "catalog:"
   }
 }

@@ -5,6 +5,9 @@ import {
   checkManifests,
   checkPackageMetadata,
   checkScriptBoundaries,
+  checkSourceMetrics,
+  validateWaivers,
+  applyBaselineAndWaivers,
 } from "./package-boundary-policy"
 
 const manifest = (name: string, dependencies: Record<string, string>, extra: Record<string, unknown> = {}) => ({
@@ -55,5 +58,45 @@ describe("repository policy", () => {
   test("combines diagnostics with remediation text", () => {
     const diagnostics = checkManifests([{ path: "bad/package.json", manifest: { name: "bad" } }])
     expect(diagnostics[0]?.remediation).toContain("rika.kind")
+  })
+
+  test("enforces warning and failure source thresholds", () => {
+    expect(checkSourceMetrics({ path: "x.ts", lines: 501, exports: 5, dependencies: 13 })).toEqual([
+      expect.objectContaining({ rule: "file-size", severity: "warning" }),
+      expect.objectContaining({ rule: "export-count", severity: "warning" }),
+      expect.objectContaining({ rule: "dependency-count", severity: "warning" }),
+    ])
+    expect(
+      checkSourceMetrics({ path: "x.ts", lines: 801, exports: 9, dependencies: 19 }).every(
+        (item) => item.severity === "error",
+      ),
+    ).toBe(true)
+  })
+
+  test("validates exact path waivers and suppresses only matching baseline diagnostics", () => {
+    expect(() =>
+      validateWaivers([{ rule: "file-size", paths: ["packages/*"], removalSlice: 2, reason: "bad" }]),
+    ).toThrow()
+    const diagnostic = {
+      path: "packages/legacy.ts",
+      rule: "file-size",
+      severity: "error" as const,
+      message: "old",
+      remediation: "split",
+    }
+    expect(
+      applyBaselineAndWaivers({
+        diagnostics: [diagnostic],
+        baseline: { base: "19a8a4b", paths: [], entries: [{ ...diagnostic }] },
+        waivers: [],
+      }),
+    ).toEqual([])
+    expect(
+      applyBaselineAndWaivers({
+        diagnostics: [diagnostic],
+        baseline: { base: "19a8a4b", paths: [], entries: [] },
+        waivers: [],
+      }),
+    ).toEqual([diagnostic])
   })
 })
