@@ -8,7 +8,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Runtime as ToolRuntime } from "@rika/coding-tools/coding-tool-catalog"
 import { Context, Deferred, Effect, Fiber, Layer, Ref } from "effect"
-import * as ExecutionIngest from "../../../product/src/execution-ingest"
+import { ExecutionIngest } from "@rika/product/product-operation"
 import { Operation } from "@rika/product/product-operation"
 
 const noInspection = (): ExecutionBackend.Inspection | undefined => undefined

@@ -11,15 +11,11 @@ import { Runtime as ToolRuntime } from "@rika/coding-tools/coding-tool-catalog"
 import * as Transcript from "@rika/transcript/transcript-unit"
 import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Result, Schema } from "effect"
 import { TestClock } from "effect/testing"
-import * as ExecutionIngest from "../../../product/src/execution-ingest"
+import { ExecutionIngest } from "@rika/product/product-operation"
 import { Operation } from "@rika/product/product-operation"
-import * as UsageCost from "../../../product/src/usage-cost"
-import { createTurn, executionRoute } from "../../../product/test/current-state"
-import {
-  delegationUnit,
-  invalidatedProjection,
-  storeProjection,
-} from "../../../product/test/transcript-repository-fixture"
+import * as UsageCost from "@rika/product/usage-projection"
+import { createTurn, executionRoute } from "../support/product-test-current-state"
+import { delegationUnit, invalidatedProjection, storeProjection } from "../support/product-test-transcript-fixture"
 
 const productLayer = <
   ThreadError,
@@ -46,11 +42,12 @@ const productLayer = <
       options.threadSummaryRepositoryLayer ??
       SummaryRepository.memoryLayer.pipe(
         Layer.provide(Layer.merge(options.repositoryLayer, options.turnRepositoryLayer)),
+        Layer.orDie,
       ),
     transcriptRepositoryLayer:
       options.transcriptRepositoryLayer ??
-      TranscriptRepository.memoryLayerWithTurns.pipe(Layer.provide(options.turnRepositoryLayer)),
-    usageRepositoryLayer: options.usageRepositoryLayer ?? UsageRepository.memoryLayer,
+      TranscriptRepository.memoryLayerWithTurns.pipe(Layer.provide(options.turnRepositoryLayer), Layer.orDie),
+    usageRepositoryLayer: options.usageRepositoryLayer ?? UsageRepository.memoryLayer.pipe(Layer.orDie),
   })
 
 const collectEvents = (session: Operation.InteractiveSession, events: Array<Operation.InteractiveEvent>) =>

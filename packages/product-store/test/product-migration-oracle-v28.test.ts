@@ -4,44 +4,8 @@ import { Effect, FileSystem, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { Database as NativeDatabase } from "bun:sqlite"
 import * as Database from "@rika/product-store/product-database-layer"
-import * as Turn from "@rika/product/turn-record"
 import { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
 import oracle from "./fixtures/product-migration-oracle-v28.fixture.json"
-import routeFixture from "./fixtures/product-route-snapshot.fixture.json"
-
-const legacyModel = (model: Turn.ExecutionModelRoute) => {
-  const connection = model.providerConnection
-  return {
-    role: model.role,
-    alias: model.alias,
-    provider: connection.provider,
-    model: model.model,
-    registrationKey: model.registrationIdentity,
-    providerProtocol: connection.protocol,
-    providerBaseUrl: connection.baseUrl,
-    ...(connection.apiKeyEnvironment === undefined ? {} : { providerApiKeyEnv: connection.apiKeyEnvironment }),
-    effort: model.effort,
-    fast: model.fast,
-    requestVariant: model.requestVariant,
-    ...(model.providerOptions === undefined ? {} : { providerOptions: model.providerOptions }),
-    compaction: model.compaction,
-  }
-}
-
-const legacyRoute = (route: Turn.ExecutionRoutePin) => ({
-  version: 1,
-  mode: route.mode,
-  ...(route.tokenBudget === undefined ? {} : { tokenBudget: route.tokenBudget }),
-  ...(route.title === undefined ? {} : { title: legacyModel(route.title) }),
-  ...(route.compactionSummary === undefined ? {} : { compactionSummary: legacyModel(route.compactionSummary) }),
-  main: legacyModel(route.main),
-  oracle: legacyModel(route.oracle),
-  ...(route.agents === undefined
-    ? {}
-    : {
-        agents: Object.fromEntries(Object.entries(route.agents).map(([role, model]) => [role, legacyModel(model)])),
-      }),
-})
 
 const makeDatabase = (filename: string) => Effect.scoped(Layer.build(Database.layer(filename)))
 
@@ -58,6 +22,7 @@ const prepareV27 = (filename: string, routeText: string) =>
         "INSERT INTO rika_turns (id, thread_id, prompt, status, execution_route_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
       )
       .run("oracle-turn", "oracle-thread", "oracle", "completed", routeText, 1, 1)
+    database.exec("PRAGMA wal_checkpoint(TRUNCATE)")
     database.close()
   })
 
@@ -77,57 +42,49 @@ const readRoute = (filename: string) =>
     }),
   )
 
+const databaseSidecars = (filename: string) => [filename, `${filename}-wal`, `${filename}-shm`]
+
 it.layer(BunServices.layer)("v28 migration oracle", (test) => {
-  test.effect("rewrites every route role and preserves opaque identities", () =>
+  test.effect("rewrites the authoritative fixture and preserves every canonical field", () =>
     Effect.scoped(
       Effect.gen(function* () {
         expect(oracle.migrationCount).toBe(28)
         expect(oracle.migrationName).toBe("product_route_snapshot")
-        expect(routeFixture.roles).toHaveLength(10)
+        expect(oracle.legacyRoute).toBeDefined()
+        expect(oracle.expectedSnapshot).toBeDefined()
         const fileSystem = yield* FileSystem.FileSystem
         const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-v28-oracle-" })
         const filename = `${directory}/rika.db`
         yield* makeDatabase(filename)
-        const route = Turn.testExecutionRoute("high")
-        const before = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(legacyRoute(route))
-        yield* prepareV27(filename, before)
+        const routeText = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(oracle.legacyRoute)
+        yield* prepareV27(filename, routeText)
         yield* makeDatabase(filename)
-        const snapshot = yield* readRoute(filename)
-        expect(snapshot.version).toBe(1)
-        expect(snapshot.mode).toBe("high")
-        expect(snapshot.main.registrationIdentity).toBe("test")
-        expect(Object.values(snapshot.agents ?? {}).map((model) => model.role)).toEqual([
-          "librarian",
-          "painter",
-          "review",
-          "readThread",
-          "surgeon",
-          "task",
-        ])
-        const text = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(snapshot)
-        for (const field of routeFixture.forbiddenFields) expect(text).not.toContain(field)
+        expect(yield* readRoute(filename)).toEqual(oracle.expectedSnapshot)
       }),
     ),
   )
 
-  test.effect("rejects malformed and future route rows before writing any database bytes", () =>
+  test.effect("rejects every declared future version before writing database or sidecar bytes", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem
         const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-v28-reject-" })
-        const futureRoute = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)({
-          ...legacyRoute(Turn.testExecutionRoute()),
-          version: 99,
-        })
-        for (const routeText of ["{", futureRoute]) {
-          const filename = `${directory}/${routeText.length}/rika.db`
+        for (const version of oracle.rejectedVersions) {
+          const filename = `${directory}/${version}/rika.db`
           yield* makeDatabase(filename)
+          const futureRoute = { ...oracle.legacyRoute, version }
+          const routeText = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.UnknownFromJsonString))(futureRoute)
           yield* prepareV27(filename, routeText)
-          const before = yield* fileSystem.readFile(filename)
+          const before = new Map<string, Uint8Array>()
+          for (const path of databaseSidecars(filename))
+            if (yield* fileSystem.exists(path)) before.set(path, yield* fileSystem.readFile(path))
           const result = yield* Effect.result(makeDatabase(filename))
           expect(result._tag).toBe("Failure")
-          const after = yield* fileSystem.readFile(filename)
-          expect(Array.from(after)).toEqual(Array.from(before))
+          for (const path of databaseSidecars(filename)) {
+            const exists = yield* fileSystem.exists(path)
+            expect(exists).toBe(before.has(path))
+            if (exists) expect(yield* fileSystem.readFile(path)).toEqual(before.get(path))
+          }
         }
       }),
     ),

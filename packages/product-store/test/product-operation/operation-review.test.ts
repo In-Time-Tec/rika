@@ -8,8 +8,8 @@ import { Runtime as ToolRuntime } from "@rika/coding-tools/coding-tool-catalog"
 import { Context, Deferred, Effect, Fiber, Layer, Ref } from "effect"
 import { TestClock, TestConsole } from "effect/testing"
 import { Operation, ProductAgent } from "@rika/product/product-operation"
-import { provideLayer } from "../../../product/test/layer"
-import { createTurn } from "../../../product/test/current-state"
+import { provideLayer } from "../support/product-test-layer"
+import { createTurn } from "../support/product-test-current-state"
 
 const backend = ExecutionBackend.Service.of({
   invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),

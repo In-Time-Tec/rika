@@ -19,11 +19,34 @@
         "packages/*/package.json",
         "tooling/*/package.json",
         "tooling/repository-policy/**/*.ts",
-        "tooling/repository-policy/**/*.json"
+        "tooling/repository-policy/**/*.json",
+        "apps/**/*",
+        "packages/**/*",
+        "scripts/**/*",
+        "test/**/*",
+        "AGENTS.md",
+        "CONTEXT.md",
+        "PRODUCT.md",
+        "plans/**/*.md",
+        "docs/features/**/*.md",
+        "docs/decisions/**/*.md"
       ]
     },
     "//#repository-graph-check": {
-      "inputs": ["package.json", "bun.lock", "tsconfig.json", "tooling/repository-graph/**/*", "docs/generated/*.json"]
+      "inputs": [
+        "package.json",
+        "bun.lock",
+        "tsconfig.json",
+        "apps/**/*",
+        "packages/**/*",
+        "scripts/**/*",
+        "test/**/*",
+        "tooling/repository-graph/**/*",
+        "tooling/repository-policy/**/*",
+        "docs/generated/*.json",
+        "docs/**/*.md",
+        "plans/**/*.md"
+      ]
     },
     "//#diagnostics": {
       "inputs": [

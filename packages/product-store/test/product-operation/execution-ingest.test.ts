@@ -8,10 +8,10 @@ import * as ExecutionBackend from "@rika/product/execution-service"
 import * as Transcript from "@rika/transcript/transcript-unit"
 import { Context, Deferred, Effect, Exit, Layer, Ref, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
-import * as ExecutionIngest from "../../../product/src/execution-ingest"
-import * as UsageCost from "../../../product/src/usage-cost"
-import { executionRoute } from "../../../product/test/current-state"
-import { storeProjection } from "../../../product/test/transcript-repository-fixture"
+import { ExecutionIngest } from "@rika/product/product-operation"
+import * as UsageCost from "@rika/product/usage-projection"
+import { executionRoute } from "../support/product-test-current-state"
+import { storeProjection } from "../support/product-test-transcript-fixture"
 
 const threadId = Thread.ThreadId.make("ingest-thread")
 const rootId = Turn.TurnId.make("root")

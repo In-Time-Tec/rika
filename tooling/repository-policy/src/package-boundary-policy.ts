@@ -587,6 +587,32 @@ export const readWorkspaceManifests = Effect.fn("RepositoryPolicy.readWorkspaceM
   )
 })
 
+export const checkWorkspaceTestTopology = Effect.fn("RepositoryPolicy.checkWorkspaceTestTopology")(function* (
+  root = ".",
+  exceptions: ReadonlyArray<TestOwnershipException> = [],
+) {
+  const fileSystem = yield* FileSystem
+  const path = yield* Path
+  const sources = yield* fileSystem.glob("{apps,packages}/**/src/**/*.ts", {
+    root,
+    exclude: ["**/node_modules/**", "**/dist/**"],
+  })
+  const tests = yield* fileSystem.glob("{apps,packages}/**/test/**/*.ts", {
+    root,
+    exclude: ["**/node_modules/**", "**/dist/**"],
+  })
+  return sources.flatMap((absoluteSource) => {
+    const sourcePath = path.isAbsolute(absoluteSource) ? path.relative(root, absoluteSource) : absoluteSource
+    const packageRoot = sourcePath.split("/src/")[0]
+    const ownedTests = tests.filter((candidate) => {
+      const testPath = path.isAbsolute(candidate) ? path.relative(root, candidate) : candidate
+      return testPath.startsWith(`${packageRoot}/test/`)
+    })
+    const exception = exceptions.find((item) => item.sourcePath === sourcePath)?.testPath
+    return checkTestTopology({ sourcePath, testPaths: ownedTests, ...(exception === undefined ? {} : { exception }) })
+  })
+})
+
 export const scanSourcePolicies = Effect.fn("RepositoryPolicy.scanSourcePolicies")(function* (root = ".") {
   const fileSystem = yield* FileSystem
   const path = yield* Path

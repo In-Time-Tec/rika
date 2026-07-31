@@ -1,5 +1,8 @@
 import { Context, Effect, Schema } from "effect"
 import type { ExecutionRouteModelSnapshot, ExecutionRouteSnapshot } from "./execution-route-snapshot"
+import * as ExecutionIngestModule from "./execution-ingest"
+
+export const ExecutionIngest = ExecutionIngestModule
 
 export const Status = Schema.Literals(["accepted", "queued", "running", "waiting", "completed", "failed", "cancelled"])
 export type Status = typeof Status.Type

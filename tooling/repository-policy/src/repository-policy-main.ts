@@ -7,6 +7,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import {
   applyBaselineAndWaivers,
   checkManifests,
+  checkWorkspaceTestTopology,
   readWorkspaceManifests,
   scanSourcePolicies,
   validateWaivers,
@@ -62,14 +63,19 @@ const run = Effect.fn("RepositoryPolicy.run")(function* () {
   const rawExceptions = yield* readJson<unknown>(
     path.join(root, "tooling/repository-policy/test-ownership-exceptions.json"),
   )
-  validateOwnershipExceptions(rawExceptions)
+  const ownershipExceptions = validateOwnershipExceptions(rawExceptions)
   const baseline = yield* readJson<BaselineInventory>(
     path.join(root, "tooling/repository-policy/baseline-inventory.json"),
   )
   if (baseline.base !== "19a8a4b" || !Array.isArray(baseline.paths) || !Array.isArray(baseline.entries))
     return yield* PolicyError.make({ message: "baseline inventory must be pinned to 19a8a4b" })
   const diagnostics = applyBaselineAndWaivers({
-    diagnostics: [...checkManifests(manifests), ...sourceDiagnostics, ...outputDiagnostics],
+    diagnostics: [
+      ...checkManifests(manifests),
+      ...sourceDiagnostics,
+      ...outputDiagnostics,
+      ...(yield* checkWorkspaceTestTopology(root, ownershipExceptions)),
+    ],
     baseline,
     waivers,
   })

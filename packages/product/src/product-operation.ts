@@ -1,4 +1,8 @@
 export * from "./operation-contract"
+import * as ExecutionIngestModule from "./execution-ingest"
+
+export import ExecutionIngest = ExecutionIngestModule
+
 export * as Operation from "./operation"
 export * as ContextFileSystem from "./context-file-system"
 export * as ContextUsage from "./context-usage"

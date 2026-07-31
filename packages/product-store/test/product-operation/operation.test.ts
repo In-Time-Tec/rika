@@ -16,11 +16,11 @@ import { ExecutionExtensions, PluginRegistry } from "@rika/extensions/plugin-con
 import { Context, Clock, Deferred, Duration, Effect, Fiber, Layer, Queue, Ref, Scheduler, Schema } from "effect"
 import { TestClock, TestConsole } from "effect/testing"
 import { it as rawIt } from "vitest"
-import * as ExecutionIngest from "../../../product/src/execution-ingest"
+import { ExecutionIngest } from "@rika/product/product-operation"
 import { Operation, ResolvedContext } from "@rika/product/product-operation"
-import { queuedTurnPromoteMaxAgeMs } from "../../../product/src/queued-turn-policy"
-import { createTurn, executionRoute } from "../../../product/test/current-state"
-import { storeProjection } from "../../../product/test/transcript-repository-fixture"
+import { queuedTurnPromoteMaxAgeMs } from "@rika/product/pending-turn"
+import { createTurn, executionRoute } from "../support/product-test-current-state"
+import { storeProjection } from "../support/product-test-transcript-fixture"
 
 const productLayer = <
   ThreadError,
@@ -47,11 +47,12 @@ const productLayer = <
       options.threadSummaryRepositoryLayer ??
       ProductStoreSummaryRepository.memoryLayer.pipe(
         Layer.provide(Layer.merge(options.repositoryLayer, options.turnRepositoryLayer)),
+        Layer.orDie,
       ),
     transcriptRepositoryLayer:
       options.transcriptRepositoryLayer ??
-      TranscriptRepository.memoryLayerWithTurns.pipe(Layer.provide(options.turnRepositoryLayer)),
-    usageRepositoryLayer: options.usageRepositoryLayer ?? ProductStoreUsageRepository.memoryLayer,
+      TranscriptRepository.memoryLayerWithTurns.pipe(Layer.provide(options.turnRepositoryLayer), Layer.orDie),
+    usageRepositoryLayer: options.usageRepositoryLayer ?? ProductStoreUsageRepository.memoryLayer.pipe(Layer.orDie),
   })
 
 const provideLayer =

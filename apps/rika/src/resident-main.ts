@@ -317,9 +317,19 @@ const start = () => {
           }),
           provideLayerScoped(Layer.mergeAll(BunServices.layer, BunCrypto.layer, FetchHttpClient.layer)),
         )
-  process.on("SIGINT", () => {})
+  const removeSigintIsolation = installResidentSigintIsolation()
   const fiber = Effect.runFork(observedProgram("resident", hostDataRoot ?? defaultDataRoot, hostProgram))
-  fiber.addObserver((exit) => process.exit(exit._tag === "Success" ? 0 : 1))
+  fiber.addObserver((exit) => {
+    removeSigintIsolation()
+    process.exit(exit._tag === "Success" ? 0 : 1)
+  })
+}
+
+const isolateSigint = () => {}
+
+export const installResidentSigintIsolation = (): (() => void) => {
+  process.on("SIGINT", isolateSigint)
+  return () => process.off("SIGINT", isolateSigint)
 }
 
 if (import.meta.main) start()

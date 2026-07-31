@@ -10,8 +10,8 @@ import * as Transcript from "@rika/transcript/transcript-unit"
 import { ThreadTools, ToolInvocation } from "@rika/coding-tools/coding-tool-catalog"
 import { Context, Effect, Layer, Schema, Stream } from "effect"
 import { ThreadQuery, ThreadToolHandlers } from "@rika/product/product-operation"
-import { provideLayer } from "../../../product/test/layer"
-import { delegationUnit, storeProjection } from "../../../product/test/transcript-repository-fixture"
+import { provideLayer } from "../support/product-test-layer"
+import { delegationUnit, storeProjection } from "../support/product-test-transcript-fixture"
 
 const workspace = "/work/acme"
 const invocation = ToolInvocation.ToolInvocation.of({

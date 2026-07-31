@@ -379,6 +379,16 @@
       "testKind": "process-test"
     },
     {
+      "id": "apps/rika/test/client-signal.test.ts",
+      "path": "apps/rika/test/client-signal.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "apps/rika/test/command.test.ts",
       "path": "apps/rika/test/command.test.ts",
       "workspace": "@rika/cli",
@@ -951,6 +961,14 @@
       "production": true,
       "publicExports": [],
       "package": "@typescript-eslint/parser"
+    },
+    {
+      "id": "external:✖",
+      "workspace": "root",
+      "kind": "external",
+      "production": true,
+      "publicExports": [],
+      "package": "✖"
     },
     {
       "id": "external:bun:sqlite",
@@ -2591,6 +2609,33 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/product-store/test/support/product-test-current-state.ts",
+      "path": "packages/product-store/test/support/product-test-current-state.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/product-store/test/support/product-test-layer.ts",
+      "path": "packages/product-store/test/support/product-test-layer.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/product-store/test/support/product-test-transcript-fixture.ts",
+      "path": "packages/product-store/test/support/product-test-transcript-fixture.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/product-store/test/thread-interaction-repository.test.ts",
       "path": "packages/product-store/test/thread-interaction-repository.test.ts",
       "workspace": "@rika/product-store",
@@ -2726,6 +2771,42 @@
       "publicExports": []
     },
     {
+      "id": "packages/product/src/execution-approval.ts",
+      "path": "packages/product/src/execution-approval.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./execution-approval"]
+    },
+    {
+      "id": "packages/product/src/execution-child-run.ts",
+      "path": "packages/product/src/execution-child-run.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./execution-child-run"]
+    },
+    {
+      "id": "packages/product/src/execution-event.ts",
+      "path": "packages/product/src/execution-event.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./execution-event"]
+    },
+    {
+      "id": "packages/product/src/execution-identifier.ts",
+      "path": "packages/product/src/execution-identifier.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./execution-identifier"]
+    },
+    {
       "id": "packages/product/src/execution-ingest-projection-contract.ts",
       "path": "packages/product/src/execution-ingest-projection-contract.ts",
       "workspace": "@rika/product",
@@ -2753,6 +2834,24 @@
       "publicExports": []
     },
     {
+      "id": "packages/product/src/execution-inspection.ts",
+      "path": "packages/product/src/execution-inspection.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./execution-inspection"]
+    },
+    {
+      "id": "packages/product/src/execution-request.ts",
+      "path": "packages/product/src/execution-request.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./execution-request"]
+    },
+    {
       "id": "packages/product/src/execution-route-snapshot.ts",
       "path": "packages/product/src/execution-route-snapshot.ts",
       "workspace": "@rika/product",
@@ -2769,6 +2868,15 @@
       "kind": "source",
       "production": true,
       "publicExports": ["./execution-status"]
+    },
+    {
+      "id": "packages/product/src/execution-workflow.ts",
+      "path": "packages/product/src/execution-workflow.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./execution-workflow"]
     },
     {
       "id": "packages/product/src/extension-operations.ts",
@@ -3723,6 +3831,16 @@
       "publicExports": []
     },
     {
+      "id": "packages/relay-execution/test/scripted-model-runtime.test.ts",
+      "path": "packages/relay-execution/test/scripted-model-runtime.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/relay-execution/test/specialty-transcripts.test.ts",
       "path": "packages/relay-execution/test/specialty-transcripts.test.ts",
       "workspace": "@rika/relay-execution",
@@ -4555,6 +4673,15 @@
       "publicExports": ["./model-usage-fallback"]
     },
     {
+      "id": "packages/transcript/src/nested-transcript-projection.ts",
+      "path": "packages/transcript/src/nested-transcript-projection.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./nested-transcript-projection"]
+    },
+    {
       "id": "packages/transcript/src/partial-input.ts",
       "path": "packages/transcript/src/partial-input.ts",
       "workspace": "@rika/transcript",
@@ -4580,6 +4707,24 @@
       "kind": "source",
       "production": true,
       "publicExports": ["./transcript-presentation-model", "./transcript-projection-model", "./transcript-source-event"]
+    },
+    {
+      "id": "packages/transcript/src/transcript-projection.ts",
+      "path": "packages/transcript/src/transcript-projection.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./transcript-projection"]
+    },
+    {
+      "id": "packages/transcript/src/transcript-settlement.ts",
+      "path": "packages/transcript/src/transcript-settlement.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./transcript-settlement"]
     },
     {
       "id": "packages/transcript/src/transcript-unit.ts",
@@ -6943,6 +7088,22 @@
     },
     {
       "from": "apps/rika/test/client-main.proc.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/client-signal.test.ts",
+      "to": "apps/rika/src/client-main.ts",
+      "specifier": "../src/client-main",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/client-signal.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -11462,14 +11623,6 @@
       "production": true
     },
     {
-      "from": "packages/product-store/src/product-database.ts",
-      "to": "packages/product/src/execution-route-snapshot.ts",
-      "specifier": "@rika/product/execution-route-snapshot",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
       "from": "packages/product-store/src/sqlite-thread-repository.ts",
       "to": "packages/product-store/src/product-database.ts",
       "specifier": "./product-database",
@@ -12199,14 +12352,6 @@
     },
     {
       "from": "packages/product-store/test/product-migration-oracle-v28.test.ts",
-      "to": "packages/product-store/test/fixtures/product-route-snapshot.fixture.json",
-      "specifier": "./fixtures/product-route-snapshot.fixture.json",
-      "kind": "import",
-      "relationship": "asset",
-      "production": true
-    },
-    {
-      "from": "packages/product-store/test/product-migration-oracle-v28.test.ts",
       "to": "packages/product/src/execution-route-snapshot.ts",
       "specifier": "@rika/product/execution-route-snapshot",
       "kind": "import",
@@ -12214,14 +12359,6 @@
       "production": false
     },
     {
-      "from": "packages/product-store/test/product-migration-oracle-v28.test.ts",
-      "to": "packages/product/src/turn-schema.ts",
-      "specifier": "@rika/product/turn-record",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
       "from": "packages/product-store/test/product-operation/execution-ingest.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -12271,8 +12408,16 @@
     },
     {
       "from": "packages/product-store/test/product-operation/execution-ingest.test.ts",
-      "to": "packages/product/src/execution-ingest.ts",
-      "specifier": "../../../product/src/execution-ingest",
+      "to": "packages/product-store/test/support/product-test-current-state.ts",
+      "specifier": "../support/product-test-current-state",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/execution-ingest.test.ts",
+      "to": "packages/product-store/test/support/product-test-transcript-fixture.ts",
+      "specifier": "../support/product-test-transcript-fixture",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -12281,6 +12426,14 @@
       "from": "packages/product-store/test/product-operation/execution-ingest.test.ts",
       "to": "packages/product/src/product-execution-contract.ts",
       "specifier": "@rika/product/execution-service",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/execution-ingest.test.ts",
+      "to": "packages/product/src/product-operation.ts",
+      "specifier": "@rika/product/product-operation",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -12304,23 +12457,7 @@
     {
       "from": "packages/product-store/test/product-operation/execution-ingest.test.ts",
       "to": "packages/product/src/usage-cost.ts",
-      "specifier": "../../../product/src/usage-cost",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/execution-ingest.test.ts",
-      "to": "packages/product/test/current-state.ts",
-      "specifier": "../../../product/test/current-state",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/execution-ingest.test.ts",
-      "to": "packages/product/test/transcript-repository-fixture.ts",
-      "specifier": "../../../product/test/transcript-repository-fixture",
+      "specifier": "@rika/product/usage-projection",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -12407,8 +12544,16 @@
     },
     {
       "from": "packages/product-store/test/product-operation/interactive-session.test.ts",
-      "to": "packages/product/src/execution-ingest.ts",
-      "specifier": "../../../product/src/execution-ingest",
+      "to": "packages/product-store/test/support/product-test-current-state.ts",
+      "specifier": "../support/product-test-current-state",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/interactive-session.test.ts",
+      "to": "packages/product-store/test/support/product-test-transcript-fixture.ts",
+      "specifier": "../support/product-test-transcript-fixture",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -12448,23 +12593,7 @@
     {
       "from": "packages/product-store/test/product-operation/interactive-session.test.ts",
       "to": "packages/product/src/usage-cost.ts",
-      "specifier": "../../../product/src/usage-cost",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/interactive-session.test.ts",
-      "to": "packages/product/test/current-state.ts",
-      "specifier": "../../../product/test/current-state",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/interactive-session.test.ts",
-      "to": "packages/product/test/transcript-repository-fixture.ts",
-      "specifier": "../../../product/test/transcript-repository-fixture",
+      "specifier": "@rika/product/usage-projection",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -12599,16 +12728,8 @@
     },
     {
       "from": "packages/product-store/test/product-operation/operation-interactive-extensions.test.ts",
-      "to": "packages/product/src/execution-ingest.ts",
-      "specifier": "../../../product/src/execution-ingest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-interactive-extensions.test.ts",
-      "to": "packages/product/src/operation-contract.ts",
-      "specifier": "../../../product/src/operation-contract",
+      "to": "packages/product-store/test/support/product-test-transcript-fixture.ts",
+      "specifier": "../support/product-test-transcript-fixture",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -12648,15 +12769,7 @@
     {
       "from": "packages/product-store/test/product-operation/operation-interactive-extensions.test.ts",
       "to": "packages/product/src/usage-cost.ts",
-      "specifier": "../../../product/src/usage-cost",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-interactive-extensions.test.ts",
-      "to": "packages/product/test/transcript-repository-fixture.ts",
-      "specifier": "../../../product/test/transcript-repository-fixture",
+      "specifier": "@rika/product/usage-projection",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -12711,6 +12824,14 @@
     },
     {
       "from": "packages/product-store/test/product-operation/operation-projection-admission.test.ts",
+      "to": "packages/product-store/test/support/product-test-current-state.ts",
+      "specifier": "../support/product-test-current-state",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-projection-admission.test.ts",
       "to": "packages/product/src/product-execution-contract.ts",
       "specifier": "@rika/product/execution-service",
       "kind": "import",
@@ -12737,14 +12858,6 @@
       "from": "packages/product-store/test/product-operation/operation-projection-admission.test.ts",
       "to": "packages/product/src/turn-schema.ts",
       "specifier": "@rika/product/turn-record",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-projection-admission.test.ts",
-      "to": "packages/product/test/current-state.ts",
-      "specifier": "../../../product/test/current-state",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -12799,6 +12912,22 @@
     },
     {
       "from": "packages/product-store/test/product-operation/operation-review.test.ts",
+      "to": "packages/product-store/test/support/product-test-current-state.ts",
+      "specifier": "../support/product-test-current-state",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-review.test.ts",
+      "to": "packages/product-store/test/support/product-test-layer.ts",
+      "specifier": "../support/product-test-layer",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-review.test.ts",
       "to": "packages/product/src/product-execution-contract.ts",
       "specifier": "@rika/product/execution-service",
       "kind": "import",
@@ -12825,22 +12954,6 @@
       "from": "packages/product-store/test/product-operation/operation-review.test.ts",
       "to": "packages/product/src/turn-schema.ts",
       "specifier": "@rika/product/turn-record",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-review.test.ts",
-      "to": "packages/product/test/current-state.ts",
-      "specifier": "../../../product/test/current-state",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-review.test.ts",
-      "to": "packages/product/test/layer.ts",
-      "specifier": "../../../product/test/layer",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -12895,8 +13008,8 @@
     },
     {
       "from": "packages/product-store/test/product-operation/operation-thread-actions.test.ts",
-      "to": "packages/product/src/execution-ingest.ts",
-      "specifier": "../../../product/src/execution-ingest",
+      "to": "packages/product-store/test/support/product-test-layer.ts",
+      "specifier": "../support/product-test-layer",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -12929,14 +13042,6 @@
       "from": "packages/product-store/test/product-operation/operation-thread-actions.test.ts",
       "to": "packages/product/src/turn-schema.ts",
       "specifier": "@rika/product/turn-record",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-thread-actions.test.ts",
-      "to": "packages/product/test/layer.ts",
-      "specifier": "../../../product/test/layer",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -13047,8 +13152,16 @@
     },
     {
       "from": "packages/product-store/test/product-operation/operation.test.ts",
-      "to": "packages/product/src/execution-ingest.ts",
-      "specifier": "../../../product/src/execution-ingest",
+      "to": "packages/product-store/test/support/product-test-current-state.ts",
+      "specifier": "../support/product-test-current-state",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation.test.ts",
+      "to": "packages/product-store/test/support/product-test-transcript-fixture.ts",
+      "specifier": "../support/product-test-transcript-fixture",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -13072,7 +13185,7 @@
     {
       "from": "packages/product-store/test/product-operation/operation.test.ts",
       "to": "packages/product/src/queued-turn-policy.ts",
-      "specifier": "../../../product/src/queued-turn-policy",
+      "specifier": "@rika/product/pending-turn",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -13089,22 +13202,6 @@
       "from": "packages/product-store/test/product-operation/operation.test.ts",
       "to": "packages/product/src/turn-schema.ts",
       "specifier": "@rika/product/turn-record",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation.test.ts",
-      "to": "packages/product/test/current-state.ts",
-      "specifier": "../../../product/test/current-state",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation.test.ts",
-      "to": "packages/product/test/transcript-repository-fixture.ts",
-      "specifier": "../../../product/test/transcript-repository-fixture",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -13175,14 +13272,6 @@
     },
     {
       "from": "packages/product-store/test/product-operation/recorded-shell-session.test.ts",
-      "to": "packages/product/src/execution-ingest.ts",
-      "specifier": "../../../product/src/execution-ingest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/recorded-shell-session.test.ts",
       "to": "packages/product/src/product-execution-contract.ts",
       "specifier": "@rika/product/execution-service",
       "kind": "import",
@@ -13247,8 +13336,8 @@
     },
     {
       "from": "packages/product-store/test/product-operation/root-turn-owner.test.ts",
-      "to": "packages/product/src/root-turn-owner.ts",
-      "specifier": "../../../product/src/root-turn-owner",
+      "to": "packages/product/src/resident-service.ts",
+      "specifier": "@rika/product/resident-service",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -13335,6 +13424,22 @@
     },
     {
       "from": "packages/product-store/test/product-operation/thread-query.test.ts",
+      "to": "packages/product-store/test/support/product-test-layer.ts",
+      "specifier": "../support/product-test-layer",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/thread-query.test.ts",
+      "to": "packages/product-store/test/support/product-test-transcript-fixture.ts",
+      "specifier": "../support/product-test-transcript-fixture",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/thread-query.test.ts",
       "to": "packages/product/src/product-operation.ts",
       "specifier": "@rika/product/product-operation",
       "kind": "import",
@@ -13353,22 +13458,6 @@
       "from": "packages/product-store/test/product-operation/thread-query.test.ts",
       "to": "packages/product/src/turn-schema.ts",
       "specifier": "@rika/product/turn-record",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/thread-query.test.ts",
-      "to": "packages/product/test/layer.ts",
-      "specifier": "../../../product/test/layer",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/thread-query.test.ts",
-      "to": "packages/product/test/transcript-repository-fixture.ts",
-      "specifier": "../../../product/test/transcript-repository-fixture",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -13440,7 +13529,7 @@
     {
       "from": "packages/product-store/test/product-operation/thread-tool-gateway.test.ts",
       "to": "packages/product/src/thread-tool-service.ts",
-      "specifier": "../../../product/src/thread-tool-service",
+      "specifier": "@rika/product/thread-tool-service",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -13700,6 +13789,78 @@
       "kind": "import",
       "relationship": "test",
       "production": false
+    },
+    {
+      "from": "packages/product-store/test/support/product-test-current-state.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product-store/test/support/product-test-current-state.ts",
+      "to": "packages/product/src/turn-repository.ts",
+      "specifier": "@rika/product/turn-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product-store/test/support/product-test-current-state.ts",
+      "to": "packages/product/src/turn-schema.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product-store/test/support/product-test-layer.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product-store/test/support/product-test-transcript-fixture.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product-store/test/support/product-test-transcript-fixture.ts",
+      "to": "packages/product/src/product-operation.ts",
+      "specifier": "@rika/product/product-operation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product-store/test/support/product-test-transcript-fixture.ts",
+      "to": "packages/product/src/transcript-repository.ts",
+      "specifier": "@rika/product/transcript-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product-store/test/support/product-test-transcript-fixture.ts",
+      "to": "packages/product/src/turn-schema.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product-store/test/support/product-test-transcript-fixture.ts",
+      "to": "packages/transcript/src/transcript-unit.ts",
+      "specifier": "@rika/transcript/transcript-unit",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
     },
     {
       "from": "packages/product-store/test/thread-interaction-repository.test.ts",
@@ -14310,6 +14471,30 @@
       "production": true
     },
     {
+      "from": "packages/product/src/execution-child-run.ts",
+      "to": "packages/product/src/execution-route-snapshot.ts",
+      "specifier": "./execution-route-snapshot",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/execution-child-run.ts",
+      "to": "packages/product/src/execution-status.ts",
+      "specifier": "./execution-status",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/execution-identifier.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/product/src/execution-ingest-projection-contract.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -14449,6 +14634,30 @@
       "from": "packages/product/src/execution-ingest.ts",
       "to": "packages/transcript/src/transcript-unit.ts",
       "specifier": "@rika/transcript/transcript-unit",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/execution-inspection.ts",
+      "to": "packages/product/src/execution-status.ts",
+      "specifier": "./execution-status",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/execution-request.ts",
+      "to": "packages/product/src/execution-route-snapshot.ts",
+      "specifier": "./execution-route-snapshot",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/execution-request.ts",
+      "to": "packages/product/src/execution-workflow.ts",
+      "specifier": "./execution-workflow",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -14879,8 +15088,24 @@
     },
     {
       "from": "packages/product/src/product-execution-contract.ts",
+      "to": "packages/product/src/execution-ingest.ts",
+      "specifier": "./execution-ingest",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/product-execution-contract.ts",
       "to": "packages/product/src/execution-route-snapshot.ts",
       "specifier": "./execution-route-snapshot",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/product-operation.ts",
+      "to": "external:✖",
+      "specifier": "✖",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -14913,6 +15138,14 @@
       "from": "packages/product/src/product-operation.ts",
       "to": "packages/product/src/context-usage.ts",
       "specifier": "./context-usage",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/product-operation.ts",
+      "to": "packages/product/src/execution-ingest.ts",
+      "specifier": "./execution-ingest",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -15078,6 +15311,14 @@
       "production": true
     },
     {
+      "from": "packages/product/src/resident-service.ts",
+      "to": "packages/product/src/root-turn-owner.ts",
+      "specifier": "./root-turn-owner",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/product/src/resolved-context.ts",
       "to": "external:crypto",
       "specifier": "crypto",
@@ -15223,24 +15464,8 @@
     },
     {
       "from": "packages/product/src/thread-interaction-repository.ts",
-      "to": "packages/coding-tools/src/coding-tool-catalog.ts",
-      "specifier": "@rika/coding-tools/coding-tool-catalog",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/src/thread-interaction-repository.ts",
       "to": "packages/product/src/thread-schema.ts",
       "specifier": "@rika/product/thread-record",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/src/thread-interaction-repository.ts",
-      "to": "packages/product/src/turn-repository.ts",
-      "specifier": "./turn-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -15671,14 +15896,6 @@
     },
     {
       "from": "packages/product/src/transcript-repository.ts",
-      "to": "packages/product/src/turn-repository.ts",
-      "specifier": "./turn-repository",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/src/transcript-repository.ts",
       "to": "packages/product/src/turn-schema.ts",
       "specifier": "@rika/product/turn-record",
       "kind": "import",
@@ -15697,14 +15914,6 @@
       "from": "packages/product/src/turn-repository.ts",
       "to": "external:effect",
       "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/src/turn-repository.ts",
-      "to": "packages/product/src/execution-status.ts",
-      "specifier": "@rika/product/execution-status",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -18102,6 +18311,30 @@
       "production": true
     },
     {
+      "from": "packages/relay-execution/test/scripted-model-runtime.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/scripted-model-runtime.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/scripted-model-runtime.test.ts",
+      "to": "packages/relay-execution/src/model/provider/scripted-model-runtime.ts",
+      "specifier": "../src/model/provider/scripted-model-runtime",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/relay-execution/test/specialty-transcripts.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -20270,6 +20503,38 @@
       "production": true
     },
     {
+      "from": "packages/transcript/src/nested-transcript-projection.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/nested-transcript-projection.ts",
+      "to": "packages/transcript/src/schema.ts",
+      "specifier": "./schema",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/nested-transcript-projection.ts",
+      "to": "packages/transcript/src/transcript-settlement.ts",
+      "specifier": "./transcript-settlement",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/nested-transcript-projection.ts",
+      "to": "packages/transcript/src/unit-order.ts",
+      "specifier": "./unit-order",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/transcript/src/recorded-shell.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -20305,6 +20570,62 @@
       "from": "packages/transcript/src/schema.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/transcript-projection.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/transcript-projection.ts",
+      "to": "packages/transcript/src/fold.ts",
+      "specifier": "./fold",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/transcript-projection.ts",
+      "to": "packages/transcript/src/schema.ts",
+      "specifier": "./schema",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/transcript-projection.ts",
+      "to": "packages/transcript/src/unit-order.ts",
+      "specifier": "./unit-order",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/transcript-settlement.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/transcript-settlement.ts",
+      "to": "packages/transcript/src/fold.ts",
+      "specifier": "./fold",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/transcript-settlement.ts",
+      "to": "packages/transcript/src/schema.ts",
+      "specifier": "./schema",
       "kind": "import",
       "relationship": "runtime",
       "production": true

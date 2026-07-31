@@ -160,6 +160,12 @@ const expected: Record<string, ReadonlyArray<string>> = {
   ],
 }
 
+it("every frozen export target exists and resolves through Bun", () =>
+  Effect.gen(function* () {
+    for (const [packageName, names] of Object.entries(expected))
+      for (const name of names) yield* Effect.tryPromise(() => import(`${packageName}/${name}`))
+  }))
+
 for (const [packageName, names] of Object.entries(expected)) {
   const packagePath = packageName.slice("@rika/".length)
   it(`${packageName} exports exactly frozen keys`, () =>

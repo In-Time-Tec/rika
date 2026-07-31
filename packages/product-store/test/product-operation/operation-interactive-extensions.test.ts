@@ -9,11 +9,11 @@ import * as SummaryRepository from "@rika/product-store/sqlite-thread-summary-re
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as Transcript from "@rika/transcript/transcript-unit"
 import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Schema } from "effect"
-import * as ExecutionIngest from "../../../product/src/execution-ingest"
+import { ExecutionIngest } from "@rika/product/product-operation"
 import { Operation } from "@rika/product/product-operation"
-import { executeInteractiveCommand, InteractiveEventSchema } from "../../../product/src/operation-contract"
-import * as UsageCost from "../../../product/src/usage-cost"
-import { invalidatedProjection, storeProjection } from "../../../product/test/transcript-repository-fixture"
+import { executeInteractiveCommand, InteractiveEventSchema } from "@rika/product/product-operation"
+import * as UsageCost from "@rika/product/usage-projection"
+import { invalidatedProjection, storeProjection } from "../support/product-test-transcript-fixture"
 
 const baseBackend = ExecutionBackend.Service.of({
   invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),

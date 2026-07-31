@@ -109,7 +109,9 @@ export const makeReloadingTestModel: (
     const load = Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
       const script = yield* fileSystem.readFileString(path)
-      return yield* TestModel.make(yield* buildTestModelScript(script))
+      return yield* TestModel.make(yield* buildTestModelScript(script), {
+        metadata: { pricing: { inputPerMTok: 0, outputPerMTok: 0 } },
+      })
     })
     const initial = yield* load.pipe(
       Effect.mapError((cause) =>
@@ -138,7 +140,9 @@ export const makeScriptedModel = Effect.fn("ScriptedModelRuntime.makeScriptedMod
     try: () => import("@batonfx/test"),
     catch: (cause) => ExternalBoundaryError.make({ operation: "load test model", message: String(cause) }),
   })
-  return yield* TestModel.make(yield* buildTestModelScript(script))
+  return yield* TestModel.make(yield* buildTestModelScript(script), {
+    metadata: { pricing: { inputPerMTok: 0, outputPerMTok: 0 } },
+  })
 })
 
 export const makeConstantModel = Effect.fn("ScriptedModelRuntime.makeConstantModel")(function* (text: string) {
@@ -146,5 +150,10 @@ export const makeConstantModel = Effect.fn("ScriptedModelRuntime.makeConstantMod
     try: () => import("@batonfx/test"),
     catch: (cause) => ExternalBoundaryError.make({ operation: "load test model", message: String(cause) }),
   })
-  return yield* TestModel.make(Array.from({ length: 4 }, () => TestModel.text(text)))
+  return yield* TestModel.make(
+    Array.from({ length: 4 }, () => TestModel.text(text)),
+    {
+      metadata: { pricing: { inputPerMTok: 0, outputPerMTok: 0 } },
+    },
+  )
 })

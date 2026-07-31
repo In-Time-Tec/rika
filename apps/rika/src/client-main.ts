@@ -11,6 +11,7 @@ import {
   Effect,
   Exit,
   FileSystem,
+  Fiber,
   Layer,
   Option,
   Path,
@@ -71,6 +72,20 @@ export const cleanInteractiveRuntimeExit = (exitCode: number): boolean =>
 
 export const interactiveRuntimeRestartLimit = 3
 
+export const isInteractiveClientLaunch = (argv: ReadonlyArray<string> | undefined): boolean => {
+  if (argv === undefined) return true
+  return !argv.some(
+    (argument) =>
+      argument === "--execute" ||
+      argument === "-x" ||
+      argument === "run" ||
+      argument === "review" ||
+      argument === "threads" ||
+      argument === "workflow" ||
+      argument === "workflows",
+  )
+}
+
 export type InteractiveRuntimeRestartDecision =
   | { readonly _tag: "respawn"; readonly environment: Record<string, string> }
   | { readonly _tag: "fail"; readonly message: string }
@@ -104,6 +119,7 @@ export const interactiveRuntimeRestartPlan = (input: {
 }
 
 let interactiveSigintObserved = false
+let interactiveClientLaunch = true
 
 const privateRuntime = Effect.fn("ClientMain.privateRuntime")(function* (role: "interactive" | "resident") {
   const path = yield* Path.Path
@@ -147,6 +163,7 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
             )
             const dataRoot = yield* DataRoot.canonicalDataRoot(database, executionDatabase)
             const forwardedArguments = argv ?? (yield* stdio.args)
+            interactiveClientLaunch = isInteractiveClientLaunch(forwardedArguments)
             return yield* Effect.scoped(
               Effect.gen(function* () {
                 if (input._tag === "Interactive") {
@@ -302,14 +319,16 @@ export const clientProcessExitCode = <E, A>(input: {
 
 if (import.meta.main) {
   let interruptedBySigint = false
-  const markSigint = () => {
+  let rootFiber: ReturnType<typeof Effect.runFork> | undefined
+  const interruptRoot = () => {
     interruptedBySigint = true
     interactiveSigintObserved = true
+    if (!interactiveClientLaunch && rootFiber !== undefined) Effect.runFork(Fiber.interrupt(rootFiber))
   }
-  process.once("SIGINT", markSigint)
-  const fiber = Effect.runFork(run().pipe(provideLayerScoped(Layer.merge(BunServices.layer, FetchHttpClient.layer))))
-  fiber.addObserver((exit) => {
-    process.off("SIGINT", markSigint)
+  process.on("SIGINT", interruptRoot)
+  rootFiber = Effect.runFork(run().pipe(provideLayerScoped(Layer.merge(BunServices.layer, FetchHttpClient.layer))))
+  rootFiber.addObserver((exit) => {
+    process.off("SIGINT", interruptRoot)
     process.exit(clientProcessExitCode({ exit, interruptedBySigint }))
   })
 }

@@ -1,3 +1,7 @@
+import * as RootTurnOwnerModule from "./root-turn-owner"
+
+export const RootTurnOwner = RootTurnOwnerModule
+
 import {
   Context,
   Crypto,

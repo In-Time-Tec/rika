@@ -2,8 +2,10 @@ import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient"
 import * as SqliteMigrator from "@effect/sql-sqlite-bun/SqliteMigrator"
 import { Cause, Effect, Exit, FileSystem, Layer, Option, Path, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import { productRouteSnapshot } from "./migration/execution/product-migration-028-product-route-snapshot"
-import { toExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
+import {
+  decodeLegacyExecutionRoute,
+  productRouteSnapshot,
+} from "./migration/execution/product-migration-028-product-route-snapshot"
 
 const baseline = Effect.gen(function* () {
   const sql = yield* SqlClient
@@ -1122,32 +1124,32 @@ const validateKnown = (state: Effect.Success<ReturnType<typeof inspectDatabase>>
 
 const inspectExisting = (filename: string) =>
   Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem
+    const inspectionDirectory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-database-inspect-" })
+    const inspectionFilename = `${inspectionDirectory}/rika.db`
+    for (const suffix of ["", "-wal"] as const) {
+      const source = `${filename}${suffix}`
+      if (yield* fileSystem.exists(source))
+        yield* fileSystem.writeFile(`${inspectionFilename}${suffix}`, yield* fileSystem.readFile(source))
+    }
     const inspect = (candidate: string) =>
       Effect.exit(
         Effect.scoped(
           Effect.gen(function* () {
-            const context = yield* Layer.build(
-              SqliteClient.layer({
-                filename: candidate,
-                readonly: true,
-                readwrite: false,
-                create: false,
-              }),
-            )
+            const context = yield* Layer.build(SqliteClient.layer({ filename: candidate }))
             return yield* inspectDatabase().pipe(Effect.provide(context))
           }),
         ),
       )
-    const initial = yield* inspect(filename)
+    const initial = yield* inspect(inspectionFilename)
     const outcome = yield* Exit.match(initial, {
       onSuccess: (value) => Effect.succeed(Exit.succeed(value)),
       onFailure: () =>
         Effect.gen(function* () {
-          const fileSystem = yield* FileSystem.FileSystem
-          if (yield* fileSystem.exists(`${filename}-wal`)) return initial
+          if (yield* fileSystem.exists(`${inspectionFilename}-wal`)) return initial
           const path = yield* Path.Path
           const fileUrl = yield* path
-            .toFileUrl(filename)
+            .toFileUrl(inspectionFilename)
             .pipe(
               Effect.mapError((error) => fail(`Could not resolve the Rika product database path: ${String(error)}`)),
             )
@@ -1204,14 +1206,15 @@ const isFreshDatabaseFile = Effect.fn("ProductDatabase.isFreshDatabaseFile")(fun
 const validateRoutePayloads = (filename: string) =>
   Effect.scoped(
     Effect.gen(function* () {
-      const context = yield* Layer.build(
-        SqliteClient.layer({
-          filename,
-          readonly: true,
-          readwrite: false,
-          create: false,
-        }),
-      )
+      const fileSystem = yield* FileSystem.FileSystem
+      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-route-inspect-" })
+      const inspectionFilename = `${directory}/rika.db`
+      for (const suffix of ["", "-wal"] as const) {
+        const source = `${filename}${suffix}`
+        if (yield* fileSystem.exists(source))
+          yield* fileSystem.writeFile(`${inspectionFilename}${suffix}`, yield* fileSystem.readFile(source))
+      }
+      const context = yield* Layer.build(SqliteClient.layer({ filename: inspectionFilename }))
       yield* Effect.gen(function* () {
         const sql = yield* SqlClient
         const rows = yield* sql<{ readonly id: string; readonly route: string }>`
@@ -1224,7 +1227,7 @@ const validateRoutePayloads = (filename: string) =>
             Effect.mapError((error) => fail(`Malformed execution route JSON for turn ${row.id}: ${String(error)}`)),
           )
           yield* Effect.try({
-            try: () => toExecutionRouteSnapshot(value),
+            try: () => decodeLegacyExecutionRoute(value),
             catch: (error) => fail(`Malformed execution route for turn ${row.id}: ${String(error)}`),
           })
         }

@@ -73,6 +73,16 @@
       "testKind": "process-test"
     },
     {
+      "id": "apps/rika/test/client-signal.test.ts",
+      "path": "apps/rika/test/client-signal.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "apps/rika/test/command.test.ts",
       "path": "apps/rika/test/command.test.ts",
       "workspace": "@rika/cli",
@@ -627,6 +637,14 @@
       "production": true,
       "publicExports": [],
       "package": "@typescript-eslint/parser"
+    },
+    {
+      "id": "external:✖",
+      "workspace": "root",
+      "kind": "external",
+      "production": true,
+      "publicExports": [],
+      "package": "✖"
     },
     {
       "id": "external:bun:sqlite",
@@ -1891,6 +1909,16 @@
       "testKind": "process-test"
     },
     {
+      "id": "packages/relay-execution/test/scripted-model-runtime.test.ts",
+      "path": "packages/relay-execution/test/scripted-model-runtime.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/relay-execution/test/specialty-transcripts.test.ts",
       "path": "packages/relay-execution/test/specialty-transcripts.test.ts",
       "workspace": "@rika/relay-execution",
@@ -2865,6 +2893,14 @@
     },
     {
       "from": "apps/rika/test/client-main.proc.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/client-signal.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -4544,14 +4580,6 @@
       "production": true
     },
     {
-      "from": "packages/product-store/test/product-migration-oracle-v28.test.ts",
-      "to": "packages/product-store/test/fixtures/product-route-snapshot.fixture.json",
-      "specifier": "./fixtures/product-route-snapshot.fixture.json",
-      "kind": "import",
-      "relationship": "asset",
-      "production": true
-    },
-    {
       "from": "packages/product-store/test/product-operation/execution-ingest.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -5779,6 +5807,22 @@
       "from": "packages/relay-execution/test/recovery.proc.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/scripted-model-runtime.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/scripted-model-runtime.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "test",
       "production": false

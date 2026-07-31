@@ -7,7 +7,7 @@ import * as ExecutionBackend from "@rika/product/execution-service"
 import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
 import { Context, Deferred, Effect, Layer, Queue, Ref, Schema } from "effect"
 import { Operation } from "@rika/product/product-operation"
-import { executionRoute } from "../../../product/test/current-state"
+import { executionRoute } from "../support/product-test-current-state"
 
 const busyThreadId = Thread.ThreadId.make("busy-thread")
 const openThreadId = Thread.ThreadId.make("open-thread")
