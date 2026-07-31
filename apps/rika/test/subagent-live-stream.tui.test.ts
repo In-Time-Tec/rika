@@ -75,8 +75,16 @@ test(
         yield* Effect.sleep("300 millis")
         const finalFrame = yield* app.waitFrame("ROOT_FINISHED_AFTER_CHILD_STREAM", 1_000)
         expect(finalFrame).not.toContain("Execution failed")
-        app.close()
-        yield* app.done
+
+        let exited = false
+        for (let attempt = 0; attempt < 3 && !exited; attempt += 1) {
+          app.close()
+          exited = yield* app.done.pipe(
+            Effect.as(true),
+            Effect.timeoutOrElse({ duration: "1 second", orElse: () => Effect.succeed(false) }),
+          )
+        }
+        expect(exited).toBe(true)
       }),
     ),
   240_000,
