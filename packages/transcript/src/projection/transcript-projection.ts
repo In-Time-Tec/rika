@@ -1,51 +1,11 @@
-import { Catalog } from "@rika/coding-tools/coding-tool-catalog"
 import { Function } from "effect"
-import { childParentMatch, executionKey } from "./child-parent"
-import {
-  applyFoldEvent,
-  isTransientEvent,
-  makeProjectionFold,
-  restoreProjectionFold,
-  settleFoldChild,
-  settleFoldRunning,
-  snapshotFoldProjection,
-  type FoldMutation,
-} from "./fold"
-import { pricingVersion, usageTokens } from "./model-cost"
-import { partialInputRecord } from "./partial-input"
-import type { Presentation, Projection, ProjectionState, SourceEvent, Unit } from "./schema"
-import { childOrder, compareUnitOrder, localOrder } from "./unit-order"
-
-export * from "./schema"
-export * from "./unit-order"
-export * from "./unit-identity"
-export * from "./recorded-shell"
-export { pricingVersion, usageTokens, type UsageTokens } from "./model-cost"
-export { partialInputRecord } from "./partial-input"
-export { childParentMatch, executionKey, isTransientEvent }
-export {
-  applyAncestorOutcome,
-  applyChildOutcome,
-  applyFoldEvent,
-  foldExecutionOutcome,
-  foldHasRunningUnits,
-  foldUnit,
-  foldUnits,
-  makeProjectionFold,
-  parentToolForChild,
-  restoreProjectionFold,
-  settleFoldRunning,
-  snapshotFoldProjection,
-  snapshotFoldState,
-  type FoldMutation,
-  type ProjectionFold,
-  type UnitDelta,
-} from "./fold"
-export type { ChildParentCandidate } from "./child-parent"
-
-export const agentPresentation = (name: string): Presentation => Catalog.resolveAgentPresentation(name)
-
-export const agentPhrase = (input: Catalog.AgentPhrase): string => Catalog.agentPhrase(input)
+import { foldOperations } from "./transcript-event-fold"
+import type { FoldMutation } from "./transcript-event-fold"
+const { applyFoldEvent, makeProjectionFold, restoreProjectionFold, snapshotFoldProjection } = foldOperations
+import type { Projection, ProjectionState } from "../schema/transcript-projection-model"
+import type { SourceEvent } from "../schema/transcript-source-event"
+import type { Unit } from "../schema/transcript-unit"
+import { compareUnitOrder } from "../ordering/transcript-unit-order"
 
 const changed = (mutation: FoldMutation): boolean =>
   mutation.stateChanged || mutation.units.upsert.length > 0 || mutation.units.remove.length > 0
@@ -74,34 +34,6 @@ export const project: {
   for (const event of events.toSorted((left, right) => left.sequence - right.sequence)) applyFoldEvent(fold, event)
   return snapshotFoldProjection(fold)
 })
-
-export const settleRunning: {
-  (projection: Projection, status: "failed" | "cancelled", sequence: number): Projection
-  (status: "failed" | "cancelled", sequence: number): (projection: Projection) => Projection
-} = Function.dual(3, (projection: Projection, status: "failed" | "cancelled", sequence: number): Projection => {
-  const fold = restoreProjectionFold(projection)
-  return changed(settleFoldRunning(fold, status, sequence)) ? snapshotFoldProjection(fold) : projection
-})
-
-export const settleChild: {
-  (projection: Projection, childId: string, status: "complete" | "failed" | "cancelled", sequence: number): Projection
-  (
-    childId: string,
-    status: "complete" | "failed" | "cancelled",
-    sequence: number,
-  ): (projection: Projection) => Projection
-} = Function.dual(
-  4,
-  (
-    projection: Projection,
-    childId: string,
-    status: "complete" | "failed" | "cancelled",
-    sequence: number,
-  ): Projection => {
-    const fold = restoreProjectionFold(projection)
-    return changed(settleFoldChild(fold, childId, status, sequence)) ? snapshotFoldProjection(fold) : projection
-  },
-)
 
 export const hasRunningBlocks = (projection: Projection): boolean =>
   projection.units.some(
@@ -184,50 +116,4 @@ export const finalAssistantOutput: {
     )
     .toSorted((left, right) => compareUnitOrder(left.order, right.order))
     .at(-1)?.text
-})
-
-export interface NestedProjection {
-  readonly parentId: string
-  readonly projection: Projection
-}
-
-const toolUnitById = (units: Iterable<Unit>, id: string): Unit | undefined => {
-  for (const unit of units)
-    if (unit.content._tag === "Block" && unit.content.block._tag === "ToolCall" && unit.content.block.id === id)
-      return unit
-  return undefined
-}
-
-export const attachUnit: {
-  (candidate: Unit, parent: Unit, parentId: string, childExecutionId: string): Unit
-  (parent: Unit, parentId: string, childExecutionId: string): (candidate: Unit) => Unit
-} = Function.dual(
-  4,
-  (candidate: Unit, parent: Unit, parentId: string, childExecutionId: string): Unit => ({
-    ...candidate,
-    parentId,
-    order: childOrder(parent.order, childExecutionId, localOrder(candidate.order)),
-  }),
-)
-
-export const withNestedProjections: {
-  (root: Projection, nested: ReadonlyArray<NestedProjection>): Projection
-  (nested: ReadonlyArray<NestedProjection>): (root: Projection) => Projection
-} = Function.dual(2, (root: Projection, nested: ReadonlyArray<NestedProjection>): Projection => {
-  const rootTurnId = root.units.find((candidate) => candidate.parentId === undefined)?.turnId ?? root.units[0]?.turnId
-  const rootOutcome = root.units.find(
-    (candidate) => candidate.parentId === undefined && candidate.executionOutcome !== undefined,
-  )?.executionOutcome
-  const units = root.units.filter((candidate) => candidate.parentId === undefined && candidate.turnId === rootTurnId)
-  for (const { parentId, projection } of nested) {
-    const parent = toolUnitById(units, parentId)
-    if (parent === undefined) throw new Error(`Nested transcript parent ${parentId} does not exist`)
-    const settled =
-      rootOutcome?.status === "cancelled" || rootOutcome?.status === "failed"
-        ? settleRunning(projection, rootOutcome.status, root.revision)
-        : projection
-    for (const candidate of settled.units) units.push(attachUnit(candidate, parent, parentId, candidate.turnId))
-  }
-  units.sort((left, right) => compareUnitOrder(left.order, right.order))
-  return { ...root, units }
 })

@@ -1,7 +1,7 @@
 import { ExecutionId } from "@rika/coding-tools/coding-tool-catalog"
 import { Function } from "effect"
-import type { Presentation } from "./schema"
-import { decodeScopedIdentity } from "./unit-identity"
+import type { Presentation } from "../schema/transcript-presentation-model"
+import { decodeScopedIdentity } from "./transcript-unit-identity"
 
 export const executionKey = ExecutionId.executionKey
 

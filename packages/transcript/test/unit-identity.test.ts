@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { decodeScopedIdentity, identityKey, scopedIdentity } from "../src/unit-identity"
+import { decodeScopedIdentity, identityKey, scopedIdentity } from "../src/ordering/transcript-unit-identity"
 
 describe("unit identity", () => {
   it("uses compact golden encodings", () => {

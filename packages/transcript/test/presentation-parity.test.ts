@@ -1,6 +1,6 @@
 import { ToolPolicy } from "@rika/coding-tools/coding-tool-catalog"
 import { describe, expect, it } from "vitest"
-import { Presentation } from "../src/schema"
+import { Presentation } from "../src/schema/transcript-presentation-model"
 
 const shape = (ast: {
   readonly _tag: string

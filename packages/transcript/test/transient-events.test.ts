@@ -1,15 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
-import {
-  applyEvent,
-  applyFoldEvent,
-  empty,
-  isTransientEvent,
-  project,
-  restoreProjectionFold,
-  snapshotFoldProjection,
-  type Projection,
-  type SourceEvent,
-} from "@rika/transcript/transcript-unit"
+import { applyEvent, empty, project } from "../src/projection/transcript-projection"
+import { foldOperations } from "../src/projection/transcript-event-fold"
+const { applyFoldEvent, isTransientEvent, restoreProjectionFold, snapshotFoldProjection } = foldOperations
+import type { Projection } from "../src/schema/transcript-projection-model"
+import type { SourceEvent } from "../src/schema/transcript-source-event"
 
 const attemptData = (attempt: string) => ({ model_call_id: `call-${attempt}`, model_attempt_id: `attempt-${attempt}` })
 

@@ -1,7 +1,8 @@
 import { Function } from "effect"
-import { childOrder, compareUnitOrder, localOrder } from "./unit-order"
+import { childOrder, compareUnitOrder, localOrder } from "../ordering/transcript-unit-order"
 import { settleRunning } from "./transcript-settlement"
-import type { Projection, Unit } from "./schema"
+import type { Projection } from "../schema/transcript-projection-model"
+import type { Unit } from "../schema/transcript-unit"
 
 export interface NestedProjection {
   readonly parentId: string

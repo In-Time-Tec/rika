@@ -1,32 +1,5 @@
 import { Schema } from "effect"
 
-const SourceSequence = Schema.Finite.check(
-  Schema.isInt(),
-  Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
-)
-const OrderSequence = Schema.Finite.check(
-  Schema.isInt(),
-  Schema.isBetween({ minimum: -1, maximum: Number.MAX_SAFE_INTEGER }),
-)
-const OrderPart = Schema.Finite.check(
-  Schema.isInt(),
-  Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
-)
-const WellFormedString = Schema.String.check(Schema.isPattern(/^(?:[^\uD800-\uDFFF]|[\uD800-\uDBFF][\uDC00-\uDFFF])*$/))
-const WellFormedNonEmptyString = WellFormedString.check(Schema.isMinLength(1))
-
-export const SourceEvent = Schema.Struct({
-  childExecutionId: Schema.optionalKey(Schema.String),
-  cursor: Schema.String,
-  sequence: SourceSequence,
-  type: Schema.String,
-  createdAt: Schema.Finite,
-  text: Schema.optionalKey(Schema.String),
-  content: Schema.optionalKey(Schema.Array(Schema.Unknown)),
-  data: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
-})
-export type SourceEvent = typeof SourceEvent.Type
-
 export const Presentation = Schema.Struct({
   family: Schema.Literals(["explore", "shell", "edit", "agent", "direct", "generic"]),
   action: Schema.String,
@@ -64,7 +37,6 @@ export const ToolFile = Schema.Struct({
   status: Schema.Literals(["running", "complete", "failed"]),
   previousPath: Schema.optionalKey(Schema.String),
 })
-export type ToolFile = typeof ToolFile.Type
 
 export const ToolProcess = Schema.Struct({
   running: Schema.optionalKey(Schema.Boolean),
@@ -74,7 +46,6 @@ export const ToolProcess = Schema.Struct({
   stderr: Schema.optionalKey(Schema.String),
   truncated: Schema.optionalKey(Schema.Boolean),
 })
-export type ToolProcess = typeof ToolProcess.Type
 
 const Reasoning = Schema.TaggedStruct("Reasoning", { text: Schema.String })
 const ToolCall = Schema.TaggedStruct("ToolCall", {
@@ -95,10 +66,7 @@ const ToolResult = Schema.TaggedStruct("ToolResult", {
   output: Schema.String,
   failed: Schema.Boolean,
 })
-const Diff = Schema.TaggedStruct("Diff", {
-  path: Schema.String,
-  patch: Schema.String,
-})
+const Diff = Schema.TaggedStruct("Diff", { path: Schema.String, patch: Schema.String })
 const ContextUsage = Schema.TaggedStruct("ContextUsage", {
   text: Schema.String,
   cost: Schema.optionalKey(Schema.String),
@@ -158,49 +126,3 @@ export const Content = Schema.Union([
   Schema.TaggedStruct("Block", { block: Block }),
 ])
 export type Content = typeof Content.Type
-
-export const UnitOrderSegment = Schema.Struct({
-  sequence: OrderSequence,
-  part: OrderPart,
-  key: WellFormedNonEmptyString,
-})
-export type UnitOrderSegment = typeof UnitOrderSegment.Type
-
-export const UnitOrder = Schema.NonEmptyArray(UnitOrderSegment)
-export type UnitOrder = typeof UnitOrder.Type
-
-export const Unit = Schema.Struct({
-  key: WellFormedNonEmptyString,
-  turnId: WellFormedString,
-  parentId: Schema.optionalKey(WellFormedString),
-  order: UnitOrder,
-  revision: Schema.Finite,
-  executionOutcome: Schema.optionalKey(
-    Schema.Struct({
-      status: Schema.Literals(["complete", "failed", "cancelled"]),
-      reason: Schema.optionalKey(Schema.String),
-    }),
-  ),
-  content: Content,
-})
-export type Unit = typeof Unit.Type
-
-const ProjectionStateFields = {
-  revision: Schema.Finite,
-  modelPhase: Schema.Finite,
-  usableCompletionSequence: Schema.optionalKey(Schema.Finite),
-  oldestCursor: Schema.optionalKey(Schema.String),
-  checkpointCursor: Schema.optionalKey(Schema.String),
-  costUsd: Schema.optionalKey(Schema.Finite),
-  usageCursors: Schema.optionalKey(Schema.Array(Schema.String)),
-  pricingVersion: Schema.optionalKey(Schema.String),
-} as const
-
-export const ProjectionState = Schema.Struct(ProjectionStateFields)
-export type ProjectionState = typeof ProjectionState.Type
-
-export const Projection = Schema.Struct({
-  units: Schema.Array(Unit),
-  ...ProjectionStateFields,
-})
-export type Projection = typeof Projection.Type

@@ -1,7 +1,9 @@
 import { Function } from "effect"
-import type { Presentation, Projection, Unit } from "./schema"
-import { identityKey, scopedIdentity } from "./unit-identity"
-import { unitOrder } from "./unit-order"
+import type { Presentation } from "../schema/transcript-presentation-model"
+import type { Projection } from "../schema/transcript-projection-model"
+import type { Unit } from "../schema/transcript-unit"
+import { identityKey, scopedIdentity } from "../ordering/transcript-unit-identity"
+import { unitOrder } from "../ordering/transcript-unit-order"
 
 export interface RunningRecordedShell {
   readonly id: string

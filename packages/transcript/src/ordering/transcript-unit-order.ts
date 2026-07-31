@@ -1,5 +1,5 @@
 import { Function } from "effect"
-import type { Unit, UnitOrder, UnitOrderSegment } from "./schema"
+import type { Unit, UnitOrder, UnitOrderSegment } from "../schema/transcript-unit"
 
 const numberWidth = 16
 const edgeSequence = 0

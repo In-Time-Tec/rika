@@ -1,16 +1,15 @@
 import { describe, expect, it } from "@effect/vitest"
+import { applyEvent, project } from "../src/projection/transcript-projection"
+import { withNestedProjections } from "../src/projection/nested-transcript-projection"
 import {
-  applyEvent,
   childOrder,
   compareUnitOrder,
   encodeUnitOrder,
   localOrder,
-  project,
   unitOrder,
-  withNestedProjections,
-  type SourceEvent,
-  type UnitOrder,
-} from "@rika/transcript/transcript-unit"
+} from "../src/ordering/transcript-unit-order"
+import type { SourceEvent } from "../src/schema/transcript-source-event"
+import type { UnitOrder } from "../src/schema/transcript-unit"
 
 describe("intrinsic transcript unit order", () => {
   it("uses one injective total order in TypeScript and durable binary text", () => {

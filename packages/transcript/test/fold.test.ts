@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Catalog } from "@rika/coding-tools/coding-tool-catalog"
-import {
+import { foldOperations } from "../src/projection/transcript-event-fold"
+const {
   applyChildOutcome,
   applyFoldEvent,
   foldUnit,
@@ -12,10 +13,13 @@ import {
   settleFoldRunning,
   snapshotFoldProjection,
   snapshotFoldState,
-} from "../src/fold"
-import { identityKey, withNestedProjections } from "@rika/transcript/transcript-unit"
-import { unitOrder } from "../src/unit-order"
-import type { Projection, SourceEvent, Unit } from "../src/schema"
+} = foldOperations
+import { identityKey } from "../src/ordering/transcript-unit-identity"
+import { withNestedProjections } from "../src/projection/nested-transcript-projection"
+import { unitOrder } from "../src/ordering/transcript-unit-order"
+import type { SourceEvent } from "../src/schema/transcript-source-event"
+import type { Projection } from "../src/schema/transcript-projection-model"
+import type { Unit } from "../src/schema/transcript-unit"
 
 const event = (sequence: number, type: string, data?: Record<string, unknown>, text?: string): SourceEvent => ({
   cursor: `cursor-${sequence}`,

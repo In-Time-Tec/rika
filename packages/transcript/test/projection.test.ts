@@ -1,19 +1,17 @@
 import { describe, expect, it } from "@effect/vitest"
 import {
   applyEvent,
-  childOrder,
-  childParentMatch,
   empty,
   finalAssistantOutput,
   hasRunningBlocks,
-  identityKey,
   project,
-  settleChild,
-  settleRunning,
-  unitOrder,
-  withNestedProjections,
-  type SourceEvent,
-} from "@rika/transcript/transcript-unit"
+} from "../src/projection/transcript-projection"
+import { settleChild, settleRunning } from "../src/projection/transcript-settlement"
+import { withNestedProjections } from "../src/projection/nested-transcript-projection"
+import { childOrder, unitOrder } from "../src/ordering/transcript-unit-order"
+import { childParentMatch } from "../src/ordering/child-parent-correlation"
+import { identityKey } from "../src/ordering/transcript-unit-identity"
+import type { SourceEvent } from "../src/schema/transcript-source-event"
 
 const usage = (cursor: string, sequence: number): SourceEvent => ({
   cursor,
