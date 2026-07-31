@@ -10,11 +10,11 @@ import { Data, Effect } from "effect"
 
 import stringWidth from "string-width"
 
-import { TranscriptPresenter } from "@rika/terminal/terminal-state"
+import { TranscriptPresenter } from "../../src/state/model/terminal-state"
 
 import { Surface, maxMountedTranscriptEntries } from "../../src/adapter"
 
-import { initial, loading, ready, replaceQueue, update } from "../../src/view-state"
+import { initial, loading, ready, replaceQueue, update } from "../../src/state/model/terminal-state"
 
 class OpenTuiError extends Data.TaggedError("OpenTuiError")<{ readonly cause: unknown }> {}
 

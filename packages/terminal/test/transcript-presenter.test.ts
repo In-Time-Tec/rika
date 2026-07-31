@@ -6,13 +6,13 @@ import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { describe, expect, it } from "vitest"
-import { ExecutionEvents, TranscriptPresenter, ViewState } from "@rika/terminal/terminal-state"
+import { ExecutionEvents, TranscriptPresenter, ViewState } from "../src/state/model/terminal-state"
 import {
   agentOutputText,
   agentResponseState,
   unitId as transcriptUnitId,
   rows as transcriptUnits,
-} from "../src/transcript-presenter"
+} from "../src/presentation/transcript/terminal-transcript-presentation"
 
 const event = (
   cursor: string,

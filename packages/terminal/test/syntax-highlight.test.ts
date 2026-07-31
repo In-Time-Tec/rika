@@ -1,7 +1,7 @@
 import { TextAttributes, type TextChunk } from "@opentui/core"
 import { describe, expect, test } from "vitest"
-import { highlightShellCommand } from "../src/syntax-highlight"
-import { colors } from "../src/theme"
+import { highlightShellCommand } from "../src/presentation/markdown/syntax-highlighter"
+import { colors } from "../src/presentation/terminal/terminal-theme"
 
 const flat = (command: string): ReadonlyArray<TextChunk> => highlightShellCommand(command).flat()
 

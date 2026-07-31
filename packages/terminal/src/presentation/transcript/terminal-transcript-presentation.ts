@@ -3,14 +3,14 @@ export {
   emptyAttachments,
   type AttachmentResult,
   type ChildProjection,
-} from "./transcript-presenter/attachment"
+} from "./transcript-attachment"
 export {
   projectChildUnits as applyChildUnits,
   projectUnitDelta as applyTurnDelta,
   projectRootUnits as applyRootUnits,
   projectUnits as applyTurnUnits,
   type Event,
-} from "./transcript-presenter/projection"
+} from "./terminal-transcript-projection"
 export {
   includeRowEnd,
   isRowWindowPinned,
@@ -22,7 +22,7 @@ export {
   rowWindowStart,
   shiftRowEnd,
   type RowWindowState,
-} from "./transcript-presenter/window"
+} from "./terminal-transcript-window"
 export {
   agentOutputText,
   agentToolSummary,
@@ -49,4 +49,4 @@ export {
   type ToolTranscriptUnit,
   type TranscriptUnit,
   type TranscriptUnitId,
-} from "./transcript-presenter/rows"
+} from "./transcript-row"

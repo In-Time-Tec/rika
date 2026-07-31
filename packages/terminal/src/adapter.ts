@@ -29,7 +29,7 @@ import cliSpinners from "cli-spinners"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Clock, Effect, Fiber, Function, Option, Schedule, Schema } from "effect"
 import stringWidth from "string-width"
-import { fromOpenTui, type Key } from "./keys"
+import { fromOpenTui, type Key } from "./presentation/terminal/terminal-keymap"
 import {
   composerHeight,
   contentColumnWidth,
@@ -57,9 +57,9 @@ import {
   type QueueItem,
   type TranscriptItem,
   isThreadBusy,
-} from "./view-state"
-import type { ModeRouteLabel, ThreadItem, TranscriptBlock } from "./view-state"
-import { applyTurnUnits as projectUnits } from "./transcript-presenter"
+} from "./state/model/terminal-state"
+import type { ModeRouteLabel, ThreadItem, TranscriptBlock } from "./state/model/terminal-state"
+import { applyTurnUnits as projectUnits } from "./presentation/transcript/terminal-transcript-presentation"
 import {
   includeRowEnd,
   maxMountedTranscriptRows,
@@ -69,9 +69,9 @@ import {
   rowWindowStart,
   shiftRowEnd,
   type RowWindowState,
-} from "./transcript-presenter"
-import { filter, type Command } from "./palette"
-import { colors, spacing } from "./theme"
+} from "./presentation/transcript/terminal-transcript-presentation"
+import { filter, type Command } from "./presentation/terminal/command-palette"
+import { colors, spacing } from "./presentation/terminal/terminal-theme"
 import {
   atBottomWithin,
   classifyTranscriptContent,
@@ -84,7 +84,7 @@ import {
   type ViewportEvent,
   type ViewportMetrics,
   type ViewportAnchor,
-} from "./transcript-viewport"
+} from "./presentation/transcript/transcript-viewport"
 import {
   escapeControlCharacters,
   formatBytes,
@@ -93,13 +93,13 @@ import {
   plural,
   relativeTime,
   truncateToWidth,
-} from "./format"
-import { renderMarkdownLines, renderMarkdownStyled } from "./markdown-renderer"
-import { renderDiff, renderDiffStyled, renderPartialDiffStyled } from "./diff-renderer"
-import { renderPierreDiff } from "./pierre-diff"
-import { highlightShellCommand } from "./syntax-highlight"
-import { wrapStyledLine } from "./styled-text"
-import { renderToolSummary } from "./tool-summary"
+} from "./presentation/terminal/terminal-format"
+import { renderMarkdownLines, renderMarkdownStyled } from "./presentation/markdown/markdown-renderer"
+import { renderDiff, renderDiffStyled, renderPartialDiffStyled } from "./presentation/tool/diff-renderer"
+import { renderPierreDiff } from "./presentation/tool/pierre-diff-adapter"
+import { highlightShellCommand } from "./presentation/markdown/syntax-highlighter"
+import { wrapStyledLine } from "./presentation/markdown/styled-text"
+import { renderToolSummary } from "./presentation/tool/tool-summary"
 import { modeIds } from "@rika/configuration/behavior-mode"
 import {
   agentToolSummary,
@@ -118,7 +118,7 @@ import {
   type ToolKind,
   type ToolTranscriptUnit,
   type TranscriptUnit,
-} from "./transcript-presenter"
+} from "./presentation/transcript/terminal-transcript-presentation"
 
 export const spinnerFrames: ReadonlyArray<string> = cliSpinners.dots.frames
 
@@ -339,12 +339,12 @@ const changedFileColor = (status: string): ColorInput => {
 
 interface ChangedNode {
   readonly children: Map<string, ChangedNode>
-  file?: import("./view-state").ChangedFile
+  file?: import("./state/model/terminal-state").ChangedFile
 }
 
 interface ChangedFileRow {
   readonly chunks: ReadonlyArray<TextChunk>
-  readonly file?: import("./view-state").ChangedFile
+  readonly file?: import("./state/model/terminal-state").ChangedFile
   readonly nameIndex?: number
 }
 
@@ -386,7 +386,7 @@ const wrapBodyText = (text: string, width: number, indent: string): string =>
 const escapeChangedPathSegment = escapeControlCharacters
 
 const fileTreeRows = (
-  files: ReadonlyArray<import("./view-state").ChangedFile>,
+  files: ReadonlyArray<import("./state/model/terminal-state").ChangedFile>,
   innerWidth: number,
   showCounts: boolean,
 ): ReadonlyArray<ChangedFileRow> => {
@@ -568,7 +568,7 @@ export const maxMountedTranscriptEntries = 600
 
 export const maxBoundedTranscriptItems = 1200
 
-export { maxMountedTranscriptRows } from "./transcript-presenter"
+export { maxMountedTranscriptRows } from "./presentation/transcript/terminal-transcript-presentation"
 
 type BoundedTranscriptModel = Omit<Model, "items"> & { readonly items: ReadonlyArray<TranscriptItem> }
 
@@ -4033,7 +4033,7 @@ const formatCost = (usd: number): string =>
 
 const modeLabelWidth = (text: string): number => stringWidth(text.replaceAll(activeTimeIcon, "x"))
 
-export { formatTokens } from "./format"
+export { formatTokens } from "./presentation/terminal/terminal-format"
 
 const welcomeMarkFrame = (rows: ReadonlyArray<string>): ReadonlyArray<string> => [
   "                                        ",

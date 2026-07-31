@@ -2,10 +2,14 @@ import { TextAttributes, type TextChunk } from "@opentui/core"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { describe, expect, test } from "vitest"
 import { buildTranscript } from "../src/adapter"
-import { colors } from "../src/theme"
-import { renderToolSummary } from "../src/tool-summary"
-import { expandableRowIds, toolDetail, rows as transcriptUnits } from "../src/transcript-presenter"
-import { initial, type Model, type TranscriptBlock } from "../src/view-state"
+import { colors } from "../src/presentation/terminal/terminal-theme"
+import { renderToolSummary } from "../src/presentation/tool/tool-summary"
+import {
+  expandableRowIds,
+  toolDetail,
+  rows as transcriptUnits,
+} from "../src/presentation/transcript/terminal-transcript-presentation"
+import { initial, type Model, type TranscriptBlock } from "../src/state/model/terminal-state"
 
 type ToolCall = Extract<TranscriptBlock, { readonly _tag: "ToolCall" }>
 

@@ -2,10 +2,10 @@ import { createTestRenderer } from "@opentui/core/testing"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
 import { Effect } from "effect"
-import { Surface } from "./adapter"
-import type { Key } from "./keys"
-import * as TranscriptPresenter from "./transcript-presenter"
-import * as ViewState from "./view-state"
+import { Surface } from "../opentui/surface/opentui-surface"
+import type { Key } from "../presentation/terminal/terminal-keymap"
+import * as TranscriptPresenter from "../presentation/transcript/terminal-transcript-presentation"
+import * as ViewState from "../state/model/terminal-state"
 
 export interface PerformanceMetric {
   readonly id: string

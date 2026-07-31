@@ -1,5 +1,5 @@
 import { Function } from "effect"
-import { clipToWidth } from "./format"
+import { clipToWidth } from "../terminal/terminal-format"
 
 const clip = clipToWidth
 
@@ -105,4 +105,4 @@ export const renderPartialDiffStyled: {
   return chunks === null ? undefined : new StyledText([...chunks])
 })
 import { StyledText, bold, fg, type TextChunk } from "@opentui/core"
-import { colors } from "./theme"
+import { colors } from "../terminal/terminal-theme"

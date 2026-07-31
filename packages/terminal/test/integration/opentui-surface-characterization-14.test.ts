@@ -10,7 +10,15 @@ import stringWidth from "string-width"
 
 import { Surface, maxMountedTranscriptEntries } from "../../src/adapter"
 
-import { applyQueueDelta, initial, loading, ready, replaceQueue, resetQueue, update } from "../../src/view-state"
+import {
+  applyQueueDelta,
+  initial,
+  loading,
+  ready,
+  replaceQueue,
+  resetQueue,
+  update,
+} from "../../src/state/model/terminal-state"
 
 class OpenTuiError extends Data.TaggedError("OpenTuiError")<{ readonly cause: unknown }> {}
 

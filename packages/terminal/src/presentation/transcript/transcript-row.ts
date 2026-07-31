@@ -1,7 +1,7 @@
 import { partialInputRecord } from "@rika/transcript/partial-tool-input"
 import { Function, Option, Schema } from "effect"
-import { escapeControlCharacters } from "../format"
-import type { Model, TranscriptBlock, TranscriptItem } from "../view-state"
+import { escapeControlCharacters } from "../terminal/terminal-format"
+import type { Model, TranscriptBlock, TranscriptItem } from "../../state/model/terminal-state"
 
 export type ToolGroupKind = "explore" | "edit" | "shell" | "other"
 

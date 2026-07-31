@@ -4,12 +4,18 @@ import * as TranscriptPresentationModel from "@rika/transcript/transcript-presen
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Duration, Function, Schema } from "effect"
 import stringWidth from "string-width"
-import { formatTokens, plural } from "./format"
-import type { Key } from "./keys"
-import { isPrintable } from "./keys"
-import { filter, type PaletteAction } from "./palette"
-import { expandableRowIds, rows as transcriptUnits, unitId as transcriptUnitId } from "./transcript-presenter"
+import { formatTokens, plural } from "../../presentation/terminal/terminal-format"
+import type { Key } from "../../presentation/terminal/terminal-keymap"
+import { isPrintable } from "../../presentation/terminal/terminal-keymap"
+import { filter, type PaletteAction } from "../../presentation/terminal/command-palette"
+import {
+  expandableRowIds,
+  rows as transcriptUnits,
+  unitId as transcriptUnitId,
+} from "../../presentation/transcript/terminal-transcript-presentation"
 import { ModeId, modeIds } from "@rika/configuration/behavior-mode"
+import { idle, isReady, loading, ready, readyOr, type Loadable, loadableSchemas } from "./terminal-loadable-state"
+import type { Message } from "./terminal-message"
 export const Mode = ModeId
 export type Mode = typeof Mode.Type
 
@@ -244,19 +250,6 @@ const cancelTranscriptBlocks = (blocks: ReadonlyArray<TranscriptBlock>): Readonl
     return block
   })
 
-export interface PastedTextAttachment {
-  readonly type: "text" | "image"
-  readonly token: string
-  readonly value?: string
-  readonly path?: string
-  readonly label: string
-}
-export type UiEvent = {
-  readonly id: string
-  readonly cursor: string
-  readonly turnId?: string
-  readonly block: TranscriptBlock
-}
 export type TranscriptItem =
   | {
       readonly _tag: "Entry"
@@ -307,31 +300,9 @@ export interface ThreadSidebarState {
   readonly scrollTop: number
 }
 
-export type Loadable<T> =
-  | { readonly _tag: "Idle" }
-  | { readonly _tag: "Loading" }
-  | { readonly _tag: "Ready"; readonly value: T }
-
-const LoadableIdleSchema = Schema.TaggedStruct("Idle", {})
-const LoadableLoadingSchema = Schema.TaggedStruct("Loading", {})
-
-export const idle: Loadable<never> = { _tag: "Idle" }
-export const loading: Loadable<never> = { _tag: "Loading" }
-export const ready = <T>(value: T): Loadable<T> => ({ _tag: "Ready", value })
-export const readyOr: {
-  <T>(loadable: Loadable<T>, fallback: T): T
-  <T>(fallback: T): (loadable: Loadable<T>) => T
-} = Function.dual(
-  2,
-  <T>(loadable: Loadable<T>, fallback: T): T => (loadable._tag === "Ready" ? loadable.value : fallback),
-)
-export const isReady = <T>(loadable: Loadable<T>): loadable is { readonly _tag: "Ready"; readonly value: T } =>
-  loadable._tag === "Ready"
-export const isLoading = <T>(loadable: Loadable<T>): boolean => loadable._tag === "Loading"
-
 const WorkspaceFilesSchema = Schema.Union([
-  LoadableIdleSchema,
-  LoadableLoadingSchema,
+  loadableSchemas.idle,
+  loadableSchemas.loading,
   Schema.TaggedStruct("Ready", { value: Schema.Array(Schema.String) }),
 ])
 
@@ -400,8 +371,8 @@ export const ChangedFile = Schema.Struct({
 export type ChangedFile = typeof ChangedFile.Type
 
 const ChangedFilesSchema = Schema.Union([
-  LoadableIdleSchema,
-  LoadableLoadingSchema,
+  loadableSchemas.idle,
+  loadableSchemas.loading,
   Schema.TaggedStruct("Ready", { value: Schema.Array(ChangedFile) }),
 ])
 const ThreadPreviewValueSchema = Schema.Struct({
@@ -409,7 +380,7 @@ const ThreadPreviewValueSchema = Schema.Struct({
   turns: Schema.Array(Schema.Struct({ prompt: Schema.String, units: Schema.Array(TranscriptUnit.Unit) })),
 })
 const ThreadPreviewSchema = Schema.Union([
-  LoadableIdleSchema,
+  loadableSchemas.idle,
   Schema.TaggedStruct("Loading", { previous: Schema.optionalKey(ThreadPreviewValueSchema) }),
   Schema.TaggedStruct("Ready", { value: ThreadPreviewValueSchema }),
 ])
@@ -519,83 +490,6 @@ export const Model = Schema.Struct({
   threadPreview: ThreadPreviewSchema,
 })
 export type Model = typeof Model.Type
-
-export type Message =
-  | { readonly _tag: "KeyPressed"; readonly key: Key }
-  | { readonly _tag: "Pasted"; readonly text: string }
-  | { readonly _tag: "ImageInserted"; readonly path: string }
-  | { readonly _tag: "ImageRemoved"; readonly path: string }
-  | { readonly _tag: "PastedTextExpanded"; readonly token: string }
-  | { readonly _tag: "Resized"; readonly width: number; readonly height: number }
-  | { readonly _tag: "ComposerHeightChanged"; readonly height: number }
-  | { readonly _tag: "Submitted"; readonly submissionId?: string }
-  | {
-      readonly _tag: "SubmissionAdmitted"
-      readonly turnId: string
-      readonly status?: "active" | "queued"
-      readonly submissionId?: string
-    }
-  | {
-      readonly _tag: "TurnStarted"
-      readonly turnId: string
-      readonly prompt: string
-      readonly submissionId?: string
-    }
-  | {
-      readonly _tag: "SteeringAccepted"
-      readonly turnId: string
-      readonly sequence: number
-      readonly text: string
-    }
-  | {
-      readonly _tag: "SteeringDelivered"
-      readonly turnId: string
-      readonly sequences: ReadonlyArray<number>
-    }
-  | { readonly _tag: "SteeringFailed"; readonly turnId: string; readonly text: string; readonly message: string }
-  | { readonly _tag: "CancelFailed"; readonly turnId?: string; readonly message: string }
-  | { readonly _tag: "AssistantStreamed"; readonly id?: string; readonly turnId?: string; readonly text: string }
-  | { readonly _tag: "AssistantCompleted"; readonly id?: string; readonly turnId?: string; readonly text: string }
-  | { readonly _tag: "ExecutionCompleted"; readonly turnId?: string }
-  | { readonly _tag: "ExecutionFailed"; readonly turnId?: string; readonly message: string }
-  | { readonly _tag: "ExecutionCancelled"; readonly turnId?: string; readonly agentResponseArrived?: boolean }
-  | { readonly _tag: "BlockAdded"; readonly block: TranscriptBlock }
-  | { readonly _tag: "ReasoningStreamed"; readonly text: string }
-  | { readonly _tag: "ReasoningToggled"; readonly index: number }
-  | { readonly _tag: "ScrollMoved"; readonly offset: number }
-  | { readonly _tag: "ScrollFollowed" }
-  | { readonly _tag: "PaletteActionConsumed" }
-  | { readonly _tag: "ThreadsReplaced"; readonly threads: ReadonlyArray<ThreadItem> }
-  | { readonly _tag: "ThreadActivated"; readonly threadId: string; readonly title: string }
-  | { readonly _tag: "ThreadTitleChanged"; readonly threadId: string; readonly title: string }
-  | { readonly _tag: "FilesReplaced"; readonly files: ReadonlyArray<string> }
-  | { readonly _tag: "BranchDetected"; readonly branch: string }
-  | { readonly _tag: "UsageReported"; readonly costUsd?: number }
-  | { readonly _tag: "WorkspaceFilesToggled" }
-  | { readonly _tag: "ThreadSidebarSelectionMoved"; readonly offset: number }
-  | { readonly _tag: "ThreadSidebarSelectionConfirmed"; readonly index?: number }
-  | { readonly _tag: "ThreadPreviewScrolled"; readonly offset: number }
-  | { readonly _tag: "EventReplayed"; readonly event: UiEvent }
-  | { readonly _tag: "DetailMoved"; readonly offset: number }
-  | { readonly _tag: "DetailToggled"; readonly id?: string }
-  | { readonly _tag: "AllDetailsToggled" }
-  | { readonly _tag: "FastModeToggled" }
-  | { readonly _tag: "SidebarViewToggled" }
-  | { readonly _tag: "SidebarWidthChanged"; readonly width: number }
-  | { readonly _tag: "ComposerReplaced"; readonly text: string }
-  | { readonly _tag: "ChangedFilesRequested" }
-  | { readonly _tag: "ChangedFilesReplaced"; readonly files: ReadonlyArray<ChangedFile> }
-  | { readonly _tag: "FilesRequested" }
-  | { readonly _tag: "FilesFailed"; readonly message: string }
-  | { readonly _tag: "ThreadPreviewRequested" }
-  | { readonly _tag: "ThreadOpenRequested" }
-  | { readonly _tag: "ThreadOpenCompleted" }
-  | { readonly _tag: "ThreadRefolding"; readonly threadId: string; readonly refolding: boolean }
-  | {
-      readonly _tag: "ThreadPreviewLoaded"
-      readonly threadId: string
-      readonly turns: ReadonlyArray<{ readonly prompt: string; readonly units: ReadonlyArray<TranscriptUnit.Unit> }>
-    }
 
 export const replaceQueue: {
   (model: Model, queue: ReadonlyArray<QueueItem>): Model

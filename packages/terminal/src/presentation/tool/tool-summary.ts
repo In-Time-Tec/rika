@@ -1,8 +1,8 @@
 import { bold, fg, type TextChunk } from "@opentui/core"
 import { Function } from "effect"
-import { colors } from "./theme"
-import { wrapStyledChunks } from "./styled-text"
-import type { ToolSummary } from "./transcript-presenter"
+import { colors } from "../terminal/terminal-theme"
+import { wrapStyledChunks } from "../markdown/styled-text"
+import type { ToolSummary } from "../transcript/terminal-transcript-presentation"
 
 export const joinToolSummary = (summary: ToolSummary): string => summary.primary + (summary.secondary ?? "")
 

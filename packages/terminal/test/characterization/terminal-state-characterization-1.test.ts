@@ -4,7 +4,7 @@ import { it } from "@effect/vitest"
 
 import { Duration, Effect } from "effect"
 
-import { Keys, Palette, ViewState } from "@rika/terminal/terminal-state"
+import { Keys, Palette, ViewState } from "../../src/state/model/terminal-state"
 
 import * as Adapter from "../../src/adapter"
 

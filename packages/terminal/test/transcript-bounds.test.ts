@@ -1,8 +1,12 @@
 import stringWidth from "string-width"
 import { describe, expect, test } from "vitest"
 import { buildTranscript, transcriptWrapWidth } from "../src/adapter"
-import { expandableRowIds, rows as transcriptUnits, unitId } from "../src/transcript-presenter"
-import { initial, type Model, type TranscriptBlock } from "../src/view-state"
+import {
+  expandableRowIds,
+  rows as transcriptUnits,
+  unitId,
+} from "../src/presentation/transcript/terminal-transcript-presentation"
+import { initial, type Model, type TranscriptBlock } from "../src/state/model/terminal-state"
 
 const longText =
   "Expected UnknownResponseStreamEvent, got " +

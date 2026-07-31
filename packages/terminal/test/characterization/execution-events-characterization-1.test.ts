@@ -10,11 +10,14 @@ import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event
 
 import { expect, it } from "vitest"
 
-import { ExecutionEvents, ViewState } from "@rika/terminal/terminal-state"
+import { ExecutionEvents, ViewState } from "../../src/state/model/terminal-state"
 
 import { renderTranscriptStyled } from "../../src/adapter"
 
-import { unitId as transcriptUnitId, rows as transcriptUnits } from "../../src/transcript-presenter"
+import {
+  unitId as transcriptUnitId,
+  rows as transcriptUnits,
+} from "../../src/presentation/transcript/terminal-transcript-presentation"
 
 const event = (
   cursor: string,

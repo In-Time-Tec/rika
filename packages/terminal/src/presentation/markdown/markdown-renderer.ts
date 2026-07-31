@@ -10,9 +10,9 @@ import {
   wrapStyledChunks as wrapChunks,
   wrapStyledLine as wrapChunkLine,
   type StyledLines as Lines,
-} from "./styled-text"
-import { highlightLines } from "./syntax-highlight"
-import { colors } from "./theme"
+} from "./presentation/markdown/styled-text"
+import { highlightLines } from "./syntax-highlighter"
+import { colors } from "../terminal/terminal-theme"
 
 const terminalSafeText = (text: string): string =>
   text.replaceAll("\r\n", "\n").replace(/\p{Cc}/gu, (character) => (character === "\n" ? character : "�"))

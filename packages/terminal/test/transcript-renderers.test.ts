@@ -1,9 +1,9 @@
 import { TextAttributes, type TextChunk } from "@opentui/core"
 import stringWidth from "string-width"
 import { describe, expect, test } from "vitest"
-import { renderMarkdown, renderMarkdownStyled } from "../src/markdown-renderer"
-import { renderDiff } from "../src/diff-renderer"
-import { colors } from "../src/theme"
+import { renderMarkdown, renderMarkdownStyled } from "../src/presentation/markdown/markdown-renderer"
+import { renderDiff } from "../src/presentation/tool/diff-renderer"
+import { colors } from "../src/presentation/terminal/terminal-theme"
 
 const chunkFor = (chunks: ReadonlyArray<TextChunk>, text: string): TextChunk => {
   const chunk = chunks.find((candidate) => candidate.text.includes(text))

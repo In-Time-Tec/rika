@@ -1,8 +1,8 @@
 import { StyledText, fg, type TextChunk } from "@opentui/core"
 import { parsePatchFiles } from "@pierre/diffs"
 import { Function } from "effect"
-import { highlightLines, languageForPath } from "./syntax-highlight"
-import { colors } from "./theme"
+import { highlightLines, languageForPath } from "../markdown/syntax-highlighter"
+import { colors } from "../terminal/terminal-theme"
 
 const strip = (line: string | undefined): string => (line ?? "").replace(/\r?\n$/, "")
 

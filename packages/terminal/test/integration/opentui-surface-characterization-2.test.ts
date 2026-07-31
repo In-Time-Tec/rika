@@ -16,7 +16,7 @@ import {
   maxMountedTranscriptRows,
 } from "../../src/adapter"
 
-import { initial, loading, ready, replaceQueue, update } from "../../src/view-state"
+import { initial, loading, ready, replaceQueue, update } from "../../src/state/model/terminal-state"
 
 class OpenTuiError extends Data.TaggedError("OpenTuiError")<{ readonly cause: unknown }> {}
 

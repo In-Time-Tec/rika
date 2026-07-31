@@ -10,7 +10,7 @@ import {
   type Model,
   type ThreadItem,
   type TranscriptBlock,
-} from "../src/view-state"
+} from "../src/state/model/terminal-state"
 
 export const visualMetadata = {
   schema: 2,

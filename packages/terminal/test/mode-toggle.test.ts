@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import * as ViewState from "../src/view-state"
+import * as ViewState from "../src/state/model/terminal-state"
 
 describe("mode cycling", () => {
   it("advances through every mode and wraps", () => {

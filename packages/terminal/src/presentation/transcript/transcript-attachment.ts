@@ -1,8 +1,8 @@
 import { childParentMatch } from "@rika/transcript/child-parent-correlation"
 import type { Unit } from "@rika/transcript/transcript-unit"
 import { Function } from "effect"
-import type { Model, TranscriptBlock, TranscriptItem } from "../view-state"
-import { projectChildUnits } from "./projection"
+import type { Model, TranscriptBlock, TranscriptItem } from "../../state/model/terminal-state"
+import { projectChildUnits } from "./terminal-transcript-projection"
 
 export interface ChildProjection {
   readonly units: ReadonlyArray<Unit>

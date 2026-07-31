@@ -296,7 +296,7 @@ vi.mock("@opentui/core", () => ({
 
 import { buildTranscript, create } from "../../src/adapter"
 
-import { initial, ready } from "../../src/view-state"
+import { initial, ready } from "../../src/state/model/terminal-state"
 
 const handlers = () => ({ key: vi.fn(), resize: vi.fn() })
 

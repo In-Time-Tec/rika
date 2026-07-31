@@ -1,5 +1,5 @@
 import { Function } from "effect"
-import type { Mode, PromptPart } from "./view-state"
+import type { Mode, PromptPart } from "./state/model/terminal-state"
 
 export interface ModelTuning {
   readonly fastMode?: boolean

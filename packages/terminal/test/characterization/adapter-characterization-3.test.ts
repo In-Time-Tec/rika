@@ -296,9 +296,9 @@ import stringWidth from "string-width"
 
 import { buildTranscript, create } from "../../src/adapter"
 
-import { initial } from "../../src/view-state"
+import { initial } from "../../src/state/model/terminal-state"
 
-import { colors } from "../../src/theme"
+import { colors } from "../../src/presentation/terminal/terminal-theme"
 
 const _handlers = () => ({ key: vi.fn(), resize: vi.fn() })
 

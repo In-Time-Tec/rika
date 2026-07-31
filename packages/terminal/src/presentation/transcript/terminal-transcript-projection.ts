@@ -5,8 +5,8 @@ import type { Block } from "@rika/transcript/transcript-presentation-model"
 import type { Unit } from "@rika/transcript/transcript-unit"
 import type { UnitDelta } from "@rika/transcript/transcript-projection"
 import { Function } from "effect"
-import type { Model, TranscriptItem } from "../view-state"
-import { isDeliveredDelegationOutput, isFailedDelegationOutput, isSucceededDelegationOutput } from "./rows"
+import type { Model, TranscriptItem } from "../../state/model/terminal-state"
+import { isDeliveredDelegationOutput, isFailedDelegationOutput, isSucceededDelegationOutput } from "./transcript-row"
 
 export interface Event {
   readonly turnId?: string
@@ -731,40 +731,54 @@ export const projectRootUnits: {
 )
 
 export const projectUnits: {
-  (model: import("../view-state").Model, units: ReadonlyArray<Unit>): import("../view-state").Model
-  (units: ReadonlyArray<Unit>): (model: import("../view-state").Model) => import("../view-state").Model
+  (
+    model: import("../../state/model/terminal-state").Model,
+    units: ReadonlyArray<Unit>,
+  ): import("../../state/model/terminal-state").Model
+  (
+    units: ReadonlyArray<Unit>,
+  ): (model: import("../../state/model/terminal-state").Model) => import("../../state/model/terminal-state").Model
 } = Function.dual(
   2,
-  (model: import("../view-state").Model, units: ReadonlyArray<Unit>): import("../view-state").Model =>
-    projectUnitsImpl(model, units),
+  (
+    model: import("../../state/model/terminal-state").Model,
+    units: ReadonlyArray<Unit>,
+  ): import("../../state/model/terminal-state").Model => projectUnitsImpl(model, units),
 )
 
 export const projectChildUnits: {
-  (model: import("../view-state").Model, parentId: string, units: ReadonlyArray<Unit>): import("../view-state").Model
+  (
+    model: import("../../state/model/terminal-state").Model,
+    parentId: string,
+    units: ReadonlyArray<Unit>,
+  ): import("../../state/model/terminal-state").Model
   (
     parentId: string,
     units: ReadonlyArray<Unit>,
-  ): (model: import("../view-state").Model) => import("../view-state").Model
-} = Function.dual(3, (model: import("../view-state").Model, parentId: string, units: ReadonlyArray<Unit>) => {
-  const projected = projectUnitsImpl(model, units, parentId)
-  const parentCancelled = (projected.blocks as ReadonlyArray<Block>).some(
-    (block) => block._tag === "ToolCall" && block.id === parentId && block.status === "cancelled",
-  )
-  if (!parentCancelled) return projected
-  const childIndexes = new Set(
-    (projected.items as ReadonlyArray<TranscriptItem>).flatMap((item) =>
-      item._tag === "Block" && item.parentId === parentId ? [item.index] : [],
-    ),
-  )
-  const blocks = [...(projected.blocks as ReadonlyArray<Block>)]
-  for (const index of childIndexes) {
-    const block = blocks[index]
-    if (block === undefined) continue
-    if ((block._tag !== "ToolCall" && block._tag !== "ChildAgent") || block.status !== "running") continue
-    blocks[index] = { ...block, status: "cancelled" as const }
-  }
-  return {
-    ...projected,
-    blocks,
-  }
-})
+  ): (model: import("../../state/model/terminal-state").Model) => import("../../state/model/terminal-state").Model
+} = Function.dual(
+  3,
+  (model: import("../../state/model/terminal-state").Model, parentId: string, units: ReadonlyArray<Unit>) => {
+    const projected = projectUnitsImpl(model, units, parentId)
+    const parentCancelled = (projected.blocks as ReadonlyArray<Block>).some(
+      (block) => block._tag === "ToolCall" && block.id === parentId && block.status === "cancelled",
+    )
+    if (!parentCancelled) return projected
+    const childIndexes = new Set(
+      (projected.items as ReadonlyArray<TranscriptItem>).flatMap((item) =>
+        item._tag === "Block" && item.parentId === parentId ? [item.index] : [],
+      ),
+    )
+    const blocks = [...(projected.blocks as ReadonlyArray<Block>)]
+    for (const index of childIndexes) {
+      const block = blocks[index]
+      if (block === undefined) continue
+      if ((block._tag !== "ToolCall" && block._tag !== "ChildAgent") || block.status !== "running") continue
+      blocks[index] = { ...block, status: "cancelled" as const }
+    }
+    return {
+      ...projected,
+      blocks,
+    }
+  },
+)

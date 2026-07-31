@@ -312,7 +312,7 @@ import {
   renderTranscriptStyled,
 } from "../../src/adapter"
 
-import { initial, ready, update } from "../../src/view-state"
+import { initial, ready, update } from "../../src/state/model/terminal-state"
 
 const handlers = () => ({ key: vi.fn(), resize: vi.fn() })
 

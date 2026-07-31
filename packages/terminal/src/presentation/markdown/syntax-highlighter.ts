@@ -14,7 +14,7 @@ import "prismjs/components/prism-diff.js"
 import "prismjs/components/prism-toml.js"
 import "prismjs/components/prism-markdown.js"
 import { bold, dim, fg, type TextChunk } from "@opentui/core"
-import { colors } from "./theme"
+import { colors } from "../terminal/terminal-theme"
 
 const roleColors = {
   keyword: colors.blue,
