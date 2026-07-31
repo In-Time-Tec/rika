@@ -34,4 +34,3 @@ export const RepairCandidate = Schema.Struct({
 })
 export type RepairCandidate = typeof RepairCandidate.Type
 
-export type ThreadSummaryRepository = unknown
