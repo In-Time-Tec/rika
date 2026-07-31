@@ -1,8 +1,4 @@
-import { expect, test } from "vitest"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Keys, ViewState } from "../../src/state/model/terminal-state"
-
-
 
 export const key = (input: Partial<Keys.Key> & Pick<Keys.Key, "name">): Keys.Key => ({
   name: input.name,
@@ -63,44 +59,3 @@ export const busyQueueModel = (model: ViewState.Model): ViewState.Model => ({
   busy: true,
   currentThreadId: "t",
 })
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

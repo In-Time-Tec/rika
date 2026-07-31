@@ -1,9 +1,8 @@
 import { expect, test, vi } from "vitest"
 import { Effect } from "effect"
 import stringWidth from "string-width"
-import { buildTranscript, create, renderTranscriptStyled } from "../../src/opentui/surface/opentui-surface"
-import { initial, type Model, type ThreadItem } from "../../src/state/model/terminal-state"
-import { colors } from "../../src/presentation/terminal/terminal-theme"
+import { buildTranscript } from "../../src/opentui/surface/opentui-surface"
+
 const opentuiValue = vi.hoisted(() => {
   const boxChildren: Array<object> = []
   const keyHandlers = new Set<(key: object) => void>()
@@ -220,8 +219,6 @@ const opentuiValue = vi.hoisted(() => {
     rootChildren,
   }
 })
-const opentui = opentuiValue
-
 vi.mock("@opentui/core", () => ({
   BoxRenderable: opentuiValue.BoxRenderable,
   EditBufferRenderable: opentuiValue.EditBufferRenderable,
@@ -247,7 +244,19 @@ vi.mock("@opentui/core", () => ({
   },
   stripAnsiSequences: (text: string) => text,
 }))
-import { shell, _windowUnitToolCall, _agentToolBlock, _handlers, nonEmptyLines, subagentToolBlock, editToolBlock, renderedText, model, _thread, _createScoped } from "./adapter-characterization-3.test-support"
+import {
+  shell,
+  _windowUnitToolCall,
+  _agentToolBlock,
+  _handlers,
+  nonEmptyLines,
+  subagentToolBlock,
+  editToolBlock,
+  renderedText,
+  model,
+  _thread,
+  _createScoped,
+} from "./adapter-characterization-3.test-support"
 test("closes an expanded settled subagent's nested tree with the terminal connector", () => {
   const state = model({
     entries: [{ role: "assistant", text: "All checks passed." }],

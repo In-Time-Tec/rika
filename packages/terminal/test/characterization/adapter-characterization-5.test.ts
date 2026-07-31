@@ -1,8 +1,8 @@
 import { expect, vi } from "vitest"
 import { it } from "@effect/vitest"
 import { Effect } from "effect"
-import { Surface, create, renderTranscriptStyled } from "../../src/opentui/surface/opentui-surface"
-import { initial, type Mode, type Model, type ThreadItem } from "../../src/state/model/terminal-state"
+import { renderTranscriptStyled } from "../../src/opentui/surface/opentui-surface"
+import { type Mode } from "../../src/state/model/terminal-state"
 const opentuiValue = vi.hoisted(() => {
   const boxChildren: Array<object> = []
   const keyHandlers = new Set<(key: object) => void>()
@@ -246,7 +246,15 @@ vi.mock("@opentui/core", () => ({
   },
   stripAnsiSequences: (text: string) => text,
 }))
-import { _shell, _windowUnitToolCall, _agentToolBlock, handlers, _nonEmptyLines, model, thread, createScoped } from "./adapter-characterization-5.test-support"
+import {
+  _shell,
+  _windowUnitToolCall,
+  _agentToolBlock,
+  handlers,
+  _nonEmptyLines,
+  model,
+  createScoped,
+} from "./adapter-characterization-5.test-support"
 it.effect("renders welcome, entries, modes, activity, cursor, and palette", () =>
   Effect.gen(function* () {
     const callbacks = handlers()

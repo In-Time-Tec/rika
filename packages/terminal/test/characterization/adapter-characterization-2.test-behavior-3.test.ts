@@ -1,14 +1,7 @@
 import { expect, test, vi } from "vitest"
 import { Effect } from "effect"
-import {
-  buildTranscript,
-  create,
-  renderBlock,
-  renderSidebar,
-  renderTranscriptStyled,
-} from "../../src/opentui/surface/opentui-surface"
-import { initial, type Model, type ThreadItem } from "../../src/state/model/terminal-state"
-import { colors } from "../../src/presentation/terminal/terminal-theme"
+import { buildTranscript } from "../../src/opentui/surface/opentui-surface"
+
 const opentuiValue = vi.hoisted(() => {
   const boxChildren: Array<object> = []
   const keyHandlers = new Set<(key: object) => void>()
@@ -225,8 +218,6 @@ const opentuiValue = vi.hoisted(() => {
     rootChildren,
   }
 })
-const opentui = opentuiValue
-
 vi.mock("@opentui/core", () => ({
   BoxRenderable: opentuiValue.BoxRenderable,
   EditBufferRenderable: opentuiValue.EditBufferRenderable,
@@ -252,7 +243,14 @@ vi.mock("@opentui/core", () => ({
   },
   stripAnsiSequences: (text: string) => text,
 }))
-import { shell, _windowUnitToolCall, agentToolBlock, _handlers, _nonEmptyLines, model, thread, _createScoped } from "./adapter-characterization-2.test-support"
+import {
+  _windowUnitToolCall,
+  agentToolBlock,
+  _handlers,
+  _nonEmptyLines,
+  model,
+  _createScoped,
+} from "./adapter-characterization-2.test-support"
 test("renders a completed subagent's tool-result fallback as markdown", () => {
   const state = model({
     blocks: [

@@ -1,19 +1,15 @@
-import { Renderable } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { expect, test } from "vitest"
-import { Data, Effect } from "effect"
-import stringWidth from "string-width"
-import { Surface, maxMountedTranscriptEntries } from "../../src/opentui/surface/opentui-surface"
+import { Effect } from "effect"
+import { Surface } from "../../src/opentui/surface/opentui-surface"
+import { initial, type Model } from "../../src/state/model/terminal-state"
 import {
-  initial,
-  loading,
-  ready,
-  replaceQueue,
-  type Model,
-  type ThreadItem,
-  update,
-} from "../../src/state/model/terminal-state"
-import { OpenTuiError, openTui, _insertText, styledTextValue, _streamingShell, thread, _giantSubagentModel, _collapsedSubagentModel, nonSpaceBounds } from "./opentui-surface-characterization-6.test-support"
+  openTui,
+  _insertText,
+  _streamingShell,
+  _giantSubagentModel,
+  _collapsedSubagentModel,
+} from "./opentui-surface-characterization-6.test-support"
 test("mounts entries appended below a detached transcript that fits the mount budget", () =>
   Effect.runPromise(
     Effect.gen(function* () {

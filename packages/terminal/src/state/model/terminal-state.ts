@@ -365,32 +365,17 @@ const displayInputImpl = ComposerState.displayInput
 const expandPastedTextImpl = ComposerState.expandPastedText
 const promptPartsImpl = ComposerState.promptParts
 const pastedTextTokenAtImpl = ComposerState.pastedTextTokenAt
-const initialModel = initialImpl
-const updateModel = reduceState
-export { initialImpl as initial }
-export { nextModeImpl as nextMode }
-export { nextUsageDisplayImpl as nextUsageDisplay }
-export { activeTimeAtImpl as activeTimeAt }
-export { formatActivityImpl as formatActivity }
-export { replaceQueueImpl as replaceQueue }
-export { resetQueueImpl as resetQueue }
-export { applyQueueDeltaImpl as applyQueueDelta }
-export { replaceTurnPromptImpl as replaceTurnPrompt }
-export { composerHeightImpl as composerHeight }
-export { contentColumnWidthImpl as contentColumnWidth }
-export { boundedThreadSidebarWidthImpl as boundedThreadSidebarWidth }
-export { fileSidebarLayoutWidthImpl as fileSidebarLayoutWidth }
-export { isNarrowImpl as isNarrow }
-export { queueContentWidthImpl as queueContentWidth }
-export { wrappedRowCountImpl as wrappedRowCount }
-export { threadSidebarLayoutWidthImpl as threadSidebarLayoutWidth }
-export { inputRowsImpl as inputRows }
-export { filteredFilesImpl as filteredFiles }
-export { filteredThreadsImpl as filteredThreads }
-export { selectedThreadMetadataImpl as selectedThreadMetadata }
-export { displayInputImpl as displayInput }
-export { expandPastedTextImpl as expandPastedText }
-export { promptPartsImpl as promptParts }
+export { initialImpl as initial, nextModeImpl as nextMode, nextUsageDisplayImpl as nextUsageDisplay }
+export { activeTimeAtImpl as activeTimeAt, formatActivityImpl as formatActivity }
+export { replaceQueueImpl as replaceQueue, resetQueueImpl as resetQueue, applyQueueDeltaImpl as applyQueueDelta }
+export { replaceTurnPromptImpl as replaceTurnPrompt, composerHeightImpl as composerHeight }
+export { contentColumnWidthImpl as contentColumnWidth, boundedThreadSidebarWidthImpl as boundedThreadSidebarWidth }
+export { fileSidebarLayoutWidthImpl as fileSidebarLayoutWidth, isNarrowImpl as isNarrow }
+export { queueContentWidthImpl as queueContentWidth, wrappedRowCountImpl as wrappedRowCount }
+export { threadSidebarLayoutWidthImpl as threadSidebarLayoutWidth, inputRowsImpl as inputRows }
+export { filteredFilesImpl as filteredFiles, filteredThreadsImpl as filteredThreads }
+export { selectedThreadMetadataImpl as selectedThreadMetadata, displayInputImpl as displayInput }
+export { expandPastedTextImpl as expandPastedText, promptPartsImpl as promptParts }
 export { pastedTextTokenAtImpl as pastedTextTokenAt }
 export type {
   TranscriptBlockModel as TranscriptBlock,
@@ -409,9 +394,9 @@ namespace ViewStateExports {
   export type PromptPart = import("./terminal-composer-state").PromptPart
   export type ComposerAttachment = import("./terminal-composer-state").ComposerAttachment
   export type ThreadItem = import("./terminal-state").ThreadItem
-  export const initial = (workspace: string, mode?: Mode): Model => initialModel(workspace, mode)
+  export const initial = (workspace: string, mode?: Mode): Model => initialImpl(workspace, mode)
   export const update = (model: Model, message: import("../model/terminal-message").Message): Model =>
-    updateModel(model, message)
+    reduceState(model, message)
   export const idle = loadableIdle
   export const streamActivity = ActivityState.streamActivity
   export const replaceQueue = QueueState.replaceQueue

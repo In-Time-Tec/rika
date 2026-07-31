@@ -1,19 +1,14 @@
-import { CliRenderEvents, Renderable } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { expect, test } from "vitest"
-import { Data, Effect } from "effect"
-import stringWidth from "string-width"
-import { Surface, maxMountedTranscriptEntries } from "../../src/opentui/surface/opentui-surface"
+import { Effect } from "effect"
+import { Surface } from "../../src/opentui/surface/opentui-surface"
+import { initial, ready, type Model, update } from "../../src/state/model/terminal-state"
 import {
-  initial,
-  loading,
-  ready,
-  replaceQueue,
-  type Model,
-  type ThreadItem,
-  update,
-} from "../../src/state/model/terminal-state"
-import { OpenTuiError, openTui, insertText, styledTextValue, _streamingShell, thread, _giantSubagentModel, _collapsedSubagentModel, nonSpaceBounds } from "./opentui-surface-characterization-11.test-support"
+  openTui,
+  _streamingShell,
+  _giantSubagentModel,
+  _collapsedSubagentModel,
+} from "./opentui-surface-characterization-11.test-support"
 test("loads the workspace file tree with Opt+T and keeps it separate from changed files", () =>
   Effect.runPromise(
     Effect.gen(function* () {

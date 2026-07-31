@@ -1,21 +1,16 @@
 import { expect, test, vi } from "vitest"
-import { it } from "@effect/vitest"
-import * as TranscriptPresentationModel from "@rika/transcript/transcript-presentation-model"
+
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Effect } from "effect"
 import stringWidth from "string-width"
 import {
-  boundedTranscriptModel,
   clipStyledLine,
-  create,
   formatTokens,
-  maxMountedTranscriptEntries,
-  maxMountedTranscriptRows,
   previewBoxRows,
   renderChangedFiles,
   renderTranscriptStyled,
 } from "../../src/opentui/surface/opentui-surface"
-import { initial, ready, type Model, type ThreadItem, update } from "../../src/state/model/terminal-state"
+import { ready, update } from "../../src/state/model/terminal-state"
 const opentuiValue = vi.hoisted(() => {
   const boxChildren: Array<object> = []
   const keyHandlers = new Set<(key: object) => void>()
@@ -259,7 +254,7 @@ vi.mock("@opentui/core", () => ({
   },
   stripAnsiSequences: (text: string) => text,
 }))
-import { _shell, windowUnitToolCall, _agentToolBlock, handlers, _nonEmptyLines, model, thread, createScoped } from "./adapter-characterization-1.test-support"
+import { _shell, _agentToolBlock, _nonEmptyLines, model, thread } from "./adapter-characterization-1.test-support"
 test("formats compact token totals", () => {
   expect(formatTokens(999)).toBe("999 tok")
   expect(formatTokens(40_100_000)).toBe("40.1M tok")

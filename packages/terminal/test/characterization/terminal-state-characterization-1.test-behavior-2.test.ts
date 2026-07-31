@@ -1,9 +1,7 @@
 import { expect, test } from "vitest"
-import { it } from "@effect/vitest"
-import { Duration, Effect } from "effect"
-import { Keys, Palette, ViewState } from "../../src/state/model/terminal-state"
-import * as Adapter from "../../src/opentui/surface/opentui-surface"
-import { key, _thread, readCall, _editFile, _busyQueueModel } from "./terminal-state-characterization-1.test-support"
+
+import { ViewState } from "../../src/state/model/terminal-state"
+import { key, _thread, _editFile, _busyQueueModel } from "./terminal-state-characterization-1.test-support"
 test("admission rebinds a queued provisional row and the real delta replaces it without resync", () => {
   const busy: ViewState.Model = ViewState.resetQueue(
     {

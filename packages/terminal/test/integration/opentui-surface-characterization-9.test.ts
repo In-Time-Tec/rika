@@ -2,12 +2,22 @@ import { Renderable } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import * as TranscriptRecordedShell from "@rika/transcript/recorded-shell-presentation"
 import { expect, test } from "vitest"
-import { Data, Effect } from "effect"
+import { Effect } from "effect"
 import stringWidth from "string-width"
-import { TranscriptPresenter, type Model, type ThreadItem } from "../../src/state/model/terminal-state"
+import { TranscriptPresenter, type Model } from "../../src/state/model/terminal-state"
 import { Surface, maxMountedTranscriptEntries } from "../../src/opentui/surface/opentui-surface"
 import { initial, loading, ready, replaceQueue, update } from "../../src/state/model/terminal-state"
-import { OpenTuiError, openTui, _insertText, styledTextValue, streamingShell, thread, _giantSubagentModel, _collapsedSubagentModel, nonSpaceBounds } from "./opentui-surface-characterization-9.test-support"
+import {
+  OpenTuiError,
+  openTui,
+  _insertText,
+  styledTextValue,
+  streamingShell,
+  thread,
+  _giantSubagentModel,
+  _collapsedSubagentModel,
+  nonSpaceBounds,
+} from "./opentui-surface-characterization-9.test-support"
 for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
   test(`keeps composer updates bounded with ${historySize} transcript entries`, () =>
     Effect.runPromise(

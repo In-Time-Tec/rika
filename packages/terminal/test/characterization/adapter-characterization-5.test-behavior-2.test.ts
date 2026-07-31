@@ -1,8 +1,8 @@
 import { expect, vi } from "vitest"
 import { it } from "@effect/vitest"
 import { Effect } from "effect"
-import { Surface, create, renderTranscriptStyled } from "../../src/opentui/surface/opentui-surface"
-import { initial, type Mode, type Model, type ThreadItem } from "../../src/state/model/terminal-state"
+import { Surface, create } from "../../src/opentui/surface/opentui-surface"
+
 const opentuiValue = vi.hoisted(() => {
   const boxChildren: Array<object> = []
   const keyHandlers = new Set<(key: object) => void>()
@@ -246,7 +246,16 @@ vi.mock("@opentui/core", () => ({
   },
   stripAnsiSequences: (text: string) => text,
 }))
-import { _shell, _windowUnitToolCall, _agentToolBlock, handlers, _nonEmptyLines, model, thread, createScoped } from "./adapter-characterization-5.test-support"
+import {
+  _shell,
+  _windowUnitToolCall,
+  _agentToolBlock,
+  handlers,
+  _nonEmptyLines,
+  model,
+  thread,
+  createScoped,
+} from "./adapter-characterization-5.test-support"
 it.effect("clears usage hover when a narrower selector moves away from the pointer", () =>
   Effect.gen(function* () {
     const { surface } = yield* createScoped(handlers())

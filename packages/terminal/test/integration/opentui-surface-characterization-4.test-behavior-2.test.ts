@@ -1,19 +1,15 @@
-import { Renderable } from "@opentui/core"
 import { createTestRenderer, ManualClock } from "@opentui/core/testing"
 import { expect, test } from "vitest"
-import { Data, Effect } from "effect"
-import stringWidth from "string-width"
+import { Effect } from "effect"
 import { Surface, maxMountedTranscriptEntries } from "../../src/opentui/surface/opentui-surface"
+import { initial, type Model, update } from "../../src/state/model/terminal-state"
 import {
-  initial,
-  loading,
-  ready,
-  replaceQueue,
-  type Model,
-  type ThreadItem,
-  update,
-} from "../../src/state/model/terminal-state"
-import { OpenTuiError, openTui, _insertText, styledTextValue, _streamingShell, thread, _giantSubagentModel, _collapsedSubagentModel, nonSpaceBounds } from "./opentui-surface-characterization-4.test-support"
+  openTui,
+  _insertText,
+  _streamingShell,
+  _giantSubagentModel,
+  _collapsedSubagentModel,
+} from "./opentui-surface-characterization-4.test-support"
 test("coalesces rapid wheel offsets into one report per frame", () =>
   Effect.runPromise(
     Effect.gen(function* () {

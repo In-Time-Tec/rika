@@ -2,13 +2,11 @@ import { expect, test, vi } from "vitest"
 import { Effect } from "effect"
 import {
   buildTranscript,
-  create,
   renderBlock,
   renderSidebar,
   renderTranscriptStyled,
 } from "../../src/opentui/surface/opentui-surface"
-import { initial, type Model, type ThreadItem } from "../../src/state/model/terminal-state"
-import { colors } from "../../src/presentation/terminal/terminal-theme"
+
 const opentuiValue = vi.hoisted(() => {
   const boxChildren: Array<object> = []
   const keyHandlers = new Set<(key: object) => void>()
@@ -225,8 +223,6 @@ const opentuiValue = vi.hoisted(() => {
     rootChildren,
   }
 })
-const opentui = opentuiValue
-
 vi.mock("@opentui/core", () => ({
   BoxRenderable: opentuiValue.BoxRenderable,
   EditBufferRenderable: opentuiValue.EditBufferRenderable,
@@ -252,7 +248,15 @@ vi.mock("@opentui/core", () => ({
   },
   stripAnsiSequences: (text: string) => text,
 }))
-import { shell, _windowUnitToolCall, agentToolBlock, _handlers, _nonEmptyLines, model, thread, _createScoped } from "./adapter-characterization-2.test-support"
+import {
+  shell,
+  _windowUnitToolCall,
+  _handlers,
+  _nonEmptyLines,
+  model,
+  thread,
+  _createScoped,
+} from "./adapter-characterization-2.test-support"
 test("renders every transcript block variant and sidebar state", () => {
   const blocks = [
     { _tag: "Reasoning", text: "why" },

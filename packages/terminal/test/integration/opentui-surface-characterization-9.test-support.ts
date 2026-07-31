@@ -1,20 +1,7 @@
-import { Renderable } from "@opentui/core"
-import { createTestRenderer } from "@opentui/core/testing"
-import * as TranscriptRecordedShell from "@rika/transcript/recorded-shell-presentation"
-import { expect, test } from "vitest"
 import { Data, Effect } from "effect"
-import stringWidth from "string-width"
-import { TranscriptPresenter, type Model, type ThreadItem } from "../../src/state/model/terminal-state"
-import { Surface, maxMountedTranscriptEntries } from "../../src/opentui/surface/opentui-surface"
-import { initial, loading, ready, replaceQueue, update } from "../../src/state/model/terminal-state"
+import { type Model, type ThreadItem } from "../../src/state/model/terminal-state"
 
-
-
-
-
-
-
-
+import { initial, update } from "../../src/state/model/terminal-state"
 
 export class OpenTuiError extends Data.TaggedError("OpenTuiError")<{ readonly cause: unknown }> {}
 
@@ -52,7 +39,6 @@ export const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "tit
   lastActivityAt: 0,
   ...input,
 })
-
 
 export const _giantSubagentModel = (childCount: number): Model => {
   const rootBlock = {
@@ -164,8 +150,6 @@ export const _collapsedSubagentModel = (answerCount: number, childCount: number)
   }
 }
 
-
-
 export const nonSpaceBounds = (frame: string, height: number) => {
   const points = frame
     .split("\n")
@@ -179,8 +163,3 @@ export const nonSpaceBounds = (frame: string, height: number) => {
     bottom: Math.max(...points.map(({ y }) => y)),
   }
 }
-
-
-
-
-

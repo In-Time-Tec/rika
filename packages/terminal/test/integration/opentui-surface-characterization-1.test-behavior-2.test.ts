@@ -1,19 +1,16 @@
-import { CliRenderEvents, Renderable, RendererControlState } from "@opentui/core"
-import { createTestRenderer, ManualClock } from "@opentui/core/testing"
+import { CliRenderEvents } from "@opentui/core"
+import { createTestRenderer } from "@opentui/core/testing"
 import { expect, test } from "vitest"
-import { Data, Effect } from "effect"
-import stringWidth from "string-width"
-import { Surface, maxMountedTranscriptEntries } from "../../src/opentui/surface/opentui-surface"
+import { Effect } from "effect"
+import { Surface } from "../../src/opentui/surface/opentui-surface"
+import { initial, ready, type Model, update } from "../../src/state/model/terminal-state"
 import {
-  initial,
-  loading,
-  ready,
-  replaceQueue,
-  type Model,
-  type ThreadItem,
-  update,
-} from "../../src/state/model/terminal-state"
-import { OpenTuiError, openTui, _insertText, styledTextValue, _streamingShell, thread, _giantSubagentModel, _collapsedSubagentModel, nonSpaceBounds } from "./opentui-surface-characterization-1.test-support"
+  openTui,
+  _insertText,
+  _streamingShell,
+  _giantSubagentModel,
+  _collapsedSubagentModel,
+} from "./opentui-surface-characterization-1.test-support"
 test("converges the model to the physical terminal size when a resize event reports a stale size", () =>
   Effect.runPromise(
     Effect.gen(function* () {

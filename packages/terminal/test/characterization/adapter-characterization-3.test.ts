@@ -1,8 +1,7 @@
 import { expect, test, vi } from "vitest"
 import { Effect } from "effect"
-import stringWidth from "string-width"
-import { buildTranscript, create, renderTranscriptStyled } from "../../src/opentui/surface/opentui-surface"
-import { initial, type Model, type ThreadItem } from "../../src/state/model/terminal-state"
+import { buildTranscript } from "../../src/opentui/surface/opentui-surface"
+
 import { colors } from "../../src/presentation/terminal/terminal-theme"
 const opentuiValue = vi.hoisted(() => {
   const boxChildren: Array<object> = []
@@ -220,8 +219,6 @@ const opentuiValue = vi.hoisted(() => {
     rootChildren,
   }
 })
-const opentui = opentuiValue
-
 vi.mock("@opentui/core", () => ({
   BoxRenderable: opentuiValue.BoxRenderable,
   EditBufferRenderable: opentuiValue.EditBufferRenderable,
@@ -247,7 +244,19 @@ vi.mock("@opentui/core", () => ({
   },
   stripAnsiSequences: (text: string) => text,
 }))
-import { shell, _windowUnitToolCall, _agentToolBlock, _handlers, nonEmptyLines, subagentToolBlock, editToolBlock, renderedText, model, _thread, _createScoped } from "./adapter-characterization-3.test-support"
+import {
+  shell,
+  _windowUnitToolCall,
+  _agentToolBlock,
+  _handlers,
+  nonEmptyLines,
+  subagentToolBlock,
+  editToolBlock,
+  renderedText,
+  model,
+  _thread,
+  _createScoped,
+} from "./adapter-characterization-3.test-support"
 test("matches Amp cancelled subagent and shell treatment", () => {
   const state = model({
     blocks: [

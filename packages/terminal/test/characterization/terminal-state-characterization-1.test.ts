@@ -1,7 +1,7 @@
 import { expect, test } from "vitest"
 import { it } from "@effect/vitest"
 import { Duration, Effect } from "effect"
-import { Keys, Palette, ViewState } from "../../src/state/model/terminal-state"
+import { Palette, ViewState } from "../../src/state/model/terminal-state"
 import * as Adapter from "../../src/opentui/surface/opentui-surface"
 import { key, _thread, readCall, _editFile, _busyQueueModel } from "./terminal-state-characterization-1.test-support"
 test("cycles cost, tokens, and active time", () => {

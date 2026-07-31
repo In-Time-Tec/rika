@@ -1,25 +1,19 @@
 import { Renderable } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { expect, test } from "vitest"
-import { Data, Effect } from "effect"
-import stringWidth from "string-width"
+import { Effect } from "effect"
 import {
   Surface,
-  boundedTranscriptModel,
-  maxBoundedTranscriptItems,
   maxMountedTranscriptEntries,
   maxMountedTranscriptRows,
 } from "../../src/opentui/surface/opentui-surface"
+
 import {
-  initial,
-  loading,
-  ready,
-  replaceQueue,
-  type Model,
-  type ThreadItem,
-  update,
-} from "../../src/state/model/terminal-state"
-import { OpenTuiError, openTui, _insertText, styledTextValue, _streamingShell, thread, giantSubagentModel, collapsedSubagentModel, nonSpaceBounds } from "./opentui-surface-characterization-2.test-support"
+  openTui,
+  _insertText,
+  _streamingShell,
+  giantSubagentModel,
+} from "./opentui-surface-characterization-2.test-support"
 test("keeps a large expanded subagent tree in one mounted row window", () =>
   Effect.runPromise(
     Effect.gen(function* () {

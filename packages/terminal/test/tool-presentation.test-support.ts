@@ -1,14 +1,9 @@
 import { TextAttributes } from "../src/presentation/markdown/styled-text"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import { describe, expect, test } from "vitest"
+import { expect } from "vitest"
 import { buildTranscript } from "../src/opentui/surface/opentui-surface"
 import { colors } from "../src/presentation/terminal/terminal-theme"
-import { renderToolSummary } from "../src/presentation/tool/tool-summary"
-import {
-  expandableRowIds,
-  toolDetail,
-  rows as transcriptUnits,
-} from "../src/presentation/transcript/terminal-transcript-presentation"
+
 import { initial, type Model, type TranscriptBlock } from "../src/state/model/terminal-state"
 
 export type ToolCall = Extract<TranscriptBlock, { readonly _tag: "ToolCall" }>
@@ -83,28 +78,6 @@ export const explore = (
   counter,
 })
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 export const streamingBlock = (name: string, partialInput: string): ToolCall => {
   const projection = TranscriptProjection.Projection.project("turn", "prompt", [
     {
@@ -120,11 +93,3 @@ export const streamingBlock = (name: string, partialInput: string): ToolCall => 
     throw new Error("expected a streaming ToolCall block")
   return unit.content.block
 }
-
-
-
-
-
-
-
-

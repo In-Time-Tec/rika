@@ -1,18 +1,12 @@
 import * as TranscriptIdentity from "@rika/transcript/transcript-unit-identity"
-import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptPresentationModel from "@rika/transcript/transcript-presentation-model"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import { describe, expect, it } from "vitest"
-import { ExecutionEvents, TranscriptPresenter, ViewState } from "../src/state/model/terminal-state"
-import {
-  agentOutputText,
-  agentResponseState,
-  unitId as transcriptUnitId,
-  rows as transcriptUnits,
-} from "../src/presentation/transcript/terminal-transcript-presentation"
+
+import { TranscriptPresenter, ViewState } from "../src/state/model/terminal-state"
+import { agentResponseState } from "../src/presentation/transcript/terminal-transcript-presentation"
 
 export const event = (
   cursor: string,
@@ -70,23 +64,6 @@ export const nestedModel = () => {
   return model
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 export const childTurnId = (child: number) => `child:turn:agent-${child}`
 
 export const childCount = 200
@@ -134,9 +111,6 @@ export const attachedSession = () => {
   const base = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), largeParent.units)
   return TranscriptPresenter.attachChildProjections(base, new Set<string>(), childProjections)
 }
-
-
-
 
 export const agentTool = (
   status: "running" | "complete" | "failed" | "cancelled",
@@ -222,19 +196,6 @@ export const optsFor = (
 
 export const settled = ["complete", "failed", "cancelled"] as const
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 export const limit = 240
 
 export const noReport = JSON.stringify({
@@ -244,7 +205,3 @@ export const noReport = JSON.stringify({
   reason: "The subagent finished its run without writing a final report.",
   recovery: "Re-run this delegation once with the same prompt, or do the work yourself.",
 })
-
-
-
-

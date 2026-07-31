@@ -1,6 +1,5 @@
 import { expect, test } from "vitest"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import { Keys, ViewState } from "../../src/state/model/terminal-state"
+import { ViewState } from "../../src/state/model/terminal-state"
 import { key, thread, readCall, editFile, busyQueueModel } from "./terminal-state-characterization-2.test-support"
 test("a stale terminal event for another turn does not clear the active turn", () => {
   const busy: ViewState.Model = {

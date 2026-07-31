@@ -1,12 +1,4 @@
-import { expect, test } from "vitest"
-import { it } from "@effect/vitest"
-import { Duration, Effect } from "effect"
-import { Keys, Palette, ViewState } from "../../src/state/model/terminal-state"
-import * as Adapter from "../../src/opentui/surface/opentui-surface"
-
-
-
-
+import { Keys, ViewState } from "../../src/state/model/terminal-state"
 
 export const key = (input: Partial<Keys.Key> & Pick<Keys.Key, "name">): Keys.Key => ({
   name: input.name,
@@ -67,39 +59,3 @@ export const _busyQueueModel = (model: ViewState.Model): ViewState.Model => ({
   busy: true,
   currentThreadId: "t",
 })
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

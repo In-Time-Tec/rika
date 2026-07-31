@@ -1,20 +1,22 @@
 import { Renderable } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { expect, test } from "vitest"
-import { Data, Effect } from "effect"
+import { Effect } from "effect"
 import stringWidth from "string-width"
 import { Surface, maxMountedTranscriptEntries } from "../../src/opentui/surface/opentui-surface"
-import { colors } from "../../src/presentation/terminal/terminal-theme"
+
+import { initial, loading, ready, replaceQueue, type Model, update } from "../../src/state/model/terminal-state"
 import {
-  initial,
-  loading,
-  ready,
-  replaceQueue,
-  type Model,
-  type ThreadItem,
-  update,
-} from "../../src/state/model/terminal-state"
-import { OpenTuiError, openTui, _insertText, styledTextValue, _streamingShell, thread, _giantSubagentModel, _collapsedSubagentModel, nonSpaceBounds } from "./opentui-surface-characterization-10.test-support"
+  OpenTuiError,
+  openTui,
+  _insertText,
+  styledTextValue,
+  _streamingShell,
+  thread,
+  _giantSubagentModel,
+  _collapsedSubagentModel,
+  nonSpaceBounds,
+} from "./opentui-surface-characterization-10.test-support"
 for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
   test(`keeps composer updates bounded with ${historySize} transcript entries`, () =>
     Effect.runPromise(

@@ -25,7 +25,6 @@ import {
   type Model,
   type QueueItem,
   type ThreadItem,
-  type TranscriptItem,
 } from "../../state/model/terminal-state"
 import { colors, spacing } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
@@ -36,7 +35,8 @@ import {
   relocateRowEnd,
   rowWindowStart,
 } from "../../presentation/transcript/terminal-transcript-presentation"
-import { classifyTranscriptContent, isFollowing } from "../../presentation/transcript/transcript-viewport"
+import { isFollowing } from "../../presentation/transcript/transcript-viewport"
+import { prependedTranscriptItems } from "./opentui-lifecycle-transcript"
 import { truncateToWidth } from "../../presentation/terminal/terminal-format"
 import { renderSidebar } from "../rendering/opentui-render-block"
 import {
@@ -64,17 +64,6 @@ import { shortcutsContent } from "./opentui-composer-region"
 import { panelLoading, compactWorkspace, welcomeContent, welcomeMarkFrames } from "./opentui-surface-content"
 import { cutoutBackground, displayCursorOffset } from "./opentui-surface-construction"
 import type { TranscriptRenderableDescriptor } from "./opentui-surface-state"
-
-const prependedTranscriptItems = (
-  previousItems: ReadonlyArray<unknown>,
-  currentItems: ReadonlyArray<unknown>,
-): number => {
-  const identities = (items: ReadonlyArray<unknown>) =>
-    (items as ReadonlyArray<TranscriptItem>).flatMap((item) =>
-      item.id === undefined ? [] : [{ id: `${item._tag}:${item.id}` }],
-    )
-  return classifyTranscriptContent(identities(previousItems), identities(currentItems)).prepended.length
-}
 
 export abstract class SurfaceLifecycle extends SurfaceInput {
   showToast(message: string, color: ColorInput = toOpenColor(colors.green)): void {

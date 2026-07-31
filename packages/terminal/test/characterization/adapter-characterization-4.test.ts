@@ -1,8 +1,8 @@
 import { expect, test, vi } from "vitest"
 import { it } from "@effect/vitest"
 import { Effect } from "effect"
-import { buildTranscript, create, renderTranscriptStyled } from "../../src/opentui/surface/opentui-surface"
-import { initial, ready, type Model, type ThreadItem } from "../../src/state/model/terminal-state"
+import { buildTranscript } from "../../src/opentui/surface/opentui-surface"
+
 const opentuiValue = vi.hoisted(() => {
   const boxChildren: Array<object> = []
   const keyHandlers = new Set<(key: object) => void>()
@@ -246,7 +246,18 @@ vi.mock("@opentui/core", () => ({
   },
   stripAnsiSequences: (text: string) => text,
 }))
-import { shell, _windowUnitToolCall, _agentToolBlock, handlers, nonEmptyLines, subagentToolBlock, renderedText, model, _thread, createScoped } from "./adapter-characterization-4.test-support"
+import {
+  shell,
+  _windowUnitToolCall,
+  _agentToolBlock,
+  handlers,
+  nonEmptyLines,
+  subagentToolBlock,
+  renderedText,
+  model,
+  _thread,
+  createScoped,
+} from "./adapter-characterization-4.test-support"
 test("keeps wrapped response continuations inside the rail and curls the final row", () => {
   const state = model({
     width: 60,
