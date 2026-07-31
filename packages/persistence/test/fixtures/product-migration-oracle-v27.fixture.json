@@ -19,6 +19,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_threads",
           "tbl_name": "rika_threads",
           "sql": "CREATE TABLE rika_threads (\n    id TEXT PRIMARY KEY NOT NULL,\n    session_id TEXT NOT NULL UNIQUE,\n    workspace TEXT NOT NULL REFERENCES rika_workspaces(path),\n    title TEXT NOT NULL,\n    labels_json TEXT NOT NULL DEFAULT '[]',\n    pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),\n    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),\n    created_at INTEGER NOT NULL,\n    updated_at INTEGER NOT NULL\n  )"
@@ -31,6 +37,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_threads",
           "columns": [
@@ -132,6 +167,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_threads",
           "foreignKeys": [
             {
@@ -160,7 +199,12 @@
         }
       ],
       "triggers": [],
-      "representativeRewriteRows": []
+      "representativeRewriteRows": [
+        {
+          "operation": "baseline creates product tables",
+          "outcome": "no row rewrite"
+        }
+      ]
     },
     {
       "prefix": 2,
@@ -189,6 +233,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_threads",
           "tbl_name": "rika_threads",
           "sql": "CREATE TABLE rika_threads (\n    id TEXT PRIMARY KEY NOT NULL,\n    session_id TEXT NOT NULL UNIQUE,\n    workspace TEXT NOT NULL REFERENCES rika_workspaces(path),\n    title TEXT NOT NULL,\n    labels_json TEXT NOT NULL DEFAULT '[]',\n    pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),\n    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),\n    created_at INTEGER NOT NULL,\n    updated_at INTEGER NOT NULL\n  )"
@@ -207,6 +257,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_threads",
           "columns": [
@@ -369,6 +448,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_threads",
           "foreignKeys": [
             {
@@ -418,7 +501,12 @@
         }
       ],
       "triggers": [],
-      "representativeRewriteRows": []
+      "representativeRewriteRows": [
+        {
+          "operation": "creates turns table and index",
+          "outcome": "no row rewrite"
+        }
+      ]
     },
     {
       "prefix": 3,
@@ -451,6 +539,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_threads",
           "tbl_name": "rika_threads",
           "sql": "CREATE TABLE rika_threads (\n    id TEXT PRIMARY KEY NOT NULL,\n    session_id TEXT NOT NULL UNIQUE,\n    workspace TEXT NOT NULL REFERENCES rika_workspaces(path),\n    title TEXT NOT NULL,\n    labels_json TEXT NOT NULL DEFAULT '[]',\n    pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),\n    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),\n    created_at INTEGER NOT NULL,\n    updated_at INTEGER NOT NULL\n  )"
@@ -469,6 +563,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_threads",
           "columns": [
@@ -631,6 +754,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_threads",
           "foreignKeys": [
             {
@@ -680,7 +807,38 @@
         }
       ],
       "triggers": [],
-      "representativeRewriteRows": []
+      "representativeRewriteRows": [
+        {
+          "operation": "queued_turn_status copy rewrite",
+          "before": {
+            "rika_turns": [
+              {
+                "id": "turn-completed",
+                "thread_id": "thread-a",
+                "prompt": "done",
+                "status": "completed",
+                "last_cursor": "c1",
+                "created_at": 10,
+                "updated_at": 11
+              }
+            ]
+          },
+          "after": {
+            "rika_turns": [
+              {
+                "id": "turn-completed",
+                "thread_id": "thread-a",
+                "prompt": "done",
+                "status": "completed",
+                "last_cursor": "c1",
+                "created_at": 10,
+                "updated_at": 11
+              }
+            ]
+          },
+          "assertion": "copied turn rows preserve every value while status CHECK adds queued"
+        }
+      ]
     },
     {
       "prefix": 4,
@@ -717,6 +875,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_threads",
           "tbl_name": "rika_threads",
           "sql": "CREATE TABLE rika_threads (\n    id TEXT PRIMARY KEY NOT NULL,\n    session_id TEXT NOT NULL UNIQUE,\n    workspace TEXT NOT NULL REFERENCES rika_workspaces(path),\n    title TEXT NOT NULL,\n    labels_json TEXT NOT NULL DEFAULT '[]',\n    pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),\n    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),\n    created_at INTEGER NOT NULL,\n    updated_at INTEGER NOT NULL\n  )"
@@ -735,6 +899,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_threads",
           "columns": [
@@ -905,6 +1098,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_threads",
           "foreignKeys": [
             {
@@ -954,7 +1151,12 @@
         }
       ],
       "triggers": [],
-      "representativeRewriteRows": []
+      "representativeRewriteRows": [
+        {
+          "operation": "adds extension_pin_json column",
+          "outcome": "no row rewrite"
+        }
+      ]
     },
     {
       "prefix": 5,
@@ -995,6 +1197,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_threads",
           "tbl_name": "rika_threads",
           "sql": "CREATE TABLE rika_threads (\n    id TEXT PRIMARY KEY NOT NULL,\n    session_id TEXT NOT NULL UNIQUE,\n    workspace TEXT NOT NULL REFERENCES rika_workspaces(path),\n    title TEXT NOT NULL,\n    labels_json TEXT NOT NULL DEFAULT '[]',\n    pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),\n    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),\n    created_at INTEGER NOT NULL,\n    updated_at INTEGER NOT NULL\n  )"
@@ -1013,6 +1221,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_threads",
           "columns": [
@@ -1191,6 +1428,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_threads",
           "foreignKeys": [
             {
@@ -1240,7 +1481,12 @@
         }
       ],
       "triggers": [],
-      "representativeRewriteRows": []
+      "representativeRewriteRows": [
+        {
+          "operation": "adds prompt_parts_json column",
+          "outcome": "no row rewrite"
+        }
+      ]
     },
     {
       "prefix": 6,
@@ -1285,6 +1531,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_threads",
           "tbl_name": "rika_threads",
           "sql": "CREATE TABLE \"rika_threads\" (\n    id TEXT PRIMARY KEY NOT NULL,\n    workspace TEXT NOT NULL REFERENCES rika_workspaces(path),\n    title TEXT NOT NULL,\n    labels_json TEXT NOT NULL DEFAULT '[]',\n    pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),\n    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),\n    created_at INTEGER NOT NULL,\n    updated_at INTEGER NOT NULL\n  )"
@@ -1303,6 +1555,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_threads",
           "columns": [
@@ -1473,6 +1754,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_threads",
           "foreignKeys": [
             {
@@ -1522,7 +1807,41 @@
         }
       ],
       "triggers": [],
-      "representativeRewriteRows": []
+      "representativeRewriteRows": [
+        {
+          "operation": "drop_thread_session_id copy rewrite",
+          "before": {
+            "rika_threads": [
+              {
+                "id": "thread-a",
+                "session_id": "legacy-session",
+                "workspace": "/work",
+                "title": "Title",
+                "labels_json": "[]",
+                "pinned": 0,
+                "archived": 0,
+                "created_at": 1,
+                "updated_at": 2
+              }
+            ]
+          },
+          "after": {
+            "rika_threads": [
+              {
+                "id": "thread-a",
+                "workspace": "/work",
+                "title": "Title",
+                "labels_json": "[]",
+                "pinned": 0,
+                "archived": 0,
+                "created_at": 1,
+                "updated_at": 2
+              }
+            ]
+          },
+          "assertion": "thread copy omits session_id and preserves remaining columns"
+        }
+      ]
     },
     {
       "prefix": 7,
@@ -1571,6 +1890,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_threads",
           "tbl_name": "rika_threads",
           "sql": "CREATE TABLE \"rika_threads\" (\n    id TEXT PRIMARY KEY NOT NULL,\n    workspace TEXT NOT NULL REFERENCES rika_workspaces(path),\n    title TEXT NOT NULL,\n    labels_json TEXT NOT NULL DEFAULT '[]',\n    pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),\n    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),\n    created_at INTEGER NOT NULL,\n    updated_at INTEGER NOT NULL\n  )"
@@ -1589,6 +1914,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_threads",
           "columns": [
@@ -1767,6 +2121,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_threads",
           "foreignKeys": [
             {
@@ -1816,7 +2174,12 @@
         }
       ],
       "triggers": [],
-      "representativeRewriteRows": []
+      "representativeRewriteRows": [
+        {
+          "operation": "adds execution_route_json column",
+          "outcome": "no row rewrite"
+        }
+      ]
     },
     {
       "prefix": 8,
@@ -1869,6 +2232,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_threads",
           "tbl_name": "rika_threads",
           "sql": "CREATE TABLE \"rika_threads\" (\n    id TEXT PRIMARY KEY NOT NULL,\n    workspace TEXT NOT NULL REFERENCES rika_workspaces(path),\n    title TEXT NOT NULL,\n    labels_json TEXT NOT NULL DEFAULT '[]',\n    pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),\n    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),\n    created_at INTEGER NOT NULL,\n    updated_at INTEGER NOT NULL\n  )"
@@ -1887,6 +2256,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_threads",
           "columns": [
@@ -2073,6 +2471,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_threads",
           "foreignKeys": [
             {
@@ -2122,7 +2524,12 @@
         }
       ],
       "triggers": [],
-      "representativeRewriteRows": []
+      "representativeRewriteRows": [
+        {
+          "operation": "adds review_fan_out_id column",
+          "outcome": "no row rewrite"
+        }
+      ]
     },
     {
       "prefix": 9,
@@ -2185,6 +2592,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_threads",
           "tbl_name": "rika_threads",
           "sql": "CREATE TABLE \"rika_threads\" (\n    id TEXT PRIMARY KEY NOT NULL,\n    workspace TEXT NOT NULL REFERENCES rika_workspaces(path),\n    title TEXT NOT NULL,\n    labels_json TEXT NOT NULL DEFAULT '[]',\n    pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),\n    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),\n    created_at INTEGER NOT NULL,\n    updated_at INTEGER NOT NULL\n  )"
@@ -2209,6 +2622,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_threads",
           "columns": [
@@ -2488,6 +2930,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_threads",
           "foreignKeys": [
             {
@@ -2568,7 +3014,12 @@
         }
       ],
       "triggers": [],
-      "representativeRewriteRows": []
+      "representativeRewriteRows": [
+        {
+          "operation": "creates transcript projection tables",
+          "outcome": "no row rewrite"
+        }
+      ]
     },
     {
       "prefix": 10,
@@ -2641,6 +3092,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_thread_read_state",
           "tbl_name": "rika_thread_read_state",
           "sql": "CREATE TABLE rika_thread_read_state (\n    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,\n    last_read_at INTEGER NOT NULL\n  )"
@@ -2677,6 +3134,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_thread_read_state",
           "columns": [
@@ -3054,6 +3540,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_thread_read_state",
           "foreignKeys": [
             {
@@ -3180,7 +3670,12 @@
         }
       ],
       "triggers": [],
-      "representativeRewriteRows": []
+      "representativeRewriteRows": [
+        {
+          "operation": "creates thread activity/read-state tables",
+          "outcome": "no row rewrite"
+        }
+      ]
     },
     {
       "prefix": 11,
@@ -3269,6 +3764,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_thread_read_state",
           "tbl_name": "rika_thread_read_state",
           "sql": "CREATE TABLE rika_thread_read_state (\n    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,\n    last_read_at INTEGER NOT NULL\n  )"
@@ -3317,6 +3818,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_thread_read_state",
           "columns": [
@@ -3848,6 +4378,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_thread_read_state",
           "foreignKeys": [
             {
@@ -4036,7 +4570,12 @@
         }
       ],
       "triggers": [],
-      "representativeRewriteRows": []
+      "representativeRewriteRows": [
+        {
+          "operation": "creates semantic transcript tables and indexes",
+          "outcome": "no row rewrite"
+        }
+      ]
     },
     {
       "prefix": 12,
@@ -4135,6 +4674,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_thread_queue_state",
           "tbl_name": "rika_thread_queue_state",
           "sql": "CREATE TABLE rika_thread_queue_state (\n    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,\n    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),\n    queued_count INTEGER NOT NULL DEFAULT 0 CHECK (queued_count >= 0),\n    wake_generation INTEGER NOT NULL DEFAULT 0 CHECK (wake_generation >= 0),\n    wake_pending INTEGER NOT NULL DEFAULT 0 CHECK (wake_pending IN (0, 1)),\n    PRIMARY KEY (thread_id)\n  )"
@@ -4189,6 +4734,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_thread_queue_state",
           "columns": [
@@ -4773,955 +5347,9 @@
       ],
       "constraints": [
         {
-          "table": "rika_thread_queue_state",
-          "foreignKeys": [
-            {
-              "id": 0,
-              "seq": 0,
-              "table": "rika_threads",
-              "from": "thread_id",
-              "to": "id",
-              "on_update": "NO ACTION",
-              "on_delete": "CASCADE",
-              "match": "NONE"
-            }
-          ]
-        },
-        {
-          "table": "rika_thread_read_state",
-          "foreignKeys": [
-            {
-              "id": 0,
-              "seq": 0,
-              "table": "rika_threads",
-              "from": "thread_id",
-              "to": "id",
-              "on_update": "NO ACTION",
-              "on_delete": "CASCADE",
-              "match": "NONE"
-            }
-          ]
-        },
-        {
-          "table": "rika_thread_turn_activity",
-          "foreignKeys": [
-            {
-              "id": 0,
-              "seq": 0,
-              "table": "rika_threads",
-              "from": "thread_id",
-              "to": "id",
-              "on_update": "NO ACTION",
-              "on_delete": "CASCADE",
-              "match": "NONE"
-            },
-            {
-              "id": 1,
-              "seq": 0,
-              "table": "rika_turns",
-              "from": "turn_id",
-              "to": "id",
-              "on_update": "NO ACTION",
-              "on_delete": "CASCADE",
-              "match": "NONE"
-            }
-          ]
-        },
-        {
-          "table": "rika_threads",
-          "foreignKeys": [
-            {
-              "id": 0,
-              "seq": 0,
-              "table": "rika_workspaces",
-              "from": "workspace",
-              "to": "path",
-              "on_update": "NO ACTION",
-              "on_delete": "NO ACTION",
-              "match": "NONE"
-            }
-          ]
-        },
-        {
-          "table": "rika_transcript_checkpoints",
-          "foreignKeys": [
-            {
-              "id": 0,
-              "seq": 0,
-              "table": "rika_threads",
-              "from": "thread_id",
-              "to": "id",
-              "on_update": "NO ACTION",
-              "on_delete": "CASCADE",
-              "match": "NONE"
-            },
-            {
-              "id": 1,
-              "seq": 0,
-              "table": "rika_turns",
-              "from": "turn_id",
-              "to": "id",
-              "on_update": "NO ACTION",
-              "on_delete": "CASCADE",
-              "match": "NONE"
-            }
-          ]
-        },
-        {
-          "table": "rika_transcript_entries",
-          "foreignKeys": [
-            {
-              "id": 0,
-              "seq": 0,
-              "table": "rika_threads",
-              "from": "thread_id",
-              "to": "id",
-              "on_update": "NO ACTION",
-              "on_delete": "CASCADE",
-              "match": "NONE"
-            },
-            {
-              "id": 1,
-              "seq": 0,
-              "table": "rika_turns",
-              "from": "turn_id",
-              "to": "id",
-              "on_update": "NO ACTION",
-              "on_delete": "CASCADE",
-              "match": "NONE"
-            }
-          ]
-        },
-        {
-          "table": "rika_transcript_units",
-          "foreignKeys": [
-            {
-              "id": 0,
-              "seq": 0,
-              "table": "rika_threads",
-              "from": "thread_id",
-              "to": "id",
-              "on_update": "NO ACTION",
-              "on_delete": "CASCADE",
-              "match": "NONE"
-            },
-            {
-              "id": 1,
-              "seq": 0,
-              "table": "rika_turns",
-              "from": "turn_id",
-              "to": "id",
-              "on_update": "NO ACTION",
-              "on_delete": "CASCADE",
-              "match": "NONE"
-            }
-          ]
-        },
-        {
-          "table": "rika_turns",
-          "foreignKeys": [
-            {
-              "id": 0,
-              "seq": 0,
-              "table": "rika_threads",
-              "from": "thread_id",
-              "to": "id",
-              "on_update": "NO ACTION",
-              "on_delete": "CASCADE",
-              "match": "NONE"
-            }
-          ]
-        },
-        {
-          "table": "rika_workspaces",
+          "table": "rika_migrations",
           "foreignKeys": []
-        }
-      ],
-      "indexes": [
-        {
-          "type": "index",
-          "name": "rika_thread_turn_activity_summary",
-          "tbl_name": "rika_thread_turn_activity",
-          "sql": "CREATE INDEX rika_thread_turn_activity_summary ON rika_thread_turn_activity (thread_id, last_event_at DESC)"
         },
-        {
-          "type": "index",
-          "name": "rika_threads_listing",
-          "tbl_name": "rika_threads",
-          "sql": "CREATE INDEX rika_threads_listing ON rika_threads (pinned DESC, updated_at DESC, id ASC)"
-        },
-        {
-          "type": "index",
-          "name": "rika_transcript_page",
-          "tbl_name": "rika_transcript_entries",
-          "sql": "CREATE INDEX rika_transcript_page ON rika_transcript_entries (thread_id, created_at DESC, turn_id DESC)"
-        },
-        {
-          "type": "index",
-          "name": "rika_transcript_units_page",
-          "tbl_name": "rika_transcript_units",
-          "sql": "CREATE INDEX rika_transcript_units_page ON rika_transcript_units (\n    thread_id, created_at DESC, turn_id DESC, unit_sequence DESC, unit_part DESC, unit_key DESC\n  )"
-        },
-        {
-          "type": "index",
-          "name": "rika_transcript_units_turn",
-          "tbl_name": "rika_transcript_units",
-          "sql": "CREATE INDEX rika_transcript_units_turn ON rika_transcript_units (\n    turn_id, unit_sequence ASC, unit_part ASC, unit_key ASC\n  )"
-        },
-        {
-          "type": "index",
-          "name": "rika_turns_queue",
-          "tbl_name": "rika_turns",
-          "sql": "CREATE INDEX rika_turns_queue ON rika_turns (thread_id, status, created_at ASC, id ASC)"
-        },
-        {
-          "type": "index",
-          "name": "rika_turns_thread",
-          "tbl_name": "rika_turns",
-          "sql": "CREATE INDEX rika_turns_thread ON rika_turns (thread_id, created_at ASC, id ASC)"
-        }
-      ],
-      "triggers": [],
-      "representativeRewriteRows": []
-    },
-    {
-      "prefix": 13,
-      "migrationRows": [
-        {
-          "migration_id": 1,
-          "name": "product_baseline"
-        },
-        {
-          "migration_id": 2,
-          "name": "turns"
-        },
-        {
-          "migration_id": 3,
-          "name": "queued_turn_status"
-        },
-        {
-          "migration_id": 4,
-          "name": "execution_extension_pins"
-        },
-        {
-          "migration_id": 5,
-          "name": "turn_prompt_parts"
-        },
-        {
-          "migration_id": 6,
-          "name": "drop_thread_session_id"
-        },
-        {
-          "migration_id": 7,
-          "name": "execution_route_pins"
-        },
-        {
-          "migration_id": 8,
-          "name": "review_fan_out_owners"
-        },
-        {
-          "migration_id": 9,
-          "name": "transcript_projection"
-        },
-        {
-          "migration_id": 10,
-          "name": "thread_summaries"
-        },
-        {
-          "migration_id": 11,
-          "name": "semantic_transcript_projection"
-        },
-        {
-          "migration_id": 12,
-          "name": "queue_state_and_current_transcripts"
-        },
-        {
-          "migration_id": 13,
-          "name": "provider_execution_routes"
-        }
-      ],
-      "schema": [
-        {
-          "type": "index",
-          "name": "rika_thread_turn_activity_summary",
-          "tbl_name": "rika_thread_turn_activity",
-          "sql": "CREATE INDEX rika_thread_turn_activity_summary ON rika_thread_turn_activity (thread_id, last_event_at DESC)"
-        },
-        {
-          "type": "index",
-          "name": "rika_threads_listing",
-          "tbl_name": "rika_threads",
-          "sql": "CREATE INDEX rika_threads_listing ON rika_threads (pinned DESC, updated_at DESC, id ASC)"
-        },
-        {
-          "type": "index",
-          "name": "rika_transcript_page",
-          "tbl_name": "rika_transcript_entries",
-          "sql": "CREATE INDEX rika_transcript_page ON rika_transcript_entries (thread_id, created_at DESC, turn_id DESC)"
-        },
-        {
-          "type": "index",
-          "name": "rika_transcript_units_page",
-          "tbl_name": "rika_transcript_units",
-          "sql": "CREATE INDEX rika_transcript_units_page ON rika_transcript_units (\n    thread_id, created_at DESC, turn_id DESC, unit_sequence DESC, unit_part DESC, unit_key DESC\n  )"
-        },
-        {
-          "type": "index",
-          "name": "rika_transcript_units_turn",
-          "tbl_name": "rika_transcript_units",
-          "sql": "CREATE INDEX rika_transcript_units_turn ON rika_transcript_units (\n    turn_id, unit_sequence ASC, unit_part ASC, unit_key ASC\n  )"
-        },
-        {
-          "type": "index",
-          "name": "rika_turns_queue",
-          "tbl_name": "rika_turns",
-          "sql": "CREATE INDEX rika_turns_queue ON rika_turns (thread_id, status, created_at ASC, id ASC)"
-        },
-        {
-          "type": "index",
-          "name": "rika_turns_thread",
-          "tbl_name": "rika_turns",
-          "sql": "CREATE INDEX rika_turns_thread ON rika_turns (thread_id, created_at ASC, id ASC)"
-        },
-        {
-          "type": "table",
-          "name": "rika_thread_queue_state",
-          "tbl_name": "rika_thread_queue_state",
-          "sql": "CREATE TABLE rika_thread_queue_state (\n    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,\n    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),\n    queued_count INTEGER NOT NULL DEFAULT 0 CHECK (queued_count >= 0),\n    wake_generation INTEGER NOT NULL DEFAULT 0 CHECK (wake_generation >= 0),\n    wake_pending INTEGER NOT NULL DEFAULT 0 CHECK (wake_pending IN (0, 1)),\n    PRIMARY KEY (thread_id)\n  )"
-        },
-        {
-          "type": "table",
-          "name": "rika_thread_read_state",
-          "tbl_name": "rika_thread_read_state",
-          "sql": "CREATE TABLE rika_thread_read_state (\n    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,\n    last_read_at INTEGER NOT NULL\n  )"
-        },
-        {
-          "type": "table",
-          "name": "rika_thread_turn_activity",
-          "tbl_name": "rika_thread_turn_activity",
-          "sql": "CREATE TABLE rika_thread_turn_activity (\n    turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,\n    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,\n    projected_cursor TEXT,\n    complete INTEGER NOT NULL DEFAULT 0 CHECK (complete IN (0, 1)),\n    added INTEGER NOT NULL DEFAULT 0 CHECK (added >= 0),\n    modified INTEGER NOT NULL DEFAULT 0 CHECK (modified >= 0),\n    removed INTEGER NOT NULL DEFAULT 0 CHECK (removed >= 0),\n    last_event_at INTEGER,\n    updated_at INTEGER NOT NULL\n  )"
-        },
-        {
-          "type": "table",
-          "name": "rika_threads",
-          "tbl_name": "rika_threads",
-          "sql": "CREATE TABLE \"rika_threads\" (\n    id TEXT PRIMARY KEY NOT NULL,\n    workspace TEXT NOT NULL REFERENCES rika_workspaces(path),\n    title TEXT NOT NULL,\n    labels_json TEXT NOT NULL DEFAULT '[]',\n    pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),\n    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),\n    created_at INTEGER NOT NULL,\n    updated_at INTEGER NOT NULL\n  )"
-        },
-        {
-          "type": "table",
-          "name": "rika_transcript_checkpoints",
-          "tbl_name": "rika_transcript_checkpoints",
-          "sql": "CREATE TABLE rika_transcript_checkpoints (\n    turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,\n    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,\n    drafts_json TEXT NOT NULL DEFAULT '[]',\n    revision INTEGER NOT NULL DEFAULT -1,\n    projection_version INTEGER NOT NULL DEFAULT 2,\n    oldest_cursor TEXT,\n    checkpoint_cursor TEXT,\n    cost_usd REAL,\n    updated_at INTEGER NOT NULL\n  , model_phase INTEGER NOT NULL DEFAULT -1)"
-        },
-        {
-          "type": "table",
-          "name": "rika_transcript_entries",
-          "tbl_name": "rika_transcript_entries",
-          "sql": "CREATE TABLE rika_transcript_entries (\n    turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,\n    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,\n    prompt TEXT NOT NULL,\n    status TEXT NOT NULL,\n    events_json TEXT NOT NULL DEFAULT '[]',\n    revision INTEGER NOT NULL DEFAULT 1,\n    projection_version INTEGER NOT NULL DEFAULT 1,\n    oldest_cursor TEXT,\n    checkpoint_cursor TEXT,\n    created_at INTEGER NOT NULL,\n    updated_at INTEGER NOT NULL\n  )"
-        },
-        {
-          "type": "table",
-          "name": "rika_transcript_units",
-          "tbl_name": "rika_transcript_units",
-          "sql": "CREATE TABLE rika_transcript_units (\n    unit_key TEXT PRIMARY KEY NOT NULL,\n    turn_id TEXT NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,\n    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,\n    unit_sequence INTEGER NOT NULL,\n    unit_part INTEGER NOT NULL,\n    revision INTEGER NOT NULL,\n    unit_json TEXT NOT NULL,\n    created_at INTEGER NOT NULL,\n    updated_at INTEGER NOT NULL\n  )"
-        },
-        {
-          "type": "table",
-          "name": "rika_turns",
-          "tbl_name": "rika_turns",
-          "sql": "CREATE TABLE \"rika_turns\" (\n    id TEXT PRIMARY KEY NOT NULL,\n    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,\n    prompt TEXT NOT NULL,\n    status TEXT NOT NULL CHECK (status IN ('accepted', 'queued', 'running', 'waiting', 'completed', 'failed', 'cancelled')),\n    last_cursor TEXT,\n    created_at INTEGER NOT NULL,\n    updated_at INTEGER NOT NULL\n  , extension_pin_json TEXT, prompt_parts_json TEXT, execution_route_json TEXT, review_fan_out_id TEXT)"
-        },
-        {
-          "type": "table",
-          "name": "rika_workspaces",
-          "tbl_name": "rika_workspaces",
-          "sql": "CREATE TABLE rika_workspaces (\n    path TEXT PRIMARY KEY NOT NULL,\n    created_at INTEGER NOT NULL\n  )"
-        }
-      ],
-      "tables": [
-        {
-          "table": "rika_thread_queue_state",
-          "columns": [
-            {
-              "cid": 0,
-              "name": "thread_id",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 1
-            },
-            {
-              "cid": 1,
-              "name": "revision",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": "0",
-              "pk": 0
-            },
-            {
-              "cid": 2,
-              "name": "queued_count",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": "0",
-              "pk": 0
-            },
-            {
-              "cid": 3,
-              "name": "wake_generation",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": "0",
-              "pk": 0
-            },
-            {
-              "cid": 4,
-              "name": "wake_pending",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": "0",
-              "pk": 0
-            }
-          ]
-        },
-        {
-          "table": "rika_thread_read_state",
-          "columns": [
-            {
-              "cid": 0,
-              "name": "thread_id",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 1
-            },
-            {
-              "cid": 1,
-              "name": "last_read_at",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            }
-          ]
-        },
-        {
-          "table": "rika_thread_turn_activity",
-          "columns": [
-            {
-              "cid": 0,
-              "name": "turn_id",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 1
-            },
-            {
-              "cid": 1,
-              "name": "thread_id",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 2,
-              "name": "projected_cursor",
-              "type": "TEXT",
-              "notnull": 0,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 3,
-              "name": "complete",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": "0",
-              "pk": 0
-            },
-            {
-              "cid": 4,
-              "name": "added",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": "0",
-              "pk": 0
-            },
-            {
-              "cid": 5,
-              "name": "modified",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": "0",
-              "pk": 0
-            },
-            {
-              "cid": 6,
-              "name": "removed",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": "0",
-              "pk": 0
-            },
-            {
-              "cid": 7,
-              "name": "last_event_at",
-              "type": "INTEGER",
-              "notnull": 0,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 8,
-              "name": "updated_at",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            }
-          ]
-        },
-        {
-          "table": "rika_threads",
-          "columns": [
-            {
-              "cid": 0,
-              "name": "id",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 1
-            },
-            {
-              "cid": 1,
-              "name": "workspace",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 2,
-              "name": "title",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 3,
-              "name": "labels_json",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": "'[]'",
-              "pk": 0
-            },
-            {
-              "cid": 4,
-              "name": "pinned",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": "0",
-              "pk": 0
-            },
-            {
-              "cid": 5,
-              "name": "archived",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": "0",
-              "pk": 0
-            },
-            {
-              "cid": 6,
-              "name": "created_at",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 7,
-              "name": "updated_at",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            }
-          ]
-        },
-        {
-          "table": "rika_transcript_checkpoints",
-          "columns": [
-            {
-              "cid": 0,
-              "name": "turn_id",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 1
-            },
-            {
-              "cid": 1,
-              "name": "thread_id",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 2,
-              "name": "drafts_json",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": "'[]'",
-              "pk": 0
-            },
-            {
-              "cid": 3,
-              "name": "revision",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": "-1",
-              "pk": 0
-            },
-            {
-              "cid": 4,
-              "name": "projection_version",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": "2",
-              "pk": 0
-            },
-            {
-              "cid": 5,
-              "name": "oldest_cursor",
-              "type": "TEXT",
-              "notnull": 0,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 6,
-              "name": "checkpoint_cursor",
-              "type": "TEXT",
-              "notnull": 0,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 7,
-              "name": "cost_usd",
-              "type": "REAL",
-              "notnull": 0,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 8,
-              "name": "updated_at",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 9,
-              "name": "model_phase",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": "-1",
-              "pk": 0
-            }
-          ]
-        },
-        {
-          "table": "rika_transcript_entries",
-          "columns": [
-            {
-              "cid": 0,
-              "name": "turn_id",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 1
-            },
-            {
-              "cid": 1,
-              "name": "thread_id",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 2,
-              "name": "prompt",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 3,
-              "name": "status",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 4,
-              "name": "events_json",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": "'[]'",
-              "pk": 0
-            },
-            {
-              "cid": 5,
-              "name": "revision",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": "1",
-              "pk": 0
-            },
-            {
-              "cid": 6,
-              "name": "projection_version",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": "1",
-              "pk": 0
-            },
-            {
-              "cid": 7,
-              "name": "oldest_cursor",
-              "type": "TEXT",
-              "notnull": 0,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 8,
-              "name": "checkpoint_cursor",
-              "type": "TEXT",
-              "notnull": 0,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 9,
-              "name": "created_at",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 10,
-              "name": "updated_at",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            }
-          ]
-        },
-        {
-          "table": "rika_transcript_units",
-          "columns": [
-            {
-              "cid": 0,
-              "name": "unit_key",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 1
-            },
-            {
-              "cid": 1,
-              "name": "turn_id",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 2,
-              "name": "thread_id",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 3,
-              "name": "unit_sequence",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 4,
-              "name": "unit_part",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 5,
-              "name": "revision",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 6,
-              "name": "unit_json",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 7,
-              "name": "created_at",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 8,
-              "name": "updated_at",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            }
-          ]
-        },
-        {
-          "table": "rika_turns",
-          "columns": [
-            {
-              "cid": 0,
-              "name": "id",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 1
-            },
-            {
-              "cid": 1,
-              "name": "thread_id",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 2,
-              "name": "prompt",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 3,
-              "name": "status",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 4,
-              "name": "last_cursor",
-              "type": "TEXT",
-              "notnull": 0,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 5,
-              "name": "created_at",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 6,
-              "name": "updated_at",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 7,
-              "name": "extension_pin_json",
-              "type": "TEXT",
-              "notnull": 0,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 8,
-              "name": "prompt_parts_json",
-              "type": "TEXT",
-              "notnull": 0,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 9,
-              "name": "execution_route_json",
-              "type": "TEXT",
-              "notnull": 0,
-              "dflt_value": null,
-              "pk": 0
-            },
-            {
-              "cid": 10,
-              "name": "review_fan_out_id",
-              "type": "TEXT",
-              "notnull": 0,
-              "dflt_value": null,
-              "pk": 0
-            }
-          ]
-        },
-        {
-          "table": "rika_workspaces",
-          "columns": [
-            {
-              "cid": 0,
-              "name": "path",
-              "type": "TEXT",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 1
-            },
-            {
-              "cid": 1,
-              "name": "created_at",
-              "type": "INTEGER",
-              "notnull": 1,
-              "dflt_value": null,
-              "pk": 0
-            }
-          ]
-        }
-      ],
-      "constraints": [
         {
           "table": "rika_thread_queue_state",
           "foreignKeys": [
@@ -5934,25 +5562,1131 @@
       "triggers": [],
       "representativeRewriteRows": [
         {
-          "id": "oracle-turn",
+          "operation": "queue_state_and_current_transcripts backfill",
+          "before": {
+            "rika_turns": [
+              {
+                "id": "turn-null",
+                "thread_id": "thread-a",
+                "status": "queued",
+                "execution_route_json": null
+              },
+              {
+                "id": "turn-existing",
+                "thread_id": "thread-a",
+                "status": "completed",
+                "execution_route_json": "{\"version\":1}"
+              }
+            ]
+          },
+          "after": {
+            "rika_turns": [
+              {
+                "id": "turn-null",
+                "execution_route_json": "{\"version\":1,\"mode\":\"test\",\"main\":{\"role\":\"main\",\"alias\":\"legacy-unavailable\",\"provider\":\"legacy-unavailable\",\"model\":\"legacy-unavailable\",\"registrationKey\":\"legacy-unavailable\",\"gatewayProtocol\":\"test\",\"gatewayBaseUrl\":\"test://legacy-unavailable\",\"gatewayAuth\":\"none\",\"effort\":\"medium\",\"fast\":false,\"requestVariant\":\"legacy-unavailable\",\"compaction\":{\"contextWindow\":1,\"reserveTokens\":0,\"keepRecentTokens\":0}},\"oracle\":{\"role\":\"oracle\",\"alias\":\"legacy-unavailable\",\"provider\":\"legacy-unavailable\",\"model\":\"legacy-unavailable\",\"registrationKey\":\"legacy-unavailable\",\"gatewayProtocol\":\"test\",\"gatewayBaseUrl\":\"test://legacy-unavailable\",\"gatewayAuth\":\"none\",\"effort\":\"medium\",\"fast\":false,\"requestVariant\":\"legacy-unavailable\",\"compaction\":{\"contextWindow\":1,\"reserveTokens\":0,\"keepRecentTokens\":0}}}"
+              },
+              {
+                "id": "turn-existing",
+                "execution_route_json": "{\"version\":1}"
+              }
+            ],
+            "rika_thread_queue_state": [
+              {
+                "thread_id": "thread-a",
+                "revision": 1,
+                "queued_count": 1,
+                "wake_generation": 0,
+                "wake_pending": 0
+              }
+            ]
+          },
+          "assertion": "NULL route receives exact legacyExecutionRoute and queued count seeds revision/count with zero wake fields"
+        }
+      ]
+    },
+    {
+      "prefix": 13,
+      "migrationRows": [
+        {
+          "migration_id": 1,
+          "name": "product_baseline"
+        },
+        {
+          "migration_id": 2,
+          "name": "turns"
+        },
+        {
+          "migration_id": 3,
+          "name": "queued_turn_status"
+        },
+        {
+          "migration_id": 4,
+          "name": "execution_extension_pins"
+        },
+        {
+          "migration_id": 5,
+          "name": "turn_prompt_parts"
+        },
+        {
+          "migration_id": 6,
+          "name": "drop_thread_session_id"
+        },
+        {
+          "migration_id": 7,
+          "name": "execution_route_pins"
+        },
+        {
+          "migration_id": 8,
+          "name": "review_fan_out_owners"
+        },
+        {
+          "migration_id": 9,
+          "name": "transcript_projection"
+        },
+        {
+          "migration_id": 10,
+          "name": "thread_summaries"
+        },
+        {
+          "migration_id": 11,
+          "name": "semantic_transcript_projection"
+        },
+        {
+          "migration_id": 12,
+          "name": "queue_state_and_current_transcripts"
+        },
+        {
+          "migration_id": 13,
+          "name": "provider_execution_routes"
+        }
+      ],
+      "schema": [
+        {
+          "type": "index",
+          "name": "rika_thread_turn_activity_summary",
+          "tbl_name": "rika_thread_turn_activity",
+          "sql": "CREATE INDEX rika_thread_turn_activity_summary ON rika_thread_turn_activity (thread_id, last_event_at DESC)"
+        },
+        {
+          "type": "index",
+          "name": "rika_threads_listing",
+          "tbl_name": "rika_threads",
+          "sql": "CREATE INDEX rika_threads_listing ON rika_threads (pinned DESC, updated_at DESC, id ASC)"
+        },
+        {
+          "type": "index",
+          "name": "rika_transcript_page",
+          "tbl_name": "rika_transcript_entries",
+          "sql": "CREATE INDEX rika_transcript_page ON rika_transcript_entries (thread_id, created_at DESC, turn_id DESC)"
+        },
+        {
+          "type": "index",
+          "name": "rika_transcript_units_page",
+          "tbl_name": "rika_transcript_units",
+          "sql": "CREATE INDEX rika_transcript_units_page ON rika_transcript_units (\n    thread_id, created_at DESC, turn_id DESC, unit_sequence DESC, unit_part DESC, unit_key DESC\n  )"
+        },
+        {
+          "type": "index",
+          "name": "rika_transcript_units_turn",
+          "tbl_name": "rika_transcript_units",
+          "sql": "CREATE INDEX rika_transcript_units_turn ON rika_transcript_units (\n    turn_id, unit_sequence ASC, unit_part ASC, unit_key ASC\n  )"
+        },
+        {
+          "type": "index",
+          "name": "rika_turns_queue",
+          "tbl_name": "rika_turns",
+          "sql": "CREATE INDEX rika_turns_queue ON rika_turns (thread_id, status, created_at ASC, id ASC)"
+        },
+        {
+          "type": "index",
+          "name": "rika_turns_thread",
+          "tbl_name": "rika_turns",
+          "sql": "CREATE INDEX rika_turns_thread ON rika_turns (thread_id, created_at ASC, id ASC)"
+        },
+        {
+          "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
+          "name": "rika_thread_queue_state",
+          "tbl_name": "rika_thread_queue_state",
+          "sql": "CREATE TABLE rika_thread_queue_state (\n    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,\n    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),\n    queued_count INTEGER NOT NULL DEFAULT 0 CHECK (queued_count >= 0),\n    wake_generation INTEGER NOT NULL DEFAULT 0 CHECK (wake_generation >= 0),\n    wake_pending INTEGER NOT NULL DEFAULT 0 CHECK (wake_pending IN (0, 1)),\n    PRIMARY KEY (thread_id)\n  )"
+        },
+        {
+          "type": "table",
+          "name": "rika_thread_read_state",
+          "tbl_name": "rika_thread_read_state",
+          "sql": "CREATE TABLE rika_thread_read_state (\n    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,\n    last_read_at INTEGER NOT NULL\n  )"
+        },
+        {
+          "type": "table",
+          "name": "rika_thread_turn_activity",
+          "tbl_name": "rika_thread_turn_activity",
+          "sql": "CREATE TABLE rika_thread_turn_activity (\n    turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,\n    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,\n    projected_cursor TEXT,\n    complete INTEGER NOT NULL DEFAULT 0 CHECK (complete IN (0, 1)),\n    added INTEGER NOT NULL DEFAULT 0 CHECK (added >= 0),\n    modified INTEGER NOT NULL DEFAULT 0 CHECK (modified >= 0),\n    removed INTEGER NOT NULL DEFAULT 0 CHECK (removed >= 0),\n    last_event_at INTEGER,\n    updated_at INTEGER NOT NULL\n  )"
+        },
+        {
+          "type": "table",
+          "name": "rika_threads",
+          "tbl_name": "rika_threads",
+          "sql": "CREATE TABLE \"rika_threads\" (\n    id TEXT PRIMARY KEY NOT NULL,\n    workspace TEXT NOT NULL REFERENCES rika_workspaces(path),\n    title TEXT NOT NULL,\n    labels_json TEXT NOT NULL DEFAULT '[]',\n    pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),\n    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),\n    created_at INTEGER NOT NULL,\n    updated_at INTEGER NOT NULL\n  )"
+        },
+        {
+          "type": "table",
+          "name": "rika_transcript_checkpoints",
+          "tbl_name": "rika_transcript_checkpoints",
+          "sql": "CREATE TABLE rika_transcript_checkpoints (\n    turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,\n    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,\n    drafts_json TEXT NOT NULL DEFAULT '[]',\n    revision INTEGER NOT NULL DEFAULT -1,\n    projection_version INTEGER NOT NULL DEFAULT 2,\n    oldest_cursor TEXT,\n    checkpoint_cursor TEXT,\n    cost_usd REAL,\n    updated_at INTEGER NOT NULL\n  , model_phase INTEGER NOT NULL DEFAULT -1)"
+        },
+        {
+          "type": "table",
+          "name": "rika_transcript_entries",
+          "tbl_name": "rika_transcript_entries",
+          "sql": "CREATE TABLE rika_transcript_entries (\n    turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,\n    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,\n    prompt TEXT NOT NULL,\n    status TEXT NOT NULL,\n    events_json TEXT NOT NULL DEFAULT '[]',\n    revision INTEGER NOT NULL DEFAULT 1,\n    projection_version INTEGER NOT NULL DEFAULT 1,\n    oldest_cursor TEXT,\n    checkpoint_cursor TEXT,\n    created_at INTEGER NOT NULL,\n    updated_at INTEGER NOT NULL\n  )"
+        },
+        {
+          "type": "table",
+          "name": "rika_transcript_units",
+          "tbl_name": "rika_transcript_units",
+          "sql": "CREATE TABLE rika_transcript_units (\n    unit_key TEXT PRIMARY KEY NOT NULL,\n    turn_id TEXT NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,\n    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,\n    unit_sequence INTEGER NOT NULL,\n    unit_part INTEGER NOT NULL,\n    revision INTEGER NOT NULL,\n    unit_json TEXT NOT NULL,\n    created_at INTEGER NOT NULL,\n    updated_at INTEGER NOT NULL\n  )"
+        },
+        {
+          "type": "table",
+          "name": "rika_turns",
+          "tbl_name": "rika_turns",
+          "sql": "CREATE TABLE \"rika_turns\" (\n    id TEXT PRIMARY KEY NOT NULL,\n    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,\n    prompt TEXT NOT NULL,\n    status TEXT NOT NULL CHECK (status IN ('accepted', 'queued', 'running', 'waiting', 'completed', 'failed', 'cancelled')),\n    last_cursor TEXT,\n    created_at INTEGER NOT NULL,\n    updated_at INTEGER NOT NULL\n  , extension_pin_json TEXT, prompt_parts_json TEXT, execution_route_json TEXT, review_fan_out_id TEXT)"
+        },
+        {
+          "type": "table",
+          "name": "rika_workspaces",
+          "tbl_name": "rika_workspaces",
+          "sql": "CREATE TABLE rika_workspaces (\n    path TEXT PRIMARY KEY NOT NULL,\n    created_at INTEGER NOT NULL\n  )"
+        }
+      ],
+      "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
+        {
+          "table": "rika_thread_queue_state",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "thread_id",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "revision",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": "0",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "queued_count",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": "0",
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "wake_generation",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": "0",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "wake_pending",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": "0",
+              "pk": 0
+            }
+          ]
+        },
+        {
+          "table": "rika_thread_read_state",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "thread_id",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "last_read_at",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
+        {
+          "table": "rika_thread_turn_activity",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "turn_id",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "thread_id",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "projected_cursor",
+              "type": "TEXT",
+              "notnull": 0,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "complete",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": "0",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "added",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": "0",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "modified",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": "0",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "removed",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": "0",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "last_event_at",
+              "type": "INTEGER",
+              "notnull": 0,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "updated_at",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
+        {
+          "table": "rika_threads",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "workspace",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "title",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "labels_json",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": "'[]'",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "pinned",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": "0",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "archived",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": "0",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "created_at",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "updated_at",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
+        {
+          "table": "rika_transcript_checkpoints",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "turn_id",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "thread_id",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "drafts_json",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": "'[]'",
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "revision",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": "-1",
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "projection_version",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": "2",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "oldest_cursor",
+              "type": "TEXT",
+              "notnull": 0,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "checkpoint_cursor",
+              "type": "TEXT",
+              "notnull": 0,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "cost_usd",
+              "type": "REAL",
+              "notnull": 0,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "updated_at",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "model_phase",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": "-1",
+              "pk": 0
+            }
+          ]
+        },
+        {
+          "table": "rika_transcript_entries",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "turn_id",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "thread_id",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "prompt",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "status",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "events_json",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": "'[]'",
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "revision",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": "1",
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "projection_version",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": "1",
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "oldest_cursor",
+              "type": "TEXT",
+              "notnull": 0,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "checkpoint_cursor",
+              "type": "TEXT",
+              "notnull": 0,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "created_at",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "updated_at",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
+        {
+          "table": "rika_transcript_units",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "unit_key",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "turn_id",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "thread_id",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "unit_sequence",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "unit_part",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "revision",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "unit_json",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "created_at",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "updated_at",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
+        {
+          "table": "rika_turns",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "thread_id",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "prompt",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 3,
+              "name": "status",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 4,
+              "name": "last_cursor",
+              "type": "TEXT",
+              "notnull": 0,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 5,
+              "name": "created_at",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 6,
+              "name": "updated_at",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 7,
+              "name": "extension_pin_json",
+              "type": "TEXT",
+              "notnull": 0,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 8,
+              "name": "prompt_parts_json",
+              "type": "TEXT",
+              "notnull": 0,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 9,
+              "name": "execution_route_json",
+              "type": "TEXT",
+              "notnull": 0,
+              "dflt_value": null,
+              "pk": 0
+            },
+            {
+              "cid": 10,
+              "name": "review_fan_out_id",
+              "type": "TEXT",
+              "notnull": 0,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
+        {
+          "table": "rika_workspaces",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "path",
+              "type": "TEXT",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
+          "table": "rika_thread_queue_state",
+          "foreignKeys": [
+            {
+              "id": 0,
+              "seq": 0,
+              "table": "rika_threads",
+              "from": "thread_id",
+              "to": "id",
+              "on_update": "NO ACTION",
+              "on_delete": "CASCADE",
+              "match": "NONE"
+            }
+          ]
+        },
+        {
+          "table": "rika_thread_read_state",
+          "foreignKeys": [
+            {
+              "id": 0,
+              "seq": 0,
+              "table": "rika_threads",
+              "from": "thread_id",
+              "to": "id",
+              "on_update": "NO ACTION",
+              "on_delete": "CASCADE",
+              "match": "NONE"
+            }
+          ]
+        },
+        {
+          "table": "rika_thread_turn_activity",
+          "foreignKeys": [
+            {
+              "id": 0,
+              "seq": 0,
+              "table": "rika_threads",
+              "from": "thread_id",
+              "to": "id",
+              "on_update": "NO ACTION",
+              "on_delete": "CASCADE",
+              "match": "NONE"
+            },
+            {
+              "id": 1,
+              "seq": 0,
+              "table": "rika_turns",
+              "from": "turn_id",
+              "to": "id",
+              "on_update": "NO ACTION",
+              "on_delete": "CASCADE",
+              "match": "NONE"
+            }
+          ]
+        },
+        {
+          "table": "rika_threads",
+          "foreignKeys": [
+            {
+              "id": 0,
+              "seq": 0,
+              "table": "rika_workspaces",
+              "from": "workspace",
+              "to": "path",
+              "on_update": "NO ACTION",
+              "on_delete": "NO ACTION",
+              "match": "NONE"
+            }
+          ]
+        },
+        {
+          "table": "rika_transcript_checkpoints",
+          "foreignKeys": [
+            {
+              "id": 0,
+              "seq": 0,
+              "table": "rika_threads",
+              "from": "thread_id",
+              "to": "id",
+              "on_update": "NO ACTION",
+              "on_delete": "CASCADE",
+              "match": "NONE"
+            },
+            {
+              "id": 1,
+              "seq": 0,
+              "table": "rika_turns",
+              "from": "turn_id",
+              "to": "id",
+              "on_update": "NO ACTION",
+              "on_delete": "CASCADE",
+              "match": "NONE"
+            }
+          ]
+        },
+        {
+          "table": "rika_transcript_entries",
+          "foreignKeys": [
+            {
+              "id": 0,
+              "seq": 0,
+              "table": "rika_threads",
+              "from": "thread_id",
+              "to": "id",
+              "on_update": "NO ACTION",
+              "on_delete": "CASCADE",
+              "match": "NONE"
+            },
+            {
+              "id": 1,
+              "seq": 0,
+              "table": "rika_turns",
+              "from": "turn_id",
+              "to": "id",
+              "on_update": "NO ACTION",
+              "on_delete": "CASCADE",
+              "match": "NONE"
+            }
+          ]
+        },
+        {
+          "table": "rika_transcript_units",
+          "foreignKeys": [
+            {
+              "id": 0,
+              "seq": 0,
+              "table": "rika_threads",
+              "from": "thread_id",
+              "to": "id",
+              "on_update": "NO ACTION",
+              "on_delete": "CASCADE",
+              "match": "NONE"
+            },
+            {
+              "id": 1,
+              "seq": 0,
+              "table": "rika_turns",
+              "from": "turn_id",
+              "to": "id",
+              "on_update": "NO ACTION",
+              "on_delete": "CASCADE",
+              "match": "NONE"
+            }
+          ]
+        },
+        {
+          "table": "rika_turns",
+          "foreignKeys": [
+            {
+              "id": 0,
+              "seq": 0,
+              "table": "rika_threads",
+              "from": "thread_id",
+              "to": "id",
+              "on_update": "NO ACTION",
+              "on_delete": "CASCADE",
+              "match": "NONE"
+            }
+          ]
+        },
+        {
+          "table": "rika_workspaces",
+          "foreignKeys": []
+        }
+      ],
+      "indexes": [
+        {
+          "type": "index",
+          "name": "rika_thread_turn_activity_summary",
+          "tbl_name": "rika_thread_turn_activity",
+          "sql": "CREATE INDEX rika_thread_turn_activity_summary ON rika_thread_turn_activity (thread_id, last_event_at DESC)"
+        },
+        {
+          "type": "index",
+          "name": "rika_threads_listing",
+          "tbl_name": "rika_threads",
+          "sql": "CREATE INDEX rika_threads_listing ON rika_threads (pinned DESC, updated_at DESC, id ASC)"
+        },
+        {
+          "type": "index",
+          "name": "rika_transcript_page",
+          "tbl_name": "rika_transcript_entries",
+          "sql": "CREATE INDEX rika_transcript_page ON rika_transcript_entries (thread_id, created_at DESC, turn_id DESC)"
+        },
+        {
+          "type": "index",
+          "name": "rika_transcript_units_page",
+          "tbl_name": "rika_transcript_units",
+          "sql": "CREATE INDEX rika_transcript_units_page ON rika_transcript_units (\n    thread_id, created_at DESC, turn_id DESC, unit_sequence DESC, unit_part DESC, unit_key DESC\n  )"
+        },
+        {
+          "type": "index",
+          "name": "rika_transcript_units_turn",
+          "tbl_name": "rika_transcript_units",
+          "sql": "CREATE INDEX rika_transcript_units_turn ON rika_transcript_units (\n    turn_id, unit_sequence ASC, unit_part ASC, unit_key ASC\n  )"
+        },
+        {
+          "type": "index",
+          "name": "rika_turns_queue",
+          "tbl_name": "rika_turns",
+          "sql": "CREATE INDEX rika_turns_queue ON rika_turns (thread_id, status, created_at ASC, id ASC)"
+        },
+        {
+          "type": "index",
+          "name": "rika_turns_thread",
+          "tbl_name": "rika_turns",
+          "sql": "CREATE INDEX rika_turns_thread ON rika_turns (thread_id, created_at ASC, id ASC)"
+        }
+      ],
+      "triggers": [],
+      "representativeRewriteRows": [
+        {
+          "operation": "provider_execution_routes JSON rewrite",
           "before": {
             "mode": "test",
             "main": {
+              "role": "main",
+              "gatewayProtocol": "responses",
+              "gatewayBaseUrl": "https://gateway",
+              "gatewayAuth": "bearer-env:MAIN_KEY",
+              "alias": "main"
+            },
+            "oracle": {
+              "role": "oracle",
               "gatewayProtocol": "responses",
               "gatewayBaseUrl": "https://gateway",
               "gatewayAuth": "bearer-env:ORACLE_KEY",
               "alias": "oracle"
+            },
+            "title": {
+              "role": "title",
+              "gatewayProtocol": "responses",
+              "gatewayBaseUrl": "https://gateway",
+              "gatewayAuth": "none",
+              "alias": "title"
+            },
+            "compactionSummary": {
+              "role": "compaction",
+              "gatewayProtocol": "responses",
+              "gatewayBaseUrl": "https://gateway",
+              "gatewayAuth": "bearer-env:COMPACTION_KEY",
+              "alias": "compaction"
+            },
+            "agents": {
+              "librarian": {
+                "role": "librarian",
+                "gatewayProtocol": "responses",
+                "gatewayBaseUrl": "https://gateway",
+                "gatewayAuth": "bearer-env:LIBRARIAN_KEY",
+                "alias": "librarian"
+              },
+              "painter": {
+                "role": "painter",
+                "gatewayProtocol": "responses",
+                "gatewayBaseUrl": "https://gateway",
+                "gatewayAuth": "none",
+                "alias": "painter"
+              }
             }
           },
           "after": {
             "mode": "test",
             "main": {
+              "role": "main",
+              "providerProtocol": "responses",
+              "providerBaseUrl": "https://gateway",
+              "providerApiKeyEnv": "MAIN_KEY",
+              "alias": "main"
+            },
+            "oracle": {
+              "role": "oracle",
               "providerProtocol": "responses",
               "providerBaseUrl": "https://gateway",
               "providerApiKeyEnv": "ORACLE_KEY",
               "alias": "oracle"
+            },
+            "title": {
+              "role": "title",
+              "providerProtocol": "responses",
+              "providerBaseUrl": "https://gateway",
+              "alias": "title"
+            },
+            "compactionSummary": {
+              "role": "compaction",
+              "providerProtocol": "responses",
+              "providerBaseUrl": "https://gateway",
+              "providerApiKeyEnv": "COMPACTION_KEY",
+              "alias": "compaction"
+            },
+            "agents": {
+              "librarian": {
+                "role": "librarian",
+                "providerProtocol": "responses",
+                "providerBaseUrl": "https://gateway",
+                "providerApiKeyEnv": "LIBRARIAN_KEY",
+                "alias": "librarian"
+              },
+              "painter": {
+                "role": "painter",
+                "providerProtocol": "responses",
+                "providerBaseUrl": "https://gateway",
+                "alias": "painter"
+              }
             }
-          }
+          },
+          "assertion": "gateway keys removed, bearer auth becomes providerApiKeyEnv, and mode/roles/aliases/agents survive"
         }
       ]
     },
@@ -6067,6 +6801,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_thread_queue_state",
           "tbl_name": "rika_thread_queue_state",
           "sql": "CREATE TABLE rika_thread_queue_state (\n    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,\n    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),\n    queued_count INTEGER NOT NULL DEFAULT 0 CHECK (queued_count >= 0),\n    wake_generation INTEGER NOT NULL DEFAULT 0 CHECK (wake_generation >= 0),\n    wake_pending INTEGER NOT NULL DEFAULT 0 CHECK (wake_pending IN (0, 1)),\n    PRIMARY KEY (thread_id)\n  )"
@@ -6121,6 +6861,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_thread_queue_state",
           "columns": [
@@ -6713,6 +7482,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_thread_queue_state",
           "foreignKeys": [
             {
@@ -6930,16 +7703,8 @@
       "triggers": [],
       "representativeRewriteRows": [
         {
-          "id": "oracle-turn",
-          "after": {
-            "mode": "test",
-            "main": {
-              "providerProtocol": "responses",
-              "providerBaseUrl": "https://gateway",
-              "providerApiKeyEnv": "ORACLE_KEY",
-              "alias": "oracle"
-            }
-          }
+          "operation": "adds queue_claim_token and unique partial index",
+          "outcome": "no row rewrite"
         }
       ]
     },
@@ -7058,6 +7823,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_thread_queue_state",
           "tbl_name": "rika_thread_queue_state",
           "sql": "CREATE TABLE rika_thread_queue_state (\n    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,\n    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),\n    queued_count INTEGER NOT NULL DEFAULT 0 CHECK (queued_count >= 0),\n    wake_generation INTEGER NOT NULL DEFAULT 0 CHECK (wake_generation >= 0),\n    wake_pending INTEGER NOT NULL DEFAULT 0 CHECK (wake_pending IN (0, 1)),\n    PRIMARY KEY (thread_id)\n  )"
@@ -7112,6 +7883,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_thread_queue_state",
           "columns": [
@@ -7712,6 +8512,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_thread_queue_state",
           "foreignKeys": [
             {
@@ -7929,16 +8733,8 @@
       "triggers": [],
       "representativeRewriteRows": [
         {
-          "id": "oracle-turn",
-          "after": {
-            "mode": "test",
-            "main": {
-              "providerProtocol": "responses",
-              "providerBaseUrl": "https://gateway",
-              "providerApiKeyEnv": "ORACLE_KEY",
-              "alias": "oracle"
-            }
-          }
+          "operation": "adds usage_cursors_json column",
+          "outcome": "no row rewrite"
         }
       ]
     },
@@ -8061,6 +8857,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_thread_queue_state",
           "tbl_name": "rika_thread_queue_state",
           "sql": "CREATE TABLE rika_thread_queue_state (\n    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,\n    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),\n    queued_count INTEGER NOT NULL DEFAULT 0 CHECK (queued_count >= 0),\n    wake_generation INTEGER NOT NULL DEFAULT 0 CHECK (wake_generation >= 0),\n    wake_pending INTEGER NOT NULL DEFAULT 0 CHECK (wake_pending IN (0, 1)),\n    PRIMARY KEY (thread_id)\n  )"
@@ -8115,6 +8917,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_thread_queue_state",
           "columns": [
@@ -8723,6 +9554,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_thread_queue_state",
           "foreignKeys": [
             {
@@ -8940,16 +9775,8 @@
       "triggers": [],
       "representativeRewriteRows": [
         {
-          "id": "oracle-turn",
-          "after": {
-            "mode": "test",
-            "main": {
-              "providerProtocol": "responses",
-              "providerBaseUrl": "https://gateway",
-              "providerApiKeyEnv": "ORACLE_KEY",
-              "alias": "oracle"
-            }
-          }
+          "operation": "adds pricing_version column",
+          "outcome": "no row rewrite"
         }
       ]
     },
@@ -9082,6 +9909,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_thread_queue_state",
           "tbl_name": "rika_thread_queue_state",
           "sql": "CREATE TABLE rika_thread_queue_state (\n    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,\n    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),\n    queued_count INTEGER NOT NULL DEFAULT 0 CHECK (queued_count >= 0),\n    wake_generation INTEGER NOT NULL DEFAULT 0 CHECK (wake_generation >= 0),\n    wake_pending INTEGER NOT NULL DEFAULT 0 CHECK (wake_pending IN (0, 1)),\n    PRIMARY KEY (thread_id)\n  )"
@@ -9178,6 +10011,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_thread_queue_state",
           "columns": [
@@ -10045,6 +10907,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_thread_queue_state",
           "foreignKeys": [
             {
@@ -10307,16 +11173,38 @@
       "triggers": [],
       "representativeRewriteRows": [
         {
-          "id": "oracle-turn",
+          "operation": "thread_search_projection insert",
+          "before": {
+            "thread": {
+              "id": "thread-search",
+              "title": "Find Me",
+              "labels_json": "[\"one\",\"two\"]"
+            },
+            "turns": [
+              {
+                "prompt": "human prompt one"
+              },
+              {
+                "prompt": "human prompt two"
+              }
+            ]
+          },
           "after": {
-            "mode": "test",
-            "main": {
-              "providerProtocol": "responses",
-              "providerBaseUrl": "https://gateway",
-              "providerApiKeyEnv": "ORACLE_KEY",
-              "alias": "oracle"
-            }
-          }
+            "rika_thread_search": [
+              {
+                "thread_id": "thread-search",
+                "title": "Find Me",
+                "labels": "[\"one\",\"two\"]",
+                "human_prompts": "human prompt one\nhuman prompt two",
+                "agent_prompts": "",
+                "root_assistant": "",
+                "child_assistant": "",
+                "files": ""
+              }
+            ],
+            "rika_thread_search_files": []
+          },
+          "assertion": "inserts one FTS row with concatenated prompts and no fabricated file rows"
         }
       ]
     },
@@ -10471,6 +11359,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_thread_invocation_receipts",
           "tbl_name": "rika_thread_invocation_receipts",
           "sql": "CREATE TABLE rika_thread_invocation_receipts (\n    invocation_digest TEXT PRIMARY KEY NOT NULL,\n    schema_input_digest TEXT NOT NULL,\n    kind TEXT NOT NULL CHECK (kind IN ('create', 'message', 'steer', 'cancel', 'stop')),\n    outcome TEXT NOT NULL,\n    source_thread_id TEXT NOT NULL,\n    source_root_turn_id TEXT,\n    target_thread_id TEXT,\n    target_turn_id TEXT,\n    queue_revision INTEGER CHECK (queue_revision IS NULL OR queue_revision >= 0),\n    created_at INTEGER NOT NULL\n  )"
@@ -10591,6 +11485,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_thread_invocation_receipts",
           "columns": [
@@ -11782,6 +12705,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_thread_invocation_receipts",
           "foreignKeys": []
         },
@@ -12078,16 +13005,8 @@
       "triggers": [],
       "representativeRewriteRows": [
         {
-          "id": "oracle-turn",
-          "after": {
-            "mode": "test",
-            "main": {
-              "providerProtocol": "responses",
-              "providerBaseUrl": "https://gateway",
-              "providerApiKeyEnv": "ORACLE_KEY",
-              "alias": "oracle"
-            }
-          }
+          "operation": "creates durable coordination tables and indexes",
+          "outcome": "no row rewrite"
         }
       ]
     },
@@ -12246,6 +13165,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_thread_invocation_receipts",
           "tbl_name": "rika_thread_invocation_receipts",
           "sql": "CREATE TABLE rika_thread_invocation_receipts (\n    invocation_digest TEXT PRIMARY KEY NOT NULL,\n    schema_input_digest TEXT NOT NULL,\n    kind TEXT NOT NULL CHECK (kind IN ('create', 'message', 'steer', 'cancel', 'stop')),\n    outcome TEXT NOT NULL,\n    source_thread_id TEXT NOT NULL,\n    source_root_turn_id TEXT,\n    target_thread_id TEXT,\n    target_turn_id TEXT,\n    queue_revision INTEGER CHECK (queue_revision IS NULL OR queue_revision >= 0),\n    created_at INTEGER NOT NULL\n  )"
@@ -12366,6 +13291,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_thread_invocation_receipts",
           "columns": [
@@ -13565,6 +14519,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_thread_invocation_receipts",
           "foreignKeys": []
         },
@@ -13861,16 +14819,8 @@
       "triggers": [],
       "representativeRewriteRows": [
         {
-          "id": "oracle-turn",
-          "after": {
-            "mode": "test",
-            "main": {
-              "providerProtocol": "responses",
-              "providerBaseUrl": "https://gateway",
-              "providerApiKeyEnv": "ORACLE_KEY",
-              "alias": "oracle"
-            }
-          }
+          "operation": "adds stop_intent column",
+          "outcome": "no row rewrite"
         }
       ]
     },
@@ -14039,6 +14989,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_thread_invocation_receipts",
           "tbl_name": "rika_thread_invocation_receipts",
           "sql": "CREATE TABLE rika_thread_invocation_receipts (\n    invocation_digest TEXT PRIMARY KEY NOT NULL,\n    schema_input_digest TEXT NOT NULL,\n    kind TEXT NOT NULL CHECK (kind IN ('create', 'message', 'steer', 'cancel', 'stop')),\n    outcome TEXT NOT NULL,\n    source_thread_id TEXT NOT NULL,\n    source_root_turn_id TEXT,\n    target_thread_id TEXT,\n    target_turn_id TEXT,\n    queue_revision INTEGER CHECK (queue_revision IS NULL OR queue_revision >= 0),\n    created_at INTEGER NOT NULL\n  )"
@@ -14171,6 +15127,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_thread_invocation_receipts",
           "columns": [
@@ -15532,6 +16517,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_thread_invocation_receipts",
           "foreignKeys": []
         },
@@ -15874,16 +16863,46 @@
       "triggers": [],
       "representativeRewriteRows": [
         {
-          "id": "oracle-turn",
+          "operation": "usage_projection seed nonqueued turns",
+          "before": {
+            "turns": [
+              {
+                "id": "completed",
+                "thread_id": "thread-a",
+                "status": "completed",
+                "updated_at": 7
+              },
+              {
+                "id": "queued",
+                "thread_id": "thread-a",
+                "status": "queued",
+                "updated_at": 8
+              }
+            ]
+          },
           "after": {
-            "mode": "test",
-            "main": {
-              "providerProtocol": "responses",
-              "providerBaseUrl": "https://gateway",
-              "providerApiKeyEnv": "ORACLE_KEY",
-              "alias": "oracle"
-            }
-          }
+            "rika_turn_usage": [
+              {
+                "turn_id": "completed",
+                "thread_id": "thread-a",
+                "revision": 0,
+                "projection_version": 1,
+                "fold_json": null,
+                "cost_nano_usd": null,
+                "tokens": null,
+                "active_millis": null,
+                "active_intervals_json": null,
+                "priced_attempts": 0,
+                "unpriced_attempts": 0,
+                "counted_attempts": 0,
+                "uncounted_attempts": 0,
+                "source_complete": 0,
+                "updated_at": 7
+              }
+            ],
+            "rika_usage_repairs": []
+          },
+          "assertion": "one v1 default usage row for every non-queued turn and none for queued turns; repairs starts empty"
         }
       ]
     },
@@ -16071,6 +17090,12 @@
           "name": "rika_turns_thread_updated",
           "tbl_name": "rika_turns",
           "sql": "CREATE INDEX rika_turns_thread_updated ON rika_turns (thread_id, updated_at DESC)"
+        },
+        {
+          "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
         },
         {
           "type": "table",
@@ -16266,6 +17291,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_thread_invocation_receipts",
           "columns": [
@@ -17776,6 +18830,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_thread_invocation_receipts",
           "foreignKeys": []
         },
@@ -18206,16 +19264,76 @@
       ],
       "representativeRewriteRows": [
         {
-          "id": "oracle-turn",
+          "operation": "materialized_thread_summaries populate picker summary",
+          "before": {
+            "thread": {
+              "id": "thread-summary",
+              "workspace": "/work",
+              "title": "Summary",
+              "pinned": 1,
+              "archived": 0,
+              "created_at": 10
+            },
+            "turns": [
+              {
+                "id": "turn-waiting",
+                "status": "waiting",
+                "created_at": 20,
+                "updated_at": 30,
+                "last_cursor": "cursor-1"
+              },
+              {
+                "id": "turn-queued",
+                "status": "queued",
+                "created_at": 21,
+                "updated_at": 22,
+                "last_cursor": null
+              },
+              {
+                "id": "turn-complete",
+                "status": "completed",
+                "created_at": 19,
+                "updated_at": 25,
+                "last_cursor": "cursor-0"
+              }
+            ],
+            "activity": [
+              {
+                "turn_id": "turn-waiting",
+                "projected_cursor": "cursor-1",
+                "complete": 0,
+                "added": 2,
+                "modified": 3,
+                "removed": 4,
+                "last_event_at": 40
+              }
+            ]
+          },
           "after": {
-            "mode": "test",
-            "main": {
-              "providerProtocol": "responses",
-              "providerBaseUrl": "https://gateway",
-              "providerApiKeyEnv": "ORACLE_KEY",
-              "alias": "oracle"
-            }
-          }
+            "rika_thread_picker_summary": [
+              {
+                "thread_id": "thread-summary",
+                "workspace": "/work",
+                "title": "Summary",
+                "pinned": 1,
+                "archived": 0,
+                "status_rank": 3,
+                "waiting_count": 1,
+                "running_count": 0,
+                "queued_count": 1,
+                "last_status": "waiting",
+                "last_turn_created_at": 21,
+                "last_turn_id": "turn-queued",
+                "last_activity_at": 40,
+                "turn_count": 3,
+                "current_activity_count": 1,
+                "added": 2,
+                "modified": 3,
+                "removed": 4
+              }
+            ]
+          },
+          "assertion": "summary includes waiting rank, mixed status counts, latest turn, activity timestamp, and file totals"
         }
       ]
     },
@@ -18407,6 +19525,12 @@
           "name": "rika_turns_thread_updated",
           "tbl_name": "rika_turns",
           "sql": "CREATE INDEX rika_turns_thread_updated ON rika_turns (thread_id, updated_at DESC)"
+        },
+        {
+          "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
         },
         {
           "type": "table",
@@ -18602,6 +19726,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_thread_invocation_receipts",
           "columns": [
@@ -20128,6 +21281,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_thread_invocation_receipts",
           "foreignKeys": []
         },
@@ -20558,16 +21715,8 @@
       ],
       "representativeRewriteRows": [
         {
-          "id": "oracle-turn",
-          "after": {
-            "mode": "test",
-            "main": {
-              "providerProtocol": "responses",
-              "providerBaseUrl": "https://gateway",
-              "providerApiKeyEnv": "ORACLE_KEY",
-              "alias": "oracle"
-            }
-          }
+          "operation": "adds child-tree checkpoint columns",
+          "outcome": "no row rewrite"
         }
       ]
     },
@@ -20766,6 +21915,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_thread_invocation_receipts",
           "tbl_name": "rika_thread_invocation_receipts",
           "sql": "CREATE TABLE rika_thread_invocation_receipts (\n    invocation_digest TEXT PRIMARY KEY NOT NULL,\n    schema_input_digest TEXT NOT NULL,\n    kind TEXT NOT NULL CHECK (kind IN ('create', 'message', 'steer', 'cancel', 'stop')),\n    outcome TEXT NOT NULL,\n    source_thread_id TEXT NOT NULL,\n    source_root_turn_id TEXT,\n    target_thread_id TEXT,\n    target_turn_id TEXT,\n    queue_revision INTEGER CHECK (queue_revision IS NULL OR queue_revision >= 0),\n    created_at INTEGER NOT NULL\n  )"
@@ -20958,6 +22113,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_thread_invocation_receipts",
           "columns": [
@@ -22484,6 +23668,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_thread_invocation_receipts",
           "foreignKeys": []
         },
@@ -22914,16 +24102,49 @@
       ],
       "representativeRewriteRows": [
         {
-          "id": "oracle-turn",
+          "operation": "consumed_execution_checkpoints copy rewrite",
+          "before": {
+            "rika_transcript_checkpoints": [
+              {
+                "turn_id": "turn-a",
+                "thread_id": "thread-a",
+                "revision": 7,
+                "projection_version": 2,
+                "model_phase": 3,
+                "oldest_cursor": "old",
+                "checkpoint_cursor": "new",
+                "cost_usd": 0.5,
+                "usage_cursors_json": "[]",
+                "consumed_json": "{\"done\":true}",
+                "pricing_version": "p1",
+                "child_tree_reconciled": 1,
+                "projection_generation": 4,
+                "updated_at": 8
+              }
+            ]
+          },
           "after": {
-            "mode": "test",
-            "main": {
-              "providerProtocol": "responses",
-              "providerBaseUrl": "https://gateway",
-              "providerApiKeyEnv": "ORACLE_KEY",
-              "alias": "oracle"
-            }
-          }
+            "rika_transcript_checkpoints": [
+              {
+                "turn_id": "turn-a",
+                "thread_id": "thread-a",
+                "revision": 7,
+                "projection_version": 1,
+                "model_phase": 3,
+                "oldest_cursor": "old",
+                "checkpoint_cursor": "new",
+                "cost_usd": 0.5,
+                "usage_cursors_json": "[]",
+                "consumed_json": null,
+                "pricing_version": "p1",
+                "child_tree_reconciled": 1,
+                "projection_generation": 4,
+                "updated_at": 8
+              }
+            ],
+            "staleTables": []
+          },
+          "assertion": "replacement checkpoint table copies all fields, sets projection_version=1, removes consumed_json, and drops stale table"
         }
       ]
     },
@@ -23126,6 +24347,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_thread_invocation_receipts",
           "tbl_name": "rika_thread_invocation_receipts",
           "sql": "CREATE TABLE rika_thread_invocation_receipts (\n    invocation_digest TEXT PRIMARY KEY NOT NULL,\n    schema_input_digest TEXT NOT NULL,\n    kind TEXT NOT NULL CHECK (kind IN ('create', 'message', 'steer', 'cancel', 'stop')),\n    outcome TEXT NOT NULL,\n    source_thread_id TEXT NOT NULL,\n    source_root_turn_id TEXT,\n    target_thread_id TEXT,\n    target_turn_id TEXT,\n    queue_revision INTEGER CHECK (queue_revision IS NULL OR queue_revision >= 0),\n    created_at INTEGER NOT NULL\n  )"
@@ -23312,6 +24539,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_thread_invocation_receipts",
           "columns": [
@@ -24801,6 +26057,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_thread_invocation_receipts",
           "foreignKeys": []
         },
@@ -25216,16 +26476,8 @@
       ],
       "representativeRewriteRows": [
         {
-          "id": "oracle-turn",
-          "after": {
-            "mode": "test",
-            "main": {
-              "providerProtocol": "responses",
-              "providerBaseUrl": "https://gateway",
-              "providerApiKeyEnv": "ORACLE_KEY",
-              "alias": "oracle"
-            }
-          }
+          "operation": "drops rika_usage_repairs intentionally",
+          "outcome": "no row rewrite"
         }
       ]
     },
@@ -25426,6 +26678,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_thread_invocation_receipts",
           "tbl_name": "rika_thread_invocation_receipts",
           "sql": "CREATE TABLE rika_thread_invocation_receipts (\n    invocation_digest TEXT PRIMARY KEY NOT NULL,\n    schema_input_digest TEXT NOT NULL,\n    kind TEXT NOT NULL CHECK (kind IN ('create', 'message', 'steer', 'cancel', 'stop')),\n    outcome TEXT NOT NULL,\n    source_thread_id TEXT NOT NULL,\n    source_root_turn_id TEXT,\n    target_thread_id TEXT,\n    target_turn_id TEXT,\n    queue_revision INTEGER CHECK (queue_revision IS NULL OR queue_revision >= 0),\n    created_at INTEGER NOT NULL\n  )"
@@ -25612,6 +26870,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_thread_invocation_receipts",
           "columns": [
@@ -27173,6 +28460,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_thread_invocation_receipts",
           "foreignKeys": []
         },
@@ -27724,16 +29015,88 @@
       ],
       "representativeRewriteRows": [
         {
-          "id": "oracle-turn",
+          "operation": "stable_transcript_unit_order destructive projection rebuild",
+          "before": {
+            "rika_transcript_entries": [
+              {
+                "turn_id": "turn-a"
+              }
+            ],
+            "rika_transcript_units": [
+              {
+                "turn_id": "turn-a",
+                "unit_key": "old-unit",
+                "unit_sequence": 1,
+                "unit_part": 0
+              }
+            ]
+          },
           "after": {
-            "mode": "test",
-            "main": {
-              "providerProtocol": "responses",
-              "providerBaseUrl": "https://gateway",
-              "providerApiKeyEnv": "ORACLE_KEY",
-              "alias": "oracle"
+            "rika_transcript_entries": [],
+            "rika_transcript_units": [],
+            "rika_transcript_execution_checkpoints": [],
+            "rika_thread_root_readiness": {
+              "outcome": "dropped"
+            },
+            "rika_thread_result_routes": {
+              "outcome": "recreated",
+              "rows": []
+            },
+            "rika_thread_root_results": [],
+            "checkpointRows": [],
+            "schema": {
+              "rika_transcript_units": [
+                "turn_id",
+                "unit_key",
+                "execution_key",
+                "thread_id",
+                "unit_order_key",
+                "tool_id",
+                "parent_id",
+                "revision",
+                "unit_json",
+                "created_at",
+                "updated_at"
+              ],
+              "rika_transcript_checkpoints": [
+                "turn_id",
+                "thread_id",
+                "checkpoint_generation",
+                "revision",
+                "projection_version",
+                "model_phase",
+                "usable_completion_sequence",
+                "oldest_cursor",
+                "checkpoint_cursor",
+                "cost_usd",
+                "usage_cursors_json",
+                "pricing_version",
+                "updated_at"
+              ],
+              "rika_transcript_execution_checkpoints": [
+                "turn_id",
+                "execution_key",
+                "execution_id",
+                "cursor",
+                "sequence",
+                "status",
+                "revision",
+                "model_phase",
+                "usable_completion_sequence",
+                "oldest_cursor",
+                "checkpoint_cursor",
+                "cost_usd",
+                "usage_cursors_json",
+                "pricing_version",
+                "parent_execution_key",
+                "parent_unit_key",
+                "parent_id",
+                "parent_order_key",
+                "is_root"
+              ]
             }
-          }
+          },
+          "assertion": "intentional destructive result drops transcript entries and old units; checkpoints are rebuilt as projection v2/model phase -1; root readiness is dropped and result routes/root results are replaced"
         }
       ]
     },
@@ -27938,6 +29301,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_thread_invocation_receipts",
           "tbl_name": "rika_thread_invocation_receipts",
           "sql": "CREATE TABLE rika_thread_invocation_receipts (\n    invocation_digest TEXT PRIMARY KEY NOT NULL,\n    schema_input_digest TEXT NOT NULL,\n    kind TEXT NOT NULL CHECK (kind IN ('create', 'message', 'steer', 'cancel', 'stop')),\n    outcome TEXT NOT NULL,\n    source_thread_id TEXT NOT NULL,\n    source_root_turn_id TEXT,\n    target_thread_id TEXT,\n    target_turn_id TEXT,\n    queue_revision INTEGER CHECK (queue_revision IS NULL OR queue_revision >= 0),\n    created_at INTEGER NOT NULL\n  )"
@@ -28124,6 +29493,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_thread_invocation_receipts",
           "columns": [
@@ -29725,6 +31123,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_thread_invocation_receipts",
           "foreignKeys": []
         },
@@ -30276,16 +31678,59 @@
       ],
       "representativeRewriteRows": [
         {
-          "id": "oracle-turn",
+          "operation": "discriminated_turns and unit copy rewrite",
+          "before": {
+            "rika_transcript_units": [
+              {
+                "turn_id": "turn-a",
+                "unit_key": "unit-a",
+                "execution_key": "execution-a",
+                "thread_id": "thread-a",
+                "unit_order_key": "0001",
+                "tool_id": null,
+                "parent_id": null,
+                "revision": 2,
+                "unit_json": "{}",
+                "created_at": 1,
+                "updated_at": 2
+              }
+            ],
+            "rika_turns": [
+              {
+                "id": "turn-a",
+                "execution_route_json": "{}"
+              }
+            ]
+          },
           "after": {
-            "mode": "test",
-            "main": {
-              "providerProtocol": "responses",
-              "providerBaseUrl": "https://gateway",
-              "providerApiKeyEnv": "ORACLE_KEY",
-              "alias": "oracle"
-            }
-          }
+            "rika_transcript_units": [
+              {
+                "turn_id": "turn-a",
+                "unit_key": "unit-a",
+                "execution_key": "execution-a",
+                "thread_id": "thread-a",
+                "unit_order_key": "0001",
+                "tool_id": null,
+                "parent_id": null,
+                "revision": 2,
+                "unit_json": "{}",
+                "created_at": 1,
+                "updated_at": 2
+              }
+            ],
+            "rika_turns": [
+              {
+                "id": "turn-a",
+                "turn_kind": "AgentExecution",
+                "shell_command": null,
+                "shell_result_text": null,
+                "shell_result_truncated": null,
+                "shell_result_exit_code": null
+              }
+            ],
+            "turnInvariant": "turn_kind=AgentExecution; shell columns NULL; execution_route_json NOT NULL; existing turn defaults preserved"
+          },
+          "assertion": "unit fields survive rebuild and existing agent turns receive AgentExecution with shell columns null"
         }
       ]
     },
@@ -30494,6 +31939,12 @@
         },
         {
           "type": "table",
+          "name": "rika_migrations",
+          "tbl_name": "rika_migrations",
+          "sql": "CREATE TABLE \"rika_migrations\" (\n  migration_id integer PRIMARY KEY NOT NULL,\n  created_at datetime NOT NULL DEFAULT current_timestamp,\n  name VARCHAR(255) NOT NULL\n)"
+        },
+        {
+          "type": "table",
           "name": "rika_thread_invocation_receipts",
           "tbl_name": "rika_thread_invocation_receipts",
           "sql": "CREATE TABLE rika_thread_invocation_receipts (\n    invocation_digest TEXT PRIMARY KEY NOT NULL,\n    schema_input_digest TEXT NOT NULL,\n    kind TEXT NOT NULL CHECK (kind IN ('create', 'message', 'steer', 'cancel', 'stop')),\n    outcome TEXT NOT NULL,\n    source_thread_id TEXT NOT NULL,\n    source_root_turn_id TEXT,\n    target_thread_id TEXT,\n    target_turn_id TEXT,\n    queue_revision INTEGER CHECK (queue_revision IS NULL OR queue_revision >= 0),\n    created_at INTEGER NOT NULL\n  )"
@@ -30680,6 +32131,35 @@
         }
       ],
       "tables": [
+        {
+          "table": "rika_migrations",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "migration_id",
+              "type": "INTEGER",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 1
+            },
+            {
+              "cid": 1,
+              "name": "created_at",
+              "type": "datetime",
+              "notnull": 1,
+              "dflt_value": "current_timestamp",
+              "pk": 0
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "VARCHAR(255)",
+              "notnull": 1,
+              "dflt_value": null,
+              "pk": 0
+            }
+          ]
+        },
         {
           "table": "rika_thread_invocation_receipts",
           "columns": [
@@ -32289,6 +33769,10 @@
       ],
       "constraints": [
         {
+          "table": "rika_migrations",
+          "foreignKeys": []
+        },
+        {
           "table": "rika_thread_invocation_receipts",
           "foreignKeys": []
         },
@@ -32840,43 +34324,291 @@
       ],
       "representativeRewriteRows": [
         {
-          "id": "oracle-turn",
+          "operation": "usage_projection_sources copy rewrite",
+          "before": {
+            "rika_turn_usage": [
+              {
+                "turn_id": "turn-a",
+                "thread_id": "thread-a",
+                "revision": 7,
+                "projection_version": 2,
+                "fold_json": "fold",
+                "updated_at": 9
+              }
+            ]
+          },
           "after": {
-            "mode": "test",
-            "main": {
-              "providerProtocol": "responses",
-              "providerBaseUrl": "https://gateway",
-              "providerApiKeyEnv": "ORACLE_KEY",
-              "alias": "oracle"
-            }
-          }
+            "rika_turn_usage": [
+              {
+                "source_id": "turn-a",
+                "turn_id": "turn-a",
+                "thread_id": "thread-a",
+                "revision": 7,
+                "projection_version": 1,
+                "fold_json": "fold",
+                "updated_at": 9
+              }
+            ],
+            "index": "(thread_id, turn_id, source_id)"
+          },
+          "assertion": "source_id is copied from turn_id, identity/revision/data survive, projection_version becomes 1, and index order is recreated"
         }
       ]
     }
   ],
   "rejectionCases": [
     {
-      "name": "empty-file",
-      "fileSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "sideFileSha256": {
-        "wal": null,
-        "shm": null
+      "name": "zero-byte-plus-wal",
+      "outcome": "rejected-unchanged",
+      "recipe": {
+        "kind": "bytes",
+        "fileBytesHex": "",
+        "sidecars": {
+          "wal": {
+            "text": "recovery-state",
+            "sha256": "13a236673ae8088533b8c1d17d983428957968044ff254b293a1145655312605"
+          }
+        }
+      },
+      "expected": {
+        "fileSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sidecarSha256": "13a236673ae8088533b8c1d17d983428957968044ff254b293a1145655312605"
       }
     },
     {
-      "name": "non-sqlite-file",
-      "fileSha256": "1392877e0a2f64560ca2895c670ed7223a16900dda5091e0b8568bcfbc52ff8b",
-      "sideFileSha256": {
-        "wal": null,
-        "shm": null
+      "name": "zero-byte-plus-shm",
+      "outcome": "rejected-unchanged",
+      "recipe": {
+        "kind": "bytes",
+        "fileBytesHex": "",
+        "sidecars": {
+          "shm": {
+            "text": "recovery-state",
+            "sha256": "13a236673ae8088533b8c1d17d983428957968044ff254b293a1145655312605"
+          }
+        }
+      },
+      "expected": {
+        "fileSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sidecarSha256": "13a236673ae8088533b8c1d17d983428957968044ff254b293a1145655312605"
       }
     },
     {
-      "name": "truncated-sqlite-header",
-      "fileSha256": "9276d0790e0f820aa1d4a42a738a6ba10e70ed4afb303af8faef3a009008481d",
-      "sideFileSha256": {
-        "wal": null,
-        "shm": null
+      "name": "initialized-empty-plus-wal",
+      "outcome": "rejected-unchanged",
+      "recipe": {
+        "kind": "initialized-empty-sqlite",
+        "sidecars": {
+          "wal": {
+            "text": "recovery-state",
+            "sha256": "13a236673ae8088533b8c1d17d983428957968044ff254b293a1145655312605"
+          }
+        }
+      },
+      "expected": {
+        "fileSha256": "generated",
+        "sidecarSha256": "13a236673ae8088533b8c1d17d983428957968044ff254b293a1145655312605"
+      }
+    },
+    {
+      "name": "corrupt-non-sqlite",
+      "outcome": "rejected-unchanged",
+      "recipe": {
+        "kind": "bytes",
+        "fileBytesHex": "0001020304050607",
+        "sidecars": {}
+      },
+      "expected": {
+        "fileSha256": "8a851ff82ee7048ad09ec3847f1ddf44944104d2cbd17ef4e3db22c6785a0d45"
+      }
+    },
+    {
+      "name": "partial-rika-workspaces",
+      "outcome": "rejected-unchanged",
+      "recipe": {
+        "kind": "sqlite-sql",
+        "statements": ["CREATE TABLE rika_workspaces (path TEXT PRIMARY KEY NOT NULL, created_at INTEGER NOT NULL)"],
+        "sidecars": {}
+      },
+      "expected": {
+        "fileSha256": "1f6ab994dcd85a21f3df4fafbb9f909b736646ec77a910f6efaaaa1d27437d3e"
+      }
+    },
+    {
+      "name": "future-schema-and-product-state",
+      "outcome": "rejected-unchanged",
+      "recipe": {
+        "kind": "current-v27-plus-sql",
+        "statements": [
+          "DELETE FROM rika_migrations WHERE migration_id = 15",
+          "INSERT INTO rika_migrations (migration_id, name) VALUES (15, 'future_schema')",
+          "CREATE TABLE future_product_state (id TEXT PRIMARY KEY)"
+        ],
+        "sidecars": {}
+      },
+      "expected": {
+        "fileSha256": "generated"
+      }
+    },
+    {
+      "name": "arbitrary-old-sessions-schema",
+      "outcome": "rejected-unchanged",
+      "recipe": {
+        "kind": "sqlite-sql",
+        "statements": ["CREATE TABLE old_sessions (id TEXT PRIMARY KEY)"],
+        "sidecars": {}
+      },
+      "expected": {
+        "fileSha256": "debfe169353212fed80ebd2744e428dcdcfcc6619097745554f73ce14e75ece5"
+      }
+    }
+  ],
+  "preflightCases": [
+    {
+      "name": "missing-filename",
+      "outcome": "accepted",
+      "recipe": {
+        "kind": "missing-file",
+        "fileBytes": null,
+        "sidecars": {}
+      },
+      "expected": {
+        "migrationRows": 27,
+        "tables": ["rika_migrations", "rika_threads", "rika_transcript_units"],
+        "fileSha256": "generated"
+      }
+    },
+    {
+      "name": "zero-byte-file",
+      "outcome": "accepted",
+      "recipe": {
+        "kind": "bytes",
+        "fileBytesHex": "",
+        "sidecars": {}
+      },
+      "expected": {
+        "migrationRows": 27,
+        "tables": ["rika_migrations", "rika_threads", "rika_transcript_units"],
+        "fileSha256": "generated"
+      }
+    },
+    {
+      "name": "initialized-empty-sqlite-file",
+      "outcome": "accepted",
+      "recipe": {
+        "kind": "initialized-empty-sqlite",
+        "fileBytes": "SQLite database created by Bun sqlite with no user tables",
+        "sidecars": {}
+      },
+      "expected": {
+        "migrationRows": 27,
+        "tables": ["rika_migrations", "rika_threads", "rika_transcript_units"],
+        "fileSha256": "generated"
+      }
+    },
+    {
+      "name": "zero-byte-plus-wal",
+      "outcome": "rejected-unchanged",
+      "recipe": {
+        "kind": "bytes",
+        "fileBytesHex": "",
+        "sidecars": {
+          "wal": {
+            "text": "recovery-state",
+            "sha256": "13a236673ae8088533b8c1d17d983428957968044ff254b293a1145655312605"
+          }
+        }
+      },
+      "expected": {
+        "fileSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sidecarSha256": "13a236673ae8088533b8c1d17d983428957968044ff254b293a1145655312605"
+      }
+    },
+    {
+      "name": "zero-byte-plus-shm",
+      "outcome": "rejected-unchanged",
+      "recipe": {
+        "kind": "bytes",
+        "fileBytesHex": "",
+        "sidecars": {
+          "shm": {
+            "text": "recovery-state",
+            "sha256": "13a236673ae8088533b8c1d17d983428957968044ff254b293a1145655312605"
+          }
+        }
+      },
+      "expected": {
+        "fileSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sidecarSha256": "13a236673ae8088533b8c1d17d983428957968044ff254b293a1145655312605"
+      }
+    },
+    {
+      "name": "initialized-empty-plus-wal",
+      "outcome": "rejected-unchanged",
+      "recipe": {
+        "kind": "initialized-empty-sqlite",
+        "sidecars": {
+          "wal": {
+            "text": "recovery-state",
+            "sha256": "13a236673ae8088533b8c1d17d983428957968044ff254b293a1145655312605"
+          }
+        }
+      },
+      "expected": {
+        "fileSha256": "generated",
+        "sidecarSha256": "13a236673ae8088533b8c1d17d983428957968044ff254b293a1145655312605"
+      }
+    },
+    {
+      "name": "corrupt-non-sqlite",
+      "outcome": "rejected-unchanged",
+      "recipe": {
+        "kind": "bytes",
+        "fileBytesHex": "0001020304050607",
+        "sidecars": {}
+      },
+      "expected": {
+        "fileSha256": "8a851ff82ee7048ad09ec3847f1ddf44944104d2cbd17ef4e3db22c6785a0d45"
+      }
+    },
+    {
+      "name": "partial-rika-workspaces",
+      "outcome": "rejected-unchanged",
+      "recipe": {
+        "kind": "sqlite-sql",
+        "statements": ["CREATE TABLE rika_workspaces (path TEXT PRIMARY KEY NOT NULL, created_at INTEGER NOT NULL)"],
+        "sidecars": {}
+      },
+      "expected": {
+        "fileSha256": "1f6ab994dcd85a21f3df4fafbb9f909b736646ec77a910f6efaaaa1d27437d3e"
+      }
+    },
+    {
+      "name": "future-schema-and-product-state",
+      "outcome": "rejected-unchanged",
+      "recipe": {
+        "kind": "current-v27-plus-sql",
+        "statements": [
+          "DELETE FROM rika_migrations WHERE migration_id = 15",
+          "INSERT INTO rika_migrations (migration_id, name) VALUES (15, 'future_schema')",
+          "CREATE TABLE future_product_state (id TEXT PRIMARY KEY)"
+        ],
+        "sidecars": {}
+      },
+      "expected": {
+        "fileSha256": "generated"
+      }
+    },
+    {
+      "name": "arbitrary-old-sessions-schema",
+      "outcome": "rejected-unchanged",
+      "recipe": {
+        "kind": "sqlite-sql",
+        "statements": ["CREATE TABLE old_sessions (id TEXT PRIMARY KEY)"],
+        "sidecars": {}
+      },
+      "expected": {
+        "fileSha256": "debfe169353212fed80ebd2744e428dcdcfcc6619097745554f73ce14e75ece5"
       }
     }
   ]
