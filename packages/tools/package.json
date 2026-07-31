@@ -10,13 +10,12 @@
     "./workspace-index": "./src/workspace-index.ts"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir dist --target bun --format esm --external effect --external 'effect/*' --external '@effect/*' --external '@ff-labs/fff-bun'",
+    "build": "bun build ./src/index.ts --outdir dist --target bun --format esm --external effect --external 'effect/*' --external '@effect/*'",
     "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/tools/src packages/tools/test",
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   },
   "dependencies": {
     "@rika/config": "workspace:*",
-    "@ff-labs/fff-bun": "catalog:",
     "effect": "catalog:",
     "parallel-web": "catalog:"
   },

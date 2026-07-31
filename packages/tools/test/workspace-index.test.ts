@@ -4,7 +4,7 @@ import { Effect, FileSystem } from "effect"
 import { WorkspaceIndex } from "../src"
 import { provide } from "./test-layer"
 
-test("indexes workspace files and follows watcher updates without escaping the workspace", () =>
+test("searches workspace files with ripgrep without escaping the workspace", () =>
   Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
@@ -49,7 +49,7 @@ test("indexes workspace files and follows watcher updates without escaping the w
           expect(firstPage).toMatchObject({ totalMatched: 3, totalFiles: 3 })
           expect(firstPage.items).toHaveLength(2)
           expect(firstPage.scores).toHaveLength(2)
-          expect(secondPage.items).toHaveLength(2)
+          expect(secondPage.items).toHaveLength(1)
           expect(new Set([...firstPage.items, ...secondPage.items].map((item) => item.relativePath)).size).toBe(3)
           expect(plain).toHaveProperty("nextCursor")
           expect(plain.items.some((item) => item.relativePath.includes("escaped"))).toBe(false)
@@ -57,13 +57,8 @@ test("indexes workspace files and follows watcher updates without escaping the w
           expect(fuzzy.items.some((item) => item.relativePath.includes("external"))).toBe(false)
 
           yield* fileSystem.writeFileString(`${workspace}/src/created.ts`, "created after scan")
-          let created = false
-          for (let attempt = 0; attempt < 100 && !created; attempt += 1) {
-            const observed = yield* index.fileSearch("created.ts", { pageSize: 10 })
-            created = observed.items.some((item) => item.relativePath === "src/created.ts")
-            if (!created) yield* Effect.sleep("10 millis")
-          }
-          expect(created).toBe(true)
+          const observed = yield* index.fileSearch("created.ts", { pageSize: 10 })
+          expect(observed.items.some((item) => item.relativePath === "src/created.ts")).toBe(true)
         }).pipe(provide(WorkspaceIndex.layer(workspace)))
       }).pipe(provide(BunServices.layer)),
     ),

@@ -267,16 +267,16 @@ const operationError = (cause: unknown): RuntimeOperationError => {
         })
   if (Schema.is(WorkspaceIndex.WorkspaceIndexError)(cause))
     return runtimeError({
-      category: cause.operation === "initialize" || cause.operation === "scan" ? "dependency_unavailable" : "operation",
+      category: cause.operation === "initialize" ? "dependency_unavailable" : "operation",
       message:
-        cause.operation === "initialize" || cause.operation === "scan"
-          ? "The workspace index is unavailable"
-          : `The workspace index could not complete ${cause.operation}`,
+        cause.operation === "initialize"
+          ? "The workspace search tools are unavailable"
+          : `Workspace search could not complete ${cause.operation}`,
       outcome: "known",
-      recovery: cause.operation === "initialize" || cause.operation === "scan" ? "after_change" : "later",
+      recovery: cause.operation === "initialize" ? "after_change" : "later",
       nextAction:
-        cause.operation === "initialize" || cause.operation === "scan"
-          ? "Repair the workspace index installation or restart Rika after the index can initialize"
+        cause.operation === "initialize"
+          ? "Confirm the workspace path is readable and that ripgrep (rg) is installed"
           : "Retry once later or use a narrower direct file operation",
     })
   if (
@@ -461,31 +461,22 @@ const runtimeLayer = (workspace: string) =>
           const operation = Effect.gen(function* () {
             switch (request._tag) {
               case "Grep": {
-                const matches: Array<string> = []
-                let cursor: WorkspaceIndex.GrepResult["nextCursor"] = null
-                do {
-                  const page: WorkspaceIndex.GrepResult = yield* workspaceIndex.grep(request.pattern, {
-                    mode: request.regex ? "regex" : "plain",
-                    smartCase: false,
-                    maxMatchesPerFile: 1_000,
-                    pageSize: 1_000 - matches.length,
-                    cursor,
+                const page = yield* workspaceIndex.grep(request.pattern, {
+                  mode: request.regex ? "regex" : "plain",
+                  maxMatchesPerFile: 1_000,
+                  pageSize: 1_000,
+                })
+                if (page.regexFallbackError !== undefined)
+                  return yield* runtimeError({
+                    category: "invalid_input",
+                    message: "The grep pattern is not a valid regular expression",
+                    outcome: "known",
+                    recovery: "after_change",
+                    nextAction: "Correct the regular expression or set regex to false",
                   })
-                  if (page.regexFallbackError !== undefined)
-                    return yield* runtimeError({
-                      category: "invalid_input",
-                      message: "The grep pattern is not a valid regular expression",
-                      outcome: "known",
-                      recovery: "after_change",
-                      nextAction: "Correct the regular expression or set regex to false",
-                    })
-                  for (const match of page.items) {
-                    matches.push(`${match.relativePath}:${match.lineNumber}:${match.lineContent}`)
-                    if (matches.length === 1_000) break
-                  }
-                  cursor = page.nextCursor
-                } while (cursor !== null && matches.length < 1_000)
-                return bounded(matches.join("\n"))
+                return bounded(
+                  page.items.map((match) => `${match.relativePath}:${match.lineNumber}:${match.lineContent}`).join("\n"),
+                )
               }
               case "Read": {
                 const start = request.readRange?.[0] ?? 1

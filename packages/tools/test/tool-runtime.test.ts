@@ -146,17 +146,14 @@ const testEnvironment = (
     fileSearch: (query) => {
       const items = Array.from(files.keys())
         .filter((file) => file.includes(query))
-        .map((file) => ({
-          relativePath: file.slice(`${workspace}/`.length),
-          fileName: file.slice(file.lastIndexOf("/") + 1),
-          size: files.get(file)?.length ?? 0,
-          modified: 0,
-          accessFrecencyScore: 0,
-          modificationFrecencyScore: 0,
-          totalFrecencyScore: 0,
-          gitStatus: "clean",
-        }))
-      return Effect.succeed({ items, scores: [], totalMatched: items.length, totalFiles: files.size })
+        .map((file) => {
+          const relativePath = file.slice(`${workspace}/`.length)
+          return {
+            relativePath,
+            fileName: relativePath.slice(relativePath.lastIndexOf("/") + 1),
+          }
+        })
+      return Effect.succeed({ items, scores: items.map(() => 1), totalMatched: items.length, totalFiles: files.size })
     },
     glob: () => Effect.succeed({ items: [], scores: [], totalMatched: 0, totalFiles: files.size }),
     grep: (query, options) => {

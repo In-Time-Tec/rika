@@ -79,20 +79,20 @@ const provideLayerScoped =
 const mkdir = (path: string, options?: { readonly recursive?: boolean }) =>
   FileSystem.FileSystem.pipe(Effect.flatMap((fileSystem) => fileSystem.makeDirectory(path, options)))
 
-const fffError = (workspace: string, method: string, cause: unknown) =>
+const workspaceGlobError = (workspace: string, method: string, cause: unknown) =>
   PlatformError.systemError({
     _tag: "Unknown",
-    module: "FFF",
+    module: "WorkspaceIndex",
     method,
     pathOrDescriptor: workspace,
     description: cause instanceof Error ? cause.message : String(cause),
     cause,
   })
 
-const fffGlob = (workspace: string, pattern: string, maximumFiles: number) =>
+const workspaceGlob = (workspace: string, pattern: string, maximumFiles: number) =>
   WorkspaceIndex.globOnce({ workspace, pattern, options: { pageSize: maximumFiles } }).pipe(
     Effect.map((result) => result.items.map((item) => item.relativePath)),
-    Effect.mapError((error) => fffError(workspace, error.operation, error)),
+    Effect.mapError((error) => workspaceGlobError(workspace, error.operation, error)),
   )
 
 export class PromptAttachmentError extends Schema.TaggedErrorClass<PromptAttachmentError>()("PromptAttachmentError", {
@@ -1188,7 +1188,7 @@ const createOperationLayerImpl = (
       Layer.effectContext(Effect.fail(ThreadSearchRepository.RepositoryError.make({ message: Cause.pretty(cause) }))),
     ),
   )
-  const resolvedContextLayer = ResolvedContext.layer(fffGlob).pipe(
+  const resolvedContextLayer = ResolvedContext.layer(workspaceGlob).pipe(
     Layer.provide(ContextFileSystem.liveLayer),
     Layer.provide(BunServices.layer),
   )
