@@ -1159,6 +1159,19 @@ export const layer = Layer.effect(
           : {}),
       } satisfies ExecutionCheckpoint
     })
+    const loadExecutionCheckpoints = Effect.fn("TranscriptRepository.loadExecutionCheckpoints")(function* (
+      turnId: TurnId,
+    ) {
+      const rows = yield* sql`
+        SELECT execution_key, execution_id, cursor, sequence, status, revision, model_phase, usable_completion_sequence,
+          oldest_cursor, checkpoint_cursor, cost_usd, usage_cursors_json, pricing_version,
+          parent_execution_key, parent_unit_key, parent_id, parent_order_key, is_root
+        FROM rika_transcript_execution_checkpoints
+        WHERE turn_id = ${turnId}
+        ORDER BY execution_key COLLATE BINARY
+      `.pipe(Effect.mapError(error))
+      return yield* Effect.all(rows.map((value) => decodeExecutionCheckpoint(value).pipe(Effect.mapError(error))))
+    })
     const get = Effect.fn("TranscriptRepository.get")(function* (turnId: TurnId) {
       const checkpointRows = yield* sql`
         SELECT c.checkpoint_generation, c.model_phase, c.revision, c.usable_completion_sequence,
@@ -1206,17 +1219,7 @@ export const layer = Layer.effect(
         ),
       )
       yield* validateUnits(units)
-      const executionRows = yield* sql`
-        SELECT execution_key, execution_id, cursor, sequence, status, revision, model_phase, usable_completion_sequence,
-          oldest_cursor, checkpoint_cursor, cost_usd, usage_cursors_json, pricing_version,
-          parent_execution_key, parent_unit_key, parent_id, parent_order_key, is_root
-        FROM rika_transcript_execution_checkpoints
-        WHERE turn_id = ${turnId}
-        ORDER BY execution_key COLLATE BINARY
-      `.pipe(Effect.mapError(error))
-      const executionCheckpoints = yield* Effect.all(
-        executionRows.map((value) => decodeExecutionCheckpoint(value).pipe(Effect.mapError(error))),
-      )
+      const executionCheckpoints = yield* loadExecutionCheckpoints(turnId)
       const usageCursors =
         row.usage_cursors_json === null
           ? undefined
@@ -1499,13 +1502,25 @@ export const layer = Layer.effect(
       listProjectionRecoveryCandidates,
       commitDelta: Effect.fn("TranscriptRepository.commitDelta")(function* (turn, state, delta, options) {
         yield* validateDelta(delta)
-        yield* validateCheckpoint(turn, state, options, true)
-        const attachmentUnits = yield* loadAttachmentUnits(turn, delta, options.executionCheckpoints)
-        yield* validateAttachmentSet(turn, attachmentUnits, options.executionCheckpoints)
+        yield* validateCheckpoint(turn, state, options)
         return yield* sql
           .withTransaction(
             Effect.gen(function* () {
               if (!(yield* commitCheckpoint(turn, state, options))) return "stale" as const
+              const checkpoints = new Map(
+                (yield* loadExecutionCheckpoints(turn.id)).map((checkpoint) => [checkpoint.executionKey, checkpoint]),
+              )
+              for (const checkpoint of options.executionCheckpoints)
+                checkpoints.set(checkpoint.executionKey, checkpoint)
+              const merged = [...checkpoints.values()]
+              yield* validateCheckpoint(
+                turn,
+                state,
+                { executionCheckpoints: merged, projectionVersion: options.projectionVersion },
+                true,
+              )
+              const attachmentUnits = yield* loadAttachmentUnits(turn, delta, merged)
+              yield* validateAttachmentSet(turn, attachmentUnits, merged)
               yield* Effect.forEach(
                 delta.remove,
                 (key) =>

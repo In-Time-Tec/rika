@@ -54,6 +54,7 @@ export interface TuiAppOptions {
   readonly root?: string
   readonly initialThreadId?: string
   readonly idStart?: number
+  readonly inspectTranscript?: boolean
   readonly workspaceFiles?: Readonly<Record<string, string>>
   readonly width?: number
   readonly height?: number
@@ -92,6 +93,9 @@ export interface TuiApp {
   readonly clickText: (text: string) => Effect.Effect<void>
   readonly frame: () => string
   readonly spans: () => CapturedSpans
+  readonly transcript: (
+    turnId: Turn.TurnId,
+  ) => Effect.Effect<TranscriptRepository.Projection | undefined, TranscriptRepository.RepositoryError>
   readonly waitFrame: (marker: string, timeoutMillis?: number) => Effect.Effect<string>
   readonly waitFrameMatch: (predicate: (frame: string) => boolean, timeoutMillis?: number) => Effect.Effect<string>
   readonly waitCost: Effect.Effect<string>
@@ -244,6 +248,13 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
     },
   })
   const operation = Context.get(yield* Layer.buildWithScope(operationLayer, yield* Effect.scope), Operation.Service)
+  const transcripts =
+    options.inspectTranscript === true
+      ? Context.get(
+          yield* Layer.buildWithScope(transcriptRepositoryLayer, yield* Effect.scope),
+          TranscriptRepository.Service,
+        )
+      : undefined
   const operationFiber = yield* Effect.forkChild(
     operation
       .run({
@@ -305,6 +316,7 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
       }),
     frame,
     spans: () => setup.captureSpans(),
+    transcript: (turnId) => transcripts?.get(turnId) ?? Effect.die("TUI transcript inspection was not requested"),
     waitFrame: (marker, timeoutMillis = 60_000) => waitFor((captured) => captured.includes(marker), timeoutMillis),
     waitFrameMatch: (predicate, timeoutMillis = 60_000) => waitFor(predicate, timeoutMillis),
     waitCost: waitFor((captured) => /\$[0-9]/u.test(captured), 60_000),
