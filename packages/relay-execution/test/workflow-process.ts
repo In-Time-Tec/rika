@@ -6,7 +6,7 @@ import { SQLite } from "@relayfx/sdk/sqlite"
 import { Config, Effect, FileSystem, Layer, Logger, Schema, Semaphore, Stdio, Stream } from "effect"
 import { Toolkit } from "effect/unstable/ai"
 import * as ExecutionBackend from "@rika/product/execution-service"
-import * as RelayExecutionBackend from "../src/relay/execution/execution-backend"
+import * as RelayExecutionBackend from "../src/relay/execution/relay-execution-layer"
 
 class FixtureError extends Schema.TaggedErrorClass<FixtureError>()("WorkflowProcessFixtureError", {
   message: Schema.String,

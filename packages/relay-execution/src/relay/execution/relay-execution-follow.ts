@@ -1,4 +1,7 @@
-import * as Backend from "./execution-backend"
+import * as Identifier from "./relay-execution-identifier"
+import * as Mapping from "./relay-event-mapping"
+import * as Recovery from "./relay-execution-recovery"
+import * as Tree from "./relay-execution-tree"
 import { Client, Ids, type Execution } from "@relayfx/sdk"
 import { Cause, Clock, Effect, Queue, Schedule, Scope, Stream } from "effect"
 import type { ExecutionCheckpoint, Event } from "@rika/product/execution-event"
@@ -7,25 +10,33 @@ import type { EventScope } from "@rika/product/execution-request"
 import { BackendError } from "@rika/product/execution-service"
 import { Status } from "@rika/product/execution-status"
 import * as ExecutionStatus from "@rika/product/execution-status"
-export const followExecution = (
-  client: Client.Interface,
-  turnId: string,
-  afterCursor: string | ExecutionCheckpoint | undefined,
-  onEvent: ((item: Event) => void) | undefined,
-  stopAtActionableWait = true,
-  reference?: ExecutionReference,
-  eventScope: EventScope = "tree",
-  attemptCost?: { readonly amount: number; readonly currency: string },
-) =>
+export const followExecution = (input: {
+  readonly client: Client.Interface
+  readonly turnId: string
+  readonly afterCursor: string | ExecutionCheckpoint | undefined
+  readonly onEvent: ((item: Event) => void) | undefined
+  readonly stopAtActionableWait: boolean
+  readonly reference: ExecutionReference | undefined
+  readonly eventScope: EventScope | undefined
+  readonly attemptCost: { readonly amount: number; readonly currency: string } | undefined
+}) =>
   Effect.scoped(
     Effect.gen(function* () {
       const startedAt = yield* Clock.currentTimeMillis
+      const stopAtActionableWait = input.stopAtActionableWait
+      const reference = input.reference
+      const eventScope = input.eventScope ?? "tree"
+      const client = input.client
+      const turnId = input.turnId
+      const afterCursor = input.afterCursor
+      const onEvent = input.onEvent
+      const attemptCost = input.attemptCost
       const followAnnotations = {
-        "rika.follow.cursor": Backend.RelayInternals.cursorOf(afterCursor) ?? "start",
+        "rika.follow.cursor": Identifier.cursorOf(afterCursor) ?? "start",
         "rika.follow.scope": eventScope,
       }
       yield* Effect.logInfo("execution.follow.started").pipe(Effect.annotateLogs(followAnnotations))
-      const rootExecutionId = Backend.RelayInternals.executionId(turnId, reference)
+      const rootExecutionId = Identifier.executionId({ turnId, reference })
       const committedSequence = typeof afterCursor === "string" ? undefined : afterCursor?.sequence
       const events: Array<Event> = []
       const followed = new Set<string>()
@@ -41,7 +52,7 @@ export const followExecution = (
         | { readonly _tag: "failed"; readonly error: BackendError }
       >(1_024)
       const attributedEvent = (item: Execution.ExecutionEvent, childExecutionId: string | undefined) =>
-        Backend.RelayInternals.event(
+        Mapping.event(
           childExecutionId === undefined
             ? item
             : {
@@ -93,7 +104,7 @@ export const followExecution = (
                 item.event.sequence <= committedSequence
               )
                 return Effect.succeed(true)
-              const spawnedChild = Backend.RelayInternals.childExecutionIdFromEvent(item.event)
+              const spawnedChild = Mapping.childExecutionIdFromEvent(item.event)
               const attributed = attributedEvent(item.event, root ? undefined : String(execution))
               const mapped =
                 attemptCost !== undefined &&
@@ -103,7 +114,7 @@ export const followExecution = (
                   : attributed
               const terminal: Status | undefined = ExecutionStatus.terminalEventStatus(mapped.type)
               const inspectActionable =
-                stopAtActionableWait && Backend.RelayInternals.isActionableWait(mapped) && typeof mapped.data?.wait_id === "string"
+                stopAtActionableWait && Mapping.isActionableWait(mapped) && typeof mapped.data?.wait_id === "string"
                   ? client.executions
                       .inspect(execution)
                       .pipe(
@@ -131,13 +142,13 @@ export const followExecution = (
         return Effect.gen(function* () {
           const inspection = yield* client.executions.inspect(execution).pipe(
             Effect.retry({
-              while: Backend.RelayInternals.isExecutionNotFound,
+              while: Mapping.isExecutionNotFound,
               schedule: Schedule.spaced("10 millis"),
               times: 100,
             }),
           )
           if (root && cursor !== undefined && inspection.last_event_cursor === cursor) {
-            if (Backend.RelayInternals.terminalExecutionStatus(inspection.status)) {
+            if (Recovery.terminalExecutionStatus(inspection.status)) {
               yield* Queue.offer(updates, {
                 _tag: "stopped",
                 status: Status.make(inspection.status),
@@ -145,7 +156,10 @@ export const followExecution = (
               })
               return
             }
-            if (stopAtActionableWait && inspection.waiting_on.some((wait) => wait.mode !== Backend.RelayInternals.childJoinWaitMode)) {
+            if (
+              stopAtActionableWait &&
+              inspection.waiting_on.some((wait) => wait.mode !== Recovery.childJoinWaitMode)
+            ) {
               yield* Queue.offer(updates, { _tag: "stopped", status: "waiting", actionable: true })
               return
             }
@@ -168,13 +182,15 @@ export const followExecution = (
               ? Queue.offer(updates, {
                   _tag: "failed",
                   error: BackendError.make({
-                    message: Backend.RelayInternals.isExecutionNotFound(Cause.squash(cause)) ? "ExecutionNotFound" : Cause.pretty(cause),
+                    message: Mapping.isExecutionNotFound(Cause.squash(cause))
+                      ? "ExecutionNotFound"
+                      : Cause.pretty(cause),
                   }),
                 }).pipe(Effect.asVoid)
               : Effect.logWarning("execution.child.follow.failed").pipe(
                   Effect.annotateLogs({
                     "rika.execution.id": String(execution),
-                    "rika.failure.kind": Backend.RelayInternals.failureKind(cause),
+                    "rika.failure.kind": Tree.failureKind(cause),
                   }),
                 ),
           ),
@@ -187,7 +203,7 @@ export const followExecution = (
           followed.add(key)
           return followOne(execution, root, cursor).pipe(Effect.forkScoped, Effect.asVoid)
         })
-      yield* launch(rootExecutionId, true, Backend.RelayInternals.cursorOf(afterCursor))
+      yield* launch(rootExecutionId, true, Identifier.cursorOf(afterCursor))
       let stoppedAtActionableWait = false
       let stoppedStatus: Status | undefined
       while (stoppedStatus === undefined) {
@@ -206,7 +222,7 @@ export const followExecution = (
           update.event.type === "model.toolcall.delta"
         if (!traceDelta || !tracedDeltas.has(update.event.type)) {
           if (traceDelta) tracedDeltas.add(update.event.type)
-          if (traceDelta || Backend.RelayInternals.observableEventTypes.has(update.event.type))
+          if (traceDelta || Mapping.observableEventTypes.has(update.event.type))
             yield* Effect.logInfo("execution.event.received").pipe(
               Effect.annotateLogs({
                 "rika.event.cursor": update.event.cursor,
@@ -220,7 +236,7 @@ export const followExecution = (
           stoppedStatus = "waiting"
         } else if (update.terminal !== undefined) stoppedStatus = update.terminal
       }
-      const status = stoppedStatus ?? Backend.RelayInternals.statusFromEvents(events)
+      const status = stoppedStatus ?? Mapping.statusFromEvents(events)
       const completedAt = yield* Clock.currentTimeMillis
       yield* Effect.logInfo("execution.follow.completed").pipe(
         Effect.annotateLogs({
@@ -234,8 +250,9 @@ export const followExecution = (
       if (stoppedAtActionableWait && (status === "running" || status === "queued")) {
         finalStatus = Status.make("waiting")
       }
-      if (Backend.RelayInternals.terminalExecutionStatus(finalStatus)) yield* Backend.RelayInternals.cancelOutlivingChildren(client, rootExecutionId)
-      const checkpoint = yield* Backend.RelayInternals.checkpointForExecution(client, rootExecutionId)
+      if (Recovery.terminalExecutionStatus(finalStatus))
+        yield* Tree.cancelOutlivingChildren({ client, root: rootExecutionId })
+      const checkpoint = yield* Identifier.checkpointForExecution({ client, id: rootExecutionId })
       return {
         turnId,
         status: finalStatus,
@@ -247,15 +264,15 @@ export const followExecution = (
     Effect.tapCause((cause) =>
       Effect.suspend(() => {
         if (Cause.hasInterruptsOnly(cause)) return Effect.void
-        if (reference !== undefined && String(Cause.squash(cause)).includes("ExecutionNotFound"))
+        if (input.reference !== undefined && String(Cause.squash(cause)).includes("ExecutionNotFound"))
           return Effect.logInfo("execution.follow.missing")
         return Effect.logError("execution.follow.failed").pipe(
-          Effect.annotateLogs("rika.failure.kind", Backend.RelayInternals.failureKind(cause)),
+          Effect.annotateLogs("rika.failure.kind", Tree.failureKind(cause)),
         )
       }),
     ),
     Effect.annotateLogs({
-      "rika.execution.id": String(Backend.RelayInternals.executionId(turnId, reference)),
-      "rika.turn.id": turnId,
+      "rika.execution.id": String(Identifier.executionId({ turnId: input.turnId, reference: input.reference })),
+      "rika.turn.id": input.turnId,
     }),
   )

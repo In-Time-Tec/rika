@@ -3,8 +3,10 @@ import * as AgentSelection from "@rika/coding-tools/agent-tool-contract"
 import * as AgentAwait from "@rika/coding-tools/agent-tool-contract"
 import * as AgentOutcomes from "@rika/coding-tools/agent-tool-contract"
 import * as ExecutionStatus from "@rika/product/execution-status"
-import { Ids, ToolRuntime as RelayToolRuntime } from "@relayfx/sdk"
-import { Effect } from "effect"
+import { Client, Ids, ToolRuntime as RelayToolRuntime } from "@relayfx/sdk"
+import { resolveChildResult } from "./relay-execution-recovery"
+import { awaitExecutionAvailable } from "./relay-execution-identifier"
+import { Effect, Stream } from "effect"
 
 export const childJoinWaitId = (childExecutionId: string) => Ids.WaitId.make(`wait:child:${childExecutionId}`)
 
@@ -75,6 +77,46 @@ export const join = (input: JoinInput) =>
     const subagents = yield* Effect.forEach(plan, (target) => collect(input, target), { concurrency: "unbounded" })
     return { subagents }
   })
+
+export const awaitChildResult = (input: { readonly client: Client.Interface; readonly childId: string }) => {
+  const childExecutionId = Ids.ExecutionId.make(input.childId)
+  return awaitExecutionAvailable({ client: input.client, id: childExecutionId }).pipe(
+    Effect.flatMap(() =>
+      Effect.gen(function* () {
+        const inspection = yield* input.client.executions.inspect(childExecutionId)
+        if (["completed", "failed", "cancelled"].includes(inspection.status)) {
+          const page = yield* input.client.executions.pageEvents({
+            execution_id: childExecutionId,
+            direction: "backward",
+            limit: 256,
+          })
+          return resolveChildResult({
+            childExecutionId: input.childId,
+            events: page.events,
+            reconciled: inspection.status as "completed" | "failed" | "cancelled",
+          })
+        }
+        const items = yield* Stream.runCollect(
+          input.client.executions.follow({
+            execution_id: childExecutionId,
+            ...(inspection.last_event_cursor === undefined ? {} : { after_cursor: inspection.last_event_cursor }),
+          }),
+        )
+        const stopped = [...items].find(
+          (item): item is Extract<typeof item, { readonly _tag: "stopped" }> => item._tag === "stopped",
+        )
+        const reconciled = stopped?.reason._tag === "terminal" ? stopped.reason.status : undefined
+        return resolveChildResult({
+          childExecutionId: input.childId,
+          events: [...items].flatMap((item) => (item._tag === "event" ? [item.event] : [])),
+          ...(reconciled === "completed" || reconciled === "failed" || reconciled === "cancelled"
+            ? { reconciled }
+            : {}),
+        })
+      }),
+    ),
+  )
+}
 
 export const registeredTool = (options: JoinOptions): RelayToolRuntime.RegisteredTool =>
   RelayToolRuntime.tool(AgentSelection.AgentContract.awaitSubagentsToolName, {

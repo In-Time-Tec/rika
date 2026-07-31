@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { Context, Effect, Layer, Schema } from "effect"
 import { LanguageModel, Prompt, Tool, Toolkit } from "effect/unstable/ai"
-import * as ThreadHost from "../src/relay/execution/thread-host"
+import * as ThreadHost from "../src/relay/execution/host/relay-thread-host"
 
 const promptWith = (messages: ReadonlyArray<Prompt.MessageEncoded>) => Prompt.make(messages)
 

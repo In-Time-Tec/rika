@@ -9,7 +9,7 @@ import { Database } from "bun:sqlite"
 import { Clock, Effect, FileSystem, Layer, Ref, Schedule, Schema, Stream } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
-import * as RelayExecutionBackend from "../src/relay/execution/execution-backend"
+import * as RelayExecutionBackend from "../src/relay/execution/relay-execution-layer"
 import { routedModel } from "./routed-model"
 import { start } from "./current-execution-route"
 

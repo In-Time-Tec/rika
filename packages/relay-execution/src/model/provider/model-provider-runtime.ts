@@ -36,8 +36,6 @@ export interface RuntimeModelRoute {
     readonly keepRecentTokens: number
   }
 }
-import * as PromptCache from "../../prompt-cache"
-import { withStreamingOnlyModel } from "../../streaming-only-model"
 import { Compaction, ModelRegistry } from "@batonfx/core"
 export { TestModel } from "@batonfx/test"
 import * as Anthropic from "@batonfx/providers/anthropic"
@@ -46,23 +44,8 @@ import * as AmazonBedrock from "@batonfx/providers/amazon-bedrock"
 import * as OpenAi from "@batonfx/providers/openai"
 export { OpenAi }
 export { ModelRegistry } from "@batonfx/core"
-import { type OpenAiAccountCredentials } from "@batonfx/providers/openai"
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
-import {
-
-  Context,
-  Deferred,
-  Effect,
-  Function,
-  Layer,
-  Option,
-  Redacted,
-  Ref,
-  Schema,
-  Scope,
-  Semaphore,
-} from "effect"
-import { FetchHttpClient } from "effect/unstable/http"
+import { Context, Deferred, Effect, Function, Layer, Ref, Schema, Scope, Semaphore } from "effect"
 import { createHash } from "node:crypto"
 
 export type ModelRegistration = ModelRegistry.Registration
@@ -108,12 +91,6 @@ export interface ProviderRuntimePin {
 export class RuntimeError extends Schema.TaggedErrorClass<RuntimeError>()("ModelProviderRuntimeError", {
   message: Schema.String,
 }) {}
-
-interface Resolution {
-  readonly runtime: ProviderRuntimePin
-  readonly options: Readonly<Record<string, unknown>>
-  readonly registrationKey: string
-}
 
 interface Account {
   readonly fingerprint: string

@@ -21,16 +21,30 @@ type RuntimeError = Runtime.RuntimeError
 type NormalizedRuntime = typeof Runtime.normalizedBaseUrl
 const normalizedBaseUrl: NormalizedRuntime = Runtime.normalizedBaseUrl
 const isNativeOpenAiRoute = Runtime.isNativeOpenAiRoute
-interface Resolution { readonly runtime: ProviderRuntimePin; readonly options: Readonly<Record<string, unknown>>; readonly registrationKey: string }
-interface Account { readonly fingerprint: string; readonly auth: OpenAiAuth.ServiceInterface }
+interface Resolution {
+  readonly runtime: ProviderRuntimePin
+  readonly options: Readonly<Record<string, unknown>>
+  readonly registrationKey: string
+}
+interface Account {
+  readonly fingerprint: string
+  readonly auth: OpenAiAuth.ServiceInterface
+}
 export interface Adapter {
   readonly id: string
   readonly matchesConfigured: (route: ModelRouteResolution.ResolvedModelRoute, account?: Account) => boolean
   readonly matchesPinned: (route: RuntimeModelRoute) => boolean
   readonly resolve: (route: ModelRouteResolution.ResolvedModelRoute, account?: Account) => ProviderRuntimePin
   readonly options: (route: ModelRouteResolution.ResolvedModelRoute) => Readonly<Record<string, unknown>>
-  readonly register: (route: ModelRouteResolution.ResolvedModelRoute, resolution: Resolution, account?: Account) => Effect.Effect<ModelRegistry.Registration, Runtime.RuntimeError, import("effect").Scope.Scope>
-  readonly restore: (route: RuntimeModelRoute, runtime: ProviderRuntimePin) => Effect.Effect<ModelRegistry.Registration, Runtime.RuntimeError, import("effect").Scope.Scope>
+  readonly register: (
+    route: ModelRouteResolution.ResolvedModelRoute,
+    resolution: Resolution,
+    account?: Account,
+  ) => Effect.Effect<ModelRegistry.Registration, Runtime.RuntimeError, import("effect").Scope.Scope>
+  readonly restore: (
+    route: RuntimeModelRoute,
+    runtime: ProviderRuntimePin,
+  ) => Effect.Effect<ModelRegistry.Registration, Runtime.RuntimeError, import("effect").Scope.Scope>
 }
 
 const canonical = (value: unknown): string => {
@@ -423,5 +437,10 @@ export const normalizePinnedRuntime = (route: RuntimeModelRoute): ProviderRuntim
         ...(route.providerApiKeyEnv === undefined ? {} : { credentialIdentity: route.providerApiKeyEnv }),
       })
 
-
-export const ProviderAdapters = { adapters, authRefreshFingerprint, canonical, normalizePinnedRuntime, unavailableRestore }
+export const ProviderAdapters = {
+  adapters,
+  authRefreshFingerprint,
+  canonical,
+  normalizePinnedRuntime,
+  unavailableRestore,
+}

@@ -10,7 +10,7 @@ import { TestClock } from "effect/testing"
 import { AiError, Tool, Toolkit } from "effect/unstable/ai"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
-import * as RelayExecutionBackend from "../src/relay/execution/execution-backend"
+import * as RelayExecutionBackend from "../src/relay/execution/relay-execution-layer"
 import { createFanOut, currentExecutionRoute, start } from "./current-execution-route"
 
 const MockEffect = vi.hoisted(() => (require("effect") as typeof import("effect")).Effect)
