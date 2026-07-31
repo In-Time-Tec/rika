@@ -5,11 +5,11 @@ import * as TranscriptProjectionModel from "@rika/transcript/transcript-projecti
 import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Effect, Function, Layer } from "effect"
-import * as Database from "../src/product-database"
+import * as Database from "../src/database/product-database-layer"
 import * as Thread from "@rika/product/thread-record"
-import * as ThreadRepository from "../src/thread-repository"
-import * as TranscriptRepository from "../src/transcript-repository"
-import * as TurnRepository from "../src/turn-repository"
+import * as ThreadRepository from "../src/thread/sqlite-thread-repository"
+import * as TranscriptRepository from "../src/transcript/sqlite-transcript-repository"
+import * as TurnRepository from "../src/turn/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 
 export const projectionVersion = 3

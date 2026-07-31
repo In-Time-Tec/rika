@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { TurnId } from "@rika/product/turn-record"
-import { invalidatedProjectionVersion, RepositoryError } from "./transcript-repository"
+import { invalidatedProjectionVersion, RepositoryError } from "./sqlite-transcript-repository"
 
 const error = (cause: unknown) => RepositoryError.make({ message: String(cause) })
 

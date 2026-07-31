@@ -3,9 +3,9 @@ import { expect, it } from "@effect/vitest"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Effect, FileSystem } from "effect"
 import * as Thread from "@rika/product/thread-record"
-import * as ThreadRepository from "../../src/thread-repository"
-import * as TranscriptRepository from "../../src/transcript-repository"
-import * as TurnRepository from "../../src/turn-repository"
+import * as ThreadRepository from "../../src/thread/sqlite-thread-repository"
+import * as TranscriptRepository from "../../src/transcript/sqlite-transcript-repository"
+import * as TurnRepository from "../../src/turn/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import {
   commitAll,

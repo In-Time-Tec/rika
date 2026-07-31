@@ -3,10 +3,10 @@ export { Service }
 import * as ExecutionStatus from "@rika/product/execution-status"
 import { Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import * as ThreadRepository from "./thread-repository"
+import * as ThreadRepository from "../thread/sqlite-thread-repository"
 import { ThreadId } from "@rika/product/thread-record"
 import { EditTotals, RepairCandidate, ThreadSummary } from "@rika/product/thread-summary"
-import * as TurnRepository from "./turn-repository"
+import * as TurnRepository from "../turn/sqlite-turn-repository"
 import { Status, TurnId, isAgentExecution } from "@rika/product/turn-record"
 import * as ThreadState from "@rika/product/thread-state"
 

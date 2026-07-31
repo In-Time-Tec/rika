@@ -3,7 +3,7 @@ export { Service }
 import { Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { Thread, ThreadId } from "@rika/product/thread-record"
-import * as TurnRepository from "./turn-repository"
+import * as TurnRepository from "../turn/sqlite-turn-repository"
 import { ExecutionRoutePin, Turn, TurnId, isAgentExecution } from "@rika/product/turn-record"
 import * as ExecutionStatus from "@rika/product/execution-status"
 

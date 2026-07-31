@@ -1,9 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
-import * as ThreadRepository from "../src/thread-repository"
+import * as ThreadRepository from "../src/thread/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
-import * as ThreadSummaryRepository from "../src/thread-summary-repository"
-import * as TurnRepository from "../src/turn-repository"
+import * as ThreadSummaryRepository from "../src/summary/sqlite-thread-summary-repository"
+import * as TurnRepository from "../src/turn/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 
 const provideLayer =

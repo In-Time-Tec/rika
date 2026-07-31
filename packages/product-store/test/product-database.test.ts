@@ -2,7 +2,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import { layer } from "../src/product-database"
+import { layer } from "../src/database/product-database-layer"
 import * as Turn from "@rika/product/turn-record"
 
 it.layer(BunServices.layer)("product database", (test) => {

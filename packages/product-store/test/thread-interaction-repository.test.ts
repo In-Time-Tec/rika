@@ -1,11 +1,11 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer } from "effect"
-import * as Database from "../src/product-database"
-import * as Repository from "../src/thread-interaction-repository"
-import * as ThreadRepository from "../src/thread-repository"
+import * as Database from "../src/database/product-database-layer"
+import * as Repository from "../src/interaction/sqlite-thread-interaction-repository"
+import * as ThreadRepository from "../src/thread/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
-import * as TurnRepository from "../src/turn-repository"
+import * as TurnRepository from "../src/turn/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 
 const sourceThreadId = Thread.ThreadId.make("source")
