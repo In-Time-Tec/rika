@@ -10,9 +10,9 @@ const buildFailure = (cause: unknown): string => {
 }
 
 export const targets = {
-  "darwin-arm64": { bun: "bun-darwin-arm64", opentuiLibc: "", fffLibc: "gnu" },
-  "linux-arm64": { bun: "bun-linux-arm64", opentuiLibc: "glibc", fffLibc: "gnu" },
-  "linux-x64": { bun: "bun-linux-x64", opentuiLibc: "glibc", fffLibc: "gnu" },
+  "darwin-arm64": { bun: "bun-darwin-arm64", opentuiLibc: "" },
+  "linux-arm64": { bun: "bun-linux-arm64", opentuiLibc: "glibc" },
+  "linux-x64": { bun: "bun-linux-x64", opentuiLibc: "glibc" },
 } as const
 
 export type PackageTarget = keyof typeof targets
@@ -117,7 +117,6 @@ const program = Effect.gen(function* () {
             define: {
               RIKA_VERSION: `"${manifest.version}"`,
               RIKA_BUILD_IDENTITY: `"${identity}"`,
-              FFF_LIBC: `"${metadata.fffLibc}"`,
               "process.env.OPENTUI_LIBC": `"${metadata.opentuiLibc}"`,
             },
           })

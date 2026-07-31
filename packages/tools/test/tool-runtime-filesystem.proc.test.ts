@@ -4,7 +4,7 @@ import { Effect, FileSystem, Layer, Schema } from "effect"
 import { MediaView, ProcessRegistry, ReadWebPage, Runtime, WebSearch, WorkspaceIndex } from "../src"
 import { provide } from "./test-layer"
 
-test("exposes fileSearch, glob, and grep through the FFF workspace index", () =>
+test("exposes fileSearch, glob, and grep through the ripgrep workspace index", () =>
   Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {

@@ -84,7 +84,7 @@ describe("release target construction", () => {
     expect(Object.keys(targets)).toEqual(["darwin-arm64", "linux-arm64", "linux-x64"])
     for (const [name, target] of Object.entries(targets)) {
       expect(target.bun).toBe(`bun-${name}`)
-      expect(target.fffLibc).toBe("gnu")
+      expect(target).toHaveProperty("opentuiLibc")
     }
   })
 

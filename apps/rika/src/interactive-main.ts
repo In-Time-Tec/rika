@@ -129,20 +129,20 @@ const rm = (path: string, options?: { readonly force?: boolean }) =>
   )
 const stat = (path: string) => FileSystem.FileSystem.pipe(Effect.flatMap((fileSystem) => fileSystem.stat(path)))
 
-const fffError = (workspace: string, method: string, cause: unknown) =>
+const workspaceGlobError = (workspace: string, method: string, cause: unknown) =>
   PlatformError.systemError({
     _tag: "Unknown",
-    module: "FFF",
+    module: "WorkspaceIndex",
     method,
     pathOrDescriptor: workspace,
     description: cause instanceof Error ? cause.message : String(cause),
     cause,
   })
 
-const fffGlob = (workspace: string, pattern: string, maximumFiles: number) =>
+const workspaceGlob = (workspace: string, pattern: string, maximumFiles: number) =>
   WorkspaceIndex.globOnce({ workspace, pattern, options: { pageSize: maximumFiles } }).pipe(
     Effect.map((result) => result.items.map((item) => item.relativePath)),
-    Effect.mapError((error) => fffError(workspace, error.operation, error)),
+    Effect.mapError((error) => workspaceGlobError(workspace, error.operation, error)),
   )
 
 const imageMediaType = (path: string) => {
@@ -1664,7 +1664,7 @@ export const interactiveTui =
                 run(session.events(feedBatcher.offer))
                 run(watchChangedFiles)
                 run(
-                  fffGlob(model.workspace, "**/*", 10_000).pipe(
+                  workspaceGlob(model.workspace, "**/*", 10_000).pipe(
                     Effect.tap((files) =>
                       Effect.sync(() => {
                         model = ViewState.update(model, { _tag: "FilesReplaced", files: files.toSorted() })
