@@ -9,7 +9,7 @@ import {
   toolDetail,
   rows as transcriptUnits,
 } from "../src/presentation/transcript/terminal-transcript-presentation"
-import { initial, type Model, type TranscriptBlock , type ThreadItem, update} from "../src/state/model/terminal-state"
+import { initial, type Model, type TranscriptBlock, type ThreadItem, update } from "../src/state/model/terminal-state"
 
 type ToolCall = Extract<TranscriptBlock, { readonly _tag: "ToolCall" }>
 

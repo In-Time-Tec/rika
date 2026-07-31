@@ -320,7 +320,9 @@ const subagentToolBlock = {
 }
 
 const renderedText = (changes: Partial<Model>): string =>
-  renderTranscriptStyled({ ...initial("/workspace", "medium"), ...changes }).chunks.map((chunk) => chunk.text).join("")
+  renderTranscriptStyled({ ...initial("/workspace", "medium"), ...changes })
+    .chunks.map((chunk) => chunk.text)
+    .join("")
 
 const model = (changes: Partial<Model> = {}): Model => ({ ...initial("/workspace", "medium"), ...changes })
 

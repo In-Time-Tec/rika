@@ -6,7 +6,14 @@ import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { describe, expect, it } from "vitest"
-import { ExecutionEvents, TranscriptPresenter, ViewState , type Model, type ThreadItem, update} from "../src/state/model/terminal-state"
+import {
+  ExecutionEvents,
+  TranscriptPresenter,
+  ViewState,
+  type Model,
+  type ThreadItem,
+  update,
+} from "../src/state/model/terminal-state"
 import {
   agentOutputText,
   agentResponseState,
