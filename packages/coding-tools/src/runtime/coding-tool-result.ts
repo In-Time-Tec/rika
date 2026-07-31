@@ -1,4 +1,4 @@
-import { Artifact } from "@rika/coding-tools/media-view-contract"
+import { Artifact } from "../media/media-view-contract"
 import { Schema } from "effect"
 
 export const Result = Schema.Struct({

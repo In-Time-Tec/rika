@@ -5,11 +5,6 @@ export const globalDirectory = ".config/rika"
 const under = (root: string, ...segments: ReadonlyArray<string>): string =>
   [root.endsWith("/") ? root.slice(0, -1) : root, ...segments].join("/")
 
-export const dataPaths = (home: string) => ({
-  database: under(home, workspaceDirectory, "rika.db"),
-  executionDatabase: under(home, workspaceDirectory, "execution.db"),
-})
-
 export const workspacePaths = (workspace: string) => ({
   settings: under(workspace, workspaceDirectory, "settings.json"),
   skills: under(workspace, workspaceDirectory, "skills"),
@@ -24,13 +19,3 @@ export const globalPaths = (home: string) => ({
   mcpOAuth: under(home, globalDirectory, "mcp-oauth.json"),
   extensionRoot: under(home, globalDirectory, "extensions"),
 })
-
-export const executionEventHistoryFor = (executionDatabase: string): string => {
-  const separator = executionDatabase.lastIndexOf("/")
-  let parent = "."
-  if (separator >= 0) {
-    const parentDirectory = executionDatabase.slice(0, separator)
-    parent = parentDirectory.length === 0 ? "/" : parentDirectory
-  }
-  return under(parent, "execution-event-history")
-}

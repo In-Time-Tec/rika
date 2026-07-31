@@ -1369,65 +1369,31 @@
       "kind": "package",
       "production": true,
       "publicExports": [
-        "./agent-tool-await-result",
         "./agent-tool-contract",
-        "./agent-tool-errors",
-        "./agent-tool-outcomes",
-        "./agent-tool-registrations",
         "./agent-tool-result",
-        "./agent-tool-selection",
-        "./agent-tool-toolkits",
-        "./agent-tool-tools",
         "./bash-tool",
         "./coding-tool-catalog",
         "./coding-tool-policy",
         "./coding-tool-runtime",
-        "./coding-tool-runtime-contract",
-        "./coding-tool-runtime-handler-layer",
-        "./coding-tool-runtime-service-tools",
-        "./coding-tool-runtime-services",
-        "./coding-tool-runtime-tool-definitions",
-        "./coding-tool-runtime-tool-service-tools",
-        "./coding-tool-runtime-tools",
         "./edit-file-tool",
         "./grep-files-tool",
         "./local-path",
         "./local-safety-policy",
-        "./media-analysis-service",
-        "./media-view-contract",
-        "./media-view-errors",
         "./media-view-service",
-        "./parallel-search-contract",
         "./parallel-web-search",
         "./read-file-tool",
-        "./read-web-page-contract",
         "./read-web-page-service",
         "./read-web-page-tool",
         "./shell-command-status-tool",
         "./shell-process-registry",
         "./thread-tool-contract",
-        "./thread-tool-coordination-contract",
-        "./thread-tool-definitions",
-        "./thread-tool-find-contract",
-        "./thread-tool-read-contract",
-        "./thread-toolkits",
         "./tool-invocation",
         "./unified-diff",
         "./view-media-tool",
-        "./web-search-availability",
-        "./web-search-errors",
-        "./web-search-input-contract",
         "./web-search-provider",
-        "./web-search-provider-contract",
-        "./web-search-provider-options",
-        "./web-search-request-contract",
-        "./web-search-result-contract",
         "./web-search-service",
         "./web-search-tool",
         "./workspace-file-search",
-        "./workspace-search-operation",
-        "./workspace-search-options",
-        "./workspace-search-results",
         "./write-file-tool"
       ]
     },
@@ -1461,7 +1427,6 @@
         "./execution-extension-service",
         "./mcp-configuration",
         "./mcp-oauth-service",
-        "./mcp-oauth-store",
         "./mcp-runtime",
         "./plugin-contract",
         "./plugin-digest",
@@ -1646,7 +1611,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./thread-tool-coordination-contract"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/catalog/thread-tool-definitions.ts",
@@ -1655,7 +1620,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./thread-tool-definitions"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/catalog/thread-tool-find-contract.ts",
@@ -1664,7 +1629,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./thread-tool-find-contract"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/catalog/thread-tool-read-contract.ts",
@@ -1673,7 +1638,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./thread-tool-read-contract"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/catalog/thread-toolkits.ts",
@@ -1682,7 +1647,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./thread-toolkits"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/catalog/tool-invocation.ts",
@@ -1700,7 +1665,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./agent-tool-await-result"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/delegation/agent-tool-contract.ts",
@@ -1718,7 +1683,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./agent-tool-errors"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/delegation/agent-tool-outcomes.ts",
@@ -1727,7 +1692,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./agent-tool-outcomes"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/delegation/agent-tool-registrations.ts",
@@ -1736,7 +1701,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./agent-tool-registrations"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/delegation/agent-tool-result.ts",
@@ -1754,7 +1719,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./agent-tool-selection"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/delegation/agent-tool-toolkits.ts",
@@ -1763,7 +1728,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./agent-tool-toolkits"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/delegation/agent-tool-tools.ts",
@@ -1772,16 +1737,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./agent-tool-tools"]
-    },
-    {
-      "id": "packages/coding-tools/src/media/media-analysis-service.ts",
-      "path": "packages/coding-tools/src/media/media-analysis-service.ts",
-      "workspace": "@rika/coding-tools",
-      "package": "@rika/coding-tools",
-      "kind": "source",
-      "production": true,
-      "publicExports": ["./media-analysis-service"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/media/media-view-contract.ts",
@@ -1790,7 +1746,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./media-view-contract"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/media/media-view-errors.ts",
@@ -1799,7 +1755,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./media-view-errors"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/media/media-view-service.ts",
@@ -1892,15 +1848,6 @@
       "publicExports": []
     },
     {
-      "id": "packages/coding-tools/src/runtime/coding-tool-runtime-contract.ts",
-      "path": "packages/coding-tools/src/runtime/coding-tool-runtime-contract.ts",
-      "workspace": "@rika/coding-tools",
-      "package": "@rika/coding-tools",
-      "kind": "source",
-      "production": true,
-      "publicExports": ["./coding-tool-runtime-contract"]
-    },
-    {
       "id": "packages/coding-tools/src/runtime/coding-tool-runtime-filesystem.ts",
       "path": "packages/coding-tools/src/runtime/coding-tool-runtime-filesystem.ts",
       "workspace": "@rika/coding-tools",
@@ -1916,7 +1863,16 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./coding-tool-runtime-handler-layer"]
+      "publicExports": []
+    },
+    {
+      "id": "packages/coding-tools/src/runtime/coding-tool-runtime-inputs.ts",
+      "path": "packages/coding-tools/src/runtime/coding-tool-runtime-inputs.ts",
+      "workspace": "@rika/coding-tools",
+      "package": "@rika/coding-tools",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/runtime/coding-tool-runtime-services.ts",
@@ -1925,7 +1881,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./coding-tool-runtime-services", "./coding-tool-runtime-tool-service-tools"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/runtime/coding-tool-runtime-tool-definitions.ts",
@@ -1934,7 +1890,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./coding-tool-runtime-tool-definitions"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/runtime/coding-tool-runtime-tools.ts",
@@ -1943,7 +1899,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./coding-tool-runtime-tools"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
@@ -1961,7 +1917,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./parallel-search-contract"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/web-research/parallel-web-search.ts",
@@ -1979,7 +1935,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./read-web-page-contract"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/web-research/read-web-page-service.ts",
@@ -2006,7 +1962,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./web-search-availability"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/web-research/web-search-errors.ts",
@@ -2015,7 +1971,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./web-search-errors"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/web-research/web-search-input-contract.ts",
@@ -2024,7 +1980,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./web-search-input-contract"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/web-research/web-search-provider-contract.ts",
@@ -2033,7 +1989,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./web-search-provider-contract"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/web-research/web-search-provider-options.ts",
@@ -2042,7 +1998,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./web-search-provider-options"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/web-research/web-search-provider.ts",
@@ -2060,7 +2016,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./web-search-request-contract"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/web-research/web-search-result-contract.ts",
@@ -2069,7 +2025,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./web-search-result-contract"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/web-research/web-search-service.ts",
@@ -2150,7 +2106,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./workspace-search-operation"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/workspace/workspace-search-options.ts",
@@ -2159,7 +2115,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./workspace-search-options"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/workspace/workspace-search-results.ts",
@@ -2168,7 +2124,7 @@
       "package": "@rika/coding-tools",
       "kind": "source",
       "production": true,
-      "publicExports": ["./workspace-search-results"]
+      "publicExports": []
     },
     {
       "id": "packages/coding-tools/src/workspace/write-file-tool.ts",
@@ -2538,15 +2494,6 @@
       "kind": "source",
       "production": true,
       "publicExports": ["./mcp-oauth-service"]
-    },
-    {
-      "id": "packages/extensions/src/mcp/mcp-oauth-store.ts",
-      "path": "packages/extensions/src/mcp/mcp-oauth-store.ts",
-      "workspace": "@rika/extensions",
-      "package": "@rika/extensions",
-      "kind": "source",
-      "production": true,
-      "publicExports": ["./mcp-oauth-store"]
     },
     {
       "id": "packages/extensions/src/mcp/mcp-runtime.ts",
@@ -5758,8 +5705,8 @@
     },
     {
       "from": "apps/rika/src/client-main.ts",
-      "to": "packages/configuration/src/path-resolution/configuration-paths.ts",
-      "specifier": "@rika/configuration/configuration-paths",
+      "to": "packages/configuration/src/path-resolution/profile-data-paths.ts",
+      "specifier": "@rika/configuration/profile-data-paths",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -7086,24 +7033,16 @@
     },
     {
       "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/coding-tools/src/catalog/thread-toolkits.ts",
-      "specifier": "@rika/coding-tools/thread-toolkits",
+      "to": "packages/coding-tools/src/catalog/thread-tool-contract.ts",
+      "specifier": "@rika/coding-tools/thread-tool-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
       "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/coding-tools/src/media/media-analysis-service.ts",
-      "specifier": "@rika/coding-tools/media-analysis-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/coding-tools/src/media/media-view-errors.ts",
-      "specifier": "@rika/coding-tools/media-view-errors",
+      "to": "packages/coding-tools/src/media/media-view-service.ts",
+      "specifier": "@rika/coding-tools/media-view-service",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -7200,14 +7139,6 @@
       "from": "apps/rika/src/resident-product.ts",
       "to": "packages/extensions/src/mcp/mcp-oauth-service.ts",
       "specifier": "@rika/extensions/mcp-oauth-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/extensions/src/mcp/mcp-oauth-store.ts",
-      "specifier": "@rika/extensions/mcp-oauth-store",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -8574,16 +8505,8 @@
     },
     {
       "from": "apps/rika/test/model-provider-runtime.test.ts",
-      "to": "packages/coding-tools/src/runtime/coding-tool-runtime-handler-layer.ts",
-      "specifier": "@rika/coding-tools/coding-tool-runtime-handler-layer",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/model-provider-runtime.test.ts",
-      "to": "packages/coding-tools/src/runtime/coding-tool-runtime-tools.ts",
-      "specifier": "@rika/coding-tools/coding-tool-runtime-tools",
+      "to": "packages/coding-tools/src/catalog/coding-tool-catalog.ts",
+      "specifier": "@rika/coding-tools/coding-tool-catalog",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -9382,16 +9305,8 @@
     },
     {
       "from": "apps/rika/test/shell-session.test.ts",
-      "to": "packages/coding-tools/src/media/media-analysis-service.ts",
-      "specifier": "@rika/coding-tools/media-analysis-service",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/shell-session.test.ts",
-      "to": "packages/coding-tools/src/media/media-view-errors.ts",
-      "specifier": "@rika/coding-tools/media-view-errors",
+      "to": "packages/coding-tools/src/media/media-view-service.ts",
+      "specifier": "@rika/coding-tools/media-view-service",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -9830,16 +9745,8 @@
     },
     {
       "from": "apps/rika/test/tui-app.ts",
-      "to": "packages/coding-tools/src/media/media-analysis-service.ts",
-      "specifier": "@rika/coding-tools/media-analysis-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/test/tui-app.ts",
-      "to": "packages/coding-tools/src/media/media-view-errors.ts",
-      "specifier": "@rika/coding-tools/media-view-errors",
+      "to": "packages/coding-tools/src/media/media-view-service.ts",
+      "specifier": "@rika/coding-tools/media-view-service",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10247,7 +10154,7 @@
     {
       "from": "packages/coding-tools/src/catalog/coding-tool-catalog.ts",
       "to": "packages/coding-tools/src/catalog/thread-toolkits.ts",
-      "specifier": "@rika/coding-tools/thread-toolkits",
+      "specifier": "./thread-toolkits",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10255,7 +10162,7 @@
     {
       "from": "packages/coding-tools/src/catalog/coding-tool-catalog.ts",
       "to": "packages/coding-tools/src/delegation/agent-tool-registrations.ts",
-      "specifier": "@rika/coding-tools/agent-tool-registrations",
+      "specifier": "../delegation/agent-tool-registrations",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10263,7 +10170,7 @@
     {
       "from": "packages/coding-tools/src/catalog/coding-tool-catalog.ts",
       "to": "packages/coding-tools/src/delegation/agent-tool-selection.ts",
-      "specifier": "@rika/coding-tools/agent-tool-selection",
+      "specifier": "../delegation/agent-tool-selection",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10271,7 +10178,7 @@
     {
       "from": "packages/coding-tools/src/catalog/coding-tool-catalog.ts",
       "to": "packages/coding-tools/src/delegation/agent-tool-toolkits.ts",
-      "specifier": "@rika/coding-tools/agent-tool-toolkits",
+      "specifier": "../delegation/agent-tool-toolkits",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10295,7 +10202,63 @@
     {
       "from": "packages/coding-tools/src/catalog/coding-tool-catalog.ts",
       "to": "packages/coding-tools/src/runtime/coding-tool-runtime-tools.ts",
-      "specifier": "@rika/coding-tools/coding-tool-runtime-tools",
+      "specifier": "../runtime/coding-tool-runtime-tools",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/catalog/coding-tool-catalog.ts",
+      "to": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
+      "specifier": "@rika/coding-tools/coding-tool-runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/catalog/thread-tool-contract.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/catalog/thread-tool-contract.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/catalog/thread-tool-contract.ts",
+      "to": "packages/coding-tools/src/catalog/thread-tool-coordination-contract.ts",
+      "specifier": "./thread-tool-coordination-contract",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/catalog/thread-tool-contract.ts",
+      "to": "packages/coding-tools/src/catalog/thread-tool-find-contract.ts",
+      "specifier": "./thread-tool-find-contract",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/catalog/thread-tool-contract.ts",
+      "to": "packages/coding-tools/src/catalog/thread-tool-read-contract.ts",
+      "specifier": "./thread-tool-read-contract",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/catalog/thread-tool-contract.ts",
+      "to": "packages/coding-tools/src/catalog/tool-invocation.ts",
+      "specifier": "../catalog/tool-invocation",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10398,8 +10361,8 @@
     },
     {
       "from": "packages/coding-tools/src/catalog/thread-toolkits.ts",
-      "to": "packages/coding-tools/src/catalog/thread-tool-definitions.ts",
-      "specifier": "./thread-tool-definitions",
+      "to": "packages/coding-tools/src/catalog/thread-tool-contract.ts",
+      "specifier": "./thread-tool-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10448,6 +10411,62 @@
       "from": "packages/coding-tools/src/delegation/agent-tool-contract.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/delegation/agent-tool-contract.ts",
+      "to": "packages/coding-tools/src/delegation/agent-tool-await-result.ts",
+      "specifier": "./agent-tool-await-result",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/delegation/agent-tool-contract.ts",
+      "to": "packages/coding-tools/src/delegation/agent-tool-errors.ts",
+      "specifier": "./agent-tool-errors",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/delegation/agent-tool-contract.ts",
+      "to": "packages/coding-tools/src/delegation/agent-tool-outcomes.ts",
+      "specifier": "./agent-tool-outcomes",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/delegation/agent-tool-contract.ts",
+      "to": "packages/coding-tools/src/delegation/agent-tool-registrations.ts",
+      "specifier": "./agent-tool-registrations",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/delegation/agent-tool-contract.ts",
+      "to": "packages/coding-tools/src/delegation/agent-tool-selection.ts",
+      "specifier": "./agent-tool-selection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/delegation/agent-tool-contract.ts",
+      "to": "packages/coding-tools/src/delegation/agent-tool-toolkits.ts",
+      "specifier": "./agent-tool-toolkits",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/delegation/agent-tool-contract.ts",
+      "to": "packages/coding-tools/src/delegation/agent-tool-tools.ts",
+      "specifier": "./agent-tool-tools",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10581,38 +10600,6 @@
       "production": true
     },
     {
-      "from": "packages/coding-tools/src/delegation/agent-tool-tools.ts",
-      "to": "packages/coding-tools/src/delegation/agent-tool-contract.ts",
-      "specifier": "./agent-tool-contract",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/media/media-analysis-service.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/media/media-analysis-service.ts",
-      "to": "packages/coding-tools/src/media/media-view-contract.ts",
-      "specifier": "./media-view-contract",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/media/media-analysis-service.ts",
-      "to": "packages/coding-tools/src/media/media-view-errors.ts",
-      "specifier": "./media-view-errors",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
       "from": "packages/coding-tools/src/media/media-view-contract.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -10632,14 +10619,6 @@
       "from": "packages/coding-tools/src/media/media-view-service.ts",
       "to": "external:effect",
       "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/media/media-view-service.ts",
-      "to": "packages/coding-tools/src/media/media-analysis-service.ts",
-      "specifier": "./media-analysis-service",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10831,95 +10810,7 @@
     {
       "from": "packages/coding-tools/src/runtime/coding-tool-result.ts",
       "to": "packages/coding-tools/src/media/media-view-contract.ts",
-      "specifier": "@rika/coding-tools/media-view-contract",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-contract.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-contract.ts",
-      "to": "packages/coding-tools/src/media/view-media-tool.ts",
-      "specifier": "../media/view-media-tool",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-contract.ts",
-      "to": "packages/coding-tools/src/process/bash-tool.ts",
-      "specifier": "../process/bash-tool",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-contract.ts",
-      "to": "packages/coding-tools/src/process/shell-command-status-tool.ts",
-      "specifier": "../process/shell-command-status-tool",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-contract.ts",
-      "to": "packages/coding-tools/src/runtime/coding-tool-result.ts",
-      "specifier": "./coding-tool-result",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-contract.ts",
-      "to": "packages/coding-tools/src/web-research/read-web-page-tool.ts",
-      "specifier": "../web-research/read-web-page-tool",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-contract.ts",
-      "to": "packages/coding-tools/src/web-research/web-search-tool.ts",
-      "specifier": "../web-research/web-search-tool",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-contract.ts",
-      "to": "packages/coding-tools/src/workspace/edit-file-tool.ts",
-      "specifier": "../workspace/edit-file-tool",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-contract.ts",
-      "to": "packages/coding-tools/src/workspace/grep-files-tool.ts",
-      "specifier": "../workspace/grep-files-tool",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-contract.ts",
-      "to": "packages/coding-tools/src/workspace/read-file-tool.ts",
-      "specifier": "../workspace/read-file-tool",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-contract.ts",
-      "to": "packages/coding-tools/src/workspace/write-file-tool.ts",
-      "specifier": "../workspace/write-file-tool",
+      "specifier": "../media/media-view-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10944,6 +10835,78 @@
       "from": "packages/coding-tools/src/runtime/coding-tool-runtime-handler-layer.ts",
       "to": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
       "specifier": "./coding-tool-runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-inputs.ts",
+      "to": "packages/coding-tools/src/media/view-media-tool.ts",
+      "specifier": "../media/view-media-tool",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-inputs.ts",
+      "to": "packages/coding-tools/src/process/bash-tool.ts",
+      "specifier": "../process/bash-tool",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-inputs.ts",
+      "to": "packages/coding-tools/src/process/shell-command-status-tool.ts",
+      "specifier": "../process/shell-command-status-tool",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-inputs.ts",
+      "to": "packages/coding-tools/src/web-research/read-web-page-tool.ts",
+      "specifier": "../web-research/read-web-page-tool",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-inputs.ts",
+      "to": "packages/coding-tools/src/web-research/web-search-tool.ts",
+      "specifier": "../web-research/web-search-tool",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-inputs.ts",
+      "to": "packages/coding-tools/src/workspace/edit-file-tool.ts",
+      "specifier": "../workspace/edit-file-tool",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-inputs.ts",
+      "to": "packages/coding-tools/src/workspace/grep-files-tool.ts",
+      "specifier": "../workspace/grep-files-tool",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-inputs.ts",
+      "to": "packages/coding-tools/src/workspace/read-file-tool.ts",
+      "specifier": "../workspace/read-file-tool",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-inputs.ts",
+      "to": "packages/coding-tools/src/workspace/write-file-tool.ts",
+      "specifier": "../workspace/write-file-tool",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -11134,8 +11097,24 @@
     },
     {
       "from": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
       "to": "packages/coding-tools/src/media/media-view-service.ts",
       "specifier": "../media/media-view-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
+      "to": "packages/coding-tools/src/policy/coding-tool-policy.ts",
+      "specifier": "../policy/coding-tool-policy",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -11166,14 +11145,6 @@
     },
     {
       "from": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
-      "to": "packages/coding-tools/src/runtime/coding-tool-runtime-contract.ts",
-      "specifier": "./coding-tool-runtime-contract",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
       "to": "packages/coding-tools/src/runtime/coding-tool-runtime-filesystem.ts",
       "specifier": "./coding-tool-runtime-filesystem",
       "kind": "import",
@@ -11182,8 +11153,8 @@
     },
     {
       "from": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
-      "to": "packages/coding-tools/src/runtime/coding-tool-runtime-tools.ts",
-      "specifier": "./coding-tool-runtime-tools",
+      "to": "packages/coding-tools/src/runtime/coding-tool-runtime-inputs.ts",
+      "specifier": "./coding-tool-runtime-inputs",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -11862,24 +11833,8 @@
     },
     {
       "from": "packages/coding-tools/test/media-view.test.ts",
-      "to": "packages/coding-tools/src/media/media-analysis-service.ts",
-      "specifier": "@rika/coding-tools/media-analysis-service",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/coding-tools/test/media-view.test.ts",
       "to": "packages/coding-tools/src/media/media-view-contract.ts",
-      "specifier": "@rika/coding-tools/media-view-contract",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/coding-tools/test/media-view.test.ts",
-      "to": "packages/coding-tools/src/media/media-view-errors.ts",
-      "specifier": "@rika/coding-tools/media-view-errors",
+      "specifier": "../src/media/media-view-contract",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -12015,7 +11970,7 @@
     {
       "from": "packages/coding-tools/test/read-web-page.test.ts",
       "to": "packages/coding-tools/src/web-research/read-web-page-contract.ts",
-      "specifier": "@rika/coding-tools/read-web-page-contract",
+      "specifier": "../src/web-research/read-web-page-contract",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -12047,7 +12002,7 @@
     {
       "from": "packages/coding-tools/test/tool-contract-support.ts",
       "to": "packages/coding-tools/src/catalog/thread-tool-coordination-contract.ts",
-      "specifier": "@rika/coding-tools/thread-tool-coordination-contract",
+      "specifier": "../src/catalog/thread-tool-coordination-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12055,7 +12010,7 @@
     {
       "from": "packages/coding-tools/test/tool-contract-support.ts",
       "to": "packages/coding-tools/src/catalog/thread-tool-find-contract.ts",
-      "specifier": "@rika/coding-tools/thread-tool-find-contract",
+      "specifier": "../src/catalog/thread-tool-find-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12063,7 +12018,7 @@
     {
       "from": "packages/coding-tools/test/tool-contract-support.ts",
       "to": "packages/coding-tools/src/catalog/thread-toolkits.ts",
-      "specifier": "@rika/coding-tools/thread-toolkits",
+      "specifier": "../src/catalog/thread-toolkits",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12087,7 +12042,7 @@
     {
       "from": "packages/coding-tools/test/tool-contract-support.ts",
       "to": "packages/coding-tools/src/delegation/agent-tool-selection.ts",
-      "specifier": "@rika/coding-tools/agent-tool-selection",
+      "specifier": "../src/delegation/agent-tool-selection",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12095,7 +12050,7 @@
     {
       "from": "packages/coding-tools/test/tool-contract-support.ts",
       "to": "packages/coding-tools/src/delegation/agent-tool-toolkits.ts",
-      "specifier": "@rika/coding-tools/agent-tool-toolkits",
+      "specifier": "../src/delegation/agent-tool-toolkits",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12103,7 +12058,7 @@
     {
       "from": "packages/coding-tools/test/tool-contract-support.ts",
       "to": "packages/coding-tools/src/delegation/agent-tool-tools.ts",
-      "specifier": "@rika/coding-tools/agent-tool-tools",
+      "specifier": "../src/delegation/agent-tool-tools",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12118,16 +12073,8 @@
     },
     {
       "from": "packages/coding-tools/test/tool-contract-support.ts",
-      "to": "packages/coding-tools/src/runtime/coding-tool-runtime-contract.ts",
-      "specifier": "@rika/coding-tools/coding-tool-runtime-contract",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/test/tool-contract-support.ts",
       "to": "packages/coding-tools/src/runtime/coding-tool-runtime-services.ts",
-      "specifier": "@rika/coding-tools/coding-tool-runtime-services",
+      "specifier": "../src/runtime/coding-tool-runtime-services",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12135,7 +12082,7 @@
     {
       "from": "packages/coding-tools/test/tool-contract-support.ts",
       "to": "packages/coding-tools/src/runtime/coding-tool-runtime-tool-definitions.ts",
-      "specifier": "@rika/coding-tools/coding-tool-runtime-tool-definitions",
+      "specifier": "../src/runtime/coding-tool-runtime-tool-definitions",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12143,7 +12090,7 @@
     {
       "from": "packages/coding-tools/test/tool-contract-support.ts",
       "to": "packages/coding-tools/src/runtime/coding-tool-runtime-tools.ts",
-      "specifier": "@rika/coding-tools/coding-tool-runtime-tools",
+      "specifier": "../src/runtime/coding-tool-runtime-tools",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12159,7 +12106,7 @@
     {
       "from": "packages/coding-tools/test/tool-contract-support.ts",
       "to": "packages/coding-tools/src/web-research/parallel-search-contract.ts",
-      "specifier": "@rika/coding-tools/parallel-search-contract",
+      "specifier": "../src/web-research/parallel-search-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12238,8 +12185,8 @@
     },
     {
       "from": "packages/coding-tools/test/tool-runtime-filesystem.proc.test.ts",
-      "to": "packages/coding-tools/src/media/media-analysis-service.ts",
-      "specifier": "@rika/coding-tools/media-analysis-service",
+      "to": "packages/coding-tools/src/media/media-view-service.ts",
+      "specifier": "@rika/coding-tools/media-view-service",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -12326,8 +12273,8 @@
     },
     {
       "from": "packages/coding-tools/test/tool-runtime.test.ts",
-      "to": "packages/coding-tools/src/media/media-analysis-service.ts",
-      "specifier": "@rika/coding-tools/media-analysis-service",
+      "to": "packages/coding-tools/src/media/media-view-service.ts",
+      "specifier": "@rika/coding-tools/media-view-service",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -12359,7 +12306,7 @@
     {
       "from": "packages/coding-tools/test/tool-runtime.test.ts",
       "to": "packages/coding-tools/src/web-research/web-search-errors.ts",
-      "specifier": "@rika/coding-tools/web-search-errors",
+      "specifier": "../src/web-research/web-search-errors",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -12367,7 +12314,7 @@
     {
       "from": "packages/coding-tools/test/tool-runtime.test.ts",
       "to": "packages/coding-tools/src/web-research/web-search-input-contract.ts",
-      "specifier": "@rika/coding-tools/web-search-input-contract",
+      "specifier": "../src/web-research/web-search-input-contract",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -12375,7 +12322,7 @@
     {
       "from": "packages/coding-tools/test/tool-runtime.test.ts",
       "to": "packages/coding-tools/src/web-research/web-search-result-contract.ts",
-      "specifier": "@rika/coding-tools/web-search-result-contract",
+      "specifier": "../src/web-research/web-search-result-contract",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -12439,7 +12386,7 @@
     {
       "from": "packages/coding-tools/test/web-search.test.ts",
       "to": "packages/coding-tools/src/web-research/web-search-input-contract.ts",
-      "specifier": "@rika/coding-tools/web-search-input-contract",
+      "specifier": "../src/web-research/web-search-input-contract",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -12447,7 +12394,7 @@
     {
       "from": "packages/coding-tools/test/web-search.test.ts",
       "to": "packages/coding-tools/src/web-research/web-search-provider-contract.ts",
-      "specifier": "@rika/coding-tools/web-search-provider-contract",
+      "specifier": "../src/web-research/web-search-provider-contract",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -12463,7 +12410,7 @@
     {
       "from": "packages/coding-tools/test/web-search.test.ts",
       "to": "packages/coding-tools/src/web-research/web-search-result-contract.ts",
-      "specifier": "@rika/coding-tools/web-search-result-contract",
+      "specifier": "../src/web-research/web-search-result-contract",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -13238,6 +13185,14 @@
     },
     {
       "from": "packages/extensions/src/mcp/mcp-oauth-service.ts",
+      "to": "external:@effect/platform-bun/BunHttpServer",
+      "specifier": "@effect/platform-bun/BunHttpServer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/extensions/src/mcp/mcp-oauth-service.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -13246,38 +13201,6 @@
     },
     {
       "from": "packages/extensions/src/mcp/mcp-oauth-service.ts",
-      "to": "packages/extensions/src/mcp/mcp-oauth-store.ts",
-      "specifier": "./mcp-oauth-store",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/extensions/src/mcp/mcp-oauth-store.ts",
-      "to": "external:@batonfx/mcp",
-      "specifier": "@batonfx/mcp",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/extensions/src/mcp/mcp-oauth-store.ts",
-      "to": "external:@effect/platform-bun/BunHttpServer",
-      "specifier": "@effect/platform-bun/BunHttpServer",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/extensions/src/mcp/mcp-oauth-store.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/extensions/src/mcp/mcp-oauth-store.ts",
       "to": "external:effect/unstable/http",
       "specifier": "effect/unstable/http",
       "kind": "import",
@@ -13285,7 +13208,7 @@
       "production": true
     },
     {
-      "from": "packages/extensions/src/mcp/mcp-oauth-store.ts",
+      "from": "packages/extensions/src/mcp/mcp-oauth-service.ts",
       "to": "external:effect/unstable/process",
       "specifier": "effect/unstable/process",
       "kind": "import",
@@ -13672,14 +13595,6 @@
       "from": "packages/extensions/test/contract/mcp-oauth-service.contract.test.ts",
       "to": "packages/extensions/src/mcp/mcp-oauth-service.ts",
       "specifier": "../../src/mcp/mcp-oauth-service",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/extensions/test/contract/mcp-oauth-service.contract.test.ts",
-      "to": "packages/extensions/src/mcp/mcp-oauth-store.ts",
-      "specifier": "../../src/mcp/mcp-oauth-store",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -15454,14 +15369,6 @@
     },
     {
       "from": "packages/product-store/test/product-operation/operation-review.test.ts",
-      "to": "packages/coding-tools/src/runtime/coding-tool-runtime-contract.ts",
-      "specifier": "@rika/coding-tools/coding-tool-runtime-contract",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-review.test.ts",
       "to": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
       "specifier": "@rika/coding-tools/coding-tool-runtime",
       "kind": "import",
@@ -15662,8 +15569,8 @@
     },
     {
       "from": "packages/product-store/test/product-operation/operation.test.ts",
-      "to": "packages/coding-tools/src/delegation/agent-tool-outcomes.ts",
-      "specifier": "@rika/coding-tools/agent-tool-outcomes",
+      "to": "packages/coding-tools/src/delegation/agent-tool-contract.ts",
+      "specifier": "@rika/coding-tools/agent-tool-contract",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -15838,14 +15745,6 @@
     },
     {
       "from": "packages/product-store/test/product-operation/recorded-shell-session.test.ts",
-      "to": "packages/coding-tools/src/runtime/coding-tool-runtime-contract.ts",
-      "specifier": "@rika/coding-tools/coding-tool-runtime-contract",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/recorded-shell-session.test.ts",
       "to": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
       "specifier": "@rika/coding-tools/coding-tool-runtime",
       "kind": "import",
@@ -15982,16 +15881,8 @@
     },
     {
       "from": "packages/product-store/test/product-operation/thread-query-support.ts",
-      "to": "packages/coding-tools/src/catalog/thread-tool-read-contract.ts",
-      "specifier": "@rika/coding-tools/thread-tool-read-contract",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product-store/test/product-operation/thread-query-support.ts",
-      "to": "packages/coding-tools/src/catalog/thread-toolkits.ts",
-      "specifier": "@rika/coding-tools/thread-toolkits",
+      "to": "packages/coding-tools/src/catalog/thread-tool-contract.ts",
+      "specifier": "@rika/coding-tools/thread-tool-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -16166,8 +16057,8 @@
     },
     {
       "from": "packages/product-store/test/product-operation/thread-tool-gateway.test.ts",
-      "to": "packages/coding-tools/src/catalog/thread-tool-coordination-contract.ts",
-      "specifier": "@rika/coding-tools/thread-tool-coordination-contract",
+      "to": "packages/coding-tools/src/catalog/thread-tool-contract.ts",
+      "specifier": "@rika/coding-tools/thread-tool-contract",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -18838,16 +18729,8 @@
     },
     {
       "from": "packages/product/src/thread-tool-handlers.ts",
-      "to": "packages/coding-tools/src/catalog/thread-tool-read-contract.ts",
-      "specifier": "@rika/coding-tools/thread-tool-read-contract",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/src/thread-tool-handlers.ts",
-      "to": "packages/coding-tools/src/catalog/thread-toolkits.ts",
-      "specifier": "@rika/coding-tools/thread-toolkits",
+      "to": "packages/coding-tools/src/catalog/thread-tool-contract.ts",
+      "specifier": "@rika/coding-tools/thread-tool-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -18902,16 +18785,8 @@
     },
     {
       "from": "packages/product/src/thread-tool-service.ts",
-      "to": "packages/coding-tools/src/catalog/thread-tool-coordination-contract.ts",
-      "specifier": "@rika/coding-tools/thread-tool-coordination-contract",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/src/thread-tool-service.ts",
-      "to": "packages/coding-tools/src/catalog/thread-tool-find-contract.ts",
-      "specifier": "@rika/coding-tools/thread-tool-find-contract",
+      "to": "packages/coding-tools/src/catalog/thread-tool-contract.ts",
+      "specifier": "@rika/coding-tools/thread-tool-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -19958,8 +19833,8 @@
     },
     {
       "from": "packages/relay-execution/src/agent-depth.ts",
-      "to": "packages/coding-tools/src/delegation/agent-tool-selection.ts",
-      "specifier": "@rika/coding-tools/agent-tool-selection",
+      "to": "packages/coding-tools/src/delegation/agent-tool-contract.ts",
+      "specifier": "@rika/coding-tools/agent-tool-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -19990,40 +19865,24 @@
     },
     {
       "from": "packages/relay-execution/src/agent-profiles.ts",
-      "to": "packages/coding-tools/src/catalog/thread-tool-definitions.ts",
-      "specifier": "@rika/coding-tools/thread-tool-definitions",
+      "to": "packages/coding-tools/src/catalog/thread-tool-contract.ts",
+      "specifier": "@rika/coding-tools/thread-tool-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
       "from": "packages/relay-execution/src/agent-profiles.ts",
-      "to": "packages/coding-tools/src/delegation/agent-tool-selection.ts",
-      "specifier": "@rika/coding-tools/agent-tool-selection",
+      "to": "packages/coding-tools/src/delegation/agent-tool-contract.ts",
+      "specifier": "@rika/coding-tools/agent-tool-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
       "from": "packages/relay-execution/src/agent-profiles.ts",
-      "to": "packages/coding-tools/src/delegation/agent-tool-tools.ts",
-      "specifier": "@rika/coding-tools/agent-tool-tools",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/relay-execution/src/agent-profiles.ts",
-      "to": "packages/coding-tools/src/runtime/coding-tool-runtime-services.ts",
-      "specifier": "@rika/coding-tools/coding-tool-runtime-services",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/relay-execution/src/agent-profiles.ts",
-      "to": "packages/coding-tools/src/runtime/coding-tool-runtime-tool-definitions.ts",
-      "specifier": "@rika/coding-tools/coding-tool-runtime-tool-definitions",
+      "to": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
+      "specifier": "@rika/coding-tools/coding-tool-runtime",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -20254,14 +20113,6 @@
     },
     {
       "from": "packages/relay-execution/src/execution-backend.ts",
-      "to": "packages/coding-tools/src/delegation/agent-tool-await-result.ts",
-      "specifier": "@rika/coding-tools/agent-tool-await-result",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/relay-execution/src/execution-backend.ts",
       "to": "packages/coding-tools/src/delegation/agent-tool-contract.ts",
       "specifier": "@rika/coding-tools/agent-tool-contract",
       "kind": "import",
@@ -20270,40 +20121,8 @@
     },
     {
       "from": "packages/relay-execution/src/execution-backend.ts",
-      "to": "packages/coding-tools/src/delegation/agent-tool-errors.ts",
-      "specifier": "@rika/coding-tools/agent-tool-errors",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/relay-execution/src/execution-backend.ts",
-      "to": "packages/coding-tools/src/delegation/agent-tool-outcomes.ts",
-      "specifier": "@rika/coding-tools/agent-tool-outcomes",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/relay-execution/src/execution-backend.ts",
-      "to": "packages/coding-tools/src/delegation/agent-tool-selection.ts",
-      "specifier": "@rika/coding-tools/agent-tool-selection",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/relay-execution/src/execution-backend.ts",
-      "to": "packages/coding-tools/src/delegation/agent-tool-toolkits.ts",
-      "specifier": "@rika/coding-tools/agent-tool-toolkits",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/relay-execution/src/execution-backend.ts",
-      "to": "packages/coding-tools/src/media/media-analysis-service.ts",
-      "specifier": "@rika/coding-tools/media-analysis-service",
+      "to": "packages/coding-tools/src/media/media-view-service.ts",
+      "specifier": "@rika/coding-tools/media-view-service",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -20312,30 +20131,6 @@
       "from": "packages/relay-execution/src/execution-backend.ts",
       "to": "packages/coding-tools/src/process/shell-process-registry.ts",
       "specifier": "@rika/coding-tools/shell-process-registry",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/relay-execution/src/execution-backend.ts",
-      "to": "packages/coding-tools/src/runtime/coding-tool-runtime-contract.ts",
-      "specifier": "@rika/coding-tools/coding-tool-runtime-contract",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/relay-execution/src/execution-backend.ts",
-      "to": "packages/coding-tools/src/runtime/coding-tool-runtime-handler-layer.ts",
-      "specifier": "@rika/coding-tools/coding-tool-runtime-handler-layer",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/relay-execution/src/execution-backend.ts",
-      "to": "packages/coding-tools/src/runtime/coding-tool-runtime-tools.ts",
-      "specifier": "@rika/coding-tools/coding-tool-runtime-tools",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -20374,8 +20169,8 @@
     },
     {
       "from": "packages/relay-execution/src/execution-backend.ts",
-      "to": "packages/configuration/src/path-resolution/configuration-paths.ts",
-      "specifier": "@rika/configuration/configuration-paths",
+      "to": "packages/configuration/src/path-resolution/profile-data-paths.ts",
+      "specifier": "@rika/configuration/profile-data-paths",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -20526,16 +20321,8 @@
     },
     {
       "from": "packages/relay-execution/src/media-analyzer.ts",
-      "to": "packages/coding-tools/src/media/media-analysis-service.ts",
-      "specifier": "@rika/coding-tools/media-analysis-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/relay-execution/src/media-analyzer.ts",
-      "to": "packages/coding-tools/src/media/media-view-errors.ts",
-      "specifier": "@rika/coding-tools/media-view-errors",
+      "to": "packages/coding-tools/src/media/media-view-service.ts",
+      "specifier": "@rika/coding-tools/media-view-service",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -20878,32 +20665,8 @@
     },
     {
       "from": "packages/relay-execution/src/subagent-join.ts",
-      "to": "packages/coding-tools/src/delegation/agent-tool-await-result.ts",
-      "specifier": "@rika/coding-tools/agent-tool-await-result",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/relay-execution/src/subagent-join.ts",
-      "to": "packages/coding-tools/src/delegation/agent-tool-outcomes.ts",
-      "specifier": "@rika/coding-tools/agent-tool-outcomes",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/relay-execution/src/subagent-join.ts",
-      "to": "packages/coding-tools/src/delegation/agent-tool-selection.ts",
-      "specifier": "@rika/coding-tools/agent-tool-selection",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/relay-execution/src/subagent-join.ts",
-      "to": "packages/coding-tools/src/delegation/agent-tool-tools.ts",
-      "specifier": "@rika/coding-tools/agent-tool-tools",
+      "to": "packages/coding-tools/src/delegation/agent-tool-contract.ts",
+      "specifier": "@rika/coding-tools/agent-tool-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -21078,8 +20841,8 @@
     },
     {
       "from": "packages/relay-execution/test/await-child-result.test.ts",
-      "to": "packages/coding-tools/src/delegation/agent-tool-outcomes.ts",
-      "specifier": "@rika/coding-tools/agent-tool-outcomes",
+      "to": "packages/coding-tools/src/delegation/agent-tool-contract.ts",
+      "specifier": "@rika/coding-tools/agent-tool-contract",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -21310,8 +21073,16 @@
     },
     {
       "from": "packages/relay-execution/test/execution-backend-relay.test.ts",
-      "to": "packages/configuration/src/path-resolution/configuration-paths.ts",
-      "specifier": "@rika/configuration/configuration-paths",
+      "to": "packages/coding-tools/src/workspace/workspace-file-search.ts",
+      "specifier": "@rika/coding-tools/workspace-file-search",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/execution-backend-relay.test.ts",
+      "to": "packages/configuration/src/path-resolution/profile-data-paths.ts",
+      "specifier": "@rika/configuration/profile-data-paths",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -21430,8 +21201,8 @@
     },
     {
       "from": "packages/relay-execution/test/execution-backend.test.ts",
-      "to": "packages/coding-tools/src/catalog/thread-toolkits.ts",
-      "specifier": "@rika/coding-tools/thread-toolkits",
+      "to": "packages/coding-tools/src/catalog/thread-tool-contract.ts",
+      "specifier": "@rika/coding-tools/thread-tool-contract",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -21542,8 +21313,8 @@
     },
     {
       "from": "packages/relay-execution/test/media-analyzer.test.ts",
-      "to": "packages/coding-tools/src/media/media-analysis-service.ts",
-      "specifier": "@rika/coding-tools/media-analysis-service",
+      "to": "packages/coding-tools/src/media/media-view-service.ts",
+      "specifier": "@rika/coding-tools/media-view-service",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -22182,8 +21953,8 @@
     },
     {
       "from": "packages/relay-execution/test/subagent-spawn.test.ts",
-      "to": "packages/coding-tools/src/catalog/thread-toolkits.ts",
-      "specifier": "@rika/coding-tools/thread-toolkits",
+      "to": "packages/coding-tools/src/catalog/thread-tool-contract.ts",
+      "specifier": "@rika/coding-tools/thread-tool-contract",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -22192,6 +21963,14 @@
       "from": "packages/relay-execution/test/subagent-spawn.test.ts",
       "to": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
       "specifier": "@rika/coding-tools/coding-tool-runtime",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/subagent-spawn.test.ts",
+      "to": "packages/coding-tools/src/workspace/workspace-file-search.ts",
+      "specifier": "@rika/coding-tools/workspace-file-search",
       "kind": "import",
       "relationship": "test",
       "production": false

@@ -6,7 +6,6 @@ import { Context, Effect, FileSystem, Layer, Option, Redacted, Ref } from "effec
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import * as McpOAuth from "../../src/mcp/mcp-oauth-service"
-import * as McpOAuthStore from "../../src/mcp/mcp-oauth-store"
 import { provideLayer } from "../support/extension-test-layer"
 
 const spawnerLayer = (exitCode: Ref.Ref<number>) =>
@@ -29,8 +28,8 @@ describe("McpOAuth", () => {
   it.effect("opens the browser and maps command failures", () =>
     Effect.gen(function* () {
       const exitCode = yield* Ref.make(0)
-      const context = yield* Layer.build(McpOAuthStore.hostLayer.pipe(Layer.provide(spawnerLayer(exitCode))))
-      const host = Context.get(context, McpOAuthStore.Host)
+      const context = yield* Layer.build(McpOAuth.OAuthHost.hostLayer.pipe(Layer.provide(spawnerLayer(exitCode))))
+      const host = Context.get(context, McpOAuth.OAuthHost.Host)
       yield* host.open("https://example.test/authorize")
       yield* Ref.set(exitCode, 1)
       const error = yield* Effect.flip(host.open("https://example.test/authorize?state=browser-secret"))
@@ -44,7 +43,7 @@ describe("McpOAuth", () => {
   it("selects the browser command for every supported platform", () => {
     expect(
       (["darwin", "win32", "linux"] as const).map((platform) =>
-        McpOAuthStore.browserCommand(platform, "https://example.test/authorize"),
+        McpOAuth.OAuthHost.browserCommand(platform, "https://example.test/authorize"),
       ),
     ).toEqual([
       { command: "open", args: ["https://example.test/authorize"] },
@@ -59,7 +58,7 @@ describe("McpOAuth", () => {
         const fs = yield* FileSystem.FileSystem
         const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-oauth-" })
         const filename = `${root}/nested/tokens.json`
-        const context = yield* Layer.build(McpOAuthStore.tokenStoreLayer(filename))
+        const context = yield* Layer.build(McpOAuth.OAuthHost.tokenStoreLayer(filename))
         yield* Effect.gen(function* () {
           const store = yield* OAuth.TokenStore
           expect(Option.isNone(yield* store.load("one"))).toBe(true)
@@ -82,7 +81,7 @@ describe("McpOAuth", () => {
         const fs = yield* FileSystem.FileSystem
         const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-oauth-errors-" })
         const filename = `${root}/tokens.json`
-        const context = yield* Layer.build(McpOAuthStore.tokenStoreLayer(filename))
+        const context = yield* Layer.build(McpOAuth.OAuthHost.tokenStoreLayer(filename))
         const run = <A, E>(effect: Effect.Effect<A, E, OAuth.TokenStore>) => effect.pipe(Effect.provide(context))
         yield* fs.writeFileString(filename, '{"access_token":"storage-secret"')
         yield* fs.chmod(filename, 0o644)
@@ -104,8 +103,8 @@ describe("McpOAuth", () => {
   it.layer(Layer.merge(FetchHttpClient.layer, BunServices.layer))((test) => {
     test.effect("hosts the real callback path, rejects other paths, and maps bind errors", () =>
       Effect.gen(function* () {
-        const context = yield* Layer.build(McpOAuthStore.hostLayer)
-        const host = Context.get(context, McpOAuthStore.Host)
+        const context = yield* Layer.build(McpOAuth.OAuthHost.hostLayer)
+        const host = Context.get(context, McpOAuth.OAuthHost.Host)
         yield* Effect.scoped(
           Effect.gen(function* () {
             const callback = yield* host.callback("http://127.0.0.1:17839/oauth/callback", "state")
@@ -135,10 +134,14 @@ describe("McpOAuth", () => {
 
   it.effect("reports status, logout, and host failures through the service boundary", () => {
     const store = OAuth.layerTokenStoreMemory
-    const host = McpOAuthStore.hostTestLayer({
+    const host = McpOAuth.OAuthHost.hostTestLayer({
       open: () =>
         Effect.fail(
-          McpOAuthStore.McpOAuthHostError.make({ server: "browser", operation: "open-browser", message: "denied" }),
+          McpOAuth.OAuthHost.McpOAuthHostError.make({
+            server: "browser",
+            operation: "open-browser",
+            message: "denied",
+          }),
         ),
       callback: () => Effect.succeed(Effect.succeed("unused")),
     })
@@ -172,7 +175,7 @@ describe("McpOAuth", () => {
       }),
     )
     const serviceLayer = McpOAuth.layer.pipe(
-      Layer.provide(McpOAuthStore.hostTestLayer({ open: () => Effect.void, callback: () => Effect.never })),
+      Layer.provide(McpOAuth.OAuthHost.hostTestLayer({ open: () => Effect.void, callback: () => Effect.never })),
       Layer.provide(store),
       Layer.provide(BunServices.layer),
     )
@@ -189,7 +192,7 @@ describe("McpOAuth", () => {
   it.effect("binds before opening, forwards only the bound state, and redacts provider failures", () =>
     Effect.gen(function* () {
       const events = yield* Ref.make<Array<string>>([])
-      const host = McpOAuthStore.hostTestLayer({
+      const host = McpOAuth.OAuthHost.hostTestLayer({
         callback: (_url, state) =>
           Ref.update(events, (values) => [...values, `bound:${state}`]).pipe(
             Effect.as(Effect.succeed(`http://127.0.0.1:17839/oauth/callback?code=ok&state=${state}`)),
@@ -223,7 +226,7 @@ describe("McpOAuth", () => {
 
   it.effect("distinguishes provider denial and exchange failures without exposing provider details", () => {
     const tokenStore = OAuth.layerTokenStoreMemory
-    const host = McpOAuthStore.hostTestLayer({
+    const host = McpOAuth.OAuthHost.hostTestLayer({
       callback: (_url, state) => Effect.succeed(Effect.succeed(`http://localhost/?code=x&state=${state}`)),
       open: () => Effect.void,
     })

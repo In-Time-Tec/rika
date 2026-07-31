@@ -50,20 +50,7 @@ export const ThreadInteractAction = Schema.Union([
   CancelAction,
   StopAction,
 ])
-export const ThreadInteractInput = Schema.Struct({
-  action: Schema.Literals(["status", "preview_messages", "message", "steer", "cancel", "stop"]),
-  threadId: NonEmptyString,
-  cursor: Schema.optionalKey(NonEmptyString),
-  limit: Schema.optionalKey(PreviewLimit),
-  message: Schema.optionalKey(PublicInputText),
-  mode: Schema.optionalKey(Mode),
-  resultDelivery: Schema.optionalKey(ResultDelivery),
-}).check(
-  Schema.makeFilter(
-    (input) => (input.action === "message" || input.action === "steer" ? input.message !== undefined : true),
-    { expected: "message to be present when action is message or steer" },
-  ),
-)
+export const ThreadInteractInput = ThreadInteractAction
 const StatusSuccess = Schema.Struct({
   schemaVersion: Schema.Literal(2),
   action: Schema.tag("status"),

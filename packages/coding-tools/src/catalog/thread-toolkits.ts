@@ -1,28 +1,28 @@
 import { Toolkit } from "effect/unstable/ai"
 import * as Policy from "../policy/coding-tool-policy"
 import type { Idempotency } from "../policy/policy-idempotency"
-import * as Tools from "./thread-tool-definitions"
+import { ThreadContract } from "./thread-tool-contract"
 
-export const toolkit = Toolkit.make(Tools.searchThreadsTool, Tools.readThreadTranscriptTool)
-export const findToolkit = Toolkit.make(Tools.findThreadTool)
+export const toolkit = Toolkit.make(ThreadContract.searchThreadsTool, ThreadContract.readThreadTranscriptTool)
+export const findToolkit = Toolkit.make(ThreadContract.findThreadTool)
 export const coordinationToolkit = Toolkit.make(
-  Tools.createThreadTool,
-  Tools.threadInteractTool,
-  Tools.waitForThreadsTool,
+  ThreadContract.createThreadTool,
+  ThreadContract.threadInteractTool,
+  ThreadContract.waitForThreadsTool,
 )
 export const publicToolkit = Toolkit.make(
-  Tools.findThreadTool,
-  Tools.createThreadTool,
-  Tools.threadInteractTool,
-  Tools.waitForThreadsTool,
+  ThreadContract.findThreadTool,
+  ThreadContract.createThreadTool,
+  ThreadContract.threadInteractTool,
+  ThreadContract.waitForThreadsTool,
 )
 export const allToolkit = Toolkit.make(
-  Tools.searchThreadsTool,
-  Tools.readThreadTranscriptTool,
-  Tools.findThreadTool,
-  Tools.createThreadTool,
-  Tools.threadInteractTool,
-  Tools.waitForThreadsTool,
+  ThreadContract.searchThreadsTool,
+  ThreadContract.readThreadTranscriptTool,
+  ThreadContract.findThreadTool,
+  ThreadContract.createThreadTool,
+  ThreadContract.threadInteractTool,
+  ThreadContract.waitForThreadsTool,
 )
 
 const registration = (
@@ -47,7 +47,7 @@ const registration = (
 
 export const registrations: ReadonlyArray<Policy.Registration> = [
   Policy.register(
-    Tools.searchThreadsTool,
+    ThreadContract.searchThreadsTool,
     Policy.allow("safe", 10_000, 20_000, {
       family: "explore",
       action: "find-thread",
@@ -57,7 +57,7 @@ export const registrations: ReadonlyArray<Policy.Registration> = [
     }),
   ),
   Policy.register(
-    Tools.readThreadTranscriptTool,
+    ThreadContract.readThreadTranscriptTool,
     Policy.allow("safe", 10_000, 40_000, {
       family: "direct",
       action: "read-thread",
@@ -66,10 +66,26 @@ export const registrations: ReadonlyArray<Policy.Registration> = [
       counter: "thread",
     }),
   ),
-  registration(Tools.findThreadTool, "safe", 10_000, 40_000, "find-thread", "Finding threads", "Found threads"),
-  registration(Tools.createThreadTool, "unsafe", 30_000, 40_000, "create-thread", "Creating thread", "Created thread"),
+  registration(
+    ThreadContract.findThreadTool,
+    "safe",
+    10_000,
+    40_000,
+    "find-thread",
+    "Finding threads",
+    "Found threads",
+  ),
+  registration(
+    ThreadContract.createThreadTool,
+    "unsafe",
+    30_000,
+    40_000,
+    "create-thread",
+    "Creating thread",
+    "Created thread",
+  ),
   Policy.register(
-    Tools.threadInteractTool,
+    ThreadContract.threadInteractTool,
     Policy.allow("unsafe", 30_000, 40_000, {
       family: "direct",
       action: "interact-thread",
@@ -79,7 +95,7 @@ export const registrations: ReadonlyArray<Policy.Registration> = [
     }),
   ),
   registration(
-    Tools.waitForThreadsTool,
+    ThreadContract.waitForThreadsTool,
     "safe",
     600_000,
     40_000,

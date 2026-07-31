@@ -1,4 +1,4 @@
-import * as AgentOutcomes from "@rika/coding-tools/agent-tool-outcomes"
+import * as AgentOutcomes from "@rika/coding-tools/agent-tool-contract"
 import * as SettingsDefaults from "@rika/configuration/configuration-settings"
 import * as SettingsDecoder from "@rika/configuration/configuration-settings"
 import { describe, expect, it } from "@effect/vitest"
@@ -6362,7 +6362,7 @@ describe("Operation", () => {
   it.effect("projects a truncated subagent as a failed delegation instead of a silent completion", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const noReport = AgentOutcomes.noReport({
+        const noReport = AgentOutcomes.AgentContract.noReport({
           childExecutionId: "child:execution%3Atruncated-turn:call-1",
           reason:
             "The subagent's final model turn ended before the provider reported why it stopped, so the stream was cut off and no report was produced.",
@@ -6425,7 +6425,7 @@ describe("Operation", () => {
         expect(delegation).toHaveLength(1)
         expect(delegation?.[0]?.status).toBe("failed")
         expect(delegation?.[0]?.output).toContain(noReport.reason)
-        expect(delegation?.[0]?.output).toContain(AgentOutcomes.noReportRecovery)
+        expect(delegation?.[0]?.output).toContain(AgentOutcomes.AgentContract.noReportRecovery)
       }),
     ),
   )

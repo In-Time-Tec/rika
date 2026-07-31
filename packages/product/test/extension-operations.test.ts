@@ -10,11 +10,14 @@ import { provideLayer } from "./layer"
 const decodeJson = Schema.decodeSync(Schema.UnknownFromJsonString)
 
 describe("ExtensionOperations", () => {
-  const oauthLayer = McpOAuth.testLayer({
-    login: () => Effect.void,
-    logout: () => Effect.void,
-    status: () => Effect.succeed("unauthenticated"),
-  })
+  const oauthLayer = Layer.succeed(
+    McpOAuth.McpOAuthService,
+    McpOAuth.McpOAuthService.of({
+      login: () => Effect.void,
+      logout: () => Effect.void,
+      status: () => Effect.succeed("unauthenticated"),
+    }),
+  )
   it.effect("runs skill, MCP, and extension lifecycle operations", () =>
     Effect.scoped(
       Effect.gen(function* () {

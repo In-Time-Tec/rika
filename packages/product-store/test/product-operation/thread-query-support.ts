@@ -1,5 +1,5 @@
-import * as ThreadToolkitsModule from "@rika/coding-tools/thread-toolkits"
-import * as ThreadReadModule from "@rika/coding-tools/thread-tool-read-contract"
+import * as ThreadToolkitsModule from "@rika/coding-tools/thread-tool-contract"
+import * as ThreadReadModule from "@rika/coding-tools/thread-tool-contract"
 import * as ThreadRepositoryModule from "@rika/product-store/sqlite-thread-repository"
 import * as ThreadInteractionRepositoryModule from "@rika/product-store/sqlite-thread-interaction-repository"
 import * as ThreadSearchRepositoryModule from "@rika/product-store/sqlite-thread-search-repository"

@@ -185,6 +185,21 @@ describe("ConfigContract", () => {
       ).toThrowError(/uppercase environment variable/),
   )
 
+  it("rejects effort variants without normal options before route resolution", () => {
+    expect(() =>
+      ConfigContract.decodeSettingsInput("settings.json", {
+        modelAliases: {
+          custom: {
+            provider: "openai",
+            candidates: ["custom-model"],
+            efforts: { low: { fast: { options: {} } } },
+            limits: { maxInputTokens: 1, maxOutputTokens: 1, keepRecentTokens: 1 },
+          },
+        },
+      }),
+    ).toThrowError(/effort low must set normal options/)
+  })
+
   it("resolves every default route to a gpt-5.6 model with streaming reasoning summaries", () => {
     const modes = ["low", "medium", "high", "ultra"] as const
     const roles = ["main", "oracle"] as const

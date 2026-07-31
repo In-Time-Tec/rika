@@ -2,8 +2,9 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { AiError, ModelRegistry, ModelResilience, Response } from "@batonfx/core"
 import { classifyFailure as classifyOpenAiFailure } from "@batonfx/providers/openai"
 import { TestModel } from "@batonfx/test"
-import { executionEventHistoryFor } from "@rika/configuration/configuration-paths"
+import { executionEventHistoryFor } from "@rika/configuration/profile-data-paths"
 import * as RikaToolRuntime from "@rika/coding-tools/coding-tool-runtime"
+import * as WorkspaceIndex from "@rika/coding-tools/workspace-file-search"
 import * as ToolInvocation from "@rika/coding-tools/tool-invocation"
 import { expect, test } from "vitest"
 import { Database } from "bun:sqlite"
@@ -628,7 +629,7 @@ test(
               modelVariantPolicy: "fixed-selection",
               toolRuntimeLayerForWorkspace: (workspace) => {
                 runtimeBuilds += 1
-                return RikaToolRuntime.layerWithProcessRegistry(workspace).pipe(
+                return RikaToolRuntime.layerWithProcessRegistry(workspace, WorkspaceIndex.layer(workspace)).pipe(
                   Layer.catch((error) =>
                     Layer.effectContext(Effect.fail(ExecutionBackend.BackendError.make({ message: String(error) }))),
                   ),
@@ -700,7 +701,7 @@ test(
               selection: fixture.selection,
               modelVariantPolicy: "fixed-selection",
               toolRuntimeLayerForWorkspace: (runtimeWorkspace) =>
-                RikaToolRuntime.layerWithProcessRegistry(runtimeWorkspace).pipe(
+                RikaToolRuntime.layerWithProcessRegistry(runtimeWorkspace, WorkspaceIndex.layer(runtimeWorkspace)).pipe(
                   Layer.catch((error) =>
                     Layer.effectContext(Effect.fail(ExecutionBackend.BackendError.make({ message: String(error) }))),
                   ),

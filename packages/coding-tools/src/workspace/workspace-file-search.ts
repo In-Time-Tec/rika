@@ -95,13 +95,25 @@ const runRg = (
 ): Effect.Effect<{ readonly stdout: string; readonly stderr: string; readonly code: number }, WorkspaceIndexError> =>
   Effect.gen(function* () {
     const command = ChildProcess.make("rg", args, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" })
+    const boundedText = <E, R>(stream: Stream.Stream<Uint8Array, E, R>) =>
+      Stream.runFold(
+        stream,
+        () => "",
+        (text, bytes) => {
+          const chunk = new TextDecoder().decode(bytes)
+          const remaining = 40_000 - text.length
+          return remaining <= 0 ? text : text + chunk.slice(0, remaining)
+        },
+      )
     const result = yield* Effect.scoped(
       Effect.gen(function* () {
         const handle = yield* spawner.spawn(command)
-        return yield* Effect.all([Stream.mkString(Stream.decodeText(handle.all)), handle.exitCode], { concurrency: 2 })
+        return yield* Effect.all([boundedText(handle.stdout), boundedText(handle.stderr), handle.exitCode], {
+          concurrency: 3,
+        })
       }),
     ).pipe(Effect.mapError((cause) => indexError(operation, cause)))
-    return { stdout: result[0], stderr: result[0], code: result[1] }
+    return { stdout: result[0], stderr: result[1], code: result[2] }
   })
 
 const listFiles = (

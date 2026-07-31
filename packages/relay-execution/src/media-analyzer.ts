@@ -1,5 +1,5 @@
-import { MediaAnalysisError } from "@rika/coding-tools/media-view-errors"
-import { MediaAnalyzer } from "@rika/coding-tools/media-analysis-service"
+import { MediaAnalysisError } from "@rika/coding-tools/media-view-service"
+import { MediaAnalyzer } from "@rika/coding-tools/media-view-service"
 import { LanguageModel, ModelRegistry, Prompt, Toolkit } from "@batonfx/core"
 import { Effect, Layer } from "effect"
 

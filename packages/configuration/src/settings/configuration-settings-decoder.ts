@@ -297,6 +297,11 @@ export const decodeSettingsInput: {
               message: `Model alias ${name} effort ${effort} must be an object`,
             })
           exactKeys(path, `Model alias ${name} effort ${effort}`, variants, ["normal", "fast"])
+          if (variants.normal === undefined)
+            throw ConfigurationSettingsFileError.make({
+              path,
+              message: `Model alias ${name} effort ${effort} must set normal options`,
+            })
           for (const [speed, variant] of Object.entries(variants)) {
             if (!object(variant) || !object((variant as Record<string, unknown>).options))
               throw ConfigurationSettingsFileError.make({

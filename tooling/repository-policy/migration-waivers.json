@@ -57,156 +57,6 @@
     "reason": "Slice 2 freezes public keys while Slice 3 creates the owning semantic source files; targets point directly at existing implementations without forwarding modules."
   },
   {
-    "rule": "export-count",
-    "paths": ["packages/coding-tools/src/coding-tool-catalog.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "export-count",
-    "paths": ["packages/coding-tools/src/execution-status.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "export-count",
-    "paths": ["packages/coding-tools/src/media-view.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "export-count",
-    "paths": ["packages/coding-tools/src/parallel-search.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "export-count",
-    "paths": ["packages/coding-tools/src/process-registry.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "export-count",
-    "paths": ["packages/coding-tools/src/read-web-page.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "export-count",
-    "paths": ["packages/coding-tools/src/thread-tools.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "export-count",
-    "paths": ["packages/coding-tools/src/tool-catalog.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "export-count",
-    "paths": ["packages/coding-tools/src/tool-definitions.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "export-count",
-    "paths": ["packages/coding-tools/src/tool-policy.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "export-count",
-    "paths": ["packages/coding-tools/src/tool-runtime.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "basename",
-    "paths": ["packages/coding-tools/src/tools/bash.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "basename",
-    "paths": ["packages/coding-tools/src/tools/edit.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "basename",
-    "paths": ["packages/coding-tools/src/tools/grep.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "basename",
-    "paths": ["packages/coding-tools/src/tools/read.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "basename",
-    "paths": ["packages/coding-tools/src/tools/result.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "basename",
-    "paths": ["packages/coding-tools/src/tools/write.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "export-count",
-    "paths": ["packages/coding-tools/src/web-search-providers.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "export-count",
-    "paths": ["packages/coding-tools/src/web-search.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "export-count",
-    "paths": ["packages/coding-tools/src/workspace-index.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "export-count",
-    "paths": ["packages/configuration/src/config-contract.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "basename",
-    "paths": ["packages/configuration/src/models.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "basename",
-    "paths": ["packages/configuration/src/modes.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "basename",
-    "paths": ["packages/configuration/src/paths.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "export-count",
-    "paths": ["packages/extensions/src/plugin-contract.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
     "rule": "basename",
     "paths": ["packages/product-store/src/migration/execution/product-migration-028-product-route-snapshot.ts"],
     "removalSlice": 3,
@@ -543,12 +393,6 @@
     "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
   },
   {
-    "rule": "export-count",
-    "paths": ["packages/relay-execution/src/execution-contract.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
     "rule": "basename",
     "paths": ["packages/relay-execution/src/prompt-files.d.ts"],
     "removalSlice": 3,
@@ -581,12 +425,6 @@
   {
     "rule": "file-size",
     "paths": ["packages/relay-execution/test/subagent-spawn.test.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "basename",
-    "paths": ["packages/terminal/intent-test.tmp.ts"],
     "removalSlice": 3,
     "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
   },
@@ -757,18 +595,6 @@
     "paths": ["packages/terminal/test/visual.capture.ts"],
     "removalSlice": 3,
     "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "export-count",
-    "paths": ["packages/transcript/src/transcript-unit.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
-  },
-  {
-    "rule": "export-count",
-    "paths": ["packages/coding-tools/src/agent-tools.ts"],
-    "removalSlice": 3,
-    "reason": "Serial Plan 027 foundation migration waiver; existing implementation is replaced by owning semantic contract or adapter slice."
   },
   {
     "rule": "export-count",

@@ -1,6 +1,7 @@
 import { Schema } from "effect"
 
-export const SearchQueries = Schema.Array(Schema.String).check(Schema.isMinLength(1))
+const Query = Schema.String.check(Schema.isPattern(/\S/))
+export const SearchQueries = Schema.Array(Query).check(Schema.isMinLength(1))
 export const Objective = Schema.String.check(Schema.isPattern(/\S/))
 export const SearchInput = Schema.Struct({
   objective: Objective,

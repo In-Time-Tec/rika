@@ -1,7 +1,22 @@
 import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect"
-import { Output, type MediaKind } from "./media-view-contract"
-import { MediaAnalysisError, MediaMissingError, MediaOversizedError, UnsupportedMediaError } from "./media-view-errors"
-import { MediaAnalyzer } from "./media-analysis-service"
+import { Output, type AnalysisInput, type MediaKind } from "./media-view-contract"
+import { MediaMissingError, MediaOversizedError, UnsupportedMediaError } from "./media-view-errors"
+
+export class MediaAnalysisError extends Schema.TaggedErrorClass<MediaAnalysisError>()("MediaAnalysisError", {
+  message: Schema.String,
+}) {}
+
+interface AnalyzerInterface {
+  readonly analyze: (input: AnalysisInput) => Effect.Effect<string, MediaAnalysisError>
+}
+export class MediaAnalyzer extends Context.Service<MediaAnalyzer, AnalyzerInterface>()(
+  "@rika/coding-tools/media/media-view-service/MediaAnalyzer",
+) {}
+export const analyzerTestLayer = (analyze: AnalyzerInterface["analyze"]) =>
+  Layer.succeed(MediaAnalyzer, MediaAnalyzer.of({ analyze }))
+export const analyzerUnavailableLayer = analyzerTestLayer(() =>
+  Effect.fail(MediaAnalysisError.make({ message: "Media analysis route is not configured" })),
+)
 
 export interface Interface {
   readonly view: (

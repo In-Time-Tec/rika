@@ -1,5 +1,5 @@
-import * as RikaToolRuntimeTools from "@rika/coding-tools/coding-tool-runtime-tools"
-import * as RuntimeHandler from "@rika/coding-tools/coding-tool-runtime-handler-layer"
+import * as RikaToolRuntimeTools from "@rika/coding-tools/coding-tool-runtime"
+import * as RuntimeHandler from "@rika/coding-tools/coding-tool-catalog"
 import * as BehaviorMode from "@rika/configuration/behavior-mode"
 import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
 import * as SettingsDefaults from "@rika/configuration/configuration-settings"

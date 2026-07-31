@@ -1,4 +1,4 @@
-import { analyzerTestLayer } from "@rika/coding-tools/media-analysis-service"
+import { analyzerTestLayer } from "@rika/coding-tools/media-view-service"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, test } from "vitest"
 import { Effect, FileSystem, Layer, Schema } from "effect"

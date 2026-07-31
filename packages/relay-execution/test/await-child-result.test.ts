@@ -1,4 +1,4 @@
-import * as AgentOutcomes from "@rika/coding-tools/agent-tool-outcomes"
+import * as AgentOutcomes from "@rika/coding-tools/agent-tool-contract"
 import { describe, expect, it } from "@effect/vitest"
 import type { Execution } from "@relayfx/sdk"
 import { resolveChildResult } from "../src/execution-backend"
@@ -44,7 +44,7 @@ describe("resolveChildResult", () => {
     if (result._tag !== "NoReport") throw new Error("expected NoReport")
     expect(result.childExecutionId).toBe(child)
     expect(result.reason).toBe(silentReason)
-    expect(result.recovery).toBe(AgentOutcomes.noReportRecovery)
+    expect(result.recovery).toBe(AgentOutcomes.AgentContract.noReportRecovery)
   })
 
   it("treats a silent child the same whether or not the provider reported a finish reason", () => {

@@ -1,6 +1,6 @@
-import * as WebSearchInput from "@rika/coding-tools/web-search-input-contract"
-import * as WebSearchResult from "@rika/coding-tools/web-search-result-contract"
-import { analyzerTestLayer } from "@rika/coding-tools/media-analysis-service"
+import * as WebSearchInput from "../src/web-research/web-search-input-contract"
+import * as WebSearchResult from "../src/web-research/web-search-result-contract"
+import { analyzerTestLayer } from "@rika/coding-tools/media-view-service"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Fiber, FileSystem, Layer, Option, Path, PlatformError, Ref, Schema, Sink, Stream } from "effect"
 import { TestClock } from "effect/testing"
@@ -9,7 +9,7 @@ import * as ProcessRegistry from "@rika/coding-tools/shell-process-registry"
 import * as ReadWebPage from "@rika/coding-tools/read-web-page-service"
 import * as Runtime from "@rika/coding-tools/coding-tool-runtime"
 import * as WebSearch from "@rika/coding-tools/web-search-service"
-import * as WebSearchErrors from "@rika/coding-tools/web-search-errors"
+import * as WebSearchErrors from "../src/web-research/web-search-errors"
 import * as WorkspaceIndex from "@rika/coding-tools/workspace-file-search"
 import { provide } from "./test-layer"
 
@@ -190,7 +190,7 @@ const testEnvironment = (
       })
     },
   })
-  const runtime = Runtime.layerWithServices(workspace).pipe(
+  const runtime = Runtime.layerWithProcessRegistry(workspace, index).pipe(
     Layer.provide(ProcessRegistry.layer),
     Layer.provide(index),
     Layer.provide(dependencies),

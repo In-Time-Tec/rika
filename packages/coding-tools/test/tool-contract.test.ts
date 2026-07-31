@@ -34,7 +34,9 @@ describe("tool contracts", () => {
       expect(schema.properties).not.toHaveProperty("_batch")
       expect(schema.properties).not.toHaveProperty("model")
       expect(
-        yield* Schema.decodeUnknownEffect(contractFixtures.AgentContract.TaskInput)({ prompt: "List files" }),
+        yield* Schema.decodeUnknownEffect(contractFixtures.AgentContract.AgentContract.TaskInput)({
+          prompt: "List files",
+        }),
       ).toEqual({
         prompt: "List files",
       })
@@ -69,11 +71,13 @@ describe("tool contracts", () => {
   )
 
   it("reports a started subagent as a running handle instead of a verdict", () => {
-    expect(contractFixtures.AgentContract.spawned({ childExecutionId: "child:execution%3Aturn:call-1" })).toEqual({
+    expect(
+      contractFixtures.AgentContract.AgentContract.spawned({ childExecutionId: "child:execution%3Aturn:call-1" }),
+    ).toEqual({
       _tag: "Spawned",
       childExecutionId: "child:execution%3Aturn:call-1",
       status: "running",
-      next: contractFixtures.AgentContract.spawnedNext,
+      next: contractFixtures.AgentContract.AgentContract.spawnedNext,
     })
   })
 
@@ -449,7 +453,7 @@ describe("tool contracts", () => {
       const searchQueries = (schema.properties as Record<string, unknown>).searchQueries
       expect(searchQueries).toEqual({
         type: "array",
-        items: { type: "string" },
+        items: { type: "string", allOf: [{ pattern: "\\S" }] },
         allOf: [{ minItems: 1 }],
       })
       expect(searchQueries).not.toHaveProperty("prefixItems")

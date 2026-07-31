@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
-import * as ThreadToolkits from "@rika/coding-tools/thread-toolkits"
-import { MediaAnalysisError } from "@rika/coding-tools/media-view-errors"
-import { analyzerTestLayer } from "@rika/coding-tools/media-analysis-service"
+import * as ThreadToolkits from "@rika/coding-tools/thread-tool-contract"
+import { MediaAnalysisError } from "@rika/coding-tools/media-view-service"
+import { analyzerTestLayer } from "@rika/coding-tools/media-view-service"
 import * as BehaviorMode from "@rika/configuration/behavior-mode"
 import * as ModelRoute from "@rika/configuration/model-route"
 import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
@@ -41,7 +41,6 @@ import * as ReadWebPage from "@rika/coding-tools/read-web-page-service"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as WebSearch from "@rika/coding-tools/web-search-service"
 import * as WebSearchProvider from "@rika/coding-tools/web-search-provider"
-import * as McpOAuthStore from "@rika/extensions/mcp-oauth-store"
 import * as WorkspaceIndex from "@rika/coding-tools/workspace-file-search"
 import { FetchHttpClient } from "effect/unstable/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
@@ -142,7 +141,7 @@ class OperationProductError extends Schema.TaggedErrorClass<OperationProductErro
 
 const relayBackendLayerImpl = (
   options: Omit<
-    RelayExecutionBackend.LayerOptions<typeof ThreadToolkits.allToolkit.tools>,
+    RelayExecutionBackend.LayerOptions<typeof ThreadToolkits.ThreadContract.allToolkit.tools>,
     "additionalToolkit" | "additionalHandlerLayer"
   >,
   repositoryLayer: Layer.Layer<ThreadRepository.Service, ThreadRepository.RepositoryError, never>,
@@ -159,10 +158,10 @@ const relayBackendLayerImpl = (
     never
   >,
   gateway: ThreadToolService.Gateway,
-): ReturnType<typeof RelayExecutionBackend.layer<typeof ThreadToolkits.allToolkit.tools>> =>
+): ReturnType<typeof RelayExecutionBackend.layer<typeof ThreadToolkits.ThreadContract.allToolkit.tools>> =>
   RelayExecutionBackend.layer({
     ...options,
-    additionalToolkit: ThreadToolkits.allToolkit,
+    additionalToolkit: ThreadToolkits.ThreadContract.allToolkit,
     additionalHandlerLayer: Layer.merge(
       Layer.merge(
         ThreadToolHandlers.handlerLayerForWorkspace(
@@ -212,13 +211,13 @@ export const relayBackendLayer: {
     gateway: ThreadToolService.Gateway,
   ): (
     options: Omit<
-      RelayExecutionBackend.LayerOptions<typeof ThreadToolkits.allToolkit.tools>,
+      RelayExecutionBackend.LayerOptions<typeof ThreadToolkits.ThreadContract.allToolkit.tools>,
       "additionalToolkit" | "additionalHandlerLayer"
     >,
   ) => ReturnType<typeof relayBackendLayerImpl>
   (
     options: Omit<
-      RelayExecutionBackend.LayerOptions<typeof ThreadToolkits.allToolkit.tools>,
+      RelayExecutionBackend.LayerOptions<typeof ThreadToolkits.ThreadContract.allToolkit.tools>,
       "additionalToolkit" | "additionalHandlerLayer"
     >,
     repositoryLayer: Layer.Layer<ThreadRepository.Service, ThreadRepository.RepositoryError, never>,
@@ -743,7 +742,7 @@ export const configuredBackendLayer = ({
                   const readPageCredential = WebSearchProvider.configuredReadPageCredential(credentials)
                   return validateWebSearchProviders(credentials).pipe(
                     Effect.as(
-                      ToolRuntime.layerWithProcessRegistry(runtimeWorkspace).pipe(
+                      ToolRuntime.layer(runtimeWorkspace).pipe(
                         Layer.provide(
                           testMediaAnalyzerResponse._tag === "Some"
                             ? analyzerTestLayer(() => Effect.succeed(testMediaAnalyzerResponse.value))
@@ -881,8 +880,8 @@ const createExtensionLayerImpl = (home: string, workspace: string) => {
     }),
     SkillRegistry.fileSystemLayer,
     McpOAuthService.layer.pipe(
-      Layer.provide(McpOAuthStore.hostLayer),
-      Layer.provide(McpOAuthStore.tokenStoreLayer(globalLayout.mcpOAuth)),
+      Layer.provide(McpOAuthService.OAuthHost.hostLayer),
+      Layer.provide(McpOAuthService.OAuthHost.tokenStoreLayer(globalLayout.mcpOAuth)),
     ),
   ).pipe(Layer.provide(BunServices.layer), Layer.merge(BunServices.layer), Layer.merge(FetchHttpClient.layer))
 }

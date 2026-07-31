@@ -1,4 +1,18 @@
-import { Config, ConfigProvider, Context, Data, Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
+import {
+  Config,
+  ConfigProvider,
+  Context,
+  Data,
+  Effect,
+  FileSystem,
+  Function,
+  Layer,
+  Option,
+  Path,
+  Schema,
+} from "effect"
+import { Toolkit } from "effect/unstable/ai"
+import * as Inputs from "./coding-tool-runtime-inputs"
 import * as LocalPath from "../workspace/local-path"
 import * as LocalSafetyPolicy from "../policy/local-safety-policy"
 import * as WebSearchService from "../web-research/web-search-service"
@@ -6,32 +20,82 @@ import * as WebSearchErrors from "../web-research/web-search-errors"
 import * as ReadWebPageService from "../web-research/read-web-page-service"
 import * as ProcessRegistry from "../process/shell-process-registry"
 import * as MediaView from "../media/media-view-service"
-import * as CodingToolResult from "./coding-tool-result"
 import { RuntimeFilesystem } from "./coding-tool-runtime-filesystem"
 import * as WorkspaceIndex from "../workspace/workspace-file-search"
 import { unifiedDiff } from "../workspace/unified-diff"
 
-import * as RuntimeContract from "./coding-tool-runtime-contract"
-import * as RuntimeTools from "./coding-tool-runtime-tools"
+import * as ToolPolicy from "../policy/coding-tool-policy"
+import * as CodingToolResult from "./coding-tool-result"
+
+const Shell = Schema.Struct({
+  _tag: Schema.tag("Shell"),
+  command: Schema.String,
+  args: Schema.Array(Schema.String),
+  cwd: Schema.optionalKey(Schema.String),
+  waitMillis: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+})
+export const Request = Schema.Union([
+  Inputs.Inputs.Grep.Request,
+  Inputs.Inputs.Read.Request,
+  Inputs.Inputs.Write.Request,
+  Inputs.Inputs.Edit.Request,
+  Inputs.Inputs.Bash.Request,
+  Shell,
+  Inputs.Inputs.ShellStatus.Request,
+  Inputs.Inputs.WebSearch.Request,
+  Inputs.Inputs.ReadPage.Request,
+  Inputs.Inputs.Media.Request,
+])
+type Request = typeof Request.Type
+type Result = CodingToolResult.Result
+export class ToolError extends Schema.TaggedErrorClass<ToolError>()("ToolError", {
+  tool: Schema.String,
+  message: Schema.String,
+  kind: Schema.Literals(["operation", "timeout"]),
+  category: CodingToolResult.FailureCategory,
+  outcome: Schema.Literals(["known", "unknown"]),
+  recovery: CodingToolResult.Recovery,
+  nextAction: Schema.String,
+}) {}
 
 export interface Interface {
-  readonly run: (request: RuntimeContract.Request) => Effect.Effect<RuntimeContract.Result, RuntimeContract.ToolError>
+  readonly run: (request: Request) => Effect.Effect<Result, ToolError>
 }
 
 export class Service extends Context.Service<Service, Interface>()(
   "@rika/coding-tools/runtime/coding-tool-runtime/Service",
 ) {}
 
-const maxOutput = 40_000
-const bounded = (text: string, limit = maxOutput): RuntimeContract.Result =>
-  RuntimeFilesystem.boundedText<RuntimeContract.Result>(text, limit)
-const policyForName = (name: string) =>
-  RuntimeTools.registrations.find((registration) => registration.tool.name === name)?.policy
-const toolName = (request: RuntimeContract.Request) => request._tag.replaceAll(/([a-z])([A-Z])/g, "$1_$2").toLowerCase()
-const contract = (request: RuntimeContract.Request) =>
-  policyForName(request._tag === "Shell" ? "bash" : toolName(request))!
+const registrations: ReadonlyArray<ToolPolicy.Registration> = [
+  Inputs.Inputs.Grep.registration,
+  Inputs.Inputs.Read.registration,
+  Inputs.Inputs.Write.registration,
+  Inputs.Inputs.Edit.registration,
+  Inputs.Inputs.Bash.registration,
+  Inputs.Inputs.ShellStatus.registration,
+  Inputs.Inputs.WebSearch.registration,
+  Inputs.Inputs.ReadPage.registration,
+  Inputs.Inputs.Media.registration,
+]
+export const toolkit = Toolkit.make(
+  Inputs.Inputs.Grep.tool,
+  Inputs.Inputs.Read.tool,
+  Inputs.Inputs.Write.tool,
+  Inputs.Inputs.Edit.tool,
+  Inputs.Inputs.Bash.tool,
+  Inputs.Inputs.ShellStatus.tool,
+  Inputs.Inputs.WebSearch.tool,
+  Inputs.Inputs.ReadPage.tool,
+  Inputs.Inputs.Media.tool,
+)
 
-const boundResult = (request: RuntimeContract.Request, result: RuntimeContract.Result): RuntimeContract.Result => {
+const maxOutput = 40_000
+const bounded = (text: string, limit = maxOutput): Result => RuntimeFilesystem.boundedText<Result>(text, limit)
+const policyForName = (name: string) => registrations.find((registration) => registration.tool.name === name)?.policy
+const toolName = (request: Request) => request._tag.replaceAll(/([a-z])([A-Z])/g, "$1_$2").toLowerCase()
+const contract = (request: Request) => policyForName(request._tag === "Shell" ? "bash" : toolName(request))!
+
+const boundResult = (request: Request, result: Result): Result => {
   const limit = contract(request).outputLimit
   let remaining = limit
   const trim = (value: string | undefined) => {
@@ -44,18 +108,30 @@ const boundResult = (request: RuntimeContract.Request, result: RuntimeContract.R
   const stdout = trim(result.stdout)
   const stderr = trim(result.stderr)
   const diff = trim(result.diff)
+  const artifact =
+    result.artifact === undefined
+      ? undefined
+      : {
+          ...result.artifact,
+          path: trim(result.artifact.path)!,
+          mimeType: trim(result.artifact.mimeType)!,
+        }
   return {
     ...result,
     text,
     ...(stdout === undefined ? {} : { stdout }),
     ...(stderr === undefined ? {} : { stderr }),
     ...(diff === undefined ? {} : { diff }),
+    ...(artifact === undefined ? {} : { artifact }),
     truncated:
       result.truncated ||
       text.length < result.text.length ||
       (stdout !== undefined && stdout.length < result.stdout!.length) ||
       (stderr !== undefined && stderr.length < result.stderr!.length) ||
-      (diff !== undefined && diff.length < result.diff!.length),
+      (diff !== undefined && diff.length < result.diff!.length) ||
+      (artifact !== undefined &&
+        (artifact.path.length < result.artifact!.path.length ||
+          artifact.mimeType.length < result.artifact!.mimeType.length)),
   }
 }
 
@@ -177,7 +253,7 @@ const actionableMessage = (details: FailureDetails) =>
     details.outcome === "known" ? "The call did not change state." : "The call may have changed state."
   } Next action: ${details.nextAction.replace(/[.\s]+$/, "")}.`
 
-const toolError = (request: RuntimeContract.Request, cause: unknown, kind: "operation" | "timeout") => {
+const toolError = (request: Request, cause: unknown, kind: "operation" | "timeout") => {
   const unsafe = contract(request).idempotency === "unsafe"
   let details: FailureDetails
   if (kind !== "timeout") details = operationError(cause)
@@ -207,7 +283,7 @@ const toolError = (request: RuntimeContract.Request, cause: unknown, kind: "oper
           nextAction: "Inspect the workspace and process state before deciding whether another call is safe",
         }
       : details
-  return RuntimeContract.ToolError.make({
+  return ToolError.make({
     tool: toolName(request),
     message: actionableMessage(finalDetails),
     kind,
@@ -502,12 +578,17 @@ const runtimeLayer = (workspace: string) =>
     }),
   ).pipe(Layer.provide(MediaView.layer(workspace)))
 
-export const layerWithProcessRegistry = (workspace: string) =>
-  runtimeLayer(workspace).pipe(Layer.provide(WorkspaceIndex.layer(workspace)))
+type WorkspaceIndexLayer = ReturnType<typeof WorkspaceIndex.layer>
+const layerWithProcessRegistryImpl = (workspace: string, indexLayer: WorkspaceIndexLayer) =>
+  runtimeLayer(workspace).pipe(Layer.provide(indexLayer))
+type ProcessRegistryLayer = ReturnType<typeof layerWithProcessRegistryImpl>
 
-export const layerWithServices = (workspace: string) => runtimeLayer(workspace)
+export const layerWithProcessRegistry: {
+  (workspace: string): (indexLayer: WorkspaceIndexLayer) => ProcessRegistryLayer
+  (workspace: string, indexLayer: WorkspaceIndexLayer): ProcessRegistryLayer
+} = Function.dual(2, layerWithProcessRegistryImpl)
 
 export const layer = (workspace: string) =>
-  layerWithProcessRegistry(workspace).pipe(Layer.provide(ProcessRegistry.layer))
+  runtimeLayer(workspace).pipe(Layer.provide(WorkspaceIndex.layer(workspace)), Layer.provide(ProcessRegistry.layer))
 
 export const testLayer = (run: Interface["run"]) => Layer.succeed(Service, Service.of({ run }))

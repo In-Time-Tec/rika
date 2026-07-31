@@ -1,4 +1,4 @@
-import * as RuntimeContract from "@rika/coding-tools/coding-tool-runtime-contract"
+import * as RuntimeContract from "@rika/coding-tools/coding-tool-runtime"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"

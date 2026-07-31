@@ -1,4 +1,4 @@
-import * as ThreadCoordination from "@rika/coding-tools/thread-tool-coordination-contract"
+import { ThreadContract } from "@rika/coding-tools/thread-tool-contract"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadInteractionRepository from "@rika/product-store/sqlite-thread-interaction-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -18,7 +18,7 @@ const invocation: ToolInvocation.Value = {
   idempotencyKeyDigest: "digest",
 }
 
-const input: typeof ThreadCoordination.CreateThreadInput.Type = { prompt: "Coordinate this work" }
+const input: typeof ThreadContract.CreateThreadInput.Type = { prompt: "Coordinate this work" }
 
 const sourceThread: Thread.Thread = {
   id: Thread.ThreadId.make("source"),

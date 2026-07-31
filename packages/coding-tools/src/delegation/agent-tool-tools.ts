@@ -1,7 +1,14 @@
 import { Schema } from "effect"
 import { Tool } from "effect/unstable/ai"
 import * as ToolInvocation from "../catalog/tool-invocation"
-import { TaskInput, ReadThreadInput, Spawned } from "./agent-tool-contract"
+const TaskInput = Schema.Struct({ prompt: Schema.String })
+const ReadThreadInput = Schema.Struct({ prompt: Schema.String, threadId: Schema.optionalKey(Schema.String) })
+const Spawned = Schema.Struct({
+  _tag: Schema.tag("Spawned"),
+  childExecutionId: Schema.String,
+  status: Schema.Literal("running"),
+  next: Schema.String,
+})
 
 export const AwaitSubagentsInput = Schema.Struct({
   subagents: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),

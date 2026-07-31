@@ -1,9 +1,10 @@
-import * as RuntimeTools from "@rika/coding-tools/coding-tool-runtime-tools"
-import * as AgentSelection from "@rika/coding-tools/agent-tool-selection"
-import * as AgentToolkits from "@rika/coding-tools/agent-tool-toolkits"
-import * as AgentRegistrations from "@rika/coding-tools/agent-tool-registrations"
-import * as ThreadToolkits from "@rika/coding-tools/thread-toolkits"
-import { Function, Schema } from "effect"
+import * as RuntimeTools from "@rika/coding-tools/coding-tool-runtime"
+import * as RuntimeRegistrations from "../runtime/coding-tool-runtime-tools"
+import * as AgentSelection from "../delegation/agent-tool-selection"
+import * as AgentToolkits from "../delegation/agent-tool-toolkits"
+import * as AgentRegistrations from "../delegation/agent-tool-registrations"
+import * as ThreadToolkits from "./thread-toolkits"
+import { Effect, Function, Schema } from "effect"
 import * as ToolPolicy from "../policy/coding-tool-policy"
 import { Idempotency } from "../policy/policy-idempotency"
 
@@ -24,8 +25,55 @@ const tools: ReadonlyArray<ToolPolicy.RegisteredTool> = [
   ...Object.values(ThreadToolkits.allToolkit.tools),
 ]
 
+export const handlerLayer = RuntimeTools.toolkit.toLayer(
+  Effect.gen(function* () {
+    const runtime = yield* RuntimeTools.Service
+    return {
+      grep: ({ pattern, regex }) => runtime.run({ _tag: "Grep", pattern, regex }),
+      read: ({ path, read_range }) =>
+        runtime.run({ _tag: "Read", path, ...(read_range === undefined ? {} : { readRange: read_range }) }),
+      write: ({ path, content }) => runtime.run({ _tag: "Write", path, content }),
+      edit: ({ path, old_str, new_str, replace_all }) =>
+        runtime.run({
+          _tag: "Edit",
+          path,
+          oldStr: old_str,
+          newStr: new_str,
+          ...(replace_all === undefined ? {} : { replaceAll: replace_all }),
+        }),
+      bash: ({ command, workdir, timeout_ms }) =>
+        runtime.run({
+          _tag: "Bash",
+          command,
+          ...(workdir === undefined ? {} : { workdir }),
+          ...(timeout_ms === undefined ? {} : { timeoutMillis: timeout_ms }),
+        }),
+      shell_command_status: ({ processId, waitMillis }) =>
+        runtime.run({ _tag: "ShellCommandStatus", processId, ...(waitMillis == null ? {} : { waitMillis }) }),
+      web_search: ({ objective, searchQueries, kind, strategy, githubSearchType }) =>
+        runtime.run({
+          _tag: "WebSearch",
+          objective,
+          searchQueries,
+          ...(kind === undefined ? {} : { kind }),
+          ...(strategy === undefined ? {} : { strategy }),
+          ...(githubSearchType === undefined ? {} : { githubSearchType }),
+        }),
+      read_web_page: ({ url, objective, fullContent, forceRefetch }) =>
+        runtime.run({
+          _tag: "ReadWebPage",
+          url,
+          ...(objective === undefined ? {} : { objective }),
+          ...(fullContent === undefined ? {} : { fullContent }),
+          ...(forceRefetch === undefined ? {} : { forceRefetch }),
+        }),
+      view_media: ({ path }) => runtime.run({ _tag: "ViewMedia", path }),
+    }
+  }),
+)
+
 const registrations: ReadonlyArray<ToolPolicy.Registration> = [
-  ...RuntimeTools.registrations,
+  ...RuntimeRegistrations.registrations,
   ...AgentRegistrations.registrations,
   ...ThreadToolkits.registrations,
 ]
@@ -207,6 +255,7 @@ export const Catalog = {
   resolveAgentPresentation,
   agentPhrase,
   resolvePresentation,
+  handlerLayer,
 }
 
 export namespace Catalog {

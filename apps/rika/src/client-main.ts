@@ -27,7 +27,7 @@ import * as Logging from "./logging"
 import { layer as residentLayer } from "./resident-client-transport"
 import * as ResidentProcessStartup from "./resident-process-startup"
 import * as DataRoot from "@rika/configuration/canonical-data-root"
-import { dataPaths } from "@rika/configuration/configuration-paths"
+import { dataPaths } from "@rika/configuration/profile-data-paths"
 
 const encodeLaunchArguments = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)))
 

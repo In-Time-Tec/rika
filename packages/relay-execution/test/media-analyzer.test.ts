@@ -1,4 +1,4 @@
-import { MediaAnalyzer } from "@rika/coding-tools/media-analysis-service"
+import { MediaAnalyzer } from "@rika/coding-tools/media-view-service"
 import { TestModel } from "@batonfx/test"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"

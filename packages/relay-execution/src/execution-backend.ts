@@ -1,15 +1,12 @@
-import * as RikaToolRuntimeContract from "@rika/coding-tools/coding-tool-runtime-contract"
-import * as RikaToolRuntimeTools from "@rika/coding-tools/coding-tool-runtime-tools"
-import * as RikaToolRuntimeHandler from "@rika/coding-tools/coding-tool-runtime-handler-layer"
 import * as WebSearchProvider from "@rika/coding-tools/web-search-provider"
-import * as AgentSelection from "@rika/coding-tools/agent-tool-selection"
-import * as AgentToolkits from "@rika/coding-tools/agent-tool-toolkits"
-import * as AgentAwait from "@rika/coding-tools/agent-tool-await-result"
-import * as AgentOutcomes from "@rika/coding-tools/agent-tool-outcomes"
-import * as AgentErrors from "@rika/coding-tools/agent-tool-errors"
-import { MediaAnalyzer } from "@rika/coding-tools/media-analysis-service"
+import * as AgentSelection from "@rika/coding-tools/agent-tool-contract"
+import * as AgentToolkits from "@rika/coding-tools/agent-tool-contract"
+import * as AgentAwait from "@rika/coding-tools/agent-tool-contract"
+import * as AgentOutcomes from "@rika/coding-tools/agent-tool-contract"
+import * as AgentErrors from "@rika/coding-tools/agent-tool-contract"
+import { MediaAnalyzer } from "@rika/coding-tools/media-view-service"
 import { type Compaction, ModelRegistry, ModelResilience, type Permissions } from "@batonfx/core"
-import { executionEventHistoryFor } from "@rika/configuration/configuration-paths"
+import { executionEventHistoryFor } from "@rika/configuration/profile-data-paths"
 import * as AgentTools from "@rika/coding-tools/agent-tool-contract"
 import { Catalog as ToolCatalog } from "@rika/coding-tools/coding-tool-catalog"
 import * as ProcessRegistry from "@rika/coding-tools/shell-process-registry"
@@ -119,7 +116,7 @@ const failureKind = (cause: Cause.Cause<unknown>) => {
 
 const toolFailureAnnotations = (cause: Cause.Cause<unknown>) => {
   const failure = Cause.squash(cause)
-  return Schema.is(RikaToolRuntimeContract.ToolError)(failure)
+  return Schema.is(RikaToolRuntime.ToolError)(failure)
     ? {
         "rika.failure.category": failure.category,
         "rika.failure.outcome": failure.outcome,
@@ -235,7 +232,7 @@ const routedToolRuntimeLayer: {
           ChildProcessSpawner.ChildProcessSpawner | Exclude<R, ProcessRegistry.Service>
         >()
         const processes = yield* LayerMap.make(() => ProcessRegistry.layer, { idleTimeToLive: "15 minutes" })
-        const run = ((request: RikaToolRuntimeContract.Request) =>
+        const run = ((request: Schema.Schema.Type<typeof RikaToolRuntime.Request>) =>
           Effect.scoped(
             Effect.gen(function* () {
               const call = yield* RelayToolRuntime.ToolCallInfo
@@ -291,9 +288,9 @@ const routedToolRuntimeLayer: {
             }),
           ).pipe(
             Effect.mapError((cause) =>
-              Schema.is(RikaToolRuntimeContract.ToolError)(cause)
+              Schema.is(RikaToolRuntime.ToolError)(cause)
                 ? cause
-                : RikaToolRuntimeContract.ToolError.make({
+                : RikaToolRuntime.ToolError.make({
                     tool: request._tag,
                     message:
                       "The tool failed before Rika could classify it. The call may have changed state. Next action: inspect current state before deciding whether another call is safe.",
@@ -494,9 +491,9 @@ export const toolkitFor = <AdditionalTools extends Record<string, Tool.Any>>(
   options: Pick<LayerOptions<AdditionalTools>, "additionalToolkit">,
 ) =>
   Toolkit.make(
-    ...Object.values(RikaToolRuntimeTools.toolkit.tools),
-    ...Object.values(AgentToolkits.modelToolkit.tools),
-    ...Object.values(AgentToolkits.joinToolkit.tools),
+    ...Object.values(RikaToolRuntime.toolkit.tools),
+    ...Object.values(AgentToolkits.AgentContract.modelToolkit.tools),
+    ...Object.values(AgentToolkits.AgentContract.joinToolkit.tools),
     ...Object.values(options.additionalToolkit?.tools ?? {}),
   )
 
@@ -508,7 +505,9 @@ const availableTools = <AdditionalTools extends Record<string, Tool.Any>>(
   return names.filter((name) => name in available)
 }
 
-export const webSearchFactories = (credentials: Readonly<Record<string, Redacted.Redacted<string>>>) =>
+export const webSearchFactories = (
+  credentials: Readonly<Record<string, Redacted.Redacted<string>>>,
+): ReturnType<typeof WebSearchProvider.configuredProviderFactories> =>
   WebSearchProvider.configuredProviderFactories(credentials)
 
 export const modelVariantKey: {
@@ -746,17 +745,18 @@ export const resolveChildResult = ({ childExecutionId, events, reconciled }: Chi
   const failure = childFailureText(terminal)
   const status = (terminal === undefined ? undefined : terminalStatuses[terminal.type]) ?? reconciled ?? "failed"
   if (status === "cancelled")
-    return AgentOutcomes.cancelled({
+    return AgentOutcomes.AgentContract.cancelled({
       childExecutionId,
       reason: failure ?? unreconciledReason(status),
       output: output ?? [],
     })
   if (output === undefined || !Arr.isReadonlyArrayNonEmpty(output)) {
-    if (status === "completed") return AgentOutcomes.noReport({ childExecutionId, reason: silentChildReason, status })
-    return AgentOutcomes.noReport({ childExecutionId, reason: failure ?? unreconciledReason(status) })
+    if (status === "completed")
+      return AgentOutcomes.AgentContract.noReport({ childExecutionId, reason: silentChildReason, status })
+    return AgentOutcomes.AgentContract.noReport({ childExecutionId, reason: failure ?? unreconciledReason(status) })
   }
-  if (status === "completed") return AgentOutcomes.report({ childExecutionId, output })
-  return AgentOutcomes.failed({ childExecutionId, reason: failure ?? unreconciledReason(status), output })
+  if (status === "completed") return AgentOutcomes.AgentContract.report({ childExecutionId, output })
+  return AgentOutcomes.AgentContract.failed({ childExecutionId, reason: failure ?? unreconciledReason(status), output })
 }
 const terminalChildStatuses = new Set(["completed", "failed", "cancelled"])
 
@@ -2178,7 +2178,9 @@ export const layer = <
           })
           const toolkit = toolkitFor(options)
           const runnerToolkit = Toolkit.make(
-            ...Object.values(toolkit.tools).filter((tool) => tool.name !== AgentSelection.awaitSubagentsToolName),
+            ...Object.values(toolkit.tools).filter(
+              (tool) => tool.name !== AgentSelection.AgentContract.awaitSubagentsToolName,
+            ),
             ThreadHost.promoteTurnTool,
           )
           const delegation = Effect.fn("ExecutionBackend.delegateAgent")(function* (
@@ -2190,7 +2192,7 @@ export const layer = <
             const parentExecutionId = Ids.ExecutionId.make(invocation.executionId)
             const parentDepth = childExecutionDepth(invocation.executionId)
             if (!delegationAvailableAtDepth(toolName, parentDepth)) {
-              return yield* AgentErrors.AgentToolError.make({
+              return yield* AgentErrors.AgentContract.AgentToolError.make({
                 tool: toolName,
                 message:
                   toolName === "task"
@@ -2202,19 +2204,23 @@ export const layer = <
             const parent = yield* client.executions
               .get(parentExecutionId)
               .pipe(
-                Effect.mapError((cause) => AgentErrors.AgentToolError.make({ tool: toolName, message: String(cause) })),
+                Effect.mapError((cause) =>
+                  AgentErrors.AgentContract.AgentToolError.make({ tool: toolName, message: String(cause) }),
+                ),
               )
             if (parent === undefined) {
-              return yield* AgentErrors.AgentToolError.make({
+              return yield* AgentErrors.AgentContract.AgentToolError.make({
                 tool: toolName,
                 message: `Execution ${invocation.executionId} was not found`,
               })
             }
             const routePin = yield* pinnedRouteForExecution(client, parent).pipe(
-              Effect.mapError((cause) => AgentErrors.AgentToolError.make({ tool: toolName, message: String(cause) })),
+              Effect.mapError((cause) =>
+                AgentErrors.AgentContract.AgentToolError.make({ tool: toolName, message: String(cause) }),
+              ),
             )
             if (routePin === undefined) {
-              return yield* AgentErrors.AgentToolError.make({
+              return yield* AgentErrors.AgentContract.AgentToolError.make({
                 tool: toolName,
                 message: "The parent execution does not have a pinned model route",
               })
@@ -2237,7 +2243,9 @@ export const layer = <
             const childRoute = routeForProfile(routePin, profile)
             const childPreset = resolve(profile, pinnedSelection(childRoute)).preset
             const durableRoute = yield* Schema.decodeUnknownEffect(Schema.Json)(routePin).pipe(
-              Effect.mapError((cause) => AgentErrors.AgentToolError.make({ tool: toolName, message: String(cause) })),
+              Effect.mapError((cause) =>
+                AgentErrors.AgentContract.AgentToolError.make({ tool: toolName, message: String(cause) }),
+              ),
             )
             const children = calls.map((childCall) => ({
               child_execution_id: makeChildExecutionId(invocation.executionId, childCall.callId),
@@ -2264,7 +2272,9 @@ export const layer = <
                 }),
               { discard: true },
             ).pipe(
-              Effect.mapError((cause) => AgentErrors.AgentToolError.make({ tool: toolName, message: String(cause) })),
+              Effect.mapError((cause) =>
+                AgentErrors.AgentContract.AgentToolError.make({ tool: toolName, message: String(cause) }),
+              ),
             )
             const currentCall = calls.find((childCall) => childCall.callId === invocation.callId)
             const current =
@@ -2275,7 +2285,7 @@ export const layer = <
                       child.child_execution_id === makeChildExecutionId(invocation.executionId, currentCall.callId),
                   )
             if (current === undefined) {
-              return yield* AgentErrors.AgentToolError.make({
+              return yield* AgentErrors.AgentContract.AgentToolError.make({
                 tool: toolName,
                 message: `The child for tool call ${invocation.callId} is not in its fan-out batch`,
               })
@@ -2287,9 +2297,9 @@ export const layer = <
                 "rika.tool.name": toolName,
               }),
             )
-            return AgentTools.spawned({ childExecutionId: String(current.child_execution_id) })
+            return AgentTools.AgentContract.spawned({ childExecutionId: String(current.child_execution_id) })
           })
-          const delegationHandlerLayer = AgentToolkits.modelToolkit.toLayer({
+          const delegationHandlerLayer = AgentToolkits.AgentContract.modelToolkit.toLayer({
             task: (input) => delegation("task", "Task", input),
             oracle: (input) => delegation("oracle", "Oracle", input),
             librarian: (input) => delegation("librarian", "Librarian", input),
@@ -2299,8 +2309,8 @@ export const layer = <
           })
           const handlerLayer = Layer.mergeAll(
             options.additionalHandlerLayer === undefined
-              ? RikaToolRuntimeHandler.handlerLayer
-              : Layer.merge(RikaToolRuntimeHandler.handlerLayer, options.additionalHandlerLayer),
+              ? ToolCatalog.handlerLayer
+              : Layer.merge(ToolCatalog.handlerLayer, options.additionalHandlerLayer),
             ThreadHost.handlerLayer(promoterRegistry),
             delegationHandlerLayer,
           )

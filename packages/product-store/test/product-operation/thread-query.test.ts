@@ -410,7 +410,7 @@ describe("ThreadQuery", () => {
 
       const query = yield* ThreadQuery.Service
       type StructuredRead = {
-        readonly selection: NonNullable<(typeof Fixtures.ThreadRead.ReadThreadInput.Type)["selection"]>
+        readonly selection: NonNullable<(typeof Fixtures.ThreadRead.ThreadContract.ReadThreadInput.Type)["selection"]>
       }
       const read = (selection: StructuredRead["selection"]) =>
         query
@@ -449,7 +449,7 @@ describe("ThreadQuery", () => {
         const omission = pages.at(-1)?.omissions[0]
         if (omission === undefined) break
         const continuation = omission.continuation
-        const nextInput = yield* Schema.decodeUnknownEffect(Fixtures.ThreadRead.ReadThreadInput)({
+        const nextInput = yield* Schema.decodeUnknownEffect(Fixtures.ThreadRead.ThreadContract.ReadThreadInput)({
           threadId: storedThread.id,
           selection: continuation,
         })
@@ -542,7 +542,7 @@ describe("ThreadQuery", () => {
 
   it.effect("exposes separate public find handler and maps failures", () =>
     Effect.gen(function* () {
-      const toolkit = yield* Fixtures.ThreadToolkits.findToolkit
+      const toolkit = yield* Fixtures.ThreadToolkits.ThreadContract.findToolkit
       const chunks = yield* toolkit
         .handle("find_thread", { query: "auth" })
         .pipe(
@@ -555,7 +555,7 @@ describe("ThreadQuery", () => {
 
   it.effect("resolves the invocation workspace and hides threads in another workspace", () =>
     Effect.gen(function* () {
-      const toolkit = yield* Fixtures.ThreadToolkits.findToolkit
+      const toolkit = yield* Fixtures.ThreadToolkits.ThreadContract.findToolkit
       const handle = (executionId: string) =>
         toolkit.handle("find_thread", { query: "auth" }).pipe(
           Effect.flatMap(Stream.runCollect),

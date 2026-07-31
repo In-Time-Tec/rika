@@ -12,8 +12,7 @@
     "./plugin-contract": "./src/plugin/plugin-contract.ts",
     "./plugin-digest": "./src/plugin/plugin-digest.ts",
     "./plugin-registry": "./src/plugin/plugin-registry.ts",
-    "./skill-registry": "./src/skill/skill-registry.ts",
-    "./mcp-oauth-store": "./src/mcp/mcp-oauth-store.ts"
+    "./skill-registry": "./src/skill/skill-registry.ts"
   },
   "dependencies": {
     "@batonfx/core": "catalog:",

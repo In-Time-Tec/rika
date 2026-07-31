@@ -1,7 +1,7 @@
-import * as AgentDefinitions from "@rika/coding-tools/agent-tool-tools"
-import * as AgentSelection from "@rika/coding-tools/agent-tool-selection"
-import * as AgentAwait from "@rika/coding-tools/agent-tool-await-result"
-import * as AgentOutcomes from "@rika/coding-tools/agent-tool-outcomes"
+import * as AgentDefinitions from "@rika/coding-tools/agent-tool-contract"
+import * as AgentSelection from "@rika/coding-tools/agent-tool-contract"
+import * as AgentAwait from "@rika/coding-tools/agent-tool-contract"
+import * as AgentOutcomes from "@rika/coding-tools/agent-tool-contract"
 import * as ExecutionStatus from "@rika/product/execution-status"
 import { Ids, ToolRuntime as RelayToolRuntime } from "@relayfx/sdk"
 import { Effect } from "effect"
@@ -49,12 +49,12 @@ export interface JoinInput extends JoinOptions {
 }
 
 const failed = (message: string) =>
-  RelayToolRuntime.ToolExecutionFailed.make({ tool_name: AgentSelection.awaitSubagentsToolName, message })
+  RelayToolRuntime.ToolExecutionFailed.make({ tool_name: AgentSelection.AgentContract.awaitSubagentsToolName, message })
 
 const collect = (options: JoinOptions, target: JoinTarget) =>
   target._tag === "unknown"
     ? Effect.succeed(
-        AgentOutcomes.noReport({
+        AgentOutcomes.AgentContract.noReport({
           childExecutionId: target.childExecutionId,
           reason: unknownSubagentReason(target.childExecutionId),
         }),
@@ -68,7 +68,7 @@ export const join = (input: JoinInput) =>
     const pending = plan.find((target) => target._tag === "pending")
     if (pending !== undefined) {
       return yield* RelayToolRuntime.ToolExecutionWaitRequested.make({
-        tool_name: AgentSelection.awaitSubagentsToolName,
+        tool_name: AgentSelection.AgentContract.awaitSubagentsToolName,
         wait_id: childJoinWaitId(pending.childExecutionId),
       })
     }
@@ -77,10 +77,10 @@ export const join = (input: JoinInput) =>
   })
 
 export const registeredTool = (options: JoinOptions): RelayToolRuntime.RegisteredTool =>
-  RelayToolRuntime.tool(AgentSelection.awaitSubagentsToolName, {
-    description: AgentSelection.awaitSubagentsDescription,
-    input: AgentDefinitions.AwaitSubagentsInput,
-    output: AgentAwait.AwaitSubagentsResult,
+  RelayToolRuntime.tool(AgentSelection.AgentContract.awaitSubagentsToolName, {
+    description: AgentSelection.AgentContract.awaitSubagentsDescription,
+    input: AgentDefinitions.AgentContract.AwaitSubagentsInput,
+    output: AgentAwait.AgentContract.AwaitSubagentsResult,
     needsApproval: false,
     run: (input, context) =>
       join({ ...options, executionId: String(context.executionId), requested: input.subagents ?? undefined }),

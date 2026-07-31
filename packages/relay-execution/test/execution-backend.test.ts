@@ -1,4 +1,4 @@
-import * as ThreadToolkits from "@rika/coding-tools/thread-toolkits"
+import * as ThreadToolkits from "@rika/coding-tools/thread-tool-contract"
 import { describe, expect, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { vi } from "vitest"
@@ -365,7 +365,7 @@ const provideBackend = (implementation: Client.Interface) => provideConfiguredBa
 const provideBackendWithThreadTools = (implementation: Client.Interface) => {
   const contextLayer = RelayExecutionBackend.layerFromClient({
     selection,
-    additionalToolkit: ThreadToolkits.toolkit,
+    additionalToolkit: ThreadToolkits.ThreadContract.toolkit,
   }).pipe(Layer.provide(Layer.succeed(Client.Service, implementation)))
   return <A, E>(effect: Effect.Effect<A, E, ExecutionBackend.Service>) =>
     Effect.gen(function* () {
@@ -1911,7 +1911,7 @@ describe("ExecutionBackend Relay client adapter", () => {
           oracleSelection,
           compaction: mainCompaction,
           oracleCompaction,
-          additionalToolkit: ThreadToolkits.allToolkit,
+          additionalToolkit: ThreadToolkits.ThreadContract.allToolkit,
           resolveWorkspace: (execution) => Effect.succeed(execution.includes("other-turn") ? "/configured" : "/plain"),
         }),
       )

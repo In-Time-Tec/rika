@@ -1,5 +1,5 @@
-import { MediaAnalysisError } from "@rika/coding-tools/media-view-errors"
-import { analyzerTestLayer } from "@rika/coding-tools/media-analysis-service"
+import { MediaAnalysisError } from "@rika/coding-tools/media-view-service"
+import { analyzerTestLayer } from "@rika/coding-tools/media-view-service"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { createTestRenderer } from "@opentui/core/testing"
 import { Operation } from "@rika/product/product-operation"

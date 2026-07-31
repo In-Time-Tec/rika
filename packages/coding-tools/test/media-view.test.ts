@@ -1,7 +1,6 @@
-import type { AnalyzerInterface } from "@rika/coding-tools/media-analysis-service"
-import { MediaAnalysisError } from "@rika/coding-tools/media-view-errors"
-import { AnalysisInput } from "@rika/coding-tools/media-view-contract"
-import { MediaAnalyzer, analyzerTestLayer, analyzerUnavailableLayer } from "@rika/coding-tools/media-analysis-service"
+import { MediaAnalysisError } from "@rika/coding-tools/media-view-service"
+import { AnalysisInput } from "../src/media/media-view-contract"
+import { MediaAnalyzer, analyzerTestLayer, analyzerUnavailableLayer } from "@rika/coding-tools/media-view-service"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer, Path, PlatformError } from "effect"
@@ -16,7 +15,8 @@ const bytes = (signature: ReadonlyArray<number>, size = signature.length) => {
 
 const view = (
   content: Uint8Array,
-  analyze: AnalyzerInterface["analyze"] = (_: AnalysisInput) => Effect.succeed("analysis"),
+  analyze: (input: AnalysisInput) => Effect.Effect<string, MediaAnalysisError> = (_: AnalysisInput) =>
+    Effect.succeed("analysis"),
 ) =>
   Effect.scoped(
     Effect.gen(function* () {

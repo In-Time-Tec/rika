@@ -1,4 +1,4 @@
-import * as RuntimeContract from "@rika/coding-tools/coding-tool-runtime-contract"
+import * as RuntimeContract from "@rika/coding-tools/coding-tool-runtime"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -6,7 +6,7 @@ import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
-import { Context, Deferred, Effect, Fiber, Layer, Ref } from "effect"
+import { Context, Deferred, Effect, Fiber, Layer, Ref, Schema } from "effect"
 import { TestClock, TestConsole } from "effect/testing"
 import { Operation, ProductAgent } from "@rika/product/product-operation"
 import { provideLayer } from "../support/product-test-layer"
@@ -95,7 +95,7 @@ describe("Operation review dispatcher", () => {
 
   it.effect("builds staged and base git diffs and reports empty reviews in text and JSON", () =>
     Effect.gen(function* () {
-      const requests = yield* Ref.make<ReadonlyArray<RuntimeContract.Request>>([])
+      const requests = yield* Ref.make<ReadonlyArray<Schema.Schema.Type<typeof RuntimeContract.Request>>>([])
       const tool = ToolRuntime.Service.of({
         run: (request) =>
           Ref.update(requests, (all) => [...all, request]).pipe(
@@ -161,7 +161,7 @@ describe("Operation review dispatcher", () => {
 
   it.effect("rejects conflicting and option-shaped selectors before running Git", () =>
     Effect.gen(function* () {
-      const requests = yield* Ref.make<ReadonlyArray<RuntimeContract.Request>>([])
+      const requests = yield* Ref.make<ReadonlyArray<Schema.Schema.Type<typeof RuntimeContract.Request>>>([])
       const tool = ToolRuntime.Service.of({
         run: (request) =>
           Ref.update(requests, (all) => [...all, request]).pipe(Effect.as({ text: "", truncated: false, exitCode: 0 })),

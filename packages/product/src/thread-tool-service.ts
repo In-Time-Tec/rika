@@ -1,5 +1,4 @@
-import * as ThreadFind from "@rika/coding-tools/thread-tool-find-contract"
-import * as ThreadCoordination from "@rika/coding-tools/thread-tool-coordination-contract"
+import { ThreadContract } from "@rika/coding-tools/thread-tool-contract"
 import { createHash, randomUUID } from "node:crypto"
 import * as ThreadInteractionRepository from "@rika/product/thread-interaction-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -28,16 +27,16 @@ type Failure = { readonly _tag: string }
 export interface Interface {
   readonly createThread: (
     invocation: ToolInvocation.Value,
-    input: typeof ThreadCoordination.CreateThreadInput.Type,
-  ) => Effect.Effect<typeof ThreadCoordination.AcceptedSuccess.Type, Failure>
+    input: typeof ThreadContract.CreateThreadInput.Type,
+  ) => Effect.Effect<typeof ThreadContract.AcceptedSuccess.Type, Failure>
   readonly interact: (
     invocation: ToolInvocation.Value,
-    input: typeof ThreadCoordination.ThreadInteractInput.Type,
-  ) => Effect.Effect<typeof ThreadCoordination.ThreadInteractSuccess.Type, Failure>
+    input: typeof ThreadContract.ThreadInteractInput.Type,
+  ) => Effect.Effect<typeof ThreadContract.ThreadInteractSuccess.Type, Failure>
   readonly waitForThreads: (
     invocation: ToolInvocation.Value,
-    input: typeof ThreadCoordination.WaitForThreadsInput.Type,
-  ) => Effect.Effect<typeof ThreadCoordination.WaitForThreadsSuccess.Type, Failure>
+    input: typeof ThreadContract.WaitForThreadsInput.Type,
+  ) => Effect.Effect<typeof ThreadContract.WaitForThreadsSuccess.Type, Failure>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/product/thread-tool-service/Service") {}
@@ -91,7 +90,7 @@ const limits = { maximumDepth: 3, maximumAdmissions: 8, maximumWorkspaceActive: 
 const delivery = (value: "reply" | "manual" | undefined) => value ?? "reply"
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex")
 const terminal = ExecutionStatus.isTerminalStatus
-const state = (turns: ReadonlyArray<Turn.Turn>): ThreadFind.ThreadState =>
+const state = (turns: ReadonlyArray<Turn.Turn>): typeof ThreadContract.ThreadState.Type =>
   ThreadState.threadState(turns.map((turn) => turn.status))
 
 export const make = Effect.fn("ThreadToolService.make")(function* (options: Options) {
@@ -122,7 +121,7 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
               .accepted(accepted.turnId)
               .pipe(Effect.mapError(() => ({ _tag: "ThreadSchedulingFailed" }) as const))
           : Effect.void
-      const createThread = (input: typeof ThreadCoordination.CreateThreadInput.Type) =>
+      const createThread = (input: typeof ThreadContract.CreateThreadInput.Type) =>
         Effect.gen(function* () {
           const resultDelivery = delivery(input.resultDelivery)
           const accepted = yield* interactions.createThread({
@@ -145,11 +144,9 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
             state: accepted.status === "queued" ? ("queued" as const) : ("running" as const),
           }
         })
-      const interact = (input: typeof ThreadCoordination.ThreadInteractInput.Type) =>
+      const interact = (input: typeof ThreadContract.ThreadInteractInput.Type) =>
         Effect.gen(function* () {
-          if ((input.action === "message" || input.action === "steer") && input.message === undefined)
-            return yield* Effect.fail({ _tag: "ThreadInteractMessageRequired" } as const)
-          const messageText = input.message ?? ""
+          const messageText = input.action === "message" || input.action === "steer" ? input.message : ""
           const threadId = Thread.ThreadId.make(input.threadId)
           if (input.action === "message") {
             const resultDelivery = delivery(input.resultDelivery)
@@ -193,7 +190,7 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
               truncated: false,
             }
           if (input.action === "preview_messages") {
-            const limit = input.limit ?? ThreadFind.previewDefaultLimit
+            const limit = input.limit ?? ThreadContract.previewDefaultLimit
             const end =
               input.cursor === undefined
                 ? messages.length
@@ -237,7 +234,7 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
             truncated: false,
           }
         })
-      const waitForThreads = (input: typeof ThreadCoordination.WaitForThreadsInput.Type) =>
+      const waitForThreads = (input: typeof ThreadContract.WaitForThreadsInput.Type) =>
         Effect.gen(function* () {
           const inspectTargets = Effect.forEach(input.targets, (target) =>
             Effect.gen(function* () {
