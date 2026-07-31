@@ -480,7 +480,7 @@ export const isServerStamped = (event: ExecutionBackend.Event): boolean => event
 
 const isActiveEventType = (type: string): type is ActiveEventType => activeEventTypes.has(type)
 
-const isTerminalEventType = (type: ActiveEventType): boolean => ExecutionStatus.isTerminalEventType(type)
+const isTerminalEventType = (type: ActiveEventType): boolean => ExecutionStatus.terminalEventStatus(type) !== undefined
 
 export interface Interval {
   readonly start: number

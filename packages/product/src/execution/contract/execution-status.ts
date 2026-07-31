@@ -5,7 +5,7 @@ export const statuses = ["accepted", "queued", "running", "waiting", "completed"
 export const Status = Schema.Literals(statuses)
 export type Status = typeof Status.Type
 
-const terminalStatuses = ["completed", "failed", "cancelled"] as const satisfies ReadonlyArray<Status>
+export const terminalStatuses = ["completed", "failed", "cancelled"] as const satisfies ReadonlyArray<Status>
 type TerminalStatus = (typeof terminalStatuses)[number]
 
 export const isTerminalStatus = (status: Status): status is TerminalStatus => {
@@ -33,4 +33,3 @@ export const terminalEventStatus = (eventType: string): Status | undefined => {
   return undefined
 }
 
-export const isTerminalEventType = (eventType: string): boolean => terminalEventStatus(eventType) !== undefined
