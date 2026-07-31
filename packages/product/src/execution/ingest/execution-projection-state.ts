@@ -5,8 +5,6 @@ import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Function } from "effect"
 import type { ProjectionOrigin, VisibleState } from "./execution-projection-contract"
 
-export * from "./execution-projection-contract"
-
 export interface ProjectionNode {
   readonly executionId: string
   readonly key: string

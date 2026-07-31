@@ -487,7 +487,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
 
   const publishPatch = (
     pipeline: Pipeline,
-    origin: IngestProjection.ProjectionOrigin,
+    origin: IngestProjectionContract.ProjectionOrigin,
     visible: IngestProjectionTypes.VisibleDelta,
   ) => {
     const root = pipeline.nodes.get(pipeline.rootKey)!
