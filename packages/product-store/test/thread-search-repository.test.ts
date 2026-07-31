@@ -1,5 +1,6 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { describe, expect, it } from "@effect/vitest"
 import { Database as NativeDatabase } from "bun:sqlite"
 import { Effect, FileSystem, Layer, Schema } from "effect"
@@ -39,24 +40,24 @@ const turn = (target: Thread.Thread, prompt: string): Turn.AgentExecutionTurn =>
   updatedAt: target.updatedAt,
 })
 
-const assistant = (target: Turn.AgentExecutionTurn, text: string, parentId?: string): Transcript.Unit => {
+const assistant = (target: Turn.AgentExecutionTurn, text: string, parentId?: string): TranscriptUnit.Unit => {
   const key = `${target.id}:${parentId ?? "root"}:${text}`
   return {
     key,
     turnId: target.id,
     ...(parentId === undefined ? {} : { parentId }),
-    order: Transcript.unitOrder(key, 1),
+    order: TranscriptOrdering.unitOrder(key, 1),
     revision: 1,
     content: { _tag: "Entry", role: "assistant", text },
   }
 }
 
-const edit = (target: Turn.Turn, path: string, status: "complete" | "failed"): Transcript.Unit => {
+const edit = (target: Turn.Turn, path: string, status: "complete" | "failed"): TranscriptUnit.Unit => {
   const key = `${target.id}:edit:${path}:${status}`
   return {
     key,
     turnId: target.id,
-    order: Transcript.unitOrder(key, 2),
+    order: TranscriptOrdering.unitOrder(key, 2),
     revision: 2,
     content: {
       _tag: "Block",

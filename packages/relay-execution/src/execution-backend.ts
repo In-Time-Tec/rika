@@ -1,15 +1,13 @@
 import { type Compaction, ModelRegistry, ModelResilience, type Permissions } from "@batonfx/core"
 import { executionEventHistoryFor } from "@rika/configuration/configuration-paths"
-import {
-  AgentTools,
-  Catalog as ToolCatalog,
-  MediaView,
-  ProcessRegistry,
-  ReadWebPage,
-  Runtime as RikaToolRuntime,
-  ToolInvocation,
-  WebSearch,
-} from "@rika/coding-tools/coding-tool-catalog"
+import * as AgentTools from "@rika/coding-tools/agent-tool-contract"
+import { Catalog as ToolCatalog } from "@rika/coding-tools/coding-tool-catalog"
+import * as MediaView from "@rika/coding-tools/media-view-service"
+import * as ProcessRegistry from "@rika/coding-tools/shell-process-registry"
+import * as ReadWebPage from "@rika/coding-tools/read-web-page-service"
+import * as RikaToolRuntime from "@rika/coding-tools/coding-tool-runtime"
+import * as ToolInvocation from "@rika/coding-tools/tool-invocation"
+import * as WebSearch from "@rika/coding-tools/web-search-service"
 import {
   ChildFanOutHost,
   Client,
@@ -84,7 +82,8 @@ import {
   delegationAvailableAtDepth,
   toolsAtDepth,
 } from "./agent-depth"
-import { ExecutionId, ExecutionStatus } from "@rika/coding-tools/coding-tool-catalog"
+import { ExecutionId } from "@rika/product/execution-identifier"
+import * as ExecutionStatus from "@rika/product/execution-status"
 import * as DataBlobStore from "./data-blob-store"
 
 export { streamingOnlyLanguageModel, withStreamingOnlyModel } from "./streaming-only-model"

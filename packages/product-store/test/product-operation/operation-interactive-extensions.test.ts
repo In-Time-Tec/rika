@@ -7,7 +7,10 @@ import * as Turn from "@rika/product/turn-record"
 import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
 import * as SummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptIdentity from "@rika/transcript/transcript-unit-identity"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Schema } from "effect"
 import { ExecutionIngest } from "@rika/product/product-operation"
 import { Operation } from "@rika/product/product-operation"
@@ -129,28 +132,31 @@ const terminalTransitionScenario = (
       const turns = yield* TurnRepository.makeMemory([target])
       const stale = oversizedProjection
         ? {
-            ...Transcript.empty(target.id, target.prompt),
+            ...TranscriptProjection.Projection.empty(target.id, target.prompt),
             units: [
               {
                 key: `turn:${target.id}:user`,
                 turnId: target.id,
-                order: Transcript.unitOrder(`turn:${target.id}:user`, -1),
+                order: TranscriptOrdering.unitOrder(`turn:${target.id}:user`, -1),
                 revision: 0,
                 content: { _tag: "Entry" as const, role: "user" as const, text: target.prompt },
               },
               {
                 key: `${target.id}:assistant:opening`,
                 turnId: target.id,
-                order: Transcript.unitOrder(`${target.id}:assistant:opening`, 1),
+                order: TranscriptOrdering.unitOrder(`${target.id}:assistant:opening`, 1),
                 revision: 1,
                 content: { _tag: "Entry" as const, role: "assistant" as const, text: "opening response" },
               },
               ...Array.from(
                 { length: 220 },
-                (_, index): Transcript.Unit => ({
+                (_, index): TranscriptUnit.Unit => ({
                   key: `${target.id}:nested:${index.toString().padStart(3, "0")}`,
                   turnId: target.id,
-                  order: Transcript.unitOrder(`${target.id}:nested:${index.toString().padStart(3, "0")}`, index + 2),
+                  order: TranscriptOrdering.unitOrder(
+                    `${target.id}:nested:${index.toString().padStart(3, "0")}`,
+                    index + 2,
+                  ),
                   revision: index + 2,
                   content: {
                     _tag: "Block",
@@ -161,7 +167,7 @@ const terminalTransitionScenario = (
               {
                 key: `${target.id}:assistant:final`,
                 turnId: target.id,
-                order: Transcript.unitOrder(`${target.id}:assistant:final`, 222),
+                order: TranscriptOrdering.unitOrder(`${target.id}:assistant:final`, 222),
                 revision: 222,
                 content: { _tag: "Entry" as const, role: "assistant" as const, text: "final response" },
               },
@@ -169,7 +175,7 @@ const terminalTransitionScenario = (
             revision: 222,
             checkpointCursor: "terminal-cursor",
           }
-        : Transcript.project(target.id, target.prompt, [
+        : TranscriptProjection.Projection.project(target.id, target.prompt, [
             {
               cursor: "terminal-cursor",
               sequence: 1,
@@ -312,7 +318,7 @@ const terminalTransitionScenario = (
       }
       const stored = yield* transcripts.get(target.id)
       if (stored === undefined) return yield* Effect.die("authoritative projection was not stored")
-      const deliveredUnits: ReadonlyArray<Transcript.Unit> =
+      const deliveredUnits: ReadonlyArray<TranscriptUnit.Unit> =
         loadedPages.flat().length === 0 ? stored.units : loadedPages.flat().map((entry) => entry.unit)
       const deliveredTurn = loadedPages.flat()[0]?.turn ?? stored.turn
       expect(deliveredTurn.status).toBe(inspectedStatus)
@@ -372,7 +378,7 @@ describe("interactive session extensions", () => {
         yield* storeProjection(
           transcripts,
           running,
-          Transcript.project(running.id, running.prompt, [
+          TranscriptProjection.Projection.project(running.id, running.prompt, [
             {
               cursor: "stored-cursor",
               sequence: 1,
@@ -443,7 +449,7 @@ describe("interactive session extensions", () => {
         if (preview?._tag !== "ThreadPreviewLoaded") return yield* Effect.die("missing thread preview")
         expect(preview.threadId).toBe(String(previewed.id))
         expect(preview.turns.map((value) => value.prompt)).toEqual(["preview prompt"])
-        const previewUnits = yield* Schema.decodeUnknownEffect(Schema.Array(Transcript.Unit))(
+        const previewUnits = yield* Schema.decodeUnknownEffect(Schema.Array(TranscriptUnit.Unit))(
           preview.turns.flatMap((value) => value.units),
         )
         expect(
@@ -545,7 +551,7 @@ describe("interactive session extensions", () => {
         yield* storeProjection(
           transcripts,
           target,
-          { ...Transcript.empty(target.id, target.prompt), costUsd: 15 },
+          { ...TranscriptProjection.Projection.empty(target.id, target.prompt), costUsd: 15 },
           {
             consumed: { [String(target.id)]: { cursor: "", sequence: -1, status: "completed" } },
             projectionVersion: 3,
@@ -732,7 +738,7 @@ describe("interactive session extensions", () => {
           yield* storeProjection(
             transcripts,
             target,
-            Transcript.project(target.id, target.prompt, [
+            TranscriptProjection.Projection.project(target.id, target.prompt, [
               {
                 cursor: `${turnId}-completed`,
                 sequence: 1,
@@ -1290,20 +1296,20 @@ describe("interactive session extensions", () => {
           loadedEntries.some(
             (entry) =>
               entry.unit.turnId === childId &&
-              entry.unit.parentId === Transcript.scopedIdentity("parent-turn", childCallId),
+              entry.unit.parentId === TranscriptIdentity.scopedIdentity("parent-turn", childCallId),
           ),
         ).toBe(true)
         expect(
           loadedEntries.some(
             (entry) =>
               entry.unit.turnId === nestedId &&
-              entry.unit.parentId === Transcript.scopedIdentity(childId, nestedCallId),
+              entry.unit.parentId === TranscriptIdentity.scopedIdentity(childId, nestedCallId),
           ),
         ).toBe(true)
         expect(
           loadedEntries.some(
             (entry) =>
-              entry.unit.parentId === Transcript.scopedIdentity("parent-turn", childCallId) &&
+              entry.unit.parentId === TranscriptIdentity.scopedIdentity("parent-turn", childCallId) &&
               entry.unit.content._tag === "Entry" &&
               entry.unit.content.role === "assistant" &&
               entry.unit.content.text === "## Child complete\n\n**Projection preserved.**",

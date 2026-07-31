@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
-import { ParallelSearch } from "@rika/coding-tools/coding-tool-catalog"
+import * as ParallelSearch from "@rika/coding-tools/parallel-web-search"
 import { provide } from "./test-layer"
 
 const response = (request: HttpClientRequest.HttpClientRequest, body: unknown, status = 200) =>

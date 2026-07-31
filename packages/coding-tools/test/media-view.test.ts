@@ -1,7 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer, Path, PlatformError } from "effect"
-import { MediaView } from "@rika/coding-tools/coding-tool-catalog"
+import * as MediaView from "@rika/coding-tools/media-view-service"
 import { provide } from "./test-layer"
 
 const bytes = (signature: ReadonlyArray<number>, size = signature.length) => {

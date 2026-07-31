@@ -1,6 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { TestModel } from "@batonfx/test"
-import { Catalog, Runtime } from "@rika/coding-tools/coding-tool-catalog"
+import { Catalog } from "@rika/coding-tools/coding-tool-catalog"
+import * as Runtime from "@rika/coding-tools/coding-tool-runtime"
 import { expect, test } from "vitest"
 import { Effect, FileSystem, Layer, Redacted, Schema } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"

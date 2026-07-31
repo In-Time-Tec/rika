@@ -1,5 +1,11 @@
+import * as BehaviorMode from "@rika/configuration/behavior-mode"
+import * as ModelRoute from "@rika/configuration/model-route"
+import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
+import * as SettingsDefaults from "@rika/configuration/configuration-settings"
+import * as ConfigurationService from "@rika/configuration/configuration-service"
+import * as SettingsDecoder from "@rika/configuration/configuration-settings"
+import * as ConfigurationSettingsInput from "@rika/configuration/configuration-settings"
 import { describe, expect, it } from "@effect/vitest"
-import { ConfigContract } from "@rika/configuration/configuration-settings"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as ThreadInteractionRepository from "@rika/product-store/sqlite-thread-interaction-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -10,9 +16,13 @@ import * as ProductStoreSummaryRepository from "@rika/product-store/sqlite-threa
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { AgentDepth } from "@rika/product/execution-service"
-import * as Transcript from "@rika/transcript/transcript-unit"
-import { AgentTools, Catalog as ToolCatalog } from "@rika/coding-tools/coding-tool-catalog"
-import { ExecutionExtensions, PluginRegistry } from "@rika/extensions/plugin-contract"
+import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as AgentTools from "@rika/coding-tools/agent-tool-contract"
+import { Catalog as ToolCatalog } from "@rika/coding-tools/coding-tool-catalog"
+import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"
+import * as PluginRegistry from "@rika/extensions/plugin-registry"
 import { Context, Clock, Deferred, Duration, Effect, Fiber, Layer, Queue, Ref, Scheduler, Schema } from "effect"
 import { TestClock, TestConsole } from "effect/testing"
 import { it as rawIt } from "vitest"
@@ -97,13 +107,13 @@ const settleUsage = settleEvents.pipe(Effect.andThen(TestClock.adjust("1 second"
 const nonActivation = (list: ReadonlyArray<Operation.InteractiveEvent>) =>
   list.filter((event) => event._tag !== "ThreadActivated")
 
-const reconcileDependencies = (extensions: ExecutionExtensions.Interface) =>
+const reconcileDependencies = (extensions: ExecutionExtensions.ExecutionExtensionInterface) =>
   Layer.merge(
     ResolvedContext.testLayer({ resolve: () => Effect.die("unused") }),
-    Layer.succeed(ExecutionExtensions.Service, extensions),
+    Layer.succeed(ExecutionExtensions.ExecutionExtensionService, extensions),
   )
 
-const unusedExtensions = ExecutionExtensions.Service.of({
+const unusedExtensions = ExecutionExtensions.ExecutionExtensionService.of({
   future: () => Effect.die("unused"),
   resume: () => Effect.die("unused"),
 })
@@ -415,7 +425,7 @@ describe("Operation", () => {
       }
       const turns = yield* TurnRepository.makeMemory([turn])
       const transcripts = yield* TranscriptRepository.makeMemory({ turns })
-      const projection = Transcript.project(String(turn.id), turn.prompt, [
+      const projection = TranscriptProjection.Projection.project(String(turn.id), turn.prompt, [
         {
           cursor: "projected-answer",
           sequence: 1,
@@ -504,7 +514,7 @@ describe("Operation", () => {
         updatedAt: 4,
       }
       const childId = `child:${turn.id}:call_1`
-      const root = Transcript.project(String(turn.id), turn.prompt, [
+      const root = TranscriptProjection.Projection.project(String(turn.id), turn.prompt, [
         {
           cursor: "root-tool",
           sequence: 1,
@@ -526,7 +536,7 @@ describe("Operation", () => {
           createdAt: 3,
         },
       ])
-      const child = Transcript.project(childId, "", [
+      const child = TranscriptProjection.Projection.project(childId, "", [
         {
           cursor: "child-answer",
           sequence: 1,
@@ -538,21 +548,23 @@ describe("Operation", () => {
       const parent = root.units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "ToolCall")
       if (parent?.content._tag !== "Block" || parent.content.block._tag !== "ToolCall")
         return yield* Effect.die("root projection has no delegation tool")
-      const stored = Transcript.withNestedProjections(root, [{ parentId: parent.content.block.id, projection: child }])
+      const stored = TranscriptNestedProjection.withNestedProjections(root, [
+        { parentId: parent.content.block.id, projection: child },
+      ])
       const turns = yield* TurnRepository.makeMemory([turn])
       const transcripts = yield* TranscriptRepository.makeMemory({ turns })
       yield* storeProjection(transcripts, turn, stored, {
         consumed: {
-          [Transcript.executionKey(String(turn.id))]: {
+          [TranscriptCorrelation.executionKey(String(turn.id))]: {
             cursor: "root-done",
             sequence: 3,
             status: "completed",
           },
-          [Transcript.executionKey(childId)]: { cursor: "child-answer", sequence: 1 },
+          [TranscriptCorrelation.executionKey(childId)]: { cursor: "child-answer", sequence: 1 },
         },
         executionStates: {
-          [Transcript.executionKey(String(turn.id))]: Transcript.projectionState(root),
-          [Transcript.executionKey(childId)]: Transcript.projectionState(child),
+          [TranscriptCorrelation.executionKey(String(turn.id))]: TranscriptProjection.Projection.projectionState(root),
+          [TranscriptCorrelation.executionKey(childId)]: TranscriptProjection.Projection.projectionState(child),
         },
         projectionVersion: ExecutionIngest.projectionVersion,
       })
@@ -616,7 +628,7 @@ describe("Operation", () => {
         yield* settleEvents
         expect(
           (yield* transcripts.get(turn.id))?.executionCheckpoints.find(
-            (checkpoint) => checkpoint.executionKey === Transcript.executionKey(childId),
+            (checkpoint) => checkpoint.executionKey === TranscriptCorrelation.executionKey(childId),
           )?.status,
         ).toBe("completed")
         expect(yield* Ref.get(relayReads)).toEqual([`inspect:${childId}`, `follow:${childId}:child-answer`])
@@ -1147,10 +1159,10 @@ describe("Operation", () => {
             backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
             resolveExecutionRoute: () =>
               Effect.try(() => {
-                ConfigContract.decodeSettingsInput("settings.json", {
+                SettingsDecoder.Decoder.decodeSettingsInput("settings.json", {
                   models: {
                     unsafe: {
-                      ...ConfigContract.defaults.models.luna,
+                      ...SettingsDefaults.Defaults.defaults.models.luna,
                       variants: { low: { normal: { options: { nested: { signature: "secret" } } } } },
                     },
                   },
@@ -5690,7 +5702,7 @@ describe("Operation", () => {
         uiActions: new Map(),
         diagnostics: [],
       }
-      const extensions = ExecutionExtensions.Service.of({
+      const extensions = ExecutionExtensions.ExecutionExtensionService.of({
         future: () => Ref.update(calls, (all) => [...all, "future"]).pipe(Effect.as({ pin, generation })),
         resume: (value) =>
           Ref.update(calls, (all) => [...all, `resume:${value.generation}`]).pipe(
@@ -5745,7 +5757,7 @@ describe("Operation", () => {
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
             backendLayer: Layer.succeed(ExecutionBackend.Service, runBackend),
             executionExtensions: {
-              layer: Layer.succeed(ExecutionExtensions.Service, extensions),
+              layer: Layer.succeed(ExecutionExtensions.ExecutionExtensionService, extensions),
               mcpFingerprint: Effect.succeed("mcp"),
             },
             defaultWorkspace: "/work",
@@ -5774,7 +5786,7 @@ describe("Operation", () => {
         mcpFingerprint: "m",
         resolvedContextDigest: "r",
       }
-      const extensions = ExecutionExtensions.Service.of({
+      const extensions = ExecutionExtensions.ExecutionExtensionService.of({
         future: () => Effect.die("unused"),
         resume: () => Effect.fail(PluginRegistry.GenerationUnavailable.make({ generation: "missing" })),
       })
@@ -5803,7 +5815,7 @@ describe("Operation", () => {
               ...(resumeFails
                 ? {
                     executionExtensions: {
-                      layer: Layer.succeed(ExecutionExtensions.Service, extensions),
+                      layer: Layer.succeed(ExecutionExtensions.ExecutionExtensionService, extensions),
                       mcpFingerprint: Effect.succeed("m"),
                     },
                   }
@@ -5865,7 +5877,7 @@ describe("Operation", () => {
         uiActions: new Map(),
         diagnostics: [],
       }
-      const extensions = ExecutionExtensions.Service.of({
+      const extensions = ExecutionExtensions.ExecutionExtensionService.of({
         future: () => Effect.die("unused"),
         resume: (value) => Effect.succeed({ pin: value, generation }),
       })
@@ -6220,7 +6232,9 @@ describe("Operation", () => {
         expect(yield* Ref.get(pageRequests)).toEqual([undefined, "page-one", undefined, "page-one"])
         const projection = yield* transcripts.get(targetTurn.id)
         expect(
-          projection === undefined ? undefined : Transcript.finalAssistantOutput(projection, String(targetTurn.id)),
+          projection === undefined
+            ? undefined
+            : TranscriptProjection.Projection.finalAssistantOutput(projection, String(targetTurn.id)),
         ).toBe("proven final answer")
         expect(yield* interactions.getRootResult(targetTurn.id)).toMatchObject({
           status: "completed",

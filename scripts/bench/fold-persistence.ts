@@ -4,7 +4,11 @@ import * as ThreadRepository from "../../packages/product-store/src/thread-repos
 import * as TranscriptRepository from "../../packages/product-store/src/transcript-repository"
 import * as TurnRepository from "../../packages/product-store/src/turn-repository"
 import * as Turn from "@rika/product/turn-record"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
+import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { projectionVersion } from "../../packages/product/src/execution-ingest"
 import { Context, Effect, FileSystem, Layer } from "effect"
 import type { BenchMeasurement } from "./baseline"
@@ -35,14 +39,14 @@ const sqliteLayer = (filename: string) => {
   )
 }
 
-const preparedEvent = (): Transcript.SourceEvent => ({
+const preparedEvent = (): TranscriptSourceEvent.SourceEvent => ({
   cursor: "bench-0",
   sequence: 0,
   type: "model.input.prepared",
   createdAt: 0,
 })
 
-const deltaEvent = (sequence: number): Transcript.SourceEvent => ({
+const deltaEvent = (sequence: number): TranscriptSourceEvent.SourceEvent => ({
   cursor: `bench-${sequence}`,
   sequence,
   type: "model.output.delta",
@@ -51,7 +55,7 @@ const deltaEvent = (sequence: number): Transcript.SourceEvent => ({
   text: "x",
 })
 
-const completeEvent = (sequence: number): Transcript.SourceEvent => ({
+const completeEvent = (sequence: number): TranscriptSourceEvent.SourceEvent => ({
   cursor: `bench-${sequence}`,
   sequence,
   type: "model.output.completed",
@@ -61,9 +65,9 @@ const completeEvent = (sequence: number): Transcript.SourceEvent => ({
 
 const executionCheckpoint = (
   turn: Turn.AgentExecutionTurn,
-  state: Transcript.ProjectionState,
+  state: TranscriptProjectionModel.ProjectionState,
 ): TranscriptRepository.ExecutionCheckpoint => ({
-  executionKey: Transcript.executionKey(String(turn.id)),
+  executionKey: TranscriptCorrelation.executionKey(String(turn.id)),
   executionId: String(turn.id),
   cursor: state.checkpointCursor ?? "",
   sequence: state.revision,
@@ -89,13 +93,13 @@ const prepareTurn = Effect.fn("Bench.prepareTurn")(function* (
     now: 2,
   })
   const turn = yield* turns.setStatus(turnId, "running", undefined, 3)
-  const empty = Transcript.empty(turnId, prompt)
+  const empty = TranscriptProjection.Projection.empty(turnId, prompt)
   const committed = yield* transcripts.commitDelta(
     turn,
-    Transcript.projectionState(empty),
+    TranscriptProjection.Projection.projectionState(empty),
     { upsert: empty.units, remove: [] },
     {
-      executionCheckpoints: [executionCheckpoint(turn, Transcript.projectionState(empty))],
+      executionCheckpoints: [executionCheckpoint(turn, TranscriptProjection.Projection.projectionState(empty))],
       projectionVersion,
       expectedGeneration: undefined,
     },
@@ -107,13 +111,13 @@ const prepareTurn = Effect.fn("Bench.prepareTurn")(function* (
 
 const commitBatch = Effect.fn("Bench.commitBatch")(function* (
   turn: Turn.AgentExecutionTurn,
-  fold: Transcript.ProjectionFold,
-  upsert: ReadonlyArray<Transcript.Unit>,
+  fold: TranscriptProjection.ProjectionFold,
+  upsert: ReadonlyArray<TranscriptUnit.Unit>,
   remove: ReadonlyArray<string>,
   expectedGeneration: number | undefined,
 ) {
   const transcripts = yield* TranscriptRepository.Service
-  const state = Transcript.snapshotFoldState(fold)
+  const state = TranscriptProjection.Fold.snapshotFoldState(fold)
   const result = yield* transcripts.commitDelta(
     turn,
     state,
@@ -130,7 +134,7 @@ const commitBatch = Effect.fn("Bench.commitBatch")(function* (
 
 const measureDebounceCommits = Effect.fn("Bench.measureDebounceCommits")(function* (
   turn: Turn.AgentExecutionTurn,
-  fold: Transcript.ProjectionFold,
+  fold: TranscriptProjection.ProjectionFold,
   startSequence: number,
   generation: number | undefined,
 ) {
@@ -139,11 +143,11 @@ const measureDebounceCommits = Effect.fn("Bench.measureDebounceCommits")(functio
   const clock = yield* MonotonicClock
   const latencies: Array<number> = []
   for (let burst = 0; burst < 8; burst += 1) {
-    const upsert = new Map<string, Transcript.Unit>()
+    const upsert = new Map<string, TranscriptUnit.Unit>()
     const remove = new Set<string>()
     for (let index = 0; index < debounceBurst; index += 1) {
       sequence += 1
-      const mutation = Transcript.applyFoldEvent(fold, deltaEvent(sequence))
+      const mutation = TranscriptProjection.Fold.applyFoldEvent(fold, deltaEvent(sequence))
       for (const unit of mutation.units.upsert) {
         upsert.set(unit.key, unit)
         remove.delete(unit.key)
@@ -154,7 +158,7 @@ const measureDebounceCommits = Effect.fn("Bench.measureDebounceCommits")(functio
       }
     }
     sequence += 1
-    const completion = Transcript.applyFoldEvent(fold, completeEvent(sequence))
+    const completion = TranscriptProjection.Fold.applyFoldEvent(fold, completeEvent(sequence))
     for (const unit of completion.units.upsert) {
       upsert.set(unit.key, unit)
       remove.delete(unit.key)
@@ -175,7 +179,7 @@ export const runFoldPersistenceBench = Effect.fn("Bench.runFoldPersistenceBench"
   const clock = yield* MonotonicClock
   const eventCount = options.eventCount ?? defaultEventCount
   const batchSize = options.commitBatch ?? defaultCommitBatch
-  const streamEvent = (sequence: number): Transcript.SourceEvent =>
+  const streamEvent = (sequence: number): TranscriptSourceEvent.SourceEvent =>
     sequence % batchSize === 0 || sequence === eventCount ? completeEvent(sequence) : deltaEvent(sequence)
   const fileSystem = yield* FileSystem.FileSystem
   const directory = yield* fileSystem.makeTempDirectory({ prefix: "rika-bench-" })
@@ -188,19 +192,19 @@ export const runFoldPersistenceBench = Effect.fn("Bench.runFoldPersistenceBench"
     const seeded = yield* prepareTurn(threadId, turnId, "bench prompt")
     const turn = seeded.turn
     let expectedGeneration = seeded.generation
-    const fold = Transcript.makeProjectionFold(String(turnId), turn.prompt)
-    Transcript.applyFoldEvent(fold, preparedEvent())
+    const fold = TranscriptProjection.Fold.makeProjectionFold(String(turnId), turn.prompt)
+    TranscriptProjection.Fold.applyFoldEvent(fold, preparedEvent())
     const commitLatencies: Array<number> = []
     let foldCpuSeconds = 0
     let persistCpuSeconds = 0
-    let pendingUpsert = new Map<string, Transcript.Unit>()
+    let pendingUpsert = new Map<string, TranscriptUnit.Unit>()
     let pendingRemove = new Set<string>()
     const foldWallStart = clock.now()
     const wallStart = clock.now()
     const totalCpuStart = cpuSample()
     for (let sequence = 1; sequence <= eventCount; sequence += 1) {
       const foldStart = cpuSample()
-      const mutation = Transcript.applyFoldEvent(fold, streamEvent(sequence))
+      const mutation = TranscriptProjection.Fold.applyFoldEvent(fold, streamEvent(sequence))
       foldCpuSeconds += cpuElapsedSeconds(foldStart, cpuSample())
       for (const unit of mutation.units.upsert) {
         pendingUpsert.set(unit.key, unit)

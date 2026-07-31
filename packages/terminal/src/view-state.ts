@@ -1,4 +1,12 @@
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as BehaviorMode from "@rika/configuration/behavior-mode"
+import * as ModelRoute from "@rika/configuration/model-route"
+import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
+import * as SettingsDefaults from "@rika/configuration/configuration-settings"
+import * as ConfigurationService from "@rika/configuration/configuration-service"
+import * as SettingsDecoder from "@rika/configuration/configuration-settings"
+import * as ConfigurationSettingsInput from "@rika/configuration/configuration-settings"
+import * as TranscriptPresentationModel from "@rika/transcript/transcript-presentation-model"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Duration, Function, Schema } from "effect"
 import stringWidth from "string-width"
 import { formatTokens, plural } from "./format"
@@ -7,8 +15,6 @@ import { isPrintable } from "./keys"
 import { filter, type PaletteAction } from "./palette"
 import { expandableRowIds, rows as transcriptUnits, unitId as transcriptUnitId } from "./transcript-presenter"
 import { ModeId, modeIds } from "@rika/configuration/behavior-mode"
-import { defaults as configDefaults, resolveModelRoute } from "@rika/configuration/configuration-settings"
-
 export const Mode = ModeId
 export type Mode = typeof Mode.Type
 
@@ -146,7 +152,7 @@ export const Entry = Schema.Struct({
 })
 export type Entry = typeof Entry.Type
 
-export type TranscriptBlock = Transcript.Block
+export type TranscriptBlock = TranscriptPresentationModel.Block
 
 export const isThreadBusy = (status: ThreadItem["status"]): boolean => status !== "idle" && status !== "error"
 
@@ -264,7 +270,7 @@ export type TranscriptItem =
       readonly turnId?: string
       readonly rootTurnId?: string
       readonly parentId?: string
-      readonly order?: Transcript.UnitOrder
+      readonly order?: TranscriptUnit.UnitOrder
     }
   | {
       readonly _tag: "Block"
@@ -273,7 +279,7 @@ export type TranscriptItem =
       readonly turnId?: string
       readonly rootTurnId?: string
       readonly parentId?: string
-      readonly order?: Transcript.UnitOrder
+      readonly order?: TranscriptUnit.UnitOrder
     }
 
 export interface PaletteState {
@@ -356,8 +362,8 @@ export const defaultModeRoutes: ModeRoutes = Object.fromEntries(
   modeIds.map((mode) => [
     mode,
     {
-      main: modeLabel(resolveModelRoute(configDefaults, mode, "main")),
-      oracle: modeLabel(resolveModelRoute(configDefaults, mode, "oracle")),
+      main: modeLabel(ModelRouteResolution.resolveModelRoute(SettingsDefaults.Defaults.defaults, mode, "main")),
+      oracle: modeLabel(ModelRouteResolution.resolveModelRoute(SettingsDefaults.Defaults.defaults, mode, "oracle")),
     },
   ]),
 )
@@ -405,7 +411,7 @@ const ChangedFilesSchema = Schema.Union([
 ])
 const ThreadPreviewValueSchema = Schema.Struct({
   threadId: Schema.String,
-  turns: Schema.Array(Schema.Struct({ prompt: Schema.String, units: Schema.Array(Transcript.Unit) })),
+  turns: Schema.Array(Schema.Struct({ prompt: Schema.String, units: Schema.Array(TranscriptUnit.Unit) })),
 })
 const ThreadPreviewSchema = Schema.Union([
   LoadableIdleSchema,
@@ -593,7 +599,7 @@ export type Message =
   | {
       readonly _tag: "ThreadPreviewLoaded"
       readonly threadId: string
-      readonly turns: ReadonlyArray<{ readonly prompt: string; readonly units: ReadonlyArray<Transcript.Unit> }>
+      readonly turns: ReadonlyArray<{ readonly prompt: string; readonly units: ReadonlyArray<TranscriptUnit.Unit> }>
     }
 
 export const replaceQueue: {
@@ -838,10 +844,8 @@ export const classifyPrompt = (input: string): PromptSubmission => {
 
 const imagePathPattern =
   /@image:(?:"([^"]+\.(?:png|jpe?g|gif|webp))"|'([^']+\.(?:png|jpe?g|gif|webp))'|([^\s,;]+\.(?:png|jpe?g|gif|webp)))|\[([^\]\n]+\.(?:png|jpe?g|gif|webp))\]|(?:file:\/\/[^\s]+\.(?:png|jpe?g|gif|webp))|(?:(?:\\ |[^\s[\]])+\.(?:png|jpe?g|gif|webp))/gi
-
 const textPart = (text: string, pasted: boolean): PromptPart =>
   pasted ? { type: "text", text, pasted } : { type: "text", text }
-
 const appendPromptPart = (parts: Array<PromptPart>, part: PromptPart): void => {
   const previous = parts.at(-1)
   if (part.type === "text" && previous?.type === "text" && (previous.pasted ?? false) === (part.pasted ?? false)) {
@@ -850,7 +854,6 @@ const appendPromptPart = (parts: Array<PromptPart>, part: PromptPart): void => {
   }
   parts.push(part)
 }
-
 const appendParsedText = (parts: Array<PromptPart>, text: string, pasted: boolean): void => {
   let offset = 0
   for (const match of text.matchAll(imagePathPattern)) {
@@ -868,7 +871,6 @@ const appendParsedText = (parts: Array<PromptPart>, text: string, pasted: boolea
   }
   if (offset < text.length) appendPromptPart(parts, textPart(text.slice(offset), pasted))
 }
-
 export const promptParts: {
   (input: string, pastedText?: ReadonlyArray<ComposerAttachment>): ReadonlyArray<PromptPart>
   (pastedText?: ReadonlyArray<ComposerAttachment>): (input: string) => ReadonlyArray<PromptPart>
@@ -885,7 +887,6 @@ export const promptParts: {
     return parts.length === 0 ? [{ type: "text", text: "" }] : parts
   },
 )
-
 const insert = (model: Model, value: string): Model => ({
   ...model,
   input: model.input.slice(0, model.cursor) + value + model.input.slice(model.cursor),
@@ -893,19 +894,14 @@ const insert = (model: Model, value: string): Model => ({
   historyIndex: undefined,
   historyDraft: undefined,
 })
-
 const erase = (value: Model, length: number): Model => ({
   ...value,
   input: value.input.slice(0, Math.max(0, value.cursor - length)) + value.input.slice(value.cursor),
   cursor: Math.max(0, value.cursor - length),
 })
-
 const lastCharacterLength = (value: string): number => Array.from(value).at(-1)?.length ?? 0
-
 const fileMention = (path: string): string => `@${/\s/u.test(path) ? `"${path}"` : path} `
-
 const questionKey = (key: Key): boolean => !key.ctrl && !key.alt && !key.meta && key.sequence === "?"
-
 const composerContext = (model: Model): boolean =>
   !model.threadSwitcher.open &&
   !model.threadSidebar.focused &&
@@ -913,7 +909,6 @@ const composerContext = (model: Model): boolean =>
   !model.palette.open &&
   !model.modePicker.open &&
   !model.filePicker.open
-
 const continueShortcutsAfterEdit = (before: Model, after: Model): Model => {
   const trigger = before.shortcutsTrigger
   if (trigger === undefined || before.input[trigger] !== "?" || !composerContext(after))
@@ -937,7 +932,6 @@ const continueShortcutsAfterEdit = (before: Model, after: Model): Model => {
     ? { ...after, shortcutsOpen: true, shortcutsTrigger: nextTrigger }
     : { ...after, shortcutsOpen: false, shortcutsTrigger: undefined }
 }
-
 const insertWhileShortcutsOpen = (model: Model, value: string): Model => {
   const trigger = model.shortcutsTrigger
   const next = insert(model, value)
@@ -945,7 +939,6 @@ const insertWhileShortcutsOpen = (model: Model, value: string): Model => {
     ? next
     : { ...next, shortcutsTrigger: model.cursor <= trigger ? trigger + value.length : trigger }
 }
-
 const pastedImagePath = (value: string): string | undefined => {
   const trimmed = value.trim()
   const quoted = (/^'.*'$/s.test(trimmed) || /^".*"$/s.test(trimmed)) && trimmed.length >= 2
@@ -960,9 +953,7 @@ const pastedImagePath = (value: string): string | undefined => {
   }
   return unquoted.replace(/\\ /g, " ")
 }
-
 const pastedMention = /(?:^|\s)@[^\s,;]/
-
 const insertPaste = (model: Model, value: string): Model => {
   const imagePath = pastedImagePath(value)
   if (imagePath !== undefined) return insertImage(model, imagePath)
@@ -977,7 +968,6 @@ const insertPaste = (model: Model, value: string): Model => {
   const next = insert(model, token)
   return { ...next, pastedText: [...model.pastedText, { type: "text", token, value, label }] }
 }
-
 const insertImage = (model: Model, path: string): Model => {
   if (model.editingTurnId !== undefined) return model
   const token = String.fromCharCode(0xe000 + model.pastedText.length)
@@ -988,7 +978,6 @@ const insertImage = (model: Model, path: string): Model => {
     pastedText: [...model.pastedText, { type: "image", token, path, label: `[Image #${imageCount + 1}]` }],
   }
 }
-
 const removeImage = (model: Model, path: string): Model => {
   const attachment = model.pastedText.find(
     (candidate): candidate is Extract<ComposerAttachment, { readonly type: "image" }> =>
@@ -1003,10 +992,8 @@ const removeImage = (model: Model, path: string): Model => {
     pastedText: model.pastedText.filter((candidate) => candidate !== attachment),
   }
 }
-
 export const displayInput = (model: Model): string =>
   model.pastedText.reduce((text, attachment) => text.replaceAll(attachment.token, attachment.label), model.input)
-
 export const expandPastedText: {
   (input: string, pastedText: ReadonlyArray<ComposerAttachment>): string
   (pastedText: ReadonlyArray<ComposerAttachment>): (input: string) => string
@@ -1017,7 +1004,6 @@ export const expandPastedText: {
     input,
   ),
 )
-
 export const pastedTextTokenAt: {
   (model: Model, displayOffset: number): string | undefined
   (displayOffset: number): (model: Model) => string | undefined
@@ -1031,7 +1017,6 @@ export const pastedTextTokenAt: {
   }
   return undefined
 })
-
 const expandPastedTextAttachment = (model: Model, token: string): Model => {
   const attachment = model.pastedText.find((candidate) => candidate.token === token)
   const tokenOffset = model.input.indexOf(token)
@@ -1043,7 +1028,6 @@ const expandPastedTextAttachment = (model: Model, token: string): Model => {
     pastedText: model.pastedText.filter((candidate) => candidate.token !== token),
   }
 }
-
 export const filteredFiles = (model: Model): ReadonlyArray<string> => {
   const items = readyOr(model.filePicker.items, [])
   const query = model.filePicker.query.toLowerCase()
@@ -1054,17 +1038,14 @@ export const filteredFiles = (model: Model): ReadonlyArray<string> => {
   }
   return items.filter((file) => file.toLowerCase().includes(query)).slice(0, 50)
 }
-
 export const filteredThreads = (model: Model): ReadonlyArray<ThreadItem> => {
   const query = model.threadSwitcher.query.toLowerCase()
   return (model.threads as ReadonlyArray<ThreadItem>).filter((thread) =>
     `${thread.title} ${thread.workspace ?? ""} ${thread.id}`.toLowerCase().includes(query),
   )
 }
-
 export const selectedThreadMetadata = (model: Model): ThreadItem | undefined =>
   filteredThreads(model)[model.threadSwitcher.selected]
-
 const renameThread = (
   threads: ReadonlyArray<ThreadItem>,
   threadId: string,
@@ -1074,7 +1055,6 @@ const renameThread = (
   for (const thread of threads) next.push(thread.id === threadId ? { ...thread, title } : thread)
   return next
 }
-
 const sameChangedFiles = (left: ReadonlyArray<ChangedFile>, right: ReadonlyArray<ChangedFile>): boolean =>
   left.length === right.length &&
   left.every((file, index) => {
@@ -1087,7 +1067,6 @@ const sameChangedFiles = (left: ReadonlyArray<ChangedFile>, right: ReadonlyArray
       file.removed === candidate.removed
     )
   })
-
 export const canSubmit = (model: Model): boolean =>
   model.editingTurnId === undefined &&
   !model.threadSwitcher.open &&
@@ -1098,7 +1077,6 @@ export const canSubmit = (model: Model): boolean =>
   !model.filePicker.open &&
   !model.shortcutsOpen &&
   !(model.cursor > 0 && model.input[model.cursor - 1] === "\\")
-
 export const update: {
   (model: Model, message: Message): Model
   (message: Message): (model: Model) => Model
@@ -2240,7 +2218,6 @@ export const update: {
     }
   }
 })
-
 export const withModeRoutes: {
   (routes: ModeRoutes): (model: Model) => Model
   (model: Model, routes: ModeRoutes): Model

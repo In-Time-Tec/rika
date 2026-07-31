@@ -1,12 +1,9 @@
-import {
-  agentPresentation,
-  childParentMatch,
-  compareUnitOrder,
-  executionKey,
-  type Block,
-  type Unit,
-  type UnitDelta,
-} from "@rika/transcript/transcript-unit"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import { childParentMatch, executionKey } from "@rika/transcript/child-parent-correlation"
+import { compareUnitOrder } from "@rika/transcript/transcript-unit-order"
+import type { Block } from "@rika/transcript/transcript-presentation-model"
+import type { Unit } from "@rika/transcript/transcript-unit"
+import type { UnitDelta } from "@rika/transcript/transcript-projection"
 import { Function } from "effect"
 import type { Model, TranscriptItem } from "../view-state"
 import { isDeliveredDelegationOutput, isFailedDelegationOutput, isSucceededDelegationOutput } from "./rows"
@@ -248,7 +245,7 @@ const updateExecutionOutcomes = (
 
 const childLabels = (name: string, presentation: ToolCall["presentation"]): ToolCall["presentation"] => ({
   ...presentation,
-  ...agentPresentation(name),
+  ...TranscriptProjection.Presentation.agentPresentation(name),
 })
 
 const mergeChildAgentImpl = (tool: Unit, child: Unit): Unit => {
@@ -397,7 +394,7 @@ const childAgentToolBlock = (block: ChildAgentBlock): ToolCall => ({
   name: block.name,
   input: "",
   status: block.status,
-  presentation: agentPresentation(block.name),
+  presentation: TranscriptProjection.Presentation.agentPresentation(block.name),
   detail: block.summary,
   files: [],
   childId: block.id,

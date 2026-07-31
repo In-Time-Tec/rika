@@ -1,10 +1,11 @@
-import { ExecutionId, ExecutionStatus } from "@rika/coding-tools/coding-tool-catalog"
+import { ExecutionId } from "./execution-identifier"
+import * as ExecutionStatus from "./execution-status"
 import * as ThreadSummary from "./thread-summary-schema"
 import * as ThreadSummaryRepository from "./thread-summary-repository"
 import type * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import type * as ExecutionBackend from "@rika/product/execution-service"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Function } from "effect"
 
 const record = (value: unknown): Readonly<Record<string, unknown>> =>
@@ -91,7 +92,10 @@ export const latestCursor: {
   2,
   (turnId: string, events: ReadonlyArray<ExecutionBackend.Event>): string | undefined =>
     events
-      .filter((event) => ExecutionId.ownsExecution(turnId, event.executionId) && !Transcript.isTransientEvent(event))
+      .filter(
+        (event) =>
+          ExecutionId.ownsExecution(turnId, event.executionId) && !TranscriptProjection.Fold.isTransientEvent(event),
+      )
       .reduce<
         ExecutionBackend.Event | undefined
       >((current, event) => (current === undefined || event.sequence >= current.sequence ? event : current), undefined)

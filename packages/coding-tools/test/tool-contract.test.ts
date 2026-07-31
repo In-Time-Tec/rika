@@ -1,15 +1,13 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { Tool } from "effect/unstable/ai"
-import {
-  AgentTools,
-  Catalog,
-  ParallelSearch,
-  ProcessRegistry,
-  Runtime,
-  ThreadTools,
-  ToolInvocation,
-} from "@rika/coding-tools/coding-tool-catalog"
+import * as AgentTools from "@rika/coding-tools/agent-tool-contract"
+import { Catalog } from "@rika/coding-tools/coding-tool-catalog"
+import * as ParallelSearch from "@rika/coding-tools/parallel-web-search"
+import * as ProcessRegistry from "@rika/coding-tools/shell-process-registry"
+import * as Runtime from "@rika/coding-tools/coding-tool-runtime"
+import * as ThreadTools from "@rika/coding-tools/thread-tool-contract"
+import * as ToolInvocation from "@rika/coding-tools/tool-invocation"
 import { provide } from "./test-layer"
 
 describe("tool contracts", () => {

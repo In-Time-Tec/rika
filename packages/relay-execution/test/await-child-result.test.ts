@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { AgentTools } from "@rika/coding-tools/coding-tool-catalog"
+import * as AgentTools from "@rika/coding-tools/agent-tool-contract"
 import type { Execution } from "@relayfx/sdk"
 import { resolveChildResult } from "../src/execution-backend"
 

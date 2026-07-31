@@ -1,6 +1,12 @@
+import * as BehaviorMode from "@rika/configuration/behavior-mode"
+import * as ModelRoute from "@rika/configuration/model-route"
+import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
+import * as SettingsDefaults from "@rika/configuration/configuration-settings"
+import * as ConfigurationService from "@rika/configuration/configuration-service"
+import * as SettingsDecoder from "@rika/configuration/configuration-settings"
+import * as ConfigurationSettingsInput from "@rika/configuration/configuration-settings"
 import { expect, it } from "@effect/vitest"
 import { ConfigOperations } from "@rika/product/product-operation"
-import { ConfigContract, ConfigService } from "@rika/configuration/configuration-settings"
 import { Effect, Layer, Redacted, Ref } from "effect"
 import { TestConsole } from "effect/testing"
 import { provideLayer } from "./layer"
@@ -16,7 +22,7 @@ it.effect("prints effective redacted config and keymap", () =>
   Effect.gen(function* () {
     const layer = Layer.mergeAll(
       TestConsole.layer,
-      ConfigService.memoryLayer({
+      ConfigurationService.memoryConfigurationLayer({
         environment: {
           providerCredentials: {},
           webSearchCredentials: { parallel: Redacted.make("never-print-this") },
@@ -61,7 +67,7 @@ it.effect("reports an overridden provider without an API key as not configured",
   Effect.gen(function* () {
     const layer = Layer.mergeAll(
       TestConsole.layer,
-      ConfigService.memoryLayer({
+      ConfigurationService.memoryConfigurationLayer({
         workspace: { providers: { openai: { baseUrl: "https://models.test/v1" } } },
         environment: {
           providerCredentials: { OPENAI_API_KEY: Redacted.make("must-not-use-this") },
@@ -89,7 +95,7 @@ it.effect("edits the selected path and reports secret-safe doctor status", () =>
     const edits = yield* Ref.make<ReadonlyArray<string>>([])
     const layer = Layer.mergeAll(
       TestConsole.layer,
-      ConfigService.memoryLayer(),
+      ConfigurationService.memoryConfigurationLayer(),
       ConfigOperations.testLayer({
         edit: (path) => Ref.update(edits, (values) => [...values, path]),
         exists: (path) => Effect.succeed(path === options.productDatabasePath),
@@ -112,7 +118,7 @@ it.effect("lists MCP transports and reports present doctor branches", () =>
     const presentOptions = options
     const layer = Layer.mergeAll(
       TestConsole.layer,
-      ConfigService.memoryLayer({
+      ConfigurationService.memoryConfigurationLayer({
         environment: {
           webSearchCredentials: { parallel: Redacted.make("secret") },
           providerCredentials: {
@@ -146,7 +152,7 @@ it.effect("reports missing config and mixed doctor paths", () =>
   Effect.gen(function* () {
     const layer = Layer.mergeAll(
       TestConsole.layer,
-      ConfigService.memoryLayer(),
+      ConfigurationService.memoryConfigurationLayer(),
       ConfigOperations.testLayer({
         edit: () => Effect.void,
         exists: (path) =>
@@ -169,20 +175,20 @@ it.effect("reports missing config and mixed doctor paths", () =>
 it.effect("fails doctor when the configured model route cannot be resolved", () =>
   Effect.gen(function* () {
     const settings = {
-      ...ConfigContract.defaults,
+      ...SettingsDefaults.Defaults.defaults,
       modes: {
-        ...ConfigContract.defaults.modes,
+        ...SettingsDefaults.Defaults.defaults.modes,
         medium: {
-          ...ConfigContract.defaults.modes.medium,
+          ...SettingsDefaults.Defaults.defaults.modes.medium,
           main: { alias: "missing", effort: "medium" },
         },
       },
-    } as unknown as ConfigContract.Settings
+    } as unknown as SettingsDefaults.ConfigurationSettings
     const layer = Layer.mergeAll(
       TestConsole.layer,
       Layer.succeed(
-        ConfigService.Service,
-        ConfigService.Service.of({
+        ConfigurationService.ConfigurationService,
+        ConfigurationService.ConfigurationService.of({
           effective: Effect.succeed({
             settings,
             environment: { providerCredentials: {}, webSearchCredentials: {} },

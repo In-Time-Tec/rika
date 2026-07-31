@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { applyEvent, project } from "../src/projection/transcript-projection"
+import * as TranscriptProjection from "../src/projection/transcript-projection"
 import { withNestedProjections } from "../src/projection/nested-transcript-projection"
 import {
   childOrder,
@@ -42,7 +42,7 @@ describe("intrinsic transcript unit order", () => {
     )
   })
 
-  it("rejects invalid numbers, malformed text, empty keys, and runtime mutation", () => {
+  it("rejects invalid numbers, malformed text, TranscriptProjection.Projection.empty keys, and runtime mutation", () => {
     for (const sequence of [Number.NaN, Number.POSITIVE_INFINITY, -2, 0.5, Number.MAX_SAFE_INTEGER + 1])
       expect(() => unitOrder("unit", sequence)).toThrow(RangeError)
     for (const part of [Number.NaN, Number.NEGATIVE_INFINITY, -1, 0.5, Number.MAX_SAFE_INTEGER + 1])
@@ -82,10 +82,10 @@ describe("intrinsic transcript unit order", () => {
         data: { tool_call_id: "call", output: "done" },
       },
     ]
-    let projection = project("turn", "prompt", [])
+    let projection = TranscriptProjection.Projection.project("turn", "prompt", [])
     const orders: Array<string> = []
     for (const event of events) {
-      projection = applyEvent(projection, event)
+      projection = TranscriptProjection.Projection.applyEvent(projection, event)
       const tool = projection.units.find((unit) => unit.key === "tool:turn:call")
       if (tool !== undefined) orders.push(encodeUnitOrder(tool.order))
     }
@@ -93,7 +93,7 @@ describe("intrinsic transcript unit order", () => {
   })
 
   it("adds nested units without renumbering any previously projected unit", () => {
-    const root = project("root", "delegate", [
+    const root = TranscriptProjection.Projection.project("root", "delegate", [
       {
         cursor: "tool",
         sequence: 0,
@@ -103,10 +103,10 @@ describe("intrinsic transcript unit order", () => {
       },
       { cursor: "answer", sequence: 1, type: "model.output.completed", createdAt: 1, text: "root answer" },
     ])
-    const firstChild = project("child-a", "", [
+    const firstChild = TranscriptProjection.Projection.project("child-a", "", [
       { cursor: "a", sequence: 0, type: "model.output.completed", createdAt: 0, text: "a" },
     ])
-    const secondChild = project("child-b", "", [
+    const secondChild = TranscriptProjection.Projection.project("child-b", "", [
       { cursor: "b", sequence: 0, type: "model.output.completed", createdAt: 0, text: "b" },
     ])
     const first = withNestedProjections(root, [{ parentId: "root:agent", projection: firstChild }])

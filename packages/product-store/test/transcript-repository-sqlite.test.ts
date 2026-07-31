@@ -1,5 +1,10 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
+import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
@@ -22,7 +27,7 @@ import {
   unit,
 } from "./transcript-repository-fixtures"
 
-const UnitJson = Schema.fromJsonString(Transcript.Unit)
+const UnitJson = Schema.fromJsonString(TranscriptUnit.Unit)
 
 const compareExecutionCheckpoints = (
   left: TranscriptRepository.ExecutionCheckpoint,
@@ -87,7 +92,7 @@ it.effect("lists terminal roots whose current SQLite projection has an unfinishe
           expect(
             yield* repository.commitDelta(
               target,
-              Transcript.projectionState(nested.projection),
+              TranscriptProjection.Projection.projectionState(nested.projection),
               { upsert: [], remove: [] },
               {
                 executionCheckpoints: terminal,
@@ -103,7 +108,7 @@ it.effect("lists terminal roots whose current SQLite projection has an unfinishe
   ).pipe(provideLayer(BunServices.layer)),
 )
 
-const usageEvent: Transcript.SourceEvent = {
+const usageEvent: TranscriptSourceEvent.SourceEvent = {
   cursor: "usage-5",
   sequence: 5,
   type: "model.usage.reported",
@@ -131,7 +136,9 @@ it.effect("rejects the same out-of-domain projection scalars before SQLite write
           const cases: ReadonlyArray<{
             readonly name: string
             readonly version?: number
-            readonly update: (state: Transcript.ProjectionState) => Transcript.ProjectionState
+            readonly update: (
+              state: TranscriptProjectionModel.ProjectionState,
+            ) => TranscriptProjectionModel.ProjectionState
           }> = [
             { name: "projection-version", version: 0, update: (state) => state },
             { name: "revision", update: (state) => ({ ...state, revision: -2 }) },
@@ -146,8 +153,8 @@ it.effect("rejects the same out-of-domain projection scalars before SQLite write
             const threadId = Thread.ThreadId.make(`thread-scalar-${index}`)
             const turnId = Turn.TurnId.make(`turn-scalar-${index}`)
             const target = yield* createTurn(threadId, turnId, candidate.name)
-            const projection = Transcript.empty(target.id, target.prompt)
-            const state = candidate.update(Transcript.projectionState(projection))
+            const projection = TranscriptProjection.Projection.empty(target.id, target.prompt)
+            const state = candidate.update(TranscriptProjection.Projection.projectionState(projection))
             const result = yield* Effect.result(
               repository.commitDelta(
                 target,
@@ -184,7 +191,7 @@ it.effect("persists atomic delta commits without rewriting untouched SQLite rows
           const sql = yield* SqlClient
           const target = yield* createTurn(threadId, turnId, "persist deltas")
           const initial = {
-            ...Transcript.project(target.id, target.prompt, [event(0)]),
+            ...TranscriptProjection.Projection.project(target.id, target.prompt, [event(0)]),
             costUsd: 1.25,
             usageCursors: ["usage-1"],
             usableCompletionSequence: 0,
@@ -206,7 +213,7 @@ it.effect("persists atomic delta commits without rewriting untouched SQLite rows
           expect(
             yield* repository.commitDelta(
               target,
-              Transcript.projectionState(initial),
+              TranscriptProjection.Projection.projectionState(initial),
               { upsert: [updated], remove: [] },
               {
                 executionCheckpoints: [executionCheckpoint(target, initial)],
@@ -225,7 +232,7 @@ it.effect("persists atomic delta commits without rewriting untouched SQLite rows
           expect(
             yield* repository.commitDelta(
               target,
-              Transcript.projectionState(initial),
+              TranscriptProjection.Projection.projectionState(initial),
               { upsert: [], remove: [] },
               {
                 executionCheckpoints: [executionCheckpoint(target, initial)],
@@ -239,7 +246,7 @@ it.effect("persists atomic delta commits without rewriting untouched SQLite rows
           expect(
             yield* repository.commitDelta(
               target,
-              Transcript.projectionState({ ...initial, revision: 3 }),
+              TranscriptProjection.Projection.projectionState({ ...initial, revision: 3 }),
               { upsert: [], remove: [promptKey] },
               {
                 executionCheckpoints: [executionCheckpoint(target, { ...initial, revision: 3 })],
@@ -253,7 +260,7 @@ it.effect("persists atomic delta commits without rewriting untouched SQLite rows
           const rejected = yield* Effect.result(
             repository.commitDelta(
               target,
-              Transcript.projectionState({ ...initial, revision: 2 }),
+              TranscriptProjection.Projection.projectionState({ ...initial, revision: 2 }),
               { upsert: [duplicate, duplicate], remove: [] },
               {
                 executionCheckpoints: [executionCheckpoint(target, { ...initial, revision: 2 })],
@@ -264,11 +271,11 @@ it.effect("persists atomic delta commits without rewriting untouched SQLite rows
           )
           expect(rejected._tag).toBe("Failure")
           expect(yield* repository.get(turnId)).toEqual(beforeConflict)
-          const moved = { ...updated, order: Transcript.unitOrder(updated.key, 50) }
+          const moved = { ...updated, order: TranscriptOrdering.unitOrder(updated.key, 50) }
           const movedResult = yield* Effect.result(
             repository.commitDelta(
               target,
-              Transcript.projectionState({ ...initial, revision: 2 }),
+              TranscriptProjection.Projection.projectionState({ ...initial, revision: 2 }),
               { upsert: [moved], remove: [] },
               {
                 executionCheckpoints: [executionCheckpoint(target, { ...initial, revision: 2 })],
@@ -282,11 +289,11 @@ it.effect("persists atomic delta commits without rewriting untouched SQLite rows
           const malformed = {
             ...unit(turnId, 2, 0, "malformed"),
             content: { _tag: "Entry", role: "invalid", text: "invalid" },
-          } as unknown as Transcript.Unit
+          } as unknown as TranscriptUnit.Unit
           const malformedResult = yield* Effect.result(
             repository.commitDelta(
               target,
-              Transcript.projectionState({ ...initial, revision: 2 }),
+              TranscriptProjection.Projection.projectionState({ ...initial, revision: 2 }),
               { upsert: [malformed], remove: [] },
               {
                 executionCheckpoints: [executionCheckpoint(target, { ...initial, revision: 2 })],
@@ -308,7 +315,7 @@ it.effect("persists atomic delta commits without rewriting untouched SQLite rows
           expect(reopened?.revision).toBe(0)
           expect(reopened.executionCheckpoints).toEqual([
             expect.objectContaining({
-              executionKey: Transcript.executionKey(String(turnId)),
+              executionKey: TranscriptCorrelation.executionKey(String(turnId)),
               executionId: String(turnId),
               cursor: "cursor-0",
               sequence: 0,
@@ -363,7 +370,7 @@ it.effect("atomically couples an attached child to its parent SQLite unit", () =
           const removal = yield* Effect.result(
             repository.commitDelta(
               target,
-              Transcript.projectionState(nested.projection),
+              TranscriptProjection.Projection.projectionState(nested.projection),
               { upsert: [], remove: [nested.parent.key] },
               {
                 executionCheckpoints: nested.checkpoints,
@@ -403,7 +410,7 @@ it.effect("requires a complete root-connected SQLite checkpoint graph for refold
         Effect.gen(function* () {
           const repository = yield* TranscriptRepository.Service
           const target = yield* createTurn(threadId, turnId, "refold graph")
-          const obsolete = Transcript.empty(target.id, target.prompt)
+          const obsolete = TranscriptProjection.Projection.empty(target.id, target.prompt)
           expect(yield* commitAll(repository, target, obsolete, undefined, 2)).toBe("committed")
           before = yield* repository.get(target.id)
           if (before === undefined) return yield* Effect.die("obsolete SQLite projection was not stored")
@@ -469,13 +476,16 @@ it.effect("replaces an invalidated SQLite projection authoritatively and persist
       const filename = `${directory}/rika.db`
       const threadId = Thread.ThreadId.make("thread-refold")
       const turnId = Turn.TurnId.make("turn-refold")
-      const replacement = Transcript.project(turnId, "refold", [event(2)])
+      const replacement = TranscriptProjection.Projection.project(turnId, "refold", [event(2)])
 
       yield* Effect.scoped(
         Effect.gen(function* () {
           const repository = yield* TranscriptRepository.Service
           const target = yield* createTurn(threadId, turnId, "refold")
-          const obsolete = { ...Transcript.project(turnId, target.prompt, [event(0), event(1)]), revision: 70 }
+          const obsolete = {
+            ...TranscriptProjection.Projection.project(turnId, target.prompt, [event(0), event(1)]),
+            revision: 70,
+          }
           yield* commitAll(repository, target, obsolete, undefined, 2)
           expect(
             yield* repository.replaceForRefold(target, replacement, {
@@ -527,11 +537,11 @@ it.effect("authoritatively adopts corrected durable terminal outcomes during ref
           ] as const) {
             const turnId = Turn.TurnId.make(`turn-refold-${suffix}`)
             const target = yield* createTurn(threadId, turnId, `refold ${suffix}`)
-            const obsolete = Transcript.project(turnId, target.prompt, [event(0), event(1)])
+            const obsolete = TranscriptProjection.Projection.project(turnId, target.prompt, [event(0), event(1)])
             yield* commitAll(repository, target, obsolete, undefined, 2)
             const before = yield* repository.get(turnId)
             if (before === undefined) return yield* Effect.die("obsolete projection was not stored")
-            const replacement = Transcript.project(turnId, target.prompt, [
+            const replacement = TranscriptProjection.Projection.project(turnId, target.prompt, [
               {
                 cursor: `${status}-cursor`,
                 sequence: 0,
@@ -584,14 +594,14 @@ it.effect("rejects a refold when the SQLite Turn tuple advanced concurrently", (
             Turn.TurnId.make("turn-refold-stale-turn"),
             "refold stale turn",
           )
-          const obsolete = Transcript.project(target.id, target.prompt, [event(0), event(1)])
+          const obsolete = TranscriptProjection.Projection.project(target.id, target.prompt, [event(0), event(1)])
           yield* commitAll(repository, target, obsolete, undefined, 2)
           const before = yield* repository.get(target.id)
           if (before === undefined) return yield* Effect.die("obsolete projection was not stored")
           expect(yield* turns.repairCursor(target.id, "completed", undefined, "newer-cursor")).toBe(true)
           const newer = yield* turns.get(target.id)
           const preserved = yield* repository.get(target.id)
-          const replacement = Transcript.project(target.id, target.prompt, [
+          const replacement = TranscriptProjection.Projection.project(target.id, target.prompt, [
             { cursor: "refold-failed", sequence: 0, type: "execution.failed", createdAt: 10, text: "failed" },
           ])
 
@@ -625,11 +635,11 @@ it.effect("rejects contradictory durable checkpoint and projected terminal outco
             Turn.TurnId.make("turn-refold-contradiction"),
             "refold contradiction",
           )
-          const obsolete = Transcript.project(target.id, target.prompt, [event(0), event(1)])
+          const obsolete = TranscriptProjection.Projection.project(target.id, target.prompt, [event(0), event(1)])
           yield* commitAll(repository, target, obsolete, undefined, 2)
           const before = yield* repository.get(target.id)
           if (before === undefined) return yield* Effect.die("obsolete projection was not stored")
-          const replacement = Transcript.project(target.id, target.prompt, [
+          const replacement = TranscriptProjection.Projection.project(target.id, target.prompt, [
             { cursor: "cancelled", sequence: 0, type: "execution.cancelled", createdAt: 10 },
           ])
           const rejected = yield* Effect.result(
@@ -664,11 +674,11 @@ it.effect("persists a terminal outcome appended after the initial projection", (
         Effect.gen(function* () {
           const repository = yield* TranscriptRepository.Service
           const target = yield* createTurn(threadId, turnId, "outcome")
-          const initial = Transcript.project(turnId, target.prompt, [event(0)])
+          const initial = TranscriptProjection.Projection.project(turnId, target.prompt, [event(0)])
           yield* commitAll(repository, target, initial, undefined)
           const stored = yield* repository.get(turnId)
           if (stored === undefined) return yield* Effect.die("initial projection was not stored")
-          const completed = Transcript.applyEvent(initial, event(2))
+          const completed = TranscriptProjection.Projection.applyEvent(initial, event(2))
           const previous = new Map(initial.units.map((candidate) => [candidate.key, candidate]))
           const changed = completed.units.filter(
             (candidate) => JSON.stringify(candidate) !== JSON.stringify(previous.get(candidate.key)),
@@ -676,7 +686,7 @@ it.effect("persists a terminal outcome appended after the initial projection", (
           expect(
             yield* repository.commitDelta(
               target,
-              Transcript.projectionState(completed),
+              TranscriptProjection.Projection.projectionState(completed),
               { upsert: changed, remove: [] },
               {
                 executionCheckpoints: [executionCheckpoint(target, completed, "completed")],
@@ -721,7 +731,12 @@ it.effect("restores usage dedup state before a redelivered usage event", () =>
         Effect.gen(function* () {
           const repository = yield* TranscriptRepository.Service
           const target = yield* createTurn(threadId, turnId, "usage")
-          yield* commitAll(repository, target, Transcript.project(turnId, target.prompt, [usageEvent]), undefined)
+          yield* commitAll(
+            repository,
+            target,
+            TranscriptProjection.Projection.project(turnId, target.prompt, [usageEvent]),
+            undefined,
+          )
         }).pipe(provideLayer(sqliteLayer(filename))),
       )
 
@@ -730,9 +745,14 @@ it.effect("restores usage dedup state before a redelivered usage event", () =>
           const repository = yield* TranscriptRepository.Service
           const reopened = yield* repository.get(turnId)
           if (reopened === undefined) return yield* Effect.die("usage projection was not stored")
-          const resumed: Transcript.Projection = { units: reopened.units, ...Transcript.projectionState(reopened) }
-          const redelivered = Transcript.applyEvent(resumed, usageEvent)
-          expect(Transcript.projectionState(redelivered)).toEqual(Transcript.projectionState(resumed))
+          const resumed: TranscriptProjectionModel.Projection = {
+            units: reopened.units,
+            ...TranscriptProjection.Projection.projectionState(reopened),
+          }
+          const redelivered = TranscriptProjection.Projection.applyEvent(resumed, usageEvent)
+          expect(TranscriptProjection.Projection.projectionState(redelivered)).toEqual(
+            TranscriptProjection.Projection.projectionState(resumed),
+          )
           expect(redelivered.usageCursors).toEqual([usageEvent.cursor])
           expect(redelivered.costUsd).toBe(resumed.costUsd)
         }).pipe(provideLayer(sqliteLayer(filename))),
@@ -760,7 +780,13 @@ it.effect("filters every SQLite keyset page by exact projection version", () =>
             [currentOlder, projectionVersion],
             [currentNewer, projectionVersion],
           ] as const)
-            yield* commitAll(repository, target, Transcript.empty(target.id, target.prompt), undefined, version)
+            yield* commitAll(
+              repository,
+              target,
+              TranscriptProjection.Projection.empty(target.id, target.prompt),
+              undefined,
+              version,
+            )
 
           const newest = yield* repository.page(threadId, { limit: 1, projectionVersion })
           expect(newest.entries.map((entry) => entry.turn.id)).toEqual([currentNewer.id])
@@ -806,7 +832,7 @@ it.effect("keyset-paginates a reopened nested intrinsic-order transcript without
       const filename = `${directory}/rika.db`
       const threadId = Thread.ThreadId.make("thread-page")
       const turnId = Turn.TurnId.make("turn-page")
-      const parentProjection = Transcript.project(turnId, "page", [
+      const parentProjection = TranscriptProjection.Projection.project(turnId, "page", [
         {
           cursor: "parent",
           sequence: 0,
@@ -829,7 +855,7 @@ it.effect("keyset-paginates a reopened nested intrinsic-order transcript without
           ...local,
           turnId: executionId,
           parentId,
-          order: Transcript.childOrder(parent.order, executionId, local.order),
+          order: TranscriptOrdering.childOrder(parent.order, executionId, local.order),
         }
       })
       const units = [parent, ...generated]
@@ -838,7 +864,12 @@ it.effect("keyset-paginates a reopened nested intrinsic-order transcript without
         Effect.gen(function* () {
           const repository = yield* TranscriptRepository.Service
           const target = yield* createTurn(threadId, turnId, "page")
-          const projection = { ...Transcript.empty(turnId, target.prompt), units, revision: 124, costUsd: 4.5 }
+          const projection = {
+            ...TranscriptProjection.Projection.empty(turnId, target.prompt),
+            units,
+            revision: 124,
+            costUsd: 4.5,
+          }
           const checkpoints = [
             executionCheckpoint(target, projection),
             ...generated.flatMap((candidate) =>
@@ -848,7 +879,7 @@ it.effect("keyset-paginates a reopened nested intrinsic-order transcript without
                     attachedExecutionCheckpoint(
                       candidate.turnId,
                       { revision: candidate.revision, modelPhase: -1 },
-                      Transcript.executionKey(String(turnId)),
+                      TranscriptCorrelation.executionKey(String(turnId)),
                       parent,
                     ),
                   ],
@@ -914,7 +945,7 @@ it.effect("orders Unicode and nested order segments exactly like SQLite BINARY",
           const sql = yield* SqlClient
           const target = yield* createTurn(threadId, turnId, "collation")
           const flat = ["a", "aa", "\ud7ff", "\u{10000}", "\ue000"].map((key) => unit(turnId, 1, 0, key))
-          const parentProjection = Transcript.project(turnId, target.prompt, [
+          const parentProjection = TranscriptProjection.Projection.project(turnId, target.prompt, [
             {
               cursor: "parent",
               sequence: 0,
@@ -934,24 +965,24 @@ it.effect("orders Unicode and nested order segments exactly like SQLite BINARY",
             return Object.assign({}, local, {
               turnId: executionId,
               parentId,
-              order: Transcript.childOrder(parent.order, executionId, local.order),
+              order: TranscriptOrdering.childOrder(parent.order, executionId, local.order),
             })
           })
           const units = [parent, ...flat, ...nested]
-          const projection = { ...Transcript.empty(turnId, target.prompt), units, revision: 1 }
+          const projection = { ...TranscriptProjection.Projection.empty(turnId, target.prompt), units, revision: 1 }
           yield* commitAll(repository, target, projection, undefined, projectionVersion, [
             executionCheckpoint(target, projection),
             ...nested.map((candidate) =>
               attachedExecutionCheckpoint(
                 candidate.turnId,
                 { revision: candidate.revision, modelPhase: -1 },
-                Transcript.executionKey(String(turnId)),
+                TranscriptCorrelation.executionKey(String(turnId)),
                 parent,
               ),
             ),
           ])
           const expected = units
-            .toSorted((left, right) => Transcript.compareUnitOrder(left.order, right.order))
+            .toSorted((left, right) => TranscriptOrdering.compareUnitOrder(left.order, right.order))
             .map((candidate) => candidate.key)
           const durable = yield* sql`SELECT unit_key FROM rika_transcript_units
             WHERE turn_id = ${turnId} ORDER BY unit_order_key COLLATE BINARY`
@@ -971,7 +1002,7 @@ it.effect("returns typed errors for malformed durable transcript state", () =>
       const filename = `${directory}/rika.db`
       const threadId = Thread.ThreadId.make("thread-corrupt")
       const turnId = Turn.TurnId.make("turn-corrupt")
-      const projection = Transcript.project(turnId, "corrupt", [
+      const projection = TranscriptProjection.Projection.project(turnId, "corrupt", [
         event(0),
         {
           cursor: "cursor-tool",
@@ -1005,12 +1036,12 @@ it.effect("returns typed errors for malformed durable transcript state", () =>
           const pageFailure = yield* Effect.flip(repository.page(threadId, { limit: 200 }))
           expect(pageFailure).toBeInstanceOf(TranscriptRepository.RepositoryError)
           yield* sql`UPDATE rika_transcript_units
-            SET unit_order_key = ${Transcript.encodeUnitOrder(firstUnit.order)}, unit_key = 'wrong-key'
+            SET unit_order_key = ${TranscriptOrdering.encodeUnitOrder(firstUnit.order)}, unit_key = 'wrong-key'
             WHERE turn_id = ${turnId} AND unit_key = ${firstUnit.key}`
           expect(yield* Effect.flip(repository.get(turnId))).toBeInstanceOf(TranscriptRepository.RepositoryError)
           expect(yield* Effect.flip(repository.page(threadId))).toBeInstanceOf(TranscriptRepository.RepositoryError)
           yield* sql`UPDATE rika_transcript_units
-            SET unit_key = ${firstUnit.key}, unit_order_key = ${Transcript.encodeUnitOrder(firstUnit.order)}, unit_json = ${"{"}
+            SET unit_key = ${firstUnit.key}, unit_order_key = ${TranscriptOrdering.encodeUnitOrder(firstUnit.order)}, unit_json = ${"{"}
             WHERE turn_id = ${turnId} AND unit_key = 'wrong-key'`
           const unitJsonFailure = yield* Effect.flip(repository.get(turnId))
           expect(unitJsonFailure).toBeInstanceOf(TranscriptRepository.RepositoryError)
@@ -1050,7 +1081,7 @@ it.effect("returns typed errors for malformed durable transcript state", () =>
           expect(yield* Effect.flip(repository.page(threadId))).toBeInstanceOf(TranscriptRepository.RepositoryError)
           yield* sql`UPDATE rika_transcript_units SET tool_id = ${toolUnit.content.block.id}
             WHERE turn_id = ${turnId} AND unit_key = ${toolUnit.key}`
-          const rootKey = Transcript.executionKey(String(turnId))
+          const rootKey = TranscriptCorrelation.executionKey(String(turnId))
           yield* sql`UPDATE rika_transcript_execution_checkpoints
             SET usage_cursors_json = ${"{"}
             WHERE turn_id = ${turnId} AND execution_key = ${rootKey}`

@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Clock, Effect, Fiber, Layer, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
-import { WebSearch } from "@rika/coding-tools/coding-tool-catalog"
+import * as WebSearch from "@rika/coding-tools/web-search-service"
 import { provide } from "./test-layer"
 
 const input = { objective: "Find current docs", searchQueries: ["current docs"] } as const

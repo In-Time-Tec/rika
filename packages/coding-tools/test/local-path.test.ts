@@ -1,7 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Path, PlatformError, Schema } from "effect"
-import { LocalPath } from "@rika/coding-tools/coding-tool-catalog"
+import * as LocalPath from "@rika/coding-tools/local-path"
 import { provide } from "./test-layer"
 
 const lookup = (fileSystem: FileSystem.FileSystem): LocalPath.Lookup => ({

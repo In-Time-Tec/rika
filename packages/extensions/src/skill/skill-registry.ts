@@ -2,6 +2,7 @@ import { SkillSource } from "@batonfx/core"
 import { SkillLoader } from "@batonfx/skills"
 import { Crypto, Effect, Encoding, FileSystem, Path, Schema } from "effect"
 import { SkillFileSystem } from "./skill-file-system"
+export { SkillFileSystem, fileSystemLayer } from "./skill-file-system"
 
 export interface Options {
   readonly globalRoot: string

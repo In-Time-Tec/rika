@@ -1,5 +1,6 @@
 import { Context, Effect, Layer, Schema } from "effect"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { ThreadId } from "@rika/product/thread-record"
 import { Turn, TurnId } from "@rika/product/turn-record"
 import type { AgentExecutionTurn, RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/turn-record"
@@ -22,7 +23,7 @@ export const ExecutionCheckpoint = Schema.Struct({
   cursor: Schema.String,
   sequence: Schema.Finite,
   status: Schema.optionalKey(Schema.Literals(["completed", "failed", "cancelled"])),
-  state: Transcript.ProjectionState,
+  state: TranscriptProjectionModel.ProjectionState,
   attachment: Schema.optionalKey(ExecutionAttachment),
 })
 export type ExecutionCheckpoint = typeof ExecutionCheckpoint.Type
@@ -31,7 +32,7 @@ export const invalidatedProjectionVersion = 2
 
 export interface Projection {
   readonly turn: Turn
-  readonly units: ReadonlyArray<Transcript.Unit>
+  readonly units: ReadonlyArray<TranscriptUnit.Unit>
   readonly checkpointGeneration: number
   readonly revision: number
   readonly modelPhase: number
@@ -55,7 +56,7 @@ export interface DeltaCheckpointOptions extends CheckpointOptions {
 }
 
 export interface UnitDelta {
-  readonly upsert: ReadonlyArray<Transcript.Unit>
+  readonly upsert: ReadonlyArray<TranscriptUnit.Unit>
   readonly remove: ReadonlyArray<string>
 }
 
@@ -104,13 +105,13 @@ export interface Interface {
   ) => Effect.Effect<ReadonlyArray<ProjectionRecoveryCandidate>, RepositoryError>
   readonly commitDelta: (
     turn: AgentExecutionTurn,
-    state: Transcript.ProjectionState,
+    state: TranscriptProjectionModel.ProjectionState,
     delta: UnitDelta,
     options: DeltaCheckpointOptions,
   ) => Effect.Effect<WriteResult, RepositoryError>
   readonly replaceForRefold: (
     turn: AgentExecutionTurn,
-    projection: Transcript.Projection,
+    projection: TranscriptProjectionModel.Projection,
     options: RefoldOptions,
   ) => Effect.Effect<RefoldWriteResult, RepositoryError>
   readonly createRecordedShell: (

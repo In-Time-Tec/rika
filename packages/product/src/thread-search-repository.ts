@@ -1,5 +1,5 @@
 import { Context, Effect, Schema } from "effect"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Thread, ThreadId } from "@rika/product/thread-record"
 import { Turn } from "@rika/product/turn-record"
 
@@ -63,7 +63,7 @@ export interface SearchPage {
 export interface RebuildInput {
   readonly thread: Thread
   readonly turns: ReadonlyArray<Turn>
-  readonly units: ReadonlyArray<Transcript.Unit>
+  readonly units: ReadonlyArray<TranscriptUnit.Unit>
 }
 
 export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("ThreadSearchRepositoryError", {

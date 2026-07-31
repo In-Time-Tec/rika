@@ -1,17 +1,26 @@
 #!/usr/bin/env bun
+import * as BehaviorMode from "@rika/configuration/behavior-mode"
+import * as ModelRoute from "@rika/configuration/model-route"
+import * as ModelRouteLabel from "@rika/configuration/model-route-label"
+import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
+import * as SettingsDefaults from "@rika/configuration/configuration-settings"
+import * as ConfigurationService from "@rika/configuration/configuration-service"
+import * as SettingsDecoder from "@rika/configuration/configuration-settings"
+import * as ConfigurationSettingsInput from "@rika/configuration/configuration-settings"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Operation from "@rika/product/product-operation"
 import * as ResidentService from "@rika/product/resident-service"
-import { ConfigContract, ConfigService } from "@rika/configuration/configuration-settings"
 import * as DataRoot from "@rika/configuration/canonical-data-root"
 import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as LocalPath from "@rika/coding-tools/local-path"
 import * as WorkspaceIndex from "@rika/coding-tools/workspace-file-search"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Palette, Session, ViewState } from "@rika/terminal/terminal-state"
 import { create as createTui, probeNativeAsset } from "@rika/terminal/opentui-surface"
 import type { PathTarget } from "@rika/terminal/terminal-state"
@@ -558,13 +567,20 @@ export const loadSettingsFile = Effect.fn("Main.loadSettingsFile")(function* (fi
   if (!(yield* fileSystem.exists(filename))) return {}
   const text = yield* fileSystem
     .readFileString(filename)
-    .pipe(Effect.mapError((error) => ConfigContract.ConfigFileError.make({ path: filename, message: String(error) })))
+    .pipe(
+      Effect.mapError((error) =>
+        SettingsDecoder.Decoder.ConfigurationSettingsFileError.make({ path: filename, message: String(error) }),
+      ),
+    )
   const value = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(text).pipe(
     Effect.mapError((error) =>
-      ConfigContract.ConfigFileError.make({ path: filename, message: `Invalid JSON: ${String(error)}` }),
+      SettingsDecoder.Decoder.ConfigurationSettingsFileError.make({
+        path: filename,
+        message: `Invalid JSON: ${String(error)}`,
+      }),
     ),
   )
-  return ConfigContract.decodeSettingsInput(filename, value)
+  return SettingsDecoder.Decoder.decodeSettingsInput(filename, value)
 })
 
 const failureKind = (cause: Cause.Cause<unknown>) => {
@@ -713,7 +729,7 @@ export const interactiveTui =
           let replayTurns = new Map<string, Turn.Turn>()
           let loadedTranscriptEntries: ReadonlyArray<TranscriptRepository.Entry> = []
           let projectionRevisions = new Map<string, number>()
-          let liveTranscriptProjections = new Map<string, Transcript.Projection>()
+          let liveTranscriptProjections = new Map<string, TranscriptProjectionModel.Projection>()
           let projectionStreams = new Map<string, InteractiveController.ProjectionStream>()
           let threadCostUsd: number | undefined
           let lastAvailableUsageCost: Extract<ViewState.Model["usageCost"], { readonly _tag: "Available" }> | undefined
@@ -889,7 +905,7 @@ export const interactiveTui =
                   fork(session.readQueue(event.threadId))
                 }
                 replayTurns.set(event.turn.id, event.turn)
-                const seed = Transcript.empty(event.turn.id, event.turn.prompt)
+                const seed = TranscriptProjection.Projection.empty(event.turn.id, event.turn.prompt)
                 loadedTranscriptEntries = [
                   ...loadedTranscriptEntries,
                   ...seed.units.map((unit) => ({
@@ -1024,7 +1040,7 @@ export const interactiveTui =
                   threadId: event.threadId,
                   turns: event.turns.map((turn) => ({
                     prompt: turn.prompt,
-                    units: turn.units.map((unit) => Schema.decodeUnknownSync(Transcript.Unit)(unit)),
+                    units: turn.units.map((unit) => Schema.decodeUnknownSync(TranscriptUnit.Unit)(unit)),
                   })),
                 })
             } else {
@@ -1835,10 +1851,15 @@ const start = () => {
             Effect.gen(function* () {
               const globalSettings = yield* loadSettingsFile(globalConfig)
               const workspaceSettings = yield* loadSettingsFile(workspaceConfig)
-              const effectiveConfig = yield* ConfigService.effective().pipe(
-                provideLayerScoped(ConfigService.memoryLayer({ global: globalSettings, workspace: workspaceSettings })),
+              const effectiveConfig = yield* ConfigurationService.effectiveConfiguration().pipe(
+                provideLayerScoped(
+                  ConfigurationService.memoryConfigurationLayer({
+                    global: globalSettings,
+                    workspace: workspaceSettings,
+                  }),
+                ),
               )
-              clientModeRoutes = ConfigContract.modeRouteLabels(effectiveConfig.settings) as ViewState.ModeRoutes
+              clientModeRoutes = ModelRouteLabel.modeRouteLabels(effectiveConfig.settings) as ViewState.ModeRoutes
               return yield* program.pipe(
                 Effect.provideService(
                   References.MinimumLogLevel,

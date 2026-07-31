@@ -1,5 +1,6 @@
 import { createTestRenderer } from "@opentui/core/testing"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
 import { Effect } from "effect"
 import { Surface } from "./adapter"
 import type { Key } from "./keys"
@@ -42,11 +43,11 @@ const sourceEvent = (
   cursor: string,
   sequence: number,
   type: string,
-  fields: Partial<Transcript.SourceEvent> = {},
-): Transcript.SourceEvent => ({ cursor, sequence, type, createdAt: sequence, ...fields })
+  fields: Partial<TranscriptSourceEvent.SourceEvent> = {},
+): TranscriptSourceEvent.SourceEvent => ({ cursor, sequence, type, createdAt: sequence, ...fields })
 
 const parentProjection = () =>
-  Transcript.project("performance", "exercise a large thread", [
+  TranscriptProjection.Projection.project("performance", "exercise a large thread", [
     sourceEvent("assistant-0", 0, "model.output.completed", { text: "Running the standard performance workload." }),
     ...Array.from({ length: childRuns }, (_, child) => [
       sourceEvent(`agent-${child}`, 1 + child * 2, "tool.call.requested", {
@@ -59,7 +60,7 @@ const parentProjection = () =>
   ])
 
 const childProjection = (child: number) =>
-  Transcript.project(childTurnId(child), "", [
+  TranscriptProjection.Projection.project(childTurnId(child), "", [
     ...Array.from({ length: toolsPerChild }, (_, tool) => [
       sourceEvent(`tool-${child}-${tool}`, tool * 2, "tool.call.requested", {
         data: { tool_call_id: `tool-${child}-${tool}`, tool_name: "read", input: { path: `src/${child}/${tool}.ts` } },
@@ -185,7 +186,7 @@ const evaluate = Effect.fn("TuiPerformance.evaluate")(function* (options: {
       const startedAt = performance.now()
       const child = step % childRuns
       const turnId = childTurnId(child)
-      const bumped = Transcript.applyEvent(
+      const bumped = TranscriptProjection.Projection.applyEvent(
         projections.get(turnId)!,
         sourceEvent(`stream-${child}-${step}`, toolsPerChild * 2 + 1 + step, "model.output.delta", {
           text: ` delta ${step}`,

@@ -1,4 +1,4 @@
-import { partialInputRecord } from "@rika/transcript/transcript-unit"
+import { partialInputRecord } from "@rika/transcript/partial-tool-input"
 import { Function, Option, Schema } from "effect"
 import { escapeControlCharacters } from "../format"
 import type { Model, TranscriptBlock, TranscriptItem } from "../view-state"

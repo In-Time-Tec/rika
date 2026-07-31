@@ -4,7 +4,7 @@ import * as ThreadSearchRepository from "@rika/product/thread-search-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
-import type * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Context, DateTime, Effect, Layer, Schema } from "effect"
 import * as ThreadState from "@rika/product/thread-state"
 
@@ -145,7 +145,7 @@ interface ChildLink {
   readonly text: string
 }
 
-const childLink = (unit: Transcript.Unit): ChildLink | undefined => {
+const childLink = (unit: TranscriptUnit.Unit): ChildLink | undefined => {
   if (unit.content._tag !== "Block") return undefined
   const block = unit.content.block
   if (block._tag === "ChildAgent") return { executionId: block.id, parentId: block.id, text: block.summary }
@@ -155,8 +155,8 @@ const childLink = (unit: Transcript.Unit): ChildLink | undefined => {
 }
 
 const message = (
-  unit: Transcript.Unit,
-  all: ReadonlyArray<Transcript.Unit>,
+  unit: TranscriptUnit.Unit,
+  all: ReadonlyArray<TranscriptUnit.Unit>,
   textLimit = 12_000,
 ): Message | undefined => {
   if (unit.content._tag === "Entry") return { role: unit.content.role, text: safeText(unit.content.text, textLimit) }
@@ -175,7 +175,10 @@ const message = (
     ...(children.length === 0 ? {} : { children }),
   }
 }
-const item = (turn: TurnRepository.PageResult["turns"][number], units: ReadonlyArray<Transcript.Unit>): ReadItem => ({
+const item = (
+  turn: TurnRepository.PageResult["turns"][number],
+  units: ReadonlyArray<TranscriptUnit.Unit>,
+): ReadItem => ({
   turnId: turn.id,
   author: turn.author._tag === "Human" ? "human" : "agent",
   createdAt: iso(turn.createdAt),
@@ -189,8 +192,8 @@ const item = (turn: TurnRepository.PageResult["turns"][number], units: ReadonlyA
 })
 const subtreeItem = (
   turn: TurnRepository.PageResult["turns"][number],
-  root: Transcript.Unit,
-  descendants: ReadonlyArray<Transcript.Unit>,
+  root: TranscriptUnit.Unit,
+  descendants: ReadonlyArray<TranscriptUnit.Unit>,
 ): ReadItem => {
   const rendered = message(root, [root, ...descendants], 8_000)
   return {
@@ -204,8 +207,8 @@ const subtreeItem = (
 
 const boundedSubtreeItem = (
   turn: TurnRepository.PageResult["turns"][number],
-  root: Transcript.Unit,
-  candidate: Transcript.Unit,
+  root: TranscriptUnit.Unit,
+  candidate: TranscriptUnit.Unit,
 ): ReadItem => {
   const renderedRoot = message(root, [root], 4_000)
   const renderedCandidate = message(candidate, [candidate], 4_000)
@@ -378,7 +381,7 @@ export const makeForWorkspace = (workspace: string) =>
         if (rootLink === undefined)
           return yield* QueryError.make({ message: `Child execution ${childExecutionId} has no parent block` })
         const rootParentId = rootLink.parentId
-        const descendants: Array<Transcript.Unit> = []
+        const descendants: Array<TranscriptUnit.Unit> = []
         const parentIds = new Set([rootParentId])
         for (const unit of units) {
           if (unit.parentId === undefined || !parentIds.has(unit.parentId)) continue
@@ -393,7 +396,7 @@ export const makeForWorkspace = (workspace: string) =>
             return link === undefined ? [] : ([[link.parentId, unit]] as const)
           }),
         )
-        const selected = new Set<Transcript.Unit>()
+        const selected = new Set<TranscriptUnit.Unit>()
         let nextOffset = offset
         let forcedItem: ReadItem | undefined
         for (let index = offset; index < descendants.length; index += 1) {

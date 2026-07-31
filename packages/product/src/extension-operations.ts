@@ -1,4 +1,6 @@
-import { McpConfig, McpOAuth, SkillRegistry } from "@rika/extensions/plugin-contract"
+import * as McpConfig from "@rika/extensions/mcp-configuration"
+import * as McpOAuth from "@rika/extensions/mcp-oauth-service"
+import * as SkillRegistry from "@rika/extensions/skill-registry"
 import { Console, Context, Effect, FileSystem, Layer, Path, PlatformError, Schema, Semaphore } from "effect"
 import type * as Operation from "./operation"
 import { workspacePaths } from "@rika/configuration/configuration-paths"
@@ -254,7 +256,7 @@ export const run = Effect.fn("ExtensionOperations.run")(function* (
       const name = input.name
       if (selected.length === 0 && name !== undefined)
         return yield* Error.make({ message: `Remote MCP server not found: ${name}` })
-      const oauth = yield* McpOAuth.Service
+      const oauth = yield* McpOAuth.McpOAuthService
       if (input.action === "oauth-login")
         yield* oauth
           .login(input.name, selected[0]!.url)

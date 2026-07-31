@@ -1,4 +1,5 @@
-import { ThreadTools, ToolInvocation } from "@rika/coding-tools/coding-tool-catalog"
+import * as ThreadTools from "@rika/coding-tools/thread-tool-contract"
+import * as ToolInvocation from "@rika/coding-tools/tool-invocation"
 import * as Turn from "@rika/product/turn-record"
 import { Effect, Option } from "effect"
 import * as ThreadQuery from "./thread-query"

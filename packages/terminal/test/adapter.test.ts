@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest"
 import { it } from "@effect/vitest"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptPresentationModel from "@rika/transcript/transcript-presentation-model"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Effect } from "effect"
 
 const shell = (id: string, command: string, output: string) => ({
@@ -349,7 +350,7 @@ test("draws every thread-preview row at the exact box width with a two-cell gutt
       turns: [
         {
           prompt: "hello world this prompt is long enough that it must wrap across several preview rows",
-          units: Transcript.empty(
+          units: TranscriptProjection.Projection.empty(
             "preview",
             "hello world this prompt is long enough that it must wrap across several preview rows",
           ).units,
@@ -393,7 +394,7 @@ test("reuses formatted thread-preview content while scrolling", () => {
     threadSwitcher: { open: true, query: "", selected: 0, kind: "switch", previewScroll: 0 },
     threadPreview: ready({
       threadId: "a",
-      turns: [{ prompt: "hello", units: Transcript.project("preview", "hello", [event]).units }],
+      turns: [{ prompt: "hello", units: TranscriptProjection.Projection.project("preview", "hello", [event]).units }],
     }),
   })
 
@@ -429,7 +430,12 @@ test("keeps the previous thread preview visible until the next preview is ready"
     threadSwitcher: { open: true, query: "", selected: 0, kind: "switch", previewScroll: 0 },
     threadPreview: ready({
       threadId: "a",
-      turns: [{ prompt: "previous preview", units: Transcript.empty("preview", "previous preview").units }],
+      turns: [
+        {
+          prompt: "previous preview",
+          units: TranscriptProjection.Projection.empty("preview", "previous preview").units,
+        },
+      ],
     }),
   })
   const pendingModel = update(
@@ -448,7 +454,7 @@ test("keeps the previous thread preview visible until the next preview is ready"
       turns: [
         {
           prompt: "next preview",
-          units: Transcript.project("preview", "next preview", [
+          units: TranscriptProjection.Projection.project("preview", "next preview", [
             {
               cursor: "answer",
               sequence: 1,
@@ -733,7 +739,7 @@ describe("Surface", () => {
 
     const bounded = boundedTranscriptModel(state)
     const mountedIds = new Set(
-      (bounded.blocks as ReadonlyArray<Transcript.Block>).flatMap((block) =>
+      (bounded.blocks as ReadonlyArray<TranscriptPresentationModel.Block>).flatMap((block) =>
         block._tag === "ToolCall" ? [block.id] : [],
       ),
     )

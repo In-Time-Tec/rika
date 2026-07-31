@@ -1,5 +1,5 @@
 import { LanguageModel, ModelRegistry, Prompt, Toolkit } from "@batonfx/core"
-import { MediaView } from "@rika/coding-tools/coding-tool-catalog"
+import * as MediaView from "@rika/coding-tools/media-view-service"
 import { Effect, Layer } from "effect"
 
 const instructions =

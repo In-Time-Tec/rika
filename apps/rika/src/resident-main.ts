@@ -1,9 +1,15 @@
 #!/usr/bin/env bun
+import * as BehaviorMode from "@rika/configuration/behavior-mode"
+import * as ModelRoute from "@rika/configuration/model-route"
+import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
+import * as SettingsDefaults from "@rika/configuration/configuration-settings"
+import * as ConfigurationService from "@rika/configuration/configuration-service"
+import * as SettingsDecoder from "@rika/configuration/configuration-settings"
+import * as ConfigurationSettingsInput from "@rika/configuration/configuration-settings"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Operation from "@rika/product/product-operation"
 import * as ResidentService from "@rika/product/resident-service"
-import { ConfigContract, ConfigService } from "@rika/configuration/configuration-settings"
 import { globalPaths, workspacePaths } from "@rika/configuration/configuration-paths"
 import { FetchHttpClient } from "effect/unstable/http"
 import { Cause, Clock, Config, Context, Effect, FileSystem, Layer, Path, Ref, References, Schema } from "effect"
@@ -36,16 +42,20 @@ const loadSettingsFile = Effect.fn("Resident.loadSettingsFile")(function* (filen
   if (!(yield* fileSystem.exists(filename))) return {}
   const text = yield* fileSystem
     .readFileString(filename)
-    .pipe(Effect.mapError((error) => ConfigContract.ConfigFileError.make({ path: filename, message: String(error) })))
+    .pipe(
+      Effect.mapError((error) =>
+        SettingsDecoder.Decoder.ConfigurationSettingsFileError.make({ path: filename, message: String(error) }),
+      ),
+    )
   const value = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(text).pipe(
     Effect.mapError((error) =>
-      ConfigContract.ConfigFileError.make({
+      SettingsDecoder.Decoder.ConfigurationSettingsFileError.make({
         path: filename,
         message: `Invalid JSON: ${String(error)}`,
       }),
     ),
   )
-  return ConfigContract.decodeSettingsInput(filename, value)
+  return SettingsDecoder.Decoder.decodeSettingsInput(filename, value)
 })
 
 const failureKind = (cause: Cause.Cause<unknown>) => {
@@ -253,9 +263,9 @@ const start = () => {
             Effect.gen(function* () {
               const globalSettings = yield* loadSettingsFile(globalConfig)
               const workspaceSettings = yield* loadSettingsFile(workspaceConfig)
-              const effectiveConfig = yield* ConfigService.effective().pipe(
+              const effectiveConfig = yield* ConfigurationService.effectiveConfiguration().pipe(
                 provideLayerScoped(
-                  ConfigService.memoryLayer({
+                  ConfigurationService.memoryConfigurationLayer({
                     global: globalSettings,
                     workspace: workspaceSettings,
                   }),

@@ -1,11 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import {
-  applyEvent,
-  empty,
-  finalAssistantOutput,
-  hasRunningBlocks,
-  project,
-} from "../src/projection/transcript-projection"
+import * as TranscriptProjection from "../src/projection/transcript-projection"
 import { settleChild, settleRunning } from "../src/projection/transcript-settlement"
 import { withNestedProjections } from "../src/projection/nested-transcript-projection"
 import { childOrder, unitOrder } from "../src/ordering/transcript-unit-order"
@@ -41,7 +35,7 @@ describe("Transcript projection", () => {
         text: `line ${index}\n`,
       }),
     )
-    const projection = project("turn-a", "prompt", events)
+    const projection = TranscriptProjection.Projection.project("turn-a", "prompt", events)
 
     expect(projection.units).toHaveLength(2)
     expect(projection.units[0]).toMatchObject({ key: "turn:turn-a:user", content: { role: "user", text: "prompt" } })
@@ -53,7 +47,7 @@ describe("Transcript projection", () => {
   })
 
   it("preserves prose and activity order while reconciling tool results", () => {
-    const projection = project("turn-a", "prompt", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
       { cursor: "0", sequence: 0, type: "model.input.prepared", createdAt: 0 },
       { cursor: "1", sequence: 1, type: "model.output.delta", createdAt: 1, text: "first" },
       { cursor: "1b", sequence: 2, type: "model.output.completed", createdAt: 2, text: "first" },
@@ -90,11 +84,11 @@ describe("Transcript projection", () => {
     expect(
       projection.units.filter((unit) => unit.content._tag === "Entry" && unit.content.role === "user"),
     ).toHaveLength(1)
-    expect(finalAssistantOutput(projection, "turn-a")).toBe("final")
+    expect(TranscriptProjection.Projection.finalAssistantOutput(projection, "turn-a")).toBe("final")
   })
 
   it("does not treat assistant text before the last root tool as the final output", () => {
-    const projection = project("turn-a", "prompt", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
       { cursor: "answer", sequence: 1, type: "model.output.completed", createdAt: 1, text: "not final" },
       {
         cursor: "tool",
@@ -113,19 +107,19 @@ describe("Transcript projection", () => {
       { cursor: "complete", sequence: 4, type: "execution.completed", createdAt: 4 },
     ])
 
-    expect(finalAssistantOutput(projection, "turn-a")).toBeUndefined()
+    expect(TranscriptProjection.Projection.finalAssistantOutput(projection, "turn-a")).toBeUndefined()
   })
 
   it("does not treat an unfinished assistant stream as the final output", () => {
-    const projection = project("turn-a", "prompt", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
       { cursor: "partial", sequence: 1, type: "model.output.delta", createdAt: 1, text: "partial" },
     ])
 
-    expect(finalAssistantOutput(projection, "turn-a")).toBeUndefined()
+    expect(TranscriptProjection.Projection.finalAssistantOutput(projection, "turn-a")).toBeUndefined()
   })
 
   it("keeps a delegation card running when its result is a spawned subagent handle", () => {
-    const projection = project("turn-a", "prompt", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
       { cursor: "0", sequence: 0, type: "model.input.prepared", createdAt: 0 },
       {
         cursor: "1",
@@ -159,7 +153,7 @@ describe("Transcript projection", () => {
   })
 
   it("does not replay the execution-wide completion text into the final assistant phase", () => {
-    const projection = project("turn-a", "prompt", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
       { cursor: "0", sequence: 0, type: "model.input.prepared", createdAt: 0 },
       { cursor: "1", sequence: 1, type: "model.output.delta", createdAt: 1, text: "first" },
       {
@@ -194,7 +188,7 @@ describe("Transcript projection", () => {
   })
 
   it("projects completed unified diffs from any tool result", () => {
-    const projection = project("turn-a", "change files", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "change files", [
       {
         cursor: "1",
         sequence: 1,
@@ -234,7 +228,7 @@ describe("Transcript projection", () => {
   })
 
   it("uses child payload status and keeps one stable child row", () => {
-    const projection = project("turn-a", "delegate", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "delegate", [
       {
         cursor: "1",
         sequence: 1,
@@ -259,7 +253,7 @@ describe("Transcript projection", () => {
 
   it("merges a correlated spawn and child lifecycle into one named tool unit", () => {
     const childId = "execution:turn-a:child:oracle"
-    const projection = project("turn-a", "delegate", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "delegate", [
       {
         cursor: "call",
         sequence: 1,
@@ -312,7 +306,7 @@ describe("Transcript projection", () => {
   })
 
   it("labels a spawn call Subagent working before any child metadata arrives", () => {
-    const projection = project("turn-a", "delegate", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "delegate", [
       {
         cursor: "call",
         sequence: 1,
@@ -366,8 +360,11 @@ describe("Transcript projection", () => {
         },
       },
     ]
-    const live = project("turn-a", "delegate", events)
-    const replayed = events.reduce((current, event) => applyEvent(current, event), empty("turn-a", "delegate"))
+    const live = TranscriptProjection.Projection.project("turn-a", "delegate", events)
+    const replayed = events.reduce(
+      (current, event) => TranscriptProjection.Projection.applyEvent(current, event),
+      TranscriptProjection.Projection.empty("turn-a", "delegate"),
+    )
     for (const projection of [live, replayed])
       expect(projection.units[1]).toMatchObject({
         key: "tool:turn-a:agent",
@@ -385,7 +382,7 @@ describe("Transcript projection", () => {
 
   it("keeps a terminal child result from presenting a failed or cancelled subagent as finished", () => {
     for (const status of ["failed", "cancelled"] as const) {
-      const projection = project("turn-a", "delegate", [
+      const projection = TranscriptProjection.Projection.project("turn-a", "delegate", [
         {
           cursor: `call-${status}`,
           sequence: 1,
@@ -428,8 +425,11 @@ describe("Transcript projection", () => {
     ]
 
     for (const projection of [
-      project("child", "delegate", events),
-      events.reduce((current, event) => applyEvent(current, event), empty("child", "delegate")),
+      TranscriptProjection.Projection.project("child", "delegate", events),
+      events.reduce(
+        (current, event) => TranscriptProjection.Projection.applyEvent(current, event),
+        TranscriptProjection.Projection.empty("child", "delegate"),
+      ),
     ]) {
       expect(projection.units.find((unit) => unit.executionOutcome !== undefined)?.executionOutcome).toEqual({
         status: "complete",
@@ -459,10 +459,16 @@ describe("Transcript projection", () => {
       [{ cursor: "partial", sequence: 3, type: "model.output.delta", createdAt: 3, text: "Partial response" }],
     ],
     [
-      "an empty completion after partial output",
+      "an TranscriptProjection.Projection.empty completion after partial output",
       [
         { cursor: "partial", sequence: 3, type: "model.output.delta", createdAt: 3, text: "Partial response" },
-        { cursor: "empty", sequence: 4, type: "model.output.completed", createdAt: 4, text: "" },
+        {
+          cursor: "TranscriptProjection.Projection.empty",
+          sequence: 4,
+          type: "model.output.completed",
+          createdAt: 4,
+          text: "",
+        },
       ],
     ],
     [
@@ -492,8 +498,11 @@ describe("Transcript projection", () => {
     ]
 
     for (const projection of [
-      project("child", "delegate", events),
-      events.reduce((current, event) => applyEvent(current, event), empty("child", "delegate")),
+      TranscriptProjection.Projection.project("child", "delegate", events),
+      events.reduce(
+        (current, event) => TranscriptProjection.Projection.applyEvent(current, event),
+        TranscriptProjection.Projection.empty("child", "delegate"),
+      ),
     ]) {
       expect(projection.units.find((unit) => unit.executionOutcome !== undefined)?.executionOutcome).toEqual({
         status: "failed",
@@ -505,7 +514,7 @@ describe("Transcript projection", () => {
   it("keeps the ToolError message as the output of a failed tool result", () => {
     const guidance =
       "File not found: a. The call did not change state. Next action: Search for the file or call read with a corrected path."
-    const projection = project("turn-a", "prompt", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
       {
         cursor: "call",
         sequence: 1,
@@ -540,7 +549,7 @@ describe("Transcript projection", () => {
 
   it("preserves a failed await_subagents continuation as an actionable AgentToolError", () => {
     const failure = "AgentToolError: Child reports could not be collected"
-    const projection = project("turn-a", "prompt", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
       {
         cursor: "call",
         sequence: 1,
@@ -577,7 +586,7 @@ describe("Transcript projection", () => {
   it("links a Relay handoff spawn to its encoded tool call and keeps the supplied prompt", () => {
     const callId = "rika:execution%3Aparent:spawn-oracle"
     const childId = `execution:parent:child:${callId}`
-    const projection = project("turn-a", "delegate", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "delegate", [
       {
         cursor: "call",
         sequence: 1,
@@ -619,7 +628,7 @@ describe("Transcript projection", () => {
   it("strips the relay depth suffix from a linked child spawn", () => {
     const callId = "rika:execution%3Aparent:spawn-task"
     const childId = `execution:parent:child:${callId}`
-    const projection = project("turn-a", "delegate", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "delegate", [
       {
         cursor: "call",
         sequence: 1,
@@ -653,7 +662,7 @@ describe("Transcript projection", () => {
   })
 
   it("strips the relay depth suffix from an unlinked child block name", () => {
-    const projection = project("turn-a", "delegate", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "delegate", [
       {
         cursor: "spawned",
         sequence: 1,
@@ -670,7 +679,7 @@ describe("Transcript projection", () => {
 
   it("links a child spawn with a percent-encoded parent execution id to the requesting tool", () => {
     const childId = "child:execution%3Aturn-a:call_1"
-    const projection = project("turn-a", "delegate", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "delegate", [
       {
         cursor: "call",
         sequence: 1,
@@ -799,8 +808,8 @@ describe("Transcript projection", () => {
         },
       },
     ]
-    const interim = project("turn-a", "run tests", events.slice(0, 4))
-    const projection = project("turn-a", "run tests", events)
+    const interim = TranscriptProjection.Projection.project("turn-a", "run tests", events.slice(0, 4))
+    const projection = TranscriptProjection.Projection.project("turn-a", "run tests", events)
 
     expect(interim.units[1]).toMatchObject({
       revision: 4,
@@ -810,7 +819,7 @@ describe("Transcript projection", () => {
       revision: 4,
       content: { _tag: "Block", block: { _tag: "ToolCall", status: "complete", output: "middle\n" } },
     })
-    expect(hasRunningBlocks(interim)).toBe(true)
+    expect(TranscriptProjection.Projection.hasRunningBlocks(interim)).toBe(true)
     expect(projection.units).toHaveLength(5)
     expect(projection.units[1]).toMatchObject({
       key: "tool:turn-a:bash-1",
@@ -871,11 +880,14 @@ describe("Transcript projection", () => {
         },
       },
     })
-    expect(hasRunningBlocks(projection)).toBe(false)
-    expect(events.reduce((current, event) => applyEvent(current, event), empty("turn-a", "run tests"))).toEqual(
-      projection,
-    )
-    expect(applyEvent(projection, events.at(-1)!)).toEqual(projection)
+    expect(TranscriptProjection.Projection.hasRunningBlocks(projection)).toBe(false)
+    expect(
+      events.reduce(
+        (current, event) => TranscriptProjection.Projection.applyEvent(current, event),
+        TranscriptProjection.Projection.empty("turn-a", "run tests"),
+      ),
+    ).toEqual(projection)
+    expect(TranscriptProjection.Projection.applyEvent(projection, events.at(-1)!)).toEqual(projection)
   })
 
   it("separates process failure from status-call failure", () => {
@@ -906,7 +918,7 @@ describe("Transcript projection", () => {
         },
       },
     ]
-    const failed = project("turn-a", "run tests", [
+    const failed = TranscriptProjection.Projection.project("turn-a", "run tests", [
       ...running,
       {
         cursor: "failed",
@@ -919,7 +931,7 @@ describe("Transcript projection", () => {
         },
       },
     ])
-    const statusError = project("turn-a", "run tests", [
+    const statusError = TranscriptProjection.Projection.project("turn-a", "run tests", [
       ...running,
       {
         cursor: "status-error",
@@ -946,7 +958,7 @@ describe("Transcript projection", () => {
         block: { _tag: "ToolCall", status: "failed", process: { running: false, exitCode: 7 } },
       },
     })
-    expect(hasRunningBlocks(failed)).toBe(false)
+    expect(TranscriptProjection.Projection.hasRunningBlocks(failed)).toBe(false)
     expect(statusError.units[1]).toMatchObject({
       revision: 2,
       content: { _tag: "Block", block: { _tag: "ToolCall", status: "running" } },
@@ -954,13 +966,13 @@ describe("Transcript projection", () => {
     expect(statusError.units[2]).toMatchObject({
       content: { _tag: "Block", block: { _tag: "ToolCall", status: "failed" } },
     })
-    expect(hasRunningBlocks(statusError)).toBe(true)
+    expect(TranscriptProjection.Projection.hasRunningBlocks(statusError)).toBe(true)
   })
 
   it("bounds folded process output while retaining the newest status chunk", () => {
     const initial = "a".repeat(30_000)
     const latest = `${"b".repeat(30_000)}TAIL`
-    const projection = project("turn-a", "run tests", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "run tests", [
       {
         cursor: "bash",
         sequence: 1,
@@ -1019,7 +1031,7 @@ describe("Transcript projection", () => {
   })
 
   it("preserves hidden web output with its presentation metadata", () => {
-    const projection = project("turn-a", "prompt", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
       {
         cursor: "web-call",
         sequence: 1,
@@ -1059,13 +1071,18 @@ describe("Transcript projection", () => {
       createdAt: 1,
       text: "answer",
     }
-    const once = applyEvent(empty("turn-a", "prompt"), event)
-    expect(applyEvent(once, event)).toEqual(once)
-    expect(applyEvent(once, { ...event, cursor: "cursor-0", sequence: 0, text: "stale" })).toEqual(once)
+    const once = TranscriptProjection.Projection.applyEvent(
+      TranscriptProjection.Projection.empty("turn-a", "prompt"),
+      event,
+    )
+    expect(TranscriptProjection.Projection.applyEvent(once, event)).toEqual(once)
+    expect(
+      TranscriptProjection.Projection.applyEvent(once, { ...event, cursor: "cursor-0", sequence: 0, text: "stale" }),
+    ).toEqual(once)
   })
 
   it("revises one compaction unit from a running start signal to the committed checkpoint", () => {
-    const started = project("turn-a", "prompt", [
+    const started = TranscriptProjection.Projection.project("turn-a", "prompt", [
       {
         cursor: "compaction-started",
         sequence: 0,
@@ -1077,7 +1094,7 @@ describe("Transcript projection", () => {
     const startedUnit = started.units.find((item) => item.key === "compaction:turn-a")
     expect(startedUnit).toMatchObject({ content: { _tag: "Block", block: { _tag: "Compaction", status: "running" } } })
 
-    const committed = project("turn-a", "prompt", [
+    const committed = TranscriptProjection.Projection.project("turn-a", "prompt", [
       {
         cursor: "compaction-started",
         sequence: 0,
@@ -1101,8 +1118,8 @@ describe("Transcript projection", () => {
     expect(committed.units.filter((item) => item.key.startsWith("compaction:"))).toHaveLength(1)
   })
 
-  it("does not project a failed compaction event as complete", () => {
-    const projection = project("turn-a", "prompt", [
+  it("does not TranscriptProjection.Projection.project a failed compaction event as complete", () => {
+    const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
       {
         cursor: "compaction-started",
         sequence: 0,
@@ -1125,7 +1142,7 @@ describe("Transcript projection", () => {
   it.each(["microcompact", "unchanged"] as const)(
     "revises a running compaction to complete on %s completed without committed",
     (kind) => {
-      const projection = project("turn-a", "prompt", [
+      const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
         {
           cursor: "compaction-started",
           sequence: 0,
@@ -1150,7 +1167,7 @@ describe("Transcript projection", () => {
   )
 
   it("attaches the checkpoint when summarize completed is followed by committed", () => {
-    const projection = project("turn-a", "prompt", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
       {
         cursor: "compaction-started",
         sequence: 0,
@@ -1184,7 +1201,7 @@ describe("Transcript projection", () => {
   })
 
   it("settles a running compaction when the turn is cancelled", () => {
-    const projection = project("turn-a", "prompt", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
       {
         cursor: "compaction-started",
         sequence: 0,
@@ -1199,7 +1216,7 @@ describe("Transcript projection", () => {
   })
 
   it("projects every semantic block shape with stable keys across lifecycle revisions", () => {
-    const projection = project("turn-a", "prompt", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
       { cursor: "reason", sequence: 0, type: "model.reasoning.delta", createdAt: 0, text: "thinking" },
       {
         cursor: "tool",
@@ -1373,12 +1390,12 @@ describe("Transcript projection", () => {
       { cursor: "failed", sequence: 21, type: "execution.failed", createdAt: 21, text: "failed" },
       { cursor: "cancelled", sequence: 22, type: "execution.cancelled", createdAt: 22 },
     ]
-    let projection = empty("turn-a", "prompt")
+    let projection = TranscriptProjection.Projection.empty("turn-a", "prompt")
     for (const event of events) {
-      projection = applyEvent(projection, event)
+      projection = TranscriptProjection.Projection.applyEvent(projection, event)
       expect(projection.revision).toBe(event.sequence)
       expect(projection.checkpointCursor).toBe(event.cursor)
-      expect(applyEvent(projection, event)).toEqual(projection)
+      expect(TranscriptProjection.Projection.applyEvent(projection, event)).toEqual(projection)
     }
 
     expect(projection.units.find((item) => item.key === "child:turn-a:member")).toMatchObject({
@@ -1390,7 +1407,7 @@ describe("Transcript projection", () => {
   })
 
   it("keeps nested keys, revisions, parents, and deterministic source order without mutating inputs", () => {
-    const root = project("root", "prompt", [
+    const root = TranscriptProjection.Projection.project("root", "prompt", [
       {
         cursor: "tool",
         sequence: 2,
@@ -1399,7 +1416,7 @@ describe("Transcript projection", () => {
         data: { tool_call_id: "child", tool_name: "task", input: { prompt: "work" } },
       },
     ])
-    const child = project("child", "", [
+    const child = TranscriptProjection.Projection.project("child", "", [
       { cursor: "answer", sequence: 7, type: "model.output.completed", createdAt: 7, text: "done" },
     ])
     const rootBefore = structuredClone(root)
@@ -1410,7 +1427,7 @@ describe("Transcript projection", () => {
     expect(first).toEqual(second)
     expect(root).toEqual(rootBefore)
     expect(child).toEqual(childBefore)
-    expect(finalAssistantOutput(first, "root")).toBeUndefined()
+    expect(TranscriptProjection.Projection.finalAssistantOutput(first, "root")).toBeUndefined()
     expect(first.units.map(({ key, revision, parentId, order }) => ({ key, revision, parentId, order }))).toEqual([
       {
         key: "turn:root:user",
@@ -1440,7 +1457,7 @@ describe("Transcript projection", () => {
   })
 
   it("keeps a recovered root completion on the root execution instead of its failed nested child", () => {
-    const root = project("root", "delegate", [
+    const root = TranscriptProjection.Projection.project("root", "delegate", [
       {
         cursor: "agent",
         sequence: 0,
@@ -1449,11 +1466,11 @@ describe("Transcript projection", () => {
         data: { tool_call_id: "agent", tool_name: "task", input: {} },
       },
     ])
-    const failedChild = project("child", "", [
+    const failedChild = TranscriptProjection.Projection.project("child", "", [
       { cursor: "failed", sequence: 0, type: "execution.failed", createdAt: 1, text: "child failed" },
     ])
     const flattened = withNestedProjections(root, [{ parentId: "root:agent", projection: failedChild }])
-    const completed = applyEvent(flattened, {
+    const completed = TranscriptProjection.Projection.applyEvent(flattened, {
       cursor: "root-done",
       sequence: 1,
       type: "execution.completed",
@@ -1473,10 +1490,10 @@ describe("Transcript projection", () => {
   })
 
   it("persists a hidden execution outcome when an execution has no root user unit", () => {
-    const root = project("root", "prompt", [
+    const root = TranscriptProjection.Projection.project("root", "prompt", [
       { cursor: "answer", sequence: 0, type: "model.output.completed", createdAt: 1, text: "answer" },
     ])
-    const projection = applyEvent(
+    const projection = TranscriptProjection.Projection.applyEvent(
       { ...root, units: root.units.filter((unit) => unit.content._tag !== "Entry" || unit.content.role !== "user") },
       { cursor: "done", sequence: 1, type: "execution.completed", createdAt: 2 },
     )
@@ -1491,7 +1508,7 @@ describe("Transcript projection", () => {
   })
 
   it("tracks usage cursors when the revision was poisoned by higher foreign sequences", () => {
-    const projection = project("turn-a", "prompt", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
       { cursor: "foreign", sequence: 4526, type: "model.output.delta", createdAt: 0, text: "child text" },
       { ...usage("usage-9", 9), createdAt: 1 },
       { ...usage("usage-30", 30), createdAt: 2 },
@@ -1504,23 +1521,33 @@ describe("Transcript projection", () => {
   })
 
   it("scopes durable usage identity to the opaque event cursor", () => {
-    const projection = project("turn-a", "prompt", [usage("shared", 9), usage("shared", 30), usage("other", 31)])
+    const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
+      usage("shared", 9),
+      usage("shared", 30),
+      usage("other", 31),
+    ])
 
     expect(projection.costUsd).toBeUndefined()
     expect(projection.usageCursors).toEqual(["shared", "other"])
   })
 
   it("does not estimate transcript dollars from usage reports", () => {
-    const projection = project("turn-a", "prompt", [usage("usage-1", 1)])
+    const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [usage("usage-1", 1)])
     expect(projection.costUsd).toBeUndefined()
     expect(projection.pricingVersion).toBeUndefined()
     expect(projection.usageCursors).toEqual(["usage-1"])
   })
 
   it("counts duplicate and out-of-order usage events exactly once", () => {
-    const first = applyEvent(empty("turn-a", "prompt"), usage("usage-5", 5))
-    const duplicated = applyEvent(applyEvent(first, usage("usage-5", 5)), usage("usage-5", 2))
-    const reordered = applyEvent(duplicated, usage("usage-2", 2))
+    const first = TranscriptProjection.Projection.applyEvent(
+      TranscriptProjection.Projection.empty("turn-a", "prompt"),
+      usage("usage-5", 5),
+    )
+    const duplicated = TranscriptProjection.Projection.applyEvent(
+      TranscriptProjection.Projection.applyEvent(first, usage("usage-5", 5)),
+      usage("usage-5", 2),
+    )
+    const reordered = TranscriptProjection.Projection.applyEvent(duplicated, usage("usage-2", 2))
 
     expect(duplicated.costUsd).toBeUndefined()
     expect(reordered.costUsd).toBeUndefined()
@@ -1532,14 +1559,20 @@ describe("Transcript projection", () => {
   it("folds each usage cursor once whether the fold is batched, incremental, or branched", () => {
     const cursors = ["usage-1", "usage-2", "usage-3"]
     const events = cursors.flatMap((cursor, index) => [usage(cursor, index + 1), usage(cursor, index + 1)])
-    const batched = project("turn-a", "prompt", events)
-    const incremental = events.reduce((projection, event) => applyEvent(projection, event), empty("turn-a", "prompt"))
-    const shared = project("turn-a", "prompt", [usage("usage-1", 1)])
-    const left = applyEvent(shared, usage("usage-2", 2))
-    const right = applyEvent(shared, usage("usage-3", 3))
-    const rejoined = applyEvent(left, usage("usage-3", 3))
-    const merged = applyEvent(right, usage("usage-2", 2))
-    const detached = applyEvent({ ...shared, usageCursors: [...(shared.usageCursors ?? [])] }, usage("usage-1", 1))
+    const batched = TranscriptProjection.Projection.project("turn-a", "prompt", events)
+    const incremental = events.reduce(
+      (projection, event) => TranscriptProjection.Projection.applyEvent(projection, event),
+      TranscriptProjection.Projection.empty("turn-a", "prompt"),
+    )
+    const shared = TranscriptProjection.Projection.project("turn-a", "prompt", [usage("usage-1", 1)])
+    const left = TranscriptProjection.Projection.applyEvent(shared, usage("usage-2", 2))
+    const right = TranscriptProjection.Projection.applyEvent(shared, usage("usage-3", 3))
+    const rejoined = TranscriptProjection.Projection.applyEvent(left, usage("usage-3", 3))
+    const merged = TranscriptProjection.Projection.applyEvent(right, usage("usage-2", 2))
+    const detached = TranscriptProjection.Projection.applyEvent(
+      { ...shared, usageCursors: [...(shared.usageCursors ?? [])] },
+      usage("usage-1", 1),
+    )
 
     expect(batched.usageCursors).toEqual(cursors)
     expect(incremental.usageCursors).toEqual(cursors)
@@ -1574,15 +1607,15 @@ describe("Transcript projection", () => {
         data: { child_execution_id: "orphan-child", preset_name: "task" },
       },
     ]
-    const cancelled = project("turn-a", "prompt", [
+    const cancelled = TranscriptProjection.Projection.project("turn-a", "prompt", [
       ...base,
       { cursor: "cancelled", sequence: 3, type: "execution.cancelled", createdAt: 3 },
     ])
-    const failed = project("turn-a", "prompt", [
+    const failed = TranscriptProjection.Projection.project("turn-a", "prompt", [
       ...base,
       { cursor: "failed", sequence: 3, type: "execution.failed", createdAt: 3, data: { message: "boom" } },
     ])
-    const completed = project("turn-a", "prompt", [
+    const completed = TranscriptProjection.Projection.project("turn-a", "prompt", [
       ...base,
       { cursor: "completed", sequence: 3, type: "execution.completed", createdAt: 3 },
     ])
@@ -1609,11 +1642,11 @@ describe("Transcript projection", () => {
       revision: 3,
       content: { _tag: "Block", block: { _tag: "ChildAgent", status: "cancelled" } },
     })
-    expect(hasRunningBlocks(completed)).toBe(false)
+    expect(TranscriptProjection.Projection.hasRunningBlocks(completed)).toBe(false)
   })
 
   it("hides model failure telemetry and explains terminal compaction failure", () => {
-    const projection = project("turn-a", "prompt", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
       { cursor: "attempt", sequence: 1, type: "model.attempt.failed", createdAt: 1 },
       { cursor: "call", sequence: 2, type: "model.call.failed", createdAt: 2 },
       {
@@ -1644,7 +1677,7 @@ describe("Transcript projection", () => {
   })
 
   it("settles linked tools and standalone child agents through the settlement helpers", () => {
-    const projection = project("turn-a", "prompt", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
       {
         cursor: "call",
         sequence: 1,
@@ -1679,9 +1712,9 @@ describe("Transcript projection", () => {
       revision: 99,
       content: { _tag: "Block", block: { _tag: "ChildAgent", status: "cancelled" } },
     })
-    expect(hasRunningBlocks(projection)).toBe(true)
-    expect(hasRunningBlocks(settledOrphan)).toBe(false)
-    expect(hasRunningBlocks(swept)).toBe(false)
+    expect(TranscriptProjection.Projection.hasRunningBlocks(projection)).toBe(true)
+    expect(TranscriptProjection.Projection.hasRunningBlocks(settledOrphan)).toBe(false)
+    expect(TranscriptProjection.Projection.hasRunningBlocks(swept)).toBe(false)
     expect(settleChild(settledOrphan, "child-1", "failed", 120)).toEqual(settledOrphan)
   })
 
@@ -1756,8 +1789,8 @@ describe("Transcript projection", () => {
     expect(childParentMatch([foreign], "child:execution%3Aparent-turn:agent")).toBeUndefined()
   })
 
-  it("records one error unit with a failed outcome and a non-empty reason when the execution fails", () => {
-    const projection = project("turn-a", "prompt", [
+  it("records one error unit with a failed outcome and a non-TranscriptProjection.Projection.empty reason when the execution fails", () => {
+    const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
       { cursor: "failed", sequence: 1, type: "execution.failed", createdAt: 1, text: "internal tool failed" },
     ])
     const errors = projection.units.filter(
@@ -1773,7 +1806,7 @@ describe("Transcript projection", () => {
   })
 
   const streamingToolBlock = (name: string, partialInput: string) => {
-    const projection = project("turn-a", "prompt", [
+    const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
       {
         cursor: "0",
         sequence: 0,
@@ -1821,7 +1854,7 @@ describe("Transcript projection", () => {
   })
 
   it("projects a delivered steering message as a user entry in event order", () => {
-    const projection = project("turn", "prompt", [
+    const projection = TranscriptProjection.Projection.project("turn", "prompt", [
       { cursor: "output-0", sequence: 0, type: "model.output.completed", createdAt: 0, text: "Working." },
       {
         cursor: "tool-1",
@@ -1852,8 +1885,8 @@ describe("Transcript projection", () => {
     expect(keys.indexOf("steering:turn:%n3:%n0")).toBeGreaterThan(keys.indexOf("tool:turn:call"))
   })
 
-  it("ignores an empty steering drain event", () => {
-    const projection = project("turn", "prompt", [
+  it("ignores an TranscriptProjection.Projection.empty steering drain event", () => {
+    const projection = TranscriptProjection.Projection.project("turn", "prompt", [
       {
         cursor: "steer-0",
         sequence: 0,
@@ -1871,7 +1904,7 @@ describe("Transcript projection", () => {
   })
 
   it("projects each delivered steering message as its own user entry", () => {
-    const projection = project("turn", "prompt", [
+    const projection = TranscriptProjection.Projection.project("turn", "prompt", [
       {
         cursor: "steer-2",
         sequence: 2,
@@ -1911,8 +1944,11 @@ describe("Transcript projection", () => {
         message_count: 1,
       },
     }
-    const first = applyEvent(empty("turn", "prompt"), delivered)
-    const replayed = applyEvent(first, delivered)
+    const first = TranscriptProjection.Projection.applyEvent(
+      TranscriptProjection.Projection.empty("turn", "prompt"),
+      delivered,
+    )
+    const replayed = TranscriptProjection.Projection.applyEvent(first, delivered)
     expect(replayed.units.filter((candidate) => candidate.key === "steering:turn:%n1:%n0")).toHaveLength(1)
   })
 
@@ -1924,7 +1960,10 @@ describe("Transcript projection", () => {
       createdAt: 4,
       data: { category: "truncated-stream", classification: "transient" },
     }
-    const projection = applyEvent(empty("turn-a", "prompt"), truncated)
+    const projection = TranscriptProjection.Projection.applyEvent(
+      TranscriptProjection.Projection.empty("turn-a", "prompt"),
+      truncated,
+    )
     expect(projection.units.map((unit) => unit.content)).toContainEqual({
       _tag: "Block",
       block: {
@@ -1943,7 +1982,10 @@ describe("Transcript projection", () => {
       createdAt: 4,
       data: { category: "rate-limit", classification: "transient" },
     }
-    const projection = applyEvent(empty("turn-a", "prompt"), failed)
+    const projection = TranscriptProjection.Projection.applyEvent(
+      TranscriptProjection.Projection.empty("turn-a", "prompt"),
+      failed,
+    )
     expect(
       projection.units.some((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Notification"),
     ).toBe(false)
@@ -1961,7 +2003,10 @@ describe("Transcript projection", () => {
         data: { details: { failure_classification: "truncated-stream" } },
       },
     ]
-    const projection = events.reduce((current, event) => applyEvent(current, event), empty("turn-a", "prompt"))
+    const projection = events.reduce(
+      (current, event) => TranscriptProjection.Projection.applyEvent(current, event),
+      TranscriptProjection.Projection.empty("turn-a", "prompt"),
+    )
     const outcome = projection.units.find((unit) => unit.executionOutcome !== undefined)?.executionOutcome
     expect(outcome).toMatchObject({ status: "failed" })
   })

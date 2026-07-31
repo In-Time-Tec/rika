@@ -1,4 +1,5 @@
-import { AgentTools, ExecutionStatus } from "@rika/coding-tools/coding-tool-catalog"
+import * as AgentTools from "@rika/coding-tools/agent-tool-contract"
+import * as ExecutionStatus from "@rika/product/execution-status"
 import { Ids, ToolRuntime as RelayToolRuntime } from "@relayfx/sdk"
 import { Effect } from "effect"
 

@@ -1,5 +1,5 @@
 import { TextAttributes, type TextChunk } from "@opentui/core"
-import { project } from "@rika/transcript/transcript-unit"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { describe, expect, test } from "vitest"
 import { buildTranscript } from "../src/adapter"
 import { colors } from "../src/theme"
@@ -615,7 +615,7 @@ describe("tool presentation", () => {
   })
 
   const streamingBlock = (name: string, partialInput: string): ToolCall => {
-    const projection = project("turn", "prompt", [
+    const projection = TranscriptProjection.Projection.project("turn", "prompt", [
       {
         cursor: "0",
         sequence: 0,

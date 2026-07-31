@@ -2,7 +2,8 @@ import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { ViewState } from "@rika/terminal/terminal-state"
 import {
   Clock,
@@ -238,7 +239,7 @@ const program = Effect.gen(function* () {
                       if (event._tag !== "TranscriptProjectionPatched" || event.origin._tag !== "Event") return
                       Queue.offerUnsafe(
                         events,
-                        `${Transcript.executionKey(event.origin.executionId)}:${event.origin.type}`,
+                        `${TranscriptCorrelation.executionKey(event.origin.executionId)}:${event.origin.type}`,
                       )
                     }),
                   )
@@ -271,7 +272,7 @@ const program = Effect.gen(function* () {
                     createdAt: startedAt,
                     updatedAt: startedAt,
                   }
-                  const seed = Transcript.empty(turn.id, turn.prompt)
+                  const seed = TranscriptProjection.Projection.empty(turn.id, turn.prompt)
                   let state: InteractiveController.State = {
                     model: {
                       ...ViewState.initial(workspace, "medium"),

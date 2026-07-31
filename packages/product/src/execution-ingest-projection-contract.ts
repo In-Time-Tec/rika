@@ -1,6 +1,6 @@
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
-import * as Transcript from "@rika/transcript/transcript-presentation-model"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Schema } from "effect"
 
 export const StreamAnchorSchema = Schema.Struct({
@@ -45,7 +45,7 @@ export const SnapshotSchema = Schema.Struct({
   turn: Turn.Turn,
   ...StreamAnchorSchema.fields,
   state: VisibleStateSchema,
-  units: Schema.Array(Transcript.Unit),
+  units: Schema.Array(TranscriptUnit.Unit),
   rootStatus: Schema.optionalKey(TerminalStatusSchema),
 })
 
@@ -59,13 +59,13 @@ export const PatchSchema = Schema.Struct({
   origin: ProjectionOriginSchema,
   state: VisibleStateSchema,
   delta: Schema.Struct({
-    upsert: Schema.Array(Transcript.Unit),
+    upsert: Schema.Array(TranscriptUnit.Unit),
     remove: Schema.Array(Schema.String),
   }),
   rootStatus: Schema.optionalKey(TerminalStatusSchema),
 })
 
-export type Unit = Transcript.Unit
+export type Unit = TranscriptUnit.Unit
 
 export interface UnitDelta {
   readonly upsert: ReadonlyArray<Unit>

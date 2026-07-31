@@ -1,7 +1,7 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { TestModel } from "@batonfx/test"
-import { Runtime } from "@rika/coding-tools/coding-tool-catalog"
+import * as Runtime from "@rika/coding-tools/coding-tool-runtime"
 import { Config, Context, Effect, Layer, Logger, Schema, Semaphore, Stdio, Stream } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import * as ExecutionBackend from "@rika/product/execution-service"

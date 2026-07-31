@@ -1,14 +1,12 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, test } from "vitest"
 import { Effect, FileSystem, Layer, Schema } from "effect"
-import {
-  MediaView,
-  ProcessRegistry,
-  ReadWebPage,
-  Runtime,
-  WebSearch,
-  WorkspaceIndex,
-} from "@rika/coding-tools/coding-tool-catalog"
+import * as MediaView from "@rika/coding-tools/media-view-service"
+import * as ProcessRegistry from "@rika/coding-tools/shell-process-registry"
+import * as ReadWebPage from "@rika/coding-tools/read-web-page-service"
+import * as Runtime from "@rika/coding-tools/coding-tool-runtime"
+import * as WebSearch from "@rika/coding-tools/web-search-service"
+import * as WorkspaceIndex from "@rika/coding-tools/workspace-file-search"
 import { provide } from "./test-layer"
 
 test("exposes fileSearch, glob, and grep through the ripgrep workspace index", () =>

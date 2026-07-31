@@ -1,4 +1,11 @@
 #!/usr/bin/env bun
+import * as BehaviorMode from "@rika/configuration/behavior-mode"
+import * as ModelRoute from "@rika/configuration/model-route"
+import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
+import * as SettingsDefaults from "@rika/configuration/configuration-settings"
+import * as ConfigurationService from "@rika/configuration/configuration-service"
+import * as SettingsDecoder from "@rika/configuration/configuration-settings"
+import * as ConfigurationSettingsInput from "@rika/configuration/configuration-settings"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import {
@@ -12,8 +19,8 @@ import {
   ThreadToolHandlers,
   ThreadToolService,
 } from "@rika/product/product-operation"
-import { ConfigContract, ConfigService, Models } from "@rika/configuration/configuration-settings"
-import { McpOAuth, SkillRegistry } from "@rika/extensions/plugin-contract"
+import * as McpOAuthService from "@rika/extensions/mcp-oauth-service"
+import * as SkillRegistry from "@rika/extensions/skill-registry"
 import * as Database from "@rika/product-store/product-database-layer"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -27,14 +34,12 @@ import * as Turn from "@rika/product/turn-record"
 import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
 import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import * as RelayExecutionBackend from "@rika/relay-execution/relay-execution-layer"
-import {
-  MediaView,
-  ReadWebPage,
-  Runtime as ToolRuntime,
-  ThreadTools,
-  WebSearch,
-  WorkspaceIndex,
-} from "@rika/coding-tools/coding-tool-catalog"
+import * as MediaView from "@rika/coding-tools/media-view-service"
+import * as ReadWebPage from "@rika/coding-tools/read-web-page-service"
+import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
+import * as ThreadTools from "@rika/coding-tools/thread-tool-contract"
+import * as WebSearch from "@rika/coding-tools/web-search-service"
+import * as WorkspaceIndex from "@rika/coding-tools/workspace-file-search"
 import { FetchHttpClient } from "effect/unstable/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import {
@@ -231,55 +236,57 @@ export const relayBackendLayer: {
 } = Function.dual(7, relayBackendLayerImpl)
 
 const resolveTunedModeRoute = (
-  settings: ConfigContract.Settings,
-  mode: ConfigContract.ModeId,
-  role: ConfigContract.Role,
+  settings: SettingsDefaults.ConfigurationSettings,
+  mode: BehaviorMode.ModeId,
+  role: ModelRoute.ModelRoute.Role,
   tuning?: { readonly fastMode?: boolean },
 ) => {
   const configured = settings.modes[mode][role]
   const fast = tuning?.fastMode ?? configured.fast ?? false
-  const routedSettings: ConfigContract.Settings = {
+  const routedSettings: SettingsDefaults.ConfigurationSettings = {
     ...settings,
     modes: {
       ...settings.modes,
       [mode]: { ...settings.modes[mode], [role]: { ...configured, fast } },
     },
   }
-  return ConfigContract.resolveModelRoute(routedSettings, mode, role)
+  return ModelRouteResolution.resolveModelRoute(routedSettings, mode, role)
 }
 
-const supportingModelRoutes = (settings: ConfigContract.Settings) => [
-  ConfigContract.resolveThreadTitleRoute(settings),
-  ConfigContract.resolveCompactionSummaryRoute(settings),
+const supportingModelRoutes = (settings: SettingsDefaults.ConfigurationSettings) => [
+  ModelRouteResolution.resolveThreadTitleRoute(settings),
+  ModelRouteResolution.resolveCompactionSummaryRoute(settings),
 ]
 
 const modelRoutesForExecutionImpl = (
-  settings: ConfigContract.Settings,
-  mode: ConfigContract.ModeId,
+  settings: SettingsDefaults.ConfigurationSettings,
+  mode: BehaviorMode.ModeId,
   tuning?: { readonly fastMode?: boolean },
 ) => [
   resolveTunedModeRoute(settings, mode, "main", tuning),
   resolveTunedModeRoute(settings, mode, "oracle", tuning),
   ...supportingModelRoutes(settings),
-  ...ConfigContract.agentIds.map((agent) => ConfigContract.resolveAgentRoute(settings, mode, agent, tuning)),
+  ...ModelRouteResolution.agentIds.map((agent) =>
+    ModelRouteResolution.resolveAgentRoute(settings, mode, agent, tuning),
+  ),
 ]
 
 export const modelRoutesForExecution: {
   (
-    mode: ConfigContract.ModeId,
+    mode: BehaviorMode.ModeId,
     tuning?: { readonly fastMode?: boolean },
-  ): (settings: ConfigContract.Settings) => ReturnType<typeof modelRoutesForExecutionImpl>
+  ): (settings: SettingsDefaults.ConfigurationSettings) => ReturnType<typeof modelRoutesForExecutionImpl>
   (
-    settings: ConfigContract.Settings,
-    mode: ConfigContract.ModeId,
+    settings: SettingsDefaults.ConfigurationSettings,
+    mode: BehaviorMode.ModeId,
     tuning?: { readonly fastMode?: boolean },
   ): ReturnType<typeof modelRoutesForExecutionImpl>
 } = Function.dual((args) => typeof args[0] === "object", modelRoutesForExecutionImpl)
 
-const defaultModelRoutes = (settings: ConfigContract.Settings) => [
+const defaultModelRoutes = (settings: SettingsDefaults.ConfigurationSettings) => [
   ...modeIds.flatMap((mode) => [
-    ConfigContract.resolveModelRoute(settings, mode, "main"),
-    ConfigContract.resolveModelRoute(settings, mode, "oracle"),
+    ModelRouteResolution.resolveModelRoute(settings, mode, "main"),
+    ModelRouteResolution.resolveModelRoute(settings, mode, "oracle"),
   ]),
   ...supportingModelRoutes(settings),
 ]
@@ -287,7 +294,7 @@ const defaultModelRoutes = (settings: ConfigContract.Settings) => [
 type PreparedPlan = ModelProviderRuntime.PreparedRoutes["plans"][number]
 
 const executionModelRoute = (
-  route: ConfigContract.ResolvedModelRoute,
+  route: ModelRouteResolution.ResolvedModelRoute,
   plan: PreparedPlan,
   role: Turn.ExecutionModelRoute["role"],
 ): Turn.ExecutionModelRoute => ({
@@ -319,7 +326,7 @@ const executionModelRoute = (
 })
 
 const executionRoutePinFromPreparedImpl = (
-  mode: ConfigContract.ModeId,
+  mode: BehaviorMode.ModeId,
   prepared: Pick<ModelProviderRuntime.PreparedRoutes, "routes" | "plans">,
 ): Turn.ExecutionRoutePin => {
   const routes = prepared.routes
@@ -354,16 +361,16 @@ const executionRoutePinFromPreparedImpl = (
 export const executionRoutePinFromPrepared: {
   (
     prepared: Pick<ModelProviderRuntime.PreparedRoutes, "routes" | "plans">,
-  ): (mode: ConfigContract.ModeId) => Turn.ExecutionRoutePin
+  ): (mode: BehaviorMode.ModeId) => Turn.ExecutionRoutePin
   (
-    mode: ConfigContract.ModeId,
+    mode: BehaviorMode.ModeId,
     prepared: Pick<ModelProviderRuntime.PreparedRoutes, "routes" | "plans">,
   ): Turn.ExecutionRoutePin
 } = Function.dual(2, executionRoutePinFromPreparedImpl)
 
 const executionRoutePinImpl = (
-  settings: ConfigContract.Settings,
-  mode: ConfigContract.ModeId,
+  settings: SettingsDefaults.ConfigurationSettings,
+  mode: BehaviorMode.ModeId,
   tuning?: { readonly fastMode?: boolean },
 ): Turn.ExecutionRoutePin => {
   const routes = modelRoutesForExecution(settings, mode, tuning)
@@ -375,19 +382,19 @@ const executionRoutePinImpl = (
 
 export const executionRoutePin: {
   (
-    mode: ConfigContract.ModeId,
+    mode: BehaviorMode.ModeId,
     tuning?: { readonly fastMode?: boolean },
-  ): (settings: ConfigContract.Settings) => Turn.ExecutionRoutePin
+  ): (settings: SettingsDefaults.ConfigurationSettings) => Turn.ExecutionRoutePin
   (
-    settings: ConfigContract.Settings,
-    mode: ConfigContract.ModeId,
+    settings: SettingsDefaults.ConfigurationSettings,
+    mode: BehaviorMode.ModeId,
     tuning?: { readonly fastMode?: boolean },
   ): Turn.ExecutionRoutePin
 } = Function.dual((args) => typeof args[0] === "object", executionRoutePinImpl)
 
 export const resolveExecutionRouteForSettings = Effect.fn("Main.resolveExecutionRouteForSettings")(function* (
-  settings: ConfigContract.Settings,
-  mode: ConfigContract.ModeId,
+  settings: SettingsDefaults.ConfigurationSettings,
+  mode: BehaviorMode.ModeId,
   tuning?: { readonly fastMode?: boolean },
 ) {
   return yield* Effect.try({
@@ -396,7 +403,7 @@ export const resolveExecutionRouteForSettings = Effect.fn("Main.resolveExecution
       executionRoute: executionRoutePin(settings, mode, tuning),
     }),
     catch: (cause) =>
-      Schema.is(ConfigContract.ModelRouteError)(cause)
+      Schema.is(ModelRouteResolution.ModelRouteError)(cause)
         ? cause
         : ModelConfigurationError.make({
             message: `Could not resolve model route: ${String(cause)}`,
@@ -405,11 +412,11 @@ export const resolveExecutionRouteForSettings = Effect.fn("Main.resolveExecution
 })
 
 export const productionCompaction = (
-  route?: Pick<ConfigContract.ResolvedModelRoute, "compaction">,
+  route?: Pick<ModelRouteResolution.ResolvedModelRoute, "compaction">,
 ): ModelProviderRuntime.CompactionOptions => ({
-  contextWindow: route?.compaction.contextWindow ?? Models.defaultCompaction.contextWindow,
-  reserveTokens: route?.compaction.reserveTokens ?? Models.defaultCompaction.reserveTokens,
-  keepRecentTokens: route?.compaction.keepRecentTokens ?? Models.defaultCompaction.keepRecentTokens,
+  contextWindow: route?.compaction.contextWindow ?? SettingsDefaults.Defaults.defaultCompaction.contextWindow,
+  reserveTokens: route?.compaction.reserveTokens ?? SettingsDefaults.Defaults.defaultCompaction.reserveTokens,
+  keepRecentTokens: route?.compaction.keepRecentTokens ?? SettingsDefaults.Defaults.defaultCompaction.keepRecentTokens,
 })
 
 const registrationTuple = (
@@ -550,7 +557,7 @@ export interface ConfiguredBackendOptions {
     ThreadInteractionRepository.RepositoryError,
     never
   >
-  readonly settings?: ConfigContract.Settings
+  readonly settings?: SettingsDefaults.ConfigurationSettings
   readonly persistedModelRoutes?: ReadonlyArray<Turn.ExecutionModelRoute>
   readonly webSearchCredentials?: Readonly<Record<string, Redacted.Redacted<string>>>
   readonly resolveLegacyRoute?: (input: ExecutionBackend.StartInput) => Effect.Effect<
@@ -560,7 +567,7 @@ export interface ConfiguredBackendOptions {
     },
     ExecutionBackend.BackendError
   >
-  readonly globalSettings?: ConfigContract.SettingsInput
+  readonly globalSettings?: ConfigurationSettingsInput.Input.SettingsInput
   readonly threadToolGateway: ThreadToolService.Gateway
 }
 
@@ -572,7 +579,7 @@ export const configuredBackendLayer = ({
   transcriptRepositoryLayer,
   threadSearchRepositoryLayer,
   threadInteractionRepositoryLayer,
-  settings = ConfigContract.defaults,
+  settings = SettingsDefaults.Defaults.defaults,
   persistedModelRoutes = [],
   webSearchCredentials = {},
   resolveLegacyRoute,
@@ -582,9 +589,9 @@ export const configuredBackendLayer = ({
   Layer.unwrap(
     Effect.gen(function* () {
       yield* mkdir(dirname(filename), { recursive: true })
-      const route = ConfigContract.resolveModelRoute(settings, "medium", "main")
-      const resolvedOracleRoute = ConfigContract.resolveModelRoute(settings, "medium", "oracle")
-      const resolvedCompactionSummaryRoute = ConfigContract.resolveCompactionSummaryRoute(settings)
+      const route = ModelRouteResolution.resolveModelRoute(settings, "medium", "main")
+      const resolvedOracleRoute = ModelRouteResolution.resolveModelRoute(settings, "medium", "oracle")
+      const resolvedCompactionSummaryRoute = ModelRouteResolution.resolveCompactionSummaryRoute(settings)
       const configuredRoutes = defaultModelRoutes(settings)
       const testResponse = yield* Config.option(Config.string("RIKA_TEST_MODEL_RESPONSE"))
       const testScript = yield* Config.option(Config.string("RIKA_TEST_MODEL_SCRIPT"))
@@ -593,9 +600,9 @@ export const configuredBackendLayer = ({
       const effectiveConfigForWorkspace = (runtimeWorkspace: string) =>
         Effect.gen(function* () {
           const runtimeSettings = yield* loadSettingsFile(workspacePaths(runtimeWorkspace).settings)
-          return yield* ConfigService.effective().pipe(
+          return yield* ConfigurationService.effectiveConfiguration().pipe(
             provideLayerScoped(
-              ConfigService.liveEnvironmentLayer({
+              ConfigurationService.liveConfigurationLayer({
                 webProviders: WebSearch.providerRegistry,
                 global: globalSettings,
                 workspace: runtimeSettings,
@@ -684,7 +691,7 @@ export const configuredBackendLayer = ({
           ...prepared.registrations,
           ...restored.flatMap((result) => (result._tag === "Registered" ? [result.registration] : [])),
         ]
-        const planFor = (resolved: ConfigContract.ResolvedModelRoute) => {
+        const planFor = (resolved: ModelRouteResolution.ResolvedModelRoute) => {
           const index = prepared.routes.findIndex(
             (candidate) =>
               candidate.alias === resolved.alias &&
@@ -798,16 +805,20 @@ export const loadSettingsFile = Effect.fn("Main.loadSettingsFile")(function* (fi
   if (!(yield* fileSystem.exists(filename))) return {}
   const text = yield* fileSystem
     .readFileString(filename)
-    .pipe(Effect.mapError((error) => ConfigContract.ConfigFileError.make({ path: filename, message: String(error) })))
+    .pipe(
+      Effect.mapError((error) =>
+        SettingsDecoder.Decoder.ConfigurationSettingsFileError.make({ path: filename, message: String(error) }),
+      ),
+    )
   const value = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(text).pipe(
     Effect.mapError((error) =>
-      ConfigContract.ConfigFileError.make({
+      SettingsDecoder.Decoder.ConfigurationSettingsFileError.make({
         path: filename,
         message: `Invalid JSON: ${String(error)}`,
       }),
     ),
   )
-  return ConfigContract.decodeSettingsInput(filename, value)
+  return SettingsDecoder.Decoder.decodeSettingsInput(filename, value)
 })
 
 const failureKind = (cause: Cause.Cause<unknown>) => {
@@ -866,9 +877,9 @@ const createExtensionLayerImpl = (home: string, workspace: string) => {
       generationsPath: workspaceLayout.extensionGenerations,
     }),
     SkillRegistry.fileSystemLayer,
-    McpOAuth.layer.pipe(
-      Layer.provide(McpOAuth.hostLayer),
-      Layer.provide(McpOAuth.tokenStoreLayer(globalLayout.mcpOAuth)),
+    McpOAuthService.layer.pipe(
+      Layer.provide(McpOAuthService.hostLayer),
+      Layer.provide(McpOAuthService.tokenStoreLayer(globalLayout.mcpOAuth)),
     ),
   ).pipe(Layer.provide(BunServices.layer), Layer.merge(BunServices.layer), Layer.merge(FetchHttpClient.layer))
 }
@@ -904,13 +915,17 @@ export const createAuthOperations = (options: {
     Effect.gen(function* () {
       const globalSettings = yield* loadSettingsFile(options.globalConfig)
       const settings = yield* loadSettingsFile(workspacePaths(workspace).settings)
-      const workspaceConfigLayer = ConfigService.liveEnvironmentLayer({
+      const workspaceConfigLayer = ConfigurationService.liveConfigurationLayer({
         webProviders: WebSearch.providerRegistry,
         global: globalSettings,
         workspace: settings,
       })
-      const resolved = yield* ConfigService.effective().pipe(provideLayerScoped(workspaceConfigLayer))
-      if (resolved.settings.providers.openai?.baseUrl !== ConfigContract.defaults.providers.openai?.baseUrl) {
+      const resolved = yield* ConfigurationService.effectiveConfiguration().pipe(
+        provideLayerScoped(workspaceConfigLayer),
+      )
+      if (
+        resolved.settings.providers.openai?.baseUrl !== SettingsDefaults.Defaults.defaults.providers.openai?.baseUrl
+      ) {
         return yield* OperationProductError.make({
           message:
             "OpenAI account login cannot be used while providers.openai.baseUrl is customized; remove the override first",
@@ -1025,12 +1040,14 @@ const createOperationLayerImpl = (
       const threadToolGateway = yield* ThreadToolService.makeGateway
       const globalSettings = yield* loadSettingsFile(globalConfig)
       const workspaceSettings = yield* loadSettingsFile(workspaceConfig)
-      const applicationConfigLayer = ConfigService.liveEnvironmentLayer({
+      const applicationConfigLayer = ConfigurationService.liveConfigurationLayer({
         webProviders: WebSearch.providerRegistry,
         global: globalSettings,
         workspace: workspaceSettings,
       })
-      const effectiveConfig = yield* ConfigService.effective().pipe(provideLayerScoped(applicationConfigLayer))
+      const effectiveConfig = yield* ConfigurationService.effectiveConfiguration().pipe(
+        provideLayerScoped(applicationConfigLayer),
+      )
       const testModelConfigured =
         environment.testModelResponse._tag === "Some" || environment.testModelScript._tag === "Some"
       const providerRuntimeContext = yield* Layer.build(
@@ -1045,9 +1062,9 @@ const createOperationLayerImpl = (
       const effectiveConfigForWorkspace = (workspace: string) =>
         Effect.gen(function* () {
           const settings = yield* loadSettingsFile(workspacePaths(workspace).settings)
-          return yield* ConfigService.effective().pipe(
+          return yield* ConfigurationService.effectiveConfiguration().pipe(
             provideLayerScoped(
-              ConfigService.liveEnvironmentLayer({
+              ConfigurationService.liveConfigurationLayer({
                 webProviders: WebSearch.providerRegistry,
                 global: globalSettings,
                 workspace: settings,
@@ -1259,7 +1276,7 @@ const createOperationLayerImpl = (
               return {
                 layer: Layer.merge(
                   configAdapter,
-                  ConfigService.liveEnvironmentLayer({
+                  ConfigurationService.liveConfigurationLayer({
                     webProviders: WebSearch.providerRegistry,
                     global: globalSettings,
                     workspace: settings,
@@ -1285,7 +1302,7 @@ const createOperationLayerImpl = (
         extensionOperations: {
           layer: extensionLayer as Layer.Layer<
             | ExtensionOperations.Service
-            | McpOAuth.Service
+            | McpOAuthService.McpOAuthService
             | SkillRegistry.SkillFileSystem
             | FileSystem.FileSystem
             | Path.Path

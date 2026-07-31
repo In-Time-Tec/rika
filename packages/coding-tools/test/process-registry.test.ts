@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Deferred, Effect, Fiber, Layer, Queue, Sink, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { ChildProcessSpawner } from "effect/unstable/process"
-import { ProcessRegistry } from "@rika/coding-tools/coding-tool-catalog"
+import * as ProcessRegistry from "@rika/coding-tools/shell-process-registry"
 import { provide } from "./test-layer"
 
 interface ControlledProcess {

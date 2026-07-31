@@ -4,8 +4,13 @@ import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as UsageRepository from "@rika/product/usage-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
-import { ExecutionId, ExecutionStatus } from "@rika/coding-tools/coding-tool-catalog"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import { ExecutionId } from "./execution-identifier"
+import * as ExecutionStatus from "./execution-status"
+import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import {
   Cause,
   Deferred,
@@ -119,19 +124,19 @@ export interface Interface {
 }
 
 type Settled = NonNullable<TranscriptRepository.ExecutionCheckpoint["status"]>
-type InterruptedOutcome = NonNullable<Transcript.Unit["executionOutcome"]> & {
+type InterruptedOutcome = NonNullable<TranscriptUnit.Unit["executionOutcome"]> & {
   readonly status: "failed" | "cancelled"
 }
 
 const isInterruptedOutcome = (
-  outcome: NonNullable<Transcript.Unit["executionOutcome"]>,
+  outcome: NonNullable<TranscriptUnit.Unit["executionOutcome"]>,
 ): outcome is InterruptedOutcome => outcome.status === "failed" || outcome.status === "cancelled"
 
 interface Node {
   readonly executionId: string
   readonly key: string
   readonly parentKey: string | undefined
-  readonly fold: Transcript.ProjectionFold
+  readonly fold: TranscriptProjection.ProjectionFold
   readonly durableCursors: Map<string, number>
   cursor: string | undefined
   sequence: number
@@ -185,7 +190,7 @@ interface Pipeline {
     readonly version: number
     readonly deferred: Deferred.Deferred<void, Failure>
   }>
-  readonly unitIndex: Map<string, Transcript.Unit>
+  readonly unitIndex: Map<string, TranscriptUnit.Unit>
   readonly unitOwners: Map<string, string>
   readonly unresolvedByParent: Map<string, Set<string>>
   readonly runningNodes: Set<string>
@@ -222,21 +227,22 @@ const spawnedChildIds = (event: ExecutionBackend.Event): ReadonlyArray<string> =
 
 const childProjectionOf = (
   key: string,
-  units: ReadonlyArray<Transcript.Unit>,
-  state?: Transcript.ProjectionState,
-): Transcript.Projection => (state === undefined ? Transcript.empty(key, "") : { units, ...state })
+  units: ReadonlyArray<TranscriptUnit.Unit>,
+  state?: TranscriptProjectionModel.ProjectionState,
+): TranscriptProjectionModel.Projection =>
+  state === undefined ? TranscriptProjection.Projection.empty(key, "") : { units, ...state }
 
 const rootProjectionOf = (
   turn: Turn.AgentExecutionTurn,
   stored: TranscriptRepository.Projection,
-  state: Transcript.ProjectionState,
-): Transcript.Projection | string => {
+  state: TranscriptProjectionModel.ProjectionState,
+): TranscriptProjectionModel.Projection | string => {
   const rootUnits = stored.units.filter((unit) => unit.parentId === undefined)
   if (rootUnits.some((unit) => unit.turnId !== turn.id)) return `Transcript ${turn.id} has a foreign root unit`
   if (stored.units.some((unit) => unit.parentId !== undefined && unit.turnId === turn.id))
     return `Transcript ${turn.id} has a root unit attached beneath another execution`
   const promptKey = `turn:${String(turn.id)}:user`
-  const expectedPrompt = Transcript.empty(String(turn.id), turn.prompt).units[0]!
+  const expectedPrompt = TranscriptProjection.Projection.empty(String(turn.id), turn.prompt).units[0]!
   const prompts = rootUnits.filter((unit) => unit.key === promptKey)
   if (prompts.length !== 1) return `Transcript ${turn.id} has no unique root prompt`
   const prompt = prompts[0]!
@@ -244,7 +250,7 @@ const rootProjectionOf = (
     prompt.content._tag !== "Entry" ||
     prompt.content.role !== "user" ||
     prompt.content.text !== turn.prompt ||
-    Transcript.compareUnitOrder(prompt.order, expectedPrompt.order) !== 0
+    TranscriptOrdering.compareUnitOrder(prompt.order, expectedPrompt.order) !== 0
   )
     return `Transcript ${turn.id} has a contradictory root prompt`
   return {
@@ -257,7 +263,7 @@ const restore = (
   turn: Turn.AgentExecutionTurn,
   stored: TranscriptRepository.Projection | undefined,
 ): { readonly nodes: Map<string, Node>; readonly order: Array<string>; readonly invalid?: string } => {
-  const rootKey = Transcript.executionKey(String(turn.id))
+  const rootKey = TranscriptCorrelation.executionKey(String(turn.id))
   const checkpoints = new Map(
     (stored?.executionCheckpoints ?? []).map((checkpoint) => [checkpoint.executionKey, checkpoint]),
   )
@@ -269,21 +275,24 @@ const restore = (
   if (
     stored !== undefined &&
     rootCheckpoint !== undefined &&
-    !Transcript.sameProjectionState(Transcript.projectionState(stored), rootCheckpoint.state)
+    !TranscriptProjection.Projection.sameProjectionState(
+      TranscriptProjection.Projection.projectionState(stored),
+      rootCheckpoint.state,
+    )
   )
     return { nodes: new Map(), order: [], invalid: `Transcript ${turn.id} has contradictory root checkpoint state` }
   const rootCursor =
     rootCheckpoint === undefined || rootCheckpoint.cursor.length === 0 ? undefined : rootCheckpoint.cursor
   const rootProjection =
     stored === undefined || rootCheckpoint === undefined
-      ? Transcript.empty(String(turn.id), turn.prompt)
+      ? TranscriptProjection.Projection.empty(String(turn.id), turn.prompt)
       : rootProjectionOf(turn, stored, rootCheckpoint.state)
   if (typeof rootProjection === "string") return { nodes: new Map(), order: [], invalid: rootProjection }
   const root: Node = {
     executionId: rootCheckpoint?.executionId ?? String(turn.id),
     key: rootKey,
     parentKey: undefined,
-    fold: Transcript.restoreProjectionFold(rootProjection),
+    fold: TranscriptProjection.Fold.restoreProjectionFold(rootProjection),
     durableCursors: new Map(rootCursor === undefined ? [] : [[rootCursor, rootCheckpoint!.sequence]]),
     cursor: rootCursor,
     sequence: rootCheckpoint?.sequence ?? -1,
@@ -294,10 +303,10 @@ const restore = (
   }
   const nodes = new Map<string, Node>([[rootKey, root]])
   const order = [rootKey]
-  const groups = new Map<string, Array<Transcript.Unit>>()
+  const groups = new Map<string, Array<TranscriptUnit.Unit>>()
   for (const unit of stored?.units ?? []) {
     if (unit.parentId === undefined) continue
-    const key = Transcript.executionKey(unit.turnId)
+    const key = TranscriptCorrelation.executionKey(unit.turnId)
     const group = groups.get(key)
     const local = IngestProjection.localizeUnit(unit)
     if (group === undefined) groups.set(key, [local])
@@ -325,7 +334,7 @@ const restore = (
         parentUnit.content._tag !== "Block" ||
         parentUnit.content.block._tag !== "ToolCall" ||
         parentUnit.content.block.id !== checkpoint.attachment.parentId ||
-        Transcript.encodeUnitOrder(parentUnit.order) !== checkpoint.attachment.parentOrderKey
+        TranscriptOrdering.encodeUnitOrder(parentUnit.order) !== checkpoint.attachment.parentOrderKey
       )
         return { nodes, order, invalid: `Transcript ${turn.id} has contradictory durable attachment for ${key}` }
       const cursor = checkpoint.cursor.length === 0 ? undefined : checkpoint.cursor
@@ -333,7 +342,7 @@ const restore = (
         executionId: checkpoint.executionId,
         key,
         parentKey: checkpoint.attachment.parentExecutionKey,
-        fold: Transcript.restoreProjectionFold(childProjectionOf(key, units, checkpoint.state)),
+        fold: TranscriptProjection.Fold.restoreProjectionFold(childProjectionOf(key, units, checkpoint.state)),
         durableCursors: new Map(cursor === undefined ? [] : [[cursor, checkpoint.sequence]]),
         cursor,
         sequence: checkpoint.sequence,
@@ -371,14 +380,14 @@ const validateStoredAttachments = (
     if (node.parentKey === undefined) continue
     const attachment = attachments.get(key)
     if (attachment === undefined) return `Transcript ${turn.id} has no durable attachment for ${key}`
-    for (const unit of Transcript.foldUnits(node.fold)) {
+    for (const unit of TranscriptProjection.Fold.foldUnits(node.fold)) {
       const actual = persisted.get(unit.key)
       const expected = IngestProjection.globalizeUnit(node, unit, attachments.get(key))
       if (
         actual === undefined ||
         actual.turnId !== expected.turnId ||
         actual.parentId !== expected.parentId ||
-        Transcript.encodeUnitOrder(actual.order) !== Transcript.encodeUnitOrder(expected.order)
+        TranscriptOrdering.encodeUnitOrder(actual.order) !== TranscriptOrdering.encodeUnitOrder(expected.order)
       )
         return `Transcript ${turn.id} has a contradictory durable attachment for ${key}`
     }
@@ -396,7 +405,7 @@ const interruptedAncestorOutcome = (nodes: ReadonlyMap<string, Node>, node: Node
   while (parentKey !== undefined) {
     const parent = nodes.get(parentKey)
     if (parent === undefined) return undefined
-    const outcome = Transcript.foldExecutionOutcome(parent.fold)
+    const outcome = TranscriptProjection.Fold.foldExecutionOutcome(parent.fold)
     if (outcome !== undefined && isInterruptedOutcome(outcome)) return outcome
     parentKey = parent.parentKey
   }
@@ -602,7 +611,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
       pipeline.unresolvedByParent.set(parent.key, waiting)
       return
     }
-    const localParent = Transcript.parentToolForChild(parent.fold, parent.executionId, child.executionId)
+    const localParent = TranscriptProjection.Fold.parentToolForChild(parent.fold, parent.executionId, child.executionId)
     if (localParent === undefined) {
       if (child.attachment !== undefined)
         fail(pipeline, child, "attachment", `Execution ${child.executionId} lost its durable parent tool`)
@@ -623,7 +632,8 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
       if (
         child.attachment.parentId !== block.id ||
         child.attachment.parentUnitKey !== parentUnit.key ||
-        Transcript.encodeUnitOrder(child.attachment.parentOrder) !== Transcript.encodeUnitOrder(parentUnit.order)
+        TranscriptOrdering.encodeUnitOrder(child.attachment.parentOrder) !==
+          TranscriptOrdering.encodeUnitOrder(parentUnit.order)
       )
         fail(pipeline, child, "attachment", `Execution ${child.executionId} changed its durable parent path`)
       return
@@ -636,7 +646,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
     }
     pipeline.unresolvedByParent.get(parent.key)?.delete(child.key)
     markCheckpoint(pipeline, child)
-    for (const unit of Transcript.foldUnits(child.fold)) {
+    for (const unit of TranscriptProjection.Fold.foldUnits(child.fold)) {
       pipeline.delta.units.set(unit.key, { owner: child.key, unit })
       visible?.set(unit.key, { owner: child.key, unit })
     }
@@ -649,7 +659,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
   const recordMutation = (
     pipeline: Pipeline,
     node: Node,
-    mutation: Transcript.FoldMutation,
+    mutation: TranscriptProjection.FoldMutation,
     visible?: IngestProjection.VisibleDelta,
   ) => {
     if (!mutation.stateChanged && mutation.units.upsert.length === 0 && mutation.units.remove.length === 0) return
@@ -665,7 +675,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
       pipeline.unitOwners.set(unit.key, node.key)
     }
     markCheckpoint(pipeline, node)
-    if (Transcript.foldHasRunningUnits(node.fold)) pipeline.runningNodes.add(node.key)
+    if (TranscriptProjection.Fold.foldHasRunningUnits(node.fold)) pipeline.runningNodes.add(node.key)
     else pipeline.runningNodes.delete(node.key)
     for (const childKey of pipeline.unresolvedByParent.get(node.key) ?? []) {
       const child = pipeline.nodes.get(childKey)
@@ -676,13 +686,13 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
   const applyMutation = (
     pipeline: Pipeline,
     node: Node,
-    mutation: Transcript.FoldMutation,
+    mutation: TranscriptProjection.FoldMutation,
     visible?: IngestProjection.VisibleDelta,
   ) => {
     recordMutation(pipeline, node, mutation, visible)
     const outcome = interruptedAncestorOutcome(pipeline.nodes, node)
-    if (outcome !== undefined && Transcript.foldHasRunningUnits(node.fold))
-      recordMutation(pipeline, node, Transcript.applyAncestorOutcome(node.fold, outcome), visible)
+    if (outcome !== undefined && TranscriptProjection.Fold.foldHasRunningUnits(node.fold))
+      recordMutation(pipeline, node, TranscriptProjection.Fold.applyAncestorOutcome(node.fold, outcome), visible)
   }
 
   const applyDescendantOutcome = (
@@ -695,7 +705,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
       if (key === ancestor.key) continue
       const node = pipeline.nodes.get(key)
       if (node !== undefined && isDescendantOf(pipeline.nodes, node, ancestor.key))
-        applyMutation(pipeline, node, Transcript.applyAncestorOutcome(node.fold, outcome), visible)
+        applyMutation(pipeline, node, TranscriptProjection.Fold.applyAncestorOutcome(node.fold, outcome), visible)
     }
   }
 
@@ -814,7 +824,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
             fail(pipeline, pipeline.nodes.get(key)!, "attachment", `Execution ${key} has no final parent tool`)
             return
           }
-          const projectionState = Transcript.snapshotFoldState(root.fold)
+          const projectionState = TranscriptProjection.Fold.snapshotFoldState(root.fold)
           const dirty = pipeline.delta
           const dirtyVersion = pipeline.pendingVersion
           pipeline.delta = { units: new Map(), checkpoints: new Set() }
@@ -826,7 +836,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
             cursor: node.cursor ?? "",
             sequence: node.sequence,
             ...(node.status === undefined ? {} : { status: node.status }),
-            state: Transcript.snapshotFoldState(node.fold),
+            state: TranscriptProjection.Fold.snapshotFoldState(node.fold),
             ...(node.attachment === undefined
               ? {}
               : {
@@ -834,14 +844,14 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
                     parentExecutionKey: node.parentKey!,
                     parentUnitKey: node.attachment.parentUnitKey,
                     parentId: node.attachment.parentId,
-                    parentOrderKey: Transcript.encodeUnitOrder(node.attachment.parentOrder),
+                    parentOrderKey: TranscriptOrdering.encodeUnitOrder(node.attachment.parentOrder),
                   },
                 }),
           })
           const terminal = fullyConsumed(pipeline.nodes)
           const usageChanged =
             pipeline.usagePending.length > 0 || (terminal && pipeline.usageSnapshot.activeEvents.size === 0)
-          const deferred = new Map<string, { readonly owner: string; readonly unit?: Transcript.Unit }>()
+          const deferred = new Map<string, { readonly owner: string; readonly unit?: TranscriptUnit.Unit }>()
           const upsert = [...dirty.units].flatMap(([key, mutation]) => {
             if (mutation.unit === undefined) return []
             const node = pipeline.nodes.get(mutation.owner)
@@ -1038,14 +1048,14 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
     childExecutionId: string,
     visible?: IngestProjection.VisibleDelta,
   ) => {
-    const key = Transcript.executionKey(childExecutionId)
+    const key = TranscriptCorrelation.executionKey(childExecutionId)
     if (key.length === 0 || key === parent.key || pipeline.nodes.has(key)) return
-    const localVisible = visible ?? new Map<string, { readonly owner: string; readonly unit?: Transcript.Unit }>()
+    const localVisible = visible ?? new Map<string, { readonly owner: string; readonly unit?: TranscriptUnit.Unit }>()
     const node: Node = {
       executionId: childExecutionId,
       key,
       parentKey: parent.key,
-      fold: Transcript.restoreProjectionFold(childProjectionOf(key, [])),
+      fold: TranscriptProjection.Fold.restoreProjectionFold(childProjectionOf(key, [])),
       durableCursors: new Map(),
       cursor: undefined,
       sequence: -1,
@@ -1056,7 +1066,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
     }
     pipeline.nodes.set(key, node)
     pipeline.order.push(key)
-    for (const unit of Transcript.foldUnits(node.fold)) {
+    for (const unit of TranscriptProjection.Fold.foldUnits(node.fold)) {
       pipeline.unitIndex.set(unit.key, unit)
       pipeline.unitOwners.set(unit.key, node.key)
       pipeline.delta.units.set(unit.key, { owner: node.key, unit })
@@ -1075,8 +1085,8 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
     try {
       if (event.executionId.length > 0 && !ExecutionId.ownsExecution(node.key, event.executionId)) return
       const visible: IngestProjection.VisibleDelta = new Map()
-      if (Transcript.isTransientEvent(event)) {
-        const mutation = Transcript.applyFoldEvent(node.fold, event)
+      if (TranscriptProjection.Fold.isTransientEvent(event)) {
+        const mutation = TranscriptProjection.Fold.applyFoldEvent(node.fold, event)
         if (!mutation.stateChanged && mutation.units.upsert.length === 0 && mutation.units.remove.length === 0) return
         IngestProjection.recordVisibleMutation(visible, node.key, mutation)
         publishPatch(pipeline, IngestProjection.eventOrigin(node.executionId, event), visible)
@@ -1115,7 +1125,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
         return
       }
       node.resumed = false
-      applyMutation(pipeline, node, Transcript.applyFoldEvent(node.fold, event), visible)
+      applyMutation(pipeline, node, TranscriptProjection.Fold.applyFoldEvent(node.fold, event), visible)
       node.durableCursors.set(event.cursor, event.sequence)
       node.cursor = event.cursor
       node.sequence = event.sequence
@@ -1123,7 +1133,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
       pipeline.pending += 1
       if (terminal !== undefined) {
         node.status = settledStatus(terminal)
-        const outcome = Transcript.foldExecutionOutcome(node.fold)
+        const outcome = TranscriptProjection.Fold.foldExecutionOutcome(node.fold)
         if (outcome === undefined)
           return fail(
             pipeline,
@@ -1138,7 +1148,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
             applyMutation(
               pipeline,
               parent,
-              Transcript.applyChildOutcome(parent.fold, node.executionId, outcome),
+              TranscriptProjection.Fold.applyChildOutcome(parent.fold, node.executionId, outcome),
               visible,
             )
         }
@@ -1479,7 +1489,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
             const node = restored.nodes.get(key)!
             if (node.parentKey === undefined) continue
             const ancestorOutcome = interruptedAncestorOutcome(restored.nodes, node)
-            if (ancestorOutcome !== undefined && Transcript.foldHasRunningUnits(node.fold))
+            if (ancestorOutcome !== undefined && TranscriptProjection.Fold.foldHasRunningUnits(node.fold))
               return yield* IngestFailure.make({
                 message: `Transcript ${root.turnId} has running descendant state beneath a ${ancestorOutcome.status} execution`,
                 threadId: String(root.threadId),
@@ -1487,10 +1497,10 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
                 executionId: node.executionId,
                 reason: "checkpoint",
               })
-            const outcome = Transcript.foldExecutionOutcome(node.fold)
+            const outcome = TranscriptProjection.Fold.foldExecutionOutcome(node.fold)
             if (outcome === undefined) continue
             const parent = restored.nodes.get(node.parentKey)!
-            const validation = Transcript.applyChildOutcome(parent.fold, node.executionId, outcome)
+            const validation = TranscriptProjection.Fold.applyChildOutcome(parent.fold, node.executionId, outcome)
             if (validation.stateChanged || validation.units.upsert.length > 0 || validation.units.remove.length > 0)
               return yield* IngestFailure.make({
                 message: `Transcript ${root.turnId} has a child outcome that contradicts its stored parent`,
@@ -1503,10 +1513,10 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
         }
         failedPipelines.delete(String(root.turnId))
         if (!refolding && isTerminalStatus(turn.status) && fullyConsumed(restored.nodes)) return
-        const unitIndex = new Map<string, Transcript.Unit>()
+        const unitIndex = new Map<string, TranscriptUnit.Unit>()
         const unitOwners = new Map<string, string>()
         for (const [key, node] of restored.nodes)
-          for (const unit of Transcript.foldUnits(node.fold)) {
+          for (const unit of TranscriptProjection.Fold.foldUnits(node.fold)) {
             unitIndex.set(unit.key, unit)
             unitOwners.set(unit.key, key)
           }
@@ -1515,7 +1525,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
         const pipeline: Pipeline = {
           threadId: root.threadId,
           turnId: root.turnId,
-          rootKey: Transcript.executionKey(String(root.turnId)),
+          rootKey: TranscriptCorrelation.executionKey(String(root.turnId)),
           streamId: `projection-${nextStreamId}`,
           nodes: restored.nodes,
           order: restored.order,
@@ -1564,7 +1574,9 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
           unitOwners,
           unresolvedByParent: new Map(),
           runningNodes: new Set(
-            [...restored.nodes].flatMap(([key, node]) => (Transcript.foldHasRunningUnits(node.fold) ? [key] : [])),
+            [...restored.nodes].flatMap(([key, node]) =>
+              TranscriptProjection.Fold.foldHasRunningUnits(node.fold) ? [key] : [],
+            ),
           ),
         }
         pipeline.fork = yield* FiberSet.makeRuntime<never, void, never>().pipe(

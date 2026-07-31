@@ -1,6 +1,11 @@
 import { Service } from "@rika/product/transcript-repository"
 export { Service }
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
+import * as TranscriptRecordedShell from "@rika/transcript/recorded-shell-presentation"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { ThreadId } from "@rika/product/thread-record"
@@ -26,7 +31,7 @@ export const ExecutionCheckpoint = Schema.Struct({
   cursor: Schema.String,
   sequence: Schema.Finite,
   status: Schema.optionalKey(Schema.Literals(["completed", "failed", "cancelled"])),
-  state: Transcript.ProjectionState,
+  state: TranscriptProjectionModel.ProjectionState,
   attachment: Schema.optionalKey(ExecutionAttachment),
 })
 export type ExecutionCheckpoint = typeof ExecutionCheckpoint.Type
@@ -35,7 +40,7 @@ export const invalidatedProjectionVersion = 2
 
 export interface Projection {
   readonly turn: Turn
-  readonly units: ReadonlyArray<Transcript.Unit>
+  readonly units: ReadonlyArray<TranscriptUnit.Unit>
   readonly checkpointGeneration: number
   readonly revision: number
   readonly modelPhase: number
@@ -59,7 +64,7 @@ export interface DeltaCheckpointOptions extends CheckpointOptions {
 }
 
 export interface UnitDelta {
-  readonly upsert: ReadonlyArray<Transcript.Unit>
+  readonly upsert: ReadonlyArray<TranscriptUnit.Unit>
   readonly remove: ReadonlyArray<string>
 }
 
@@ -110,13 +115,13 @@ export interface Interface {
   ) => Effect.Effect<ReadonlyArray<ProjectionRecoveryCandidate>, RepositoryError>
   readonly commitDelta: (
     turn: AgentExecutionTurn,
-    state: Transcript.ProjectionState,
+    state: TranscriptProjectionModel.ProjectionState,
     delta: UnitDelta,
     options: DeltaCheckpointOptions,
   ) => Effect.Effect<WriteResult, RepositoryError>
   readonly replaceForRefold: (
     turn: AgentExecutionTurn,
-    projection: Transcript.Projection,
+    projection: TranscriptProjectionModel.Projection,
     options: RefoldOptions,
   ) => Effect.Effect<RefoldWriteResult, RepositoryError>
   readonly createRecordedShell: (
@@ -210,7 +215,7 @@ const UnitRow = Schema.Struct({
   projection_version: Schema.Finite,
 })
 
-const UnitJson = Schema.fromJsonString(Transcript.Unit)
+const UnitJson = Schema.fromJsonString(TranscriptUnit.Unit)
 const UsageCursorsJson = Schema.fromJsonString(Schema.Array(Schema.String))
 const error = (cause: unknown) =>
   Schema.is(RepositoryError)(cause) ? cause : RepositoryError.make({ message: String(cause) })
@@ -223,10 +228,10 @@ const isRefoldStale = (value: unknown): value is RefoldStale =>
 
 const refoldTurn = Effect.fn("TranscriptRepository.refoldTurn")(function* (
   expected: AgentExecutionTurn,
-  projection: Transcript.Projection,
+  projection: TranscriptProjectionModel.Projection,
   options: RefoldOptions,
 ) {
-  const rootKey = Transcript.executionKey(String(expected.id))
+  const rootKey = TranscriptCorrelation.executionKey(String(expected.id))
   const roots = options.executionCheckpoints.filter((checkpoint) => checkpoint.executionKey === rootKey)
   if (roots.length !== 1)
     return yield* RepositoryError.make({ message: `Transcript ${expected.id} has no unique root execution checkpoint` })
@@ -254,12 +259,12 @@ const cursorFor = (entry: Entry | undefined): PageCursor | undefined =>
     : {
         createdAt: entry.turn.createdAt,
         turnId: entry.turn.id,
-        orderKey: Transcript.encodeUnitOrder(entry.unit.order),
+        orderKey: TranscriptOrdering.encodeUnitOrder(entry.unit.order),
       }
 
 const storedProjection = (
   turn: Turn,
-  projection: Transcript.Projection,
+  projection: TranscriptProjectionModel.Projection,
   options: CheckpointOptions,
   checkpointGeneration: number,
 ): Projection => ({
@@ -279,9 +284,9 @@ const storedProjection = (
 })
 
 const withUnits = (
-  state: Transcript.ProjectionState,
-  units: ReadonlyArray<Transcript.Unit>,
-): Transcript.Projection => ({
+  state: TranscriptProjectionModel.ProjectionState,
+  units: ReadonlyArray<TranscriptUnit.Unit>,
+): TranscriptProjectionModel.Projection => ({
   units,
   revision: state.revision,
   modelPhase: state.modelPhase,
@@ -294,20 +299,27 @@ const withUnits = (
 })
 
 const recordedShellProjection = (turn: RunningRecordedShellTurn | TerminalRecordedShellTurn) => {
-  const running = Transcript.recordedShellProjection({ id: turn.id, command: turn.command, status: "running" })
-  return turn.status === "running" ? running : Transcript.settleRecordedShellProjection(running, turn)
+  const running = TranscriptRecordedShell.recordedShellProjection({
+    id: turn.id,
+    command: turn.command,
+    status: "running",
+  })
+  return turn.status === "running" ? running : TranscriptRecordedShell.settleRecordedShellProjection(running, turn)
 }
 
 const validateRecordedShellProjection = Effect.fn("TranscriptRepository.validateRecordedShellProjection")(function* (
   turn: RunningRecordedShellTurn | TerminalRecordedShellTurn,
-  projection: Transcript.Projection,
+  projection: TranscriptProjectionModel.Projection,
   projectionVersion: number,
 ) {
   yield* validateProjectionVersion(turn.id, projectionVersion)
   if (turn.prompt !== `$ ${turn.command}`)
     return yield* RepositoryError.make({ message: `Recorded shell turn ${turn.id} has a contradictory prompt` })
   const expected = recordedShellProjection(turn)
-  if (!Transcript.sameProjectionState(expected, projection) || expected.units.length !== projection.units.length)
+  if (
+    !TranscriptProjection.Projection.sameProjectionState(expected, projection) ||
+    expected.units.length !== projection.units.length
+  )
     return yield* RepositoryError.make({ message: `Recorded shell turn ${turn.id} has a contradictory projection` })
   const [expectedUnits, actualUnits] = yield* Effect.all([
     Effect.forEach(expected.units, (unit) => Schema.encodeEffect(UnitJson)(unit)),
@@ -326,38 +338,38 @@ const compareText = (left: string, right: string): number => {
 const compareEntry = (left: Entry, right: Entry): number =>
   left.turn.createdAt - right.turn.createdAt ||
   compareText(left.turn.id, right.turn.id) ||
-  Transcript.compareUnitOrder(left.unit.order, right.unit.order)
+  TranscriptOrdering.compareUnitOrder(left.unit.order, right.unit.order)
 
 const before = (entry: Entry, cursor: PageCursor): boolean =>
   entry.turn.createdAt < cursor.createdAt ||
   (entry.turn.createdAt === cursor.createdAt &&
     (entry.turn.id < cursor.turnId ||
-      (entry.turn.id === cursor.turnId && Transcript.encodeUnitOrder(entry.unit.order) < cursor.orderKey)))
+      (entry.turn.id === cursor.turnId && TranscriptOrdering.encodeUnitOrder(entry.unit.order) < cursor.orderKey)))
 
 const after = (entry: Entry, cursor: PageCursor): boolean =>
   entry.turn.createdAt > cursor.createdAt ||
   (entry.turn.createdAt === cursor.createdAt &&
     (entry.turn.id > cursor.turnId ||
-      (entry.turn.id === cursor.turnId && Transcript.encodeUnitOrder(entry.unit.order) > cursor.orderKey)))
+      (entry.turn.id === cursor.turnId && TranscriptOrdering.encodeUnitOrder(entry.unit.order) > cursor.orderKey)))
 
 const compareDescending = (left: Entry, right: Entry): number => compareEntry(right, left)
 
-const unitSetError = (units: ReadonlyArray<Transcript.Unit>): RepositoryError | undefined => {
+const unitSetError = (units: ReadonlyArray<TranscriptUnit.Unit>): RepositoryError | undefined => {
   const keys = new Set<string>()
   const orders = new Set<string>()
   for (const unit of units) {
-    if (!Transcript.hasIntrinsicOrder(unit))
+    if (!TranscriptOrdering.hasIntrinsicOrder(unit))
       return RepositoryError.make({ message: `Transcript unit ${unit.key} has a non-intrinsic order` })
     if (keys.has(unit.key)) return RepositoryError.make({ message: `Transcript unit key ${unit.key} is duplicated` })
     keys.add(unit.key)
-    const order = Transcript.encodeUnitOrder(unit.order)
+    const order = TranscriptOrdering.encodeUnitOrder(unit.order)
     if (orders.has(order)) return RepositoryError.make({ message: `Transcript unit order ${order} is duplicated` })
     orders.add(order)
   }
   return undefined
 }
 
-const validateUnits = (units: ReadonlyArray<Transcript.Unit>) => {
+const validateUnits = (units: ReadonlyArray<TranscriptUnit.Unit>) => {
   const failure = unitSetError(units)
   return failure === undefined ? Effect.void : Effect.fail(failure)
 }
@@ -365,7 +377,7 @@ const validateUnits = (units: ReadonlyArray<Transcript.Unit>) => {
 const stateScalarError = (
   turnId: TurnId,
   owner: string,
-  state: Transcript.ProjectionState,
+  state: TranscriptProjectionModel.ProjectionState,
 ): RepositoryError | undefined => {
   if (!Number.isSafeInteger(state.revision) || state.revision < -1)
     return RepositoryError.make({ message: `Transcript ${turnId} has an invalid revision for ${owner}` })
@@ -383,7 +395,7 @@ const stateScalarError = (
   return undefined
 }
 
-const validateStateScalars = (turnId: TurnId, owner: string, state: Transcript.ProjectionState) => {
+const validateStateScalars = (turnId: TurnId, owner: string, state: TranscriptProjectionModel.ProjectionState) => {
   const failure = stateScalarError(turnId, owner, state)
   return failure === undefined ? Effect.void : Effect.fail(failure)
 }
@@ -400,7 +412,7 @@ const validateCurrentProjectionVersion = (projectionVersion: number) =>
 
 const validateCheckpoint = (
   turn: AgentExecutionTurn,
-  state: Transcript.ProjectionState,
+  state: TranscriptProjectionModel.ProjectionState,
   options: CheckpointOptions,
   complete = false,
 ) => {
@@ -414,7 +426,7 @@ const validateCheckpoint = (
   const checkpoints = options.executionCheckpoints
   if (checkpoints.length === 0)
     return Effect.fail(RepositoryError.make({ message: `Transcript ${turn.id} has no execution checkpoint` }))
-  const rootKey = Transcript.executionKey(String(turn.id))
+  const rootKey = TranscriptCorrelation.executionKey(String(turn.id))
   const keys = new Set<string>()
   const parents = new Map<string, string | undefined>()
   let root: ExecutionCheckpoint | undefined
@@ -423,7 +435,7 @@ const validateCheckpoint = (
       return Effect.fail(RepositoryError.make({ message: `Transcript ${turn.id} has an empty execution key` }))
     if (
       checkpoint.executionId.length === 0 ||
-      Transcript.executionKey(checkpoint.executionId) !== checkpoint.executionKey
+      TranscriptCorrelation.executionKey(checkpoint.executionId) !== checkpoint.executionKey
     )
       return Effect.fail(
         RepositoryError.make({
@@ -480,7 +492,7 @@ const validateCheckpoint = (
   if (complete)
     if (root === undefined)
       return Effect.fail(RepositoryError.make({ message: `Transcript ${turn.id} has no root execution checkpoint` }))
-  if (complete && root !== undefined && !Transcript.sameProjectionState(state, root.state))
+  if (complete && root !== undefined && !TranscriptProjection.Projection.sameProjectionState(state, root.state))
     return Effect.fail(RepositoryError.make({ message: `Transcript ${turn.id} has contradictory root fold state` }))
   if (complete) {
     const connected = new Set<string>([rootKey])
@@ -518,11 +530,11 @@ const validateCheckpoint = (
 
 const attachmentSetError = (
   turn: AgentExecutionTurn,
-  units: ReadonlyArray<Transcript.Unit>,
+  units: ReadonlyArray<TranscriptUnit.Unit>,
   checkpoints: ReadonlyArray<ExecutionCheckpoint>,
 ): RepositoryError | undefined => {
   if (checkpoints.length === 0 && units.length === 0) return undefined
-  const rootKey = Transcript.executionKey(String(turn.id))
+  const rootKey = TranscriptCorrelation.executionKey(String(turn.id))
   const byExecution = new Map(checkpoints.map((checkpoint) => [checkpoint.executionKey, checkpoint]))
   const byUnit = new Map(units.map((unit) => [unit.key, unit]))
   for (const checkpoint of checkpoints) {
@@ -531,18 +543,18 @@ const attachmentSetError = (
     const parent = byUnit.get(attachment.parentUnitKey)
     if (
       parent === undefined ||
-      Transcript.executionKey(parent.turnId) !== attachment.parentExecutionKey ||
+      TranscriptCorrelation.executionKey(parent.turnId) !== attachment.parentExecutionKey ||
       parent.content._tag !== "Block" ||
       parent.content.block._tag !== "ToolCall" ||
       parent.content.block.id !== attachment.parentId ||
-      Transcript.encodeUnitOrder(parent.order) !== attachment.parentOrderKey
+      TranscriptOrdering.encodeUnitOrder(parent.order) !== attachment.parentOrderKey
     )
       return RepositoryError.make({
         message: `Transcript ${turn.id} has a contradictory attachment for ${checkpoint.executionKey}`,
       })
   }
   for (const unit of units) {
-    const executionKey = Transcript.executionKey(unit.turnId)
+    const executionKey = TranscriptCorrelation.executionKey(unit.turnId)
     const checkpoint = byExecution.get(executionKey)
     if (executionKey === rootKey) {
       if (unit.parentId !== undefined)
@@ -556,9 +568,13 @@ const attachmentSetError = (
       attachment === undefined ||
       parent === undefined ||
       unit.parentId !== attachment.parentId ||
-      Transcript.encodeUnitOrder(unit.order) !==
-        Transcript.encodeUnitOrder(
-          Transcript.childOrder(parent.order, checkpoint.executionId, Transcript.localOrder(unit.order)),
+      TranscriptOrdering.encodeUnitOrder(unit.order) !==
+        TranscriptOrdering.encodeUnitOrder(
+          TranscriptOrdering.childOrder(
+            parent.order,
+            checkpoint.executionId,
+            TranscriptOrdering.localOrder(unit.order),
+          ),
         )
     )
       return RepositoryError.make({
@@ -570,7 +586,7 @@ const attachmentSetError = (
 
 const validateAttachmentSet = (
   turn: AgentExecutionTurn,
-  units: ReadonlyArray<Transcript.Unit>,
+  units: ReadonlyArray<TranscriptUnit.Unit>,
   checkpoints: ReadonlyArray<ExecutionCheckpoint>,
 ) => {
   const failure = attachmentSetError(turn, units, checkpoints)
@@ -582,7 +598,7 @@ const validatePageOptions = (options: PageOptions) =>
     ? Effect.fail(RepositoryError.make({ message: "Transcript pages cannot specify both before and after cursors" }))
     : Effect.void
 
-const validateMemoryUnits = (units: ReadonlyArray<Transcript.Unit>) =>
+const validateMemoryUnits = (units: ReadonlyArray<TranscriptUnit.Unit>) =>
   Effect.forEach(units, (unit) => Schema.encodeEffect(UnitJson)(unit).pipe(Effect.mapError(error)), { discard: true })
 
 const validateMemoryCheckpoint = (options: CheckpointOptions) =>
@@ -619,7 +635,7 @@ const memoryWriteResult = (write: MemoryWrite): Effect.Effect<WriteResult, Repos
 
 interface MemoryEntry {
   projection: Projection
-  unitsByKey: Map<string, Transcript.Unit>
+  unitsByKey: Map<string, TranscriptUnit.Unit>
   orderOwners: Map<string, string>
   checkpointsByKey: Map<string, ExecutionCheckpoint>
   attachmentsByUnit: Map<string, string>
@@ -628,7 +644,7 @@ interface MemoryEntry {
 const materializeMemory = (entry: MemoryEntry): Projection => ({
   ...clone(entry.projection),
   units: [...entry.unitsByKey.values()]
-    .toSorted((left, right) => Transcript.compareUnitOrder(left.order, right.order))
+    .toSorted((left, right) => TranscriptOrdering.compareUnitOrder(left.order, right.order))
     .map(clone),
   executionCheckpoints: [...entry.checkpointsByKey.values()]
     .toSorted((left, right) => compareText(left.executionKey, right.executionKey))
@@ -637,7 +653,7 @@ const materializeMemory = (entry: MemoryEntry): Projection => ({
 
 const memoryEntry = (
   turn: Turn,
-  projection: Transcript.Projection,
+  projection: TranscriptProjectionModel.Projection,
   options: CheckpointOptions,
   checkpointGeneration: number,
 ): MemoryEntry => {
@@ -653,7 +669,9 @@ const memoryEntry = (
       checkpointGeneration,
     ),
     unitsByKey,
-    orderOwners: new Map([...unitsByKey.values()].map((unit) => [Transcript.encodeUnitOrder(unit.order), unit.key])),
+    orderOwners: new Map(
+      [...unitsByKey.values()].map((unit) => [TranscriptOrdering.encodeUnitOrder(unit.order), unit.key]),
+    ),
     checkpointsByKey,
     attachmentsByUnit: new Map(
       [...checkpointsByKey.values()]
@@ -698,7 +716,11 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
         projectionVersion: projection.projectionVersion,
       }
       yield* validateProjectionVersion(projection.turn.id, projection.projectionVersion)
-      yield* validateStateScalars(projection.turn.id, "root projection", Transcript.projectionState(projection))
+      yield* validateStateScalars(
+        projection.turn.id,
+        "root projection",
+        TranscriptProjection.Projection.projectionState(projection),
+      )
       const invalidatedEmpty =
         projection.projectionVersion === invalidatedProjectionVersion &&
         projection.units.length === 0 &&
@@ -710,11 +732,16 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
           })
         yield* validateRecordedShellProjection(
           projection.turn,
-          withUnits(Transcript.projectionState(projection), projection.units),
+          withUnits(TranscriptProjection.Projection.projectionState(projection), projection.units),
           projection.projectionVersion,
         )
       } else if (!invalidatedEmpty) {
-        yield* validateCheckpoint(projection.turn, Transcript.projectionState(projection), options, true)
+        yield* validateCheckpoint(
+          projection.turn,
+          TranscriptProjection.Projection.projectionState(projection),
+          options,
+          true,
+        )
         yield* validateMemoryCheckpoint(options)
         yield* validateAttachmentSet(projection.turn, projection.units, projection.executionCheckpoints)
       }
@@ -722,7 +749,7 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
         projection.turn.id,
         memoryEntry(
           projection.turn,
-          withUnits(Transcript.projectionState(projection), projection.units),
+          withUnits(TranscriptProjection.Projection.projectionState(projection), projection.units),
           options,
           projection.checkpointGeneration,
         ),
@@ -829,11 +856,11 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
                 if (
                   parent === undefined ||
                   checkpointFor(attachment.parentExecutionKey) === undefined ||
-                  Transcript.executionKey(parent.turnId) !== attachment.parentExecutionKey ||
+                  TranscriptCorrelation.executionKey(parent.turnId) !== attachment.parentExecutionKey ||
                   parent.content._tag !== "Block" ||
                   parent.content.block._tag !== "ToolCall" ||
                   parent.content.block.id !== attachment.parentId ||
-                  Transcript.encodeUnitOrder(parent.order) !== attachment.parentOrderKey
+                  TranscriptOrdering.encodeUnitOrder(parent.order) !== attachment.parentOrderKey
                 )
                   return [
                     {
@@ -846,11 +873,11 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
                   ]
               }
             }
-            const root = checkpointFor(Transcript.executionKey(String(turn.id)))
+            const root = checkpointFor(TranscriptCorrelation.executionKey(String(turn.id)))
             if (
               root === undefined ||
               root.attachment !== undefined ||
-              !Transcript.sameProjectionState(projectionState, root.state)
+              !TranscriptProjection.Projection.sameProjectionState(projectionState, root.state)
             )
               return [
                 {
@@ -870,7 +897,7 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
                 ]
             for (const unit of delta.upsert) {
               const previous = current?.unitsByKey.get(unit.key)
-              const orderKey = Transcript.encodeUnitOrder(unit.order)
+              const orderKey = TranscriptOrdering.encodeUnitOrder(unit.order)
               const previousToolId =
                 previous?.content._tag === "Block" && previous.content.block._tag === "ToolCall"
                   ? previous.content.block.id
@@ -882,7 +909,7 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
               if (
                 previous !== undefined &&
                 (previous.turnId !== unit.turnId ||
-                  Transcript.encodeUnitOrder(previous.order) !== orderKey ||
+                  TranscriptOrdering.encodeUnitOrder(previous.order) !== orderKey ||
                   previousToolId !== toolId ||
                   previous.parentId !== unit.parentId)
               )
@@ -904,7 +931,7 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
                   },
                   entries,
                 ]
-              const executionKey = Transcript.executionKey(unit.turnId)
+              const executionKey = TranscriptCorrelation.executionKey(unit.turnId)
               const checkpoint = checkpointFor(executionKey)
               if (checkpoint === undefined)
                 return [
@@ -914,7 +941,7 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
                   },
                   entries,
                 ]
-              if (executionKey === Transcript.executionKey(String(turn.id))) {
+              if (executionKey === TranscriptCorrelation.executionKey(String(turn.id))) {
                 if (unit.parentId !== undefined)
                   return [
                     {
@@ -930,9 +957,13 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
                   attachment === undefined ||
                   parent === undefined ||
                   unit.parentId !== attachment.parentId ||
-                  Transcript.encodeUnitOrder(unit.order) !==
-                    Transcript.encodeUnitOrder(
-                      Transcript.childOrder(parent.order, checkpoint.executionId, Transcript.localOrder(unit.order)),
+                  TranscriptOrdering.encodeUnitOrder(unit.order) !==
+                    TranscriptOrdering.encodeUnitOrder(
+                      TranscriptOrdering.childOrder(
+                        parent.order,
+                        checkpoint.executionId,
+                        TranscriptOrdering.localOrder(unit.order),
+                      ),
                     )
                 )
                   return [
@@ -949,13 +980,13 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
             const next = current ?? memoryEntry(turn, withUnits(projectionState, []), options, -1)
             for (const key of delta.remove) {
               const previous = next.unitsByKey.get(key)
-              if (previous !== undefined) next.orderOwners.delete(Transcript.encodeUnitOrder(previous.order))
+              if (previous !== undefined) next.orderOwners.delete(TranscriptOrdering.encodeUnitOrder(previous.order))
               next.unitsByKey.delete(key)
             }
             for (const unit of delta.upsert) {
               const copy = clone(unit)
               next.unitsByKey.set(unit.key, copy)
-              next.orderOwners.set(Transcript.encodeUnitOrder(unit.order), unit.key)
+              next.orderOwners.set(TranscriptOrdering.encodeUnitOrder(unit.order), unit.key)
             }
             for (const checkpoint of options.executionCheckpoints) {
               const copy = clone(checkpoint)
@@ -977,7 +1008,7 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
       }),
       replaceForRefold: Effect.fn("TranscriptRepository.replaceForRefold")(function* (turn, projection, options) {
         yield* validateUnits(projection.units)
-        yield* validateCheckpoint(turn, Transcript.projectionState(projection), options, true)
+        yield* validateCheckpoint(turn, TranscriptProjection.Projection.projectionState(projection), options, true)
         yield* validateMemoryUnits(projection.units)
         yield* validateMemoryCheckpoint(options)
         yield* validateAttachmentSet(turn, projection.units, options.executionCheckpoints)
@@ -1203,9 +1234,10 @@ export const layer = Layer.effect(
                         : null
                     return (
                       unit.key === unitRow.unit_key &&
-                      (isRecordedShell(turn) ? null : Transcript.executionKey(unit.turnId)) === unitRow.execution_key &&
-                      Transcript.hasIntrinsicOrder(unit) &&
-                      Transcript.encodeUnitOrder(unit.order) === unitRow.unit_order_key &&
+                      (isRecordedShell(turn) ? null : TranscriptCorrelation.executionKey(unit.turnId)) ===
+                        unitRow.execution_key &&
+                      TranscriptOrdering.hasIntrinsicOrder(unit) &&
+                      TranscriptOrdering.encodeUnitOrder(unit.order) === unitRow.unit_order_key &&
                       (unit.parentId ?? null) === unitRow.parent_id &&
                       toolId === unitRow.tool_id
                     )
@@ -1224,7 +1256,7 @@ export const layer = Layer.effect(
         row.usage_cursors_json === null
           ? undefined
           : yield* Schema.decodeUnknownEffect(UsageCursorsJson)(row.usage_cursors_json).pipe(Effect.mapError(error))
-      const state: Transcript.ProjectionState = {
+      const state: TranscriptProjectionModel.ProjectionState = {
         revision: row.revision,
         modelPhase: row.model_phase,
         ...(row.usable_completion_sequence === null
@@ -1301,12 +1333,12 @@ export const layer = Layer.effect(
         )
       },
     )
-    const storeUnit = Effect.fn("TranscriptRepository.storeUnit")(function* (turn: Turn, unit: Transcript.Unit) {
-      if (!Transcript.hasIntrinsicOrder(unit))
+    const storeUnit = Effect.fn("TranscriptRepository.storeUnit")(function* (turn: Turn, unit: TranscriptUnit.Unit) {
+      if (!TranscriptOrdering.hasIntrinsicOrder(unit))
         return yield* RepositoryError.make({ message: `Transcript unit ${unit.key} has a non-intrinsic order` })
       const encoded = yield* Schema.encodeEffect(UnitJson)(unit)
-      const orderKey = Transcript.encodeUnitOrder(unit.order)
-      const executionKey = isRecordedShell(turn) ? null : Transcript.executionKey(unit.turnId)
+      const orderKey = TranscriptOrdering.encodeUnitOrder(unit.order)
+      const executionKey = isRecordedShell(turn) ? null : TranscriptCorrelation.executionKey(unit.turnId)
       const rows =
         yield* sql`INSERT INTO rika_transcript_units (turn_id, unit_key, execution_key, thread_id, unit_order_key, tool_id, parent_id, revision, unit_json, created_at, updated_at)
           VALUES (${turn.id}, ${unit.key}, ${executionKey}, ${turn.threadId}, ${orderKey}, ${unit.content._tag === "Block" && unit.content.block._tag === "ToolCall" ? unit.content.block.id : null}, ${unit.parentId ?? null}, ${unit.revision}, ${encoded}, ${turn.createdAt}, ${turn.updatedAt})
@@ -1322,7 +1354,7 @@ export const layer = Layer.effect(
         return yield* RepositoryError.make({ message: `Transcript unit ${unit.key} changed its intrinsic identity` })
     }, Effect.mapError(error))
     const checkpointValues = Effect.fn("TranscriptRepository.checkpointValues")(function* (
-      state: Transcript.ProjectionState,
+      state: TranscriptProjectionModel.ProjectionState,
     ) {
       const usageCursors =
         state.usageCursors === undefined ? null : yield* Schema.encodeEffect(UsageCursorsJson)(state.usageCursors)
@@ -1368,7 +1400,7 @@ export const layer = Layer.effect(
     })
     const commitCheckpoint = Effect.fn("TranscriptRepository.commitCheckpoint")(function* (
       turn: Turn,
-      state: Transcript.ProjectionState,
+      state: TranscriptProjectionModel.ProjectionState,
       options: DeltaCheckpointOptions,
     ) {
       const values = yield* checkpointValues(state)
@@ -1398,7 +1430,7 @@ export const layer = Layer.effect(
     })
     const replaceCheckpointForRefold = Effect.fn("TranscriptRepository.replaceCheckpointForRefold")(function* (
       turn: Turn,
-      state: Transcript.ProjectionState,
+      state: TranscriptProjectionModel.ProjectionState,
       options: RefoldOptions,
     ) {
       const values = yield* checkpointValues(state)
@@ -1481,11 +1513,15 @@ export const layer = Layer.effect(
                 ${resultTruncated}, ${result?.exitCode ?? null},
                 '{"_tag":"Human"}', '{"_tag":"Original"}', ${turn.createdAt}, ${turn.updatedAt}
               )`
-            const committed = yield* commitCheckpoint(turn, Transcript.projectionState(projection), {
-              executionCheckpoints: [],
-              projectionVersion,
-              expectedGeneration: undefined,
-            })
+            const committed = yield* commitCheckpoint(
+              turn,
+              TranscriptProjection.Projection.projectionState(projection),
+              {
+                executionCheckpoints: [],
+                projectionVersion,
+                expectedGeneration: undefined,
+              },
+            )
             if (!committed)
               return yield* RepositoryError.make({ message: `Recorded shell transcript ${turn.id} already exists` })
             yield* Effect.forEach(projection.units, (unit) => storeUnit(turn, unit), { discard: true })
@@ -1543,7 +1579,7 @@ export const layer = Layer.effect(
       }),
       replaceForRefold: Effect.fn("TranscriptRepository.replaceForRefold")(function* (turn, projection, options) {
         yield* validateUnits(projection.units)
-        yield* validateCheckpoint(turn, Transcript.projectionState(projection), options, true)
+        yield* validateCheckpoint(turn, TranscriptProjection.Projection.projectionState(projection), options, true)
         yield* validateAttachmentSet(turn, projection.units, options.executionCheckpoints)
         const replacementTurn = yield* refoldTurn(turn, projection, options)
         return yield* sql
@@ -1611,11 +1647,15 @@ export const layer = Layer.effect(
                     AND updated_at = ${expected.updatedAt}
                   RETURNING id`
                 if (updated.length === 0) return yield* refoldStale
-                const committed = yield* commitCheckpoint(turn, Transcript.projectionState(projection), {
-                  executionCheckpoints: [],
-                  projectionVersion,
-                  expectedGeneration,
-                })
+                const committed = yield* commitCheckpoint(
+                  turn,
+                  TranscriptProjection.Projection.projectionState(projection),
+                  {
+                    executionCheckpoints: [],
+                    projectionVersion,
+                    expectedGeneration,
+                  },
+                )
                 if (!committed) return yield* refoldStale
                 yield* Effect.forEach(projection.units, (unit) => storeUnit(turn, unit), { discard: true })
                 const stored = yield* get(turn.id)
@@ -1728,9 +1768,10 @@ export const layer = Layer.effect(
                       : null
                   if (
                     unit.key !== row.unit_key ||
-                    (isRecordedShell(turn) ? null : Transcript.executionKey(unit.turnId)) !== row.execution_key ||
-                    !Transcript.hasIntrinsicOrder(unit) ||
-                    Transcript.encodeUnitOrder(unit.order) !== row.unit_order_key ||
+                    (isRecordedShell(turn) ? null : TranscriptCorrelation.executionKey(unit.turnId)) !==
+                      row.execution_key ||
+                    !TranscriptOrdering.hasIntrinsicOrder(unit) ||
+                    TranscriptOrdering.encodeUnitOrder(unit.order) !== row.unit_order_key ||
                     (unit.parentId ?? null) !== row.durable_parent_id ||
                     toolId !== row.durable_tool_id ||
                     turn.id !== turnId
@@ -1766,12 +1807,12 @@ export const layer = Layer.effect(
                   } else {
                     if (
                       row.checkpoint_execution_id === null ||
-                      Transcript.executionKey(row.checkpoint_execution_id) !== row.execution_key
+                      TranscriptCorrelation.executionKey(row.checkpoint_execution_id) !== row.execution_key
                     )
                       return yield* RepositoryError.make({ message: "Transcript unit has no execution checkpoint" })
                     if (row.checkpoint_is_root === 1) {
                       if (
-                        row.execution_key !== Transcript.executionKey(String(turnId)) ||
+                        row.execution_key !== TranscriptCorrelation.executionKey(String(turnId)) ||
                         unit.parentId !== undefined ||
                         row.attachment_parent_execution_key !== null ||
                         row.attachment_parent_unit_key !== null ||
@@ -1802,17 +1843,17 @@ export const layer = Layer.effect(
                       const parent = yield* Schema.decodeUnknownEffect(UnitJson)(row.attachment_unit_json)
                       if (
                         parent.key !== row.attachment_parent_unit_key ||
-                        Transcript.executionKey(parent.turnId) !== row.attachment_parent_execution_key ||
-                        Transcript.encodeUnitOrder(parent.order) !== row.attachment_parent_order_key ||
+                        TranscriptCorrelation.executionKey(parent.turnId) !== row.attachment_parent_execution_key ||
+                        TranscriptOrdering.encodeUnitOrder(parent.order) !== row.attachment_parent_order_key ||
                         parent.content._tag !== "Block" ||
                         parent.content.block._tag !== "ToolCall" ||
                         parent.content.block.id !== row.attachment_parent_id ||
-                        Transcript.encodeUnitOrder(unit.order) !==
-                          Transcript.encodeUnitOrder(
-                            Transcript.childOrder(
+                        TranscriptOrdering.encodeUnitOrder(unit.order) !==
+                          TranscriptOrdering.encodeUnitOrder(
+                            TranscriptOrdering.childOrder(
                               parent.order,
                               row.checkpoint_execution_id,
-                              Transcript.localOrder(unit.order),
+                              TranscriptOrdering.localOrder(unit.order),
                             ),
                           )
                       )

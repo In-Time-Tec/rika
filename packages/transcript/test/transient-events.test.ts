@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { applyEvent, empty, project } from "../src/projection/transcript-projection"
+import * as TranscriptProjection from "../src/projection/transcript-projection"
 import { foldOperations } from "../src/projection/transcript-event-fold"
 const { applyFoldEvent, isTransientEvent, restoreProjectionFold, snapshotFoldProjection } = foldOperations
 import type { Projection } from "../src/schema/transcript-projection-model"
@@ -94,13 +94,16 @@ describe("transient events", () => {
   })
 
   it("applies transient delta content without advancing revision or cursors", () => {
-    const base = applyEvent(empty("turn-a", "prompt"), {
+    const base = TranscriptProjection.Projection.applyEvent(TranscriptProjection.Projection.empty("turn-a", "prompt"), {
       cursor: "prepared",
       sequence: 1,
       type: "model.input.prepared",
       createdAt: 1,
     })
-    const streamed = applyEvent(applyEvent(base, transientDelta(1, "hel")), transientDelta(2, "lo"))
+    const streamed = TranscriptProjection.Projection.applyEvent(
+      TranscriptProjection.Projection.applyEvent(base, transientDelta(1, "hel")),
+      transientDelta(2, "lo"),
+    )
 
     expect(assistantText(streamed)).toBe("hello")
     expect(streamed.revision).toBe(base.revision)
@@ -109,14 +112,17 @@ describe("transient events", () => {
   })
 
   it("replaces streamed cycle text with the durable cycle completion without duplication", () => {
-    const base = applyEvent(empty("turn-a", "prompt"), {
+    const base = TranscriptProjection.Projection.applyEvent(TranscriptProjection.Projection.empty("turn-a", "prompt"), {
       cursor: "prepared",
       sequence: 1,
       type: "model.input.prepared",
       createdAt: 1,
     })
-    const streamed = applyEvent(applyEvent(base, transientDelta(1, "hel")), transientDelta(2, "lo"))
-    const completed = applyEvent(streamed, {
+    const streamed = TranscriptProjection.Projection.applyEvent(
+      TranscriptProjection.Projection.applyEvent(base, transientDelta(1, "hel")),
+      transientDelta(2, "lo"),
+    )
+    const completed = TranscriptProjection.Projection.applyEvent(streamed, {
       cursor: "cycle-0",
       sequence: 2,
       type: "model.cycle.completed",
@@ -130,14 +136,17 @@ describe("transient events", () => {
   })
 
   it("replaces streamed reasoning with the durable reasoning completion", () => {
-    const base = applyEvent(empty("turn-a", "prompt"), {
+    const base = TranscriptProjection.Projection.applyEvent(TranscriptProjection.Projection.empty("turn-a", "prompt"), {
       cursor: "prepared",
       sequence: 1,
       type: "model.input.prepared",
       createdAt: 1,
     })
-    const streamed = applyEvent(applyEvent(base, transientReasoning(1, "thinking ")), transientReasoning(2, "hard"))
-    const completed = applyEvent(streamed, {
+    const streamed = TranscriptProjection.Projection.applyEvent(
+      TranscriptProjection.Projection.applyEvent(base, transientReasoning(1, "thinking ")),
+      transientReasoning(2, "hard"),
+    )
+    const completed = TranscriptProjection.Projection.applyEvent(streamed, {
       cursor: "cycle-reasoning-0",
       sequence: 2,
       type: "model.reasoning.completed",
@@ -184,8 +193,11 @@ describe("transient events", () => {
       ...durable.slice(6),
     ]
 
-    const replayed = project("turn-a", "prompt", durable)
-    const streamed = live.reduce((current, event) => applyEvent(current, event), empty("turn-a", "prompt"))
+    const replayed = TranscriptProjection.Projection.project("turn-a", "prompt", durable)
+    const streamed = live.reduce(
+      (current, event) => TranscriptProjection.Projection.applyEvent(current, event),
+      TranscriptProjection.Projection.empty("turn-a", "prompt"),
+    )
 
     expect(entryTexts(replayed)).toEqual(entryTexts(streamed))
     expect(replayed.revision).toBe(streamed.revision)
@@ -193,7 +205,7 @@ describe("transient events", () => {
 
   it("ignores transient deltas re-delivered after the durable cycle completed", () => {
     const reply = "I’ll trace the current permission/path enforcement and every related test."
-    const thoughts = "**Planning project exploration and permissions review**"
+    const thoughts = "**Planning TranscriptProjection.Projection.project exploration and permissions review**"
     const streamed = fold(
       [
         durableEvent(0, "execution.accepted"),
@@ -212,7 +224,7 @@ describe("transient events", () => {
         durableEvent(11, "tool.call.requested", { tool_call_id: "call_BLq", tool_name: "read", input: "{}" }),
         durableEvent(14, "execution.cancelled"),
       ],
-      empty("turn-a", "prompt"),
+      TranscriptProjection.Projection.empty("turn-a", "prompt"),
     )
     const reattached = fold([transientReasoning(1, thoughts, 5), transientDelta(2, reply, 6)], streamed)
 
@@ -247,9 +259,9 @@ describe("transient events", () => {
         durableEvent(34, "tool.call.requested", { tool_call_id: "call_Alg", tool_name: "read", input: "{}" }),
         durableEvent(46, "execution.cancelled"),
       ],
-      empty("turn-b", "prompt"),
+      TranscriptProjection.Projection.empty("turn-b", "prompt"),
     )
-    const reattached = applyEvent(streamed, transientDelta(1, first, 5))
+    const reattached = TranscriptProjection.Projection.applyEvent(streamed, transientDelta(1, first, 5))
 
     expect(keysOf(streamed)).toEqual(keysOf(reattached))
     expect(reattached.units.filter((unit) => unit.key.startsWith("assistant:turn-b:"))).toHaveLength(2)
@@ -259,7 +271,7 @@ describe("transient events", () => {
   it("applies a re-delivered transient batch once while the same attempt is still streaming", () => {
     const base = fold(
       [durableEvent(2, "model.input.prepared"), durableEvent(4, "model.attempt.started")],
-      empty("turn-c", "prompt"),
+      TranscriptProjection.Projection.empty("turn-c", "prompt"),
     )
     const batch = [transientDelta(1, "hel", 4), transientDelta(2, "lo", 4)]
     const retained = restoreProjectionFold(base)
@@ -278,7 +290,7 @@ describe("transient events", () => {
   it("streams a retried attempt whose transient index restarts below the previous attempt", () => {
     const base = fold(
       [durableEvent(2, "model.input.prepared"), durableEvent(4, "model.attempt.started")],
-      empty("turn-d", "prompt"),
+      TranscriptProjection.Projection.empty("turn-d", "prompt"),
     )
     const first = fold([transientDelta(7, "cut off", 4, "one")], base)
     const retried = fold(
@@ -297,7 +309,7 @@ describe("transient events", () => {
         transientDelta(1, "partial", 5),
         durableEvent(8, "model.cycle.completed", { text: "the complete answer" }),
       ],
-      empty("turn-e", "prompt"),
+      TranscriptProjection.Projection.empty("turn-e", "prompt"),
     )
     const late = fold([transientDelta(2, " and more", 5), transientDelta(3, " and more still", 6)], streamed)
 
@@ -310,7 +322,7 @@ describe("transient events", () => {
     const retained = restoreProjectionFold(
       fold(
         [durableEvent(2, "model.input.prepared"), durableEvent(4, "model.attempt.started")],
-        empty("turn-parallel-tools", "prompt"),
+        TranscriptProjection.Projection.empty("turn-parallel-tools", "prompt"),
       ),
     )
     for (const [index, id] of ["call-a", "call-b", "call-c"].entries())
@@ -347,7 +359,7 @@ describe("transient events", () => {
     const retained = restoreProjectionFold(
       fold(
         [durableEvent(2, "model.input.prepared"), durableEvent(4, "model.attempt.started")],
-        empty("turn-result-without-request", "prompt"),
+        TranscriptProjection.Projection.empty("turn-result-without-request", "prompt"),
       ),
     )
     applyFoldEvent(retained, transientTool(1, "missing", 4))
@@ -380,7 +392,7 @@ describe("transient events", () => {
         const retained = restoreProjectionFold(
           fold(
             [durableEvent(2, "model.input.prepared"), durableEvent(4, "model.attempt.started")],
-            empty("turn-tool-boundary", "prompt"),
+            TranscriptProjection.Projection.empty("turn-tool-boundary", "prompt"),
           ),
         )
         applyFoldEvent(retained, transient.event)
@@ -392,7 +404,7 @@ describe("transient events", () => {
     const retained = restoreProjectionFold(
       fold(
         [durableEvent(2, "model.input.prepared"), durableEvent(4, "model.attempt.started")],
-        empty("turn-rejected-request", "prompt"),
+        TranscriptProjection.Projection.empty("turn-rejected-request", "prompt"),
       ),
     )
     applyFoldEvent(retained, transientDelta(1, "partial", 4))
@@ -413,7 +425,7 @@ describe("transient events", () => {
       const retained = restoreProjectionFold(
         fold(
           [durableEvent(2, "model.input.prepared"), durableEvent(4, "model.attempt.started")],
-          empty("turn-missing-sibling", "prompt"),
+          TranscriptProjection.Projection.empty("turn-missing-sibling", "prompt"),
         ),
       )
       applyFoldEvent(retained, transientTool(1, "requested", 4))
@@ -436,7 +448,7 @@ describe("transient events", () => {
     const retained = restoreProjectionFold(
       fold(
         [durableEvent(2, "model.input.prepared"), durableEvent(4, "model.attempt.started")],
-        empty("turn-missing-tool", "prompt"),
+        TranscriptProjection.Projection.empty("turn-missing-tool", "prompt"),
       ),
     )
     applyFoldEvent(retained, transientTool(1, "missing", 4))
@@ -450,7 +462,7 @@ describe("transient events", () => {
     const retained = restoreProjectionFold(
       fold(
         [durableEvent(2, "model.input.prepared"), durableEvent(4, "model.attempt.started")],
-        empty("turn-f", "prompt"),
+        TranscriptProjection.Projection.empty("turn-f", "prompt"),
       ),
     )
     applyFoldEvent(retained, transientDelta(1, "partial", 4))
@@ -461,13 +473,13 @@ describe("transient events", () => {
   })
 
   it("keeps legacy durable delta histories advancing the revision", () => {
-    const base = applyEvent(empty("turn-a", "prompt"), {
+    const base = TranscriptProjection.Projection.applyEvent(TranscriptProjection.Projection.empty("turn-a", "prompt"), {
       cursor: "prepared",
       sequence: 1,
       type: "model.input.prepared",
       createdAt: 1,
     })
-    const legacy = applyEvent(base, {
+    const legacy = TranscriptProjection.Projection.applyEvent(base, {
       cursor: "legacy-delta",
       sequence: 2,
       type: "model.output.delta",

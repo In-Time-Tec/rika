@@ -1,3 +1,10 @@
+import * as BehaviorMode from "@rika/configuration/behavior-mode"
+import * as ModelRoute from "@rika/configuration/model-route"
+import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
+import * as SettingsDefaults from "@rika/configuration/configuration-settings"
+import * as ConfigurationService from "@rika/configuration/configuration-service"
+import * as SettingsDecoder from "@rika/configuration/configuration-settings"
+import * as ConfigurationSettingsInput from "@rika/configuration/configuration-settings"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
@@ -9,19 +16,19 @@ import * as UsageRepository from "@rika/product/usage-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { AgentDepth } from "@rika/product/execution-service"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { clampThreadTitle, threadTitleLimit } from "./thread-title"
 import * as ProductAgent from "./product-agent"
-import { ExecutionExtensions } from "@rika/extensions/plugin-contract"
-import { ConfigService } from "@rika/configuration/configuration-settings"
 import * as ExtensionOperations from "./extension-operations"
+import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"
+import * as McpOAuth from "@rika/extensions/mcp-oauth-service"
 import * as OpenAiAuth from "./openai-auth"
-import {
-  Catalog as ToolCatalog,
-  ExecutionId,
-  ExecutionStatus,
-  Runtime as ToolRuntime,
-} from "@rika/coding-tools/coding-tool-catalog"
+import { Catalog as ToolCatalog } from "@rika/coding-tools/coding-tool-catalog"
+import { ExecutionId } from "./execution-identifier"
+import * as ExecutionStatus from "./execution-status"
+import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import {
   Cause,
   Clock,
@@ -211,7 +218,6 @@ const sanitizeThreadTitle = (text: string) =>
     .slice(0, threadTitleLimit)
     .join("")
     .trimEnd()
-
 const withSelectionEpoch = (event: InteractiveEvent, selectionEpoch: number): InteractiveEvent => {
   switch (event._tag) {
     case "SelectionLoaded":
@@ -240,7 +246,6 @@ const withSelectionEpoch = (event: InteractiveEvent, selectionEpoch: number): In
 class OperationError extends Schema.TaggedErrorClass<OperationError>()("OperationError", {
   message: Schema.String,
 }) {}
-
 const operationError = (message: string) => OperationError.make({ message })
 const executeShellCommand = Effect.fn("Operation.executeShellCommand")(function* (
   tools: ToolRuntime.Interface,
@@ -301,7 +306,7 @@ const transcriptCursorFor = (
     : {
         createdAt: entry.turn.createdAt,
         turnId: entry.turn.id,
-        orderKey: Transcript.encodeUnitOrder(entry.unit.order),
+        orderKey: TranscriptOrdering.encodeUnitOrder(entry.unit.order),
       }
 const boundTurnEntries = (
   entries: ReadonlyArray<TranscriptRepository.Entry>,
@@ -397,7 +402,6 @@ const boundPartialTranscriptEntries = (
 }
 const selectionInitialTurnWindow = 12
 const selectionInitialEntryWindow = 400
-
 export interface ProductLayerOptions<
   ThreadError,
   TurnError,
@@ -424,7 +428,7 @@ export interface ProductLayerOptions<
   readonly toolRuntimeLayer?: (workspace: string) => Layer.Layer<ToolRuntime.Service, OperationError, never>
   readonly resolvedContextLayer?: Layer.Layer<ResolvedContext.Service, OperationError>
   readonly executionExtensions?: {
-    readonly layer: Layer.Layer<ExecutionExtensions.Service, OperationError>
+    readonly layer: Layer.Layer<ExecutionExtensions.ExecutionExtensionService, OperationError>
     readonly mcpFingerprint: Effect.Effect<string>
   }
   readonly defaultWorkspace: string
@@ -433,11 +437,14 @@ export interface ProductLayerOptions<
   readonly makeThreadId: Effect.Effect<Thread.ThreadId>
   readonly makeTurnId: Effect.Effect<Turn.TurnId>
   readonly configOperations?: {
-    readonly layer: Layer.Layer<ConfigOperations.Adapter | ConfigService.Service, OperationError>
+    readonly layer: Layer.Layer<ConfigOperations.Adapter | ConfigurationService.ConfigurationService, OperationError>
     readonly options: ConfigOperations.Options
     readonly forWorkspace?: (workspace: string) => Effect.Effect<
       {
-        readonly layer: Layer.Layer<ConfigOperations.Adapter | ConfigService.Service, OperationError>
+        readonly layer: Layer.Layer<
+          ConfigOperations.Adapter | ConfigurationService.ConfigurationService,
+          OperationError
+        >
         readonly options: ConfigOperations.Options
       },
       OperationError
@@ -446,11 +453,11 @@ export interface ProductLayerOptions<
   readonly extensionOperations?: {
     readonly layer: Layer.Layer<
       | ExtensionOperations.Service
-      | import("@rika/extensions/plugin-contract").McpOAuth.Service
+      | import("@rika/extensions/mcp-oauth-service").McpOAuthService
       | import("effect").FileSystem.FileSystem
       | import("effect").Path.Path
       | import("effect").Crypto.Crypto
-      | import("@rika/extensions/plugin-contract").SkillRegistry.SkillFileSystem,
+      | import("@rika/extensions/skill-registry").SkillFileSystem,
       OperationError
     >
   }
@@ -460,12 +467,10 @@ export interface ProductLayerOptions<
     session: InteractiveSession,
   ) => Effect.Effect<void, OperationUnavailable>
 }
-
 export interface AuthOperationOptions {
   readonly layer: Layer.Layer<OpenAiAuth.Service, OperationError>
   readonly assertOpenAiDirect: (workspace: string) => Effect.Effect<void, OperationError>
 }
-
 export const runAuth = Effect.fn("Operation.runAuth")(function* (
   input: Extract<Input, { readonly _tag: "Auth" }>,
   options: AuthOperationOptions,
@@ -507,9 +512,8 @@ export const runAuth = Effect.fn("Operation.runAuth")(function* (
   }
   yield* Console.log(message)
 })
-
 const reconcileInternal = Effect.fn("Operation.reconcile")(function* (
-  extensions?: ExecutionExtensions.Interface,
+  extensions?: ExecutionExtensions.ExecutionExtensionInterface,
   prepare?: (
     turn: Turn.AgentExecutionTurn,
     workspace: string,
@@ -520,7 +524,10 @@ const reconcileInternal = Effect.fn("Operation.reconcile")(function* (
       readonly extensionPin: Turn.ExecutionExtensionPin | undefined
     },
     OperationError,
-    TurnRepository.Service | ThreadRepository.Service | ResolvedContext.Service | ExecutionExtensions.Service
+    | TurnRepository.Service
+    | ThreadRepository.Service
+    | ResolvedContext.Service
+    | ExecutionExtensions.ExecutionExtensionService
   >,
   watchReviewOwner?: (
     turn: Turn.AgentExecutionTurn,
@@ -787,9 +794,8 @@ const reconcileInternal = Effect.fn("Operation.reconcile")(function* (
     { discard: true },
   )
 })
-
 export const reconcile = Effect.fn("Operation.reconcilePublic")(function* (
-  extensions?: ExecutionExtensions.Interface,
+  extensions?: ExecutionExtensions.ExecutionExtensionInterface,
   prepare?: (
     turn: Turn.AgentExecutionTurn,
     workspace: string,
@@ -800,7 +806,10 @@ export const reconcile = Effect.fn("Operation.reconcilePublic")(function* (
       readonly extensionPin: Turn.ExecutionExtensionPin | undefined
     },
     OperationError,
-    TurnRepository.Service | ThreadRepository.Service | ResolvedContext.Service | ExecutionExtensions.Service
+    | TurnRepository.Service
+    | ThreadRepository.Service
+    | ResolvedContext.Service
+    | ExecutionExtensions.ExecutionExtensionService
   >,
   watchReviewOwner?: (
     turn: Turn.AgentExecutionTurn,
@@ -813,22 +822,18 @@ export const reconcile = Effect.fn("Operation.reconcilePublic")(function* (
   | TurnRepository.Service
   | ThreadRepository.Service
   | ResolvedContext.Service
-  | ExecutionExtensions.Service
+  | ExecutionExtensions.ExecutionExtensionService
 > {
   return yield* reconcileInternal(extensions, prepare, watchReviewOwner).pipe(
     Effect.mapError((error) => operationError(String(error))),
   )
 })
-
 const fanOutTurnStatus = (state: "joining" | "satisfied" | "failed" | "cancelled"): Turn.Status => {
   if (state === "joining") return "running"
   return state === "satisfied" ? "completed" : state
 }
-
-const normalizeChildExecutionId = Transcript.executionKey
-
+const normalizeChildExecutionId = TranscriptCorrelation.executionKey
 type ThreadUsageEvent = Extract<InteractiveEvent, { readonly _tag: "ThreadUsageUpdated" }>
-
 const initializeSelectedUsage = (threadId: Thread.ThreadId, request: number): ThreadUsageEvent => ({
   _tag: "ThreadUsageUpdated",
   selectionEpoch: request,
@@ -838,7 +843,6 @@ const initializeSelectedUsage = (threadId: Thread.ThreadId, request: number): Th
   tokens: { _tag: "Unavailable" },
   time: { _tag: "Unavailable" },
 })
-
 const persistedThreadUsage = (
   value: UsageRepository.Aggregate,
 ): Pick<ThreadUsageEvent, "cost" | "tokens" | "time"> => ({
@@ -859,7 +863,6 @@ const persistedThreadUsage = (
           ...(value.activeSince === undefined ? {} : { activeSince: value.activeSince }),
         },
 })
-
 const transcriptProjectionEvent = (change: ExecutionIngest.ProjectionChange): InteractiveEvent => {
   switch (change._tag) {
     case "ProjectionStarted": {
@@ -906,7 +909,6 @@ const transcriptProjectionEvent = (change: ExecutionIngest.ProjectionChange): In
       return Function.absurd(change)
   }
 }
-
 export const rootExecutionEvents: {
   (turnId: string, events: ReadonlyArray<ExecutionBackend.Event>): ReadonlyArray<ExecutionBackend.Event>
   (events: ReadonlyArray<ExecutionBackend.Event>): (turnId: string) => ReadonlyArray<ExecutionBackend.Event>
@@ -915,13 +917,11 @@ export const rootExecutionEvents: {
   (turnId: string, events: ReadonlyArray<ExecutionBackend.Event>): ReadonlyArray<ExecutionBackend.Event> =>
     events.filter((event) => ExecutionId.ownsExecution(turnId, event.executionId)),
 )
-
 const undeliveredEvents = (
   events: ReadonlyArray<ExecutionBackend.Event>,
   delivered: ReadonlySet<string>,
 ): ReadonlyArray<ExecutionBackend.Event> =>
   events.filter((event) => !delivered.has(event.cursor)).toSorted((left, right) => left.sequence - right.sequence)
-
 type SelectionEpochState = {
   readonly epoch: number
   readonly thread: Thread.Thread
@@ -935,7 +935,6 @@ type SelectionEpochState = {
     promoted: boolean
   }
 }
-
 const makeSelectionState = (thread: Thread.Thread, epoch: number): SelectionEpochState => ({
   epoch,
   thread,
@@ -944,15 +943,12 @@ const makeSelectionState = (thread: Thread.Thread, epoch: number): SelectionEpoc
   newestTranscriptCursor: undefined,
   hasOlder: false,
 })
-
 const projectedOutcomeStatus = (status: "completed" | "failed" | "cancelled"): "complete" | "failed" | "cancelled" => {
   if (status === "completed") return "complete"
   return status
 }
-
 const sessionQuiescencePollAttempts = 40
 const sessionQuiescenceCandidateLimit = 8
-
 const executionTreeQuiescent = Effect.fn("Operation.executionTreeQuiescent")(function* (
   backend: ExecutionBackend.Interface,
   turnId: string,
@@ -983,10 +979,8 @@ const executionTreeQuiescent = Effect.fn("Operation.executionTreeQuiescent")(fun
   }
   return true
 })
-
 const workflowReplacementKey = (runId: string, ownerTurnId?: string, workspace?: string) =>
   JSON.stringify([runId, ownerTurnId, workspace])
-
 export const hasActiveExecutionWork = Effect.fn("Operation.hasActiveExecutionWork")(function* () {
   const turns = yield* TurnRepository.Service
   const backend = yield* ExecutionBackend.Service
@@ -1034,7 +1028,6 @@ export const hasActiveExecutionWork = Effect.fn("Operation.hasActiveExecutionWor
   }
   return backend.listOpenRootExecutions === undefined ? false : (yield* backend.listOpenRootExecutions).length > 0
 })
-
 const blockedSessionWriter = Effect.fn("Operation.blockedSessionWriter")(function* (
   backend: ExecutionBackend.Interface,
   threadId: Thread.ThreadId,
@@ -1052,7 +1045,6 @@ const blockedSessionWriter = Effect.fn("Operation.blockedSessionWriter")(functio
   }
   return undefined
 })
-
 const settleStopRequestedTurns = Effect.fn("Operation.settleStopRequestedTurns")(function* <E, R>(
   backend: ExecutionBackend.Interface,
   settle: (
@@ -1081,7 +1073,6 @@ const settleStopRequestedTurns = Effect.fn("Operation.settleStopRequestedTurns")
     yield* Effect.logInfo("execution.stop.settled").pipe(Effect.annotateLogs({ "rika.turn.id": String(turn.id) }))
   }
 })
-
 export const stopActiveExecutionWork = Effect.fn("Operation.stopActiveExecutionWork")(function* () {
   const turns = yield* TurnRepository.Service
   const backend = yield* ExecutionBackend.Service
@@ -1096,7 +1087,6 @@ export const stopActiveExecutionWork = Effect.fn("Operation.stopActiveExecutionW
     turns.setStatus(turnId, status, cursor, settledAt).pipe(Effect.asVoid),
   )
 })
-
 export const settleAbandonedRecoveredWork = Effect.fn("Operation.settleAbandonedRecoveredWork")(function* (
   grace: Duration.Duration,
   watchedThreads: () => ReadonlySet<string>,
@@ -1140,7 +1130,6 @@ export const settleAbandonedRecoveredWork = Effect.fn("Operation.settleAbandoned
     )
   }
 })
-
 const awaitSessionQuiescence = Effect.fn("Operation.awaitSessionQuiescence")(function* (
   backend: ExecutionBackend.Interface,
   threadId: Thread.ThreadId,
@@ -1168,7 +1157,6 @@ const awaitSessionQuiescence = Effect.fn("Operation.awaitSessionQuiescence")(fun
   )
   return blocked
 })
-
 const queueItem = (turn: Turn.AgentExecutionTurn): QueueItem => {
   const attachments = turn.promptParts
     ?.filter((part) => part.type === "image")
@@ -1177,7 +1165,6 @@ const queueItem = (turn: Turn.AgentExecutionTurn): QueueItem => {
     ? { id: turn.id, prompt: turn.prompt }
     : { id: turn.id, prompt: turn.prompt, attachments }
 }
-
 const queueMutationEvent = (queue: TurnRepository.QueueItemChange): InteractiveEvent => {
   const change =
     queue.change._tag === "Removed"
@@ -1192,12 +1179,9 @@ const queueMutationEvent = (queue: TurnRepository.QueueItemChange): InteractiveE
     change,
   }
 }
-
 const unavailable = (input: Input, message = `${input._tag} is specified but not implemented yet`) =>
   OperationUnavailable.make({ operation: input._tag, message })
-
 const writeThread = (thread: Thread.Thread) => Console.log(encodeJson(thread))
-
 const requireThread = Effect.fn("Operation.requireThread")(function* (
   repository: ThreadRepository.Interface,
   id: string,
@@ -1206,7 +1190,6 @@ const requireThread = Effect.fn("Operation.requireThread")(function* (
   if (thread === undefined) return yield* operationError(`Thread ${id} does not exist`)
   return thread
 })
-
 const markdownExport = (thread: Thread.Thread, turns: ReadonlyArray<Turn.Turn>) =>
   [
     `# ${thread.title}`,
@@ -1217,7 +1200,6 @@ const markdownExport = (thread: Thread.Thread, turns: ReadonlyArray<Turn.Turn>) 
     "",
     ...turns.flatMap((turn, index) => [`## Turn ${index + 1}`, "", `Status: ${turn.status}`, "", turn.prompt, ""]),
   ].join("\n")
-
 export const productLayer = <
   ThreadError,
   TurnError,
@@ -1415,7 +1397,7 @@ export const productLayer = <
       const extensionService =
         options.executionExtensions === undefined
           ? undefined
-          : Context.get(dependencyContext, ExecutionExtensions.Service)
+          : Context.get(dependencyContext, ExecutionExtensions.ExecutionExtensionService)
       const executionDependencies = Context.merge(
         dependencyContext,
         Context.make(ExecutionBackend.Service, acquiredBackend),
@@ -1906,7 +1888,7 @@ export const productLayer = <
         }
         if (options.executionExtensions === undefined)
           return { prompt: resolved.prompt, promptParts, extensionPin: turn.extensionPin, messages: resolved.messages }
-        const extensions = yield* ExecutionExtensions.Service
+        const extensions = yield* ExecutionExtensions.ExecutionExtensionService
         if (turn.extensionPin !== undefined) {
           yield* extensions.resume(turn.extensionPin)
           return { prompt: resolved.prompt, promptParts, extensionPin: turn.extensionPin, messages: resolved.messages }
@@ -1967,7 +1949,7 @@ export const productLayer = <
               if (turn.status === "cancelled" && projection === undefined) result = { status: "cancelled" }
               else {
                 const checkpoint = projection?.executionCheckpoints.find(
-                  (entry) => entry.executionKey === Transcript.executionKey(String(turn.id)),
+                  (entry) => entry.executionKey === TranscriptCorrelation.executionKey(String(turn.id)),
                 )
                 const expectedOutcome = projectedOutcomeStatus(turn.status)
                 const outcome = projection?.units.find(
@@ -1985,7 +1967,10 @@ export const productLayer = <
                   continue
                 }
                 if (turn.status === "completed") {
-                  const output = Transcript.finalAssistantOutput(projection, String(turn.id))?.slice(0, 8_000)
+                  const output = TranscriptProjection.Projection.finalAssistantOutput(
+                    projection,
+                    String(turn.id),
+                  )?.slice(0, 8_000)
                   if (output === undefined) {
                     retry = true
                     continue
@@ -2561,7 +2546,7 @@ export const productLayer = <
             | TranscriptRepository.Service
             | ExecutionBackend.Service
             | ResolvedContext.Service
-            | ExecutionExtensions.Service
+            | ExecutionExtensions.ExecutionExtensionService
           >,
         ) =>
           effect.pipe(
@@ -2904,7 +2889,7 @@ export const productLayer = <
                 return yield* operationError(`Recorded shell turn ${turn.id} has no current durable transcript`)
               yield* ensureIngest(turn.threadId, turn.id)
               if (!Turn.isAgentExecution(turn)) continue
-              const seed = Transcript.empty(turn.id, turn.prompt)
+              const seed = TranscriptProjection.Projection.empty(turn.id, turn.prompt)
               entries = seed.units.map((unit) => ({
                 turn,
                 unit,
@@ -3814,12 +3799,12 @@ export const productLayer = <
                     yield* ensureIngest(turn.threadId, turn.id)
                   return {
                     prompt: turn.prompt,
-                    units: projection?.units ?? Transcript.empty(turn.id, turn.prompt).units,
+                    units: projection?.units ?? TranscriptProjection.Projection.empty(turn.id, turn.prompt).units,
                   }
                 }).pipe(
                   Effect.orElseSucceed(() => ({
                     prompt: turn.prompt,
-                    units: Transcript.empty(turn.id, turn.prompt).units,
+                    units: TranscriptProjection.Projection.empty(turn.id, turn.prompt).units,
                   })),
                 ),
               )
@@ -4814,7 +4799,6 @@ export const productLayer = <
       })
     }),
   )
-
 export const testLayer = (calls: Ref.Ref<ReadonlyArray<Input>>) =>
   Layer.succeed(
     Service,

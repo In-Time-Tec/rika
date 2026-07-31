@@ -1,4 +1,9 @@
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
+import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Effect, Function, Layer } from "effect"
 import * as Database from "../src/product-database"
 import * as Thread from "@rika/product/thread-record"
@@ -29,7 +34,7 @@ export const turn: {
   }),
 )
 
-export const event = (index: number): Transcript.SourceEvent => ({
+export const event = (index: number): TranscriptSourceEvent.SourceEvent => ({
   cursor: `cursor-${index}`,
   sequence: index,
   type: index === 2 ? "execution.completed" : "model.output.completed",
@@ -38,14 +43,14 @@ export const event = (index: number): Transcript.SourceEvent => ({
 })
 
 export const unit: {
-  (turnId: Turn.TurnId, sequence: number, part: number, key: string): Transcript.Unit
-  (sequence: number, part: number, key: string): (turnId: Turn.TurnId) => Transcript.Unit
+  (turnId: Turn.TurnId, sequence: number, part: number, key: string): TranscriptUnit.Unit
+  (sequence: number, part: number, key: string): (turnId: Turn.TurnId) => TranscriptUnit.Unit
 } = Function.dual(
   4,
-  (turnId: Turn.TurnId, sequence: number, part: number, key: string): Transcript.Unit => ({
+  (turnId: Turn.TurnId, sequence: number, part: number, key: string): TranscriptUnit.Unit => ({
     key,
     turnId,
-    order: Transcript.unitOrder(key, sequence, part),
+    order: TranscriptOrdering.unitOrder(key, sequence, part),
     revision: sequence,
     content: { _tag: "Entry", role: "assistant", text: key },
   }),
@@ -54,74 +59,74 @@ export const unit: {
 export const executionCheckpoint: {
   (
     target: Turn.AgentExecutionTurn,
-    state: Transcript.ProjectionStateSource,
+    state: TranscriptProjection.ProjectionStateSource,
     status?: TranscriptRepository.ExecutionCheckpoint["status"],
   ): TranscriptRepository.ExecutionCheckpoint
   (
-    state: Transcript.ProjectionStateSource,
+    state: TranscriptProjection.ProjectionStateSource,
     status?: TranscriptRepository.ExecutionCheckpoint["status"],
   ): (target: Turn.AgentExecutionTurn) => TranscriptRepository.ExecutionCheckpoint
 } = Function.dual(
   (args) => typeof args[0] === "object" && args[0] !== null && "_tag" in args[0],
   (
     target: Turn.AgentExecutionTurn,
-    state: Transcript.ProjectionStateSource,
+    state: TranscriptProjection.ProjectionStateSource,
     status?: TranscriptRepository.ExecutionCheckpoint["status"],
   ): TranscriptRepository.ExecutionCheckpoint => ({
-    executionKey: Transcript.executionKey(String(target.id)),
+    executionKey: TranscriptCorrelation.executionKey(String(target.id)),
     executionId: String(target.id),
     cursor: state.checkpointCursor ?? "",
     sequence: state.revision,
     ...(status === undefined ? {} : { status }),
-    state: Transcript.projectionState(state),
+    state: TranscriptProjection.Projection.projectionState(state),
   }),
 )
 
 export const attachedExecutionCheckpoint: {
   (
     executionId: string,
-    state: Transcript.ProjectionStateSource,
+    state: TranscriptProjection.ProjectionStateSource,
     parentExecutionKey: string,
-    parent: Transcript.Unit,
+    parent: TranscriptUnit.Unit,
     status?: TranscriptRepository.ExecutionCheckpoint["status"],
   ): TranscriptRepository.ExecutionCheckpoint
   (
-    state: Transcript.ProjectionStateSource,
+    state: TranscriptProjection.ProjectionStateSource,
     parentExecutionKey: string,
-    parent: Transcript.Unit,
+    parent: TranscriptUnit.Unit,
     status?: TranscriptRepository.ExecutionCheckpoint["status"],
   ): (executionId: string) => TranscriptRepository.ExecutionCheckpoint
 } = Function.dual(
   (args) => typeof args[0] === "string",
   (
     executionId: string,
-    state: Transcript.ProjectionStateSource,
+    state: TranscriptProjection.ProjectionStateSource,
     parentExecutionKey: string,
-    parent: Transcript.Unit,
+    parent: TranscriptUnit.Unit,
     status?: TranscriptRepository.ExecutionCheckpoint["status"],
   ): TranscriptRepository.ExecutionCheckpoint => {
     if (parent.content._tag !== "Block" || parent.content.block._tag !== "ToolCall")
       throw new TypeError("Attached execution fixtures require a parent tool unit")
     return {
-      executionKey: Transcript.executionKey(executionId),
+      executionKey: TranscriptCorrelation.executionKey(executionId),
       executionId,
       cursor: state.checkpointCursor ?? "",
       sequence: state.revision,
       ...(status === undefined ? {} : { status }),
-      state: Transcript.projectionState(state),
+      state: TranscriptProjection.Projection.projectionState(state),
       attachment: {
         parentExecutionKey,
         parentUnitKey: parent.key,
         parentId: parent.content.block.id,
-        parentOrderKey: Transcript.encodeUnitOrder(parent.order),
+        parentOrderKey: TranscriptOrdering.encodeUnitOrder(parent.order),
       },
     }
   },
 )
 
 export interface NestedProjectionFixture {
-  readonly projection: Transcript.Projection
-  readonly parent: Transcript.Unit
+  readonly projection: TranscriptProjectionModel.Projection
+  readonly parent: TranscriptUnit.Unit
   readonly checkpoints: ReadonlyArray<TranscriptRepository.ExecutionCheckpoint>
 }
 
@@ -129,7 +134,7 @@ export const nestedProjection: {
   (target: Turn.AgentExecutionTurn, childExecutionId: string): NestedProjectionFixture
   (childExecutionId: string): (target: Turn.AgentExecutionTurn) => NestedProjectionFixture
 } = Function.dual(2, (target: Turn.AgentExecutionTurn, childExecutionId: string): NestedProjectionFixture => {
-  const root = Transcript.project(target.id, target.prompt, [
+  const root = TranscriptProjection.Projection.project(target.id, target.prompt, [
     {
       cursor: "parent-tool",
       sequence: 0,
@@ -150,13 +155,13 @@ export const nestedProjection: {
   if (parent?.content._tag !== "Block" || parent.content.block._tag !== "ToolCall")
     throw new TypeError("Nested transcript fixture has no parent tool")
   const parentId = parent.content.block.id
-  const child = Transcript.empty(childExecutionId, "child")
+  const child = TranscriptProjection.Projection.empty(childExecutionId, "child")
   const units = [
     ...root.units,
     ...child.units.map((candidate) =>
       Object.assign({}, candidate, {
         parentId,
-        order: Transcript.childOrder(parent.order, childExecutionId, candidate.order),
+        order: TranscriptOrdering.childOrder(parent.order, childExecutionId, candidate.order),
       }),
     ),
   ]
@@ -165,7 +170,12 @@ export const nestedProjection: {
     parent,
     checkpoints: [
       executionCheckpoint(target, root, "completed"),
-      attachedExecutionCheckpoint(childExecutionId, child, Transcript.executionKey(String(target.id)), parent),
+      attachedExecutionCheckpoint(
+        childExecutionId,
+        child,
+        TranscriptCorrelation.executionKey(String(target.id)),
+        parent,
+      ),
     ],
   }
 })
@@ -190,11 +200,11 @@ export const invalidCheckpointGraphs: {
     const root = nested.checkpoints[0]!
     const child = nested.checkpoints[1]!
     if (child.attachment === undefined) throw new TypeError("Nested transcript fixture has no child attachment")
-    const peerState = Transcript.empty(peerExecutionId, "peer")
+    const peerState = TranscriptProjection.Projection.empty(peerExecutionId, "peer")
     const peer = attachedExecutionCheckpoint(
       peerExecutionId,
       peerState,
-      Transcript.executionKey(String(target.id)),
+      TranscriptCorrelation.executionKey(String(target.id)),
       nested.parent,
     )
     if (peer.attachment === undefined) throw new TypeError("Nested transcript fixture has no peer attachment")
@@ -217,7 +227,7 @@ export const invalidCheckpointGraphs: {
             ...child,
             attachment: {
               ...child.attachment,
-              parentExecutionKey: Transcript.executionKey(`missing:${child.executionId}`),
+              parentExecutionKey: TranscriptCorrelation.executionKey(`missing:${child.executionId}`),
             },
           },
         ],
@@ -234,14 +244,14 @@ interface InvalidCheckpointGraph {
 export const commitAll = Effect.fn("TranscriptRepositoryTest.commitAll")(function* (
   repository: TranscriptRepository.Interface,
   target: Turn.AgentExecutionTurn,
-  projection: Transcript.Projection,
+  projection: TranscriptProjectionModel.Projection,
   expectedGeneration: number | undefined,
   version: number = projectionVersion,
   checkpoints: ReadonlyArray<TranscriptRepository.ExecutionCheckpoint> = [executionCheckpoint(target, projection)],
 ) {
   return yield* repository.commitDelta(
     target,
-    Transcript.projectionState(projection),
+    TranscriptProjection.Projection.projectionState(projection),
     { upsert: projection.units, remove: [] },
     {
       executionCheckpoints: checkpoints,

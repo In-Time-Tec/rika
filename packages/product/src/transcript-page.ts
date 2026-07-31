@@ -1,10 +1,10 @@
-import * as Transcript from "@rika/transcript/transcript-presentation-model"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Schema } from "effect"
 import { Turn, TurnId } from "./turn-schema"
 
 export interface Entry {
   readonly turn: Turn
-  readonly unit: Transcript.Unit
+  readonly unit: TranscriptUnit.Unit
   readonly projectionRevision: number
   readonly projectionModelPhase: number
   readonly projectionCostUsd?: number
@@ -12,7 +12,7 @@ export interface Entry {
 
 export const EntrySchema = Schema.Struct({
   turn: Turn,
-  unit: Transcript.Unit,
+  unit: TranscriptUnit.Unit,
   projectionRevision: Schema.Finite,
   projectionModelPhase: Schema.Finite,
   projectionCostUsd: Schema.optionalKey(Schema.Finite),

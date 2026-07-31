@@ -3,7 +3,14 @@ import type * as Operation from "@rika/product/product-operation"
 import * as Thread from "@rika/product/thread-record"
 import type * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as Turn from "@rika/product/turn-record"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptIdentity from "@rika/transcript/transcript-unit-identity"
+import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
+import * as TranscriptRecordedShell from "@rika/transcript/recorded-shell-presentation"
+import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { ExecutionEvents, Keys, Palette, ViewState } from "@rika/terminal/terminal-state"
 import { renderTranscriptStyled } from "@rika/terminal/opentui-surface"
 import { HashMap } from "effect"
@@ -46,7 +53,7 @@ const entries = (
     createdAt,
     updatedAt: createdAt,
   }
-  const projection = Transcript.project(id, id, events)
+  const projection = TranscriptProjection.Projection.project(id, id, events)
   return projection.units.map((unit) =>
     Object.assign(
       {
@@ -72,7 +79,7 @@ const asRunningEntry = (entry: TranscriptRepository.Entry): AgentTranscriptEntry
 const cursor = (entry: TranscriptRepository.Entry): TranscriptRepository.PageCursor => ({
   createdAt: entry.turn.createdAt,
   turnId: entry.turn.id,
-  orderKey: Transcript.encodeUnitOrder(entry.unit.order),
+  orderKey: TranscriptOrdering.encodeUnitOrder(entry.unit.order),
 })
 
 const initialState = (): InteractiveController.State => ({
@@ -85,7 +92,7 @@ const initialState = (): InteractiveController.State => ({
   selectionEpoch: 0,
 })
 
-const visibleState = (projection: Transcript.Projection) => ({
+const visibleState = (projection: TranscriptProjectionModel.Projection) => ({
   revision: projection.revision,
   modelPhase: projection.modelPhase,
   ...(projection.usableCompletionSequence === undefined
@@ -93,7 +100,10 @@ const visibleState = (projection: Transcript.Projection) => ({
     : { usableCompletionSequence: projection.usableCompletionSequence }),
 })
 
-const unitDelta = (previous: Transcript.Projection, next: Transcript.Projection): Transcript.UnitDelta => {
+const unitDelta = (
+  previous: TranscriptProjectionModel.Projection,
+  next: TranscriptProjectionModel.Projection,
+): TranscriptProjection.UnitDelta => {
   const previousUnits = new Map(previous.units.map((unit) => [unit.key, unit] as const))
   const nextUnits = new Map(next.units.map((unit) => [unit.key, unit] as const))
   return {
@@ -103,7 +113,7 @@ const unitDelta = (previous: Transcript.Projection, next: Transcript.Projection)
 }
 
 const projectionOrigin = (
-  event: Transcript.SourceEvent,
+  event: TranscriptSourceEvent.SourceEvent,
   executionId: string,
 ): Extract<
   Extract<Operation.InteractiveEvent, { readonly _tag: "TranscriptProjectionPatched" }>["origin"],
@@ -121,21 +131,23 @@ const projectionOrigin = (
     sequence: event.sequence,
     type: event.type,
     createdAt: event.createdAt,
-    transient: Transcript.isTransientEvent(event),
+    transient: TranscriptProjection.Fold.isTransientEvent(event),
     ...(event.text === undefined ? {} : { text: event.text }),
     ...(typeof blockId === "string" ? { blockId } : {}),
     ...(steeringSequences === undefined || steeringSequences.length === 0 ? {} : { steeringSequences }),
   }
 }
 
-const terminalRootStatus = (event: Transcript.SourceEvent): "completed" | "failed" | "cancelled" | undefined => {
+const terminalRootStatus = (
+  event: TranscriptSourceEvent.SourceEvent,
+): "completed" | "failed" | "cancelled" | undefined => {
   if (event.type === "execution.completed") return "completed"
   if (event.type === "execution.failed") return "failed"
   if (event.type === "execution.cancelled") return "cancelled"
   return undefined
 }
 
-const transientDelta = (index: number, text: string): Transcript.SourceEvent => ({
+const transientDelta = (index: number, text: string): TranscriptSourceEvent.SourceEvent => ({
   cursor: `transient-${index}`,
   sequence: 2,
   type: "model.output.delta",
@@ -144,7 +156,11 @@ const transientDelta = (index: number, text: string): Transcript.SourceEvent => 
   data: { delta: text, transient_index: index, model_call_id: "call-1", model_attempt_id: "attempt-1" },
 })
 
-const startProjection = (state: InteractiveController.State, turn: Turn.Turn, projection: Transcript.Projection) =>
+const startProjection = (
+  state: InteractiveController.State,
+  turn: Turn.Turn,
+  projection: TranscriptProjectionModel.Projection,
+) =>
   InteractiveController.update(state, {
     _tag: "TranscriptProjectionStarted",
     selectionEpoch: state.selectionEpoch,
@@ -166,7 +182,7 @@ const openProjectionStream = (state: InteractiveController.State, turnId: string
 const makeProjectionFeed = (
   selected: InteractiveController.State,
   turn: Turn.Turn,
-  initialProjection: Transcript.Projection,
+  initialProjection: TranscriptProjectionModel.Projection,
 ) => {
   const streamId = `stream:${turn.id}`
   let state = startProjection(selected, turn, initialProjection).state
@@ -180,10 +196,10 @@ const makeProjectionFeed = (
       return projection
     },
     apply(
-      event: Transcript.SourceEvent,
-      options: { readonly executionId?: string; readonly projection?: Transcript.Projection } = {},
+      event: TranscriptSourceEvent.SourceEvent,
+      options: { readonly executionId?: string; readonly projection?: TranscriptProjectionModel.Projection } = {},
     ) {
-      const next = options.projection ?? Transcript.applyEvent(projection, event)
+      const next = options.projection ?? TranscriptProjection.Projection.applyEvent(projection, event)
       const baseRevision = patchRevision
       patchRevision += 1
       const rootStatus = terminalRootStatus(event)
@@ -468,7 +484,7 @@ it("keeps a live projection when stale persisted units arrive for the same Turn"
     createdAt: 2,
     text: "live answer",
   }
-  const projection = Transcript.project(turn.id, turn.prompt, [
+  const projection = TranscriptProjection.Projection.project(turn.id, turn.prompt, [
     { cursor: "page-1", sequence: 1, type: "model.output.completed", createdAt: 1, text: "page answer" },
   ])
   const feed = makeProjectionFeed(page.state, turn, projection)
@@ -528,7 +544,11 @@ it("applies transient output deltas that share the durable head sequence", () =>
   })
   expect(page.state.revisions.get("new")).toBe(2)
 
-  const feed = makeProjectionFeed(page.state, turn, Transcript.project(turn.id, turn.prompt, source))
+  const feed = makeProjectionFeed(
+    page.state,
+    turn,
+    TranscriptProjection.Projection.project(turn.id, turn.prompt, source),
+  )
   const first = feed.apply(transientDelta(1, "hel"))
   const second = feed.apply(transientDelta(2, "lo"))
   const completed = feed.apply({
@@ -619,7 +639,11 @@ it("owns transcript page, prepend, and patch reduction", () => {
     hasOlder: false,
     threadCostUsd: 0,
   })
-  const feed = makeProjectionFeed(prepended.state, activeTurn, Transcript.empty(activeTurn.id, activeTurn.prompt))
+  const feed = makeProjectionFeed(
+    prepended.state,
+    activeTurn,
+    TranscriptProjection.Projection.empty(activeTurn.id, activeTurn.prompt),
+  )
   const patched = feed.apply({
     cursor: "cursor-1",
     sequence: 1,
@@ -663,9 +687,9 @@ it("normalizes malformed page order and duplicate units across selection and pre
 
   expect(selected.state.entries.map((entry) => entry.unit.key)).toEqual([
     "turn:old:user",
-    Transcript.identityKey("assistant", "old", 0),
+    TranscriptIdentity.identityKey("assistant", "old", 0),
     "turn:new:user",
-    Transcript.identityKey("assistant", "new", 0),
+    TranscriptIdentity.identityKey("assistant", "new", 0),
   ])
   expect(prepended.state.entries).toEqual(selected.state.entries)
   expect(prepended.state.model.entries.map((entry) => entry.text)).toEqual(["old", "old answer", "new", "new answer"])
@@ -679,7 +703,7 @@ it("inserts an older partial Turn page between retained opening and final entrie
     unit: {
       key: unitKey,
       turnId: turn.id,
-      order: Transcript.unitOrder(unitKey, sequence),
+      order: TranscriptOrdering.unitOrder(unitKey, sequence),
       revision: sequence,
       content: { _tag: "Entry" as const, role: "assistant" as const, text },
     },
@@ -725,14 +749,14 @@ it("projects child execution units beneath the matching subagent", () => {
     threadCostUsd: 0,
     activeTurn: turn,
   })
-  const requestedEvent: Transcript.SourceEvent = {
+  const requestedEvent: TranscriptSourceEvent.SourceEvent = {
     cursor: "agent",
     sequence: 0,
     type: "tool.call.requested",
     createdAt: 3,
     data: { tool_call_id: "agent", tool_name: "oracle", input: { prompt: "Review the code" } },
   }
-  const spawnedEvent: Transcript.SourceEvent = {
+  const spawnedEvent: TranscriptSourceEvent.SourceEvent = {
     cursor: "spawned",
     sequence: 1,
     type: "child_run.spawned",
@@ -742,48 +766,51 @@ it("projects child execution units beneath the matching subagent", () => {
       child_execution_id: "execution:parent:child:agent",
     },
   }
-  const childToolEvent: Transcript.SourceEvent = {
+  const childToolEvent: TranscriptSourceEvent.SourceEvent = {
     cursor: "child-read",
     sequence: 0,
     type: "tool.call.requested",
     createdAt: 5,
     data: { tool_call_id: "read", tool_name: "read", input: { path: "src/a.ts" } },
   }
-  const childResponseEvent: Transcript.SourceEvent = {
+  const childResponseEvent: TranscriptSourceEvent.SourceEvent = {
     cursor: "child-response",
     sequence: 1,
     type: "model.output.completed",
     createdAt: 6,
     text: "## Review complete\n\n**No defects found.**",
   }
-  let parent = Transcript.empty(turn.id, turn.prompt)
+  let parent = TranscriptProjection.Projection.empty(turn.id, turn.prompt)
   const feed = makeProjectionFeed(page.state, turn, parent)
-  parent = Transcript.applyEvent(parent, requestedEvent)
+  parent = TranscriptProjection.Projection.applyEvent(parent, requestedEvent)
   feed.apply(requestedEvent, { projection: parent })
-  parent = Transcript.applyEvent(parent, spawnedEvent)
+  parent = TranscriptProjection.Projection.applyEvent(parent, spawnedEvent)
   feed.apply(spawnedEvent, { projection: parent })
   const childId = "parent:child:agent"
-  let childProjection = Transcript.applyEvent(Transcript.empty(childId, ""), childToolEvent)
+  let childProjection = TranscriptProjection.Projection.applyEvent(
+    TranscriptProjection.Projection.empty(childId, ""),
+    childToolEvent,
+  )
   const child = feed.apply(childToolEvent, {
     executionId: `execution:${childId}`,
-    projection: Transcript.withNestedProjections(parent, [
+    projection: TranscriptNestedProjection.withNestedProjections(parent, [
       { parentId: `${turn.id}:agent`, projection: childProjection },
     ]),
   })
-  childProjection = Transcript.applyEvent(childProjection, childResponseEvent)
+  childProjection = TranscriptProjection.Projection.applyEvent(childProjection, childResponseEvent)
   const response = feed.apply(childResponseEvent, {
     executionId: `execution:${childId}`,
-    projection: Transcript.withNestedProjections(parent, [
+    projection: TranscriptNestedProjection.withNestedProjections(parent, [
       { parentId: `${turn.id}:agent`, projection: childProjection },
     ]),
   })
 
   expect(child.state.model.blocks).toEqual([
     expect.objectContaining({ _tag: "ToolCall", id: "parent:agent", childId: "execution:parent:child:agent" }),
-    expect.objectContaining({ _tag: "ToolCall", id: Transcript.scopedIdentity(childId, "read") }),
+    expect.objectContaining({ _tag: "ToolCall", id: TranscriptIdentity.scopedIdentity(childId, "read") }),
   ])
   expect(child.state.model.items[2]).toMatchObject({
-    id: Transcript.identityKey("tool", childId, "read"),
+    id: TranscriptIdentity.identityKey("tool", childId, "read"),
     parentId: "parent:agent",
   })
   expect(child.state.revisions.get("parent")).toBe(1)
@@ -793,7 +820,7 @@ it("projects child execution units beneath the matching subagent", () => {
   expect(response.state.model.items).toContainEqual(
     expect.objectContaining({
       _tag: "Entry",
-      id: Transcript.identityKey("assistant", childId, 0),
+      id: TranscriptIdentity.identityKey("assistant", childId, 0),
       parentId: "parent:agent",
     }),
   )
@@ -819,40 +846,43 @@ it("attaches parallel child streams when task rows lack explicit spawn links", (
     threadCostUsd: 0,
     activeTurn: turn,
   })
-  let parent = Transcript.empty(turnId, turn.prompt)
+  let parent = TranscriptProjection.Projection.empty(turnId, turn.prompt)
   const feed = makeProjectionFeed(selected.state, turn, parent)
 
   for (const [sequence, callId] of ["one", "two", "three", "four"].entries()) {
-    const event: Transcript.SourceEvent = {
+    const event: TranscriptSourceEvent.SourceEvent = {
       cursor: `task-${callId}`,
       sequence,
       type: "tool.call.requested",
       createdAt: 3,
       data: { tool_call_id: callId, tool_name: "task", input: { prompt: `Explore ${callId}` } },
     }
-    parent = Transcript.applyEvent(parent, event)
+    parent = TranscriptProjection.Projection.applyEvent(parent, event)
     feed.apply(event, { projection: parent })
   }
 
-  const children = new Map<string, Transcript.Projection>()
+  const children = new Map<string, TranscriptProjectionModel.Projection>()
   for (const [index, childId] of childIds.entries()) {
-    const toolEvent: Transcript.SourceEvent = {
+    const toolEvent: TranscriptSourceEvent.SourceEvent = {
       cursor: `child-tool-${index}`,
       sequence: 0,
       type: "tool.call.requested",
       createdAt: 4,
       data: { tool_call_id: "read", tool_name: "read", input: { path: `src/${index}.ts` } },
     }
-    const responseEvent: Transcript.SourceEvent = {
+    const responseEvent: TranscriptSourceEvent.SourceEvent = {
       cursor: `child-response-${index}`,
       sequence: 1,
       type: "model.output.completed",
       createdAt: 5,
       text: `## Agent ${index + 1}\n\n**Complete.**`,
     }
-    children.set(childId, Transcript.applyEvent(Transcript.empty(childId, ""), toolEvent))
+    children.set(
+      childId,
+      TranscriptProjection.Projection.applyEvent(TranscriptProjection.Projection.empty(childId, ""), toolEvent),
+    )
     const nested = () =>
-      Transcript.withNestedProjections(
+      TranscriptNestedProjection.withNestedProjections(
         parent,
         [...children].map(([, projection], childIndex) => ({
           parentId: `${turnId}:${["one", "two", "three", "four"][childIndex]}`,
@@ -860,7 +890,7 @@ it("attaches parallel child streams when task rows lack explicit spawn links", (
         })),
       )
     feed.apply(toolEvent, { executionId: `execution:${childId}`, projection: nested() })
-    children.set(childId, Transcript.applyEvent(children.get(childId)!, responseEvent))
+    children.set(childId, TranscriptProjection.Projection.applyEvent(children.get(childId)!, responseEvent))
     feed.apply(responseEvent, { executionId: `execution:${childId}`, projection: nested() })
   }
 
@@ -877,7 +907,7 @@ it("reloads one completed subagent tree with rendered markdown and no serialized
   const childId = "durable-parent:child:agent"
   const serialized =
     '{"status":"completed","output":[{"type":"text","text":"## Review complete\\n\\n**No defects found.**"}]}'
-  const parent = Transcript.project(target.id, target.prompt, [
+  const parent = TranscriptProjection.Projection.project(target.id, target.prompt, [
     {
       cursor: "agent",
       sequence: 0,
@@ -905,7 +935,7 @@ it("reloads one completed subagent tree with rendered markdown and no serialized
     },
     { cursor: "done", sequence: 3, type: "execution.completed", createdAt: 5 },
   ])
-  const child = Transcript.project(childId, "", [
+  const child = TranscriptProjection.Projection.project(childId, "", [
     {
       cursor: "read",
       sequence: 0,
@@ -922,7 +952,9 @@ it("reloads one completed subagent tree with rendered markdown and no serialized
     },
     { cursor: "child-done", sequence: 2, type: "execution.completed", createdAt: 5 },
   ])
-  const durable = Transcript.withNestedProjections(parent, [{ parentId: `${target.id}:agent`, projection: child }])
+  const durable = TranscriptNestedProjection.withNestedProjections(parent, [
+    { parentId: `${target.id}:agent`, projection: child },
+  ])
   const persistedEntries = durable.units.map((unit) => ({
     turn: target,
     unit,
@@ -959,7 +991,7 @@ it("reloads one completed subagent tree with rendered markdown and no serialized
   expect(loaded.state.model.items).toContainEqual(
     expect.objectContaining({
       _tag: "Entry",
-      id: Transcript.identityKey("assistant", childId, 0),
+      id: TranscriptIdentity.identityKey("assistant", childId, 0),
       parentId: `${target.id}:agent`,
     }),
   )
@@ -977,7 +1009,7 @@ it("reloads one completed subagent tree with rendered markdown and no serialized
 it("keeps cancelled child tools terminal in live and reloaded projections", () => {
   const target = { ...entries("cancel-parent", 2)[0]!.turn, status: "running" as const }
   const childId = "child:execution%3Acancel-parent:agent"
-  const parent = Transcript.project(target.id, target.prompt, [
+  const parent = TranscriptProjection.Projection.project(target.id, target.prompt, [
     {
       cursor: "agent",
       sequence: 0,
@@ -994,7 +1026,7 @@ it("keeps cancelled child tools terminal in live and reloaded projections", () =
     },
     { cursor: "root-cancelled", sequence: 2, type: "execution.cancelled", createdAt: 6 },
   ])
-  const child = Transcript.project(childId, "", [
+  const child = TranscriptProjection.Projection.project(childId, "", [
     {
       cursor: "bash",
       sequence: 0,
@@ -1003,7 +1035,9 @@ it("keeps cancelled child tools terminal in live and reloaded projections", () =
       data: { tool_call_id: "bash", tool_name: "bash", input: { command: "sleep 60" } },
     },
   ])
-  const durable = Transcript.withNestedProjections(parent, [{ parentId: `${target.id}:agent`, projection: child }])
+  const durable = TranscriptNestedProjection.withNestedProjections(parent, [
+    { parentId: `${target.id}:agent`, projection: child },
+  ])
   const persistedEntries = durable.units.map((unit) => ({
     turn: { ...target, status: "cancelled" as const },
     unit,
@@ -1028,7 +1062,7 @@ it("keeps cancelled child tools terminal in live and reloaded projections", () =
   for (const model of [live, loaded]) {
     expect(model.blocks).toEqual([
       expect.objectContaining({ id: `${target.id}:agent`, status: "cancelled" }),
-      expect.objectContaining({ id: Transcript.scopedIdentity(childId, "bash"), status: "cancelled" }),
+      expect.objectContaining({ id: TranscriptIdentity.scopedIdentity(childId, "bash"), status: "cancelled" }),
     ])
     expect(model.entries.filter((entry) => entry.role === "notice")).toEqual([])
     expect(
@@ -1059,7 +1093,7 @@ const orphanEntries = (turn: Turn.Turn, count: number) =>
     unit: {
       key: `${turn.id}:nested:${index}`,
       turnId: turn.id,
-      order: Transcript.unitOrder(`${turn.id}:nested:${index}`, index + 10),
+      order: TranscriptOrdering.unitOrder(`${turn.id}:nested:${index}`, index + 10),
       revision: index + 10,
       parentId: `${turn.id}:agent`,
       content: {
@@ -1100,7 +1134,9 @@ const projectionEvent = (turn: Turn.Turn, text: string, transient = false) => ({
 it("installs an authoritative projection snapshot for the active turn", () => {
   const active = runningTurn("projection-snapshot")
   const selected = populatedSelection(active)
-  const projection = Transcript.project(active.id, active.prompt, [projectionEvent(active, "live answer")])
+  const projection = TranscriptProjection.Projection.project(active.id, active.prompt, [
+    projectionEvent(active, "live answer"),
+  ])
   const started = startProjection(selected.state, active, projection)
 
   expect(started.state.model.entries.map((entry) => entry.text)).toContain("live answer")
@@ -1115,8 +1151,10 @@ it("installs an authoritative projection snapshot for the active turn", () => {
 it("keeps every open projection visible when snapshots arrive in sequence", () => {
   const active = runningTurn("projection-active")
   const concurrent = { ...runningTurn("projection-concurrent"), createdAt: 3, updatedAt: 3 }
-  const activeProjection = Transcript.project(active.id, active.prompt, [projectionEvent(active, "active answer")])
-  const concurrentProjection = Transcript.project(concurrent.id, concurrent.prompt, [
+  const activeProjection = TranscriptProjection.Projection.project(active.id, active.prompt, [
+    projectionEvent(active, "active answer"),
+  ])
+  const concurrentProjection = TranscriptProjection.Projection.project(concurrent.id, concurrent.prompt, [
     projectionEvent(concurrent, "concurrent answer"),
   ])
   const activeStarted = startProjection(populatedSelection(active).state, active, activeProjection)
@@ -1130,10 +1168,14 @@ it("keeps every open projection visible when snapshots arrive in sequence", () =
 
 it("applies exact projection upserts and removals without replaying source events", () => {
   const active = runningTurn("projection-delta")
-  const initialProjection = Transcript.project(active.id, active.prompt, [projectionEvent(active, "hel")])
+  const initialProjection = TranscriptProjection.Projection.project(active.id, active.prompt, [
+    projectionEvent(active, "hel"),
+  ])
   const selected = populatedSelection(active)
   const started = startProjection(selected.state, active, initialProjection)
-  const updatedProjection = Transcript.project(active.id, active.prompt, [projectionEvent(active, "hello")])
+  const updatedProjection = TranscriptProjection.Projection.project(active.id, active.prompt, [
+    projectionEvent(active, "hello"),
+  ])
   const updatedUnit = updatedProjection.units.find(
     (unit) => unit.content._tag === "Entry" && unit.content.role === "assistant",
   )!
@@ -1179,21 +1221,21 @@ it("applies exact projection upserts and removals without replaying source event
 
 it("inserts a newly discovered projection unit at its stable order", () => {
   const active = runningTurn("projection-order")
-  const later: Transcript.Unit = {
+  const later: TranscriptUnit.Unit = {
     key: `${active.id}:later`,
     turnId: active.id,
-    order: Transcript.unitOrder(`${active.id}:later`, 2),
+    order: TranscriptOrdering.unitOrder(`${active.id}:later`, 2),
     revision: 2,
     content: { _tag: "Entry", role: "assistant", text: "later" },
   }
-  const earlier: Transcript.Unit = {
+  const earlier: TranscriptUnit.Unit = {
     key: `${active.id}:earlier`,
     turnId: active.id,
-    order: Transcript.unitOrder(`${active.id}:earlier`, 1),
+    order: TranscriptOrdering.unitOrder(`${active.id}:earlier`, 1),
     revision: 1,
     content: { _tag: "Entry", role: "assistant", text: "earlier" },
   }
-  const projection = { ...Transcript.empty(active.id, active.prompt), units: [later] }
+  const projection = { ...TranscriptProjection.Projection.empty(active.id, active.prompt), units: [later] }
   const started = startProjection(populatedSelection(active).state, active, projection)
   const patched = InteractiveController.update(started.state, {
     _tag: "TranscriptProjectionPatched",
@@ -1217,7 +1259,7 @@ it("inserts a newly discovered projection unit at its stable order", () => {
 
 it("requests an authoritative resync for a projection stream or revision mismatch", () => {
   const active = runningTurn("projection-gap")
-  const projection = Transcript.project(active.id, active.prompt, [])
+  const projection = TranscriptProjection.Projection.project(active.id, active.prompt, [])
   const started = startProjection(populatedSelection(active).state, active, projection)
   const patch = {
     _tag: "TranscriptProjectionPatched" as const,
@@ -1239,7 +1281,9 @@ it("requests an authoritative resync for a projection stream or revision mismatc
 
 it("keeps the visible projection at a terminal boundary and rejects later patches", () => {
   const active = runningTurn("projection-terminal")
-  const projection = Transcript.project(active.id, active.prompt, [projectionEvent(active, "final answer")])
+  const projection = TranscriptProjection.Projection.project(active.id, active.prompt, [
+    projectionEvent(active, "final answer"),
+  ])
   const started = startProjection(populatedSelection(active).state, active, projection)
   const terminal = InteractiveController.update(started.state, {
     _tag: "TranscriptProjectionPatched",
@@ -1290,7 +1334,9 @@ it("keeps the visible projection at a terminal boundary and rejects later patche
 
 it("rejects a terminal boundary that contradicts the last projection patch", () => {
   const active = runningTurn("projection-terminal-mismatch")
-  const projection = Transcript.project(active.id, active.prompt, [projectionEvent(active, "final answer")])
+  const projection = TranscriptProjection.Projection.project(active.id, active.prompt, [
+    projectionEvent(active, "final answer"),
+  ])
   const started = startProjection(populatedSelection(active).state, active, projection)
   const patched = InteractiveController.update(started.state, {
     _tag: "TranscriptProjectionPatched",
@@ -1333,7 +1379,11 @@ it("settles a recorded shell projection without treating it as an agent executio
     createdAt: 2,
     updatedAt: 2,
   }
-  const initial = Transcript.recordedShellProjection({ id: running.id, command: running.command, status: "running" })
+  const initial = TranscriptRecordedShell.recordedShellProjection({
+    id: running.id,
+    command: running.command,
+    status: "running",
+  })
   const started = startProjection(populatedSelection(running).state, running, initial)
   const terminal: Turn.TerminalRecordedShellTurn = {
     ...running,
@@ -1341,7 +1391,7 @@ it("settles a recorded shell projection without treating it as an agent executio
     result: { text: "done", truncated: false, exitCode: 0 },
     updatedAt: 3,
   }
-  const settled = Transcript.settleRecordedShellProjection(initial, terminal)
+  const settled = TranscriptRecordedShell.settleRecordedShellProjection(initial, terminal)
   const patched = InteractiveController.update(started.state, {
     _tag: "TranscriptProjectionPatched",
     selectionEpoch: 1,
@@ -1385,7 +1435,7 @@ it("settles a recorded shell projection without treating it as an agent executio
 
 it("retains the typed projection failure boundary and requests resync", () => {
   const active = runningTurn("projection-failure")
-  const projection = Transcript.project(active.id, active.prompt, [])
+  const projection = TranscriptProjection.Projection.project(active.id, active.prompt, [])
   const started = startProjection(populatedSelection(active).state, active, projection)
   const failed = InteractiveController.update(started.state, {
     _tag: "TranscriptProjectionFailed",
@@ -1413,9 +1463,11 @@ it("retains the typed projection failure boundary and requests resync", () => {
 
 it("renders transient projection deltas without advancing the durable fold revision", () => {
   const active = runningTurn("projection-transient")
-  const projection = Transcript.project(active.id, active.prompt, [])
+  const projection = TranscriptProjection.Projection.project(active.id, active.prompt, [])
   const started = startProjection(populatedSelection(active).state, active, projection)
-  const transientProjection = Transcript.project(active.id, active.prompt, [projectionEvent(active, "stream", true)])
+  const transientProjection = TranscriptProjection.Projection.project(active.id, active.prompt, [
+    projectionEvent(active, "stream", true),
+  ])
   const transientUnit = transientProjection.units.find(
     (unit) => unit.content._tag === "Entry" && unit.content.role === "assistant",
   )!
@@ -1450,7 +1502,7 @@ it("renders transient projection deltas without advancing the durable fold revis
 
 it("does not traverse unchanged projection units for a one-unit delta", () => {
   const active = runningTurn("projection-complexity")
-  const template = Transcript.project(active.id, active.prompt, []).units[0]!
+  const template = TranscriptProjection.Projection.project(active.id, active.prompt, []).units[0]!
   let unchangedReads = 0
   const units = Array.from(
     { length: 2_000 },
@@ -1459,7 +1511,7 @@ it("does not traverse unchanged projection units for a one-unit delta", () => {
         {
           ...template,
           key: `${active.id}:unit:${index}`,
-          order: Transcript.unitOrder(active.id, index),
+          order: TranscriptOrdering.unitOrder(active.id, index),
           content: { _tag: "Entry" as const, role: "assistant" as const, text: `line ${index}` },
         },
         {
@@ -1471,7 +1523,7 @@ it("does not traverse unchanged projection units for a one-unit delta", () => {
         },
       ),
   )
-  const projection = { ...Transcript.project(active.id, active.prompt, []), units }
+  const projection = { ...TranscriptProjection.Projection.project(active.id, active.prompt, []), units }
   const started = startProjection(populatedSelection(active).state, active, projection)
   const replacement = {
     ...units[1_000]!,
@@ -1549,7 +1601,11 @@ it("repaints live patches for the in-flight turn after a reload that renders not
     threadCostUsd: 0,
     activeTurn: active,
   })
-  const feed = makeProjectionFeed(reloaded.state, active, Transcript.empty(active.id, active.prompt))
+  const feed = makeProjectionFeed(
+    reloaded.state,
+    active,
+    TranscriptProjection.Projection.empty(active.id, active.prompt),
+  )
   const patched = feed.apply({
     cursor: "answer",
     sequence: 9,
@@ -1577,7 +1633,11 @@ it("seeds the in-flight turn so an empty reload still paints and keeps taking li
     threadCostUsd: 0,
     activeTurn: active,
   })
-  const feed = makeProjectionFeed(reloaded.state, active, Transcript.empty(active.id, active.prompt))
+  const feed = makeProjectionFeed(
+    reloaded.state,
+    active,
+    TranscriptProjection.Projection.empty(active.id, active.prompt),
+  )
   const patched = feed.apply({
     cursor: "answer",
     sequence: 9,
@@ -1592,7 +1652,7 @@ it("seeds the in-flight turn so an empty reload still paints and keeps taking li
 })
 
 it("keeps live child patches rendering after a mid-turn selection reload", () => {
-  const parentEvents: ReadonlyArray<Transcript.SourceEvent> = [
+  const parentEvents: ReadonlyArray<TranscriptSourceEvent.SourceEvent> = [
     {
       cursor: "agent",
       sequence: 0,
@@ -1611,17 +1671,22 @@ it("keeps live child patches rendering after a mid-turn selection reload", () =>
   const running = entries("parent", 2, parentEvents).map(asRunningEntry)
   const turn = running[0]!.turn
   const childId = "parent:child:agent"
-  const childReadEvent: Transcript.SourceEvent = {
+  const childReadEvent: TranscriptSourceEvent.SourceEvent = {
     cursor: "child-read",
     sequence: 0,
     type: "tool.call.requested",
     createdAt: 6,
     data: { tool_call_id: "read", tool_name: "read", input: { path: "src/a.ts" } },
   }
-  const parent = Transcript.project(turn.id, turn.prompt, parentEvents)
-  let childProjection = Transcript.applyEvent(Transcript.empty(childId, ""), childReadEvent)
+  const parent = TranscriptProjection.Projection.project(turn.id, turn.prompt, parentEvents)
+  let childProjection = TranscriptProjection.Projection.applyEvent(
+    TranscriptProjection.Projection.empty(childId, ""),
+    childReadEvent,
+  )
   const nested = () =>
-    Transcript.withNestedProjections(parent, [{ parentId: `${turn.id}:agent`, projection: childProjection }])
+    TranscriptNestedProjection.withNestedProjections(parent, [
+      { parentId: `${turn.id}:agent`, projection: childProjection },
+    ])
   const selected = InteractiveController.update(initialState(), {
     _tag: "SelectionLoaded",
     selectionEpoch: 1,
@@ -1648,26 +1713,26 @@ it("keeps live child patches rendering after a mid-turn selection reload", () =>
     activeTurn: turn,
   })
   const secondFeed = makeProjectionFeed(reloaded.state, turn, nested())
-  const childWriteEvent: Transcript.SourceEvent = {
+  const childWriteEvent: TranscriptSourceEvent.SourceEvent = {
     cursor: "child-write",
     sequence: 1,
     type: "tool.call.requested",
     createdAt: 7,
     data: { tool_call_id: "write", tool_name: "write", input: { path: "src/b.ts" } },
   }
-  childProjection = Transcript.applyEvent(childProjection, childWriteEvent)
+  childProjection = TranscriptProjection.Projection.applyEvent(childProjection, childWriteEvent)
   const resumed = secondFeed.apply(childWriteEvent, {
     executionId: `execution:${childId}`,
     projection: nested(),
   })
 
   expect(firstFeed.state.model.blocks).toContainEqual(
-    expect.objectContaining({ id: Transcript.scopedIdentity(childId, "read") }),
+    expect.objectContaining({ id: TranscriptIdentity.scopedIdentity(childId, "read") }),
   )
   expect(secondFeed.state.model.blocks).toContainEqual(expect.objectContaining({ id: "parent:agent" }))
   expect(secondFeed.state.model.items.length).toBeGreaterThan(0)
   expect(resumed.state.model.blocks).toContainEqual(
-    expect.objectContaining({ id: Transcript.scopedIdentity(childId, "write") }),
+    expect.objectContaining({ id: TranscriptIdentity.scopedIdentity(childId, "write") }),
   )
 })
 
@@ -1684,7 +1749,7 @@ it("keeps one of five status labels from submit until the turn completes", () =>
     replayTurns: new Map([[turn.id, turn]]),
     entries: entries(turn.id, turn.createdAt),
   }
-  const feed = makeProjectionFeed(state, turn, Transcript.empty(turn.id, turn.prompt))
+  const feed = makeProjectionFeed(state, turn, TranscriptProjection.Projection.empty(turn.id, turn.prompt))
   state = feed.state
   const labels = ["Sending", "Waiting", "Thinking 2 tok", "Streaming 2 tok", "Running 1 tool", "Running 2 tools"]
   const expectStatus = (expected: string) => {
@@ -1759,7 +1824,7 @@ it("keeps 200ms tool lifecycle events in distinct TUI frames", () => {
     replayTurns: new Map([[turn.id, turn]]),
     entries: entries(turn.id, turn.createdAt),
   }
-  state = startProjection(state, turn, Transcript.empty(turn.id, turn.prompt)).state
+  state = startProjection(state, turn, TranscriptProjection.Projection.empty(turn.id, turn.prompt)).state
   let now = 0
   const scheduled: Array<{ readonly at: number; readonly flush: () => void }> = []
   const applied: Array<{ readonly at: number; readonly type: string; readonly activity: string | undefined }> = []
@@ -1781,14 +1846,14 @@ it("keeps 200ms tool lifecycle events in distinct TUI frames", () => {
     }
     now = target
   }
-  let projection = Transcript.empty(turn.id, turn.prompt)
+  let projection = TranscriptProjection.Projection.empty(turn.id, turn.prompt)
   let patchRevision = 0
   const event = (
     sequence: number,
     type: "tool.call.requested" | "tool.result.received",
     callId: string,
   ): ProjectionPatched => {
-    const source: Transcript.SourceEvent = {
+    const source: TranscriptSourceEvent.SourceEvent = {
       cursor: `timed-${sequence}`,
       sequence,
       type,
@@ -1798,7 +1863,7 @@ it("keeps 200ms tool lifecycle events in distinct TUI frames", () => {
           ? { tool_call_id: callId, tool_name: "read", input: { path: `${callId}.ts` } }
           : { tool_call_id: callId, output: callId },
     }
-    const next = Transcript.applyEvent(projection, source)
+    const next = TranscriptProjection.Projection.applyEvent(projection, source)
     const baseRevision = patchRevision
     patchRevision += 1
     const patched: ProjectionPatched = {
@@ -2074,7 +2139,11 @@ it("clears working state when the semantic event stream reaches a terminal event
     threadCostUsd: 0,
     activeTurn,
   })
-  const feed = makeProjectionFeed(page.state, activeTurn, Transcript.empty(activeTurn.id, activeTurn.prompt))
+  const feed = makeProjectionFeed(
+    page.state,
+    activeTurn,
+    TranscriptProjection.Projection.empty(activeTurn.id, activeTurn.prompt),
+  )
   feed.apply({ cursor: "completed", sequence: 1, type: "execution.completed", createdAt: 3 })
   const completed = feed.stop("completed")
 
@@ -2105,7 +2174,7 @@ it("keeps the newest logical selection when delayed A to B to A work arrives", (
   const a3 = load(b2.state, thread, 3, entries("a-3", 3))
   const delayedA1 = load(a3.state, thread, 1, entries("stale-a", 4))
   const staleTurn = entries("a-1", 1)[0]!.turn
-  const staleProjection = Transcript.project(staleTurn.id, staleTurn.prompt, [
+  const staleProjection = TranscriptProjection.Projection.project(staleTurn.id, staleTurn.prompt, [
     {
       cursor: "stale",
       sequence: 9,
@@ -2216,17 +2285,17 @@ it("eagerly consumes more than one frame of events while bounding reducer work p
     threadCostUsd: 0,
     activeTurn: turn,
   }).state
-  let projection = Transcript.empty(turn.id, turn.prompt)
+  let projection = TranscriptProjection.Projection.empty(turn.id, turn.prompt)
   state = startProjection(state, turn, projection).state
   const events: ReadonlyArray<ProjectionPatched> = Array.from({ length: 257 }, (_, index) => {
-    const source: Transcript.SourceEvent = {
+    const source: TranscriptSourceEvent.SourceEvent = {
       cursor: `chunk-${index}`,
       sequence: index,
       type: "model.output.delta",
       createdAt: index,
       text: index === 256 ? "FINAL-CHUNK" : "x",
     }
-    const next = Transcript.applyEvent(projection, source)
+    const next = TranscriptProjection.Projection.applyEvent(projection, source)
     const event: ProjectionPatched = {
       _tag: "TranscriptProjectionPatched",
       selectionEpoch: 1,

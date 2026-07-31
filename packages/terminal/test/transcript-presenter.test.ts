@@ -1,4 +1,10 @@
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptIdentity from "@rika/transcript/transcript-unit-identity"
+import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as TranscriptPresentationModel from "@rika/transcript/transcript-presentation-model"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { describe, expect, it } from "vitest"
 import { ExecutionEvents, TranscriptPresenter, ViewState } from "@rika/terminal/terminal-state"
 import {
@@ -12,10 +18,10 @@ const event = (
   cursor: string,
   sequence: number,
   type: string,
-  fields: Partial<Transcript.SourceEvent> = {},
-): Transcript.SourceEvent => ({ cursor, sequence, type, createdAt: sequence, ...fields })
+  fields: Partial<TranscriptSourceEvent.SourceEvent> = {},
+): TranscriptSourceEvent.SourceEvent => ({ cursor, sequence, type, createdAt: sequence, ...fields })
 
-const parentProjection = Transcript.project("turn", "prompt", [
+const parentProjection = TranscriptProjection.Projection.project("turn", "prompt", [
   event("assistant-0", 0, "model.output.completed", { text: "Working on it." }),
   event("agent", 1, "tool.call.requested", {
     data: { tool_call_id: "agent", tool_name: "oracle", input: { prompt: "Review the code" } },
@@ -25,7 +31,7 @@ const parentProjection = Transcript.project("turn", "prompt", [
   }),
 ])
 
-const childProjection = Transcript.project("child:turn:oracle", "", [
+const childProjection = TranscriptProjection.Projection.project("child:turn:oracle", "", [
   event("read", 0, "tool.call.requested", {
     data: { tool_call_id: "read", tool_name: "read", input: { path: "src/a.ts" } },
   }),
@@ -38,17 +44,17 @@ const childProjection = Transcript.project("child:turn:oracle", "", [
   }),
 ])
 
-const grandchildProjection = Transcript.project("child:child:turn:oracle:nested", "", [
+const grandchildProjection = TranscriptProjection.Projection.project("child:child:turn:oracle:nested", "", [
   event("shell", 0, "tool.call.requested", {
     data: { tool_call_id: "shell", tool_name: "bash", input: { command: "bun test" } },
   }),
   event("shell-result", 1, "tool.result.received", { data: { tool_call_id: "shell", output: "passed" } }),
 ])
 
-const entryUnit = (key: string, sequence: number, text: string): Transcript.Unit => ({
+const entryUnit = (key: string, sequence: number, text: string): TranscriptUnit.Unit => ({
   key,
   turnId: "ordered-turn",
-  order: Transcript.unitOrder(key, sequence),
+  order: TranscriptOrdering.unitOrder(key, sequence),
   revision: sequence,
   content: { _tag: "Entry", role: "assistant", text },
 })
@@ -58,7 +64,7 @@ const nestedModel = () => {
   model = TranscriptPresenter.applyChildUnits(model, "turn:agent", childProjection.units)
   model = TranscriptPresenter.applyChildUnits(
     model,
-    Transcript.scopedIdentity("child:turn:oracle", "nested"),
+    TranscriptIdentity.scopedIdentity("child:turn:oracle", "nested"),
     grandchildProjection.units,
   )
   return model
@@ -106,7 +112,7 @@ describe("TranscriptPresenter", () => {
     const attached = TranscriptPresenter.attachChildProjections(base, new Set<string>(), projections)
     const expected = TranscriptPresenter.applyChildUnits(
       TranscriptPresenter.applyChildUnits(base, "turn:agent", childProjection.units),
-      Transcript.scopedIdentity("child:turn:oracle", "nested"),
+      TranscriptIdentity.scopedIdentity("child:turn:oracle", "nested"),
       grandchildProjection.units,
     )
     expect(attached.model).toEqual(expected)
@@ -126,7 +132,7 @@ describe("TranscriptPresenter", () => {
 
   it("preserves untouched array elements when one unit changes", () => {
     const base = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), parentProjection.units)
-    const next = Transcript.applyEvent(
+    const next = TranscriptProjection.Projection.applyEvent(
       parentProjection,
       event("agent-result", 3, "tool.result.received", { data: { tool_call_id: "agent", output: "done" } }),
     )
@@ -151,18 +157,18 @@ describe("TranscriptPresenter", () => {
   })
 
   it("orders one reverse delta across nested executions by the root projection order", () => {
-    const parentOrder = Transcript.unitOrder("tool:root:agent", 1)
-    const earlier: Transcript.Unit = {
+    const parentOrder = TranscriptOrdering.unitOrder("tool:root:agent", 1)
+    const earlier: TranscriptUnit.Unit = {
       ...entryUnit("child-a:answer", 1, "earlier child"),
       turnId: "child-a",
       parentId: "root:agent",
-      order: Transcript.childOrder(parentOrder, "child-a", Transcript.unitOrder("child-a:answer", 1)),
+      order: TranscriptOrdering.childOrder(parentOrder, "child-a", TranscriptOrdering.unitOrder("child-a:answer", 1)),
     }
-    const later: Transcript.Unit = {
+    const later: TranscriptUnit.Unit = {
       ...entryUnit("child-z:answer", 1, "later child"),
       turnId: "child-z",
       parentId: "root:agent",
-      order: Transcript.childOrder(parentOrder, "child-z", Transcript.unitOrder("child-z:answer", 1)),
+      order: TranscriptOrdering.childOrder(parentOrder, "child-z", TranscriptOrdering.unitOrder("child-z:answer", 1)),
     }
     const inserted = TranscriptPresenter.applyTurnDelta(ViewState.initial("/work"), "root", {
       upsert: [later, earlier],
@@ -202,7 +208,7 @@ describe("TranscriptPresenter", () => {
   })
 
   it("removes nested child rows without disturbing their parent tool", () => {
-    const nested = Transcript.withNestedProjections(parentProjection, [
+    const nested = TranscriptNestedProjection.withNestedProjections(parentProjection, [
       { parentId: "turn:agent", projection: childProjection },
     ])
     const childKeys = nested.units.filter((unit) => unit.turnId === "child:turn:oracle").map((unit) => unit.key)
@@ -219,7 +225,7 @@ describe("TranscriptPresenter", () => {
       (row) =>
         row.kind === "tool" &&
         row.blocks.some((index) => {
-          const block = updated.blocks[index] as Transcript.Block | undefined
+          const block = updated.blocks[index] as TranscriptPresentationModel.Block | undefined
           return block?._tag === "ToolCall" && block.id === "turn:agent"
         }),
     )
@@ -230,11 +236,15 @@ describe("TranscriptPresenter", () => {
     const tool = parentProjection.units.find(
       (unit) => unit.content._tag === "Block" && unit.content.block._tag === "ToolCall",
     )!
-    const outcome: Transcript.Unit = {
+    const outcome: TranscriptUnit.Unit = {
       key: "execution:child:outcome",
       turnId: "child",
       parentId: "turn:agent",
-      order: Transcript.childOrder(tool.order, "child", Transcript.unitOrder("execution:child:outcome", 2)),
+      order: TranscriptOrdering.childOrder(
+        tool.order,
+        "child",
+        TranscriptOrdering.unitOrder("execution:child:outcome", 2),
+      ),
       revision: 2,
       content: { _tag: "Entry", role: "notice", text: "" },
       executionOutcome: { status: "failed", reason: "child failed" },
@@ -254,7 +264,7 @@ describe("TranscriptPresenter", () => {
   })
 
   it("keeps an applied child outcome when the parent's stale units reproject", () => {
-    const failedChild = Transcript.project("child:turn:oracle", "", [
+    const failedChild = TranscriptProjection.Projection.project("child:turn:oracle", "", [
       event("read", 0, "tool.call.requested", {
         data: { tool_call_id: "read", tool_name: "read", input: { path: "src/a.ts" } },
       }),
@@ -263,9 +273,9 @@ describe("TranscriptPresenter", () => {
     let model = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), parentProjection.units)
     model = TranscriptPresenter.applyChildUnits(model, "turn:agent", failedChild.units)
     const parentTool = (candidate: ViewState.Model) =>
-      (candidate.blocks as ReadonlyArray<Transcript.Block>).find(
+      (candidate.blocks as ReadonlyArray<TranscriptPresentationModel.Block>).find(
         (block) => block._tag === "ToolCall" && block.id === "turn:agent",
-      ) as Extract<Transcript.Block, { _tag: "ToolCall" }>
+      ) as Extract<TranscriptPresentationModel.Block, { _tag: "ToolCall" }>
     expect(parentTool(model).status).toBe("failed")
     const reprojected = TranscriptPresenter.applyTurnUnits(model, parentProjection.units)
     expect(parentTool(reprojected).status).toBe("failed")
@@ -273,14 +283,14 @@ describe("TranscriptPresenter", () => {
   })
 
   it("rewrites running rows to cancelled when a cancellation notice projects", () => {
-    const cancelled = Transcript.applyEvent(
+    const cancelled = TranscriptProjection.Projection.applyEvent(
       parentProjection,
       event("cancel", 3, "execution.cancelled", { data: { reason: "stop" } }),
     )
     const model = TranscriptPresenter.applyTurnUnits(nestedModel(), cancelled.units)
-    const tool = (model.blocks as ReadonlyArray<Transcript.Block>).find(
+    const tool = (model.blocks as ReadonlyArray<TranscriptPresentationModel.Block>).find(
       (block) => block._tag === "ToolCall" && block.id === "turn:agent",
-    ) as Extract<Transcript.Block, { _tag: "ToolCall" }>
+    ) as Extract<TranscriptPresentationModel.Block, { _tag: "ToolCall" }>
     expect(tool.status).toBe("cancelled")
   })
 
@@ -296,7 +306,10 @@ describe("TranscriptPresenter", () => {
     )
     expect(second.model).toBe(first.model)
     expect(second.attachments).toBe(first.attachments)
-    const bumped = Transcript.applyEvent(childProjection, event("more", 4, "model.output.delta", { text: "hi" }))
+    const bumped = TranscriptProjection.Projection.applyEvent(
+      childProjection,
+      event("more", 4, "model.output.delta", { text: "hi" }),
+    )
     const third = TranscriptPresenter.attachChildProjections(
       second.model,
       new Set<string>(),
@@ -330,7 +343,7 @@ const childTurnId = (child: number) => `child:turn:agent-${child}`
 describe("TranscriptPresenter at scale", () => {
   const childCount = 200
   const toolsPerChild = 20
-  const largeParent = Transcript.project("turn", "prompt", [
+  const largeParent = TranscriptProjection.Projection.project("turn", "prompt", [
     event("assistant-0", 0, "model.output.completed", { text: "Fanning out." }),
     ...Array.from({ length: childCount }, (_, child) => [
       event(`agent-${child}`, 1 + child * 2, "tool.call.requested", {
@@ -362,7 +375,7 @@ describe("TranscriptPresenter at scale", () => {
       }).flat()
       return [
         childTurnId(child),
-        Transcript.project(childTurnId(child), "", [
+        TranscriptProjection.Projection.project(childTurnId(child), "", [
           ...events,
           event(`answer-${child}`, toolsPerChild * 2, "model.output.completed", { text: `Child ${child} finished.` }),
         ]),
@@ -389,7 +402,7 @@ describe("TranscriptPresenter at scale", () => {
 
   it("changes only the dirty child's rows when one child streams a delta", () => {
     const session = attachedSession()
-    const bumped = Transcript.applyEvent(
+    const bumped = TranscriptProjection.Projection.applyEvent(
       childProjections.get(childTurnId(120))!,
       event(`tool-120-${toolsPerChild - 1}-result`, toolsPerChild * 2 + 1, "tool.result.received", {
         data: { tool_call_id: `tool-120-${toolsPerChild - 1}`, output: "late result" },
@@ -422,7 +435,7 @@ describe("TranscriptPresenter at scale", () => {
 const agentTool = (
   status: "running" | "complete" | "failed" | "cancelled",
   output?: string,
-): Extract<Transcript.Block, { _tag: "ToolCall" }> => ({
+): Extract<TranscriptPresentationModel.Block, { _tag: "ToolCall" }> => ({
   _tag: "ToolCall",
   id: "agent",
   name: "task",
@@ -448,7 +461,7 @@ const agentScenario = (opts: {
 }) => {
   const tool = agentTool(opts.status, opts.output)
   const entries: Array<ViewState.Entry> = []
-  const blocks: Array<Transcript.Block> = [tool]
+  const blocks: Array<TranscriptPresentationModel.Block> = [tool]
   const items: Array<ViewState.TranscriptItem> = [{ _tag: "Block", index: 0, id: "tool:agent" }]
   const children: Array<ViewState.TranscriptItem> = []
   if (opts.answer !== undefined) {
@@ -608,7 +621,7 @@ describe("agentResponseState", () => {
 describe("nested subagent rows", () => {
   it("emits only ToolCall children as rows while assistant and error children feed the terminal", () => {
     const parent = agentTool("complete")
-    const nested: Extract<Transcript.Block, { _tag: "ToolCall" }> = {
+    const nested: Extract<TranscriptPresentationModel.Block, { _tag: "ToolCall" }> = {
       _tag: "ToolCall",
       id: "nested-read",
       name: "read",

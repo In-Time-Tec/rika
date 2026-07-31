@@ -1,7 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { LanguageModel, ModelRegistry } from "@batonfx/core"
 import { TestModel } from "@batonfx/test"
-import { Runtime } from "@rika/coding-tools/coding-tool-catalog"
+import * as Runtime from "@rika/coding-tools/coding-tool-runtime"
 import { describe, expect, it, test } from "vitest"
 import { Database } from "bun:sqlite"
 import { Deferred, Effect, Fiber, FileSystem, Layer, Ref, Schedule, Stream } from "effect"

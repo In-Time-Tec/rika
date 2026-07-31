@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { Context, Effect, FileSystem, Layer, Path, PlatformError, Schema } from "effect"
-import { LocalPath } from "@rika/coding-tools/coding-tool-catalog"
+import * as LocalPath from "@rika/coding-tools/local-path"
 import * as ContextFileSystem from "./context-file-system"
 
 export const Diagnostic = Schema.Struct({

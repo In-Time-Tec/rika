@@ -1,8 +1,28 @@
+import { Catalog } from "@rika/coding-tools/coding-tool-catalog"
 import { Function } from "effect"
 import { foldOperations } from "./transcript-event-fold"
 import type { FoldMutation } from "./transcript-event-fold"
-const { applyFoldEvent, makeProjectionFold, restoreProjectionFold, snapshotFoldProjection } = foldOperations
-import type { Projection, ProjectionState } from "../schema/transcript-projection-model"
+const {
+  applyFoldEvent: applyFoldEventImpl,
+  applyAncestorOutcome,
+  applyChildOutcome,
+  foldExecutionOutcome,
+  foldHasRunningUnits,
+  foldUnit,
+  foldUnits,
+  isTransientEvent,
+  makeProjectionFold,
+  parentToolForChild,
+  restoreProjectionFold,
+  settleFoldChild,
+  settleFoldRunning,
+  snapshotFoldProjection,
+  snapshotFoldState,
+} = foldOperations
+export const Fold = foldOperations
+export type { FoldMutation, ProjectionFold } from "./transcript-event-fold"
+export type { UnitDelta } from "./transcript-fold-state"
+import type { Projection as ProjectionModel, ProjectionState } from "../schema/transcript-projection-model"
 import type { SourceEvent } from "../schema/transcript-source-event"
 import type { Unit } from "../schema/transcript-unit"
 import { compareUnitOrder } from "../ordering/transcript-unit-order"
@@ -10,32 +30,36 @@ import { compareUnitOrder } from "../ordering/transcript-unit-order"
 const changed = (mutation: FoldMutation): boolean =>
   mutation.stateChanged || mutation.units.upsert.length > 0 || mutation.units.remove.length > 0
 
-export const empty: {
-  (turnId: string, prompt: string): Projection
-  (prompt: string): (turnId: string) => Projection
+const agentPresentation = (name: string) => Catalog.resolveAgentPresentation(name)
+
+const agentPhrase = (input: Catalog.AgentPhrase): string => Catalog.agentPhrase(input)
+
+const empty: {
+  (turnId: string, prompt: string): ProjectionModel
+  (prompt: string): (turnId: string) => ProjectionModel
 } = Function.dual(
   2,
-  (turnId: string, prompt: string): Projection => snapshotFoldProjection(makeProjectionFold(turnId, prompt)),
+  (turnId: string, prompt: string): ProjectionModel => snapshotFoldProjection(makeProjectionFold(turnId, prompt)),
 )
 
-export const applyEvent: {
-  (projection: Projection, event: SourceEvent): Projection
-  (event: SourceEvent): (projection: Projection) => Projection
-} = Function.dual(2, (projection: Projection, event: SourceEvent): Projection => {
+const applyEvent: {
+  (projection: ProjectionModel, event: SourceEvent): ProjectionModel
+  (event: SourceEvent): (projection: ProjectionModel) => ProjectionModel
+} = Function.dual(2, (projection: ProjectionModel, event: SourceEvent): ProjectionModel => {
   const fold = restoreProjectionFold(projection)
-  return changed(applyFoldEvent(fold, event)) ? snapshotFoldProjection(fold) : projection
+  return changed(applyFoldEventImpl(fold, event)) ? snapshotFoldProjection(fold) : projection
 })
 
-export const project: {
-  (turnId: string, prompt: string, events: ReadonlyArray<SourceEvent>): Projection
-  (prompt: string, events: ReadonlyArray<SourceEvent>): (turnId: string) => Projection
-} = Function.dual(3, (turnId: string, prompt: string, events: ReadonlyArray<SourceEvent>): Projection => {
+const project: {
+  (turnId: string, prompt: string, events: ReadonlyArray<SourceEvent>): ProjectionModel
+  (prompt: string, events: ReadonlyArray<SourceEvent>): (turnId: string) => ProjectionModel
+} = Function.dual(3, (turnId: string, prompt: string, events: ReadonlyArray<SourceEvent>): ProjectionModel => {
   const fold = makeProjectionFold(turnId, prompt)
-  for (const event of events.toSorted((left, right) => left.sequence - right.sequence)) applyFoldEvent(fold, event)
+  for (const event of events.toSorted((left, right) => left.sequence - right.sequence)) applyFoldEventImpl(fold, event)
   return snapshotFoldProjection(fold)
 })
 
-export const hasRunningBlocks = (projection: Projection): boolean =>
+const hasRunningBlocks = (projection: ProjectionModel): boolean =>
   projection.units.some(
     (candidate) =>
       candidate.content._tag === "Block" &&
@@ -54,7 +78,7 @@ export interface ProjectionStateSource {
   readonly pricingVersion?: string | undefined
 }
 
-export const projectionState = (projection: ProjectionStateSource): ProjectionState => ({
+const projectionState = (projection: ProjectionStateSource): ProjectionState => ({
   revision: projection.revision,
   modelPhase: projection.modelPhase,
   ...(projection.usableCompletionSequence === undefined
@@ -72,7 +96,7 @@ const sameOptionalArray = (left: ReadonlyArray<string> | undefined, right: Reado
     ? left === right
     : left.length === right.length && left.every((value, index) => value === right[index])
 
-export const sameProjectionState: {
+const sameProjectionState: {
   (left: ProjectionState, right: ProjectionState): boolean
   (right: ProjectionState): (left: ProjectionState) => boolean
 } = Function.dual(
@@ -93,7 +117,7 @@ interface AssistantOutputProjection {
   readonly usableCompletionSequence?: number | undefined
 }
 
-export const finalAssistantOutput: {
+const finalAssistantOutput: {
   (projection: AssistantOutputProjection, turnId: string): string | undefined
   (turnId: string): (projection: AssistantOutputProjection) => string | undefined
 } = Function.dual(2, (projection: AssistantOutputProjection, turnId: string): string | undefined => {
@@ -117,3 +141,14 @@ export const finalAssistantOutput: {
     .toSorted((left, right) => compareUnitOrder(left.order, right.order))
     .at(-1)?.text
 })
+
+export const Presentation = { agentPresentation, agentPhrase }
+export const Projection = {
+  applyEvent,
+  empty,
+  finalAssistantOutput,
+  hasRunningBlocks,
+  project,
+  projectionState,
+  sameProjectionState,
+}

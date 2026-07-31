@@ -1,5 +1,7 @@
 import { Agent, type ModelRegistry, TurnPolicy } from "@batonfx/core"
-import { AgentTools, Runtime as Tools, ThreadTools } from "@rika/coding-tools/coding-tool-catalog"
+import * as AgentTools from "@rika/coding-tools/agent-tool-contract"
+import * as Tools from "@rika/coding-tools/coding-tool-runtime"
+import * as ThreadTools from "@rika/coding-tools/thread-tool-contract"
 import { Effect, Function, Schema } from "effect"
 import { Toolkit } from "effect/unstable/ai"
 import childPrompt from "./prompts/child.prompt.txt"

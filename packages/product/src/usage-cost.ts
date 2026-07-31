@@ -1,6 +1,8 @@
-import { ExecutionStatus } from "@rika/coding-tools/coding-tool-catalog"
+import * as ExecutionStatus from "./execution-status"
 import type * as ExecutionBackend from "@rika/product/execution-service"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptUsage from "@rika/transcript/model-usage-fallback"
 import { Duration, Function, Result, Schema } from "effect"
 
 export interface RootExecution {
@@ -981,7 +983,7 @@ const applyAttempt = (
   }
   let next = current
   if (event.type === "model.usage.reported") {
-    const decoded = Transcript.usageTokens(event.data ?? {})
+    const decoded = TranscriptUsage.usageTokens(event.data ?? {})
     next = {
       ...current,
       tokens:
@@ -1021,10 +1023,10 @@ export const applyUsageFoldEvent: {
     fold: UsageFold,
     input: RootExecution & { readonly event: ExecutionBackend.Event },
   ): Result.Result<void, ProjectionFailure> => {
-    const executionId = Transcript.executionKey(input.event.executionId)
+    const executionId = TranscriptCorrelation.executionKey(input.event.executionId)
     const normalized =
       executionId === input.event.executionId ? input : { ...input, event: { ...input.event, executionId } }
-    if (Transcript.isTransientEvent(normalized.event)) return Result.succeed(undefined)
+    if (TranscriptProjection.Fold.isTransientEvent(normalized.event)) return Result.succeed(undefined)
     const value = usageOwner(fold)
     if (isActiveEventType(normalized.event.type)) {
       const active = applyActive(value, normalized)
@@ -1086,7 +1088,7 @@ export const foldBatch: {
     }
     const candidate = usageFoldChanged(fold) ? snapshotUsageFold(fold) : snapshot
     for (const identity of completeExecutionIds) {
-      const executionId = Transcript.executionKey(identity)
+      const executionId = TranscriptCorrelation.executionKey(identity)
       const events = candidate.executionEvents.get(executionId) ?? []
       if (events.length === 0 || executionIntervals(events) === undefined) {
         const event = events.toSorted((left, right) => left.sequence - right.sequence)[0]

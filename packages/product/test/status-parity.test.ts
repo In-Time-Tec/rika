@@ -3,7 +3,7 @@ import { Event as DirectEvent } from "@rika/product/execution-event"
 import { Status as DirectStatus } from "@rika/product/execution-status"
 import { AgentProfile as DirectAgentProfile } from "@rika/product/execution-child-run"
 import * as TurnSchema from "@rika/product/turn-record"
-import { ExecutionStatus } from "@rika/coding-tools/coding-tool-catalog"
+import * as ExecutionStatus from "@rika/product/execution-status"
 import { describe, expect, it } from "vitest"
 
 const members = (schema: { readonly ast: { readonly types?: ReadonlyArray<{ readonly literal?: unknown }> } }) =>

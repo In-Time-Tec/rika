@@ -1,5 +1,5 @@
 import { createTestRenderer } from "@opentui/core/testing"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Effect, FileSystem, Path, Schema } from "effect"
 import { Surface } from "../src/adapter"
 import {
@@ -85,7 +85,7 @@ const threadBrowser = (): Model => ({
     turns: [
       {
         prompt: "Finish the thread UI parity work.",
-        units: Transcript.project("preview", "Finish the thread UI parity work.", [
+        units: TranscriptProjection.Projection.project("preview", "Finish the thread UI parity work.", [
           {
             cursor: "preview-output",
             sequence: 1,

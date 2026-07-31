@@ -4,7 +4,8 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { Operation } from "@rika/product/product-operation"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
 import { Config, Console, Effect, Exit, FileSystem, Layer, Logger, Path, Ref, Schema, Scope } from "effect"
 import { serve } from "../../src/resident-host-transport"
 import * as ResidentProcessStartup from "../../src/resident-process-startup"
@@ -25,8 +26,8 @@ const fixtureTurn = (threadId: Thread.ThreadId, turnId: Turn.TurnId, prompt: str
   updatedAt: 0,
 })
 
-const visibleProjectionState = (fold: Transcript.ProjectionFold) => {
-  const state = Transcript.snapshotFoldState(fold)
+const visibleProjectionState = (fold: TranscriptProjection.ProjectionFold) => {
+  const state = TranscriptProjection.Fold.snapshotFoldState(fold)
   return {
     revision: state.revision,
     modelPhase: state.modelPhase,
@@ -43,7 +44,7 @@ const makeFixtureProjection = (
   prompt: string,
 ) => {
   const turn = fixtureTurn(threadId, turnId, prompt)
-  const fold = Transcript.restoreProjectionFold(Transcript.empty(turnId, prompt))
+  const fold = TranscriptProjection.Fold.restoreProjectionFold(TranscriptProjection.Projection.empty(turnId, prompt))
   const streamId = `fixture:${turnId}`
   let patchRevision = 0
   dispatch({
@@ -55,11 +56,11 @@ const makeFixtureProjection = (
     streamId,
     patchRevision,
     state: visibleProjectionState(fold),
-    units: Transcript.foldUnits(fold),
+    units: TranscriptProjection.Fold.foldUnits(fold),
   })
   return {
-    emit: (event: Transcript.SourceEvent, executionId = `execution:${turnId}`) => {
-      const mutation = Transcript.applyFoldEvent(fold, event)
+    emit: (event: TranscriptSourceEvent.SourceEvent, executionId = `execution:${turnId}`) => {
+      const mutation = TranscriptProjection.Fold.applyFoldEvent(fold, event)
       const baseRevision = patchRevision
       patchRevision += 1
       const blockId = event.data?.tool_call_id ?? event.data?.call_id ?? event.data?.id
@@ -78,7 +79,7 @@ const makeFixtureProjection = (
           sequence: event.sequence,
           type: event.type,
           createdAt: event.createdAt,
-          transient: Transcript.isTransientEvent(event),
+          transient: TranscriptProjection.Fold.isTransientEvent(event),
           ...(event.text === undefined ? {} : { text: event.text }),
           ...(typeof blockId === "string" ? { blockId } : {}),
         },

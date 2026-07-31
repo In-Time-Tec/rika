@@ -1,6 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { LocalSafetyPolicy } from "@rika/coding-tools/coding-tool-catalog"
-
+import * as LocalSafetyPolicy from "@rika/coding-tools/local-safety-policy"
 const bash = (command: string, cwd = "/home/dev/project") =>
   LocalSafetyPolicy.checkProcessInvocation({
     executable: "/bin/bash",

@@ -1,7 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, test } from "vitest"
 import { Effect, FileSystem } from "effect"
-import { WorkspaceIndex } from "@rika/coding-tools/coding-tool-catalog"
+import * as WorkspaceIndex from "@rika/coding-tools/workspace-file-search"
 import { provide } from "./test-layer"
 
 test("searches workspace files with ripgrep without escaping the workspace", () =>

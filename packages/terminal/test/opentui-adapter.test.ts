@@ -1,6 +1,6 @@
 import { CliRenderEvents, Renderable, RendererControlState } from "@opentui/core"
 import { createTestRenderer, ManualClock } from "@opentui/core/testing"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptRecordedShell from "@rika/transcript/recorded-shell-presentation"
 import { expect, test } from "vitest"
 import { Data, Effect } from "effect"
 import stringWidth from "string-width"
@@ -2272,7 +2272,7 @@ test("shows recorded shell output when the same transcript unit settles", () =>
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
       const id = "recorded-shell-turn"
-      const running = Transcript.recordedShellProjection({ id, command: "printf done", status: "running" })
+      const running = TranscriptRecordedShell.recordedShellProjection({ id, command: "printf done", status: "running" })
       let model = TranscriptPresenter.applyRootUnits(initial("/work", "high"), id, running.units)
       const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
       try {
@@ -2280,7 +2280,7 @@ test("shows recorded shell output when the same transcript unit settles", () =>
         yield* openTui(() => setup.flush())
         expect(setup.captureCharFrame()).not.toContain("RECORDED_SHELL_OUTPUT")
 
-        const settled = Transcript.settleRecordedShellProjection(running, {
+        const settled = TranscriptRecordedShell.settleRecordedShellProjection(running, {
           id,
           command: "printf done",
           status: "completed",
@@ -3015,7 +3015,6 @@ test("routes ctrl+v to injected image paste and inserts its attachment path", ()
       }
     }),
   ))
-
 const nonSpaceBounds = (frame: string, height: number) => {
   const points = frame
     .split("\n")

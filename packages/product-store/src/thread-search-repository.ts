@@ -1,6 +1,6 @@
 import { Service } from "@rika/product/thread-search-repository"
 export { Service }
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { Thread, ThreadId, ThreadLineage } from "@rika/product/thread-record"
@@ -66,7 +66,7 @@ export interface SearchPage {
 export interface RebuildInput {
   readonly thread: Thread
   readonly turns: ReadonlyArray<Turn>
-  readonly units: ReadonlyArray<Transcript.Unit>
+  readonly units: ReadonlyArray<TranscriptUnit.Unit>
 }
 
 export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("ThreadSearchRepositoryError", {
@@ -125,12 +125,10 @@ const parseQuery = (query: string): ParsedQuery => {
   }
   return { terms, files }
 }
-
 const includesAll = (text: string, values: ReadonlyArray<string>) => {
   const candidate = normalize(text)
   return values.every((value) => candidate.includes(normalize(value)))
 }
-
 const makeDocument = (input: RebuildInput): Document => {
   const prompts = { human: [] as Array<string>, agent: [] as Array<string> }
   for (const turn of input.turns) prompts[turn.author._tag === "Human" ? "human" : "agent"].push(turn.prompt)
@@ -161,7 +159,6 @@ const makeDocument = (input: RebuildInput): Document => {
     files: [...files].toSorted().join("\n"),
   }
 }
-
 const resultFor = (document: Document, parsed: ParsedQuery): Result | undefined => {
   const searchable = sourceOrder.map(([, key]) => document[key]).join("\n")
   if (!includesAll(searchable, parsed.terms) || !includesAll(document.files, parsed.files)) return undefined
@@ -194,7 +191,6 @@ const resultFor = (document: Document, parsed: ParsedQuery): Result | undefined 
     omissionReasons: [...(omitted ? ["snippetLimit" as const] : []), ...(shortened ? ["snippetLength" as const] : [])],
   }
 }
-
 const selected = (documents: ReadonlyArray<Document>, input: SearchInput, parsed: ParsedQuery): SearchPage => {
   const limit = boundedLimit(input.limit)
   const results = documents
@@ -223,7 +219,6 @@ const selected = (documents: ReadonlyArray<Document>, input: SearchInput, parsed
       results.length > limit && last !== undefined ? { updatedAt: last.updatedAt, threadId: last.threadId } : undefined,
   }
 }
-
 export const makeMemory = Effect.gen(function* () {
   const state = yield* Ref.make(new Map<ThreadId, Document>())
   return Service.of({
@@ -243,9 +238,7 @@ export const makeMemory = Effect.gen(function* () {
     }),
   })
 })
-
 export const memoryLayer = Layer.effect(Service, makeMemory)
-
 const Row = Schema.Struct({
   id: Schema.String,
   workspace: Schema.String,
@@ -266,7 +259,6 @@ const Row = Schema.Struct({
 })
 const LabelsJson = Schema.fromJsonString(Schema.Array(Schema.String))
 const LineageJson = Schema.fromJsonString(ThreadLineage)
-
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {

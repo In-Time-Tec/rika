@@ -1,6 +1,12 @@
+import * as BehaviorMode from "@rika/configuration/behavior-mode"
+import * as ModelRoute from "@rika/configuration/model-route"
+import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
+import * as SettingsDefaults from "@rika/configuration/configuration-settings"
+import * as ConfigurationService from "@rika/configuration/configuration-service"
+import * as SettingsDecoder from "@rika/configuration/configuration-settings"
+import * as ConfigurationSettingsInput from "@rika/configuration/configuration-settings"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { ConfigOperations, Operation } from "@rika/product/product-operation"
-import { ConfigContract, ConfigService } from "@rika/configuration/configuration-settings"
 import * as Database from "@rika/product-store/product-database-layer"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -8,7 +14,7 @@ import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-rep
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
-import { WebSearch } from "@rika/coding-tools/coding-tool-catalog"
+import * as WebSearch from "@rika/coding-tools/web-search-service"
 import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, Schema, Scope } from "effect"
 import { TestConsole } from "effect/testing"
 import { expect, it } from "@effect/vitest"
@@ -101,10 +107,10 @@ const sandbox = Effect.gen(function* () {
 let identifierSequence = 0
 
 const configServiceLayer = (input: {
-  readonly workspace?: ConfigContract.SettingsInput
+  readonly workspace?: ConfigurationSettingsInput.Input.SettingsInput
   readonly env?: Readonly<Record<string, string>>
 }) =>
-  ConfigService.liveEnvironmentLayer({
+  ConfigurationService.liveConfigurationLayer({
     webProviders: WebSearch.providerRegistry,
     global: {},
     workspace: input.workspace ?? {},
@@ -117,7 +123,7 @@ const operationLayer = (
   context: CliSandbox,
   options: {
     readonly config?: {
-      readonly workspace?: ConfigContract.SettingsInput
+      readonly workspace?: ConfigurationSettingsInput.Input.SettingsInput
       readonly env?: Readonly<Record<string, string>>
     }
   } = {},
@@ -273,7 +279,10 @@ it.effect(
         const settingsJson = yield* Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(settingsInput)
         yield* fileSystem.makeDirectory(path.dirname(context.workspaceConfigPath), { recursive: true })
         yield* fileSystem.writeFileString(context.workspaceConfigPath, settingsJson)
-        const workspaceSettings = ConfigContract.decodeSettingsInput(context.workspaceConfigPath, settingsInput)
+        const workspaceSettings = SettingsDecoder.Decoder.decodeSettingsInput(
+          context.workspaceConfigPath,
+          settingsInput,
+        )
         const cli = yield* openCli(
           operationLayer(context, {
             config: {

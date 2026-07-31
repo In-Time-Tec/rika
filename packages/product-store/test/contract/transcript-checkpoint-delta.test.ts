@@ -1,6 +1,6 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Effect, FileSystem } from "effect"
 import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "../../src/thread-repository"
@@ -58,7 +58,7 @@ it.effect("merges stored child checkpoints when a SQLite delta supplies the root
           expect(
             yield* repository.commitDelta(
               target,
-              Transcript.projectionState(nested.projection),
+              TranscriptProjection.Projection.projectionState(nested.projection),
               { upsert: [childUnit], remove: [] },
               {
                 executionCheckpoints: [root],
@@ -102,7 +102,7 @@ it.effect("merges a child-only SQLite checkpoint delta with its stored root", ()
           expect(
             yield* repository.commitDelta(
               target,
-              Transcript.projectionState(nested.projection),
+              TranscriptProjection.Projection.projectionState(nested.projection),
               { upsert: [], remove: [] },
               {
                 executionCheckpoints: [{ ...child, status: "completed" }],
@@ -125,7 +125,10 @@ it.effect("merges a child-only SQLite checkpoint delta with its stored root", ()
           const contradictory = yield* Effect.result(
             repository.commitDelta(
               target,
-              { ...Transcript.projectionState(nested.projection), revision: nested.projection.revision + 1 },
+              {
+                ...TranscriptProjection.Projection.projectionState(nested.projection),
+                revision: nested.projection.revision + 1,
+              },
               { upsert: [], remove: [] },
               {
                 executionCheckpoints: [{ ...child, status: "completed" }],

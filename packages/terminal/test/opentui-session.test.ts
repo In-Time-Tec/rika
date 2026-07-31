@@ -1,5 +1,5 @@
 import { expect, test } from "vitest"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { ExecutionEvents, Session, ViewState } from "@rika/terminal/terminal-state"
 
 test("routes session actions only through available adapter callbacks", () => {
@@ -62,14 +62,14 @@ test("restarts through the shared event mapper and preserves transcript across q
     { cursor: "5", sequence: 5, type: "model.output.completed", text: "hello" },
   ] as const
   const source = events.map((event) => Object.assign({}, event, { createdAt: event.sequence }))
-  let projection = Transcript.empty("turn", "prompt")
+  let projection = TranscriptProjection.Projection.empty("turn", "prompt")
   let live = ViewState.initial("/work")
   for (const event of source) {
-    projection = Transcript.applyEvent(projection, event)
+    projection = TranscriptProjection.Projection.applyEvent(projection, event)
     live = ExecutionEvents.projectUnits(live, projection.units)
   }
   live = ViewState.replaceQueue(live, [{ id: "later", prompt: "later" }])
-  projection = Transcript.applyEvent(projection, {
+  projection = TranscriptProjection.Projection.applyEvent(projection, {
     cursor: "6",
     sequence: 6,
     type: "tool.started",

@@ -1,6 +1,10 @@
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Function } from "effect"
 import { projectionVersion } from "../src/execution-ingest"
 
@@ -12,7 +16,7 @@ export interface StoreProjectionOptions {
       { readonly cursor: string; readonly sequence: number; readonly status?: "completed" | "failed" | "cancelled" }
     >
   >
-  readonly executionStates?: Readonly<Record<string, Transcript.ProjectionState>>
+  readonly executionStates?: Readonly<Record<string, TranscriptProjectionModel.ProjectionState>>
   readonly projectionVersion?: number
 }
 
@@ -39,12 +43,12 @@ export const invalidatedProjection: {
 )
 
 export const delegationUnit: {
-  (executionId: string, callId: string, childExecutionId: string, sequence: number): Transcript.Unit
-  (callId: string, childExecutionId: string, sequence: number): (executionId: string) => Transcript.Unit
+  (executionId: string, callId: string, childExecutionId: string, sequence: number): TranscriptUnit.Unit
+  (callId: string, childExecutionId: string, sequence: number): (executionId: string) => TranscriptUnit.Unit
 } = Function.dual(
   4,
-  (executionId: string, callId: string, childExecutionId: string, sequence: number): Transcript.Unit => {
-    const projection = Transcript.project(executionId, "", [
+  (executionId: string, callId: string, childExecutionId: string, sequence: number): TranscriptUnit.Unit => {
+    const projection = TranscriptProjection.Projection.project(executionId, "", [
       {
         cursor: `${callId}:requested`,
         sequence,
@@ -68,7 +72,7 @@ export const delegationUnit: {
   },
 )
 
-const statusFor = (units: ReadonlyArray<Transcript.Unit>) => {
+const statusFor = (units: ReadonlyArray<TranscriptUnit.Unit>) => {
   const outcome = units.find((unit) => unit.executionOutcome !== undefined)?.executionOutcome?.status
   if (outcome === "complete") return "completed" as const
   if (outcome === "failed" || outcome === "cancelled") return outcome
@@ -76,13 +80,13 @@ const statusFor = (units: ReadonlyArray<Transcript.Unit>) => {
 }
 
 const attachmentFor = (
-  projection: Transcript.Projection,
+  projection: TranscriptProjectionModel.Projection,
   executionId: string,
-  units: ReadonlyArray<Transcript.Unit>,
+  units: ReadonlyArray<TranscriptUnit.Unit>,
 ): TranscriptRepository.ExecutionAttachment => {
   const sample = units[0]
   if (sample === undefined) {
-    const parent = Transcript.childParentMatch(
+    const parent = TranscriptCorrelation.childParentMatch(
       projection.units.flatMap((unit) =>
         unit.content._tag === "Block" && unit.content.block._tag === "ToolCall"
           ? [
@@ -101,19 +105,19 @@ const attachmentFor = (
     if (parent === undefined || parent.content._tag !== "Block" || parent.content.block._tag !== "ToolCall")
       throw new Error(`Execution ${executionId} has no durable parent tool`)
     return {
-      parentExecutionKey: Transcript.executionKey(parent.turnId),
+      parentExecutionKey: TranscriptCorrelation.executionKey(parent.turnId),
       parentUnitKey: parent.key,
       parentId: parent.content.block.id,
-      parentOrderKey: Transcript.encodeUnitOrder(parent.order),
+      parentOrderKey: TranscriptOrdering.encodeUnitOrder(parent.order),
     }
   }
   if (sample.parentId === undefined) throw new Error(`Execution ${executionId} has no attached transcript unit`)
   const edge = sample.order.findIndex((segment) => segment.key === `@child:${executionId}`)
   if (edge <= 0) throw new Error(`Execution ${executionId} has no intrinsic child order edge`)
-  const parentOrder: Transcript.UnitOrder = [sample.order[0]!, ...sample.order.slice(1, edge)]
+  const parentOrder: TranscriptUnit.UnitOrder = [sample.order[0]!, ...sample.order.slice(1, edge)]
   const parent = projection.units.find(
     (unit) =>
-      Transcript.compareUnitOrder(unit.order, parentOrder) === 0 &&
+      TranscriptOrdering.compareUnitOrder(unit.order, parentOrder) === 0 &&
       unit.content._tag === "Block" &&
       unit.content.block._tag === "ToolCall" &&
       unit.content.block.id === sample.parentId,
@@ -123,26 +127,26 @@ const attachmentFor = (
     if (
       unit.parentId !== sample.parentId ||
       unit.order[edge]?.key !== `@child:${executionId}` ||
-      Transcript.compareUnitOrder([unit.order[0]!, ...unit.order.slice(1, edge)], parent.order) !== 0
+      TranscriptOrdering.compareUnitOrder([unit.order[0]!, ...unit.order.slice(1, edge)], parent.order) !== 0
     )
       throw new Error(`Execution ${executionId} has contradictory attached transcript units`)
   return {
-    parentExecutionKey: Transcript.executionKey(parent.turnId),
+    parentExecutionKey: TranscriptCorrelation.executionKey(parent.turnId),
     parentUnitKey: parent.key,
     parentId: sample.parentId,
-    parentOrderKey: Transcript.encodeUnitOrder(parent.order),
+    parentOrderKey: TranscriptOrdering.encodeUnitOrder(parent.order),
   }
 }
 
 const inferredExecutionCheckpoints = (
   turn: Turn.Turn,
-  projection: Transcript.Projection,
+  projection: TranscriptProjectionModel.Projection,
   options: StoreProjectionOptions,
 ): ReadonlyArray<TranscriptRepository.ExecutionCheckpoint> => {
-  const rootKey = Transcript.executionKey(String(turn.id))
-  const executions = new Map<string, { readonly executionId: string; readonly units: Array<Transcript.Unit> }>()
+  const rootKey = TranscriptCorrelation.executionKey(String(turn.id))
+  const executions = new Map<string, { readonly executionId: string; readonly units: Array<TranscriptUnit.Unit> }>()
   for (const unit of projection.units) {
-    const key = Transcript.executionKey(unit.turnId)
+    const key = TranscriptCorrelation.executionKey(unit.turnId)
     const execution = executions.get(key)
     if (execution === undefined) executions.set(key, { executionId: unit.turnId, units: [unit] })
     else execution.units.push(unit)
@@ -158,7 +162,7 @@ const inferredExecutionCheckpoints = (
     const state =
       options.executionStates?.[executionKey] ??
       (executionKey === rootKey
-        ? Transcript.projectionState(projection)
+        ? TranscriptProjection.Projection.projectionState(projection)
         : {
             revision: sequence,
             modelPhase: 0,
@@ -182,12 +186,12 @@ export const storeProjection: {
   (
     repository: TranscriptRepository.Interface,
     turn: Turn.AgentExecutionTurn,
-    projection: Transcript.Projection,
+    projection: TranscriptProjectionModel.Projection,
     options?: StoreProjectionOptions,
   ): ReturnType<TranscriptRepository.Interface["commitDelta"]>
   (
     turn: Turn.AgentExecutionTurn,
-    projection: Transcript.Projection,
+    projection: TranscriptProjectionModel.Projection,
     options?: StoreProjectionOptions,
   ): (repository: TranscriptRepository.Interface) => ReturnType<TranscriptRepository.Interface["commitDelta"]>
 } = Function.dual(
@@ -195,12 +199,12 @@ export const storeProjection: {
   (
     repository: TranscriptRepository.Interface,
     turn: Turn.AgentExecutionTurn,
-    projection: Transcript.Projection,
+    projection: TranscriptProjectionModel.Projection,
     options: StoreProjectionOptions = {},
   ) =>
     repository.commitDelta(
       turn,
-      Transcript.projectionState(projection),
+      TranscriptProjection.Projection.projectionState(projection),
       { upsert: projection.units, remove: [] },
       {
         expectedGeneration: undefined,

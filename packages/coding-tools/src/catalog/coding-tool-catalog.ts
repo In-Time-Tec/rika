@@ -12,9 +12,8 @@ import * as LocalPath from "../workspace/local-path"
 import * as LocalSafetyPolicy from "../policy/local-safety-policy"
 import * as WorkspaceIndex from "../workspace/workspace-file-search"
 import * as ToolInvocation from "./tool-invocation"
-export { Idempotency, Presentation } from "../policy/coding-tool-policy"
 
-export const Definition = Schema.Struct({
+const Definition = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
   idempotency: ToolPolicy.Idempotency,
@@ -37,7 +36,7 @@ const registrations: ReadonlyArray<ToolPolicy.Registration> = [
   ...ThreadTools.registrations,
 ]
 
-export const makeDefinitions: {
+const makeDefinitions: {
   (
     registeredTools: ReadonlyArray<ToolPolicy.RegisteredTool>,
     registered: ReadonlyArray<ToolPolicy.Registration>,
@@ -90,9 +89,9 @@ export const makeDefinitions: {
   },
 )
 
-export const definitions = makeDefinitions(tools, registrations)
+const definitions = makeDefinitions(tools, registrations)
 
-export const get = (name: string) => definitions.find((definition) => definition.name === name)
+const get = (name: string) => definitions.find((definition) => definition.name === name)
 
 const agentPresentation = (action: string, activeLabel: string, completeLabel: string): ToolPolicy.Presentation => ({
   family: "agent",
@@ -108,19 +107,19 @@ const agentToolName = (profile: string): string => {
   return profile === "readthread" ? "read_thread" : profile
 }
 
-export const agentProfile = (name: string): string =>
+const agentProfile = (name: string): string =>
   name
     .trim()
     .replace(/^rika-/, "")
     .replace(/:\d+$/, "")
     .trim()
 
-export const agentDisplay = (name: string): string => {
+const agentDisplay = (name: string): string => {
   const profile = agentProfile(name)
   return genericAgentNames.has(profile.toLowerCase()) ? "Subagent" : profile.charAt(0).toUpperCase() + profile.slice(1)
 }
 
-export const resolveAgentPresentation = (name: string): ToolPolicy.Presentation => {
+const resolveAgentPresentation = (name: string): ToolPolicy.Presentation => {
   const profile = agentProfile(name).toLowerCase()
   const toolName = agentToolName(profile)
   const defined = AgentTools.isDelegationToolName(toolName) ? get(toolName)?.presentation : undefined
@@ -134,14 +133,14 @@ interface CatalogAgentPhrase {
   readonly status: "running" | "complete" | "failed" | "cancelled"
 }
 
-export const agentPhrase = ({ name, status }: CatalogAgentPhrase): string => {
+const agentPhrase = ({ name, status }: CatalogAgentPhrase): string => {
   const presentation = resolveAgentPresentation(name)
   if (status === "running") return presentation.activeLabel
   if (status === "complete") return presentation.completeLabel
   return `${agentDisplay(name)} ${status}`
 }
 
-export const resolvePresentation = (rawName: string): ToolPolicy.Presentation => {
+const resolvePresentation = (rawName: string): ToolPolicy.Presentation => {
   const name = rawName.toLowerCase()
   const defined = get(name)?.presentation
   if (defined !== undefined) return defined
@@ -219,50 +218,3 @@ export const Catalog = {
 export namespace Catalog {
   export type AgentPhrase = CatalogAgentPhrase
 }
-
-export namespace ExecutionId {
-  export const executionNamespacePrefixes = ["execution:", "child:", "workflow:"] as const
-  export const isExecutionNamespace = (value: string): boolean =>
-    executionNamespacePrefixes.some((prefix) => value.startsWith(prefix))
-  export const executionKey = (value: string): string => value.replace(/^execution:/, "")
-  export const ownsExecution: {
-    (turnId: string, executionId: string): boolean
-    (executionId: string): (turnId: string) => boolean
-  } = Function.dual(2, (turnId: string, executionId: string): boolean => executionKey(executionId) === turnId)
-}
-
-export namespace ExecutionStatus {
-  export const statuses = ["accepted", "queued", "running", "waiting", "completed", "failed", "cancelled"] as const
-  export const Status = Schema.Literals(statuses)
-  export type Status = typeof Status.Type
-  export const terminalStatuses = ["completed", "failed", "cancelled"] as const satisfies ReadonlyArray<Status>
-  export type TerminalStatus = (typeof terminalStatuses)[number]
-  export const isTerminalStatus = (status: Status): status is TerminalStatus =>
-    status === "completed" || status === "failed" || status === "cancelled"
-  export const isActiveStatus = (status: Status): boolean => !isTerminalStatus(status) && status !== "queued"
-  export const occupiesQueue = (status: Status): boolean => !isTerminalStatus(status)
-  export const terminalEventStatus = (eventType: string): Status | undefined => {
-    if (eventType === "execution.completed") return "completed"
-    if (eventType === "execution.failed") return "failed"
-    if (eventType === "execution.cancelled") return "cancelled"
-    return undefined
-  }
-  export const isTerminalEventType = (eventType: string): boolean => terminalEventStatus(eventType) !== undefined
-}
-
-export {
-  ToolPolicy,
-  ParallelSearch,
-  WebSearch,
-  ReadWebPage,
-  ProcessRegistry,
-  MediaView,
-  LocalPath,
-  LocalSafetyPolicy,
-  WorkspaceIndex,
-  ThreadTools,
-  Runtime,
-  AgentTools,
-  ToolInvocation,
-}
-export { ToolInvocation as ToolInvocationService }

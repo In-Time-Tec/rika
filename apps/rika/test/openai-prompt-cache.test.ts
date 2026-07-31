@@ -1,4 +1,10 @@
-import { ConfigContract } from "@rika/configuration/configuration-settings"
+import * as BehaviorMode from "@rika/configuration/behavior-mode"
+import * as ModelRoute from "@rika/configuration/model-route"
+import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
+import * as SettingsDefaults from "@rika/configuration/configuration-settings"
+import * as ConfigurationService from "@rika/configuration/configuration-service"
+import * as SettingsDecoder from "@rika/configuration/configuration-settings"
+import * as ConfigurationSettingsInput from "@rika/configuration/configuration-settings"
 import { describe, expect, it } from "@effect/vitest"
 import { ModelRegistry } from "@rika/relay-execution/model-provider-runtime"
 import { OpenAi } from "@rika/relay-execution/model-provider-runtime"
@@ -7,10 +13,10 @@ import { LanguageModel } from "effect/unstable/ai"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import * as ModelProviderRuntime from "@rika/relay-execution/model-provider-runtime"
 
-const settingsWith = (baseUrl: string, promptCaching?: boolean): ConfigContract.Settings => ({
-  ...ConfigContract.defaults,
+const settingsWith = (baseUrl: string, promptCaching?: boolean): SettingsDefaults.ConfigurationSettings => ({
+  ...SettingsDefaults.Defaults.defaults,
   providers: {
-    ...ConfigContract.defaults.providers,
+    ...SettingsDefaults.Defaults.defaults.providers,
     openai: {
       protocol: "openai",
       baseUrl,
@@ -22,9 +28,9 @@ const settingsWith = (baseUrl: string, promptCaching?: boolean): ConfigContract.
 
 const proxyUrl = "https://switchboard-itt.up.railway.app/v1"
 
-const nativeRoute = ConfigContract.resolveModelRoute(ConfigContract.defaults, "medium", "main")
-const proxyRoute = ConfigContract.resolveModelRoute(settingsWith(proxyUrl), "medium", "main")
-const optedInProxyRoute = ConfigContract.resolveModelRoute(settingsWith(proxyUrl, true), "medium", "main")
+const nativeRoute = ModelRouteResolution.resolveModelRoute(SettingsDefaults.Defaults.defaults, "medium", "main")
+const proxyRoute = ModelRouteResolution.resolveModelRoute(settingsWith(proxyUrl), "medium", "main")
+const optedInProxyRoute = ModelRouteResolution.resolveModelRoute(settingsWith(proxyUrl, true), "medium", "main")
 
 const Request = Schema.Struct({
   model: Schema.String,
@@ -85,8 +91,8 @@ describe("openai prompt cache retention", () => {
   })
 
   it("lets promptCaching false turn retention off even on the native endpoint", () => {
-    const route = ConfigContract.resolveModelRoute(
-      settingsWith(ConfigContract.defaults.providers.openai!.baseUrl!, false),
+    const route = ModelRouteResolution.resolveModelRoute(
+      settingsWith(SettingsDefaults.Defaults.defaults.providers.openai!.baseUrl!, false),
       "medium",
       "main",
     )
@@ -94,12 +100,12 @@ describe("openai prompt cache retention", () => {
   })
 
   it("accepts promptCaching as a provider key instead of rejecting it as unknown configuration", () => {
-    const decoded = ConfigContract.decodeSettingsInput("settings.json", {
+    const decoded = SettingsDecoder.Decoder.decodeSettingsInput("settings.json", {
       providers: { openai: { baseUrl: proxyUrl, promptCaching: true } },
     })
     expect(decoded.providers?.openai).toMatchObject({ promptCaching: true })
     expect(() =>
-      ConfigContract.decodeSettingsInput("settings.json", {
+      SettingsDecoder.Decoder.decodeSettingsInput("settings.json", {
         providers: { openai: { baseUrl: proxyUrl, promptCaching: "yes" } },
       }),
     ).toThrow(/promptCaching must be a boolean/)
@@ -110,8 +116,8 @@ describe("openai prompt cache retention", () => {
   })
 
   it("keeps retention out of the Anthropic request options, where cache control does the work instead", () => {
-    const route = ConfigContract.resolveModelRoute(ConfigContract.defaults, "medium", "main")
-    const anthropic: ConfigContract.ResolvedModelRoute = {
+    const route = ModelRouteResolution.resolveModelRoute(SettingsDefaults.Defaults.defaults, "medium", "main")
+    const anthropic: ModelRouteResolution.ResolvedModelRoute = {
       ...route,
       providerId: "anthropic",
       providerConnection: {

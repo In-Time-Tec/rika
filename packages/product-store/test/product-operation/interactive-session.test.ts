@@ -7,8 +7,15 @@ import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
 import * as SummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
-import { Runtime as ToolRuntime } from "@rika/coding-tools/coding-tool-catalog"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
+import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import * as TranscriptIdentity from "@rika/transcript/transcript-unit-identity"
+import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
+import * as TranscriptUsage from "@rika/transcript/model-usage-fallback"
 import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Result, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { ExecutionIngest } from "@rika/product/product-operation"
@@ -113,7 +120,7 @@ const storeCompletedTranscript = Effect.fn("InteractiveSessionTest.storeComplete
   turn: Turn.AgentExecutionTurn,
   cursor: string,
 ) {
-  const projection = Transcript.project(String(turn.id), turn.prompt, [
+  const projection = TranscriptProjection.Projection.project(String(turn.id), turn.prompt, [
     {
       cursor,
       sequence: 0,
@@ -1439,21 +1446,24 @@ describe("InteractiveSession controls", () => {
           now: turnIndex + 10,
         })
         const completed = yield* turns.setStatus(created.id, "completed", undefined, turnIndex + 10)
-        const units: Array<Transcript.Unit> = [
-          Transcript.empty(created.id, created.prompt).units[0]!,
+        const units: Array<TranscriptUnit.Unit> = [
+          TranscriptProjection.Projection.empty(created.id, created.prompt).units[0]!,
           ...Array.from(
             { length: 72 },
-            (_, index): Transcript.Unit => ({
+            (_, index): TranscriptUnit.Unit => ({
               key: `${created.id}:assistant:${index.toString().padStart(2, "0")}`,
               turnId: created.id,
-              order: Transcript.unitOrder(`${created.id}:assistant:${index.toString().padStart(2, "0")}`, index + 1),
+              order: TranscriptOrdering.unitOrder(
+                `${created.id}:assistant:${index.toString().padStart(2, "0")}`,
+                index + 1,
+              ),
               revision: index + 1,
               content: { _tag: "Entry", role: "assistant", text: `${created.id} ${index} ${"x".repeat(50_000)}` },
             }),
           ),
         ]
         yield* storeProjection(transcripts, completed, {
-          ...Transcript.empty(created.id, created.prompt),
+          ...TranscriptProjection.Projection.empty(created.id, created.prompt),
           units,
           revision: 72,
         })
@@ -1506,19 +1516,19 @@ describe("InteractiveSession controls", () => {
       if (parent.content._tag !== "Block" || parent.content.block._tag !== "ToolCall")
         return yield* Effect.die("missing nested parent tool")
       const parentId = parent.content.block.id
-      const units: Array<Transcript.Unit> = [
-        Transcript.empty(created.id, created.prompt).units[0]!,
+      const units: Array<TranscriptUnit.Unit> = [
+        TranscriptProjection.Projection.empty(created.id, created.prompt).units[0]!,
         {
           key: `${created.id}:assistant:opening`,
           turnId: created.id,
-          order: Transcript.unitOrder(`${created.id}:assistant:opening`, 1),
+          order: TranscriptOrdering.unitOrder(`${created.id}:assistant:opening`, 1),
           revision: 1,
           content: { _tag: "Entry", role: "assistant", text: "opening response" },
         },
         {
           key: `compaction:${created.id}`,
           turnId: created.id,
-          order: Transcript.unitOrder(`compaction:${created.id}`, 1, 1),
+          order: TranscriptOrdering.unitOrder(`compaction:${created.id}`, 1, 1),
           revision: 2,
           content: {
             _tag: "Block",
@@ -1533,12 +1543,15 @@ describe("InteractiveSession controls", () => {
         parent,
         ...Array.from(
           { length: 260 },
-          (_, index): Transcript.Unit =>
-            Transcript.attachUnit(
+          (_, index): TranscriptUnit.Unit =>
+            TranscriptNestedProjection.attachUnit(
               {
                 key: `${created.id}:assistant:${index.toString().padStart(3, "0")}`,
                 turnId: childExecutionId,
-                order: Transcript.unitOrder(`${created.id}:assistant:${index.toString().padStart(3, "0")}`, index),
+                order: TranscriptOrdering.unitOrder(
+                  `${created.id}:assistant:${index.toString().padStart(3, "0")}`,
+                  index,
+                ),
                 revision: index,
                 content: {
                   _tag: "Block",
@@ -1553,13 +1566,13 @@ describe("InteractiveSession controls", () => {
         {
           key: `${created.id}:assistant:final`,
           turnId: created.id,
-          order: Transcript.unitOrder(`${created.id}:assistant:final`, 262),
+          order: TranscriptOrdering.unitOrder(`${created.id}:assistant:final`, 262),
           revision: 262,
           content: { _tag: "Entry", role: "assistant", text: "final response" },
         },
       ]
       yield* storeProjection(transcripts, completed, {
-        ...Transcript.empty(created.id, created.prompt),
+        ...TranscriptProjection.Projection.empty(created.id, created.prompt),
         units,
         revision: 262,
       })
@@ -1582,7 +1595,9 @@ describe("InteractiveSession controls", () => {
       expect(loaded.some((entry) => entry.unit.key === `${created.id}:assistant:opening`)).toBe(true)
       expect(loaded.some((entry) => entry.unit.key === `${created.id}:assistant:final`)).toBe(true)
       expect(loaded.filter((entry) => entry.unit.key === `compaction:${created.id}`)).toHaveLength(1)
-      expect(cursor.orderKey).not.toBe(Transcript.encodeUnitOrder(Transcript.unitOrder(`turn:${created.id}:user`, 0)))
+      expect(cursor.orderKey).not.toBe(
+        TranscriptOrdering.encodeUnitOrder(TranscriptOrdering.unitOrder(`turn:${created.id}:user`, 0)),
+      )
 
       const olderEntries: Array<TranscriptRepository.Entry> = []
       let hasOlder = initial.hasOlder
@@ -1608,8 +1623,12 @@ describe("InteractiveSession controls", () => {
         if (prepended.oldestCursor !== undefined) before = prepended.oldestCursor
       }
       expect(olderEntries.length).toBeGreaterThan(0)
-      const cursorEntry = loaded.find((entry) => Transcript.encodeUnitOrder(entry.unit.order) === cursor.orderKey)
-      expect(Transcript.compareUnitOrder(olderEntries.at(-1)!.unit.order, cursorEntry!.unit.order)).toBeLessThan(0)
+      const cursorEntry = loaded.find(
+        (entry) => TranscriptOrdering.encodeUnitOrder(entry.unit.order) === cursor.orderKey,
+      )
+      expect(
+        TranscriptOrdering.compareUnitOrder(olderEntries.at(-1)!.unit.order, cursorEntry!.unit.order),
+      ).toBeLessThan(0)
       const allEntries = [...olderEntries, ...loaded]
       expect(new Set(allEntries.map((entry) => entry.unit.key)).size).toBe(allEntries.length)
       expect(allEntries.filter((entry) => entry.unit.parentId === parentId)).toHaveLength(260)
@@ -1638,24 +1657,24 @@ describe("InteractiveSession controls", () => {
         const childExecutionId = `child:${created.id}`
         const parent =
           entry.children === 0 ? undefined : delegationUnit(created.id, `delegate-${created.id}`, childExecutionId, 2)
-        const units: Array<Transcript.Unit> = [
-          Transcript.empty(created.id, entry.prompt).units[0]!,
+        const units: Array<TranscriptUnit.Unit> = [
+          TranscriptProjection.Projection.empty(created.id, entry.prompt).units[0]!,
           {
             key: `assistant:${created.id}:0`,
             turnId: created.id,
-            order: Transcript.unitOrder(`assistant:${created.id}:0`, 1),
+            order: TranscriptOrdering.unitOrder(`assistant:${created.id}:0`, 1),
             revision: 1,
             content: { _tag: "Entry", role: "assistant", text: entry.reply },
           },
           ...(parent === undefined ? [] : [parent]),
-          ...Array.from({ length: entry.children }, (_, child): Transcript.Unit => {
+          ...Array.from({ length: entry.children }, (_, child): TranscriptUnit.Unit => {
             if (parent === undefined || parent.content._tag !== "Block" || parent.content.block._tag !== "ToolCall")
               throw new TypeError(`Turn ${created.id} has no child parent tool`)
-            return Transcript.attachUnit(
+            return TranscriptNestedProjection.attachUnit(
               {
                 key: `${created.id}:child:${child.toString().padStart(3, "0")}`,
                 turnId: childExecutionId,
-                order: Transcript.unitOrder(`${created.id}:child:${child.toString().padStart(3, "0")}`, child),
+                order: TranscriptOrdering.unitOrder(`${created.id}:child:${child.toString().padStart(3, "0")}`, child),
                 revision: child,
                 content: { _tag: "Block", block: { _tag: "Reasoning", text: `child ${child}` } },
               },
@@ -1666,7 +1685,7 @@ describe("InteractiveSession controls", () => {
           }),
         ]
         yield* storeProjection(transcripts, completed, {
-          ...Transcript.empty(created.id, created.prompt),
+          ...TranscriptProjection.Projection.empty(created.id, created.prompt),
           units,
           revision: units.length,
         })
@@ -1809,7 +1828,7 @@ const subagentChildEvents: ReadonlyArray<ExecutionBackend.Event> = serverEvents(
 ])
 
 const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagentReloadHarness")(function* (options: {
-  readonly storedTree: Transcript.Projection
+  readonly storedTree: TranscriptProjectionModel.Projection
   readonly turnLastCursor: string
   readonly childReplayEvents: ReadonlyArray<ExecutionBackend.Event>
   readonly consumed?: Readonly<
@@ -1951,7 +1970,7 @@ interface ObservedProjectionStream {
   readonly streamId: string
   readonly patchRevision: number
   readonly state: Extract<Operation.InteractiveEvent, { readonly _tag: "TranscriptProjectionStarted" }>["state"]
-  readonly units: ReadonlyMap<string, Transcript.Unit>
+  readonly units: ReadonlyMap<string, TranscriptUnit.Unit>
   readonly rootStatus?: "completed" | "failed" | "cancelled"
 }
 
@@ -1970,7 +1989,7 @@ const sortObservedEntries = (entries: ReadonlyArray<TranscriptRepository.Entry>)
     (left, right) =>
       left.turn.createdAt - right.turn.createdAt ||
       String(left.turn.id).localeCompare(String(right.turn.id)) ||
-      Transcript.compareUnitOrder(left.unit.order, right.unit.order),
+      TranscriptOrdering.compareUnitOrder(left.unit.order, right.unit.order),
   )
 
 const latestSelectionEntries = (events: ReadonlyArray<Operation.InteractiveEvent>) => {
@@ -2155,9 +2174,9 @@ describe("InteractiveSession subagent reload", () => {
           text: "root failed after delegation",
         },
       ]
-      const failedRoot = Transcript.project("done", "delegate", failedRootEvents)
-      const completedChild = Transcript.project(subagentChildId, "", subagentChildEvents)
-      const storedTree = Transcript.withNestedProjections(failedRoot, [
+      const failedRoot = TranscriptProjection.Projection.project("done", "delegate", failedRootEvents)
+      const completedChild = TranscriptProjection.Projection.project(subagentChildId, "", subagentChildEvents)
+      const storedTree = TranscriptNestedProjection.withNestedProjections(failedRoot, [
         { parentId: subagentToolId, projection: completedChild },
       ])
       const { session, subagentThread } = yield* makeSubagentReloadHarness({
@@ -2328,7 +2347,7 @@ describe("InteractiveSession subagent reload", () => {
           createdAt: 6,
         },
       ]
-      const stale = Transcript.project("done", "delegate", rootEvents.slice(0, 4))
+      const stale = TranscriptProjection.Projection.project("done", "delegate", rootEvents.slice(0, 4))
       const inspections: Readonly<Record<string, ExecutionBackend.Inspection>> = {
         done: {
           turnId: "done",
@@ -2431,7 +2450,7 @@ describe("InteractiveSession subagent reload", () => {
             entry.unit.turnId === completedChildId &&
             entry.unit.content._tag === "Block" &&
             entry.unit.content.block._tag === "ToolCall" &&
-            entry.unit.content.block.id === Transcript.scopedIdentity(completedChildId, "nested"),
+            entry.unit.content.block.id === TranscriptIdentity.scopedIdentity(completedChildId, "nested"),
         )?.unit.content,
       ).toMatchObject({ _tag: "Block", block: { _tag: "ToolCall", status: "complete" } })
       expect(
@@ -2464,9 +2483,9 @@ describe("InteractiveSession subagent reload", () => {
   it.effect("renders an already-completed child from persisted units after following it once", () =>
     Effect.gen(function* () {
       const followed = yield* Ref.make<ReadonlyArray<string>>([])
-      const rootProjection = Transcript.project("done", "delegate", subagentRootEvents.slice(0, 3))
-      const storedTree = Transcript.withNestedProjections(rootProjection, [
-        { parentId: subagentToolId, projection: Transcript.empty(subagentChildId, "") },
+      const rootProjection = TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents.slice(0, 3))
+      const storedTree = TranscriptNestedProjection.withNestedProjections(rootProjection, [
+        { parentId: subagentToolId, projection: TranscriptProjection.Projection.empty(subagentChildId, "") },
       ])
       const { session, subagentThread } = yield* makeSubagentReloadHarness({
         storedTree,
@@ -2550,9 +2569,9 @@ describe("InteractiveSession subagent reload", () => {
           children,
         }
       }
-      const rootProjection = Transcript.project("done", "delegate", failedRootEvents)
-      const storedTree = Transcript.withNestedProjections(rootProjection, [
-        { parentId: subagentToolId, projection: Transcript.empty(subagentChildId, "") },
+      const rootProjection = TranscriptProjection.Projection.project("done", "delegate", failedRootEvents)
+      const storedTree = TranscriptNestedProjection.withNestedProjections(rootProjection, [
+        { parentId: subagentToolId, projection: TranscriptProjection.Projection.empty(subagentChildId, "") },
       ])
       const { session, subagentThread } = yield* makeSubagentReloadHarness({
         storedTree,
@@ -2560,7 +2579,7 @@ describe("InteractiveSession subagent reload", () => {
         childReplayEvents: childEvents,
         consumed: {
           done: { cursor: "root-failed", sequence: 3, status: "failed" },
-          [Transcript.executionKey(subagentChildId)]: { cursor: "", sequence: -1 },
+          [TranscriptCorrelation.executionKey(subagentChildId)]: { cursor: "", sequence: -1 },
         },
         turnStatus: "failed",
         followed,
@@ -2595,17 +2614,17 @@ describe("InteractiveSession subagent reload", () => {
 
   it.effect("resumes an exact empty child checkpoint from its durable event suffix", () =>
     Effect.gen(function* () {
-      const rootProjection = Transcript.project("done", "delegate", subagentRootEvents)
-      const brokenTree = Transcript.withNestedProjections(rootProjection, [
-        { parentId: subagentToolId, projection: Transcript.empty(subagentChildId, "") },
+      const rootProjection = TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents)
+      const brokenTree = TranscriptNestedProjection.withNestedProjections(rootProjection, [
+        { parentId: subagentToolId, projection: TranscriptProjection.Projection.empty(subagentChildId, "") },
       ])
       const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
-        storedTree: { ...brokenTree, pricingVersion: Transcript.pricingVersion },
+        storedTree: { ...brokenTree, pricingVersion: TranscriptUsage.pricingVersion },
         turnLastCursor: "done-final",
         childReplayEvents: subagentChildEvents,
         consumed: {
           done: { cursor: "done-final", sequence: 5, status: "completed" },
-          [Transcript.executionKey(subagentChildId)]: { cursor: "", sequence: -1 },
+          [TranscriptCorrelation.executionKey(subagentChildId)]: { cursor: "", sequence: -1 },
         },
       })
       const { entries, events } = yield* selectionEntriesFor(session, subagentThread.id, nestedSubagentReady)
@@ -2615,14 +2634,14 @@ describe("InteractiveSession subagent reload", () => {
         let attempt = 0;
         attempt < 400 &&
         (yield* transcripts.get(Turn.TurnId.make("done")))?.executionCheckpoints.find(
-          (checkpoint) => checkpoint.executionKey === Transcript.executionKey(subagentChildId),
+          (checkpoint) => checkpoint.executionKey === TranscriptCorrelation.executionKey(subagentChildId),
         )?.cursor !== "childdone~a4";
         attempt += 1
       )
         yield* Effect.yieldNow
       expect(
         (yield* transcripts.get(Turn.TurnId.make("done")))?.executionCheckpoints.find(
-          (checkpoint) => checkpoint.executionKey === Transcript.executionKey(subagentChildId),
+          (checkpoint) => checkpoint.executionKey === TranscriptCorrelation.executionKey(subagentChildId),
         ),
       ).toMatchObject({ cursor: "childdone~a4", status: "completed" })
       expect(
@@ -2650,7 +2669,7 @@ describe("InteractiveSession subagent reload", () => {
     Effect.gen(function* () {
       const followed = yield* Ref.make<ReadonlyArray<string>>([])
       const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
-        storedTree: Transcript.project("done", "delegate", subagentRootEvents),
+        storedTree: TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents),
         turnLastCursor: "done-final",
         childReplayEvents: [],
         followed,
@@ -2680,7 +2699,7 @@ describe("InteractiveSession subagent reload", () => {
   it.effect("keeps an invalidated projection empty when Relay cannot refold its child", () =>
     Effect.gen(function* () {
       const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
-        storedTree: Transcript.project("done", "delegate", subagentRootEvents),
+        storedTree: TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents),
         turnLastCursor: "done-later",
         childReplayEvents: [],
         projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
@@ -2695,13 +2714,13 @@ describe("InteractiveSession subagent reload", () => {
 
   it.effect("does not replay a refolded terminal child tree when the thread reopens", () =>
     Effect.gen(function* () {
-      const rootProjection = Transcript.project("done", "delegate", subagentRootEvents)
-      const childProjection = Transcript.project(subagentChildId, "", subagentChildEvents)
+      const rootProjection = TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents)
+      const childProjection = TranscriptProjection.Projection.project(subagentChildId, "", subagentChildEvents)
       const attributedChildEvents = subagentChildEvents.map((event) => ({
         ...event,
         childExecutionId: subagentChildId,
       }))
-      const storedTree = Transcript.withNestedProjections(rootProjection, [
+      const storedTree = TranscriptNestedProjection.withNestedProjections(rootProjection, [
         { parentId: subagentToolId, projection: childProjection },
       ])
       let inspections = 0
@@ -2746,7 +2765,7 @@ describe("InteractiveSession subagent reload", () => {
     Effect.gen(function* () {
       let inspections = 0
       const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
-        storedTree: Transcript.project("done", "delegate", subagentRootEvents),
+        storedTree: TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents),
         turnLastCursor: "done-final",
         childReplayEvents: [],
         projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
@@ -2784,7 +2803,7 @@ describe("InteractiveSession subagent reload", () => {
     Effect.gen(function* () {
       let childAvailable = false
       const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
-        storedTree: Transcript.project("done", "delegate", subagentRootEvents),
+        storedTree: TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents),
         turnLastCursor: "done-final",
         childReplayEvents: subagentChildEvents,
         projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
@@ -2846,7 +2865,7 @@ describe("InteractiveSession subagent reload", () => {
       const lateChild = `${subagentChildId}:late`
       let rootInspections = 0
       const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
-        storedTree: Transcript.project("done", "delegate", subagentRootEvents),
+        storedTree: TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents),
         turnLastCursor: "done-final",
         childReplayEvents: subagentChildEvents,
         projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
@@ -2886,7 +2905,7 @@ describe("InteractiveSession subagent reload", () => {
 
   it.effect("refolds only durable root and child events and excludes stale stored children", () =>
     Effect.gen(function* () {
-      const staleChild = Transcript.project(subagentChildId, "", [
+      const staleChild = TranscriptProjection.Projection.project(subagentChildId, "", [
         ...subagentChildEvents,
         {
           cursor: "stale-child",
@@ -2896,7 +2915,7 @@ describe("InteractiveSession subagent reload", () => {
           text: "stale stored child",
         },
       ])
-      const orphan = Transcript.project("orphan-child", "", [
+      const orphan = TranscriptProjection.Projection.project("orphan-child", "", [
         {
           cursor: "orphan-answer",
           sequence: 200,
@@ -2905,8 +2924,8 @@ describe("InteractiveSession subagent reload", () => {
           text: "orphan stored child",
         },
       ])
-      const staleTree = Transcript.withNestedProjections(
-        Transcript.project("done", "wrong stored prompt", subagentRootEvents),
+      const staleTree = TranscriptNestedProjection.withNestedProjections(
+        TranscriptProjection.Projection.project("done", "wrong stored prompt", subagentRootEvents),
         [{ parentId: subagentToolId, projection: staleChild }],
       )
       const staleParent = staleTree.units.find(
@@ -2915,7 +2934,9 @@ describe("InteractiveSession subagent reload", () => {
       const storedTree = {
         ...staleTree,
         units: staleTree.units.concat(
-          orphan.units.map((unit) => Transcript.attachUnit(unit, staleParent, "orphan-parent", "orphan-child")),
+          orphan.units.map((unit) =>
+            TranscriptNestedProjection.attachUnit(unit, staleParent, "orphan-parent", "orphan-child"),
+          ),
         ),
       }
       const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
@@ -2950,7 +2971,7 @@ describe("InteractiveSession subagent reload", () => {
   it.effect("does not promote a refold when Relay cannot replay the root", () =>
     Effect.gen(function* () {
       const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
-        storedTree: Transcript.project("done", "delegate", subagentRootEvents),
+        storedTree: TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents),
         turnLastCursor: "done-final",
         childReplayEvents: subagentChildEvents,
         projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
@@ -3056,7 +3077,7 @@ const makeSpendHarness = Effect.fn("InteractiveSessionTest.makeSpendHarness")(fu
           initial: [
             invalidatedProjection(
               spendTurn,
-              Transcript.project(String(spendTurnId), spendTurn.prompt, spendTimeline).revision,
+              TranscriptProjection.Projection.project(String(spendTurnId), spendTurn.prompt, spendTimeline).revision,
             ),
           ],
           turns,
@@ -3282,7 +3303,7 @@ describe("InteractiveSession persisted usage", () => {
       expect(refolded?.projectionVersion).toBe(ExecutionIngest.projectionVersion)
       expect(
         refolded?.executionCheckpoints.find(
-          (entry) => entry.executionKey === Transcript.executionKey(String(spendTurnId)),
+          (entry) => entry.executionKey === TranscriptCorrelation.executionKey(String(spendTurnId)),
         )?.status,
       ).toBe("completed")
       expect(persistedTurn?.activeMillis).toBe(30_000)

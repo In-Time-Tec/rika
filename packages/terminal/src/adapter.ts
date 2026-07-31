@@ -26,7 +26,7 @@ import {
 } from "@opentui/core"
 import type { ColorInput, KeyEvent, MouseEvent, PasteEvent } from "@opentui/core"
 import cliSpinners from "cli-spinners"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Clock, Effect, Fiber, Function, Option, Schedule, Schema } from "effect"
 import stringWidth from "string-width"
 import { fromOpenTui, type Key } from "./keys"
@@ -1429,7 +1429,7 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
   }
   const renderChildAgentBody = (block: Extract<TranscriptBlock, { _tag: "ChildAgent" }>, expanded: boolean) => {
     const running = block.status === "running"
-    const phrase = Transcript.agentPhrase({ name: block.name, status: block.status })
+    const phrase = TranscriptProjection.Presentation.agentPhrase({ name: block.name, status: block.status })
     append(statusIcon(block.status === "failed", running, block.status === "cancelled"))
     for (const chunk of renderToolSummary(agentToolSummary(phrase), { leading: " " })[0]!) append(chunk)
     append(marker(expanded))

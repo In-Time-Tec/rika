@@ -1,7 +1,11 @@
 import type * as Operation from "@rika/product/product-operation"
 import type * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as Turn from "@rika/product/turn-record"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
+import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { TranscriptPresenter, ViewState } from "@rika/terminal/terminal-state"
 import { Effect, Function, HashMap } from "effect"
 
@@ -30,7 +34,7 @@ export interface State {
   readonly replayTurns: ReadonlyMap<string, Turn.Turn>
   readonly entries: ReadonlyArray<TranscriptRepository.Entry>
   readonly revisions: ReadonlyMap<string, number>
-  readonly liveProjections: ReadonlyMap<string, Transcript.Projection>
+  readonly liveProjections: ReadonlyMap<string, TranscriptProjectionModel.Projection>
   readonly projectionStreams?: ReadonlyMap<string, ProjectionStream>
   readonly threadCostUsd?: number
   readonly lastAvailableUsageCost?: Extract<ViewState.Model["usageCost"], { readonly _tag: "Available" }>
@@ -50,7 +54,7 @@ interface OpenProjectionStream {
     readonly modelPhase: number
     readonly usableCompletionSequence?: number
   }
-  readonly units: HashMap.HashMap<string, Transcript.Unit>
+  readonly units: HashMap.HashMap<string, TranscriptUnit.Unit>
   readonly rootStatus?: "completed" | "failed" | "cancelled"
 }
 
@@ -89,7 +93,7 @@ const cursorForEntry = (entry: TranscriptRepository.Entry | undefined): Transcri
     : {
         createdAt: entry.turn.createdAt,
         turnId: entry.turn.id,
-        orderKey: Transcript.encodeUnitOrder(entry.unit.order),
+        orderKey: TranscriptOrdering.encodeUnitOrder(entry.unit.order),
       }
 
 const sameCursor = (
@@ -235,7 +239,7 @@ const activeSeedEntries = (
   entries: ReadonlyArray<TranscriptRepository.Entry>,
 ): ReadonlyArray<TranscriptRepository.Entry> => {
   if (activeTurn === undefined || entries.some((entry) => entry.turn.id === activeTurn.id)) return []
-  const seed = Transcript.empty(activeTurn.id, activeTurn.prompt)
+  const seed = TranscriptProjection.Projection.empty(activeTurn.id, activeTurn.prompt)
   return seed.units.map((unit) => ({
     turn: activeTurn,
     unit,
@@ -249,7 +253,7 @@ const project = (
   entries: ReadonlyArray<TranscriptRepository.Entry>,
   displayCostUsd: number | undefined,
 ) => {
-  const grouped = new Map<string, Array<Transcript.Unit>>()
+  const grouped = new Map<string, Array<TranscriptUnit.Unit>>()
   for (const entry of entries) {
     const rootTurnId = String(entry.turn.id)
     const units = grouped.get(rootTurnId)
@@ -264,7 +268,7 @@ const project = (
 
 const projectionEntries = (
   turn: Turn.Turn,
-  projection: Transcript.Projection,
+  projection: TranscriptProjectionModel.Projection,
 ): ReadonlyArray<TranscriptRepository.Entry> =>
   projection.units.map((unit) => ({
     turn,
@@ -277,7 +281,7 @@ const projectionEntries = (
 const displayedEntries = (
   entries: ReadonlyArray<TranscriptRepository.Entry>,
   replayTurns: ReadonlyMap<string, Turn.Turn>,
-  liveProjections: ReadonlyMap<string, Transcript.Projection>,
+  liveProjections: ReadonlyMap<string, TranscriptProjectionModel.Projection>,
   projectionStreams: ReadonlyMap<string, ProjectionStream> | undefined,
   activeTurnId: string | undefined,
 ) => {
@@ -346,7 +350,7 @@ const reconcileTranscriptBlocks = (model: ViewState.Model): ViewState.Model => {
 
 const projections = (
   entries: ReadonlyArray<TranscriptRepository.Entry>,
-): ReadonlyMap<string, Transcript.Projection> => {
+): ReadonlyMap<string, TranscriptProjectionModel.Projection> => {
   const grouped = new Map<string, Array<TranscriptRepository.Entry>>()
   for (const entry of entries) grouped.set(entry.turn.id, [...(grouped.get(entry.turn.id) ?? []), entry])
   return new Map(
@@ -372,23 +376,24 @@ const projectionFromEntries = (
   entries: ReadonlyArray<TranscriptRepository.Entry>,
   turnId: string,
   prompt: string,
-): Transcript.Projection => projections(entries).get(turnId) ?? Transcript.empty(turnId, prompt)
+): TranscriptProjectionModel.Projection =>
+  projections(entries).get(turnId) ?? TranscriptProjection.Projection.empty(turnId, prompt)
 
-const sourceText = (event: Transcript.SourceEvent): string => {
+const sourceText = (event: TranscriptSourceEvent.SourceEvent): string => {
   if (typeof event.text === "string") return event.text
   const delta = event.data?.delta
   return typeof delta === "string" ? delta : ""
 }
 
-const sourceBlockId = (event: Transcript.SourceEvent, fallback: string): string => {
+const sourceBlockId = (event: TranscriptSourceEvent.SourceEvent, fallback: string): string => {
   const id = event.data?.tool_call_id ?? event.data?.call_id ?? event.data?.id
   return typeof id === "string" ? id : fallback
 }
 
 const activityAfter = (
   activity: ViewState.Activity | undefined,
-  event: Transcript.SourceEvent,
-  projection: Transcript.Projection,
+  event: TranscriptSourceEvent.SourceEvent,
+  projection: TranscriptProjectionModel.Projection,
   model: ViewState.Model,
 ): ViewState.Activity | undefined => {
   const runningActivity = ViewState.runningToolsActivity(model)
@@ -456,8 +461,12 @@ const activityAfterOrigin = (
   )
 }
 
-const projectionFromStream = (stream: OpenProjectionStream | FailedProjectionStream): Transcript.Projection => ({
-  units: HashMap.toValues(stream.units).toSorted((left, right) => Transcript.compareUnitOrder(left.order, right.order)),
+const projectionFromStream = (
+  stream: OpenProjectionStream | FailedProjectionStream,
+): TranscriptProjectionModel.Projection => ({
+  units: HashMap.toValues(stream.units).toSorted((left, right) =>
+    TranscriptOrdering.compareUnitOrder(left.order, right.order),
+  ),
   revision: stream.state.revision,
   modelPhase: stream.state.modelPhase,
   ...(stream.state.usableCompletionSequence === undefined
@@ -478,7 +487,7 @@ const normalizeEntries = (
     (left, right) =>
       left.turn.createdAt - right.turn.createdAt ||
       compareText(left.turn.id, right.turn.id) ||
-      Transcript.compareUnitOrder(left.unit.order, right.unit.order),
+      TranscriptOrdering.compareUnitOrder(left.unit.order, right.unit.order),
   )
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest"
 import { it } from "@effect/vitest"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Duration, Effect } from "effect"
 import { Keys, Palette, ViewState } from "@rika/terminal/terminal-state"
 import * as Adapter from "../src/adapter"
@@ -1326,7 +1326,9 @@ describe("ViewState", () => {
     model = ViewState.update(model, {
       _tag: "ThreadPreviewLoaded",
       threadId: "a",
-      turns: [{ prompt: "stale preview", units: Transcript.empty("preview", "stale preview").units }],
+      turns: [
+        { prompt: "stale preview", units: TranscriptProjection.Projection.empty("preview", "stale preview").units },
+      ],
     })
     for (const character of "missing")
       model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: character, sequence: character }) })
@@ -1337,7 +1339,9 @@ describe("ViewState", () => {
     model = ViewState.update(model, {
       _tag: "ThreadPreviewLoaded",
       threadId: "a",
-      turns: [{ prompt: "removed preview", units: Transcript.empty("preview", "removed preview").units }],
+      turns: [
+        { prompt: "removed preview", units: TranscriptProjection.Projection.empty("preview", "removed preview").units },
+      ],
     })
     model = ViewState.update(model, {
       _tag: "ThreadsReplaced",
@@ -1632,20 +1636,20 @@ describe("loadable panel state machine", () => {
     const previous = ViewState.update(firstPreviewLoading, {
       _tag: "ThreadPreviewLoaded",
       threadId: "thread-0",
-      turns: [{ prompt: "previous", units: Transcript.empty("preview", "previous").units }],
+      turns: [{ prompt: "previous", units: TranscriptProjection.Projection.empty("preview", "previous").units }],
     })
     const previewLoading = ViewState.update(previous, { _tag: "ThreadPreviewRequested" })
     expect(previewLoading.threadPreview).toEqual({
       _tag: "Loading",
       previous: {
         threadId: "thread-0",
-        turns: [{ prompt: "previous", units: Transcript.empty("preview", "previous").units }],
+        turns: [{ prompt: "previous", units: TranscriptProjection.Projection.empty("preview", "previous").units }],
       },
     })
     const previewReady = ViewState.update(previewLoading, {
       _tag: "ThreadPreviewLoaded",
       threadId: "thread-1",
-      turns: [{ prompt: "hi", units: Transcript.empty("preview", "hi").units }],
+      turns: [{ prompt: "hi", units: TranscriptProjection.Projection.empty("preview", "hi").units }],
     })
     expect(previewReady.threadPreview._tag).toBe("Ready")
     const opening = ViewState.update(base, { _tag: "ThreadOpenRequested" })

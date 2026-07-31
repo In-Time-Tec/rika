@@ -1,4 +1,9 @@
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
+import * as TranscriptUsage from "@rika/transcript/model-usage-fallback"
 import { expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import * as Thread from "@rika/product/thread-record"
@@ -51,7 +56,7 @@ it.effect("lists terminal roots whose current projection has an unfinished child
     expect(
       yield* repository.commitDelta(
         target,
-        Transcript.projectionState(nested.projection),
+        TranscriptProjection.Projection.projectionState(nested.projection),
         { upsert: [], remove: [] },
         {
           executionCheckpoints: terminal,
@@ -88,7 +93,11 @@ it.effect("loads a migration-invalidated empty projection for authoritative refo
       (yield* Effect.result(TranscriptRepository.makeMemory({ initial: [{ ...invalidated, revision: -2 }] })))._tag,
     ).toBe("Failure")
 
-    const replacement = Transcript.project(target.id, target.prompt, [event(0), event(1), event(2)])
+    const replacement = TranscriptProjection.Projection.project(target.id, target.prompt, [
+      event(0),
+      event(1),
+      event(2),
+    ])
     expect(
       yield* repository.replaceForRefold(target, replacement, {
         executionCheckpoints: [executionCheckpoint(target, replacement, "completed")],
@@ -112,13 +121,13 @@ it.effect("authoritatively adopts corrected terminal outcomes in paired memory r
       [101, "cancelled", "execution.cancelled"],
     ] as const) {
       const target = turn(index)
-      const obsolete = Transcript.project(target.id, target.prompt, [event(0), event(1)])
+      const obsolete = TranscriptProjection.Projection.project(target.id, target.prompt, [event(0), event(1)])
       const turns = yield* TurnRepository.makeMemory([target])
       const repository = yield* TranscriptRepository.makeMemory({ turns })
       yield* commitAll(repository, target, obsolete, undefined, 2)
       const before = yield* repository.get(target.id)
       if (before === undefined) return yield* Effect.die("obsolete projection was not stored")
-      const replacement = Transcript.project(target.id, target.prompt, [
+      const replacement = TranscriptProjection.Projection.project(target.id, target.prompt, [
         {
           cursor: `${status}-cursor`,
           sequence: 0,
@@ -158,14 +167,14 @@ it.effect("rejects a refold when the paired memory Turn tuple advanced concurren
     const target = turn(103)
     const turns = yield* TurnRepository.makeMemory([target])
     const repository = yield* TranscriptRepository.makeMemory({ turns })
-    const obsolete = Transcript.project(target.id, target.prompt, [event(0), event(1)])
+    const obsolete = TranscriptProjection.Projection.project(target.id, target.prompt, [event(0), event(1)])
     yield* commitAll(repository, target, obsolete, undefined, 2)
     const before = yield* repository.get(target.id)
     if (before === undefined) return yield* Effect.die("obsolete projection was not stored")
     expect(yield* turns.repairCursor(target.id, "completed", undefined, "newer-cursor")).toBe(true)
     const newer = yield* turns.get(target.id)
     const preserved = yield* repository.get(target.id)
-    const replacement = Transcript.project(target.id, target.prompt, [
+    const replacement = TranscriptProjection.Projection.project(target.id, target.prompt, [
       { cursor: "refold-failed", sequence: 0, type: "execution.failed", createdAt: 10, text: "failed" },
     ])
 
@@ -187,11 +196,11 @@ it.effect("rejects contradictory checkpoint and projected terminal outcomes in p
     const target = turn(102)
     const turns = yield* TurnRepository.makeMemory([target])
     const repository = yield* TranscriptRepository.makeMemory({ turns })
-    const obsolete = Transcript.project(target.id, target.prompt, [event(0), event(1)])
+    const obsolete = TranscriptProjection.Projection.project(target.id, target.prompt, [event(0), event(1)])
     yield* commitAll(repository, target, obsolete, undefined, 2)
     const before = yield* repository.get(target.id)
     if (before === undefined) return yield* Effect.die("obsolete projection was not stored")
-    const replacement = Transcript.project(target.id, target.prompt, [
+    const replacement = TranscriptProjection.Projection.project(target.id, target.prompt, [
       { cursor: "cancelled", sequence: 0, type: "execution.cancelled", createdAt: 10 },
     ])
     const rejected = yield* Effect.result(
@@ -225,7 +234,7 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
       const cases: ReadonlyArray<{
         readonly name: string
         readonly version?: number
-        readonly update: (state: Transcript.ProjectionState) => Transcript.ProjectionState
+        readonly update: (state: TranscriptProjectionModel.ProjectionState) => TranscriptProjectionModel.ProjectionState
       }> = [
         { name: "projection-version", version: 0, update: (state) => state },
         { name: "revision", update: (state) => ({ ...state, revision: -2 }) },
@@ -243,8 +252,8 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
 
       for (const [index, candidate] of cases.entries()) {
         const target = turn(600 + index)
-        const projection = Transcript.empty(target.id, target.prompt)
-        const state = candidate.update(Transcript.projectionState(projection))
+        const projection = TranscriptProjection.Projection.empty(target.id, target.prompt)
+        const state = candidate.update(TranscriptProjection.Projection.projectionState(projection))
         const result = yield* Effect.result(
           repository.commitDelta(
             target,
@@ -267,7 +276,7 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
     Effect.gen(function* () {
       const repository = yield* TranscriptRepository.Service
       const target = turn(1)
-      const initial = Transcript.project(target.id, target.prompt, [event(0), event(1)])
+      const initial = TranscriptProjection.Projection.project(target.id, target.prompt, [event(0), event(1)])
       expect(yield* commitAll(repository, target, initial, undefined)).toBe("committed")
       const stored = yield* repository.get(target.id)
       if (stored === undefined) return yield* Effect.die("initial projection was not stored")
@@ -284,7 +293,7 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
       expect(
         yield* repository.commitDelta(
           target,
-          Transcript.projectionState({ ...initial, revision: 2 }),
+          TranscriptProjection.Projection.projectionState({ ...initial, revision: 2 }),
           { upsert: [updated], remove: [] },
           {
             executionCheckpoints: [executionCheckpoint(target, { ...initial, revision: 2 })],
@@ -299,11 +308,11 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
       expect(afterUpdate?.units.find((candidate) => candidate.key !== updated.key)).toEqual(
         stored.units.find((candidate) => candidate.key !== updated.key),
       )
-      const moved = { ...updated, order: Transcript.unitOrder(updated.key, 50) }
+      const moved = { ...updated, order: TranscriptOrdering.unitOrder(updated.key, 50) }
       const movedResult = yield* Effect.result(
         repository.commitDelta(
           target,
-          Transcript.projectionState({ ...initial, revision: 3 }),
+          TranscriptProjection.Projection.projectionState({ ...initial, revision: 3 }),
           { upsert: [moved], remove: [] },
           {
             executionCheckpoints: [executionCheckpoint(target, { ...initial, revision: 3 })],
@@ -317,7 +326,7 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
       expect(
         yield* repository.commitDelta(
           target,
-          Transcript.projectionState({ ...initial, revision: 3 }),
+          TranscriptProjection.Projection.projectionState({ ...initial, revision: 3 }),
           { upsert: [], remove: [updated.key] },
           {
             executionCheckpoints: [executionCheckpoint(target, { ...initial, revision: 3 })],
@@ -334,13 +343,13 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
     Effect.gen(function* () {
       const repository = yield* TranscriptRepository.Service
       const target = turn(2)
-      const initial = { ...Transcript.project(target.id, target.prompt, [event(0)]), revision: 4 }
+      const initial = { ...TranscriptProjection.Projection.project(target.id, target.prompt, [event(0)]), revision: 4 }
       yield* commitAll(repository, target, initial, undefined)
       const before = yield* repository.get(target.id)
-      const replacement = Transcript.project(target.id, target.prompt, [event(0), event(1)])
+      const replacement = TranscriptProjection.Projection.project(target.id, target.prompt, [event(0), event(1)])
       const result = yield* repository.commitDelta(
         target,
-        Transcript.projectionState({ ...replacement, revision: 6 }),
+        TranscriptProjection.Projection.projectionState({ ...replacement, revision: 6 }),
         { upsert: replacement.units, remove: [] },
         {
           executionCheckpoints: [executionCheckpoint(target, { ...replacement, revision: 6 })],
@@ -353,7 +362,7 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
       expect(
         yield* repository.commitDelta(
           target,
-          Transcript.projectionState({ ...replacement, revision: 3 }),
+          TranscriptProjection.Projection.projectionState({ ...replacement, revision: 3 }),
           { upsert: replacement.units, remove: [] },
           {
             executionCheckpoints: [executionCheckpoint(target, { ...replacement, revision: 3 })],
@@ -381,7 +390,7 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
       const removal = yield* Effect.result(
         repository.commitDelta(
           target,
-          Transcript.projectionState(nested.projection),
+          TranscriptProjection.Projection.projectionState(nested.projection),
           { upsert: [], remove: [nested.parent.key] },
           {
             executionCheckpoints: nested.checkpoints,
@@ -400,7 +409,7 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
     Effect.gen(function* () {
       const repository = yield* TranscriptRepository.Service
       const target = turn(151)
-      const obsolete = Transcript.empty(target.id, target.prompt)
+      const obsolete = TranscriptProjection.Projection.empty(target.id, target.prompt)
       expect(yield* commitAll(repository, target, obsolete, undefined, 2)).toBe("committed")
       const before = yield* repository.get(target.id)
       if (before === undefined) return yield* Effect.die("obsolete projection was not stored")
@@ -440,14 +449,14 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
     Effect.gen(function* () {
       const repository = yield* TranscriptRepository.Service
       const target = turn(200)
-      const projection = Transcript.project(target.id, target.prompt, [event(0)])
+      const projection = TranscriptProjection.Projection.project(target.id, target.prompt, [event(0)])
       yield* commitAll(repository, target, projection, undefined)
       const before = yield* repository.get(target.id)
-      const key = Transcript.executionKey(String(target.id))
+      const key = TranscriptCorrelation.executionKey(String(target.id))
       const result = yield* Effect.result(
         repository.commitDelta(
           target,
-          Transcript.projectionState(projection),
+          TranscriptProjection.Projection.projectionState(projection),
           { upsert: [], remove: [] },
           {
             executionCheckpoints: [
@@ -467,7 +476,7 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
     Effect.gen(function* () {
       const repository = yield* TranscriptRepository.Service
       const target = turn(300)
-      const projection = Transcript.project(target.id, target.prompt, [event(0)])
+      const projection = TranscriptProjection.Projection.project(target.id, target.prompt, [event(0)])
       yield* commitAll(repository, target, projection, undefined)
       const initial = yield* repository.get(target.id)
       if (initial === undefined) return yield* Effect.die("initial projection was not stored")
@@ -480,7 +489,7 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
       expect(
         yield* repository.commitDelta(
           target,
-          Transcript.projectionState(projection),
+          TranscriptProjection.Projection.projectionState(projection),
           { upsert: [updated], remove: [] },
           {
             executionCheckpoints: [executionCheckpoint(target, projection)],
@@ -495,7 +504,7 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
       expect(
         yield* repository.commitDelta(
           target,
-          Transcript.projectionState(projection),
+          TranscriptProjection.Projection.projectionState(projection),
           { upsert: [], remove: [updated.key] },
           {
             executionCheckpoints: [executionCheckpoint(target, projection)],
@@ -512,14 +521,14 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
     Effect.gen(function* () {
       const repository = yield* TranscriptRepository.Service
       const target = turn(3)
-      const initial = { ...Transcript.empty(target.id, target.prompt), revision: 0 }
+      const initial = { ...TranscriptProjection.Projection.empty(target.id, target.prompt), revision: 0 }
       yield* commitAll(repository, target, initial, undefined)
       const before = yield* repository.get(target.id)
       const duplicate = unit(target.id, 1, 0, "duplicate")
       const duplicateFailure = yield* Effect.result(
         repository.commitDelta(
           target,
-          Transcript.projectionState({ ...initial, revision: 1 }),
+          TranscriptProjection.Projection.projectionState({ ...initial, revision: 1 }),
           { upsert: [duplicate, { ...duplicate, revision: 2 }], remove: [] },
           {
             executionCheckpoints: [executionCheckpoint(target, { ...initial, revision: 1 })],
@@ -528,11 +537,11 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
           },
         ),
       )
-      const invalid = { ...unit(target.id, 2, 0, "invalid"), order: Transcript.unitOrder("other", 2) }
+      const invalid = { ...unit(target.id, 2, 0, "invalid"), order: TranscriptOrdering.unitOrder("other", 2) }
       const intrinsicFailure = yield* Effect.result(
         repository.commitDelta(
           target,
-          Transcript.projectionState({ ...initial, revision: 1 }),
+          TranscriptProjection.Projection.projectionState({ ...initial, revision: 1 }),
           { upsert: [invalid], remove: [] },
           {
             executionCheckpoints: [executionCheckpoint(target, { ...initial, revision: 1 })],
@@ -551,9 +560,12 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
     Effect.gen(function* () {
       const repository = yield* TranscriptRepository.Service
       const target = turn(4)
-      const obsolete = { ...Transcript.project(target.id, target.prompt, [event(0), event(1)]), revision: 50 }
+      const obsolete = {
+        ...TranscriptProjection.Projection.project(target.id, target.prompt, [event(0), event(1)]),
+        revision: 50,
+      }
       yield* commitAll(repository, target, obsolete, undefined, 2)
-      const replacement = Transcript.project(target.id, target.prompt, [event(2)])
+      const replacement = TranscriptProjection.Projection.project(target.id, target.prompt, [event(2)])
       expect(
         yield* repository.replaceForRefold(target, replacement, {
           executionCheckpoints: [executionCheckpoint(target, replacement, "completed")],
@@ -590,7 +602,13 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
         [currentOlder, projectionVersion],
         [currentNewer, projectionVersion],
       ] as const)
-        yield* commitAll(repository, target, Transcript.empty(target.id, target.prompt), undefined, version)
+        yield* commitAll(
+          repository,
+          target,
+          TranscriptProjection.Projection.empty(target.id, target.prompt),
+          undefined,
+          version,
+        )
 
       const newest = yield* repository.page(threadId, { limit: 1, projectionVersion })
       expect(newest.entries.map((entry) => entry.turn.id)).toEqual([currentNewer.id])
@@ -641,7 +659,7 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
         yield* commitAll(
           repository,
           target,
-          { ...Transcript.empty(target.id, target.prompt), units, revision: 2 },
+          { ...TranscriptProjection.Projection.empty(target.id, target.prompt), units, revision: 2 },
           undefined,
         )
       }
@@ -688,7 +706,7 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
       const threadId = Thread.ThreadId.make("thread-nested")
       const target = turn(20, threadId)
       const childId = "turn-20:child"
-      const parent = Transcript.project(target.id, target.prompt, [
+      const parent = TranscriptProjection.Projection.project(target.id, target.prompt, [
         {
           cursor: "tool",
           sequence: 0,
@@ -697,12 +715,14 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
           data: { tool_call_id: "agent", tool_name: "task", input: {} },
         },
       ])
-      const child = Transcript.project(childId, "", [event(0), event(1)])
+      const child = TranscriptProjection.Projection.project(childId, "", [event(0), event(1)])
       const nested = {
-        ...Transcript.withNestedProjections(parent, [{ parentId: `${target.id}:agent`, projection: child }]),
+        ...TranscriptNestedProjection.withNestedProjections(parent, [
+          { parentId: `${target.id}:agent`, projection: child },
+        ]),
         revision: 4,
         costUsd: 1.25,
-        pricingVersion: Transcript.pricingVersion,
+        pricingVersion: TranscriptUsage.pricingVersion,
         usableCompletionSequence: 3,
       }
       const parentTool = parent.units.find(
@@ -711,19 +731,19 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
       if (parentTool === undefined) return yield* Effect.die("nested transcript had no parent tool")
       yield* commitAll(repository, target, nested, undefined, projectionVersion, [
         executionCheckpoint(target, nested),
-        attachedExecutionCheckpoint(childId, child, Transcript.executionKey(String(target.id)), parentTool),
+        attachedExecutionCheckpoint(childId, child, TranscriptCorrelation.executionKey(String(target.id)), parentTool),
       ])
       const other = turn(21, threadId)
       yield* commitAll(
         repository,
         other,
-        { ...Transcript.empty(other.id, other.prompt), revision: 0, costUsd: 2.5 },
+        { ...TranscriptProjection.Projection.empty(other.id, other.prompt), revision: 0, costUsd: 2.5 },
         undefined,
       )
       const stored = yield* repository.get(target.id)
       const page = yield* repository.page(threadId, { limit: 1 })
       expect(stored?.units).toEqual(nested.units)
-      expect(stored?.pricingVersion).toBe(Transcript.pricingVersion)
+      expect(stored?.pricingVersion).toBe(TranscriptUsage.pricingVersion)
       expect(stored?.usableCompletionSequence).toBe(3)
       expect(page.threadCostUsd).toBe(3.75)
       expect(yield* repository.globalCostUsd).toBe(3.75)
@@ -740,7 +760,7 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
       yield* commitAll(
         repository,
         target,
-        { ...Transcript.empty(target.id, target.prompt), units, revision: 200 },
+        { ...TranscriptProjection.Projection.empty(target.id, target.prompt), units, revision: 200 },
         undefined,
       )
       const minimum = yield* repository.page(target.threadId, { limit: 0 })

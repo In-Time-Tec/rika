@@ -6,8 +6,13 @@ import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as Turn from "@rika/product/turn-record"
-import * as Transcript from "@rika/transcript/transcript-unit"
-import { ThreadTools, ToolInvocation } from "@rika/coding-tools/coding-tool-catalog"
+import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
+import * as ThreadTools from "@rika/coding-tools/thread-tool-contract"
+import * as ToolInvocation from "@rika/coding-tools/tool-invocation"
 import { Context, Effect, Layer, Schema, Stream } from "effect"
 import { ThreadQuery, ThreadToolHandlers } from "@rika/product/product-operation"
 import { provideLayer } from "../support/product-test-layer"
@@ -46,7 +51,7 @@ const storedTurn: Turn.Turn = {
   createdAt: 1,
   updatedAt: 2,
 }
-const projection = (units: ReadonlyArray<Transcript.Unit>): Transcript.Projection => ({
+const projection = (units: ReadonlyArray<TranscriptUnit.Unit>): TranscriptProjectionModel.Projection => ({
   units,
   revision: units.reduce((maximum, unit) => Math.max(maximum, unit.revision), -1),
   modelPhase: 0,
@@ -273,10 +278,10 @@ describe("ThreadQuery", () => {
   it.effect("reads a standalone ChildAgent subtree through the same child selector as delegated tools", () =>
     Effect.gen(function* () {
       const transcripts = yield* TranscriptRepository.Service
-      const childAgent: Transcript.Unit = {
+      const childAgent: TranscriptUnit.Unit = {
         key: "child-agent:reviewer",
         turnId: storedTurn.id,
-        order: Transcript.unitOrder("child-agent:reviewer", 1),
+        order: TranscriptOrdering.unitOrder("child-agent:reviewer", 1),
         revision: 1,
         content: {
           _tag: "Block",
@@ -291,7 +296,7 @@ describe("ThreadQuery", () => {
         },
       }
       yield* storeProjection(transcripts, storedTurn, {
-        units: [Transcript.empty(storedTurn.id, storedTurn.prompt).units[0]!, childAgent],
+        units: [TranscriptProjection.Projection.empty(storedTurn.id, storedTurn.prompt).units[0]!, childAgent],
         revision: 1,
         modelPhase: 0,
       })
@@ -320,14 +325,14 @@ describe("ThreadQuery", () => {
   it.effect("returns schema-valid subtree continuations that advance through oversized nested output", () =>
     Effect.gen(function* () {
       const transcripts = yield* TranscriptRepository.Service
-      const entry = (executionId: string, id: string, sequence: number): Transcript.Unit => ({
+      const entry = (executionId: string, id: string, sequence: number): TranscriptUnit.Unit => ({
         key: `entry:${id}`,
         turnId: executionId,
-        order: Transcript.unitOrder(`entry:${id}`, sequence),
+        order: TranscriptOrdering.unitOrder(`entry:${id}`, sequence),
         revision: sequence,
         content: { _tag: "Entry", role: "assistant", text: `${id}:${"y".repeat(12_000)}` },
       })
-      const child = (executionId: string, id: string, sequence: number): Transcript.Unit => {
+      const child = (executionId: string, id: string, sequence: number): TranscriptUnit.Unit => {
         const unit = delegationUnit(executionId, `${id}-call`, id, sequence)
         if (unit.content._tag !== "Block" || unit.content.block._tag !== "ToolCall")
           throw new TypeError(`Delegation ${id} did not project a tool block`)
@@ -346,21 +351,21 @@ describe("ThreadQuery", () => {
       const nestedFour = child("nested-three", "nested-four", 2)
       const siblingAgent = child(storedTurn.id, "sibling-agent", 8)
       const root = projection([
-        Transcript.empty(storedTurn.id, storedTurn.prompt).units[0]!,
+        TranscriptProjection.Projection.empty(storedTurn.id, storedTurn.prompt).units[0]!,
         rootAgent,
         siblingAgent,
         ...Array.from(
           { length: 201 },
-          (_, index): Transcript.Unit => ({
+          (_, index): TranscriptUnit.Unit => ({
             key: `newer:${index}`,
             turnId: storedTurn.id,
-            order: Transcript.unitOrder(`newer:${index}`, index + 10),
+            order: TranscriptOrdering.unitOrder(`newer:${index}`, index + 10),
             revision: index + 10,
             content: { _tag: "Entry", role: "assistant", text: `unrelated-${index}` },
           }),
         ),
       ])
-      const nested = Transcript.withNestedProjections(root, [
+      const nested = TranscriptNestedProjection.withNestedProjections(root, [
         {
           parentId:
             rootAgent.content._tag === "Block" && rootAgent.content.block._tag === "ToolCall"

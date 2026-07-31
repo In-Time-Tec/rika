@@ -1,5 +1,9 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
 import { expect, test } from "vitest"
 import { Database as NativeDatabase } from "bun:sqlite"
 import { Effect, FileSystem, Layer, Schema } from "effect"
@@ -477,13 +481,13 @@ test("creates, persists, and reopens the current schema", () => {
         const storedTurn = yield* turns.get(Turn.TurnId.make("turn-a"))
         if (storedTurn === undefined || !Turn.isAgentExecution(storedTurn))
           return yield* Effect.die("turn-a was not stored as an agent execution")
-        const projection = Transcript.project(storedTurn.id, storedTurn.prompt, [
+        const projection = TranscriptProjection.Projection.project(storedTurn.id, storedTurn.prompt, [
           { cursor: "cursor-a", sequence: 1, type: "execution.completed", createdAt: 4 },
         ])
         yield* commitAll(transcript, storedTurn, projection, undefined)
         yield* transcript.commitDelta(
           storedTurn,
-          Transcript.projectionState({ ...projection, revision: 2, checkpointCursor: "cursor-b" }),
+          TranscriptProjection.Projection.projectionState({ ...projection, revision: 2, checkpointCursor: "cursor-b" }),
           { upsert: [], remove: [] },
           {
             executionCheckpoints: [
@@ -495,7 +499,7 @@ test("creates, persists, and reopens the current schema", () => {
         )
         const beforeRejectedReplacement = yield* transcript.get(storedTurn.id)
         const malformed = {
-          ...Transcript.project(storedTurn.id, storedTurn.prompt, [
+          ...TranscriptProjection.Projection.project(storedTurn.id, storedTurn.prompt, [
             { cursor: "cursor-c", sequence: 3, type: "model.output.completed", createdAt: 6, text: "invalid" },
           ]),
           units: [
@@ -507,12 +511,12 @@ test("creates, persists, and reopens the current schema", () => {
               content: { _tag: "Entry", role: "invalid", text: "invalid" },
             },
           ],
-        } as unknown as Transcript.Projection
+        } as unknown as TranscriptProjectionModel.Projection
         expect(
           (yield* Effect.result(
             transcript.commitDelta(
               storedTurn,
-              Transcript.projectionState(malformed),
+              TranscriptProjection.Projection.projectionState(malformed),
               { upsert: malformed.units, remove: [] },
               {
                 executionCheckpoints: [executionCheckpoint(storedTurn, malformed)],
@@ -543,7 +547,7 @@ test("creates, persists, and reopens the current schema", () => {
           JOIN rika_turns t ON t.id = u.turn_id
           WHERE u.thread_id = ${id} AND
             (u.created_at, u.turn_id, u.unit_order_key) <
-            (${storedTurn.createdAt}, ${storedTurn.id}, ${Transcript.encodeUnitOrder(projection.units[0]!.order)})
+            (${storedTurn.createdAt}, ${storedTurn.id}, ${TranscriptOrdering.encodeUnitOrder(projection.units[0]!.order)})
           ORDER BY u.created_at DESC, u.turn_id DESC, u.unit_order_key DESC
           LIMIT 51`
         const decodedCursorPlan = yield* Schema.decodeUnknownEffect(
@@ -644,7 +648,7 @@ test("reopens a completed nested transcript through the SQLite page", () => {
           })
           const completed = yield* turns.setStatus(target.id, "completed", "parent-done", 3)
           const childId = "nested-turn:child:agent"
-          const parent = Transcript.project(target.id, target.prompt, [
+          const parent = TranscriptProjection.Projection.project(target.id, target.prompt, [
             {
               cursor: "agent",
               sequence: 0,
@@ -661,7 +665,7 @@ test("reopens a completed nested transcript through the SQLite page", () => {
             },
             { cursor: "parent-done", sequence: 2, type: "execution.completed", createdAt: 3 },
           ])
-          const child = Transcript.project(childId, "", [
+          const child = TranscriptProjection.Projection.project(childId, "", [
             {
               cursor: "answer",
               sequence: 0,
@@ -671,7 +675,7 @@ test("reopens a completed nested transcript through the SQLite page", () => {
             },
             { cursor: "child-done", sequence: 1, type: "execution.completed", createdAt: 3 },
           ])
-          const projection = Transcript.withNestedProjections(parent, [
+          const projection = TranscriptNestedProjection.withNestedProjections(parent, [
             { parentId: `${target.id}:agent`, projection: child },
           ])
           const parentTool = parent.units.find(
@@ -683,7 +687,7 @@ test("reopens a completed nested transcript through the SQLite page", () => {
             attachedExecutionCheckpoint(
               childId,
               child,
-              Transcript.executionKey(String(target.id)),
+              TranscriptCorrelation.executionKey(String(target.id)),
               parentTool,
               "completed",
             ),
@@ -892,7 +896,7 @@ test("enforces current foreign keys and cascades thread deletion", () => {
           prompt: "cascade",
           now: 2,
         })
-        yield* commitAll(transcripts, turn, Transcript.empty(turn.id, turn.prompt), undefined)
+        yield* commitAll(transcripts, turn, TranscriptProjection.Projection.empty(turn.id, turn.prompt), undefined)
         const orphan = yield* Effect.result(sql`INSERT INTO rika_turns
           (id, thread_id, prompt, status, created_at, updated_at)
           VALUES ('orphan', 'missing-thread', 'orphan', 'accepted', 3, 3)`)
@@ -1318,7 +1322,7 @@ test("malformed SQLite product rows fail through typed repositories", () => {
           prompt: "persist",
           now: 2,
         })
-        yield* commitAll(transcripts, turn, Transcript.empty(turn.id, turn.prompt), undefined)
+        yield* commitAll(transcripts, turn, TranscriptProjection.Projection.empty(turn.id, turn.prompt), undefined)
         yield* sql`UPDATE rika_threads SET labels_json = 'not-json' WHERE id = ${id}`
         expect(yield* Effect.result(threads.get(id))).toMatchObject({
           _tag: "Failure",
@@ -1326,7 +1330,7 @@ test("malformed SQLite product rows fail through typed repositories", () => {
         })
         yield* sql`INSERT INTO rika_transcript_units
           (turn_id, unit_key, execution_key, thread_id, unit_order_key, revision, unit_json, created_at, updated_at)
-          VALUES (${turn.id}, 'malformed-unit', ${Transcript.executionKey(turn.id)}, ${id}, 'malformed-order', 1, 'not-json', 2, 2)`
+          VALUES (${turn.id}, 'malformed-unit', ${TranscriptCorrelation.executionKey(turn.id)}, ${id}, 'malformed-order', 1, 'not-json', 2, 2)`
         expect(yield* Effect.result(transcripts.get(turn.id))).toMatchObject({
           _tag: "Failure",
           failure: { _tag: "TranscriptRepositoryError" },

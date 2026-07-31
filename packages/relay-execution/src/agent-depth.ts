@@ -1,4 +1,4 @@
-import { AgentTools } from "@rika/coding-tools/coding-tool-catalog"
+import * as AgentTools from "@rika/coding-tools/agent-tool-contract"
 import { Function } from "effect"
 
 export const decodeParentExecutionId = (value: string) => {

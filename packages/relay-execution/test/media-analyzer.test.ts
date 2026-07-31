@@ -1,5 +1,5 @@
 import { TestModel } from "@batonfx/test"
-import { MediaView } from "@rika/coding-tools/coding-tool-catalog"
+import * as MediaView from "@rika/coding-tools/media-view-service"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import { AiError } from "effect/unstable/ai"

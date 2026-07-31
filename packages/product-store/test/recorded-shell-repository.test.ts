@@ -1,5 +1,5 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as Transcript from "@rika/transcript/transcript-unit"
+import * as TranscriptRecordedShell from "@rika/transcript/recorded-shell-presentation"
 import { expect, it } from "@effect/vitest"
 import { Effect, FileSystem } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
@@ -43,7 +43,7 @@ const exercise = Effect.fn("RecordedShellRepositoryTest.exercise")(function* (
 
   const initialTurn = running("recorded-shell-turn")
   const initial = yield* transcripts.createRecordedShell(initialTurn, projectionVersion)
-  const expectedRunning = Transcript.recordedShellProjection({
+  const expectedRunning = TranscriptRecordedShell.recordedShellProjection({
     id: initialTurn.id,
     command: initialTurn.command,
     status: "running",
@@ -93,7 +93,7 @@ const exercise = Effect.fn("RecordedShellRepositoryTest.exercise")(function* (
   const settled = yield* transcripts.settleRecordedShell(initialTurn, completedTurn, 0, projectionVersion)
   expect(settled._tag).toBe("Committed")
   if (settled._tag !== "Committed") return yield* Effect.die("recorded shell settlement was stale")
-  const expectedTerminal = Transcript.settleRecordedShellProjection(expectedRunning, completedTurn)
+  const expectedTerminal = TranscriptRecordedShell.settleRecordedShellProjection(expectedRunning, completedTurn)
   expect(settled.projection).toMatchObject({
     turn: completedTurn,
     units: expectedTerminal.units,
@@ -132,8 +132,12 @@ const exercise = Effect.fn("RecordedShellRepositoryTest.exercise")(function* (
     id: Turn.TurnId.make("recorded-shell-copy"),
   }
   const copied = yield* transcripts.copyRecordedShell(copiedTurn, projectionVersion)
-  const expectedCopy = Transcript.settleRecordedShellProjection(
-    Transcript.recordedShellProjection({ id: copiedTurn.id, command: copiedTurn.command, status: "running" }),
+  const expectedCopy = TranscriptRecordedShell.settleRecordedShellProjection(
+    TranscriptRecordedShell.recordedShellProjection({
+      id: copiedTurn.id,
+      command: copiedTurn.command,
+      status: "running",
+    }),
     copiedTurn,
   )
   expect(copied).toMatchObject({

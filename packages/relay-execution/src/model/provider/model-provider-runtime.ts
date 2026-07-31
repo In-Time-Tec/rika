@@ -1,4 +1,10 @@
-import { ConfigContract, Models } from "@rika/configuration/configuration-settings"
+import * as BehaviorMode from "@rika/configuration/behavior-mode"
+import * as ModelRoute from "@rika/configuration/model-route"
+import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
+import * as SettingsDefaults from "@rika/configuration/configuration-settings"
+import * as ConfigurationService from "@rika/configuration/configuration-service"
+import * as SettingsDecoder from "@rika/configuration/configuration-settings"
+import * as ConfigurationSettingsInput from "@rika/configuration/configuration-settings"
 interface RuntimeModelRoute {
   readonly role:
     | "main"
@@ -112,12 +118,12 @@ interface Resolution {
 
 interface Adapter {
   readonly id: string
-  readonly matchesConfigured: (route: ConfigContract.ResolvedModelRoute, account?: Account) => boolean
+  readonly matchesConfigured: (route: ModelRouteResolution.ResolvedModelRoute, account?: Account) => boolean
   readonly matchesPinned: (route: RuntimeModelRoute) => boolean
-  readonly resolve: (route: ConfigContract.ResolvedModelRoute, account?: Account) => ProviderRuntimePin
-  readonly options: (route: ConfigContract.ResolvedModelRoute) => Readonly<Record<string, unknown>>
+  readonly resolve: (route: ModelRouteResolution.ResolvedModelRoute, account?: Account) => ProviderRuntimePin
+  readonly options: (route: ModelRouteResolution.ResolvedModelRoute) => Readonly<Record<string, unknown>>
   readonly register: (
-    route: ConfigContract.ResolvedModelRoute,
+    route: ModelRouteResolution.ResolvedModelRoute,
     resolution: Resolution,
     account?: Account,
   ) => Effect.Effect<ModelRegistry.Registration, RuntimeError, Scope.Scope>
@@ -139,11 +145,11 @@ export const normalizedBaseUrl = (value: string) => {
   return url.toString().replace(/\/(?=\?|$)/, "")
 }
 
-export const isNativeOpenAiRoute = (route: ConfigContract.ResolvedModelRoute) =>
+export const isNativeOpenAiRoute = (route: ModelRouteResolution.ResolvedModelRoute) =>
   route.providerId === "openai" &&
   route.providerConnection.protocol === "openai" &&
   normalizedBaseUrl(route.providerConnection.baseUrl!) ===
-    normalizedBaseUrl(ConfigContract.defaults.providers.openai!.baseUrl!)
+    normalizedBaseUrl(SettingsDefaults.Defaults.defaults.providers.openai!.baseUrl!)
 
 const canonical = (value: unknown): string => {
   if (value === null || typeof value !== "object") return JSON.stringify(value)
@@ -250,14 +256,14 @@ const streamingOnlyRegistration =
   (registration: ModelRegistry.Registration): ModelRegistry.Registration =>
     streamingOnly ? withStreamingOnlyModel(registration) : registration
 
-export const routeAcceptsPromptCacheRetention = (route: ConfigContract.ResolvedModelRoute): boolean =>
+export const routeAcceptsPromptCacheRetention = (route: ModelRouteResolution.ResolvedModelRoute): boolean =>
   route.providerConnection.promptCaching ?? isNativeOpenAiRoute(route)
 
-const routeStreamingOnly = (route: ConfigContract.ResolvedModelRoute): boolean =>
+const routeStreamingOnly = (route: ModelRouteResolution.ResolvedModelRoute): boolean =>
   route.providerConnection.protocol !== "amazon-bedrock" &&
-  (route.providerConnection.streamingOnly ?? ConfigContract.isStreamingOnlyBaseUrl(route.providerConnection.baseUrl))
+  (route.providerConnection.streamingOnly ?? ModelRoute.isStreamingOnlyBaseUrl(route.providerConnection.baseUrl))
 
-const bedrockOptions = (route: ConfigContract.ResolvedModelRoute) => {
+const bedrockOptions = (route: ModelRouteResolution.ResolvedModelRoute) => {
   const {
     output_config,
     additionalModelRequestFields,
@@ -281,13 +287,13 @@ const bedrockOptions = (route: ConfigContract.ResolvedModelRoute) => {
   }
 }
 
-const authRefreshFingerprint = (command: ConfigContract.BedrockAuthRefresh) =>
+const authRefreshFingerprint = (command: ModelRoute.ModelRoute.BedrockAuthRefresh) =>
   `sha256:${createHash("sha256")
     .update(canonical([command.command, ...command.args]))
     .digest("hex")}`
 
 const registerBedrock = (
-  route: ConfigContract.ResolvedModelRoute,
+  route: ModelRouteResolution.ResolvedModelRoute,
   resolution: Resolution,
   recovery?: AmazonBedrock.Recovery,
 ) => {
@@ -313,7 +319,7 @@ const registerBedrock = (
   ).pipe(Effect.mapError(() => RuntimeError.make({ message: "Amazon Bedrock provider registration failed" })))
 }
 
-const registerOpenAi = (route: ConfigContract.ResolvedModelRoute, resolution: Resolution) =>
+const registerOpenAi = (route: ModelRouteResolution.ResolvedModelRoute, resolution: Resolution) =>
   credential(route.providerConnection.apiKeyEnv, route.providerId).pipe(
     Effect.flatMap((apiKey) =>
       provideScoped(
@@ -334,7 +340,7 @@ const registerOpenAi = (route: ConfigContract.ResolvedModelRoute, resolution: Re
     ),
   )
 
-const registerAnthropic = (route: ConfigContract.ResolvedModelRoute, resolution: Resolution) =>
+const registerAnthropic = (route: ModelRouteResolution.ResolvedModelRoute, resolution: Resolution) =>
   credential(route.providerConnection.apiKeyEnv, route.providerId).pipe(
     Effect.flatMap((apiKey) =>
       provideScoped(
@@ -363,12 +369,12 @@ const unavailableRestore = (route: RuntimeModelRoute) =>
 const configuredFromPin = (
   route: RuntimeModelRoute,
   runtime: ProviderRuntimePin,
-): ConfigContract.ResolvedModelRoute => ({
+): ModelRouteResolution.ResolvedModelRoute => ({
   alias: route.alias,
   displayName: route.alias,
-  effort: route.effort as ConfigContract.Effort,
+  effort: route.effort as ModelRoute.ModelRoute.Effort,
   fast: route.fast,
-  providerId: route.provider as ConfigContract.ProviderId,
+  providerId: route.provider as ModelRoute.ModelRoute.ProviderId,
   providerConnection:
     route.providerProtocol === "amazon-bedrock"
       ? {
@@ -458,7 +464,8 @@ const adapters = (
       runtime.credentialIdentity === undefined ||
       route.provider !== "openai" ||
       route.providerProtocol !== "openai" ||
-      normalizedBaseUrl(route.providerBaseUrl) !== normalizedBaseUrl(ConfigContract.defaults.providers.openai!.baseUrl!)
+      normalizedBaseUrl(route.providerBaseUrl) !==
+        normalizedBaseUrl(SettingsDefaults.Defaults.defaults.providers.openai!.baseUrl!)
         ? unavailableRestore(route)
         : provideScoped(
             ModelRegistry.registrations().pipe(Effect.map((items) => withStreamingOnlyModel(items[0]!))),
@@ -552,12 +559,12 @@ const accountStatus = (auth: OpenAiAuth.ServiceInterface) =>
   )
 
 export interface PreparedRoutes {
-  readonly routes: ReadonlyArray<ConfigContract.ResolvedModelRoute>
+  readonly routes: ReadonlyArray<ModelRouteResolution.ResolvedModelRoute>
   readonly plans: ReadonlyArray<ReturnType<typeof plan>>
   readonly registrations: ReadonlyArray<ModelRegistry.Registration>
 }
 
-const plan = (route: ConfigContract.ResolvedModelRoute, adapter: Adapter, account?: Account) => {
+const plan = (route: ModelRouteResolution.ResolvedModelRoute, adapter: Adapter, account?: Account) => {
   const runtime = adapter.resolve(route, account)
   const options = adapter.options(route)
   const registrationKey = `sha256:${createHash("sha256")
@@ -582,9 +589,10 @@ const plan = (route: ConfigContract.ResolvedModelRoute, adapter: Adapter, accoun
     registrationKey,
     selection: { provider: route.providerId, model: route.model, registrationKey },
     compaction: {
-      contextWindow: route.compaction.contextWindow ?? Models.defaultCompaction.contextWindow,
-      reserveTokens: route.compaction.reserveTokens ?? Models.defaultCompaction.reserveTokens,
-      keepRecentTokens: route.compaction.keepRecentTokens ?? Models.defaultCompaction.keepRecentTokens,
+      contextWindow: route.compaction.contextWindow ?? SettingsDefaults.Defaults.defaultCompaction.contextWindow,
+      reserveTokens: route.compaction.reserveTokens ?? SettingsDefaults.Defaults.defaultCompaction.reserveTokens,
+      keepRecentTokens:
+        route.compaction.keepRecentTokens ?? SettingsDefaults.Defaults.defaultCompaction.keepRecentTokens,
     } satisfies Compaction.DefaultOptions,
     runtime,
     providerRuntime: runtime,
@@ -592,7 +600,7 @@ const plan = (route: ConfigContract.ResolvedModelRoute, adapter: Adapter, accoun
   }
 }
 
-const purePlan = (route: ConfigContract.ResolvedModelRoute, fingerprint?: string) => {
+const purePlan = (route: ModelRouteResolution.ResolvedModelRoute, fingerprint?: string) => {
   const available = adapters({} as OpenAiAuth.ServiceInterface)
   const adapter =
     fingerprint !== undefined && isNativeOpenAiRoute(route)
@@ -606,27 +614,27 @@ const purePlan = (route: ConfigContract.ResolvedModelRoute, fingerprint?: string
 }
 
 export const modelRoutePlan = Function.dual((args) => typeof args[0] === "object", purePlan) as {
-  (route: ConfigContract.ResolvedModelRoute, fingerprint?: string): ReturnType<typeof plan>
-  (fingerprint?: string): (route: ConfigContract.ResolvedModelRoute) => ReturnType<typeof plan>
+  (route: ModelRouteResolution.ResolvedModelRoute, fingerprint?: string): ReturnType<typeof plan>
+  (fingerprint?: string): (route: ModelRouteResolution.ResolvedModelRoute) => ReturnType<typeof plan>
 }
 export const providerRuntimePin = Function.dual(
   (args) => typeof args[0] === "object",
-  (route: ConfigContract.ResolvedModelRoute, fingerprint?: string) => purePlan(route, fingerprint).runtime,
+  (route: ModelRouteResolution.ResolvedModelRoute, fingerprint?: string) => purePlan(route, fingerprint).runtime,
 ) as {
-  (route: ConfigContract.ResolvedModelRoute, fingerprint?: string): ProviderRuntimePin
-  (fingerprint?: string): (route: ConfigContract.ResolvedModelRoute) => ProviderRuntimePin
+  (route: ModelRouteResolution.ResolvedModelRoute, fingerprint?: string): ProviderRuntimePin
+  (fingerprint?: string): (route: ModelRouteResolution.ResolvedModelRoute) => ProviderRuntimePin
 }
 export const requestOptions = Function.dual(
   (args) => typeof args[0] === "object",
-  (route: ConfigContract.ResolvedModelRoute, fingerprint?: string) => purePlan(route, fingerprint).options,
+  (route: ModelRouteResolution.ResolvedModelRoute, fingerprint?: string) => purePlan(route, fingerprint).options,
 ) as {
-  (route: ConfigContract.ResolvedModelRoute, fingerprint?: string): Readonly<Record<string, unknown>>
-  (fingerprint?: string): (route: ConfigContract.ResolvedModelRoute) => Readonly<Record<string, unknown>>
+  (route: ModelRouteResolution.ResolvedModelRoute, fingerprint?: string): Readonly<Record<string, unknown>>
+  (fingerprint?: string): (route: ModelRouteResolution.ResolvedModelRoute) => Readonly<Record<string, unknown>>
 }
 
 export interface ServiceInterface {
   readonly prepare: (
-    routes: ReadonlyArray<ConfigContract.ResolvedModelRoute>,
+    routes: ReadonlyArray<ModelRouteResolution.ResolvedModelRoute>,
   ) => Effect.Effect<PreparedRoutes, RuntimeError>
   readonly restore: (
     routes: ReadonlyArray<RuntimeModelRoute>,
@@ -644,9 +652,9 @@ export class Service extends Context.Service<Service, ServiceInterface>()(
       const auth = yield* OpenAiAuth.Service
       const authRefresh = yield* BedrockAuthRefresh.Service
       const scope = yield* Effect.scope
-      const trustedRefreshCommands = new Map<string, ConfigContract.BedrockAuthRefresh>()
+      const trustedRefreshCommands = new Map<string, ModelRoute.ModelRoute.BedrockAuthRefresh>()
       const refreshes = yield* Ref.make(new Map<string, Deferred.Deferred<void, BedrockAuthRefresh.Failure>>())
-      const refresh = (fingerprint: string, command: ConfigContract.BedrockAuthRefresh) =>
+      const refresh = (fingerprint: string, command: ModelRoute.ModelRoute.BedrockAuthRefresh) =>
         Effect.gen(function* () {
           const deferred = yield* Deferred.make<void, BedrockAuthRefresh.Failure>()
           const current = yield* Ref.modify(refreshes, (entries) => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
-import { ReadWebPage } from "@rika/coding-tools/coding-tool-catalog"
+import * as ReadWebPage from "@rika/coding-tools/read-web-page-service"
 import { provide } from "./test-layer"
 
 const response = (request: HttpClientRequest.HttpClientRequest, body: unknown, status = 200) =>

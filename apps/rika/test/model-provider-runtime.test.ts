@@ -1,12 +1,18 @@
+import * as BehaviorMode from "@rika/configuration/behavior-mode"
+import * as ModelRoute from "@rika/configuration/model-route"
+import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
+import * as SettingsDefaults from "@rika/configuration/configuration-settings"
+import * as ConfigurationService from "@rika/configuration/configuration-service"
+import * as SettingsDecoder from "@rika/configuration/configuration-settings"
+import * as ConfigurationSettingsInput from "@rika/configuration/configuration-settings"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { ModelRegistry } from "@rika/relay-execution/model-provider-runtime"
 import { expect, test } from "vitest"
 import { OpenAiAuth } from "@rika/product/product-operation"
-import { ConfigContract } from "@rika/configuration/configuration-settings"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import * as RelayExecutionBackend from "@rika/relay-execution/relay-execution-layer"
-import { Runtime as RikaToolRuntime } from "@rika/coding-tools/coding-tool-catalog"
+import * as RikaToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import { Database } from "bun:sqlite"
 import { Cause, ConfigProvider, Context, Effect, FileSystem, Layer, Redacted, Schema, Scope, Stream } from "effect"
 import { LanguageModel, Response as AiResponse } from "effect/unstable/ai"
@@ -60,10 +66,10 @@ const withRuntime = <A, E>(
     }),
   ).pipe(Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromUnknown(environment)))
 
-const openAiSettings = (baseUrl: string): ConfigContract.Settings => ({
-  ...ConfigContract.defaults,
+const openAiSettings = (baseUrl: string): SettingsDefaults.ConfigurationSettings => ({
+  ...SettingsDefaults.Defaults.defaults,
   providers: {
-    ...ConfigContract.defaults.providers,
+    ...SettingsDefaults.Defaults.defaults.providers,
     openai: { protocol: "openai", baseUrl },
   },
 })
@@ -88,15 +94,15 @@ test("prepares distinct registrations for every default model tuple and aligns e
       authService(),
       (runtime) =>
         Effect.gen(function* () {
-          const modes = Object.keys(ConfigContract.defaults.modes) as Array<ConfigContract.ModeId>
+          const modes = Object.keys(SettingsDefaults.Defaults.defaults.modes) as Array<BehaviorMode.ModeId>
           const efforts = ["low", "medium", "high", "xhigh", "max"] as const
           const variants = modes.flatMap((mode) =>
             efforts.flatMap((effort) => {
-              const configured = ConfigContract.defaults.modes[mode]
-              const settings: ConfigContract.Settings = {
-                ...ConfigContract.defaults,
+              const configured = SettingsDefaults.Defaults.defaults.modes[mode]
+              const settings: SettingsDefaults.ConfigurationSettings = {
+                ...SettingsDefaults.Defaults.defaults,
                 modes: {
-                  ...ConfigContract.defaults.modes,
+                  ...SettingsDefaults.Defaults.defaults.modes,
                   [mode]: {
                     main: { ...configured.main, effort },
                     oracle: { ...configured.oracle, effort },
@@ -135,10 +141,10 @@ test("sends configured reasoning effort and summary to custom OpenAI requests", 
         return Response.json({})
       }),
   })
-  const settings: ConfigContract.Settings = {
-    ...ConfigContract.defaults,
+  const settings: SettingsDefaults.ConfigurationSettings = {
+    ...SettingsDefaults.Defaults.defaults,
     providers: {
-      ...ConfigContract.defaults.providers,
+      ...SettingsDefaults.Defaults.defaults.providers,
       openai: { protocol: "openai", baseUrl: server.url.toString() },
     },
   }
@@ -146,7 +152,7 @@ test("sends configured reasoning effort and summary to custom OpenAI requests", 
     withRuntime(authService(), (runtime) =>
       Effect.gen(function* () {
         for (const mode of ["low", "medium", "high", "ultra"] as const) {
-          const prepared = yield* runtime.prepare([ConfigContract.resolveModelRoute(settings, mode, "main")])
+          const prepared = yield* runtime.prepare([ModelRouteResolution.resolveModelRoute(settings, mode, "main")])
           const context = yield* Layer.build(prepared.registrations[0]!.layer)
           yield* Effect.exit(LanguageModel.generateText({ prompt: mode }).pipe(Effect.provide(context)))
         }
@@ -211,7 +217,7 @@ test("assembles each fragmented OpenAI function call once and sends supported st
   return Effect.runPromise(
     withRuntime(authService(), (runtime) =>
       Effect.gen(function* () {
-        const route = ConfigContract.resolveModelRoute(openAiSettings(server.url.toString()), "medium", "main")
+        const route = ModelRouteResolution.resolveModelRoute(openAiSettings(server.url.toString()), "medium", "main")
         const prepared = yield* runtime.prepare([route])
         const context = yield* Layer.build(prepared.registrations[0]!.layer)
         const toolkitContext = yield* Layer.build(
@@ -264,7 +270,7 @@ test("rejects a malformed OpenAI terminal without completing a partial function 
   return Effect.runPromise(
     withRuntime(authService(), (runtime) =>
       Effect.gen(function* () {
-        const route = ConfigContract.resolveModelRoute(openAiSettings(server.url.toString()), "medium", "main")
+        const route = ModelRouteResolution.resolveModelRoute(openAiSettings(server.url.toString()), "medium", "main")
         const prepared = yield* runtime.prepare([route])
         const context = yield* Layer.build(prepared.registrations[0]!.layer)
         const toolkitContext = yield* Layer.build(
@@ -312,7 +318,7 @@ test("classifies a nested OpenAI Responses context error without exposing the Ef
       authService(),
       (runtime) =>
         Effect.gen(function* () {
-          const route = ConfigContract.resolveModelRoute(openAiSettings(server.url.toString()), "medium", "main")
+          const route = ModelRouteResolution.resolveModelRoute(openAiSettings(server.url.toString()), "medium", "main")
           const prepared = yield* runtime.prepare([route])
           const registration = prepared.registrations[0]!
           const context = yield* Layer.build(registration.layer)
@@ -352,7 +358,7 @@ test("compacts a restored durable session and replays a nested OpenAI Responses 
     message: "Your input exceeds the context window of this model. Please adjust your input and try again.",
     param: "input",
   }
-  const settings = ConfigContract.defaults
+  const settings = SettingsDefaults.Defaults.defaults
   return Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
@@ -363,7 +369,7 @@ test("compacts a restored durable session and replays a nested OpenAI Responses 
           yield* fileSystem.writeFileString(`${directory}/fixture.txt`, "durable overflow fixture")
           const providerContext = yield* Layer.build(runtimeLayer(authService()))
           const runtime = Context.get(providerContext, ModelProviderRuntime.Service)
-          const route = ConfigContract.resolveModelRoute(settings, "medium", "main")
+          const route = ModelRouteResolution.resolveModelRoute(settings, "medium", "main")
           const prepared = yield* runtime.prepare([route])
           const preparedRegistration = prepared.registrations[0]!
           const selection = ModelProviderRuntime.modelRoutePlan(route).selection
@@ -490,14 +496,14 @@ test("retains Anthropic registration behavior", () =>
       authService(),
       (runtime) =>
         Effect.gen(function* () {
-          const settings: ConfigContract.Settings = {
-            ...ConfigContract.defaults,
+          const settings: SettingsDefaults.ConfigurationSettings = {
+            ...SettingsDefaults.Defaults.defaults,
             modes: {
-              ...ConfigContract.defaults.modes,
-              low: { ...ConfigContract.defaults.modes.low, main: { alias: "fable", effort: "low" } },
+              ...SettingsDefaults.Defaults.defaults.modes,
+              low: { ...SettingsDefaults.Defaults.defaults.modes.low, main: { alias: "fable", effort: "low" } },
             },
           }
-          const route = ConfigContract.resolveModelRoute(settings, "low", "main")
+          const route = ModelRouteResolution.resolveModelRoute(settings, "low", "main")
           const prepared = yield* runtime.prepare([route])
           expect(prepared.registrations[0]).toMatchObject({
             provider: "anthropic",
@@ -514,10 +520,10 @@ test("registers Bedrock routes and pins only non-secret connection identity", ()
     withRuntime(authService(), (runtime) =>
       Effect.gen(function* () {
         const refresh = { command: "aws", args: ["sso", "login", "--profile", "engineering"] }
-        const settings: ConfigContract.Settings = {
-          ...ConfigContract.defaults,
+        const settings: SettingsDefaults.ConfigurationSettings = {
+          ...SettingsDefaults.Defaults.defaults,
           providers: {
-            ...ConfigContract.defaults.providers,
+            ...SettingsDefaults.Defaults.defaults.providers,
             bedrock: {
               protocol: "amazon-bedrock",
               region: "us-east-1",
@@ -527,19 +533,19 @@ test("registers Bedrock routes and pins only non-secret connection identity", ()
             },
           },
           models: {
-            ...ConfigContract.defaults.models,
+            ...SettingsDefaults.Defaults.defaults.models,
             "bedrock-fable": {
-              ...ConfigContract.defaults.models.fable!,
+              ...SettingsDefaults.Defaults.defaults.models.fable!,
               provider: "bedrock",
               candidates: ["us.anthropic.claude-sonnet-4-20250514-v1:0"],
             },
           },
           modes: {
-            ...ConfigContract.defaults.modes,
-            low: { ...ConfigContract.defaults.modes.low, main: { alias: "bedrock-fable", effort: "low" } },
+            ...SettingsDefaults.Defaults.defaults.modes,
+            low: { ...SettingsDefaults.Defaults.defaults.modes.low, main: { alias: "bedrock-fable", effort: "low" } },
           },
         }
-        const route = ConfigContract.resolveModelRoute(settings, "low", "main")
+        const route = ModelRouteResolution.resolveModelRoute(settings, "low", "main")
         const prepared = yield* runtime.prepare([route])
         expect(prepared.registrations[0]).toMatchObject({
           provider: "bedrock",
@@ -562,11 +568,11 @@ test("registers Bedrock routes and pins only non-secret connection identity", ()
   ))
 
 test("keys Bedrock registrations by connection and refresh identity without ambient credentials", () => {
-  const base = ConfigContract.resolveModelRoute(
+  const base = ModelRouteResolution.resolveModelRoute(
     {
-      ...ConfigContract.defaults,
+      ...SettingsDefaults.Defaults.defaults,
       providers: {
-        ...ConfigContract.defaults.providers,
+        ...SettingsDefaults.Defaults.defaults.providers,
         bedrock: {
           protocol: "amazon-bedrock",
           region: "us-east-1",
@@ -576,16 +582,16 @@ test("keys Bedrock registrations by connection and refresh identity without ambi
         },
       },
       models: {
-        ...ConfigContract.defaults.models,
+        ...SettingsDefaults.Defaults.defaults.models,
         "bedrock-fable": {
-          ...ConfigContract.defaults.models.fable!,
+          ...SettingsDefaults.Defaults.defaults.models.fable!,
           provider: "bedrock",
           candidates: ["model"],
         },
       },
       modes: {
-        ...ConfigContract.defaults.modes,
-        low: { ...ConfigContract.defaults.modes.low, main: { alias: "bedrock-fable", effort: "low" } },
+        ...SettingsDefaults.Defaults.defaults.modes,
+        low: { ...SettingsDefaults.Defaults.defaults.modes.low, main: { alias: "bedrock-fable", effort: "low" } },
       },
     },
     "low",
@@ -607,7 +613,7 @@ test("fails before registration when an API credential is missing without exposi
   Effect.runPromise(
     withRuntime(authService(), (runtime) =>
       Effect.gen(function* () {
-        const route = ConfigContract.resolveModelRoute(ConfigContract.defaults, "medium", "main")
+        const route = ModelRouteResolution.resolveModelRoute(SettingsDefaults.Defaults.defaults, "medium", "main")
         const exit = yield* Effect.exit(runtime.prepare([route]))
         expect(exit._tag).toBe("Failure")
         if (exit._tag === "Failure") {
@@ -624,7 +630,7 @@ test("uses a native OpenAI account without an API key and applies account reques
   Effect.runPromise(
     withRuntime(authService({ _tag: "Present", fingerprint: "account-a" }), (runtime) =>
       Effect.gen(function* () {
-        const routes = modelRoutesForExecution(ConfigContract.defaults, "medium")
+        const routes = modelRoutesForExecution(SettingsDefaults.Defaults.defaults, "medium")
         const prepared = yield* runtime.prepare(routes)
         expect(prepared.registrations.length).toBeGreaterThan(0)
         expect(prepared.plans[0]?.runtime).toEqual({ adapter: "openai-account", credentialIdentity: "account-a" })
@@ -638,13 +644,13 @@ test("uses a native OpenAI account without an API key and applies account reques
   ))
 
 test("pins provider runtime identity, roundtrips JSON, and normalizes old account pins", () => {
-  const route = ConfigContract.resolveModelRoute(ConfigContract.defaults, "medium", "main")
+  const route = ModelRouteResolution.resolveModelRoute(SettingsDefaults.Defaults.defaults, "medium", "main")
   const api = ModelProviderRuntime.modelRoutePlan(route)
   const account = ModelProviderRuntime.modelRoutePlan(route, "account-a")
   expect(api.runtime).toEqual({ adapter: "openai", credentialIdentity: "OPENAI_API_KEY" })
   expect(account.runtime).toEqual({ adapter: "openai-account", credentialIdentity: "account-a" })
   expect(account.registrationKey).not.toBe(api.registrationKey)
-  const pin = executionRoutePin(ConfigContract.defaults, "medium")
+  const pin = executionRoutePin(SettingsDefaults.Defaults.defaults, "medium")
   const encoded = Schema.decodeUnknownSync(Turn.ExecutionRoutePin)(JSON.parse(JSON.stringify(pin)))
   expect(encoded.main.providerConnection).toEqual(pin.main.providerConnection)
   expect(
@@ -665,16 +671,16 @@ test("custom OpenAI and Anthropic routes never evaluate corrupt account status",
       { ...authService(), status: Effect.fail(OpenAiAuth.StoreError.make({ kind: "corrupt", message: "hidden" })) },
       (runtime) =>
         Effect.gen(function* () {
-          const settings: ConfigContract.Settings = {
-            ...ConfigContract.defaults,
+          const settings: SettingsDefaults.ConfigurationSettings = {
+            ...SettingsDefaults.Defaults.defaults,
             providers: {
-              ...ConfigContract.defaults.providers,
+              ...SettingsDefaults.Defaults.defaults.providers,
               openai: { protocol: "openai", baseUrl: "https://models.example.test/v1" },
             },
           }
           const routes = [
-            ConfigContract.resolveModelRoute(settings, "medium", "main"),
-            ConfigContract.resolveModelRoute(settings, "low", "main"),
+            ModelRouteResolution.resolveModelRoute(settings, "medium", "main"),
+            ModelRouteResolution.resolveModelRoute(settings, "low", "main"),
           ]
           const prepared = yield* runtime.prepare(routes)
           expect(prepared.registrations).toHaveLength(2)
@@ -691,7 +697,7 @@ test("observes a login between prepare calls without rebuilding the runtime", ()
       auth,
       (runtime) =>
         Effect.gen(function* () {
-          const route = ConfigContract.resolveModelRoute(ConfigContract.defaults, "medium", "main")
+          const route = ModelRouteResolution.resolveModelRoute(SettingsDefaults.Defaults.defaults, "medium", "main")
           const first = yield* runtime.prepare([route])
           status = { _tag: "Present", fingerprint: "account-a" }
           const second = yield* runtime.prepare([route])
@@ -709,7 +715,7 @@ test("reuses one scoped registration across repeated prepare calls", () =>
       authService(),
       (runtime) =>
         Effect.gen(function* () {
-          const route = ConfigContract.resolveModelRoute(ConfigContract.defaults, "medium", "main")
+          const route = ModelRouteResolution.resolveModelRoute(SettingsDefaults.Defaults.defaults, "medium", "main")
           const first = yield* runtime.prepare([route])
           const second = yield* runtime.prepare([route])
           expect(second.registrations[0]).toBe(first.registrations[0])
@@ -723,7 +729,7 @@ test("fails a mismatched account fingerprint before a request", () =>
     withRuntime(authService({ _tag: "Present", fingerprint: "account-a" }, "account-b"), (runtime) =>
       Effect.gen(function* () {
         const prepared = yield* runtime.prepare([
-          ConfigContract.resolveModelRoute(ConfigContract.defaults, "medium", "main"),
+          ModelRouteResolution.resolveModelRoute(SettingsDefaults.Defaults.defaults, "medium", "main"),
         ])
         const context = yield* Layer.build(prepared.registrations[0]!.layer)
         const exit = yield* Effect.exit(
@@ -741,7 +747,7 @@ test("restores old API and account routes with their stored registration keys", 
       authService({ _tag: "Present", fingerprint: "account-a" }),
       (runtime) =>
         Effect.gen(function* () {
-          const base = executionRoutePin(ConfigContract.defaults, "medium").main
+          const base = executionRoutePin(SettingsDefaults.Defaults.defaults, "medium").main
           const oldBase = {
             ...base,
             provider: base.providerConnection.provider,

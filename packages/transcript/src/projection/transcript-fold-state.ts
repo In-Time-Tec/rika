@@ -20,7 +20,7 @@ interface ProjectionFold {
   readonly [ProjectionFoldType]: typeof ProjectionFoldType
 }
 
-interface UnitDelta {
+export interface UnitDelta {
   readonly upsert: ReadonlyArray<Unit>
   readonly remove: ReadonlyArray<string>
 }

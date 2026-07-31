@@ -1,9 +1,11 @@
-import { ExecutionId } from "@rika/coding-tools/coding-tool-catalog"
 import { Function } from "effect"
 import type { Presentation } from "../schema/transcript-presentation-model"
 import { decodeScopedIdentity } from "./transcript-unit-identity"
 
-export const executionKey = ExecutionId.executionKey
+export const executionKey = (value: string): string => value.replace(/^execution:/, "")
+
+const isExecutionNamespace = (value: string): boolean =>
+  value.startsWith("execution:") || value.startsWith("child:") || value.startsWith("workflow:")
 
 const durableToolCallPrefix = /^rika:([^:]+):/
 
@@ -12,7 +14,7 @@ export const providerCallId = (id: string): string => {
   if (match === null) return id
   try {
     const namespace = decodeURIComponent(match[1]!)
-    return ExecutionId.isExecutionNamespace(namespace) ? id.slice(match[0].length) : id
+    return isExecutionNamespace(namespace) ? id.slice(match[0].length) : id
   } catch {
     return id
   }

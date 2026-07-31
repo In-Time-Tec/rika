@@ -1,5 +1,5 @@
 import { Context, Effect, Layer, Ref, Schema } from "effect"
-import { ExecutionStatus } from "@rika/coding-tools/coding-tool-catalog"
+import * as ExecutionStatus from "./execution-status"
 import * as ThreadRepository from "./thread-repository"
 import { ThreadId } from "@rika/product/thread-record"
 import { EditTotals, RepairCandidate, ThreadSummary } from "@rika/product/thread-summary"

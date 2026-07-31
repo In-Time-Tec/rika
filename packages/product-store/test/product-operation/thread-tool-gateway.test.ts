@@ -5,7 +5,8 @@ import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Effect, Exit, Ref, Scope } from "effect"
-import type { ThreadTools, ToolInvocation } from "@rika/coding-tools/coding-tool-catalog"
+import * as ThreadTools from "@rika/coding-tools/thread-tool-contract"
+import * as ToolInvocation from "@rika/coding-tools/tool-invocation"
 import * as ThreadToolService from "@rika/product/thread-tool-service"
 
 const invocation: ToolInvocation.Value = {

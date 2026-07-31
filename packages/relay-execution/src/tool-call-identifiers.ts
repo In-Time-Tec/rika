@@ -1,4 +1,4 @@
-import { ExecutionId } from "@rika/coding-tools/coding-tool-catalog"
+import { ExecutionId } from "@rika/product/execution-identifier"
 import { Function } from "effect"
 import { Prompt, Response } from "effect/unstable/ai"
 

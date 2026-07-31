@@ -1,4 +1,10 @@
-import { ConfigContract, ConfigService } from "@rika/configuration/configuration-settings"
+import * as BehaviorMode from "@rika/configuration/behavior-mode"
+import * as ModelRoute from "@rika/configuration/model-route"
+import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
+import * as SettingsDefaults from "@rika/configuration/configuration-settings"
+import * as ConfigurationService from "@rika/configuration/configuration-service"
+import * as SettingsDecoder from "@rika/configuration/configuration-settings"
+import * as ConfigurationSettingsInput from "@rika/configuration/configuration-settings"
 import { Console, Context, Effect, Layer, Schema } from "effect"
 
 export class AdapterError extends Schema.TaggedErrorClass<AdapterError>()("ConfigOperationsAdapterError", {
@@ -29,10 +35,10 @@ export const run = Effect.fn("ConfigOperations.run")(function* (
     | { readonly _tag: "Doctor" },
   options: Options,
 ) {
-  const configService = yield* ConfigService.Service
+  const configService = yield* ConfigurationService.ConfigurationService
   const adapter = yield* Adapter
   const config = yield* configService.effective
-  const route = ConfigContract.resolveModelRoute(config.settings, "medium")
+  const route = ModelRouteResolution.resolveModelRoute(config.settings, "medium")
   const providers = Object.fromEntries(
     Object.entries(config.settings.providers).map(([id, provider]) => [
       id,

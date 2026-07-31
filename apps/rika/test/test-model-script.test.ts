@@ -1,3 +1,11 @@
+import * as BehaviorMode from "@rika/configuration/behavior-mode"
+import * as ModelRoute from "@rika/configuration/model-route"
+import * as ModelRouteLabel from "@rika/configuration/model-route-label"
+import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
+import * as SettingsDefaults from "@rika/configuration/configuration-settings"
+import * as ConfigurationService from "@rika/configuration/configuration-service"
+import * as SettingsDecoder from "@rika/configuration/configuration-settings"
+import * as ConfigurationSettingsInput from "@rika/configuration/configuration-settings"
 import { expect, test } from "vitest"
 import { LanguageModel } from "effect/unstable/ai"
 import type { ModelRegistry } from "@rika/relay-execution/model-provider-runtime"
@@ -5,7 +13,6 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { createTestRenderer } from "@opentui/core/testing"
 import { Cause, Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Redacted, Schema } from "effect"
 import { OpenAiAuth, Operation, ThreadToolService } from "@rika/product/product-operation"
-import { ConfigContract, ConfigService } from "@rika/configuration/configuration-settings"
 import * as Database from "@rika/product-store/product-database-layer"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as ThreadInteractionRepository from "@rika/product-store/sqlite-thread-interaction-repository"
@@ -40,7 +47,7 @@ import { bedrockAuthRefreshTestLayer } from "@rika/relay-execution/model-provide
 import { modelRoutePlan, Service as ModelProviderRuntime } from "@rika/relay-execution/model-provider-runtime"
 import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
 
-const distinctModelRoutes = (routes: ReadonlyArray<ConfigContract.ResolvedModelRoute>) =>
+const distinctModelRoutes = (routes: ReadonlyArray<ModelRouteResolution.ResolvedModelRoute>) =>
   routes.filter(
     (route, index, all) =>
       all.findIndex(
@@ -48,10 +55,10 @@ const distinctModelRoutes = (routes: ReadonlyArray<ConfigContract.ResolvedModelR
       ) === index,
   )
 
-const httpRoute = (route: ConfigContract.ResolvedModelRoute) => {
+const httpRoute = (route: ModelRouteResolution.ResolvedModelRoute) => {
   if (route.providerConnection.protocol === "amazon-bedrock") throw new Error("Expected an HTTP model route")
-  return route as ConfigContract.ResolvedModelRoute & {
-    readonly providerConnection: ConfigContract.HttpProviderConnection
+  return route as ModelRouteResolution.ResolvedModelRoute & {
+    readonly providerConnection: ModelRoute.ModelRoute.HttpProviderConnection
   }
 }
 
@@ -64,7 +71,7 @@ test("rejects web search provider IDs that are not installed", () =>
     }),
   ))
 
-const modelRouteDisplayLabel = (route: ConfigContract.ResolvedModelRoute) => {
+const modelRouteDisplayLabel = (route: ModelRouteResolution.ResolvedModelRoute) => {
   const [provider, version, ...name] = route.model.split("-")
   const modelName = name.map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`).join(" ")
   return `${provider?.toUpperCase()}-${version} ${modelName} ${route.effort}`
@@ -127,7 +134,7 @@ test("uses production compaction defaults and route overrides", () => {
 })
 
 test("content-addresses non-secret model execution semantics deterministically", () => {
-  const route = httpRoute(ConfigContract.resolveModelRoute(ConfigContract.defaults, "high", "oracle"))
+  const route = httpRoute(ModelRouteResolution.resolveModelRoute(SettingsDefaults.Defaults.defaults, "high", "oracle"))
   const key = modelRoutePlan(route).registrationKey
   expect(key).toMatch(/^sha256:[a-f0-9]{64}$/)
   expect(modelRoutePlan(route).registrationKey).toBe(key)
@@ -173,12 +180,12 @@ test("content-addresses non-secret model execution semantics deterministically",
   for (const changed of changes) expect(modelRoutePlan(changed).registrationKey).not.toBe(key)
   expect(JSON.stringify(modelRoutePlan(route))).not.toContain("API_KEY_VALUE")
   expect(modelRoutePlan(route).selection.registrationKey).toBe(key)
-  expect(executionRoutePin(ConfigContract.defaults, "high").oracle.providerOptions).toEqual(
+  expect(executionRoutePin(SettingsDefaults.Defaults.defaults, "high").oracle.providerOptions).toEqual(
     modelRoutePlan(route).options,
   )
-  expect(executionRoutePin(ConfigContract.defaults, "medium").tokenBudget).toBeUndefined()
+  expect(executionRoutePin(SettingsDefaults.Defaults.defaults, "medium").tokenBudget).toBeUndefined()
   const settings = {
-    ...ConfigContract.defaults,
+    ...SettingsDefaults.Defaults.defaults,
     compaction: { summaryModel: { alias: "terra", effort: "medium" as const } },
   }
   expect(executionRoutePin(settings, "medium").compactionSummary).toMatchObject({
@@ -192,16 +199,16 @@ test("pins GPT 5.6 routes to each mode's configured effort and selected fast tie
   const modes = ["low", "medium", "high", "ultra"] as const
   for (const mode of modes) {
     for (const fastMode of [false, true]) {
-      const route = executionRoutePin(ConfigContract.defaults, mode, { fastMode })
+      const route = executionRoutePin(SettingsDefaults.Defaults.defaults, mode, { fastMode })
       for (const selected of [route.main, route.oracle, route.title!]) {
         expect(selected.model).toMatch(/^gpt-5\.6-/)
         expect(selected.providerConnection.protocol).toBe("openai")
       }
       expect(route.main.providerOptions).toMatchObject({
-        reasoning: { effort: ConfigContract.defaults.modes[mode].main.effort },
+        reasoning: { effort: SettingsDefaults.Defaults.defaults.modes[mode].main.effort },
       })
       expect(route.oracle.providerOptions).toMatchObject({
-        reasoning: { effort: ConfigContract.defaults.modes[mode].oracle.effort },
+        reasoning: { effort: SettingsDefaults.Defaults.defaults.modes[mode].oracle.effort },
       })
       expect(route.main.providerOptions?.service_tier).toBe(fastMode ? "priority" : undefined)
       expect(route.oracle.providerOptions?.service_tier).toBe(fastMode ? "priority" : undefined)
@@ -219,12 +226,12 @@ test("pins GPT 5.6 routes to each mode's configured effort and selected fast tie
 })
 
 test("pins aliases, variants, candidates, specialists, titles, and summaries as one admission snapshot", () => {
-  const settings: ConfigContract.Settings = {
-    ...ConfigContract.defaults,
+  const settings: SettingsDefaults.ConfigurationSettings = {
+    ...SettingsDefaults.Defaults.defaults,
     providers: {
-      ...ConfigContract.defaults.providers,
+      ...SettingsDefaults.Defaults.defaults.providers,
       openai: {
-        ...ConfigContract.providerDefaults.openai,
+        ...SettingsDefaults.Defaults.providerDefaults.openai,
         baseUrl: "https://models.example.test/v1?tenant=admission",
         apiKeyEnv: "ADMISSION_API_KEY",
       },
@@ -269,12 +276,12 @@ test("pins aliases, variants, candidates, specialists, titles, and summaries as 
 test("fails an unavailable tuned route through the typed error channel", () =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const settings: ConfigContract.Settings = {
-        ...ConfigContract.defaults,
+      const settings: SettingsDefaults.ConfigurationSettings = {
+        ...SettingsDefaults.Defaults.defaults,
         modes: {
-          ...ConfigContract.defaults.modes,
+          ...SettingsDefaults.Defaults.defaults.modes,
           low: {
-            ...ConfigContract.defaults.modes.low,
+            ...SettingsDefaults.Defaults.defaults.modes.low,
             main: { alias: "fable", effort: "low" },
           },
         },
@@ -299,12 +306,12 @@ test("surfaces an unavailable tuned route as an interactive execution failure", 
         const sessions = yield* Deferred.make<Operation.InteractiveSession>()
         const release = yield* Deferred.make<void>()
         const events = new Array<Operation.InteractiveEvent>()
-        const settings: ConfigContract.Settings = {
-          ...ConfigContract.defaults,
+        const settings: SettingsDefaults.ConfigurationSettings = {
+          ...SettingsDefaults.Defaults.defaults,
           modes: {
-            ...ConfigContract.defaults.modes,
+            ...SettingsDefaults.Defaults.defaults.modes,
             low: {
-              ...ConfigContract.defaults.modes.low,
+              ...SettingsDefaults.Defaults.defaults.modes.low,
               main: { alias: "fable", effort: "low" },
             },
           },
@@ -356,7 +363,7 @@ test("renders every default mode route in the mode picker", () =>
   Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const modes = Object.keys(ConfigContract.defaults.modes) as Array<ConfigContract.ModeId>
+        const modes = Object.keys(SettingsDefaults.Defaults.defaults.modes) as Array<BehaviorMode.ModeId>
         const setup = yield* Effect.acquireRelease(
           Effect.tryPromise(() => createTestRenderer({ width: 80, height: 24 })),
           (value) => Effect.sync(() => value.renderer.destroy()),
@@ -376,10 +383,10 @@ test("renders every default mode route in the mode picker", () =>
           yield* Effect.tryPromise(() => setup.renderOnce())
           const frame = setup.captureCharFrame()
           expect(frame).toContain(
-            `Oracle: ${modelRouteDisplayLabel(ConfigContract.resolveModelRoute(ConfigContract.defaults, mode, "oracle"))}`,
+            `Oracle: ${modelRouteDisplayLabel(ModelRouteResolution.resolveModelRoute(SettingsDefaults.Defaults.defaults, mode, "oracle"))}`,
           )
           expect(frame).toContain(
-            `Agent:  ${modelRouteDisplayLabel(ConfigContract.resolveModelRoute(ConfigContract.defaults, mode, "main"))}`,
+            `Agent:  ${modelRouteDisplayLabel(ModelRouteResolution.resolveModelRoute(SettingsDefaults.Defaults.defaults, mode, "main"))}`,
           )
         }
       }),
@@ -387,7 +394,7 @@ test("renders every default mode route in the mode picker", () =>
   ))
 
 test("keeps registrations distinct by the exact Baton registry tuple", () => {
-  const route = ConfigContract.resolveModelRoute(ConfigContract.defaults, "high", "oracle")
+  const route = ModelRouteResolution.resolveModelRoute(SettingsDefaults.Defaults.defaults, "high", "oracle")
   const second = { ...route, fast: true }
   expect(modelRoutePlan(second).registrationKey).not.toBe(modelRoutePlan(route).registrationKey)
   expect(distinctModelRoutes([route, second, route])).toEqual([route, second])
@@ -443,7 +450,7 @@ test("isolates a stale persisted route while healthy routes keep starting", () =
   Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const route = executionRoutePin(ConfigContract.defaults, "medium")
+        const route = executionRoutePin(SettingsDefaults.Defaults.defaults, "medium")
         const healthy = route.main
         const stale = {
           ...route.main,
@@ -522,13 +529,13 @@ test("builds the configured backend with duplicate persisted routes and one unav
           const productDatabaseLayer = Layer.succeedContext(productDatabaseContext)
           const repositoryLayer = ThreadRepository.layer.pipe(Layer.provide(productDatabaseLayer))
           const turnRepositoryLayer = TurnRepository.layer.pipe(Layer.provide(productDatabaseLayer))
-          const settings: ConfigContract.Settings = {
-            ...ConfigContract.defaults,
+          const settings: SettingsDefaults.ConfigurationSettings = {
+            ...SettingsDefaults.Defaults.defaults,
             providers: {
-              ...ConfigContract.defaults.providers,
+              ...SettingsDefaults.Defaults.defaults.providers,
               openai: {
                 protocol: "openai",
-                baseUrl: ConfigContract.providerDefaults.openai.baseUrl,
+                baseUrl: SettingsDefaults.Defaults.providerDefaults.openai.baseUrl,
               },
             },
           }
@@ -608,7 +615,7 @@ test("builds the configured backend with duplicate persisted routes and one unav
 test("resolves a legacy unavailable route to the current default when it starts", () =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const current = executionRoutePin(ConfigContract.defaults, "medium")
+      const current = executionRoutePin(SettingsDefaults.Defaults.defaults, "medium")
       const legacyModel = {
         ...current.main,
         role: "main" as const,
@@ -652,7 +659,7 @@ test("resolves a legacy unavailable route to the current default when it starts"
 test("re-registers a cloned active route when interrupt-and-send starts it", () =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const cloned = executionRoutePin(ConfigContract.defaults, "high")
+      const cloned = executionRoutePin(SettingsDefaults.Defaults.defaults, "high")
       const starts = new Array<ExecutionBackend.StartInput>()
       const registrations = new Array<string>()
       const isolated = yield* withPinnedRouteRegistration(recordingBackend(starts, registrations), {
@@ -677,7 +684,7 @@ test("re-registers a cloned active route when interrupt-and-send starts it", () 
   ))
 
 test("restores every pinned role from a nonterminal turn into the restart registration set", () => {
-  const route = executionRoutePin(ConfigContract.defaults, "high")
+  const route = executionRoutePin(SettingsDefaults.Defaults.defaults, "high")
   const owner: Turn.AgentExecutionTurn = {
     _tag: "AgentExecution",
     id: Turn.TurnId.make("review-owner"),
@@ -738,7 +745,7 @@ test("loads title model pins from completed turn rows for restart registration",
             ),
             yield* Effect.scope,
           )
-          const route = executionRoutePin(ConfigContract.defaults, "medium")
+          const route = executionRoutePin(SettingsDefaults.Defaults.defaults, "medium")
           yield* Effect.gen(function* () {
             const threads = yield* ThreadRepository.Service
             const turns = yield* TurnRepository.Service
@@ -790,7 +797,7 @@ test("uses the owning thread workspace for durable title executions", () =>
           id: Turn.TurnId.make("title-workspace-turn"),
           threadId: thread.id,
           prompt: "title me",
-          executionRoute: executionRoutePin(ConfigContract.defaults, "medium"),
+          executionRoute: executionRoutePin(SettingsDefaults.Defaults.defaults, "medium"),
           queueCapacity: 128,
           now: 1,
         })
@@ -887,7 +894,7 @@ test("renders configured model display names in the mode picker", () =>
       Effect.gen(function* () {
         const config = yield* Effect.scopedWith((scope) =>
           Layer.buildWithScope(
-            ConfigService.memoryLayer({
+            ConfigurationService.memoryConfigurationLayer({
               global: {
                 modelAliases: {
                   "gate-sonnet": {
@@ -909,7 +916,9 @@ test("renders configured model display names in the mode picker", () =>
               },
             }),
             scope,
-          ).pipe(Effect.flatMap((context) => ConfigService.effective().pipe(Effect.provide(context)))),
+          ).pipe(
+            Effect.flatMap((context) => ConfigurationService.effectiveConfiguration().pipe(Effect.provide(context))),
+          ),
         )
         const settings = config.settings
         const setup = yield* Effect.acquireRelease(
@@ -925,7 +934,7 @@ test("renders configured model display names in the mode picker", () =>
         surface.update({
           ...ViewState.withModeRoutes(
             ViewState.initial("/workspace", "high"),
-            ConfigContract.modeRouteLabels(settings) as ViewState.ModeRoutes,
+            ModelRouteLabel.modeRouteLabels(settings) as ViewState.ModeRoutes,
           ),
           modePicker: { open: true, selected: 2 },
         })
