@@ -43,7 +43,7 @@ export const makeFanOutHost = (context: {
     LayerOptions,
     "selection" | "oracleSelection" | "compaction" | "oracleCompaction" | "compactionSummarySelection"
   >
-  readonly fanOutAgentId: typeof import("../relay-execution-adapter").fanOutAgentId
+  readonly fanOutAgentId: typeof import("../relay-execution-input").fanOutAgentId
   readonly addressId: Ids.AddressId
   readonly parentPermissions: typeof parentPermissions
   readonly toolExecutionPolicy: { readonly concurrency: "unbounded" }
