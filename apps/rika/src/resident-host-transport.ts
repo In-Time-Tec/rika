@@ -504,9 +504,9 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
         ? operation.authorizeResidentReplacement.pipe(Effect.map((disposition) => disposition === "defer"))
         : (operation.hasActiveExecutionWork ?? Effect.succeed(true)),
     ),
-    Effect.catch((error) =>
+    Effect.catch(() =>
       Effect.logError("resident.replacement.status_failed").pipe(
-        Effect.annotateLogs("rika.failure.kind", String(error)),
+        Effect.annotateLogs("rika.failure.kind", "ResidentReplacementStatusFailure"),
         Effect.as(true),
       ),
     ),
@@ -529,9 +529,9 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               ),
             ),
       ),
-      Effect.catch((error) =>
+      Effect.catch(() =>
         Effect.logError("resident.abandonment.cancel_failed").pipe(
-          Effect.annotateLogs("rika.failure.kind", String(error)),
+          Effect.annotateLogs("rika.failure.kind", "ResidentAbandonmentCancelFailure"),
         ),
       ),
     )

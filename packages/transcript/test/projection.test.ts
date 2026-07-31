@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import {
   applyEvent,
+  applyFoldEvent,
   childOrder,
   childParentMatch,
   empty,
@@ -8,8 +9,10 @@ import {
   hasRunningBlocks,
   identityKey,
   project,
+  restoreProjectionFold,
   settleChild,
   settleRunning,
+  snapshotFoldProjection,
   unitOrder,
   withNestedProjections,
   type SourceEvent,
@@ -29,6 +32,16 @@ const usage = (cursor: string, sequence: number): SourceEvent => ({
     input_tokens_cache_write: 0,
     output_tokens: 0,
   },
+})
+
+const retryNotice = (sequence: number, childExecutionId?: string): SourceEvent => ({
+  executionId: "execution:turn-a",
+  ...(childExecutionId === undefined ? {} : { childExecutionId }),
+  cursor: `retry-${sequence}`,
+  sequence,
+  type: "model.retry.scheduled",
+  createdAt: sequence,
+  data: { model_call_id: "shared-call", category: "overloaded", reason: "provider-resilience" },
 })
 
 describe("Transcript projection", () => {
@@ -1934,6 +1947,7 @@ describe("Transcript projection", () => {
       data: { model_call_id: "call-a", category: "truncated-stream", classification: "terminal" },
     }
     const retry: SourceEvent = {
+      executionId: "execution:turn-a",
       cursor: "retry",
       sequence: 6,
       type: "model.retry.scheduled",
@@ -1954,7 +1968,7 @@ describe("Transcript projection", () => {
       (unit) => unit.content._tag === "Block" && unit.content.block._tag === "Notification",
     )
     expect(notices).toHaveLength(1)
-    expect(notices[0]?.key).toBe("model-retry:turn-a:call-a")
+    expect(notices[0]?.key).toBe("model-retry:execution%3Aturn-a:call-a")
     expect(notices[0]?.content).toEqual({
       _tag: "Block",
       block: {
@@ -1963,6 +1977,75 @@ describe("Transcript projection", () => {
         detail: "The model call failed before any output was shown. Rika is retrying the call.",
       },
     })
+  })
+
+  it("keys retry notices by the emitting execution when root and child call ids collide", () => {
+    const projection = [retryNotice(1), retryNotice(2, "child:execution%3Aturn-a:shared")].reduce(
+      (current, event) => applyEvent(current, event),
+      empty("turn-a", "prompt"),
+    )
+    const notices = projection.units.filter((unit) => unit.key.startsWith("model-retry:"))
+
+    expect(notices.map((unit) => unit.key)).toEqual([
+      "model-retry:execution%3Aturn-a:shared-call",
+      "model-retry:child%3Aexecution%253Aturn-a%3Ashared:shared-call",
+    ])
+  })
+
+  it("uses truthful timeout and invalid-tool-correction retry wording", () => {
+    const projection = [
+      {
+        cursor: "timeout",
+        sequence: 1,
+        type: "model.retry.scheduled",
+        createdAt: 1,
+        data: { model_call_id: "timeout-call", category: "timeout", reason: "provider-resilience" },
+      },
+      {
+        cursor: "correction",
+        sequence: 2,
+        type: "model.retry.scheduled",
+        createdAt: 2,
+        data: {
+          model_call_id: "correction-call",
+          category: "invalid-input",
+          reason: "invalid-tool-call-correction",
+        },
+      },
+    ].reduce((current, event) => applyEvent(current, event), empty("turn-a", "prompt"))
+    const notices = projection.units.flatMap((unit) =>
+      unit.content._tag === "Block" && unit.content.block._tag === "Notification" ? [unit.content.block] : [],
+    )
+
+    expect(notices).toEqual([
+      {
+        _tag: "Notification",
+        title: "Model response timed out",
+        detail: "The model stopped responding before the configured deadline. Rika is retrying the call.",
+      },
+      {
+        _tag: "Notification",
+        title: "Correcting model tool call",
+        detail: "The model produced an invalid tool call. Rika is asking it to correct the call.",
+      },
+    ])
+  })
+
+  it("drops and diagnoses retry telemetry without a model call id", () => {
+    const dropped: Array<string> = []
+    const retained = restoreProjectionFold(empty("turn-a", "prompt"), {
+      observer: { eventDropped: (event, reason) => dropped.push(`${event.cursor}:${reason}`) },
+    })
+    applyFoldEvent(retained, {
+      cursor: "malformed-retry",
+      sequence: 1,
+      type: "model.retry.scheduled",
+      createdAt: 1,
+      data: { category: "timeout", reason: "provider-resilience" },
+    })
+
+    expect(snapshotFoldProjection(retained).units.some((unit) => unit.key.startsWith("model-retry:"))).toBe(false)
+    expect(dropped).toEqual(["malformed-retry:missing-model-call-id"])
   })
 
   it("does not rewrite a cut-off execution failure into a complete turn", () => {

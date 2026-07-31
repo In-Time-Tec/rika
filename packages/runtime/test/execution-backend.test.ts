@@ -102,6 +102,11 @@ const makeClient = Effect.fn("ExecutionBackendTest.makeClient")(function* (optio
   readonly replayEvents?: ReadonlyArray<Execution.ExecutionEvent>
   readonly pageEvents?: ReadonlyArray<Execution.ExecutionEvent>
   readonly openWaitIds?: ReadonlyArray<string>
+  readonly openExecutions?: ReadonlyArray<{
+    readonly execution_id: string
+    readonly created_at: number
+    readonly metadata?: Readonly<Record<string, unknown>>
+  }>
   readonly cancelStatus?: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled"
   readonly unavailableLookups?: number
   readonly fail?: "register" | "start" | "lookup" | "replay" | "cancel"
@@ -211,7 +216,7 @@ const makeClient = Effect.fn("ExecutionBackendTest.makeClient")(function* (optio
         pending_tool_calls: [],
         child_runs: [],
       }),
-    listExecutions: unused,
+    listExecutions: () => Effect.succeed({ records: options?.openExecutions ?? [], next_cursor: undefined }),
     listSessions: unused,
     getSession: unused,
     listWaits: unused,
@@ -306,6 +311,7 @@ const makeClient = Effect.fn("ExecutionBackendTest.makeClient")(function* (optio
       steer: flat.steer,
       get: flat.getExecution,
       inspect: flat.inspectExecution,
+      list: flat.listExecutions,
       replay: flat.replayExecution,
       pageEvents: flat.pageExecutionEvents,
       stream: flat.streamExecution,
@@ -370,6 +376,45 @@ const provideBackendWithThreadTools = (implementation: Client.Interface) => {
 }
 
 describe("ExecutionBackend Relay client adapter", () => {
+  it.effect("retains malformed auxiliary roots so recovery can cancel them", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient({
+        openExecutions: [
+          {
+            execution_id: "auxiliary:title:valid-turn",
+            created_at: 1,
+            metadata: { rika_work_kind: "title", rika_turn_id: "valid-turn" },
+          },
+          {
+            execution_id: "auxiliary:title:mismatched-turn",
+            created_at: 2,
+            metadata: { rika_work_kind: "title", rika_turn_id: "other-turn" },
+          },
+          {
+            execution_id: "auxiliary:title:missing-turn-id",
+            created_at: 3,
+            metadata: { rika_work_kind: "title" },
+          },
+        ],
+      })
+      const roots = yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        return yield* backend.listOpenRootExecutions!
+      }).pipe(provideBackend(fixture.implementation))
+
+      expect(roots).toEqual([
+        { kind: "title", executionId: "auxiliary:title:valid-turn", turnId: "valid-turn", createdAt: 1 },
+        {
+          kind: "title",
+          executionId: "auxiliary:title:mismatched-turn",
+          turnId: "other-turn",
+          createdAt: 2,
+        },
+        { kind: "unrecognized", executionId: "auxiliary:title:missing-turn-id", createdAt: 3 },
+      ])
+    }),
+  )
+
   it("keeps preset inheritance separate from explicit child-run overrides", () => {
     const base = {
       child_execution_id: Ids.ChildExecutionId.make("child:one"),

@@ -669,11 +669,22 @@ describe("Operation", () => {
     }),
   )
 
-  it.effect("cancels open root executions with no live turn row after the recovery window", () =>
+  it.effect("preserves only deterministic title roots associated with an existing agent Turn", () =>
     Effect.gen(function* () {
       yield* TestClock.adjust("1 minute")
       const cancelled = yield* Ref.make<ReadonlyArray<string>>([])
-      const turns = yield* TurnRepository.makeMemory([])
+      const completedTurn: Turn.Turn = {
+        ...turnProvenance,
+        id: Turn.TurnId.make("completed-turn"),
+        threadId: Thread.ThreadId.make("completed-thread"),
+        prompt: "done",
+        executionRoute: executionRoute(),
+        status: "completed",
+        stopIntent: "none",
+        createdAt: 1,
+        updatedAt: 1,
+      }
+      const turns = yield* TurnRepository.makeMemory([completedTurn])
       const listingBackend = ExecutionBackend.Service.of({
         ...backend,
         listOpenRootExecutions: Effect.succeed([
@@ -690,6 +701,19 @@ describe("Operation", () => {
             turnId: "completed-turn",
             createdAt: 0,
           },
+          {
+            kind: "title",
+            executionId: "auxiliary:title:other-turn",
+            turnId: "completed-turn",
+            createdAt: 0,
+          },
+          {
+            kind: "title",
+            executionId: "auxiliary:title:missing-turn",
+            turnId: "missing-turn",
+            createdAt: 0,
+          },
+          { kind: "unrecognized", executionId: "auxiliary:title:malformed", createdAt: 0 },
         ]),
         cancel: (turnId) =>
           Ref.update(cancelled, (values) => [...values, turnId]).pipe(
@@ -704,7 +728,12 @@ describe("Operation", () => {
           ),
         ),
       )
-      expect(yield* Ref.get(cancelled)).toEqual(["execution:orphan-turn"])
+      expect(yield* Ref.get(cancelled)).toEqual([
+        "execution:orphan-turn",
+        "auxiliary:title:other-turn",
+        "auxiliary:title:missing-turn",
+        "auxiliary:title:malformed",
+      ])
     }),
   )
 

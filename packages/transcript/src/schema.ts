@@ -16,6 +16,7 @@ const WellFormedString = Schema.String.check(Schema.isPattern(/^(?:[^\uD800-\uDF
 const WellFormedNonEmptyString = WellFormedString.check(Schema.isMinLength(1))
 
 export const SourceEvent = Schema.Struct({
+  executionId: Schema.optionalKey(Schema.String),
   childExecutionId: Schema.optionalKey(Schema.String),
   cursor: Schema.String,
   sequence: SourceSequence,

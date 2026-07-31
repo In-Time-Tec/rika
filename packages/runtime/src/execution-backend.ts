@@ -1945,27 +1945,34 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               .pipe(Effect.mapError(error))
             for (const record of page.records) {
               const metadata = record.metadata
-              const auxiliaryTurnId =
-                metadata?.rika_work_kind === "title" && typeof metadata.rika_turn_id === "string"
-                  ? metadata.rika_turn_id
-                  : undefined
-              if (auxiliaryTurnId !== undefined) {
+              const rootExecutionId = String(record.execution_id)
+              if (metadata?.rika_work_kind === "title") {
+                if (typeof metadata.rika_turn_id === "string")
+                  roots.push({
+                    kind: "title",
+                    executionId: rootExecutionId,
+                    turnId: metadata.rika_turn_id,
+                    createdAt: record.created_at,
+                  })
+                else roots.push({ kind: "unrecognized", executionId: rootExecutionId, createdAt: record.created_at })
+                continue
+              }
+              const turnId = turnIdFromExecutionId(rootExecutionId)
+              if (turnId !== undefined) {
                 roots.push({
-                  kind: "title",
-                  executionId: String(record.execution_id),
-                  turnId: auxiliaryTurnId,
+                  kind: "turn",
+                  executionId: rootExecutionId,
+                  turnId,
                   createdAt: record.created_at,
                 })
                 continue
               }
-              const turnId = turnIdFromExecutionId(String(record.execution_id))
-              if (turnId === undefined) continue
-              roots.push({
-                kind: "turn",
-                executionId: String(record.execution_id),
-                turnId,
-                createdAt: record.created_at,
-              })
+              if (
+                rootExecutionId.startsWith("auxiliary:title:") ||
+                metadata?.rika_work_kind !== undefined ||
+                metadata?.rika_turn_id !== undefined
+              )
+                roots.push({ kind: "unrecognized", executionId: rootExecutionId, createdAt: record.created_at })
             }
             cursor = page.next_cursor
           } while (cursor !== undefined)

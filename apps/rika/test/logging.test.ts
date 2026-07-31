@@ -1,5 +1,8 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { assert, describe, it } from "@effect/vitest"
+import { Operation } from "@rika/app"
+import * as TurnRepository from "@rika/persistence/turn-repository"
+import * as ExecutionBackend from "@rika/runtime/contract"
 import { Cause, Duration, Effect, FileSystem, Layer, Path, Ref, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import * as Logging from "../src/logging"
@@ -71,13 +74,13 @@ describe("Logging", () => {
         const path = yield* Path.Path
         const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-private-" })
         const secrets = [
-          "prompt-secret-72d8",
-          "model-body-secret-13a4",
-          "tool-output-secret-99bc",
-          "shell-secret-02ef",
-          "authorization-secret-5d31",
-          "credential-secret-f741",
-          "arbitrary-error-secret-38ab",
+          "sk-live-72d8a41f",
+          "pk-live-13a4b72e",
+          "opaque-99bcf105",
+          "private-02efab84",
+          "bearer-5d31c990",
+          "key-f7412dde",
+          "failure-38ab6c21",
         ]
         yield* Effect.scoped(
           Effect.flatMap(
@@ -92,7 +95,7 @@ describe("Logging", () => {
                   authorization: secrets[4],
                   credential: secrets[5],
                   error: secrets[6],
-                  "rika.execution.id": "execution-42",
+                  "rika.execution.id": "execution:42",
                   "rika.failure.category": "invalid_input",
                   "rika.failure.interrupted": false,
                   "rika.failure.kind": secrets[6],
@@ -117,7 +120,7 @@ describe("Logging", () => {
         assert.strictEqual(record.message, "diagnostic.unstructured")
         assert.strictEqual(record.detail, undefined)
         assert.deepStrictEqual(record.annotations, {
-          "rika.execution.id": "execution-42",
+          "rika.execution.id": "execution:42",
           "rika.failure.category": "invalid_input",
           "rika.failure.interrupted": false,
           "rika.failure.outcome": "known",
@@ -129,6 +132,112 @@ describe("Logging", () => {
           "rika.duration.ms": 9_876,
           "rika.tool.name": "read",
         })
+      }),
+    )
+
+    test.effect("rejects opaque values from every approved string field while retaining known tags", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-string-schemas-" })
+        const opaque = "sk-live-7f3a9c2d"
+        const stringFields = [
+          "rika.event.cursor",
+          "rika.event.type",
+          "rika.execution.id",
+          "rika.failure.category",
+          "rika.failure.kind",
+          "rika.failure.outcome",
+          "rika.follow.cursor",
+          "rika.follow.reason",
+          "rika.follow.scope",
+          "rika.model.alias",
+          "rika.model.backend.kind",
+          "rika.model.name",
+          "rika.model.provider",
+          "rika.model.registration_key",
+          "rika.operation",
+          "rika.process.instance",
+          "rika.process.role",
+          "rika.reconciliation.cursor.initial",
+          "rika.reconciliation.cursor.replayed",
+          "rika.resident.client.kind",
+          "rika.resident.command.tag",
+          "rika.resident.connection.id",
+          "rika.resident.connection.role",
+          "rika.resident.rejection.reason",
+          "rika.resident.request.id",
+          "rika.resident.session.id",
+          "rika.resident.shutdown.reason",
+          "rika.resident.startup.role",
+          "rika.thread.id",
+          "rika.tool.call.id",
+          "rika.tool.dependency",
+          "rika.tool.name",
+          "rika.turn.id",
+          "rika.version",
+        ]
+        yield* Effect.scoped(
+          Effect.flatMap(
+            Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })),
+            (logging) =>
+              Effect.logError("failure.tagged").pipe(
+                Effect.annotateLogs({
+                  ...Object.fromEntries(stringFields.map((key) => [key, opaque])),
+                  "rika.failure.kind": "TokenExpiredError",
+                }),
+                Effect.provide(logging),
+              ),
+          ),
+        )
+        const { content, records } = yield* writtenRecords(root)
+        assert.notInclude(content, opaque)
+        assert.deepStrictEqual(records[0]?.annotations, { "rika.failure.kind": "TokenExpiredError" })
+      }),
+    )
+
+    test.effect("omits an opaque backend failure through recovered-root cancellation", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-recovery-failure-" })
+        const opaque = "sk-live-9a2f7c1e"
+        const turns = yield* TurnRepository.makeMemory([])
+        const backend = ExecutionBackend.Service.of({
+          invokeChild: () => Effect.die("unused"),
+          createFanOut: () => Effect.die("unused"),
+          inspectFanOut: () => Effect.die("unused"),
+          cancelFanOut: () => Effect.die("unused"),
+          registerWorkflows: () => Effect.die("unused"),
+          startWorkflow: () => Effect.die("unused"),
+          inspectWorkflow: () => Effect.die("unused"),
+          cancelWorkflow: () => Effect.die("unused"),
+          start: () => Effect.die("unused"),
+          replay: () => Effect.die("unused"),
+          inspect: () => Effect.die("unused"),
+          steer: () => Effect.die("unused"),
+          resolveInvocationSource: () => Effect.die("unused"),
+          listOpenRootExecutions: Effect.succeed([
+            { kind: "unrecognized" as const, executionId: "auxiliary:title:malformed", createdAt: 0 },
+          ]),
+          cancel: () => Effect.fail(ExecutionBackend.BackendError.make({ message: opaque })),
+        })
+        yield* TestClock.adjust("1 minute")
+        yield* Effect.scoped(
+          Effect.flatMap(
+            Layer.build(
+              Layer.mergeAll(
+                Logging.layer({ dataRoot: root, role: "resident", version: "1", pid: 42 }),
+                Layer.succeed(TurnRepository.Service, turns),
+                Layer.succeed(ExecutionBackend.Service, backend),
+              ),
+            ),
+            (context) =>
+              Operation.settleAbandonedRecoveredWork(Duration.zero, () => new Set()).pipe(Effect.provide(context)),
+          ),
+        )
+        const { content, records } = yield* writtenRecords(root)
+        assert.notInclude(content, opaque)
+        const failed = records.find((record) => record.message === "execution.recovery.orphan_cancel_failed")
+        assert.strictEqual(failed?.annotations["rika.failure.kind"], "RecoveredRootCancelFailure")
       }),
     )
 

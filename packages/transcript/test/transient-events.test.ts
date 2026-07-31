@@ -413,6 +413,41 @@ describe("transient events", () => {
     }
   })
 
+  it("rejects equal-sequence reasoning, output, and tool transients after every execution terminal", () => {
+    for (const terminal of ["execution.completed", "execution.failed", "execution.cancelled"]) {
+      const dropped: Array<string> = []
+      const retained = restoreProjectionFold(empty(`turn-late-${terminal}`, "prompt"), {
+        observer: { eventDropped: (event, reason) => dropped.push(`${event.type}:${reason}`) },
+      })
+      applyFoldEvent(retained, durableEvent(4, "model.attempt.started", attemptData("a")))
+      applyFoldEvent(retained, durableEvent(5, terminal))
+      applyFoldEvent(retained, transientReasoning(1, "late reasoning", 5))
+      applyFoldEvent(retained, transientDelta(2, "late output", 5))
+      applyFoldEvent(retained, transientTool(3, "late-tool", 5))
+
+      const projected = snapshotFoldProjection(retained)
+      expect(reasoningText(projected)).toBe("")
+      expect(assistantText(projected)).toBe("")
+      expect(keysOf(projected)).not.toContain(`tool:turn-late-${terminal}:late-tool`)
+      expect(dropped).toEqual([
+        "model.reasoning.delta:execution-terminal",
+        "model.output.delta:execution-terminal",
+        "model.toolcall.delta:execution-terminal",
+      ])
+    }
+  })
+
+  it("retains the terminal transient barrier after restoring a projection", () => {
+    const terminal = fold(
+      [durableEvent(4, "model.attempt.started", attemptData("a")), durableEvent(5, "execution.completed")],
+      empty("turn-restored-terminal", "prompt"),
+    )
+    const restored = fold([transientDelta(1, "late", 5)], terminal)
+
+    expect(assistantText(restored)).toBe("")
+    expect(restored).toEqual(terminal)
+  })
+
   it("matches replay after a child terminal arrives over streamed reasoning", () => {
     const durable = [
       durableEvent(2, "model.input.prepared"),

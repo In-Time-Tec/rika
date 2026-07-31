@@ -274,6 +274,11 @@ export type OpenRootExecution =
       readonly turnId: string
       readonly createdAt: number
     }
+  | {
+      readonly kind: "unrecognized"
+      readonly executionId: string
+      readonly createdAt: number
+    }
 
 export interface Interface {
   readonly registerModels?: (

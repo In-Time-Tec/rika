@@ -1062,7 +1062,7 @@ const settleStopRequestedTurns = Effect.fn("Operation.settleStopRequestedTurns")
     const outcome = yield* Effect.result(backend.cancel(turn.id))
     if (outcome._tag === "Failure") {
       yield* Effect.logWarning("execution.stop.settle_cancel_failed").pipe(
-        Effect.annotateLogs({ "rika.turn.id": String(turn.id), "rika.failure.kind": String(outcome.failure) }),
+        Effect.annotateLogs({ "rika.turn.id": String(turn.id), "rika.failure.kind": "ExecutionStopCancelFailure" }),
       )
       continue
     }
@@ -1119,18 +1119,29 @@ export const settleAbandonedRecoveredWork = Effect.fn("Operation.settleAbandoned
   const openRoots = yield* backend.listOpenRootExecutions.pipe(Effect.orElseSucceed(() => []))
   for (const root of openRoots) {
     if (root.createdAt >= bootAt) continue
-    if (root.kind === "title") continue
-    const turn = yield* turns.get(Turn.TurnId.make(root.turnId))
-    if (turn !== undefined && Turn.isAgentExecution(turn) && !isTerminalStatus(turn.status)) continue
-    yield* backend
-      .cancel(root.executionId, ExecutionBackend.executionReference)
-      .pipe(
-        Effect.catch((failure) =>
-          Effect.logWarning("execution.recovery.orphan_cancel_failed").pipe(
-            Effect.annotateLogs({ "rika.execution.id": root.executionId, "rika.failure.kind": String(failure) }),
-          ),
-        ),
+    if (root.kind === "title") {
+      const associatedTurnId = Turn.TurnId.make(root.turnId)
+      const associatedTurn = yield* turns.get(associatedTurnId)
+      if (
+        root.executionId === titleExecutionId(associatedTurnId) &&
+        associatedTurn !== undefined &&
+        Turn.isAgentExecution(associatedTurn)
       )
+        continue
+    } else if (root.kind === "turn") {
+      const turn = yield* turns.get(Turn.TurnId.make(root.turnId))
+      if (turn !== undefined && Turn.isAgentExecution(turn) && !isTerminalStatus(turn.status)) continue
+    }
+    yield* backend.cancel(root.executionId, ExecutionBackend.executionReference).pipe(
+      Effect.catch(() =>
+        Effect.logWarning("execution.recovery.orphan_cancel_failed").pipe(
+          Effect.annotateLogs({
+            "rika.execution.id": root.executionId,
+            "rika.failure.kind": "RecoveredRootCancelFailure",
+          }),
+        ),
+      ),
+    )
     yield* Effect.logInfo("execution.recovery.orphan_cancelled").pipe(
       Effect.annotateLogs({ "rika.execution.id": root.executionId }),
     )
@@ -1546,7 +1557,7 @@ export const productLayer = <
               yield* Effect.logWarning("execution.stop.settle_cancel_failed").pipe(
                 Effect.annotateLogs({
                   "rika.turn.id": String(turn.id),
-                  "rika.failure.kind": String(outcome.failure),
+                  "rika.failure.kind": "ExecutionStopCancelFailure",
                 }),
               )
               continue
@@ -1725,10 +1736,10 @@ export const productLayer = <
                   return
                 yield* projectExecutionResult(candidate.threadId, result)
               }).pipe(
-                Effect.catch((error) =>
+                Effect.catch(() =>
                   Effect.logError("thread-summary.repair.failed").pipe(
                     Effect.annotateLogs("rika.turn.id", candidate.turnId),
-                    Effect.annotateLogs("rika.failure.kind", String(error)),
+                    Effect.annotateLogs("rika.failure.kind", "ThreadSummaryRepairFailure"),
                   ),
                 ),
               ),
@@ -3130,12 +3141,12 @@ export const productLayer = <
                               ),
                             )
                         }),
-                        Effect.catch((error) =>
+                        Effect.catch(() =>
                           Effect.logError("turn.observer.failed").pipe(
                             Effect.annotateLogs({
                               "rika.thread.id": String(turn.threadId),
                               "rika.turn.id": String(turn.id),
-                              "rika.failure.kind": String(error),
+                              "rika.failure.kind": "ExecutionInspectionFailure",
                             }),
                             Effect.andThen(Effect.sleep("50 millis")),
                             Effect.andThen(notifyTurnChanged(turn)),
@@ -3867,9 +3878,9 @@ export const productLayer = <
           watchedThreadIds,
         ).pipe(
           Effect.provide(executionDependencies),
-          Effect.catch((failure) =>
+          Effect.catch(() =>
             Effect.logError("execution.recovery.abandonment_failed").pipe(
-              Effect.annotateLogs("rika.failure.kind", String(failure)),
+              Effect.annotateLogs("rika.failure.kind", "ExecutionRecoveryAbandonmentFailure"),
             ),
           ),
         ),
@@ -3878,9 +3889,9 @@ export const productLayer = <
       const repairSummariesOnce = yield* Effect.cached(
         repairThreadSummaries().pipe(
           Effect.provide(executionDependencies),
-          Effect.catch((error) =>
+          Effect.catch(() =>
             Effect.logError("thread-summary.repair.failed").pipe(
-              Effect.annotateLogs("rika.failure.kind", String(error)),
+              Effect.annotateLogs("rika.failure.kind", "ThreadSummaryRepairFailure"),
             ),
           ),
         ),
@@ -4742,11 +4753,11 @@ export const productLayer = <
                       Effect.onError(() =>
                         forkCreated
                           ? repository.remove(forkId).pipe(
-                              Effect.catch((error) =>
+                              Effect.catch(() =>
                                 Effect.logError("thread.fork.cleanup.failed").pipe(
                                   Effect.annotateLogs({
                                     "rika.thread.id": String(forkId),
-                                    "rika.failure.kind": String(error),
+                                    "rika.failure.kind": "ThreadForkFailure",
                                   }),
                                 ),
                               ),

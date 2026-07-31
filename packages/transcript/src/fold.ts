@@ -28,6 +28,7 @@ export interface ProjectionFoldObserver {
   readonly unitLookup?: (key: string) => void
   readonly runningUnitVisited?: (unit: Unit) => void
   readonly fullUnitEnumeration?: () => void
+  readonly eventDropped?: (event: SourceEvent, reason: "execution-terminal" | "missing-model-call-id") => void
 }
 
 export interface ProjectionFoldOptions {
@@ -74,6 +75,7 @@ interface OwnedFold {
   readonly transientUnitsByAttempt: Map<string, Set<string>>
   readonly transientCallByAttempt: Map<string, string>
   latestRootToolKey: string | undefined
+  terminal: boolean
   readonly observer: ProjectionFoldObserver | undefined
 }
 
@@ -355,10 +357,12 @@ const makeFold = (projection: Projection, options?: ProjectionFoldOptions): Proj
     transientUnitsByAttempt: new Map(),
     transientCallByAttempt: new Map(),
     latestRootToolKey: undefined,
+    terminal: false,
     observer: options?.observer,
   }
   owned.set(fold, value)
   for (const unit of units.values()) indexUnit(value, unit)
+  value.terminal = value.outcomeUnits.size > 0
   for (const unit of units.values()) {
     const restored = restoredChildOutcome(unit)
     if (restored !== undefined) restoreChildOutcome(value, restored)
@@ -1317,28 +1321,37 @@ const applyKnownEvent = (value: OwnedFold, change: MutableMutation, event: Sourc
   if (event.type === "model.attempt.failed" || event.type === "model.call.failed") return
   if (event.type === "model.retry.scheduled") {
     const payload = sourcePayload(event)
+    const modelCallId = string(payload.model_call_id)
+    if (modelCallId.length === 0) {
+      value.observer?.eventDropped?.(event, "missing-model-call-id")
+      return
+    }
     const reason = string(payload.reason)
     const category = string(payload.category)
-    const block: Block = {
-      _tag: "Notification",
-      title:
-        reason === "invalid-tool-call-correction"
-          ? "Correcting model tool call"
-          : category === "timeout"
-            ? "Model response timed out"
-            : "Retrying model response",
-      detail:
-        reason === "invalid-tool-call-correction"
-          ? "The model produced an invalid tool call. Rika is asking it to correct the call."
-          : category === "timeout"
-            ? "The model stopped responding before the configured deadline. Rika is retrying the call."
-            : "The model call failed before any output was shown. Rika is retrying the call.",
-    }
+    let block: Block
+    if (reason === "invalid-tool-call-correction")
+      block = {
+        _tag: "Notification",
+        title: "Correcting model tool call",
+        detail: "The model produced an invalid tool call. Rika is asking it to correct the call.",
+      }
+    else if (category === "timeout")
+      block = {
+        _tag: "Notification",
+        title: "Model response timed out",
+        detail: "The model stopped responding before the configured deadline. Rika is retrying the call.",
+      }
+    else
+      block = {
+        _tag: "Notification",
+        title: "Retrying model response",
+        detail: "The model call failed before any output was shown. Rika is retrying the call.",
+      }
     upsertUnit(
       value,
       change,
       makeUnit(
-        identityKey("model-retry", turnId, string(payload.model_call_id, event.cursor)),
+        identityKey("model-retry", event.childExecutionId ?? event.executionId ?? executionKey(turnId), modelCallId),
         turnId,
         event.sequence,
         0,
@@ -1467,19 +1480,19 @@ const restoreTransientBase = (value: OwnedFold, change: MutableMutation, key: st
 }
 
 const clearTransientAttempt = (value: OwnedFold, change: MutableMutation, attempt: string): void => {
-  for (const key of [...(value.transientUnitsByAttempt.get(attempt) ?? [])]) restoreTransientBase(value, change, key)
+  for (const key of value.transientUnitsByAttempt.get(attempt) ?? []) restoreTransientBase(value, change, key)
   value.transientUnitsByAttempt.delete(attempt)
   value.transientIndexes.delete(attempt)
   value.transientCallByAttempt.delete(attempt)
 }
 
 const clearTransientCall = (value: OwnedFold, change: MutableMutation, callId: string): void => {
-  for (const [attempt, candidate] of [...value.transientCallByAttempt])
+  for (const [attempt, candidate] of value.transientCallByAttempt)
     if (candidate === callId) clearTransientAttempt(value, change, attempt)
 }
 
 const clearAllTransients = (value: OwnedFold, change: MutableMutation): void => {
-  for (const key of [...value.transientBases.keys()]) restoreTransientBase(value, change, key)
+  for (const key of value.transientBases.keys()) restoreTransientBase(value, change, key)
   value.transientIndexes.clear()
   value.transientUnitsByAttempt.clear()
   value.transientAttemptsByUnit.clear()
@@ -1507,6 +1520,10 @@ export const applyFoldEvent: {
   const value = owner(fold)
   const change = mutation()
   if (isTransientEvent(event)) {
+    if (value.terminal) {
+      value.observer?.eventDropped?.(event, "execution-terminal")
+      return result(change)
+    }
     if (event.sequence < value.state.revision) return result(change)
     const attempt = transientAttempt(event)
     const payload = sourcePayload(event)
@@ -1535,6 +1552,8 @@ export const applyFoldEvent: {
   const resolvedKey = durableResolutionKey(value, event)
   if (resolvedKey !== undefined) restoreTransientBase(value, change, resolvedKey)
   applyKnownEvent(value, change, event)
+  if (event.type === "execution.completed" || event.type === "execution.failed" || event.type === "execution.cancelled")
+    value.terminal = true
   setState(value, change, "revision", event.sequence)
   if (value.state.oldestCursor === undefined) setState(value, change, "oldestCursor", event.cursor)
   setState(value, change, "checkpointCursor", event.cursor)
