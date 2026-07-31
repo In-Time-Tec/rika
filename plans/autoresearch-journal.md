@@ -679,3 +679,20 @@ Window 0 shows Bun/JIT spike (~0.13–0.19); steady windows match empty-root CPU
 ### Verdict
 
 **Keep** (measurement only). Populated idle closed for mission scope; no cut warranted. First-window warmup optional follow-up.
+
+## Iteration 2026-07-30u — release endgame cut: Relay 0.7.32 + Rika 0.0.25
+
+- Timestamp: 2026-07-30 ~18:55 MDT
+
+### Shipped
+
+| Package              | Version    | Notes                                                                                                                                       |
+| -------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Baton                | 0.11.13    | unchanged / skipped                                                                                                                         |
+| Relay `@relayfx/sdk` | **0.7.32** | GitHub release + npm; Publish CI wait set `continue-on-error` (red CI: prettier fixed; PG/MySQL state put RETURNING still failing coverage) |
+| Rika                 | **0.0.25** | GitHub release + npm launcher/platform packages; published via `skip_ci_gate`                                                               |
+
+### Follow-ups
+
+- Restore Relay publish CI gate after PG/MySQL `execution-state` dialect fix
+- Relay CI coverage still red on MySQL/PG state repository tests (SQLite path used by Rika is what shipped)
