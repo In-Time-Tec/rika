@@ -447,6 +447,50 @@ describe("ExecutionIngest", () => {
     }),
   )
 
+  it.effect("keeps ingest live while streamed parallel tool calls resolve one at a time", () =>
+    Effect.gen(function* () {
+      const toolIds = ["call-a", "call-b", "call-c", "call-d", "call-e"] as const
+      const events: ReadonlyArray<ExecutionBackend.Event> = [
+        started("root"),
+        ...toolIds.map((toolId, index) =>
+          event("root", `transient-${toolId}`, 0, "model.toolcall.delta", {
+            data: {
+              delta: "{}",
+              tool_call_id: toolId,
+              tool_name: "read",
+              transient_index: index + 1,
+              model_call_id: "model-call",
+              model_attempt_id: "model-attempt",
+            },
+          }),
+        ),
+        ...toolIds.map((toolId, index) =>
+          event("root", `requested-${toolId}`, index + 1, "tool.call.requested", {
+            data: { tool_call_id: toolId, tool_name: "read", input: { path: `${toolId}.txt` } },
+          }),
+        ),
+        ...toolIds.map((toolId, index) =>
+          event("root", `result-${toolId}`, index + 6, "tool.result.received", {
+            data: { tool_call_id: toolId, tool_name: "read", output: toolId },
+          }),
+        ),
+        event("root", "completed", 11, "execution.completed"),
+      ]
+      const { ingest, transcripts } = yield* makeHarness({
+        script: { root: { events, status: "completed" } },
+      })
+
+      yield* ingest.ensure({ threadId, turnId: rootId })
+      yield* settle(ingest)
+
+      const stored = yield* transcripts.get(rootId)
+      expect(
+        stored?.units.filter((unit) => unit.content._tag === "Block" && unit.content.block._tag === "ToolCall"),
+      ).toHaveLength(toolIds.length)
+      expect(checkpoint(stored, "root")?.status).toBe("completed")
+    }),
+  )
+
   it.effect("removes a projection watcher when its scope closes", () =>
     Effect.gen(function* () {
       const { ingest } = yield* makeHarness({

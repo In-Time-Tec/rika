@@ -1455,6 +1455,17 @@ const requiresResolvedTransients = (event: SourceEvent): boolean =>
   event.type === "execution.failed" ||
   event.type === "execution.cancelled"
 
+const blockingTransientKeys = (value: OwnedFold, event: SourceEvent): ReadonlyArray<string> => {
+  const toolBatchBoundary = event.type === "tool.call.requested" || event.type === "tool.result.received"
+  const unresolvedResultKey =
+    event.type === "tool.result.received" ? toolKey(value.turnId, rawToolId(event)) : undefined
+  return [...value.transientBases.keys()].filter((key) => {
+    if (!toolBatchBoundary || key === unresolvedResultKey) return true
+    const unit = value.units.get(key)
+    return unit?.content._tag !== "Block" || unit.content.block._tag !== "ToolCall"
+  })
+}
+
 export const applyFoldEvent: {
   (fold: ProjectionFold, event: SourceEvent): FoldMutation
   (event: SourceEvent): (fold: ProjectionFold) => FoldMutation
@@ -1484,14 +1495,13 @@ export const applyFoldEvent: {
     if (event.type === "model.usage.reported") applyUsage(value, change, event)
     return result(change)
   }
+  const unresolved = requiresResolvedTransients(event) ? blockingTransientKeys(value, event) : []
+  if (unresolved.length > 0)
+    throw new TypeError(
+      `Transcript ${value.turnId} reached ${event.type} with unresolved transient units ${unresolved.join(", ")}`,
+    )
   const resolvedKey = durableResolutionKey(value, event)
   if (resolvedKey !== undefined) restoreTransientBase(value, change, resolvedKey)
-  if (requiresResolvedTransients(event) && value.transientBases.size > 0)
-    throw new TypeError(
-      `Transcript ${value.turnId} reached ${event.type} with unresolved transient units ${[
-        ...value.transientBases.keys(),
-      ].join(", ")}`,
-    )
   applyKnownEvent(value, change, event)
   setState(value, change, "revision", event.sequence)
   if (value.state.oldestCursor === undefined) setState(value, change, "oldestCursor", event.cursor)
