@@ -53,26 +53,17 @@ import * as InteractiveFeedOverflow from "../interactive/interactive-feed-overfl
 import * as UsageCost from "../../usage/usage-projection"
 import * as RootTurnOwner from "../../thread/queue/root-turn-owner"
 import * as ThreadToolService from "../../thread/tool/thread-tool-service"
-import {
-  Input,
-  InteractiveEventSchema,
-  InvalidInput,
-  OperationUnavailable,
-  Service,
-  unavailableLayer,
-} from "../contract/product-operation-service"
 import { ModeId } from "@rika/configuration/behavior-mode"
-import type {
-  Interface,
-  InteractiveCommand,
-  InteractiveEvent,
-  InteractiveSession,
-  QueueChange,
-  QueueItem,
-} from "../contract/product-operation-service"
+import { InvalidInput, OperationUnavailable, Service, unavailableLayer } from "../contract/product-operation-service"
+import { Input } from "../contract/operation-input-schema"
+import { InteractiveCommand } from "../interactive/interactive-command"
+import { InteractiveEventSchema } from "../interactive/interactive-event"
+import type { InteractiveEvent, QueueChange, QueueItem } from "../interactive/interactive-event"
+import type { InteractiveSession } from "../interactive/interactive-session"
 
-export { Input, InteractiveEventSchema, InvalidInput, OperationUnavailable, Service, unavailableLayer }
-export type { Interface, InteractiveCommand, InteractiveEvent, InteractiveSession, QueueChange, QueueItem }
+export { Input } from "../contract/operation-input-schema"
+export { InteractiveEventSchema, InvalidInput, OperationUnavailable, Service, unavailableLayer } from "../contract/product-operation-service"
+export type { Interface, InteractiveCommand, InteractiveEvent, InteractiveSession, QueueChange, QueueItem } from "../contract/product-operation-service"
 
 const failureKind = (cause: Cause.Cause<unknown>) => {
   const failure = Cause.squash(cause)

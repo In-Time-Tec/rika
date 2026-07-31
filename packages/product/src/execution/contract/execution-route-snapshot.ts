@@ -1,20 +1,8 @@
 import { Schema } from "effect"
-
-export const ModelRegistrationIdentity = Schema.String.pipe(Schema.brand("ModelRegistrationIdentity"))
-export type ModelRegistrationIdentity = typeof ModelRegistrationIdentity.Type
-
-export const ProviderAuthentication = Schema.Literals(["api-key", "account", "none"])
-export type ProviderAuthentication = typeof ProviderAuthentication.Type
-
-export const ProviderConnectionSnapshot = Schema.Struct({
-  provider: Schema.String,
-  protocol: Schema.String,
-  baseUrl: Schema.String,
-  authentication: ProviderAuthentication,
-  apiKeyEnvironment: Schema.optionalKey(Schema.String),
-  credentialIdentity: Schema.optionalKey(Schema.String),
-})
-export type ProviderConnectionSnapshot = typeof ProviderConnectionSnapshot.Type
+import { ModelRegistrationIdentity, modelRegistrationIdentity } from "./model-registration-identity"
+import { ProviderAuthentication, ProviderConnectionSnapshot } from "./provider-connection-snapshot"
+export { ModelRegistrationIdentity, modelRegistrationIdentity } from "./model-registration-identity"
+export { ProviderAuthentication, ProviderConnectionSnapshot } from "./provider-connection-snapshot"
 
 const ModelRouteRole = Schema.Literals([
   "main",
@@ -70,9 +58,6 @@ export const ExecutionRouteSnapshot = Schema.Struct({
 export type ExecutionRouteSnapshot = typeof ExecutionRouteSnapshot.Type
 export type ExecutionModelRoute = ExecutionRouteModelSnapshot
 export type ExecutionRoutePin = ExecutionRouteSnapshot
-
-export const modelRegistrationIdentity = (value: string): ModelRegistrationIdentity =>
-  Schema.decodeUnknownSync(ModelRegistrationIdentity)(value)
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
