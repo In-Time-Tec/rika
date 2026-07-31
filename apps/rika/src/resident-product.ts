@@ -15,6 +15,7 @@ import {
   ThreadToolService,
 } from "@rika/app"
 import { ConfigContract, ConfigService, Models } from "@rika/config"
+import * as Diagnostic from "@rika/app/diagnostic-contract"
 import { McpOAuth, SkillRegistry } from "@rika/extensions"
 import * as Database from "@rika/persistence/database"
 import * as ThreadRepository from "@rika/persistence/repository"
@@ -771,13 +772,11 @@ export const configuredBackendLayer = ({
           message: "RIKA_TEST_MEDIA_ANALYZER_RESPONSE and RIKA_TEST_MEDIA_ANALYZER_ERROR cannot both be set",
         })
       }
-      let backendKind: "test-script" | "test-response" | "provider"
+      let backendKind: Diagnostic.ModelBackendKind
       if (testScript._tag === "Some") backendKind = "test-script"
       else if (testResponse._tag === "Some") backendKind = "test-response"
       else backendKind = "provider"
-      yield* Effect.logInfo("model.backend.configured").pipe(
-        Effect.annotateLogs("rika.model.backend.kind", backendKind),
-      )
+      yield* Effect.logInfo("model.backend.configured").pipe(Effect.annotateLogs(Diagnostic.modelBackend(backendKind)))
       let registration: ModelRegistry.Registration
       let selection: ModelRegistry.ModelSelection
       let additionalRegistrations: Array<ModelRegistry.Registration> = []

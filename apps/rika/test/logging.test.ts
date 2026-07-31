@@ -1,9 +1,11 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { assert, describe, it } from "@effect/vitest"
 import { Operation } from "@rika/app"
+import * as Diagnostic from "@rika/app/diagnostic-contract"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import { Cause, Duration, Effect, FileSystem, Layer, Path, Ref, Schema } from "effect"
+import { ModelConfigurationError } from "../src/resident-product"
 import { TestClock } from "effect/testing"
 import * as Logging from "../src/logging"
 
@@ -132,6 +134,46 @@ describe("Logging", () => {
           "rika.duration.ms": 9_876,
           "rika.tool.name": "read",
         })
+      }),
+    )
+
+    test.effect("preserves shared typed producer diagnostics through the logger", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-producer-contract-" })
+        const taggedFailure = (kind: Diagnostic.FailureKind) =>
+          Effect.logError("failure.tagged").pipe(Effect.annotateLogs(Diagnostic.failure(kind)))
+        yield* Effect.scoped(
+          Effect.flatMap(
+            Layer.build(Logging.layer({ dataRoot: root, role: "resident", version: "1", pid: 42 })),
+            (logging) =>
+              Effect.all(
+                [
+                  ...Diagnostic.modelBackendKinds.map((kind) =>
+                    Effect.logInfo("model.backend.configured").pipe(Effect.annotateLogs(Diagnostic.modelBackend(kind))),
+                  ),
+                  taggedFailure("ExecutionIngestFollowFailure"),
+                  Effect.logError("failure.tagged").pipe(
+                    Effect.annotateLogs(
+                      Diagnostic.failureFrom(ModelConfigurationError.make({ message: "invalid model configuration" })),
+                    ),
+                  ),
+                ],
+                { concurrency: 1, discard: true },
+              ).pipe(Effect.provide(logging)),
+          ),
+        )
+        const { records } = yield* writtenRecords(root)
+        assert.deepStrictEqual(
+          records.map((record) => record.annotations),
+          [
+            { "rika.model.backend.kind": "provider" },
+            { "rika.model.backend.kind": "test-script" },
+            { "rika.model.backend.kind": "test-response" },
+            { "rika.failure.kind": "ExecutionIngestFollowFailure" },
+            { "rika.failure.kind": "ModelConfigurationError" },
+          ],
+        )
       }),
     )
 

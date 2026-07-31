@@ -28,7 +28,10 @@ export interface ProjectionFoldObserver {
   readonly unitLookup?: (key: string) => void
   readonly runningUnitVisited?: (unit: Unit) => void
   readonly fullUnitEnumeration?: () => void
-  readonly eventDropped?: (event: SourceEvent, reason: "execution-terminal" | "missing-model-call-id") => void
+  readonly eventDropped?: (
+    event: SourceEvent,
+    reason: "execution-terminal" | "missing-model-call-id" | "invalid-model-call-id",
+  ) => void
 }
 
 export interface ProjectionFoldOptions {
@@ -1321,9 +1324,13 @@ const applyKnownEvent = (value: OwnedFold, change: MutableMutation, event: Sourc
   if (event.type === "model.attempt.failed" || event.type === "model.call.failed") return
   if (event.type === "model.retry.scheduled") {
     const payload = sourcePayload(event)
-    const modelCallId = string(payload.model_call_id)
-    if (modelCallId.length === 0) {
+    if (typeof payload.model_call_id !== "string") {
       value.observer?.eventDropped?.(event, "missing-model-call-id")
+      return
+    }
+    const modelCallId = payload.model_call_id.trim()
+    if (modelCallId.length === 0 || modelCallId.length > 256) {
+      value.observer?.eventDropped?.(event, "invalid-model-call-id")
       return
     }
     const reason = string(payload.reason)
@@ -1351,7 +1358,7 @@ const applyKnownEvent = (value: OwnedFold, change: MutableMutation, event: Sourc
       value,
       change,
       makeUnit(
-        identityKey("model-retry", event.childExecutionId ?? event.executionId ?? executionKey(turnId), modelCallId),
+        identityKey("model-retry", event.executionId ?? executionKey(turnId), modelCallId),
         turnId,
         event.sequence,
         0,

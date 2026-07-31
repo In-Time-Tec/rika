@@ -5,6 +5,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Operation from "@rika/app/operation-contract"
 import * as ResidentService from "@rika/app/resident-service"
 import { ConfigContract, ConfigService } from "@rika/config"
+import * as Diagnostic from "@rika/app/diagnostic-contract"
 import { globalPaths, workspacePaths } from "@rika/config/paths"
 import { FetchHttpClient } from "effect/unstable/http"
 import {
@@ -62,13 +63,7 @@ const loadSettingsFile = Effect.fn("Resident.loadSettingsFile")(function* (filen
   return ConfigContract.decodeSettingsInput(filename, value)
 })
 
-const failureKind = (cause: Cause.Cause<unknown>) => {
-  const failure = Cause.squash(cause)
-  if (failure instanceof Error) return failure.name
-  if (failure !== null && typeof failure === "object" && "_tag" in failure && typeof failure._tag === "string")
-    return failure._tag
-  return typeof failure
-}
+const failureAnnotations = (cause: Cause.Cause<unknown>) => Diagnostic.failureFrom(Cause.squash(cause))
 
 const start = () => {
   const environment = Effect.runSync(
@@ -295,7 +290,7 @@ const start = () => {
           Effect.tapCause((cause) =>
             Cause.hasInterruptsOnly(cause)
               ? Effect.void
-              : Effect.logError("process.failed").pipe(Effect.annotateLogs("rika.failure.kind", failureKind(cause))),
+              : Effect.logError("process.failed").pipe(Effect.annotateLogs(failureAnnotations(cause))),
           ),
           Effect.ensuring(Effect.logInfo("process.stopped")),
           Effect.annotateLogs({

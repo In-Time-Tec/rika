@@ -34,14 +34,27 @@ const usage = (cursor: string, sequence: number): SourceEvent => ({
   },
 })
 
-const retryNotice = (sequence: number, childExecutionId?: string): SourceEvent => ({
-  executionId: "execution:turn-a",
+const retryNotice = (sequence: number, executionId = "execution:turn-a", childExecutionId?: string): SourceEvent => ({
+  executionId,
   ...(childExecutionId === undefined ? {} : { childExecutionId }),
   cursor: `retry-${sequence}`,
   sequence,
   type: "model.retry.scheduled",
   createdAt: sequence,
   data: { model_call_id: "shared-call", category: "overloaded", reason: "provider-resilience" },
+})
+
+const malformedRetryNotice = (cursor: string, sequence: number, modelCallId?: string): SourceEvent => ({
+  executionId: "execution:turn-a",
+  cursor,
+  sequence,
+  type: "model.retry.scheduled",
+  createdAt: sequence,
+  data: {
+    ...(modelCallId === undefined ? {} : { model_call_id: modelCallId }),
+    category: "timeout",
+    reason: "provider-resilience",
+  },
 })
 
 describe("Transcript projection", () => {
@@ -1980,10 +1993,11 @@ describe("Transcript projection", () => {
   })
 
   it("keys retry notices by the emitting execution when root and child call ids collide", () => {
-    const projection = [retryNotice(1), retryNotice(2, "child:execution%3Aturn-a:shared")].reduce(
-      (current, event) => applyEvent(current, event),
-      empty("turn-a", "prompt"),
-    )
+    const childExecutionId = "child:execution%3Aturn-a:shared"
+    const projection = [
+      retryNotice(1, "execution:turn-a", childExecutionId),
+      retryNotice(2, childExecutionId, "child:referenced-by-child"),
+    ].reduce((current, event) => applyEvent(current, event), empty("turn-a", "prompt"))
     const notices = projection.units.filter((unit) => unit.key.startsWith("model-retry:"))
 
     expect(notices.map((unit) => unit.key)).toEqual([
@@ -2031,21 +2045,26 @@ describe("Transcript projection", () => {
     ])
   })
 
-  it("drops and diagnoses retry telemetry without a model call id", () => {
+  it("normalizes bounded retry call ids and diagnoses malformed telemetry", () => {
     const dropped: Array<string> = []
     const retained = restoreProjectionFold(empty("turn-a", "prompt"), {
       observer: { eventDropped: (event, reason) => dropped.push(`${event.cursor}:${reason}`) },
     })
-    applyFoldEvent(retained, {
-      cursor: "malformed-retry",
-      sequence: 1,
-      type: "model.retry.scheduled",
-      createdAt: 1,
-      data: { category: "timeout", reason: "provider-resilience" },
-    })
+    applyFoldEvent(retained, malformedRetryNotice("missing-retry", 1))
+    applyFoldEvent(retained, malformedRetryNotice("blank-retry", 2, " \t\n "))
+    applyFoldEvent(retained, malformedRetryNotice("oversized-retry", 3, "x".repeat(257)))
+    applyFoldEvent(retained, malformedRetryNotice("normalized-retry", 4, " call-a "))
 
-    expect(snapshotFoldProjection(retained).units.some((unit) => unit.key.startsWith("model-retry:"))).toBe(false)
-    expect(dropped).toEqual(["malformed-retry:missing-model-call-id"])
+    expect(
+      snapshotFoldProjection(retained)
+        .units.filter((unit) => unit.key.startsWith("model-retry:"))
+        .map((unit) => unit.key),
+    ).toEqual(["model-retry:execution%3Aturn-a:call-a"])
+    expect(dropped).toEqual([
+      "missing-retry:missing-model-call-id",
+      "blank-retry:invalid-model-call-id",
+      "oversized-retry:invalid-model-call-id",
+    ])
   })
 
   it("does not rewrite a cut-off execution failure into a complete turn", () => {

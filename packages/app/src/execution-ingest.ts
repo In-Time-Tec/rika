@@ -22,6 +22,7 @@ import {
   Semaphore,
   Stream,
 } from "effect"
+import * as Diagnostic from "./diagnostic-contract"
 import * as IngestProjection from "./execution-ingest-projection"
 import * as UsageCost from "./usage-cost"
 
@@ -1268,7 +1269,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
                     "rika.thread.id": String(pipeline.threadId),
                     "rika.turn.id": String(pipeline.turnId),
                     "rika.execution.id": node.executionId,
-                    "rika.failure.kind": "ExecutionIngestFollowFailure",
+                    ...Diagnostic.failure("ExecutionIngestFollowFailure"),
                   }),
                 )
               }),
@@ -1349,7 +1350,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
                     "rika.turn.id": failure.turnId,
                     "rika.execution.id": failure.executionId,
                     "rika.ingest.reason": failure.reason,
-                    "rika.failure.kind": failure._tag,
+                    ...Diagnostic.failure(failure._tag),
                   }),
                 )
           return logged.pipe(Effect.andThen(Scope.close(pipelineScope, Exit.void)))
@@ -1570,7 +1571,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
                   Effect.annotateLogs({
                     "rika.thread.id": String(root.threadId),
                     "rika.turn.id": String(root.turnId),
-                    "rika.failure.kind": "ProjectionRecoveryFailure",
+                    ...Diagnostic.failure("ProjectionRecoveryFailure"),
                   }),
                 )
               }),

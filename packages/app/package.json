@@ -6,6 +6,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./diagnostic-contract": "./src/diagnostic-contract.ts",
     "./interactive-feed-overflow": "./src/interactive-feed-overflow.ts",
     "./operation": "./src/operation.ts",
     "./operation-contract": "./src/operation-contract.ts",
