@@ -205,7 +205,7 @@ describe("transient events", () => {
 
   it("ignores transient deltas re-delivered after the durable cycle completed", () => {
     const reply = "I’ll trace the current permission/path enforcement and every related test."
-    const thoughts = "**Planning TranscriptProjection.Projection.project exploration and permissions review**"
+    const thoughts = "**Planning project exploration and permissions review**"
     const streamed = fold(
       [
         durableEvent(0, "execution.accepted"),

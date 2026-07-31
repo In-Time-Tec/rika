@@ -459,11 +459,11 @@ describe("Transcript projection", () => {
       [{ cursor: "partial", sequence: 3, type: "model.output.delta", createdAt: 3, text: "Partial response" }],
     ],
     [
-      "an TranscriptProjection.Projection.empty completion after partial output",
+      "an empty completion after partial output",
       [
         { cursor: "partial", sequence: 3, type: "model.output.delta", createdAt: 3, text: "Partial response" },
         {
-          cursor: "TranscriptProjection.Projection.empty",
+          cursor: "empty",
           sequence: 4,
           type: "model.output.completed",
           createdAt: 4,
@@ -1118,7 +1118,7 @@ describe("Transcript projection", () => {
     expect(committed.units.filter((item) => item.key.startsWith("compaction:"))).toHaveLength(1)
   })
 
-  it("does not TranscriptProjection.Projection.project a failed compaction event as complete", () => {
+  it("does not project a failed compaction event as complete", () => {
     const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
       {
         cursor: "compaction-started",
@@ -1789,7 +1789,7 @@ describe("Transcript projection", () => {
     expect(childParentMatch([foreign], "child:execution%3Aparent-turn:agent")).toBeUndefined()
   })
 
-  it("records one error unit with a failed outcome and a non-TranscriptProjection.Projection.empty reason when the execution fails", () => {
+  it("records one error unit with a failed outcome and a non-empty reason when the execution fails", () => {
     const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
       { cursor: "failed", sequence: 1, type: "execution.failed", createdAt: 1, text: "internal tool failed" },
     ])
@@ -1885,7 +1885,7 @@ describe("Transcript projection", () => {
     expect(keys.indexOf("steering:turn:%n3:%n0")).toBeGreaterThan(keys.indexOf("tool:turn:call"))
   })
 
-  it("ignores an TranscriptProjection.Projection.empty steering drain event", () => {
+  it("ignores an empty steering drain event", () => {
     const projection = TranscriptProjection.Projection.project("turn", "prompt", [
       {
         cursor: "steer-0",

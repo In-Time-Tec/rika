@@ -42,7 +42,7 @@ describe("intrinsic transcript unit order", () => {
     )
   })
 
-  it("rejects invalid numbers, malformed text, TranscriptProjection.Projection.empty keys, and runtime mutation", () => {
+  it("rejects invalid numbers, malformed text, empty keys, and runtime mutation", () => {
     for (const sequence of [Number.NaN, Number.POSITIVE_INFINITY, -2, 0.5, Number.MAX_SAFE_INTEGER + 1])
       expect(() => unitOrder("unit", sequence)).toThrow(RangeError)
     for (const part of [Number.NaN, Number.NEGATIVE_INFINITY, -1, 0.5, Number.MAX_SAFE_INTEGER + 1])

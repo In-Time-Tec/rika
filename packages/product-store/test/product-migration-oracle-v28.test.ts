@@ -1,6 +1,6 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer, Schema } from "effect"
+import { Context, Effect, FileSystem, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { Database as NativeDatabase } from "bun:sqlite"
 import * as Database from "@rika/product-store/product-database-layer"
@@ -12,19 +12,101 @@ const makeDatabase = (filename: string) => Effect.scoped(Layer.build(Database.la
 const prepareV27 = (filename: string, routeText: string) =>
   Effect.sync(() => {
     const database = new NativeDatabase(filename)
-    database.exec("DELETE FROM rika_migrations WHERE migration_id = 28")
-    database.exec("INSERT INTO rika_workspaces (path, created_at) VALUES ('/oracle', 1)")
-    database.exec(
-      "INSERT INTO rika_threads (id, workspace, title, labels_json, pinned, archived, created_at, updated_at) VALUES ('oracle-thread', '/oracle', 'Oracle', '[]', 0, 0, 1, 1)",
-    )
-    database
-      .query(
-        "INSERT INTO rika_turns (id, thread_id, prompt, status, execution_route_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    try {
+      database.exec("DELETE FROM rika_migrations WHERE migration_id = 28")
+      database.exec("INSERT INTO rika_workspaces (path, created_at) VALUES ('/oracle', 1)")
+      database.exec(
+        "INSERT INTO rika_threads (id, workspace, title, labels_json, pinned, archived, created_at, updated_at) VALUES ('oracle-thread', '/oracle', 'Oracle', '[]', 0, 0, 1, 1)",
       )
-      .run("oracle-turn", "oracle-thread", "oracle", "completed", routeText, 1, 1)
-    database.exec("PRAGMA wal_checkpoint(TRUNCATE)")
-    database.close()
+      database
+        .query(
+          "INSERT INTO rika_turns (id, thread_id, prompt, status, execution_route_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .run("oracle-turn", "oracle-thread", "oracle", "completed", routeText, 1, 1)
+    } finally {
+      database.exec("PRAGMA wal_checkpoint(TRUNCATE)")
+      database.close()
+    }
   })
+
+const updateRoute = (filename: string, routeText: string) =>
+  Effect.sync(() => {
+    const database = new NativeDatabase(filename)
+    try {
+      database.query("UPDATE rika_turns SET execution_route_json = ? WHERE id = 'oracle-turn'").run(routeText)
+    } finally {
+      database.exec("PRAGMA wal_checkpoint(TRUNCATE)")
+      database.close()
+    }
+  })
+
+const migrationVersion = (filename: string) =>
+  Effect.sync(() => {
+    const database = new NativeDatabase(filename)
+    try {
+      const row = database.query("SELECT max(migration_id) AS migration_id FROM rika_migrations").get() as {
+        migration_id: number | null
+      }
+      return row.migration_id
+    } finally {
+      database.close()
+    }
+  })
+
+const removeSidecars = (filename: string) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem
+    for (const path of databaseSidecars(filename).slice(1))
+      if (yield* fileSystem.exists(path)) yield* fileSystem.remove(path)
+  })
+
+const vacuumCopy = (source: string, target: string) =>
+  Effect.sync(() => {
+    const database = new NativeDatabase(source)
+    try {
+      database.exec(`VACUUM INTO '${target.replaceAll("'", "''")}'`)
+    } finally {
+      database.close()
+    }
+  })
+
+const makeV27Template = (directory: string, routeText: string) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem
+    const source = `${directory}/source/rika.db`
+    const filename = `${directory}/template/rika.db`
+    yield* fileSystem.makeDirectory(`${directory}/source`, { recursive: true })
+    yield* fileSystem.makeDirectory(`${directory}/template`, { recursive: true })
+    yield* makeDatabase(source)
+    yield* prepareV27(source, routeText)
+    yield* vacuumCopy(source, filename)
+    yield* removeSidecars(source)
+    expect(yield* migrationVersion(filename)).toBe(27)
+    for (const path of databaseSidecars(filename).slice(1)) expect(yield* fileSystem.exists(path)).toBe(false)
+    return filename
+  })
+
+const copyTemplate = (template: string, filename: string) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem
+    yield* fileSystem.makeDirectory(filename.slice(0, filename.lastIndexOf("/")), { recursive: true })
+    yield* fileSystem.writeFile(filename, yield* fileSystem.readFile(template))
+    for (const path of databaseSidecars(filename).slice(1)) expect(yield* fileSystem.exists(path)).toBe(false)
+  })
+
+class V28Template extends Context.Service<V28Template, string>()(
+  "@rika/product-store/test/product-migration-oracle-v28.test/V28Template",
+) {}
+
+const v28TemplateLayer = Layer.effect(
+  V28Template,
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem
+    const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-v28-template-" })
+    const routeText = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(oracle.legacyRoute)
+    return yield* makeV27Template(directory, routeText)
+  }),
+)
 
 const readRoute = (filename: string) =>
   Effect.scoped(
@@ -44,101 +126,145 @@ const readRoute = (filename: string) =>
 
 const databaseSidecars = (filename: string) => [filename, `${filename}-wal`, `${filename}-shm`]
 
-it.layer(BunServices.layer)("v28 migration oracle", (test) => {
-  test.effect("rewrites the authoritative fixture and preserves every canonical field", () =>
-    Effect.scoped(
+const readDatabaseBytes = (filename: string) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem
+    const bytes = new Map<string, Uint8Array>()
+    for (const path of databaseSidecars(filename))
+      if (yield* fileSystem.exists(path)) bytes.set(path, yield* fileSystem.readFile(path))
+    return bytes
+  })
+
+const expectUnchanged = (before: Map<string, Uint8Array>, filename: string) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem
+    for (const path of databaseSidecars(filename)) {
+      const exists = yield* fileSystem.exists(path)
+      expect(exists).toBe(before.has(path))
+      if (exists) expect(yield* fileSystem.readFile(path)).toEqual(before.get(path))
+    }
+  })
+
+const rejectRoutes = (directory: string, template: string, routes: Iterable<readonly [string, string]>) =>
+  Effect.forEach(
+    routes,
+    ([name, routeText]) =>
       Effect.gen(function* () {
-        expect(oracle.migrationCount).toBe(28)
-        expect(oracle.migrationName).toBe("product_route_snapshot")
-        expect(oracle.legacyRoute).toBeDefined()
-        expect(oracle.expectedSnapshot).toBeDefined()
-        const fileSystem = yield* FileSystem.FileSystem
-        const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-v28-oracle-" })
-        const filename = `${directory}/rika.db`
-        yield* makeDatabase(filename)
-        const routeText = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(oracle.legacyRoute)
-        yield* prepareV27(filename, routeText)
-        yield* makeDatabase(filename)
-        expect(yield* readRoute(filename)).toEqual(oracle.expectedSnapshot)
+        const filename = `${directory}/${name}/rika.db`
+        yield* copyTemplate(template, filename)
+        yield* updateRoute(filename, routeText)
+        yield* removeSidecars(filename)
+        const before = yield* readDatabaseBytes(filename)
+        expect(before.has(filename)).toBe(true)
+        expect(before.has(`${filename}-wal`)).toBe(false)
+        expect(before.has(`${filename}-shm`)).toBe(false)
+        const result = yield* Effect.result(makeDatabase(filename))
+        expect(result._tag).toBe("Failure")
+        yield* expectUnchanged(before, filename)
       }),
-    ),
+    { concurrency: 4 },
   )
 
-  test.effect(
-    "rejects malformed JSON and connection identities without changing database or sidecars",
-    () =>
+const malformedJsonRoutes = () =>
+  oracle.malformedJsonCases.map((kind) => {
+    let routeText = "[]"
+    if (kind === "truncated-object") routeText = '{"version":1'
+    else if (kind === "scalar") routeText = "null"
+    return [`json-${kind}`, routeText] as const
+  })
+
+const malformedIdentityRoutes = (encodedRoute: string) =>
+  oracle.malformedConnectionIdentityCases.map((kind) => {
+    let replacement = '"connectionIdentity":{"opaque":1}'
+    if (kind === "primitive") replacement = '"connectionIdentity":"opaque"'
+    else if (kind === "unknown-field") replacement = '"connectionIdentity":{"opaque":"ok","extra":true}'
+    else if (kind === "missing-connection-identity") replacement = ""
+    else if (kind === "missing-opaque") replacement = '"connectionIdentity":{}'
+    else if (kind === "empty-opaque") replacement = '"connectionIdentity":{"opaque":""}'
+    const marker = '"connectionIdentity":{"opaque":"connection-main"}'
+    const routeText =
+      kind === "missing-connection-identity"
+        ? encodedRoute.replace(`,${marker}`, "")
+        : encodedRoute.replace(marker, replacement)
+    return [`identity-${kind}`, routeText] as const
+  })
+
+const rejectMalformedRoutes = (prefix: string, routes: Iterable<readonly [string, string]>) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix })
+      yield* rejectRoutes(directory, yield* V28Template, routes)
+    }),
+  )
+
+const rejectIdentityCase = (prefix: string, index: number) =>
+  Effect.gen(function* () {
+    const encodedRoute = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.UnknownFromJsonString))(
+      oracle.legacyRoute,
+    )
+    yield* rejectMalformedRoutes(prefix, malformedIdentityRoutes(encodedRoute).slice(index, index + 1))
+  })
+
+it.layer(BunServices.layer)("v28 migration oracle", (test) => {
+  test.layer(v28TemplateLayer)((templateTest) => {
+    templateTest.effect("rewrites the authoritative fixture and preserves every canonical field", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          expect(oracle.migrationCount).toBe(28)
+          expect(oracle.migrationName).toBe("product_route_snapshot")
+          expect(oracle.legacyRoute).toBeDefined()
+          expect(oracle.expectedSnapshot).toBeDefined()
+          const fileSystem = yield* FileSystem.FileSystem
+          const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-v28-oracle-" })
+          const filename = `${directory}/valid/rika.db`
+          yield* copyTemplate(yield* V28Template, filename)
+          yield* makeDatabase(filename)
+          expect(yield* readRoute(filename)).toEqual(oracle.expectedSnapshot)
+        }),
+      ),
+    )
+
+    for (const [index, kind] of oracle.malformedJsonCases.entries())
+      templateTest.effect(`rejects malformed JSON ${kind} without changing database or sidecars`, () =>
+        rejectMalformedRoutes(`rika-v28-malformed-json-${index}-`, malformedJsonRoutes().slice(index, index + 1)),
+      )
+
+    for (const [index, kind] of oracle.malformedConnectionIdentityCases.entries())
+      templateTest.effect(`rejects malformed connection identity ${kind} without changing database or sidecars`, () =>
+        rejectIdentityCase(`rika-v28-malformed-identity-${index}-`, index),
+      )
+
+    templateTest.effect("rejects every declared future version before writing database or sidecar bytes", () =>
       Effect.scoped(
         Effect.gen(function* () {
           const fileSystem = yield* FileSystem.FileSystem
-          const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-v28-malformed-" })
-          const malformedRoutes = new Map<string, string>()
-          for (const kind of oracle.malformedJsonCases) {
-            let routeText = "[]"
-            if (kind === "truncated-object") routeText = '{"version":1'
-            else if (kind === "scalar") routeText = "null"
-            malformedRoutes.set(`json-${kind}`, routeText)
-          }
-          const encodedRoute = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.UnknownFromJsonString))(
-            oracle.legacyRoute,
+          const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-v28-reject-" })
+          const template = yield* V28Template
+          yield* Effect.forEach(
+            oracle.rejectedVersions,
+            (version) =>
+              Effect.gen(function* () {
+                const filename = `${directory}/${version}/rika.db`
+                yield* copyTemplate(template, filename)
+                const futureRoute = { ...oracle.legacyRoute, version }
+                const routeText = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.UnknownFromJsonString))(
+                  futureRoute,
+                )
+                yield* updateRoute(filename, routeText)
+                yield* removeSidecars(filename)
+                const before = yield* readDatabaseBytes(filename)
+                expect(before.has(filename)).toBe(true)
+                expect(before.has(`${filename}-wal`)).toBe(false)
+                expect(before.has(`${filename}-shm`)).toBe(false)
+                const result = yield* Effect.result(makeDatabase(filename))
+                expect(result._tag).toBe("Failure")
+                yield* expectUnchanged(before, filename)
+              }),
+            { concurrency: 2 },
           )
-          for (const kind of oracle.malformedConnectionIdentityCases) {
-            let replacement = '"connectionIdentity":{"opaque":1}'
-            if (kind === "primitive") replacement = '"connectionIdentity":"opaque"'
-            else if (kind === "unknown-field") replacement = '"connectionIdentity":{"opaque":"ok","extra":true}'
-            else if (kind === "missing-connection-identity") replacement = ""
-            else if (kind === "missing-opaque") replacement = '"connectionIdentity":{}'
-            else if (kind === "empty-opaque") replacement = '"connectionIdentity":{"opaque":""}'
-            const marker = '"connectionIdentity":{"opaque":"connection-main"}'
-            malformedRoutes.set(
-              `identity-${kind}`,
-              kind === "missing-connection-identity"
-                ? encodedRoute.replace(`,${marker}`, "")
-                : encodedRoute.replace(marker, replacement),
-            )
-          }
-          for (const [name, routeText] of malformedRoutes) {
-            const filename = `${directory}/${name}/rika.db`
-            yield* makeDatabase(filename)
-            yield* prepareV27(filename, routeText)
-            const before = new Map<string, Uint8Array>()
-            for (const path of databaseSidecars(filename))
-              if (yield* fileSystem.exists(path)) before.set(path, yield* fileSystem.readFile(path))
-            const result = yield* Effect.result(makeDatabase(filename))
-            expect(result._tag).toBe("Failure")
-            for (const path of databaseSidecars(filename)) {
-              const exists = yield* fileSystem.exists(path)
-              expect(exists).toBe(before.has(path))
-              if (exists) expect(yield* fileSystem.readFile(path)).toEqual(before.get(path))
-            }
-          }
         }),
       ),
-    30_000,
-  )
-
-  test.effect("rejects every declared future version before writing database or sidecar bytes", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem
-        const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-v28-reject-" })
-        for (const version of oracle.rejectedVersions) {
-          const filename = `${directory}/${version}/rika.db`
-          yield* makeDatabase(filename)
-          const futureRoute = { ...oracle.legacyRoute, version }
-          const routeText = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.UnknownFromJsonString))(futureRoute)
-          yield* prepareV27(filename, routeText)
-          const before = new Map<string, Uint8Array>()
-          for (const path of databaseSidecars(filename))
-            if (yield* fileSystem.exists(path)) before.set(path, yield* fileSystem.readFile(path))
-          const result = yield* Effect.result(makeDatabase(filename))
-          expect(result._tag).toBe("Failure")
-          for (const path of databaseSidecars(filename)) {
-            const exists = yield* fileSystem.exists(path)
-            expect(exists).toBe(before.has(path))
-            if (exists) expect(yield* fileSystem.readFile(path)).toEqual(before.get(path))
-          }
-        }
-      }),
-    ),
-  )
+    )
+  })
 })

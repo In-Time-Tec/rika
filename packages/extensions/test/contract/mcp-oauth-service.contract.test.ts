@@ -106,8 +106,8 @@ describe("McpOAuth", () => {
         const host = Context.get(context, McpOAuth.OAuthHost.Host)
         yield* Effect.scoped(
           Effect.gen(function* () {
-            const first = yield* host.prepareCallback!("/oauth/callback")
-            const second = yield* host.prepareCallback!("/oauth/callback")
+            const first = yield* host.prepareCallback("/oauth/callback")
+            const second = yield* host.prepareCallback("/oauth/callback")
             expect(first.redirectUrl).not.toBe(second.redirectUrl)
             const client = yield* HttpClient.HttpClient
             const firstUrl = new URL(first.redirectUrl)
