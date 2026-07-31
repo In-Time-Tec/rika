@@ -58,6 +58,7 @@ import {
   AgentProfile,
   BackendError,
   Event,
+  executionReference,
   type ExecutionCheckpoint,
   type ExecutionReference,
   type ExecutionRoutePin,
@@ -523,6 +524,7 @@ const variantSelection = (
     : { ...selection, registrationKey: modelVariantKey(effort ?? "medium", fast) }
 
 const agentId = Ids.AgentId.make("agent:rika")
+const titleAgentId = Ids.AgentId.make("agent:rika:title")
 const addressId = Ids.AddressId.make("address:rika")
 const rootAgentName = "rika"
 const fanOutAgentId = (fanOutId: unknown, childExecutionId: unknown) =>
@@ -1635,6 +1637,79 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
             type: "accepted" as const,
           }
         }),
+        startAuxiliary: Effect.fn("ExecutionBackend.startAuxiliary")(function* (input) {
+          const route = input.executionRoute.title
+          if (route === undefined)
+            return yield* BackendError.make({ message: `Turn ${input.turnId} has no pinned title route` })
+          const id = Ids.ExecutionId.make(input.executionId)
+          const durableRoute = yield* Schema.decodeUnknownEffect(Schema.Json)(input.executionRoute).pipe(
+            Effect.mapError(error),
+          )
+          const preset = resolveTitle(pinnedSelection(route))
+          const metadata = {
+            product_profile: "Title",
+            steering_enabled: false,
+            rika_execution_id: input.executionId,
+            rika_thread_id: input.threadId,
+            rika_turn_id: input.turnId,
+            rika_work_kind: "title",
+            rika_agent_depth: 0,
+            rika_reasoning_effort: route.effort,
+            rika_execution_route: durableRoute,
+          }
+          const registered = yield* client.agents
+            .register({
+              id: titleAgentId,
+              address: addressId,
+              name: "rika-title",
+              instructions: preset.instructions,
+              model: {
+                ...preset.model,
+                metadata,
+              },
+              tools: [],
+              tool_execution: toolExecutionPolicy,
+              permissions: [],
+              metadata,
+            })
+            .pipe(Effect.mapError(error))
+          const start = client.executions
+            .startByAgentDefinition({
+              root_address_id: addressId,
+              session_id: Ids.SessionId.make(`session:${input.executionId}`),
+              agent_id: titleAgentId,
+              agent_revision: registered.record.current_revision,
+              input: [Content.text(input.prompt)],
+              idempotency_key: input.executionId,
+              execution_id: id,
+              metadata,
+            })
+            .pipe(
+              Effect.asVoid,
+              Effect.catchTag("ClientError", (startError) =>
+                client.executions.get(id).pipe(
+                  Effect.matchEffect({
+                    onFailure: () => Effect.fail(startError),
+                    onSuccess: (existing) => (existing === undefined ? Effect.fail(startError) : Effect.void),
+                  }),
+                ),
+              ),
+              Effect.mapError(error),
+            )
+          const starter = yield* Effect.forkChild(start)
+          yield* Effect.yieldNow
+          const started = starter.pollUnsafe()
+          if (started !== undefined) yield* Fiber.join(starter)
+          else yield* Effect.raceFirst(awaitExecutionAvailable(client, id), Fiber.join(starter))
+          return yield* followExecution(
+            client,
+            input.executionId,
+            undefined,
+            input.onEvent,
+            true,
+            executionReference,
+          ).pipe(Effect.ensuring(Fiber.interrupt(starter)), Effect.mapError(error))
+        }),
         start: Effect.fn(
           function* (input) {
             return yield* Effect.gen(function* () {
@@ -1869,9 +1944,24 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               })
               .pipe(Effect.mapError(error))
             for (const record of page.records) {
+              const metadata = record.metadata
+              const auxiliaryTurnId =
+                metadata?.rika_work_kind === "title" && typeof metadata.rika_turn_id === "string"
+                  ? metadata.rika_turn_id
+                  : undefined
+              if (auxiliaryTurnId !== undefined) {
+                roots.push({
+                  kind: "title",
+                  executionId: String(record.execution_id),
+                  turnId: auxiliaryTurnId,
+                  createdAt: record.created_at,
+                })
+                continue
+              }
               const turnId = turnIdFromExecutionId(String(record.execution_id))
               if (turnId === undefined) continue
               roots.push({
+                kind: "turn",
                 executionId: String(record.execution_id),
                 turnId,
                 createdAt: record.created_at,

@@ -92,6 +92,15 @@ export interface StartInput {
   readonly onEvent?: (event: Event) => void
 }
 
+export interface StartAuxiliaryInput {
+  readonly executionId: string
+  readonly threadId: string
+  readonly turnId: string
+  readonly prompt: string
+  readonly executionRoute: ExecutionRoutePin
+  readonly onEvent?: (event: Event) => void
+}
+
 export type EventScope = "execution" | "tree"
 
 export interface ExecutionReference {
@@ -252,11 +261,19 @@ export interface ThreadQueueWake {
 
 export type TurnPromoter = (threadId: string, generation: number) => Effect.Effect<number>
 
-export interface OpenRootExecution {
-  readonly executionId: string
-  readonly turnId: string | undefined
-  readonly createdAt: number
-}
+export type OpenRootExecution =
+  | {
+      readonly kind: "turn"
+      readonly executionId: string
+      readonly turnId: string
+      readonly createdAt: number
+    }
+  | {
+      readonly kind: "title"
+      readonly executionId: string
+      readonly turnId: string
+      readonly createdAt: number
+    }
 
 export interface Interface {
   readonly registerModels?: (
@@ -296,6 +313,7 @@ export interface Interface {
   readonly wakeThreadHost?: (wake: ThreadQueueWake) => Effect.Effect<void, BackendError>
   readonly registerTurnPromoter?: (promoter: TurnPromoter) => Effect.Effect<void>
   readonly start: (input: StartInput) => Effect.Effect<Result, BackendError>
+  readonly startAuxiliary?: (input: StartAuxiliaryInput) => Effect.Effect<Result, BackendError>
   readonly follow?: (
     turnId: string,
     afterCursor: string | ExecutionCheckpoint | undefined,

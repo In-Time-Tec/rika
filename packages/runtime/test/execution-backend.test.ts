@@ -482,6 +482,49 @@ describe("ExecutionBackend Relay client adapter", () => {
     }),
   )
 
+  it.effect("starts title work as a deterministic capability-free top-level execution", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient({ streamEvents: [relayEvent("execution.completed", 1)] })
+      const route = currentExecutionRoute()
+      const title = { ...route.main, role: "title" as const, alias: "title" }
+      const result = yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        if (backend.startAuxiliary === undefined) return yield* Effect.die("Missing auxiliary start")
+        return yield* backend.startAuxiliary({
+          executionId: "auxiliary:title:turn-a",
+          threadId: "thread-a",
+          turnId: "turn-a",
+          prompt: "Summarize this thread",
+          executionRoute: { ...route, title },
+        })
+      }).pipe(provideBackend(fixture.implementation))
+
+      const registrations = yield* Ref.get(fixture.registrations)
+      const starts = yield* Ref.get(fixture.starts)
+      expect(registrations[0]).toMatchObject({
+        id: "agent:rika:title",
+        address: "address:rika",
+        name: "rika-title",
+        tools: [],
+        permissions: [],
+        metadata: {
+          product_profile: "Title",
+          steering_enabled: false,
+          rika_work_kind: "title",
+          rika_turn_id: "turn-a",
+        },
+      })
+      expect(starts[0]).toMatchObject({
+        execution_id: "auxiliary:title:turn-a",
+        idempotency_key: "auxiliary:title:turn-a",
+        session_id: "session:auxiliary:title:turn-a",
+        agent_id: "agent:rika:title",
+        input: [Content.text("Summarize this thread")],
+      })
+      expect(result.status).toBe("completed")
+    }),
+  )
+
   it.effect("maps distinct top-level Turn identities to distinct deterministic Relay identities", () =>
     Effect.gen(function* () {
       const fixture = yield* makeClient({

@@ -677,8 +677,19 @@ describe("Operation", () => {
       const listingBackend = ExecutionBackend.Service.of({
         ...backend,
         listOpenRootExecutions: Effect.succeed([
-          { executionId: "execution:orphan-turn", turnId: "orphan-turn", createdAt: 0 },
-          { executionId: "execution:fresh-turn", turnId: "fresh-turn", createdAt: Number.MAX_SAFE_INTEGER },
+          { kind: "turn", executionId: "execution:orphan-turn", turnId: "orphan-turn", createdAt: 0 },
+          {
+            kind: "turn",
+            executionId: "execution:fresh-turn",
+            turnId: "fresh-turn",
+            createdAt: Number.MAX_SAFE_INTEGER,
+          },
+          {
+            kind: "title",
+            executionId: "auxiliary:title:completed-turn",
+            turnId: "completed-turn",
+            createdAt: 0,
+          },
         ]),
         cancel: (turnId) =>
           Ref.update(cancelled, (values) => [...values, turnId]).pipe(
@@ -4348,40 +4359,35 @@ describe("Operation", () => {
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const startInputs = yield* Ref.make<ReadonlyArray<ExecutionBackend.StartInput>>([])
-      const childInputs = yield* Ref.make<ReadonlyArray<ExecutionBackend.InvokeChildInput>>([])
+      const auxiliaryInputs = yield* Ref.make<ReadonlyArray<ExecutionBackend.StartAuxiliaryInput>>([])
       const liveBackend = ExecutionBackend.Service.of({
         ...backend,
-        invokeChild: (input) =>
-          Ref.update(childInputs, (all) => [...all, input]).pipe(Effect.as({ ...input, type: "accepted" as const })),
-        follow: (executionId, afterCursor, onEvent, reference) => {
-          if (executionId !== "child:turn-interactive:title")
-            return backend.follow!(executionId, afterCursor, onEvent, reference)
-          if (reference !== ExecutionBackend.executionReference)
-            return Effect.die(new Error("title execution addressed without the execution reference"))
-          return Effect.succeed({
-            turnId: executionId,
-            status: "completed" as const,
-            events: [
-              executionStarted(executionId),
-              {
-                executionId,
-                cursor: "title-a",
-                sequence: 1,
-                type: "model.output.completed" as const,
-                createdAt: 3,
-                text: "answer",
-              },
-              {
-                executionId,
-                cursor: "title-b",
-                sequence: 2,
-                type: "execution.completed" as const,
-                timestampSource: "server" as const,
-                createdAt: 4,
-              },
-            ],
-          })
-        },
+        startAuxiliary: (input) =>
+          Ref.update(auxiliaryInputs, (all) => [...all, input]).pipe(
+            Effect.as({
+              turnId: input.turnId,
+              status: "completed" as const,
+              events: [
+                executionStarted(input.executionId),
+                {
+                  executionId: input.executionId,
+                  cursor: "title-a",
+                  sequence: 1,
+                  type: "model.output.completed" as const,
+                  createdAt: 3,
+                  text: "answer",
+                },
+                {
+                  executionId: input.executionId,
+                  cursor: "title-b",
+                  sequence: 2,
+                  type: "execution.completed" as const,
+                  timestampSource: "server" as const,
+                  createdAt: 4,
+                },
+              ],
+            }),
+          ),
         start: (input) =>
           Ref.update(startInputs, (all) => [...all, input]).pipe(
             Effect.andThen(
@@ -4486,12 +4492,14 @@ describe("Operation", () => {
       expect(transcript).toContainEqual(
         expect.objectContaining({ _tag: "ThreadTitled", threadId: "thread-interactive", title: "answer" }),
       )
-      expect(yield* Ref.get(childInputs)).toContainEqual({
-        parentTurnId: "turn-interactive",
-        childId: "title",
-        profile: "Title",
-        prompt: "exact prompt",
-      })
+      expect(yield* Ref.get(auxiliaryInputs)).toContainEqual(
+        expect.objectContaining({
+          executionId: "auxiliary:title:turn-interactive",
+          threadId: "thread-interactive",
+          turnId: "turn-interactive",
+          prompt: "exact prompt",
+        }),
+      )
       expect(yield* turns.get(Turn.TurnId.make("turn-interactive"))).toMatchObject({
         prompt: "exact prompt",
         status: "completed",
@@ -4653,7 +4661,7 @@ describe("Operation", () => {
       const turns = yield* TurnRepository.makeMemory()
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
       const starts = yield* Ref.make<ReadonlyArray<string>>([])
-      const titleInvocations = yield* Ref.make<ReadonlyArray<ExecutionBackend.InvokeChildInput>>([])
+      const titleInvocations = yield* Ref.make<ReadonlyArray<ExecutionBackend.StartAuxiliaryInput>>([])
       const titleRoute = {
         ...Turn.testExecutionRoute("low").main,
         role: "title" as const,
@@ -4662,34 +4670,32 @@ describe("Operation", () => {
       }
       const routedBackend = ExecutionBackend.Service.of({
         ...backend,
-        invokeChild: (input) =>
+        startAuxiliary: (input) =>
           Ref.update(titleInvocations, (values) => [...values, input]).pipe(
-            Effect.as({ ...input, type: "accepted" as const }),
+            Effect.as({
+              turnId: input.turnId,
+              status: "completed" as const,
+              events: [
+                executionStarted(input.executionId),
+                {
+                  executionId: input.executionId,
+                  cursor: "title-output",
+                  sequence: 1,
+                  type: "model.output.completed" as const,
+                  createdAt: 3,
+                  text: "Selected Route Title",
+                },
+                {
+                  executionId: input.executionId,
+                  cursor: "title-completed",
+                  sequence: 2,
+                  type: "execution.completed" as const,
+                  timestampSource: "server" as const,
+                  createdAt: 4,
+                },
+              ],
+            }),
           ),
-        follow: (executionId) =>
-          Effect.succeed({
-            turnId: executionId,
-            status: "completed" as const,
-            events: [
-              executionStarted(executionId),
-              {
-                executionId,
-                cursor: "title-output",
-                sequence: 1,
-                type: "model.output.completed" as const,
-                createdAt: 3,
-                text: "Selected Route Title",
-              },
-              {
-                executionId,
-                cursor: "title-completed",
-                sequence: 2,
-                type: "execution.completed" as const,
-                timestampSource: "server" as const,
-                createdAt: 4,
-              },
-            ],
-          }),
         start: (input) =>
           Ref.update(starts, (values) => [...values, `${input.executionRoute.main.model}:${input.turnId}`]).pipe(
             Effect.as({
@@ -4746,7 +4752,13 @@ describe("Operation", () => {
 
       expect(yield* Ref.get(starts)).toEqual(["high-model:turn-selected-title"])
       expect(yield* Ref.get(titleInvocations)).toEqual([
-        { parentTurnId: "turn-selected-title", childId: "title", profile: "Title", prompt: "Build groceries" },
+        expect.objectContaining({
+          executionId: "auxiliary:title:turn-selected-title",
+          threadId: "thread-selected-title",
+          turnId: "turn-selected-title",
+          prompt: "Build groceries",
+          executionRoute: expect.objectContaining({ title: titleRoute }),
+        }),
       ])
       expect(yield* repository.get(Thread.ThreadId.make("thread-selected-title"))).toMatchObject({
         title: "Selected Route Title",
@@ -4763,7 +4775,7 @@ describe("Operation", () => {
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const titleFailingBackend = ExecutionBackend.Service.of({
         ...backend,
-        invokeChild: () => Effect.fail(ExecutionBackend.BackendError.make({ message: "title unavailable" })),
+        startAuxiliary: () => Effect.fail(ExecutionBackend.BackendError.make({ message: "title unavailable" })),
       })
       const layer = Operation.productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
@@ -4795,7 +4807,7 @@ describe("Operation", () => {
     }),
   )
 
-  it.effect("finishes a durable title from replay after restart without starting it again", () =>
+  it.effect("reconciles a durable auxiliary title through its idempotent identity after restart", () =>
     Effect.gen(function* () {
       const thread = selectionThread("title-restart-thread")
       const prompt = "Recover this title after restart"
@@ -4813,31 +4825,19 @@ describe("Operation", () => {
       }
       const turns = yield* TurnRepository.makeMemory([firstTurn])
       const starts = yield* Ref.make(0)
-      const replayed = yield* Ref.make<ReadonlyArray<string>>([])
+      const auxiliaries = yield* Ref.make<ReadonlyArray<string>>([])
       const restartedBackend = ExecutionBackend.Service.of({
         ...backend,
         start: (input) => Ref.update(starts, (count) => count + 1).pipe(Effect.andThen(backend.start(input))),
-        inspect: (executionId) =>
-          Effect.succeed(
-            executionId === "child:title-restart-turn:title"
-              ? {
-                  turnId: executionId,
-                  status: "completed" as const,
-                  waits: [],
-                  pendingTools: [],
-                  children: [],
-                }
-              : undefined,
-          ),
-        replay: (executionId) =>
-          Ref.update(replayed, (values) => [...values, executionId]).pipe(
+        startAuxiliary: (input) =>
+          Ref.update(auxiliaries, (values) => [...values, input.executionId]).pipe(
             Effect.as({
-              turnId: executionId,
+              turnId: input.turnId,
               status: "completed" as const,
               events: [
-                executionStarted(executionId),
+                executionStarted(input.executionId),
                 {
-                  executionId,
+                  executionId: input.executionId,
                   cursor: "restarted-title-output",
                   sequence: 1,
                   type: "model.output.completed" as const,
@@ -4845,7 +4845,7 @@ describe("Operation", () => {
                   text: "Recovered Durable Title",
                 },
                 {
-                  executionId,
+                  executionId: input.executionId,
                   cursor: "restarted-title-done",
                   sequence: 2,
                   type: "execution.completed" as const,
@@ -4876,7 +4876,7 @@ describe("Operation", () => {
       )
 
       expect(yield* Ref.get(starts)).toBe(0)
-      expect(yield* Ref.get(replayed)).toContain("child:title-restart-turn:title")
+      expect(yield* Ref.get(auxiliaries)).toContain("auxiliary:title:title-restart-turn")
     }),
   )
 

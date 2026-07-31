@@ -192,7 +192,7 @@ const ignoreInteractiveEvent = (_event: InteractiveEvent) => {}
 
 const temporaryThreadTitle = (prompt: string) => clampThreadTitle(prompt) || "New thread"
 
-const titleExecutionId = (turnId: Turn.TurnId) => AgentDepth.childExecutionId(String(turnId), "title")
+const titleExecutionId = (turnId: Turn.TurnId) => `auxiliary:title:${String(turnId)}`
 
 const sanitizeThreadTitle = (text: string) =>
   [
@@ -1119,7 +1119,8 @@ export const settleAbandonedRecoveredWork = Effect.fn("Operation.settleAbandoned
   const openRoots = yield* backend.listOpenRootExecutions.pipe(Effect.orElseSucceed(() => []))
   for (const root of openRoots) {
     if (root.createdAt >= bootAt) continue
-    const turn = root.turnId === undefined ? undefined : yield* turns.get(Turn.TurnId.make(root.turnId))
+    if (root.kind === "title") continue
+    const turn = yield* turns.get(Turn.TurnId.make(root.turnId))
     if (turn !== undefined && Turn.isAgentExecution(turn) && !isTerminalStatus(turn.status)) continue
     yield* backend
       .cancel(root.executionId, ExecutionBackend.executionReference)
@@ -1505,10 +1506,7 @@ export const productLayer = <
             Cause.hasInterruptsOnly(cause)
               ? Effect.interrupt
               : Effect.logError("usage-projection.publish.failed").pipe(
-                  Effect.annotateLogs({
-                    "rika.failure.kind": failureKind(cause),
-                    "rika.failure.cause": Cause.pretty(cause),
-                  }),
+                  Effect.annotateLogs("rika.failure.kind", failureKind(cause)),
                 ),
           ),
         ),
@@ -1582,9 +1580,6 @@ export const productLayer = <
         const summaries = yield* ThreadSummaryRepository.Service
         publishInteractiveActivity(0, { _tag: "ThreadsListed", threads: yield* summaries.list() })
       })
-      const settledTitleExecutions = new Set<string>()
-      const titleAttempts = new Map<string, number>()
-      const maximumTitleAttempts = 3
       const titleThread = Effect.fn("Operation.titleThread")(function* (
         thread: Thread.Thread,
         firstTurn: Turn.AgentExecutionTurn,
@@ -1597,31 +1592,15 @@ export const productLayer = <
           const current = yield* threads.get(thread.id)
           if (current === undefined || current.title !== temporaryThreadTitle(firstTurn.prompt)) return
           const executionId = titleExecutionId(firstTurn.id)
-          if (settledTitleExecutions.has(executionId)) return
-          const inspection = yield* backend.inspect(executionId, ExecutionBackend.executionReference)
-          if (inspection?.status === "failed" || inspection?.status === "cancelled") {
-            settledTitleExecutions.add(executionId)
-            return
-          }
-          let result
-          if (inspection === undefined) {
-            yield* backend.invokeChild({
-              parentTurnId: String(firstTurn.id),
-              childId: "title",
-              profile: "Title",
-              prompt: firstTurn.prompt.slice(0, 2000),
-            })
-            const spawned = yield* backend.inspect(executionId, ExecutionBackend.executionReference)
-            if (spawned !== undefined && isTerminalStatus(spawned.status))
-              result = yield* backend.replay(executionId, undefined, ExecutionBackend.executionReference)
-            else if (backend.follow !== undefined)
-              result = yield* backend.follow(executionId, undefined, undefined, ExecutionBackend.executionReference)
-          } else if (isTerminalStatus(inspection.status)) {
-            result = yield* backend.replay(executionId, undefined, ExecutionBackend.executionReference)
-          } else if (backend.follow !== undefined) {
-            result = yield* backend.follow(executionId, undefined, undefined, ExecutionBackend.executionReference)
-          }
-          if (result === undefined) return
+          if (backend.startAuxiliary === undefined)
+            return yield* operationError("The execution backend does not support auxiliary work")
+          const result = yield* backend.startAuxiliary({
+            executionId,
+            threadId: String(thread.id),
+            turnId: String(firstTurn.id),
+            prompt: firstTurn.prompt.slice(0, 2000),
+            executionRoute: firstTurn.executionRoute,
+          })
           yield* commitUsageSource(
             executionId,
             String(thread.id),
@@ -1630,8 +1609,6 @@ export const productLayer = <
             isTerminalStatus(result.status),
           )
           yield* usageRepository.readTurn(String(firstTurn.id)).pipe(Effect.flatMap(publishThreadUsage))
-          if (!isTerminalStatus(result.status)) return
-          settledTitleExecutions.add(executionId)
           if (result.status !== "completed") return
           const text = result.events
             .filter((event) => event.type === "model.output.completed")
@@ -1650,21 +1627,9 @@ export const productLayer = <
           yield* notifyThreadSummaries
         })
         yield* withExecutionAdmission(program).pipe(
-          Effect.catchCause((cause) => {
-            const executionId = titleExecutionId(firstTurn.id)
-            const attempts = (titleAttempts.get(executionId) ?? 0) + 1
-            if (attempts >= maximumTitleAttempts) {
-              settledTitleExecutions.add(executionId)
-              titleAttempts.delete(executionId)
-            } else titleAttempts.set(executionId, attempts)
-            return Effect.logWarning("thread-title.failed").pipe(
-              Effect.annotateLogs({
-                "rika.failure.kind": failureKind(cause),
-                "rika.failure.cause": Cause.pretty(cause),
-                "rika.title.attempts": attempts,
-              }),
-            )
-          }),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("thread-title.failed").pipe(Effect.annotateLogs("rika.failure.kind", failureKind(cause))),
+          ),
         )
       })
       const notifyTurnChanged = (turn: Pick<Turn.Turn, "id" | "threadId">) =>
@@ -2436,7 +2401,6 @@ export const productLayer = <
                         yield* Effect.logError("turn.failed").pipe(
                           Effect.annotateLogs({
                             "rika.duration.ms": failedAt - startedAt,
-                            "rika.failure.cause": String(outcome.cause),
                             "rika.failure.kind": failureKind(outcome.cause),
                             "rika.thread.id": String(thread.id),
                             "rika.turn.id": String(turn.id),
@@ -2657,7 +2621,7 @@ export const productLayer = <
               const current = yield* turns.get(promotedTurn.id)
               yield* Effect.logError("turn.failed").pipe(
                 Effect.annotateLogs({
-                  "rika.failure.cause": String(outcome.error),
+                  "rika.failure.kind": "QueuedTurnStartFailure",
                   "rika.thread.id": String(thread.id),
                   "rika.turn.id": String(promotedTurn.id),
                 }),
