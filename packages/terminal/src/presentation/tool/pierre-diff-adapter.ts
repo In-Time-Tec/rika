@@ -1,4 +1,4 @@
-import { StyledText, fg, type TextChunk } from "@opentui/core"
+import { TerminalStyledText, fg, type TerminalTextChunk } from "../markdown/styled-text"
 import { parsePatchFiles } from "@pierre/diffs"
 import { Function } from "effect"
 import { highlightLines, languageForPath } from "../markdown/syntax-highlighter"
@@ -22,11 +22,11 @@ type Row =
       readonly lang: string | undefined
     }
 
-const clipLine = (chunks: ReadonlyArray<TextChunk>, width: number): ReadonlyArray<TextChunk> => {
+const clipLine = (chunks: ReadonlyArray<TerminalTextChunk>, width: number): ReadonlyArray<TerminalTextChunk> => {
   const total = chunks.reduce((sum, chunk) => sum + chunk.text.length, 0)
   if (total <= width) return chunks
   const budget = Math.max(0, width - 1)
-  const clipped: Array<TextChunk> = []
+  const clipped: Array<TerminalTextChunk> = []
   let used = 0
   for (const chunk of chunks) {
     if (used >= budget) break
@@ -38,7 +38,7 @@ const clipLine = (chunks: ReadonlyArray<TextChunk>, width: number): ReadonlyArra
   return clipped
 }
 
-const contentChunks = (row: Extract<Row, { number: number }>): ReadonlyArray<TextChunk> => {
+const contentChunks = (row: Extract<Row, { number: number }>): ReadonlyArray<TerminalTextChunk> => {
   if (row.content.length === 0) return []
   if (row.marker === "-") return [fg(colors.red)(row.content)]
   if (row.marker === "+") return [fg(colors.green)(row.content)]
@@ -46,23 +46,23 @@ const contentChunks = (row: Extract<Row, { number: number }>): ReadonlyArray<Tex
   return highlightLines(row.content, row.lang)[0] ?? []
 }
 
-const pierreCache = new Map<string, ReadonlyArray<TextChunk> | null>()
+const pierreCache = new Map<string, ReadonlyArray<TerminalTextChunk> | null>()
 const pierreCacheLimit = 256
 
 export const renderPierreDiff: {
-  (options: DiffRenderOptions): (patch: string) => StyledText | undefined
-  (patch: string, options: DiffRenderOptions): StyledText | undefined
-} = Function.dual(2, (patch: string, options: DiffRenderOptions): StyledText | undefined => {
+  (options: DiffRenderOptions): (patch: string) => TerminalStyledText | undefined
+  (patch: string, options: DiffRenderOptions): TerminalStyledText | undefined
+} = Function.dual(2, (patch: string, options: DiffRenderOptions): TerminalStyledText | undefined => {
   const key = `${options.indent ?? 2}:${options.width}:${patch}`
   const cached = pierreCache.get(key)
-  if (cached !== undefined) return cached === null ? undefined : new StyledText([...cached])
+  if (cached !== undefined) return cached === null ? undefined : new TerminalStyledText([...cached])
   const chunks = renderPierreDiffChunks(patch, options)
   if (pierreCache.size >= pierreCacheLimit) pierreCache.delete(pierreCache.keys().next().value!)
   pierreCache.set(key, chunks)
-  return chunks === null ? undefined : new StyledText([...chunks])
+  return chunks === null ? undefined : new TerminalStyledText([...chunks])
 })
 
-const renderPierreDiffChunks = (patch: string, options: DiffRenderOptions): ReadonlyArray<TextChunk> | null => {
+const renderPierreDiffChunks = (patch: string, options: DiffRenderOptions): ReadonlyArray<TerminalTextChunk> | null => {
   const { width } = options
   const indent = " ".repeat(options.indent ?? 2)
   let parsed: ReturnType<typeof parsePatchFiles>
@@ -118,7 +118,7 @@ const renderPierreDiffChunks = (patch: string, options: DiffRenderOptions): Read
     }
   if (!hasContent) return null
   const numberWidth = Math.max(1, ...rows.flatMap((row) => ("ellipsis" in row ? [] : [String(row.number).length])))
-  const chunks: Array<TextChunk> = []
+  const chunks: Array<TerminalTextChunk> = []
   rows.forEach((row, index) => {
     if (index > 0) chunks.push(fg(colors.text)("\n"))
     if ("ellipsis" in row) {

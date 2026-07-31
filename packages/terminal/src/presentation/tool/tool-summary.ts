@@ -1,4 +1,4 @@
-import { bold, fg, type TextChunk } from "@opentui/core"
+import { bold, fg, type TerminalTextChunk } from "../markdown/styled-text"
 import { Function } from "effect"
 import { colors } from "../terminal/terminal-theme"
 import { wrapStyledChunks } from "../markdown/styled-text"
@@ -9,11 +9,11 @@ export const joinToolSummary = (summary: ToolSummary): string => summary.primary
 type ToolSummaryOptions = { readonly leading?: string; readonly selected?: boolean; readonly width?: number }
 
 export const renderToolSummary: {
-  (options?: ToolSummaryOptions): (summary: ToolSummary) => ReadonlyArray<ReadonlyArray<TextChunk>>
-  (summary: ToolSummary, options?: ToolSummaryOptions): ReadonlyArray<ReadonlyArray<TextChunk>>
+  (options?: ToolSummaryOptions): (summary: ToolSummary) => ReadonlyArray<ReadonlyArray<TerminalTextChunk>>
+  (summary: ToolSummary, options?: ToolSummaryOptions): ReadonlyArray<ReadonlyArray<TerminalTextChunk>>
 } = Function.dual(
   (args) => typeof args[0] === "object" && args[0] !== null && "primary" in args[0],
-  (summary: ToolSummary, options: ToolSummaryOptions = {}): ReadonlyArray<ReadonlyArray<TextChunk>> => {
+  (summary: ToolSummary, options: ToolSummaryOptions = {}): ReadonlyArray<ReadonlyArray<TerminalTextChunk>> => {
     const leading = options.leading ?? ""
     const chunks =
       options.selected === true

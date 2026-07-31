@@ -4,7 +4,7 @@ import { clipToWidth } from "../terminal/terminal-format"
 const clip = clipToWidth
 
 const renderDiffCache = new Map<string, string>()
-const styledDiffCache = new Map<string, ReadonlyArray<TextChunk> | null>()
+const styledDiffCache = new Map<string, ReadonlyArray<TerminalTextChunk> | null>()
 const diffCacheLimit = 256
 
 const cachedDiff = <A>(cache: Map<string, A>, key: string, compute: () => A): A => {
@@ -58,13 +58,13 @@ const renderDiffUncached = (patch: string, width: number): string => {
 export type DiffStyleOptions = { readonly width: number; readonly indent?: number }
 
 export const renderDiffStyled: {
-  (options: DiffStyleOptions): (patch: string) => StyledText
-  (patch: string, options: DiffStyleOptions): StyledText
-} = Function.dual(2, (patch: string, options: DiffStyleOptions): StyledText => {
+  (options: DiffStyleOptions): (patch: string) => TerminalStyledText
+  (patch: string, options: DiffStyleOptions): TerminalStyledText
+} = Function.dual(2, (patch: string, options: DiffStyleOptions): TerminalStyledText => {
   const indent = " ".repeat(options.indent ?? 2)
   const chunks = cachedDiff(styledDiffCache, `s:${indent.length}:${options.width}:${patch}`, () => {
     const lines = renderDiff(patch, Math.max(1, options.width - indent.length)).split("\n")
-    const built: Array<TextChunk> = []
+    const built: Array<TerminalTextChunk> = []
     lines.forEach((line, index) => {
       let color = colors.muted
       if (/^\s*\d*\s+\+/.test(line)) color = colors.green
@@ -74,13 +74,13 @@ export const renderDiffStyled: {
     })
     return built
   })
-  return new StyledText([...(chunks ?? [])])
+  return new TerminalStyledText([...(chunks ?? [])])
 })
 
 export const renderPartialDiffStyled: {
-  (options: DiffStyleOptions): (patch: string) => StyledText | undefined
-  (patch: string, options: DiffStyleOptions): StyledText | undefined
-} = Function.dual(2, (patch: string, options: DiffStyleOptions): StyledText | undefined => {
+  (options: DiffStyleOptions): (patch: string) => TerminalStyledText | undefined
+  (patch: string, options: DiffStyleOptions): TerminalStyledText | undefined
+} = Function.dual(2, (patch: string, options: DiffStyleOptions): TerminalStyledText | undefined => {
   const indent = " ".repeat(options.indent ?? 2)
   const chunks = cachedDiff(styledDiffCache, `t:${indent.length}:${options.width}:${patch}`, () => {
     const lines = patch
@@ -90,7 +90,7 @@ export const renderPartialDiffStyled: {
           (line.startsWith("+") && !line.startsWith("+++")) || (line.startsWith("-") && !line.startsWith("---")),
       )
     if (lines.length === 0) return null
-    const built: Array<TextChunk> = []
+    const built: Array<TerminalTextChunk> = []
     lines.forEach((line, index) => {
       const marker = line[0]!
       built.push(
@@ -102,7 +102,7 @@ export const renderPartialDiffStyled: {
     })
     return built
   })
-  return chunks === null ? undefined : new StyledText([...chunks])
+  return chunks === null ? undefined : new TerminalStyledText([...chunks])
 })
-import { StyledText, bold, fg, type TextChunk } from "@opentui/core"
+import { TerminalStyledText, bold, fg, type TerminalTextChunk } from "../markdown/styled-text"
 import { colors } from "../terminal/terminal-theme"

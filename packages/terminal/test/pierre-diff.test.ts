@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import type { TextChunk } from "@opentui/core"
+import type { TerminalTextChunk as TextChunk } from "../src/presentation/markdown/styled-text"
 import { renderPierreDiff } from "../src/presentation/tool/pierre-diff-adapter"
 import { colors } from "../src/presentation/terminal/terminal-theme"
 

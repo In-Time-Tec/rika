@@ -93,12 +93,19 @@ import {
   relativeTime,
   truncateToWidth,
 } from "../../presentation/terminal/terminal-format"
-import { renderMarkdownLines, renderMarkdownStyled } from "../../presentation/markdown/markdown-renderer"
-import { renderDiff, renderDiffStyled, renderPartialDiffStyled } from "../../presentation/tool/diff-renderer"
-import { renderPierreDiff } from "../../presentation/tool/pierre-diff-adapter"
-import { highlightShellCommand } from "../../presentation/markdown/syntax-highlighter"
-import { wrapStyledLine } from "../../presentation/markdown/styled-text"
-import { renderToolSummary } from "../../presentation/tool/tool-summary"
+import {
+  renderMarkdownLines,
+  renderMarkdownStyled,
+  highlightShellCommand,
+  wrapStyledLine,
+  renderDiffStyled,
+  renderPartialDiffStyled,
+  renderPierreDiff,
+  renderToolSummary,
+  toOpenChunk,
+} from "../rendering/terminal-text-adapter"
+import type { TerminalTextChunk } from "../../presentation/markdown/styled-text"
+import { renderDiff } from "../../presentation/tool/diff-renderer"
 import { modeIds } from "@rika/configuration/behavior-mode"
 import {
   agentToolSummary,
@@ -834,8 +841,8 @@ interface TranscriptUnitCacheEntry {
 const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) => {
   let chunks: Array<TextChunk> = []
   let line = 0
-  const append = (chunk: TextChunk) => {
-    chunks.push(chunk)
+  const append = (chunk: TextChunk | TerminalTextChunk) => {
+    chunks.push(toOpenChunk(chunk))
     line += chunk.text.split("\n").length - 1
   }
   const appendAll = (styled: StyledText) => {

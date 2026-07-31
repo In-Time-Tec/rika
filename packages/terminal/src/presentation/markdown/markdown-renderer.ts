@@ -1,4 +1,14 @@
-import { StyledText, bold, dim, fg, italic, link, strikethrough, underline, type TextChunk } from "@opentui/core"
+import {
+  TerminalStyledText,
+  bold,
+  dim,
+  fg,
+  italic,
+  link,
+  strikethrough,
+  underline,
+  type TerminalTextChunk,
+} from "./styled-text"
 import { Function } from "effect"
 import { Lexer, type Token, type Tokens } from "marked"
 import stringWidth from "string-width"
@@ -22,8 +32,8 @@ const trailingBlankLines = (raw: string): number => {
   return match === null ? 0 : Math.max(0, match[0].length - 1)
 }
 
-const inlineChunks = (tokens: ReadonlyArray<Token>, plain: boolean): Array<TextChunk> => {
-  const chunks: Array<TextChunk> = []
+const inlineChunks = (tokens: ReadonlyArray<Token>, plain: boolean): Array<TerminalTextChunk> => {
+  const chunks: Array<TerminalTextChunk> = []
   for (const token of tokens) {
     switch (token.type) {
       case "text": {
@@ -66,7 +76,7 @@ const inlineChunks = (tokens: ReadonlyArray<Token>, plain: boolean): Array<TextC
   return chunks
 }
 
-const headingChunks = (heading: Tokens.Heading, plain: boolean): Array<TextChunk> =>
+const headingChunks = (heading: Tokens.Heading, plain: boolean): Array<TerminalTextChunk> =>
   inlineChunks(heading.tokens, plain).map((chunk) => {
     const colored = chunk.fg === colors.text ? fg(colors.teal)(chunk) : chunk
     switch (heading.depth) {
@@ -137,10 +147,10 @@ const tableWidths = (natural: ReadonlyArray<number>, minimum: ReadonlyArray<numb
 }
 
 const cellLine = (
-  content: ReadonlyArray<TextChunk>,
+  content: ReadonlyArray<TerminalTextChunk>,
   width: number,
   align: Tokens.TableCell["align"],
-): Array<TextChunk> => {
+): Array<TerminalTextChunk> => {
   const contentWidth = content.reduce((sum, chunk) => sum + stringWidth(chunk.text), 0)
   const remaining = Math.max(0, width - contentWidth)
   let left = 0
@@ -150,7 +160,12 @@ const cellLine = (
   return [fg(colors.text)(` ${" ".repeat(left)}`), ...content, fg(colors.text)(`${" ".repeat(right)} `)]
 }
 
-const tableRule = (left: string, join: string, right: string, widths: ReadonlyArray<number>): Array<TextChunk> => [
+const tableRule = (
+  left: string,
+  join: string,
+  right: string,
+  widths: ReadonlyArray<number>,
+): Array<TerminalTextChunk> => [
   dim(fg(colors.text)(`${left}${widths.map((width) => "─".repeat(width + 2)).join(join)}${right}`)),
 ]
 
@@ -173,7 +188,7 @@ const tableLines = (table: Tokens.Table, plain: boolean, width: number): Lines =
     const wrapped = cells.map((cell, index) => wrapChunks(inlineChunks(cell.tokens, plain), widths[index]!))
     const height = Math.max(1, ...wrapped.map((cell) => cell.length))
     return Array.from({ length: height }, (_, lineIndex) => {
-      const chunks: Array<TextChunk> = [dim(fg(colors.text)("│"))]
+      const chunks: Array<TerminalTextChunk> = [dim(fg(colors.text)("│"))]
       cells.forEach((cell, index) => {
         chunks.push(
           ...cellLine(wrapped[index]?.[lineIndex] ?? [], widths[index]!, cell.align),
@@ -336,11 +351,11 @@ export const renderMarkdown: {
 )
 
 export const renderMarkdownLines: {
-  (source: string, width?: number): ReadonlyArray<ReadonlyArray<TextChunk>>
-  (width?: number): (source: string) => ReadonlyArray<ReadonlyArray<TextChunk>>
+  (source: string, width?: number): ReadonlyArray<ReadonlyArray<TerminalTextChunk>>
+  (width?: number): (source: string) => ReadonlyArray<ReadonlyArray<TerminalTextChunk>>
 } = Function.dual(
   (args) => typeof args[0] === "string",
-  (source: string, width = 80): ReadonlyArray<ReadonlyArray<TextChunk>> => {
+  (source: string, width = 80): ReadonlyArray<ReadonlyArray<TerminalTextChunk>> => {
     const bounded = Math.max(1, Math.floor(width))
     return renderLines(source, false, bounded).flatMap((line) => {
       if (line.length === 0) return [[]]
@@ -351,17 +366,17 @@ export const renderMarkdownLines: {
 )
 
 export const renderMarkdownStyled: {
-  (source: string, width?: number): StyledText
-  (width?: number): (source: string) => StyledText
+  (source: string, width?: number): TerminalStyledText
+  (width?: number): (source: string) => TerminalStyledText
 } = Function.dual(
   (args) => typeof args[0] === "string",
-  (source: string, width = 80): StyledText => {
-    const chunks: Array<TextChunk> = []
+  (source: string, width = 80): TerminalStyledText => {
+    const chunks: Array<TerminalTextChunk> = []
     renderLines(source, false, width).forEach((line, index) => {
       if (index > 0) chunks.push(fg(colors.text)("\n"))
       chunks.push(...line)
     })
     if (chunks.length === 0) chunks.push(fg(colors.text)(""))
-    return new StyledText(chunks)
+    return new TerminalStyledText(chunks)
   },
 )

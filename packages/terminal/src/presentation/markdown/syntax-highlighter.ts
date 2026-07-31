@@ -13,7 +13,7 @@ import "prismjs/components/prism-yaml.js"
 import "prismjs/components/prism-diff.js"
 import "prismjs/components/prism-toml.js"
 import "prismjs/components/prism-markdown.js"
-import { bold, dim, fg, type TextChunk } from "@opentui/core"
+import { bold, dim, fg, type TerminalTextChunk } from "./styled-text"
 import { colors } from "../terminal/terminal-theme"
 
 const roleColors = {
@@ -108,13 +108,13 @@ export const languageForPath = (path: string): string | undefined => {
   return extension === undefined ? undefined : extensionLanguages[extension]
 }
 
-const highlightCache = new Map<string, ReadonlyArray<ReadonlyArray<TextChunk>>>()
+const highlightCache = new Map<string, ReadonlyArray<ReadonlyArray<TerminalTextChunk>>>()
 const highlightCacheLimit = 512
 
 export const highlightLines: {
-  (lang: string | undefined): (code: string) => ReadonlyArray<ReadonlyArray<TextChunk>>
-  (code: string, lang: string | undefined): ReadonlyArray<ReadonlyArray<TextChunk>>
-} = Function.dual(2, (code: string, lang: string | undefined): ReadonlyArray<ReadonlyArray<TextChunk>> => {
+  (lang: string | undefined): (code: string) => ReadonlyArray<ReadonlyArray<TerminalTextChunk>>
+  (code: string, lang: string | undefined): ReadonlyArray<ReadonlyArray<TerminalTextChunk>>
+} = Function.dual(2, (code: string, lang: string | undefined): ReadonlyArray<ReadonlyArray<TerminalTextChunk>> => {
   const key = `${lang ?? ""}\u0000${code}`
   const cached = highlightCache.get(key)
   if (cached !== undefined) return cached
@@ -122,7 +122,7 @@ export const highlightLines: {
   const runs: Array<Run> = []
   if (grammar === undefined) runs.push({ text: code, role: "plain" })
   else flatten(Prism.tokenize(code, grammar), "plain", runs)
-  const lines: Array<Array<TextChunk>> = [[]]
+  const lines: Array<Array<TerminalTextChunk>> = [[]]
   for (const run of runs) {
     run.text.split("\n").forEach((piece, index) => {
       if (index > 0) lines.push([])
@@ -311,7 +311,7 @@ const scanShellCommand = (command: string): ReadonlyArray<ShellRun> => {
   return runs
 }
 
-const shellRunChunk = (kind: ShellKind, piece: string): TextChunk => {
+const shellRunChunk = (kind: ShellKind, piece: string): TerminalTextChunk => {
   switch (kind) {
     case "command":
       return bold(fg(colors.text)(piece))
@@ -331,12 +331,12 @@ const shellRunChunk = (kind: ShellKind, piece: string): TextChunk => {
   }
 }
 
-const shellCommandCache = new Map<string, ReadonlyArray<ReadonlyArray<TextChunk>>>()
+const shellCommandCache = new Map<string, ReadonlyArray<ReadonlyArray<TerminalTextChunk>>>()
 
-export const highlightShellCommand = (command: string): ReadonlyArray<ReadonlyArray<TextChunk>> => {
+export const highlightShellCommand = (command: string): ReadonlyArray<ReadonlyArray<TerminalTextChunk>> => {
   const cached = shellCommandCache.get(command)
   if (cached !== undefined) return cached
-  const lines: Array<Array<TextChunk>> = [[]]
+  const lines: Array<Array<TerminalTextChunk>> = [[]]
   for (const run of scanShellCommand(command)) {
     run.text.split("\n").forEach((piece, pieceIndex) => {
       if (pieceIndex > 0) lines.push([])

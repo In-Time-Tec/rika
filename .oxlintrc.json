@@ -12,14 +12,7 @@
     {
       "files": ["**/test/**"],
       "rules": {
-        "no-await-in-loop": "off",
-        "no-unused-vars": "off"
-      }
-    },
-    {
-      "files": ["packages/terminal/src/state/model/terminal-state.ts"],
-      "rules": {
-        "no-shadow": "off"
+        "no-await-in-loop": "off"
       }
     }
   ],

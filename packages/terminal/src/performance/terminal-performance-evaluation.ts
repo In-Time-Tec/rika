@@ -1,4 +1,4 @@
-import { createTestRenderer } from "@opentui/core/testing"
+import { createTestRenderer } from "../opentui/rendering/terminal-test-renderer"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
 import { Effect } from "effect"

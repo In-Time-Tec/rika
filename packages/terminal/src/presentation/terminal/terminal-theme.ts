@@ -1,30 +1,41 @@
-import { RGBA } from "@opentui/core"
-
-export const colors = {
-  text: RGBA.fromIndex(7),
-  subtle: RGBA.fromIndex(8),
-  muted: RGBA.fromIndex(8),
-  surface: RGBA.defaultBackground(),
-  teal: RGBA.fromIndex(6),
-  green: RGBA.fromIndex(2),
-  red: RGBA.fromIndex(1),
-  amber: RGBA.fromIndex(3),
-  blue: RGBA.fromIndex(4),
-  purple: RGBA.fromIndex(5),
-  gold: RGBA.fromIndex(3),
+export interface TerminalThemeColors {
+  readonly text: string
+  readonly subtle: string
+  readonly muted: string
+  readonly surface: string
+  readonly teal: string
+  readonly green: string
+  readonly red: string
+  readonly amber: string
+  readonly blue: string
+  readonly purple: string
+  readonly gold: string
+  readonly low: string
+  readonly medium: string
+  readonly high: string
+  readonly ultra: string
+  readonly selectionBg: string
+  readonly selectionFg: string
+  readonly selectionHint: string
+}
+export const colors: TerminalThemeColors = {
+  text: "white",
+  subtle: "brightBlack",
+  muted: "brightBlack",
+  surface: "default",
+  teal: "cyan",
+  green: "green",
+  red: "red",
+  amber: "yellow",
+  blue: "blue",
+  purple: "magenta",
+  gold: "yellow",
   low: "#ffd700",
   medium: "#3dffa6",
   high: "#3dd4ff",
   ultra: "#d8b3ff",
-  selectionBg: RGBA.fromIndex(3),
-  selectionFg: RGBA.fromIndex(0),
-  selectionHint: RGBA.fromIndex(4),
-} as const
-
-export const spacing = {
-  transcript: 1,
-  inputHorizontal: 1,
-  inputHeight: 5,
-  overlayTop: 4,
-  overlayHeight: 10,
-} as const
+  selectionBg: "yellow",
+  selectionFg: "black",
+  selectionHint: "blue",
+}
+export const spacing = { transcript: 1, inputHorizontal: 1, inputHeight: 5, overlayTop: 4, overlayHeight: 10 } as const
