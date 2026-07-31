@@ -1,31 +1,48 @@
+import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as Database from "@rika/persistence/database"
-import * as Thread from "@rika/persistence/thread"
-import * as ThreadRepository from "@rika/persistence/repository"
-import * as Turn from "@rika/persistence/turn"
-import * as TurnRepository from "@rika/persistence/turn-repository"
-import { Effect, Layer } from "effect"
+import * as Database from "../../packages/persistence/src/product-database"
+import * as Thread from "../../packages/persistence/src/thread-schema"
+import * as ThreadRepository from "../../packages/persistence/src/thread-repository"
+import * as Turn from "../../packages/persistence/src/turn-schema"
+import * as TurnRepository from "../../packages/persistence/src/turn-repository"
+import { Config, Effect, FileSystem, Layer, Path, Schema } from "effect"
+import type { ConfigError as EffectConfigError } from "effect/Config"
+import type * as PlatformError from "effect/PlatformError"
 
-const threadCount = Number(process.env.RIKA_SEED_THREAD_COUNT ?? "100")
-const turnsPerThread = Number(process.env.RIKA_SEED_TURNS_PER_THREAD ?? "1")
-const root = process.env.RIKA_SEED_ROOT
-if (root === undefined || root.length === 0) {
-  console.error("RIKA_SEED_ROOT is required")
-  process.exit(1)
+class SeedConfigurationError extends Schema.TaggedErrorClass<SeedConfigurationError>()("SeedConfigurationError", {
+  message: Schema.String,
+}) {}
+
+const SeedOutput = Schema.Struct({
+  root: Schema.String,
+  database: Schema.String,
+  threadCount: Schema.Int,
+  turnsPerThread: Schema.Int,
+})
+
+const SeedOutputJson = Schema.fromJsonString(SeedOutput)
+
+const sqliteLayer = (
+  filename: string,
+): Layer.Layer<
+  ThreadRepository.Service | TurnRepository.Service,
+  PlatformError.PlatformError | Database.ProductDatabaseError,
+  FileSystem.FileSystem | Path.Path
+> => {
+  const database = Database.layer(filename)
+  return Layer.mergeAll(ThreadRepository.layer, TurnRepository.layer).pipe(Layer.provide(database))
 }
 
-const filename = `${root}/rika.db`
-
-const sqliteLayer = (() => {
-  const database = Database.layer(filename)
-  return Layer.mergeAll(
-    database,
-    ThreadRepository.layer.pipe(Layer.provide(database)),
-    TurnRepository.layer.pipe(Layer.provide(database)),
-  ).pipe(Layer.provide(BunServices.layer))
-})()
+const configuration = Config.all({
+  threadCount: Config.int("RIKA_SEED_THREAD_COUNT").pipe(Config.withDefault(100)),
+  turnsPerThread: Config.int("RIKA_SEED_TURNS_PER_THREAD").pipe(Config.withDefault(1)),
+  root: Config.string("RIKA_SEED_ROOT"),
+})
 
 const seed = Effect.gen(function* () {
+  const { threadCount, turnsPerThread, root } = yield* configuration
+  if (root.length === 0) return yield* SeedConfigurationError.make({ message: "RIKA_SEED_ROOT is required" })
+  const filename = `${root}/rika.db`
   const threads = yield* ThreadRepository.Service
   const turns = yield* TurnRepository.Service
   for (let index = 0; index < threadCount; index += 1) {
@@ -50,23 +67,27 @@ const seed = Effect.gen(function* () {
     }
   }
   const listed = yield* threads.listAll
-  return { threadCount: listed.length, turnsPerThread }
+  return yield* Schema.encodeEffect(SeedOutputJson)({
+    root,
+    database: filename,
+    threadCount: listed.length,
+    turnsPerThread,
+  })
 })
 
-await Effect.runPromise(
-  seed.pipe(
-    Effect.provide(sqliteLayer),
-    Effect.tap(({ threadCount: created, turnsPerThread: perThread }) =>
-      Effect.sync(() =>
-        console.log(
-          JSON.stringify({
-            root: process.env.RIKA_SEED_ROOT,
-            database: filename,
-            threadCount: created,
-            turnsPerThread: perThread,
-          }),
-        ),
+const configuredDatabase: Layer.Layer<
+  ThreadRepository.Service | TurnRepository.Service,
+  EffectConfigError | PlatformError.PlatformError | Database.ProductDatabaseError,
+  FileSystem.FileSystem | Path.Path
+> = Layer.unwrap(configuration.pipe(Effect.map(({ root }) => sqliteLayer(`${root}/rika.db`))))
+
+const services = configuredDatabase.pipe(Layer.provideMerge(BunServices.layer))
+
+if (import.meta.main)
+  BunRuntime.runMain(
+    Effect.scoped(
+      Effect.flatMap(Layer.build(services), (context) =>
+        Effect.provide(seed.pipe(Effect.tap((output) => Effect.log(output))), context),
       ),
     ),
-  ),
-)
+  )

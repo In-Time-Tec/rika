@@ -1,4 +1,6 @@
-import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect"
+import { Context, Effect, FileSystem, Layer, Path, Schema, Stream } from "effect"
+import { ChildProcess } from "effect/unstable/process"
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { containedRelativePath } from "./workspace-boundary"
 
 export interface GlobOptions {
@@ -127,29 +129,34 @@ const emptyGrep = (totalFiles: number, regexFallbackError?: string): GrepResult 
   ...(regexFallbackError === undefined ? {} : { regexFallbackError }),
 })
 
-const runRg = (operation: Operation, cwd: string, args: ReadonlyArray<string>) =>
-  Effect.try({
-    try: () => {
-      const result = Bun.spawnSync(["rg", ...args], {
-        cwd,
-        stdout: "pipe",
-        stderr: "pipe",
-      })
-      return {
-        stdout: new TextDecoder().decode(result.stdout),
-        stderr: new TextDecoder().decode(result.stderr),
-        code: result.exitCode ?? 1,
-      }
-    },
-    catch: (cause) => indexError(operation, cause),
+const runRg = (
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  operation: Operation,
+  cwd: string,
+  args: ReadonlyArray<string>,
+): Effect.Effect<{ readonly stdout: string; readonly stderr: string; readonly code: number }, WorkspaceIndexError> =>
+  Effect.gen(function* () {
+    const command = ChildProcess.make("rg", args, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" })
+    const result = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const handle = yield* spawner.spawn(command)
+        return yield* Effect.all([Stream.mkString(Stream.decodeText(handle.all)), handle.exitCode], { concurrency: 2 })
+      }),
+    ).pipe(Effect.mapError((cause) => indexError(operation, cause)))
+    return { stdout: result[0], stderr: result[0], code: result[1] }
   })
 
-const listFiles = (operation: Operation, root: string, pattern?: string) =>
+const listFiles = (
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  operation: Operation,
+  root: string,
+  pattern?: string,
+): Effect.Effect<ReadonlyArray<string>, WorkspaceIndexError> =>
   Effect.gen(function* () {
     const args = ["--files", "--color", "never", ...ignoreArgs]
     if (pattern !== undefined && pattern.length > 0 && pattern !== "**/*" && pattern !== "**")
       args.push("--glob", pattern)
-    const result = yield* runRg(operation, root, args)
+    const result = yield* runRg(spawner, operation, root, args)
     if (result.code > 1)
       return yield* indexError(operation, result.stderr.trim() || `rg --files exited with code ${result.code}`)
     return result.stdout
@@ -179,12 +186,8 @@ const filterContained = (
   })
 
 const paginatePaths = (relativePaths: ReadonlyArray<string>, options?: GlobOptions | SearchOptions): SearchResult => {
-  const pageSize = Math.max(
-    1,
-    options && "pageSize" in options && options.pageSize !== undefined ? options.pageSize : 50,
-  )
-  const pageIndex =
-    options && "pageIndex" in options && options.pageIndex !== undefined ? Math.max(0, options.pageIndex) : 0
+  const pageSize = Math.max(1, options?.pageSize ?? 50)
+  const pageIndex = options !== undefined && "pageIndex" in options ? Math.max(0, options.pageIndex ?? 0) : 0
   const start = pageIndex * pageSize
   const page = relativePaths.slice(start, start + pageSize)
   const items = page.map(pathItem)
@@ -200,12 +203,13 @@ const makeService = (workspace: string) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const root = yield* fileSystem.realPath(workspace).pipe(Effect.mapError((cause) => indexError("initialize", cause)))
 
     const interface_: Interface = {
       fileSearch: (query, options) =>
         Effect.gen(function* () {
-          const listed = yield* listFiles("fileSearch", root)
+          const listed = yield* listFiles(spawner, "fileSearch", root)
           const relativePaths = yield* filterContained("fileSearch", root, path, fileSystem, listed)
           const ranked = relativePaths
             .map((relativePath) => ({ relativePath, score: fuzzyScore(query, relativePath) }))
@@ -223,7 +227,7 @@ const makeService = (workspace: string) =>
         }),
       glob: (pattern, options) =>
         Effect.gen(function* () {
-          const listed = yield* listFiles("glob", root, pattern)
+          const listed = yield* listFiles(spawner, "glob", root, pattern)
           const relativePaths = (yield* filterContained("glob", root, path, fileSystem, listed)).toSorted(
             (left, right) => left.localeCompare(right),
           )
@@ -231,7 +235,7 @@ const makeService = (workspace: string) =>
         }),
       grep: (query, options) =>
         Effect.gen(function* () {
-          if (options?.cursor) return emptyGrep(0)
+          if (options?.cursor !== undefined && options.cursor !== null && options.cursor.length > 0) return emptyGrep(0)
           const pageSize = Math.max(1, options?.pageSize ?? 1_000)
           const maxMatchesPerFile = Math.max(1, options?.maxMatchesPerFile ?? 1_000)
           const mode = options?.mode ?? "plain"
@@ -246,7 +250,7 @@ const makeService = (workspace: string) =>
           ]
           if (mode === "plain") args.push("--fixed-strings")
           args.push("--", query)
-          const result = yield* runRg("grep", root, args)
+          const result = yield* runRg(spawner, "grep", root, args)
           if (result.code === 2) {
             const message = result.stderr.trim()
             if (mode === "regex" && /regex parse error|error parsing regex|invalid regex/i.test(message))
@@ -271,18 +275,15 @@ const makeService = (workspace: string) =>
             })
             if (parsed.length >= pageSize) break
           }
-          const items = yield* Effect.gen(function* () {
-            const kept: Array<GrepMatch> = []
-            for (const match of parsed) {
-              if (
-                yield* containedRelativePath(root, match.relativePath, path, fileSystem).pipe(
-                  Effect.mapError((cause) => indexError("grep", cause)),
-                )
+          const items: Array<GrepMatch> = []
+          for (const match of parsed) {
+            if (
+              yield* containedRelativePath(root, match.relativePath, path, fileSystem).pipe(
+                Effect.mapError((cause) => indexError("grep", cause)),
               )
-                kept.push(match)
-            }
-            return kept
-          })
+            )
+              items.push(match)
+          }
           return {
             items,
             totalMatched: items.length,

@@ -90,9 +90,11 @@ const workspaceGlobError = (workspace: string, method: string, cause: unknown) =
   })
 
 const workspaceGlob = (workspace: string, pattern: string, maximumFiles: number) =>
-  WorkspaceIndex.globOnce({ workspace, pattern, options: { pageSize: maximumFiles } }).pipe(
-    Effect.map((result) => result.items.map((item) => item.relativePath)),
-    Effect.mapError((error) => workspaceGlobError(workspace, error.operation, error)),
+  provideLayerScoped(BunServices.layer)(
+    WorkspaceIndex.globOnce({ workspace, pattern, options: { pageSize: maximumFiles } }).pipe(
+      Effect.map((result) => result.items.map((item) => item.relativePath)),
+      Effect.mapError((error) => workspaceGlobError(workspace, error.operation, error)),
+    ),
   )
 
 export class PromptAttachmentError extends Schema.TaggedErrorClass<PromptAttachmentError>()("PromptAttachmentError", {

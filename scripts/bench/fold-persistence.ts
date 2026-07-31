@@ -1,19 +1,25 @@
-import * as Database from "@rika/persistence/database"
-import * as Thread from "@rika/persistence/thread"
-import * as ThreadRepository from "@rika/persistence/repository"
-import * as TranscriptRepository from "@rika/persistence/transcript-repository"
-import * as TurnRepository from "@rika/persistence/turn-repository"
-import * as Turn from "@rika/persistence/turn"
-import * as Transcript from "@rika/transcript"
+import * as Database from "../../packages/persistence/src/product-database"
+import * as Thread from "../../packages/persistence/src/thread-schema"
+import * as ThreadRepository from "../../packages/persistence/src/thread-repository"
+import * as TranscriptRepository from "../../packages/persistence/src/transcript-repository"
+import * as TurnRepository from "../../packages/persistence/src/turn-repository"
+import * as Turn from "../../packages/persistence/src/turn-schema"
+import * as Transcript from "../../packages/transcript/src/index"
 import { projectionVersion } from "../../packages/app/src/execution-ingest"
-import { Effect, FileSystem, Layer } from "effect"
+import { Context, Effect, FileSystem, Layer } from "effect"
 import type { BenchMeasurement } from "./baseline"
 import { cpuSample, summarizeLatencies } from "./stats"
 
 const cpuElapsedSeconds = (before: ReturnType<typeof cpuSample>, after: ReturnType<typeof cpuSample>): number =>
   (after.userMicros - before.userMicros + after.systemMicros - before.systemMicros) / 1_000_000
 
-const monotonicNanos = (): bigint => process.hrtime.bigint()
+interface MonotonicClockShape {
+  readonly now: () => bigint
+}
+
+export class MonotonicClock extends Context.Service<MonotonicClock, MonotonicClockShape>()(
+  "rika/scripts/bench/fold-persistence/MonotonicClock",
+) {}
 
 const monotonicMillis = (start: bigint, end: bigint): number => Number(end - start) / 1_000_000
 
@@ -24,11 +30,8 @@ const debounceBurst = 32
 
 const sqliteLayer = (filename: string) => {
   const database = Database.layer(filename)
-  return Layer.mergeAll(
-    database,
-    ThreadRepository.layer.pipe(Layer.provide(database)),
-    TurnRepository.layer.pipe(Layer.provide(database)),
-    TranscriptRepository.layer.pipe(Layer.provide(database)),
+  return Layer.mergeAll(ThreadRepository.layer, TurnRepository.layer, TranscriptRepository.layer).pipe(
+    Layer.provide(database),
   )
 }
 
@@ -133,6 +136,7 @@ const measureDebounceCommits = Effect.fn("Bench.measureDebounceCommits")(functio
 ) {
   let sequence = startSequence
   let expectedGeneration = generation
+  const clock = yield* MonotonicClock
   const latencies: Array<number> = []
   for (let burst = 0; burst < 8; burst += 1) {
     const upsert = new Map<string, Transcript.Unit>()
@@ -157,9 +161,9 @@ const measureDebounceCommits = Effect.fn("Bench.measureDebounceCommits")(functio
     }
     for (const key of completion.units.remove) remove.add(key)
     yield* Effect.sleep(`${debounceWindowMs} millis`)
-    const commitStart = monotonicNanos()
+    const commitStart = clock.now()
     expectedGeneration = yield* commitBatch(turn, fold, [...upsert.values()], [...remove], expectedGeneration)
-    latencies.push(monotonicMillis(commitStart, monotonicNanos()))
+    latencies.push(monotonicMillis(commitStart, clock.now()))
   }
   return { latencies, nextSequence: sequence, generation: expectedGeneration }
 })
@@ -168,6 +172,7 @@ export const runFoldPersistenceBench = Effect.fn("Bench.runFoldPersistenceBench"
   readonly eventCount?: number
   readonly commitBatch?: number
 }) {
+  const clock = yield* MonotonicClock
   const eventCount = options.eventCount ?? defaultEventCount
   const batchSize = options.commitBatch ?? defaultCommitBatch
   const streamEvent = (sequence: number): Transcript.SourceEvent =>
@@ -175,7 +180,8 @@ export const runFoldPersistenceBench = Effect.fn("Bench.runFoldPersistenceBench"
   const fileSystem = yield* FileSystem.FileSystem
   const directory = yield* fileSystem.makeTempDirectory({ prefix: "rika-bench-" })
   const filename = `${directory}/rika.db`
-  const context = yield* Layer.build(sqliteLayer(filename))
+  const context: Context.Context<ThreadRepository.Service | TurnRepository.Service | TranscriptRepository.Service> =
+    yield* Layer.build(sqliteLayer(filename))
   return yield* Effect.gen(function* () {
     const threadId = Thread.ThreadId.make("bench-thread")
     const turnId = Turn.TurnId.make("bench-turn")
@@ -189,8 +195,8 @@ export const runFoldPersistenceBench = Effect.fn("Bench.runFoldPersistenceBench"
     let persistCpuSeconds = 0
     let pendingUpsert = new Map<string, Transcript.Unit>()
     let pendingRemove = new Set<string>()
-    const foldWallStart = monotonicNanos()
-    const wallStart = monotonicNanos()
+    const foldWallStart = clock.now()
+    const wallStart = clock.now()
     const totalCpuStart = cpuSample()
     for (let sequence = 1; sequence <= eventCount; sequence += 1) {
       const foldStart = cpuSample()
@@ -206,7 +212,7 @@ export const runFoldPersistenceBench = Effect.fn("Bench.runFoldPersistenceBench"
       }
       if (sequence % batchSize !== 0 && sequence !== eventCount) continue
       const persistStart = cpuSample()
-      const commitStart = monotonicNanos()
+      const commitStart = clock.now()
       expectedGeneration = yield* commitBatch(
         turn,
         fold,
@@ -214,18 +220,18 @@ export const runFoldPersistenceBench = Effect.fn("Bench.runFoldPersistenceBench"
         [...pendingRemove],
         expectedGeneration,
       )
-      commitLatencies.push(monotonicMillis(commitStart, monotonicNanos()))
+      commitLatencies.push(monotonicMillis(commitStart, clock.now()))
       persistCpuSeconds += cpuElapsedSeconds(persistStart, cpuSample())
       pendingUpsert = new Map()
       pendingRemove = new Set()
     }
-    const foldWallSeconds = monotonicMillis(foldWallStart, monotonicNanos()) / 1000
+    const foldWallSeconds = monotonicMillis(foldWallStart, clock.now()) / 1000
     const stored = yield* TranscriptRepository.Service.pipe(Effect.flatMap((repository) => repository.get(turnId)))
     if (stored === undefined || stored.revision !== eventCount)
       return yield* Effect.die(`bench projection revision mismatch: ${stored?.revision ?? "missing"}`)
     const debounce = yield* measureDebounceCommits(turn, fold, eventCount, stored.checkpointGeneration)
     const debounceSummary = summarizeLatencies(debounce.latencies)
-    const wallEnd = monotonicNanos()
+    const wallEnd = clock.now()
     const totalCpuEnd = cpuSample()
     const wallSeconds = monotonicMillis(wallStart, wallEnd) / 1000
     const commitSummary = summarizeLatencies(commitLatencies)

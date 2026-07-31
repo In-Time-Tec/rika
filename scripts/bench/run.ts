@@ -10,8 +10,10 @@ import {
   saveBaseline,
   type BenchMeasurement,
 } from "./baseline"
-import { defaultCommitBatch, defaultEventCount, runFoldPersistenceBench } from "./fold-persistence"
+import { defaultCommitBatch, defaultEventCount, MonotonicClock, runFoldPersistenceBench } from "./fold-persistence"
 import { median } from "./stats"
+
+const processMonotonicClock = { now: () => process.hrtime.bigint() }
 
 const benchName = "fold-persistence"
 const defaultWindows = 3
@@ -117,8 +119,7 @@ const command = Command.make(
 )
 
 const main = Command.run(command, { version: "0.0.0" })
+const services = Layer.mergeAll(BunServices.layer, Layer.succeed(MonotonicClock, processMonotonicClock))
 
 if (import.meta.main)
-  BunRuntime.runMain(
-    Effect.scoped(Effect.flatMap(Layer.build(BunServices.layer), (context) => Effect.provide(main, context))),
-  )
+  BunRuntime.runMain(Effect.scoped(Effect.flatMap(Layer.build(services), (context) => Effect.provide(main, context))))

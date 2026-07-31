@@ -1,5 +1,5 @@
 import * as Turn from "@rika/persistence/turn"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { expect, test } from "vitest"
 import * as TuiApp from "./tui-app"
 
@@ -54,22 +54,28 @@ test(
         yield* app.waitFrame("ROOT_FINISHED_AFTER_CHILD_STREAM")
 
         const turnId = Turn.TurnId.make("tui-turn-0")
-        const durable = yield* Effect.gen(function* () {
-          const started = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
-          for (;;) {
-            const projection = yield* app.transcript(turnId)
-            if (
-              projection !== undefined &&
-              projection.executionCheckpoints.length === 2 &&
-              projection.executionCheckpoints.every((checkpoint) => checkpoint.status === "completed") &&
-              JSON.stringify(projection.units).includes("CHILD_STREAMED_BEFORE_ROOT")
-            )
-              return projection
-            const now = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
-            if (now - started >= 5_000) return yield* Effect.die("child output was not durably persisted")
-            yield* Effect.sleep("20 millis")
+        const started = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
+        let durable: NonNullable<Effect.Success<ReturnType<typeof app.transcript>>>
+        for (;;) {
+          const projection = yield* app.transcript(turnId)
+          const encodedUnits =
+            projection === undefined
+              ? undefined
+              : yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(projection.units)
+          if (
+            projection !== undefined &&
+            projection.executionCheckpoints.length === 2 &&
+            projection.executionCheckpoints.every((checkpoint) => checkpoint.status === "completed") &&
+            encodedUnits !== undefined &&
+            encodedUnits.includes("CHILD_STREAMED_BEFORE_ROOT")
+          ) {
+            durable = projection
+            break
           }
-        })
+          const now = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
+          if (now - started >= 5_000) return yield* Effect.die("child output was not durably persisted")
+          yield* Effect.sleep("20 millis")
+        }
         expect(durable.executionCheckpoints.some((checkpoint) => checkpoint.attachment !== undefined)).toBe(true)
 
         yield* Effect.sleep("300 millis")
