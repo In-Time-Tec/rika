@@ -1,15 +1,9 @@
 import { CliRenderEvents, Renderable, RendererControlState } from "@opentui/core"
-
 import { createTestRenderer, ManualClock } from "@opentui/core/testing"
-
 import { expect, test } from "vitest"
-
 import { Data, Effect } from "effect"
-
 import stringWidth from "string-width"
-
 import { Surface, maxMountedTranscriptEntries } from "../../src/opentui/surface/opentui-surface"
-
 import {
   initial,
   loading,
@@ -19,44 +13,7 @@ import {
   type ThreadItem,
   update,
 } from "../../src/state/model/terminal-state"
-
-class OpenTuiError extends Data.TaggedError("OpenTuiError")<{ readonly cause: unknown }> {}
-
-const openTui = <A>(operation: () => Promise<A>) =>
-  Effect.tryPromise({ try: operation, catch: (cause) => new OpenTuiError({ cause }) })
-
-const _insertText = (model: Model, text: string) => update(model, { _tag: "Pasted", text })
-
-const styledTextValue = (value: { readonly chunks: ReadonlyArray<{ readonly text: string }> } | string) =>
-  typeof value === "string" ? value : value.chunks.map((chunk) => chunk.text).join("")
-
-const _streamingShell = (id: string, output?: string) => ({
-  _tag: "ToolCall" as const,
-  id,
-  name: "bash",
-  input: `{"command":"printf ${id}"}`,
-  status: "running" as const,
-  presentation: {
-    family: "shell" as const,
-    action: "shell",
-    activeLabel: "Running",
-    completeLabel: "Ran",
-  },
-  detail: `printf ${id}`,
-  ...(output === undefined ? {} : { output }),
-  files: [],
-})
-
-const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
-  workspace: "/work",
-  pinned: false,
-  archived: false,
-  status: "idle",
-  unread: false,
-  lastActivityAt: 0,
-  ...input,
-})
-
+import { OpenTuiError, openTui, _insertText, styledTextValue, _streamingShell, thread, _giantSubagentModel, _collapsedSubagentModel, nonSpaceBounds } from "./opentui-surface-characterization-1.test-support"
 for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
   test(`keeps composer updates bounded with ${historySize} transcript entries`, () =>
     Effect.runPromise(
@@ -86,117 +43,6 @@ for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
       }),
     ))
 }
-
-const _giantSubagentModel = (childCount: number): Model => {
-  const rootBlock = {
-    _tag: "ToolCall" as const,
-    id: "root-tool",
-    name: "task",
-    input: "{}",
-    status: "complete" as const,
-    presentation: {
-      family: "agent" as const,
-      action: "task",
-      activeLabel: "Subagent working",
-      completeLabel: "Subagent finished",
-    },
-    detail: "delegated task",
-    files: [],
-  }
-  const childBlocks = Array.from({ length: childCount }, (_, index) => ({
-    _tag: "ToolCall" as const,
-    id: `child-${index}`,
-    name: "bash",
-    input: "{}",
-    status: "complete" as const,
-    presentation: {
-      family: "shell" as const,
-      action: "shell",
-      activeLabel: "Running",
-      completeLabel: "Ran",
-    },
-    detail: `cmd-${index}`,
-    files: [],
-  }))
-  const blocks = [rootBlock, ...childBlocks]
-  const items = blocks.map((block, index) => ({
-    _tag: "Block" as const,
-    index,
-    id: `block-${block.id}`,
-    turnId: "turn-1",
-    ...(index === 0 ? {} : { parentId: "root-tool" }),
-  }))
-  return {
-    ...initial("/work", "high"),
-    blocks,
-    items,
-    expandedRowKeys: ["tool:root-tool"],
-    scrollFollow: false,
-  }
-}
-
-const _collapsedSubagentModel = (answerCount: number, childCount: number): Model => {
-  const entries = Array.from({ length: answerCount }, (_, index) => ({
-    role: "assistant" as const,
-    text: `answer ${index}`,
-    turnId: "turn-1",
-  }))
-  const rootBlock = {
-    _tag: "ToolCall" as const,
-    id: "root-tool",
-    name: "task",
-    input: "{}",
-    status: "running" as const,
-    presentation: {
-      family: "agent" as const,
-      action: "task",
-      activeLabel: "Subagent working",
-      completeLabel: "Subagent finished",
-    },
-    detail: "delegated task",
-    files: [],
-  }
-  const childBlocks = Array.from({ length: childCount }, (_, index) => ({
-    _tag: "ToolCall" as const,
-    id: `child-${index}`,
-    name: "bash",
-    input: "{}",
-    status: "complete" as const,
-    presentation: {
-      family: "shell" as const,
-      action: "shell",
-      activeLabel: "Running",
-      completeLabel: "Ran",
-    },
-    detail: `cmd-${index}`,
-    files: [],
-  }))
-  const blocks = [rootBlock, ...childBlocks]
-  const items = [
-    ...entries.map((_, index) => ({
-      _tag: "Entry" as const,
-      index,
-      id: `answer-${index}`,
-      turnId: "turn-1",
-    })),
-    ...blocks.map((block, index) => ({
-      _tag: "Block" as const,
-      index,
-      id: `block-${block.id}`,
-      turnId: "turn-1",
-      ...(index === 0 ? {} : { parentId: "root-tool" }),
-    })),
-  ]
-  return {
-    ...initial("/work", "high"),
-    entries,
-    blocks,
-    items,
-    expandedRowKeys: [],
-    scrollFollow: true,
-  }
-}
-
 for (const panel of ["changed", "workspace"] as const) {
   test(`keeps composer updates bounded with a large ${panel} files sidebar`, () =>
     Effect.runPromise(
@@ -248,7 +94,6 @@ for (const panel of ["changed", "workspace"] as const) {
       }),
     ))
 }
-
 for (const width of [80, 50] as const) {
   test(`renders a visible error action and leaves the composer usable at width ${width}`, () =>
     Effect.runPromise(
@@ -293,21 +138,6 @@ for (const width of [80, 50] as const) {
       }),
     ))
 }
-
-const nonSpaceBounds = (frame: string, height: number) => {
-  const points = frame
-    .split("\n")
-    .slice(0, height - 5)
-    .flatMap((row, y) => Array.from(row, (cell, x) => ({ cell, x, y })))
-    .filter(({ cell }) => cell !== " ")
-  return {
-    left: Math.min(...points.map(({ x }) => x)),
-    right: Math.max(...points.map(({ x }) => x)),
-    top: Math.min(...points.map(({ y }) => y)),
-    bottom: Math.max(...points.map(({ y }) => y)),
-  }
-}
-
 for (const [width, height] of [
   [100, 30],
   [80, 24],
@@ -348,7 +178,6 @@ for (const [width, height] of [
       }),
     ))
 }
-
 for (const height of [13, 16, 19] as const) {
   test(`keeps essential compact welcome copy visible at 60x${height}`, () =>
     Effect.runPromise(
@@ -370,7 +199,6 @@ for (const height of [13, 16, 19] as const) {
       }),
     ))
 }
-
 for (const [width, height] of [
   [140, 40],
   [100, 24],
@@ -478,7 +306,6 @@ for (const [width, height] of [
       }),
     ))
 }
-
 test("renders input and resize updates while the renderer remains event-driven", () =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -524,7 +351,6 @@ test("renders input and resize updates while the renderer remains event-driven",
       }
     }),
   ))
-
 test("keeps the submitted transcript echo stable when typing resumes before TurnStarted", () =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -565,7 +391,6 @@ test("keeps the submitted transcript echo stable when typing resumes before Turn
       }
     }),
   ))
-
 test("coalesces a resize storm into one transcript reflow at the final width", () =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -630,128 +455,6 @@ test("coalesces a resize storm into one transcript reflow at the final width", (
           .join("\n")
         expect(narrowed.split("\n").every((line) => stringWidth(line) <= 100)).toBe(true)
         expect(narrowed.match(/alpha/g)?.length).toBe(25)
-      } finally {
-        surface.destroy()
-        setup.renderer.destroy()
-      }
-    }),
-  ))
-
-test("converges the model to the physical terminal size when a resize event reports a stale size", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
-      let model: Model = { ...initial("/work", "high"), width: 80, height: 24 }
-      const surface = new Surface(setup.renderer, {
-        key: () => undefined,
-        resize: (width, height) => {
-          model = update(model, { _tag: "Resized", width, height })
-          surface.update(model)
-        },
-      })
-      try {
-        surface.update(model)
-        yield* openTui(() => setup.flush())
-        const renderer = setup.renderer as unknown as {
-          _usesProcessStdout: boolean
-          stdout: { columns: number; rows: number }
-          resize: (width: number, height: number) => void
-          emit: (event: string, ...args: ReadonlyArray<unknown>) => boolean
-        }
-        renderer._usesProcessStdout = true
-        renderer.stdout = { columns: 132, rows: 43 }
-        let corrected: readonly [number, number] | undefined
-        renderer.resize = (width, height) => {
-          corrected = [width, height]
-        }
-        renderer.emit(CliRenderEvents.RESIZE, 80, 24)
-        expect(corrected).toEqual([132, 43])
-        expect([model.width, model.height]).toEqual([132, 43])
-      } finally {
-        surface.destroy()
-        setup.renderer.destroy()
-      }
-    }),
-  ))
-
-test("uses OpenTUI's native cursor position with a blinking block style", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30 }))
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { animate: false })
-      const base = { ...initial("/work", "high"), width: 100, height: 30, input: "draft", cursor: 5 }
-      try {
-        surface.update(base)
-        yield* openTui(() => setup.flush())
-        const composerCursor = setup.renderer.getCursorState()
-        expect(composerCursor).toMatchObject({ visible: true, style: "block", blinking: true })
-
-        surface.update({
-          ...base,
-          paletteOpen: true,
-          palette: { open: true, query: "mode", selected: 0 },
-        })
-        yield* openTui(() => setup.flush())
-        const paletteCursor = setup.renderer.getCursorState()
-        expect(paletteCursor).toMatchObject({ visible: true, style: "block", blinking: true })
-        expect(paletteCursor.y).not.toBe(composerCursor.y)
-
-        surface.update({
-          ...base,
-          threadSwitcher: { ...base.threadSwitcher, open: true, query: "cursor" },
-        })
-        yield* openTui(() => setup.flush())
-        expect(setup.renderer.getCursorState()).toMatchObject({ visible: true, style: "block", blinking: true })
-
-        surface.update({
-          ...base,
-          filePicker: { ...base.filePicker, open: true, query: "src", items: ready(["src/main.ts"]) },
-        })
-        yield* openTui(() => setup.flush())
-        expect(setup.renderer.getCursorState()).toMatchObject({ visible: true, style: "block", blinking: true })
-
-        surface.update({ ...base, modePicker: { open: true, selected: 0 } })
-        yield* openTui(() => setup.flush())
-        expect(setup.renderer.getCursorState().visible).toBe(false)
-
-        surface.update({
-          ...base,
-          threadSidebar: { open: true, focused: true, selected: 0, scrollTop: 0 },
-        })
-        yield* openTui(() => setup.flush())
-        expect(setup.renderer.getCursorState().visible).toBe(false)
-      } finally {
-        surface.destroy()
-        setup.renderer.destroy()
-      }
-    }),
-  ))
-
-test("keeps the application-controlled cursor visible when animation is disabled", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30 }))
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { animate: false })
-      const base = { ...initial("/work", "high"), width: 100, height: 30, input: "draft", cursor: 5 }
-      try {
-        surface.update(base)
-        yield* openTui(() => setup.flush())
-        expect(setup.renderer.getCursorState().visible).toBe(true)
-
-        surface.update({ ...base, input: "drafts", cursor: 6 })
-        expect(setup.renderer.getCursorState().visible).toBe(true)
-
-        const palette = {
-          ...base,
-          paletteOpen: true,
-          palette: { open: true, query: "mode", selected: 0 },
-        }
-        surface.update(palette)
-        yield* openTui(() => setup.flush())
-        expect(setup.renderer.getCursorState().visible).toBe(true)
-
-        surface.update({ ...palette, palette: { ...palette.palette, query: "modes" } })
-        expect(setup.renderer.getCursorState().visible).toBe(true)
       } finally {
         surface.destroy()
         setup.renderer.destroy()

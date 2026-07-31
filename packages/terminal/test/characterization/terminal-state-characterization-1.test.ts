@@ -1,86 +1,20 @@
 import { expect, test } from "vitest"
-
 import { it } from "@effect/vitest"
-
 import { Duration, Effect } from "effect"
-
 import { Keys, Palette, ViewState } from "../../src/state/model/terminal-state"
-
 import * as Adapter from "../../src/opentui/surface/opentui-surface"
-
-const key = (input: Partial<Keys.Key> & Pick<Keys.Key, "name">): Keys.Key => ({
-  name: input.name,
-  ctrl: input.ctrl ?? false,
-  alt: input.alt ?? false,
-  meta: input.meta ?? false,
-  shift: input.shift ?? false,
-  sequence: input.sequence ?? "",
-  eventType: input.eventType ?? "press",
-})
-
-const _thread = (
-  input: Partial<ViewState.ThreadItem> & Pick<ViewState.ThreadItem, "id" | "title">,
-): ViewState.ThreadItem => ({
-  workspace: "/work",
-  pinned: false,
-  archived: false,
-  status: "idle",
-  unread: false,
-  lastActivityAt: 0,
-  ...input,
-})
-
-const readCall = (
-  id: string,
-  detail: string,
-  status: "running" | "complete" = "running",
-): Extract<ViewState.TranscriptBlock, { _tag: "ToolCall" }> => ({
-  _tag: "ToolCall",
-  id,
-  name: "read",
-  input: detail,
-  status,
-  presentation: {
-    family: "explore",
-    action: "read",
-    activeLabel: "Exploring",
-    completeLabel: "Explored",
-    counter: "file",
-  },
-  detail,
-  files: [],
-})
-
-const _editFile = (id: string, path: string) => ({
-  key: id,
-  path,
-  kind: "update" as const,
-  patch: `--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-old\n+new`,
-  additions: 1,
-  deletions: 1,
-  preview: false,
-  status: "complete" as const,
-})
-
-const _busyQueueModel = (model: ViewState.Model): ViewState.Model => ({
-  ...model,
-  busy: true,
-  currentThreadId: "t",
-})
-
+import { key, _thread, readCall, _editFile, _busyQueueModel } from "./terminal-state-characterization-1.test-support"
 test("cycles cost, tokens, and active time", () => {
   expect(ViewState.nextUsageDisplay("cost")).toBe("tokens")
   expect(ViewState.nextUsageDisplay("tokens")).toBe("time")
   expect(ViewState.nextUsageDisplay("time")).toBe("cost")
 })
-
 test("adds only an open active interval to accumulated time", () => {
   expect(ViewState.activeTimeAt({ _tag: "Available", accumulatedMillis: 5_000, activeSince: 10_000 }, 53_000)).toEqual(
     Duration.seconds(48),
   )
   expect(ViewState.activeTimeAt({ _tag: "Available", accumulatedMillis: 5_000 }, 53_000)).toEqual(Duration.seconds(5))
 })
-
 test("tracks only the five turn activity states", () => {
   let model = { ...ViewState.initial("/work", "medium"), input: "run it", cursor: 6 }
   model = ViewState.update(model, { _tag: "Submitted" })
@@ -103,7 +37,6 @@ test("tracks only the five turn activity states", () => {
   model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "c", ctrl: true }) })
   expect(ViewState.formatActivity(model.activity)).toBe("Waiting")
 })
-
 test("formats Amp activity counters with the singular tok unit", () => {
   expect(ViewState.formatActivity({ _tag: "Thinking", bytes: 0 })).toBe("Thinking 0 tok")
   expect(ViewState.formatActivityCounter(1)).toBe("1 tok")
@@ -114,7 +47,6 @@ test("formats Amp activity counters with the singular tok unit", () => {
   expect(ViewState.formatActivityCounter(1_234_567)).toBe("1.2M tok")
   expect(ViewState.formatActivityCounter(1_234)).toBe(Adapter.formatTokens(1_234))
 })
-
 test("summarizes top-level subagents separately from all other running tools", () => {
   const rootAgent = {
     ...readCall("root-agent", "Root agent"),
@@ -144,7 +76,6 @@ test("summarizes top-level subagents separately from all other running tools", (
     "Running 5 subagents, 3 tools",
   )
 })
-
 test("exposes only thread switch, mode change, fast mode, and quit in the command palette", () => {
   expect(Palette.commands).toEqual([
     {
@@ -174,7 +105,6 @@ test("exposes only thread switch, mode change, fast mode, and quit in the comman
   expect(Palette.filter("reasoning")).toEqual([])
   expect(Palette.filter("changed files")).toEqual([])
 })
-
 it.effect("completes file mentions and exposes mode and shortcuts state", () =>
   Effect.sync(() => {
     let model = ViewState.update(ViewState.initial("/work", "medium"), {
@@ -197,12 +127,10 @@ it.effect("completes file mentions and exposes mode and shortcuts state", () =>
     expect(model.input).toBe("?")
   }),
 )
-
 test("leaves Opt+D unbound", () => {
   const model = ViewState.initial("/work", "medium")
   expect(ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "d", alt: true }) })).toEqual(model)
 })
-
 test("preserves ordered prompt parts for bracketed paths and file URLs", () => {
   expect(ViewState.promptParts("before [shots/a.png] after file:///tmp/b%20c.webp")).toEqual([
     { type: "text", text: "before " },
@@ -216,7 +144,6 @@ test("preserves ordered prompt parts for bracketed paths and file URLs", () => {
     { type: "text", text: " now" },
   ])
 })
-
 test("edits, moves, and submits input", () => {
   let model = ViewState.initial("/work")
   expect(ViewState.update(model, { _tag: "Submitted" })).toBe(model)
@@ -239,13 +166,11 @@ test("edits, moves, and submits input", () => {
   expect(model.entries.at(-1)).toEqual({ role: "user", text: "q", turnId: "q" })
   expect(model.busy).toBe(true)
 })
-
 test("classifies shell prompts and keeps incognito commands out of prompt semantics", () => {
   expect(ViewState.classifyPrompt("$ echo ok")).toEqual({ _tag: "Shell", command: "echo ok", incognito: false })
   expect(ViewState.classifyPrompt("$$ secret")).toEqual({ _tag: "Shell", command: "secret", incognito: true })
   expect(ViewState.classifyPrompt("explain $PATH")).toEqual({ _tag: "Prompt", prompt: "explain $PATH" })
 })
-
 test("replaces the visible prompt for an existing Turn without changing execution state", () => {
   const started = ViewState.update(ViewState.initial("/work"), {
     _tag: "TurnStarted",
@@ -260,7 +185,6 @@ test("replaces the visible prompt for an existing Turn without changing executio
   expect(promoted.entries).toEqual([{ role: "user", text: "after", turnId: "queued" }])
   expect(promoted.busy).toBe(true)
 })
-
 test("applies revisioned queue deltas and requests a resync on gaps or invalid changes", () => {
   let model = ViewState.resetQueue({ ...ViewState.initial("/work"), currentThreadId: "thread" }, "thread", 3, [
     { id: "one", prompt: "one" },
@@ -292,7 +216,6 @@ test("applies revisioned queue deltas and requests a resync on gaps or invalid c
   expect(applied.model.queue).toEqual([{ id: "one", prompt: "one" }])
   expect(applied.model.queueSelection).toBe("one")
 })
-
 test("supports multiline, palette, release, and resize messages", () => {
   let model = ViewState.initial("/work", "high")
   model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "return", shift: true }) })
@@ -309,7 +232,6 @@ test("supports multiline, palette, release, and resize messages", () => {
   expect([model.width, model.height]).toEqual([50, 12])
   expect(ViewState.isNarrow(model)).toBe(true)
 })
-
 test("reduces a resize storm to the final size", () => {
   let model = ViewState.initial("/work", "high")
   for (const [width, height] of [
@@ -321,7 +243,6 @@ test("reduces a resize storm to the final size", () => {
     model = ViewState.update(model, { _tag: "Resized", width, height })
   expect([model.width, model.height]).toEqual([132, 43])
 })
-
 test("grows multiline input and supports newline shortcuts and history search", () => {
   let model = ViewState.initial("/work")
   for (const character of "first")
@@ -342,7 +263,6 @@ test("grows multiline input and supports newline shortcuts and history search", 
   expect(model.input).toBe("a\n\n")
   expect(ViewState.inputRows(model)).toBe(3)
 })
-
 test("auto-grows and manually resizes the composer within terminal bounds", () => {
   let model = { ...ViewState.initial("/work"), input: "one\ntwo\nthree\nfour", cursor: 18 }
   expect(ViewState.composerHeight(model)).toBe(6)
@@ -355,7 +275,6 @@ test("auto-grows and manually resizes the composer within terminal bounds", () =
   expect(model.composerHeight).toBe(6)
   expect(ViewState.composerHeight(model)).toBe(6)
 })
-
 test("counts composer rows by terminal cell width for wide, combining, and sidebar-narrowed input", () => {
   const cjk = { ...ViewState.initial("/work", "high"), width: 40, input: "文".repeat(40) }
   expect(ViewState.inputRows(cjk)).toBe(3)
@@ -376,7 +295,6 @@ test("counts composer rows by terminal cell width for wide, combining, and sideb
   expect(ViewState.inputRows(sidebar)).toBe(2)
   expect(ViewState.inputRows({ ...sidebar, changedFilesOpen: false })).toBe(1)
 })
-
 test("keeps queue state outside the transcript and tracks reasoning and scroll follow", () => {
   let model = ViewState.replaceQueue(ViewState.initial("/work"), [{ id: "queued", prompt: "old" }])
   model = ViewState.update(model, { _tag: "ReasoningStreamed", text: "details" })
@@ -389,7 +307,6 @@ test("keeps queue state outside the transcript and tracks reasoning and scroll f
   model = ViewState.update(model, { _tag: "ScrollFollowed" })
   expect(model).toMatchObject({ scrollFollow: true, scrollOffset: 0 })
 })
-
 test("leaves transcript navigation keys to the viewport owner", () => {
   let model: ViewState.Model = {
     ...ViewState.initial("/work"),
@@ -406,7 +323,6 @@ test("leaves transcript navigation keys to the viewport owner", () => {
   model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "end" }) })
   expect(model).toMatchObject({ scrollOffset: 120, scrollFollow: true })
 })
-
 test("streams, completes, and reports failures", () => {
   let model = ViewState.initial("/work")
   model = ViewState.update(model, { _tag: "AssistantStreamed", text: "hel" })
@@ -442,7 +358,6 @@ test("streams, completes, and reports failures", () => {
   model = ViewState.update(ViewState.initial("/work"), { _tag: "AssistantCompleted", text: "standalone" })
   expect(model.entries).toEqual([{ role: "assistant", text: "standalone" }])
 })
-
 test("cancels every running transcript unit once and leaves no global notice", () => {
   const parent = {
     _tag: "ToolCall" as const,
@@ -481,7 +396,6 @@ test("cancels every running transcript unit once and leaves no global notice", (
   expect(cancelled.entries.filter((entry) => entry.role === "notice")).toEqual([])
   expect(repeated).toBe(cancelled)
 })
-
 test("restores a submitted draft when cancellation arrives before an agent response", () => {
   let running = ViewState.update(
     { ...ViewState.initial("/work"), input: "cancel this prompt", cursor: 6 },
@@ -518,7 +432,6 @@ test("restores a submitted draft when cancellation arrives before an agent respo
   expect(cancelled.entries.filter((entry) => entry.role === "notice")).toEqual([])
   expect(repeated).toBe(cancelled)
 })
-
 test("submitting while a turn is active stays an ordinary submission", () => {
   const busy: ViewState.Model = {
     ...ViewState.initial("/work"),
@@ -535,7 +448,6 @@ test("submitting while a turn is active stays an ordinary submission", () => {
     { input: "queued follow-up", attachments: [], cursor: 0, submissionId: "sub-q" },
   ])
 })
-
 test("submitting while busy echoes a provisional queue row immediately", () => {
   const busy: ViewState.Model = ViewState.resetQueue(
     {
@@ -553,215 +465,4 @@ test("submitting while busy echoes a provisional queue row immediately", () => {
   expect(submitted.queue).toEqual([{ id: "sub-1", prompt: "queued prompt", provisional: true }])
   expect(submitted.queueRevision).toBe(3)
   expect(submitted.input).toBe("")
-})
-
-test("admission rebinds a queued provisional row and the real delta replaces it without resync", () => {
-  const busy: ViewState.Model = ViewState.resetQueue(
-    {
-      ...ViewState.initial("/work"),
-      busy: true,
-      activeTurnId: "turn-a",
-      currentThreadId: "thread",
-      input: "queued prompt",
-    },
-    "thread",
-    3,
-    [],
-  )
-  const submitted = ViewState.update(busy, { _tag: "Submitted", submissionId: "sub-1" })
-  const admitted = ViewState.update(submitted, {
-    _tag: "SubmissionAdmitted",
-    turnId: "turn-b",
-    status: "queued",
-    submissionId: "sub-1",
-  })
-  expect(admitted.queue).toEqual([{ id: "turn-b", prompt: "queued prompt", provisional: true }])
-  const applied = ViewState.applyQueueDelta(admitted, "thread", 4, {
-    _tag: "Added",
-    item: { id: "turn-b", prompt: "queued prompt" },
-  })
-  expect(applied.resync).toBe(false)
-  expect(applied.model.queue).toEqual([{ id: "turn-b", prompt: "queued prompt" }])
-  expect(applied.model.queueRevision).toBe(4)
-})
-
-test("admission that starts immediately removes the provisional row", () => {
-  const busy: ViewState.Model = ViewState.resetQueue(
-    { ...ViewState.initial("/work"), busy: true, activeTurnId: "turn-a", currentThreadId: "thread", input: "prompt" },
-    "thread",
-    3,
-    [],
-  )
-  const submitted = ViewState.update(busy, { _tag: "Submitted", submissionId: "sub-1" })
-  const admitted = ViewState.update(submitted, {
-    _tag: "SubmissionAdmitted",
-    turnId: "turn-b",
-    status: "active",
-    submissionId: "sub-1",
-  })
-  expect(admitted.queue).toEqual([])
-})
-
-test("provisional queue rows ignore edit, steer, and dequeue keys", () => {
-  const busy: ViewState.Model = ViewState.resetQueue(
-    { ...ViewState.initial("/work"), busy: true, activeTurnId: "turn-a", currentThreadId: "thread", input: "prompt" },
-    "thread",
-    3,
-    [],
-  )
-  const submitted = ViewState.update(busy, { _tag: "Submitted", submissionId: "sub-1" })
-  const selected = { ...submitted, queueSelection: "sub-1" }
-  const dequeued = ViewState.update(selected, { _tag: "KeyPressed", key: key({ name: "backspace" }) })
-  const steered = ViewState.update(selected, { _tag: "KeyPressed", key: key({ name: "return" }) })
-  const edited = ViewState.update(selected, { _tag: "KeyPressed", key: key({ name: "e", ctrl: true }) })
-  expect(dequeued.pendingAction).toBeUndefined()
-  expect(steered.pendingAction).toBeUndefined()
-  expect(edited.editingTurnId).toBeUndefined()
-})
-
-test("steering a selected queued message opens a pending steering row", () => {
-  const busy: ViewState.Model = ViewState.resetQueue(
-    {
-      ...ViewState.initial("/work"),
-      busy: true,
-      activeTurnId: "turn-a",
-      currentThreadId: "thread",
-      queueSelection: "queued-1",
-    },
-    "thread",
-    1,
-    [{ id: "queued-1", prompt: "steer me please" }],
-  )
-  const steered = ViewState.update(busy, { _tag: "KeyPressed", key: key({ name: "return" }) })
-  expect(steered.pendingSteering).toEqual([{ turnId: "turn-a", text: "steer me please" }])
-  expect(steered.pendingAction).toEqual({ _tag: "SteerQueued", id: "queued-1", prompt: "steer me please" })
-})
-
-test("binds an accepted steering sequence and removes it on delivery", () => {
-  const busy: ViewState.Model = {
-    ...ViewState.initial("/work"),
-    busy: true,
-    activeTurnId: "turn-a",
-    pendingSteering: [{ turnId: "turn-a", text: "focus on the fixture" }],
-  }
-  const accepted = ViewState.update(busy, {
-    _tag: "SteeringAccepted",
-    turnId: "turn-a",
-    sequence: 0,
-    text: "focus on the fixture",
-  })
-  expect(accepted.pendingSteering).toEqual([{ turnId: "turn-a", text: "focus on the fixture", sequence: 0 }])
-  const delivered = ViewState.update(accepted, { _tag: "SteeringDelivered", turnId: "turn-a", sequences: [0] })
-  expect(delivered.pendingSteering).toEqual([])
-  const foreign = ViewState.update(accepted, { _tag: "SteeringDelivered", turnId: "turn-b", sequences: [0] })
-  expect(foreign.pendingSteering).toHaveLength(1)
-})
-
-test("keeps the active turn running and restores text when steering fails", () => {
-  const busy: ViewState.Model = {
-    ...ViewState.initial("/work"),
-    busy: true,
-    activeTurnId: "turn-a",
-    pendingSteering: [{ turnId: "turn-a", text: "focus on the fixture" }],
-  }
-  const failed = ViewState.update(busy, {
-    _tag: "SteeringFailed",
-    turnId: "turn-a",
-    text: "focus on the fixture",
-    message: "Execution did not become available for steering",
-  })
-  expect(failed.busy).toBe(true)
-  expect(failed.activeTurnId).toBe("turn-a")
-  expect(failed.pendingSteering).toEqual([])
-  expect(failed.input).toBe("focus on the fixture")
-  expect(failed.blocks).toContainEqual(
-    expect.objectContaining({ _tag: "Notification", title: "Steering not delivered" }),
-  )
-})
-
-test("ignores steering receipts that arrive after another turn becomes active", () => {
-  const active: ViewState.Model = {
-    ...ViewState.initial("/work"),
-    busy: true,
-    activeTurnId: "turn-b",
-    pendingSteering: [{ turnId: "turn-b", text: "for b" }],
-  }
-  const accepted = ViewState.update(active, {
-    _tag: "SteeringAccepted",
-    turnId: "turn-a",
-    sequence: 1,
-    text: "for a",
-  })
-  const failed = ViewState.update(active, {
-    _tag: "SteeringFailed",
-    turnId: "turn-a",
-    text: "for a",
-    message: "late failure",
-  })
-  expect(accepted).toEqual(active)
-  expect(failed).toEqual(active)
-})
-
-test("does not issue another cancel while cancellation is pending", () => {
-  const pending: ViewState.Model = {
-    ...ViewState.initial("/work"),
-    busy: true,
-    activeTurnId: "turn-a",
-    cancelPending: true,
-  }
-  expect(ViewState.update(pending, { _tag: "KeyPressed", key: key({ name: "c", ctrl: true }) })).toEqual(pending)
-})
-
-test("restores undelivered steering text into an empty composer when the turn settles", () => {
-  const busy: ViewState.Model = {
-    ...ViewState.initial("/work"),
-    busy: true,
-    activeTurnId: "turn-a",
-    pendingSteering: [{ turnId: "turn-a", text: "left behind", sequence: 0 }],
-  }
-  const completed = ViewState.update(busy, { _tag: "ExecutionCompleted", turnId: "turn-a" })
-  expect(completed.pendingSteering).toEqual([])
-  expect(completed.input).toBe("left behind")
-  const occupied = ViewState.update({ ...busy, input: "typing" }, { _tag: "ExecutionCompleted", turnId: "turn-a" })
-  expect(occupied.pendingSteering).toEqual([])
-  expect(occupied.input).toBe("typing")
-})
-
-test("keeps steering rows for other turns when one turn settles", () => {
-  const busy: ViewState.Model = {
-    ...ViewState.initial("/work"),
-    busy: true,
-    activeTurnId: "turn-a",
-    pendingSteering: [
-      { turnId: "turn-a", text: "for a", sequence: 0 },
-      { turnId: "turn-b", text: "for b", sequence: 1 },
-    ],
-  }
-  const completed = ViewState.update(busy, { _tag: "ExecutionCompleted", turnId: "turn-a" })
-  expect(completed.pendingSteering).toEqual([{ turnId: "turn-b", text: "for b", sequence: 1 }])
-})
-
-test("binds keyed submission drafts and restores only the cancelled turn's draft", () => {
-  let model = ViewState.update(
-    { ...ViewState.initial("/work"), input: "first prompt" },
-    { _tag: "Submitted", submissionId: "sub-a" },
-  )
-  model = { ...model, busy: false, activity: undefined }
-  model = ViewState.update({ ...model, input: "second prompt" }, { _tag: "Submitted", submissionId: "sub-b" })
-  model = ViewState.update(model, { _tag: "SubmissionAdmitted", turnId: "turn-a", submissionId: "sub-a" })
-  model = ViewState.update(model, { _tag: "SubmissionAdmitted", turnId: "turn-b", submissionId: "sub-b" })
-  model = ViewState.update(model, { _tag: "TurnStarted", turnId: "turn-a", prompt: "first prompt" })
-  expect(model.submittedDrafts).toEqual([
-    { input: "first prompt", attachments: [], cursor: 0, submissionId: "sub-a", turnId: "turn-a" },
-    { input: "second prompt", attachments: [], cursor: 0, submissionId: "sub-b", turnId: "turn-b" },
-  ])
-  const cancelled = ViewState.update(model, {
-    _tag: "ExecutionCancelled",
-    turnId: "turn-a",
-    agentResponseArrived: false,
-  })
-  expect(cancelled.input).toBe("first prompt")
-  expect(cancelled.submittedDrafts).toEqual([
-    { input: "second prompt", attachments: [], cursor: 0, submissionId: "sub-b", turnId: "turn-b" },
-  ])
 })

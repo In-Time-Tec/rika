@@ -1,0 +1,93 @@
+import { Renderable } from "@opentui/core"
+import { createTestRenderer } from "@opentui/core/testing"
+import { expect, test } from "vitest"
+import { Data, Effect } from "effect"
+import stringWidth from "string-width"
+import { Surface, maxMountedTranscriptEntries } from "../../src/opentui/surface/opentui-surface"
+import {
+  initial,
+  loading,
+  ready,
+  replaceQueue,
+  type Model,
+  type ThreadItem,
+  update,
+} from "../../src/state/model/terminal-state"
+import { OpenTuiError, openTui, _insertText, styledTextValue, _streamingShell, thread, _giantSubagentModel, _collapsedSubagentModel, nonSpaceBounds } from "./opentui-surface-characterization-13.test-support"
+test("keeps malformed thread titles on one styled picker row", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 140, height: 30 }))
+      const base = { ...initial("/work", "high"), width: 140, height: 30 }
+      const model: Model = {
+        ...base,
+        threads: [
+          thread({ id: "broken", title: "# Finish the release\n\nYou are finishing\ttoday\u001b" }),
+          thread({ id: "following", title: "Following thread" }),
+        ],
+        threadSwitcher: { ...base.threadSwitcher, open: true },
+      }
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      try {
+        surface.update(model)
+        yield* openTui(() => setup.renderOnce())
+        const rows = setup.captureCharFrame().split("\n")
+        const selectedRow = rows.findIndex((row) => row.includes("# Finish the release"))
+        const followingRow = rows.findIndex((row) => row.includes("Following thread"))
+        expect(selectedRow).toBeGreaterThanOrEqual(0)
+        expect(followingRow).toBe(selectedRow + 1)
+        expect(rows[selectedRow]).toContain("\\n\\nYou are finishing\\ttoday\\u{1b}")
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+test("keeps every overlay above the composer at 50x12", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 50, height: 12 }))
+      let model: Model = { ...initial("/work", "high"), width: 50, height: 12 }
+      model = update(model, { _tag: "FilesReplaced", files: ["src/main.ts"] })
+      model = update(model, {
+        _tag: "ThreadsReplaced",
+        threads: [thread({ id: "thread-2", title: "Release notes", workspace: "/two" })],
+      })
+      const base = model
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      const capture = Effect.fn("capture")(function* (next: Model, title: string, content: string, composerRow = 7) {
+        model = next
+        surface.update(model)
+        yield* openTui(() => setup.renderOnce())
+        const frame = setup.captureCharFrame()
+        const rows = frame.split("\n")
+        expect(frame).toContain(title)
+        expect(frame).toContain(content)
+        expect(rows[composerRow]?.startsWith("╭")).toBe(true)
+        expect(rows[11]?.startsWith("╰")).toBe(true)
+      })
+      try {
+        yield* capture(
+          { ...base, paletteOpen: true, palette: { ...base.palette, open: true } },
+          "Command Palette",
+          "toggle fast mode",
+        )
+        yield* capture({ ...base, modePicker: { ...base.modePicker, open: true } }, "←→ turn · esc", "GPT-5.6")
+        yield* capture({ ...base, shortcutsOpen: true }, "command palette", "Ctrl+O", 4)
+        yield* capture({ ...base, filePicker: { ...base.filePicker, open: true } }, "@src", "@src")
+        yield* capture(
+          { ...base, threadSwitcher: { ...base.threadSwitcher, open: true, kind: "mention" } },
+          "Mention Thread",
+          "Release notes",
+        )
+        yield* capture(
+          { ...base, threadSwitcher: { ...base.threadSwitcher, open: true } },
+          "Switch Thread",
+          "Release notes",
+        )
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))

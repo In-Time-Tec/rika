@@ -2,6 +2,7 @@ import { fg, StyledText, type TextChunk } from "@opentui/core"
 import { Function } from "effect"
 import type { Model } from "../../state/model/terminal-state"
 import { colors } from "../../presentation/terminal/terminal-theme"
+import { toOpenColor } from "./terminal-text-adapter"
 import {
   orderedTranscriptItems,
   rows as transcriptUnits,
@@ -62,4 +63,11 @@ export const buildTranscript: {
   },
 )
 
-export const renderTranscriptStyled = (model: Model): StyledText => buildTranscript(model).styled
+export const renderTranscriptStyled = (model: Model): StyledText => {
+  const styled = buildTranscript(model).styled
+  return new StyledText(
+    styled.chunks.map((chunk) =>
+      chunk.fg === undefined ? chunk : Object.assign({}, chunk, { fg: toOpenColor(chunk.fg) }),
+    ),
+  )
+}

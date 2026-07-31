@@ -1,69 +1,7 @@
 import { expect, test } from "vitest"
-
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-
 import { Keys, ViewState } from "../../src/state/model/terminal-state"
-
-const key = (input: Partial<Keys.Key> & Pick<Keys.Key, "name">): Keys.Key => ({
-  name: input.name,
-  ctrl: input.ctrl ?? false,
-  alt: input.alt ?? false,
-  meta: input.meta ?? false,
-  shift: input.shift ?? false,
-  sequence: input.sequence ?? "",
-  eventType: input.eventType ?? "press",
-})
-
-const thread = (
-  input: Partial<ViewState.ThreadItem> & Pick<ViewState.ThreadItem, "id" | "title">,
-): ViewState.ThreadItem => ({
-  workspace: "/work",
-  pinned: false,
-  archived: false,
-  status: "idle",
-  unread: false,
-  lastActivityAt: 0,
-  ...input,
-})
-
-const readCall = (
-  id: string,
-  detail: string,
-  status: "running" | "complete" = "running",
-): Extract<ViewState.TranscriptBlock, { _tag: "ToolCall" }> => ({
-  _tag: "ToolCall",
-  id,
-  name: "read",
-  input: detail,
-  status,
-  presentation: {
-    family: "explore",
-    action: "read",
-    activeLabel: "Exploring",
-    completeLabel: "Explored",
-    counter: "file",
-  },
-  detail,
-  files: [],
-})
-
-const editFile = (id: string, path: string) => ({
-  key: id,
-  path,
-  kind: "update" as const,
-  patch: `--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-old\n+new`,
-  additions: 1,
-  deletions: 1,
-  preview: false,
-  status: "complete" as const,
-})
-
-const busyQueueModel = (model: ViewState.Model): ViewState.Model => ({
-  ...model,
-  busy: true,
-  currentThreadId: "t",
-})
-
+import { key, thread, readCall, editFile, busyQueueModel } from "./terminal-state-characterization-2.test-support"
 test("a stale terminal event for another turn does not clear the active turn", () => {
   const busy: ViewState.Model = {
     ...ViewState.initial("/work"),
@@ -76,7 +14,6 @@ test("a stale terminal event for another turn does not clear the active turn", (
   expect(afterStale.activeTurnId).toBe("turn-b")
   expect(afterStale.submittedDrafts).toHaveLength(1)
 })
-
 test("settles cancellation without adding a textual notice", () => {
   const running: ViewState.Model = {
     ...ViewState.initial("/work"),
@@ -95,7 +32,6 @@ test("settles cancellation without adding a textual notice", () => {
   expect(cancelled.items).toEqual([])
   expect(cancelled.input).toBe("")
 })
-
 test("does not add a fallback marker when the parent cancellation event arrived first", () => {
   const parent = {
     _tag: "ToolCall" as const,
@@ -128,7 +64,6 @@ test("does not add a fallback marker when the parent cancellation event arrived 
   ])
   expect(cancelled.entries.filter((entry) => entry.role === "notice")).toEqual([])
 })
-
 test("models structured transcript blocks without backend types", () => {
   let model = ViewState.initial("/work")
   model = ViewState.update(model, { _tag: "ReasoningStreamed", text: "checking " })
@@ -160,7 +95,6 @@ test("models structured transcript blocks without backend types", () => {
   expect(model.blocks).toHaveLength(4)
   expect(model.blocks[0]).toMatchObject({ _tag: "Reasoning", text: "checking files" })
 })
-
 test("executes every focused palette action", () => {
   let model = ViewState.initial("/work")
   model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "o", ctrl: true }) })
@@ -191,7 +125,6 @@ test("executes every focused palette action", () => {
   model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
   expect(model.pendingAction).toEqual({ _tag: "Quit" })
 })
-
 test("keeps overlays exclusive and types @ and ? into a non-empty composer", () => {
   let model = { ...ViewState.initial("/work"), input: "draft", cursor: 5 }
   model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "o", ctrl: true }) })
@@ -211,7 +144,6 @@ test("keeps overlays exclusive and types @ and ? into a non-empty composer", () 
   model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "escape" }) })
   expect(model.shortcutsOpen).toBe(false)
 })
-
 test("opens shortcuts only for the first question mark in an empty composer", () => {
   let sentence = { ...ViewState.initial("/work"), input: "how was your day", cursor: 16 }
   sentence = ViewState.update(sentence, {
@@ -247,7 +179,6 @@ test("opens shortcuts only for the first question mark in an empty composer", ()
   model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "backspace" }) })
   expect(model).toMatchObject({ input: "", cursor: 0, shortcutsOpen: false, shortcutsTrigger: undefined })
 })
-
 test("does not open shortcuts when question mark is typed in a dialog", () => {
   let model = ViewState.update(ViewState.initial("/work"), {
     _tag: "KeyPressed",
@@ -256,7 +187,6 @@ test("does not open shortcuts when question mark is typed in a dialog", () => {
   model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "/", sequence: "?", shift: true }) })
   expect(model).toMatchObject({ shortcutsOpen: false, palette: { open: true, query: "?" }, input: "" })
 })
-
 test("keeps an empty palette open with a valid selection and no action", () => {
   let model = ViewState.update(ViewState.initial("/work"), {
     _tag: "KeyPressed",
@@ -270,7 +200,6 @@ test("keeps an empty palette open with a valid selection and no action", () => {
   expect(model).toMatchObject({ paletteOpen: true, palette: { open: true, selected: 0 } })
   expect(model.pendingAction).toBeUndefined()
 })
-
 test("switches mutually exclusively between the workspace file tree and changed files", () => {
   let model = ViewState.initial("/work")
   model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "t", alt: true }) })
@@ -282,7 +211,6 @@ test("switches mutually exclusively between the workspace file tree and changed 
   model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "t", alt: true }) })
   expect(model).toMatchObject({ workspaceFilesOpen: false, changedFilesOpen: false })
 })
-
 test("toggles every transcript detail as one reducer action", () => {
   let model = {
     ...ViewState.initial("/work"),
@@ -297,14 +225,12 @@ test("toggles every transcript detail as one reducer action", () => {
   model = ViewState.update(model, { _tag: "AllDetailsToggled" })
   expect(model.expandedRowKeys).toEqual([])
 })
-
 test("keeps an unchanged changed-files snapshot stable", () => {
   const files = [{ path: "src/a.ts", status: "M", added: 1, removed: 2 }]
   const model = ViewState.update(ViewState.initial("/work"), { _tag: "ChangedFilesReplaced", files })
 
   expect(ViewState.update(model, { _tag: "ChangedFilesReplaced", files: [...files] })).toBe(model)
 })
-
 test("moves up into queued turns and down or Escape back to the composer", () => {
   let model = ViewState.replaceQueue({ ...ViewState.initial("/work"), busy: true }, [
     { id: "one", prompt: "one" },
@@ -325,7 +251,6 @@ test("moves up into queued turns and down or Escape back to the composer", () =>
   expect(model.queueSelection).toBeUndefined()
   expect(model.pendingAction).toBeUndefined()
 })
-
 test("steers and dequeues only while a queued turn is selected", () => {
   let model = ViewState.replaceQueue({ ...ViewState.initial("/work"), busy: true }, [
     { id: "one", prompt: "one" },
@@ -338,7 +263,6 @@ test("steers and dequeues only while a queued turn is selected", () => {
   model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "backspace" }) })
   expect(model.pendingAction).toEqual({ _tag: "Dequeue", id: "two" })
 })
-
 test("leaves the queue unchanged when Backspace is pressed from the composer", () => {
   const model = ViewState.update(
     ViewState.replaceQueue({ ...ViewState.initial("/work"), busy: true }, [
@@ -350,7 +274,6 @@ test("leaves the queue unchanged when Backspace is pressed from the composer", (
   expect(model.queueSelection).toBeUndefined()
   expect(model.pendingAction).toBeUndefined()
 })
-
 test("keeps queue navigation inactive on reset and Added", () => {
   let model = ViewState.resetQueue(busyQueueModel(ViewState.initial("/work")), "t", 1, [
     { id: "a", prompt: "a" },
@@ -361,7 +284,6 @@ test("keeps queue navigation inactive on reset and Added", () => {
   expect(added.resync).toBe(false)
   expect(added.model.queueSelection).toBeUndefined()
 })
-
 test("keeps a still-valid selection across reset and Updated", () => {
   let model = ViewState.resetQueue(busyQueueModel(ViewState.initial("/work")), "t", 1, [
     { id: "a", prompt: "a" },
@@ -377,7 +299,6 @@ test("keeps a still-valid selection across reset and Updated", () => {
   expect(updated.model.queueSelection).toBe("a")
   expect(updated.model.queue[0]).toEqual({ id: "a", prompt: "a3" })
 })
-
 test("reselects the neighbor at the same index when the selected queued turn is removed", () => {
   let model = ViewState.resetQueue(busyQueueModel(ViewState.initial("/work")), "t", 1, [
     { id: "a", prompt: "a" },
@@ -389,13 +310,11 @@ test("reselects the neighbor at the same index when the selected queued turn is 
   expect(removed.model.queue.map((item) => item.id)).toEqual(["a", "c"])
   expect(removed.model.queueSelection).toBe("c")
 })
-
 test("reconciles a mismatched durable queued count by requesting a resync", () => {
   const model = ViewState.resetQueue(busyQueueModel(ViewState.initial("/work")), "t", 1, [{ id: "a", prompt: "a" }])
   const applied = ViewState.applyQueueDelta(model, "t", 2, { _tag: "Added", item: { id: "b", prompt: "b" } }, 5)
   expect(applied.resync).toBe(true)
 })
-
 test("edits a queued turn: Ctrl+E loads it, Enter saves EditQueued, Escape restores", () => {
   let model = ViewState.resetQueue(busyQueueModel(ViewState.initial("/work")), "t", 1, [
     { id: "a", prompt: "alpha" },
@@ -419,7 +338,6 @@ test("edits a queued turn: Ctrl+E loads it, Enter saves EditQueued, Escape resto
   expect(cancelled.input).toBe("")
   expect(cancelled.pendingAction).toBeUndefined()
 })
-
 test("Enter on a selected queued row without edit mode still steers", () => {
   let model = ViewState.resetQueue(busyQueueModel(ViewState.initial("/work")), "t", 1, [{ id: "a", prompt: "alpha" }])
   model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
@@ -427,12 +345,10 @@ test("Enter on a selected queued row without edit mode still steers", () => {
   expect(model.pendingAction).toEqual({ _tag: "SteerQueued", id: "a", prompt: "alpha" })
   expect(model.editingTurnId).toBeUndefined()
 })
-
 test("does not allow submit while editing a queued turn", () => {
   expect(ViewState.canSubmit({ ...ViewState.initial("/work"), editingTurnId: "b", input: "edited" })).toBe(false)
   expect(ViewState.canSubmit({ ...ViewState.initial("/work"), input: "normal" })).toBe(true)
 })
-
 test("exits edit mode and restores the composer when the edited queued turn is removed", () => {
   let model = ViewState.resetQueue(busyQueueModel(ViewState.initial("/work")), "t", 1, [
     { id: "a", prompt: "alpha" },
@@ -447,7 +363,6 @@ test("exits edit mode and restores the composer when the edited queued turn is r
   expect(removed.editReturn).toBeUndefined()
   expect(removed.input).toBe("")
 })
-
 test("blocks image attachment while editing a queued turn", () => {
   let model = ViewState.resetQueue(busyQueueModel(ViewState.initial("/work")), "t", 1, [{ id: "a", prompt: "alpha" }])
   model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
@@ -457,7 +372,6 @@ test("blocks image attachment while editing a queued turn", () => {
   expect(after.input).toBe(model.input)
   expect(after.pastedText).toEqual([])
 })
-
 test("ignores queue dequeue and edit re-entry keys while editing with a cleared composer", () => {
   let model = ViewState.resetQueue(busyQueueModel(ViewState.initial("/work")), "t", 1, [{ id: "a", prompt: "alpha" }])
   model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
@@ -469,7 +383,6 @@ test("ignores queue dequeue and edit re-entry keys while editing with a cleared 
   const reentry = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "e", ctrl: true }) })
   expect(reentry.input).toBe("")
 })
-
 test("navigates transcript detail units with Tab and toggles the selected unit", () => {
   let model = {
     ...ViewState.initial("/work"),
@@ -498,7 +411,6 @@ test("navigates transcript detail units with Tab and toggles the selected unit",
   model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
   expect(model.expandedRowKeys).toEqual(["block:Diff:2", "tool:1", "block:Reasoning:0"])
 })
-
 test("keeps an expanded streamed tool group open as new children arrive", () => {
   let model = ViewState.update(ViewState.initial("/work"), { _tag: "BlockAdded", block: readCall("1", "a") })
   model = ViewState.update(model, { _tag: "DetailToggled", id: "tool:1" })
@@ -512,7 +424,6 @@ test("keeps an expanded streamed tool group open as new children arrive", () => 
   const collapsed = ViewState.update(model, { _tag: "DetailToggled", id: "tool:1" })
   expect(collapsed.expandedRowKeys).not.toContain("tool:1")
 })
-
 test("click toggles do not move the Tab detail selection", () => {
   const base = { ...ViewState.initial("/work"), blocks: [readCall("1", "a", "complete")] }
   const clicked = ViewState.update(base, { _tag: "DetailToggled", id: "tool:1" })
@@ -521,7 +432,6 @@ test("click toggles do not move the Tab detail selection", () => {
   const tabbed = ViewState.update(clicked, { _tag: "KeyPressed", key: key({ name: "tab" }) })
   expect(tabbed.detailSelection).toBe("tool:1")
 })
-
 test("toggles an expanded edit group's file rows independently", () => {
   const call: Extract<ViewState.TranscriptBlock, { _tag: "ToolCall" }> = {
     _tag: "ToolCall",
@@ -542,7 +452,6 @@ test("toggles an expanded edit group's file rows independently", () => {
 
   expect(model).toMatchObject({ detailSelection: undefined, expandedRowKeys: [parent, child] })
 })
-
 test("navigates threads and deduplicates replay", () => {
   let model = ViewState.update(ViewState.initial("/work"), {
     _tag: "ThreadsReplaced",
@@ -560,205 +469,4 @@ test("navigates threads and deduplicates replay", () => {
   const replayed = ViewState.update(model, { _tag: "EventReplayed", event })
   expect(replayed).toBe(model)
   expect(model).toMatchObject({ eventCursor: "42", seenEventIds: ["stable"] })
-})
-
-test("opens, filters, navigates, closes, and confirms the all-workspace thread switcher", () => {
-  let model = ViewState.update(ViewState.initial("/work"), {
-    _tag: "ThreadsReplaced",
-    threads: [
-      thread({ id: "a", title: "First", workspace: "/one" }),
-      thread({ id: "b", title: "Second task", workspace: "/two", unread: true, archived: true }),
-    ],
-  })
-  model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "t", ctrl: true }) })
-  expect(model.threadSwitcher.open).toBe(true)
-  model = ViewState.update(model, { _tag: "ThreadPreviewScrolled", offset: 5 })
-  expect(model.threadSwitcher.previewScroll).toBe(5)
-  for (const character of "second")
-    model = ViewState.update(model, {
-      _tag: "KeyPressed",
-      key: key({ name: character, sequence: character }),
-    })
-  expect(model.threadSwitcher.previewScroll).toBe(0)
-  expect(ViewState.filteredThreads(model).map((item) => item.id)).toEqual(["b"])
-  expect(ViewState.selectedThreadMetadata(model)).toMatchObject({ id: "b", workspace: "/two", archived: true })
-  model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
-  expect(model.pendingAction).toEqual({ _tag: "SelectThread", id: "b" })
-  expect(model.threadSwitcher.open).toBe(false)
-  model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "w", alt: true }) })
-  model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "escape" }) })
-  expect(model.threadSwitcher.open).toBe(false)
-})
-
-test("closes the thread switcher without reloading the current thread", () => {
-  let model = ViewState.update(ViewState.initial("/work"), {
-    _tag: "ThreadsReplaced",
-    threads: [thread({ id: "a", title: "First" }), thread({ id: "b", title: "Second" })],
-  })
-  model = ViewState.update(model, { _tag: "ThreadActivated", threadId: "b", title: "Second" })
-  model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "t", ctrl: true }) })
-  model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
-
-  expect(model.threadSwitcher.open).toBe(false)
-  expect(model.pendingAction).toBeUndefined()
-})
-
-test("clears stale previews for missing filters and removed or archived thread summaries", () => {
-  let model = ViewState.update(ViewState.initial("/work"), {
-    _tag: "ThreadsReplaced",
-    threads: [thread({ id: "a", title: "Alpha" }), thread({ id: "b", title: "Beta" })],
-  })
-  model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "t", ctrl: true }) })
-  model = ViewState.update(model, {
-    _tag: "ThreadPreviewLoaded",
-    threadId: "a",
-    turns: [
-      { prompt: "stale preview", units: TranscriptProjection.Projection.empty("preview", "stale preview").units },
-    ],
-  })
-  for (const character of "missing")
-    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: character, sequence: character }) })
-  expect(model.threadPreview._tag).toBe("Idle")
-
-  model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "escape" }) })
-  model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "t", ctrl: true }) })
-  model = ViewState.update(model, {
-    _tag: "ThreadPreviewLoaded",
-    threadId: "a",
-    turns: [
-      { prompt: "removed preview", units: TranscriptProjection.Projection.empty("preview", "removed preview").units },
-    ],
-  })
-  model = ViewState.update(model, {
-    _tag: "ThreadsReplaced",
-    threads: [thread({ id: "b", title: "Beta" })],
-  })
-  expect(model.threadPreview._tag).toBe("Idle")
-  expect(ViewState.selectedThreadMetadata(model)?.id).toBe("b")
-  expect(model.threadSwitcher.previewScroll).toBe(0)
-})
-
-test("switches file completion to thread completion with @@ and inserts a typed thread mention", () => {
-  let model = ViewState.update(ViewState.initial("/work"), {
-    _tag: "ThreadsReplaced",
-    threads: [thread({ id: "thread-2", title: "Release notes", workspace: "/two" })],
-  })
-  model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "@", sequence: "@" }) })
-  model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "@", sequence: "@" }) })
-  expect(model.threadSwitcher).toMatchObject({ open: true, kind: "mention" })
-  model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "r", sequence: "r" }) })
-  model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
-  expect(model.input).toBe("@thread-2 ")
-})
-
-test("surfaces workspace file index failures and clears them on the next load", () => {
-  let model = ViewState.update(ViewState.initial("/work"), { _tag: "FilesRequested" })
-  expect(model.filePicker.items).toEqual({ _tag: "Loading" })
-  model = ViewState.update(model, { _tag: "FilesFailed", message: "workspace search failed" })
-  expect(model.filePicker.items).toEqual({ _tag: "Idle" })
-  expect(model.filePicker.error).toBe("workspace search failed")
-  model = ViewState.update(model, { _tag: "FilesReplaced", files: ["a.ts"] })
-  expect(model.filePicker.items).toEqual({ _tag: "Ready", value: ["a.ts"] })
-  expect(model.filePicker.error).toBeUndefined()
-})
-
-test("removes a complete Unicode query character and keeps file completion open", () => {
-  let model = ViewState.update(ViewState.initial("/work"), {
-    _tag: "FilesReplaced",
-    files: ["src/😀.ts"],
-  })
-  model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "@", sequence: "@" }) })
-  model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "😀", sequence: "😀" }) })
-  model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "backspace" }) })
-  expect(model.input).toBe("@")
-  expect(model.filePicker).toMatchObject({ open: true, query: "", selected: 0 })
-})
-
-test("selects from refreshed file and thread results without retaining stale indexes", () => {
-  let files = ViewState.update(ViewState.initial("/work"), {
-    _tag: "FilesReplaced",
-    files: ["a.ts", "b.ts", "c.ts"],
-  })
-  files = ViewState.update(files, { _tag: "KeyPressed", key: key({ name: "@", sequence: "@" }) })
-  files = ViewState.update(files, { _tag: "KeyPressed", key: key({ name: "t", sequence: "t" }) })
-  files = ViewState.update(files, { _tag: "KeyPressed", key: key({ name: "down" }) })
-  files = ViewState.update(files, { _tag: "KeyPressed", key: key({ name: "down" }) })
-  files = ViewState.update(files, { _tag: "FilesReplaced", files: ["only.ts"] })
-  files = ViewState.update(files, { _tag: "KeyPressed", key: key({ name: "return" }) })
-  expect(files.input).toBe("@only.ts ")
-
-  let threads = ViewState.update(ViewState.initial("/work"), {
-    _tag: "ThreadsReplaced",
-    threads: [thread({ id: "a", title: "A" }), thread({ id: "b", title: "B" }), thread({ id: "c", title: "C" })],
-  })
-  threads = ViewState.update(threads, { _tag: "KeyPressed", key: key({ name: "@", sequence: "@" }) })
-  threads = ViewState.update(threads, { _tag: "KeyPressed", key: key({ name: "@", sequence: "@" }) })
-  threads = ViewState.update(threads, { _tag: "KeyPressed", key: key({ name: "down" }) })
-  threads = ViewState.update(threads, { _tag: "KeyPressed", key: key({ name: "down" }) })
-  threads = ViewState.update(threads, {
-    _tag: "ThreadsReplaced",
-    threads: [thread({ id: "only", title: "Only" })],
-  })
-  threads = ViewState.update(threads, { _tag: "KeyPressed", key: key({ name: "return" }) })
-  expect(threads.input).toBe("@only ")
-})
-
-test("opens, focuses, navigates, and closes the fixed thread sidebar with ctrl+backslash", () => {
-  let model = ViewState.update(ViewState.initial("/work"), {
-    _tag: "ThreadsReplaced",
-    threads: [thread({ id: "a", title: "First" }), thread({ id: "b", title: "Second" })],
-  })
-  model = ViewState.update(model, { _tag: "ThreadActivated", threadId: "b", title: "Second" })
-  const toggle = { _tag: "KeyPressed", key: key({ name: "\\", ctrl: true, sequence: "\u001c" }) } as const
-  model = ViewState.update(model, toggle)
-  expect(model.threadSidebar).toMatchObject({ open: true, focused: false, selected: 1 })
-  model = ViewState.update(model, toggle)
-  expect(model.threadSidebar.focused).toBe(true)
-  model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
-  model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
-  expect(model.pendingAction).toEqual({ _tag: "SelectThread", id: "a" })
-  model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "escape" }) })
-  expect(model.threadSidebar).toMatchObject({ open: true, focused: false })
-  model = ViewState.update(model, toggle)
-  model = ViewState.update(model, toggle)
-  expect(model.threadSidebar.open).toBe(false)
-})
-
-test("keeps the current thread selected in the sidebar without reloading it", () => {
-  let model = ViewState.update(ViewState.initial("/work"), {
-    _tag: "ThreadsReplaced",
-    threads: [thread({ id: "a", title: "First" }), thread({ id: "b", title: "Second" })],
-  })
-  model = ViewState.update(model, { _tag: "ThreadActivated", threadId: "b", title: "Second" })
-  model = ViewState.update(model, { _tag: "ThreadSidebarSelectionConfirmed", index: 1 })
-
-  expect(model.threadSidebar.selected).toBe(1)
-  expect(model.pendingAction).toBeUndefined()
-})
-
-test("keeps the thread sidebar selection visible when stale threads disappear", () => {
-  let model = ViewState.update(ViewState.initial("/work"), {
-    _tag: "ThreadsReplaced",
-    threads: Array.from({ length: 40 }, (_, index) => thread({ id: String(index), title: `Thread ${index}` })),
-  })
-  model = {
-    ...model,
-    height: 8,
-    threadSidebar: { open: true, focused: true, selected: 39, scrollTop: 32 },
-  }
-  model = ViewState.update(model, {
-    _tag: "ThreadsReplaced",
-    threads: [thread({ id: "fresh", title: "Fresh" })],
-  })
-  expect(model.threadSidebar).toMatchObject({ selected: 0, scrollTop: 0 })
-})
-
-test("bounds the thread sidebar on tiny terminals to preserve the main column", () => {
-  const model = {
-    ...ViewState.initial("/work"),
-    width: 20,
-    threadSidebar: { ...ViewState.initial("/work").threadSidebar, open: true },
-  }
-  expect(ViewState.boundedThreadSidebarWidth(model.width)).toBe(8)
-  expect(ViewState.contentColumnWidth(model)).toBe(12)
 })

@@ -2,6 +2,7 @@ import { CliRenderEvents } from "@opentui/core"
 import stringWidth from "string-width"
 import { filter } from "../../presentation/terminal/command-palette"
 import { colors } from "../../presentation/terminal/terminal-theme"
+import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { filteredFiles, type Model } from "../../state/model/terminal-state"
 import { paletteContent, modePickerContent } from "./opentui-composer-region"
 import { filePickerContent, threadSwitcherContent, threadSwitcherListWidth } from "./opentui-overlay-content"
@@ -65,7 +66,7 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
       this.paletteBox.left = Math.max(0, Math.floor((model.width - boxWidth) / 2))
       this.paletteBox.top = Math.max(0, Math.floor((composerTop - boxHeight) / 2))
       this.paletteBox.title = " Command Palette "
-      this.paletteBox.titleColor = colors.amber
+      this.paletteBox.titleColor = toOpenColor(colors.amber)
       this.paletteBox.titleAlignment = "left"
       this.palette.content = paletteContent(model, results, Math.max(1, boxWidth - 4), Math.max(1, boxHeight - 2))
       this.syncOverlayEditor(`> ${model.palette.query}`, 2 + model.palette.query.length, 0, boxHeight - 2, boxWidth - 4)

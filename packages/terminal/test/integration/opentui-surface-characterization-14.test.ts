@@ -1,15 +1,9 @@
 import { Renderable } from "@opentui/core"
-
 import { createTestRenderer } from "@opentui/core/testing"
-
 import { expect, test } from "vitest"
-
 import { Data, Effect } from "effect"
-
 import stringWidth from "string-width"
-
 import { Surface, maxMountedTranscriptEntries } from "../../src/opentui/surface/opentui-surface"
-
 import {
   applyQueueDelta,
   initial,
@@ -21,44 +15,7 @@ import {
   type Model,
   type ThreadItem,
 } from "../../src/state/model/terminal-state"
-
-class OpenTuiError extends Data.TaggedError("OpenTuiError")<{ readonly cause: unknown }> {}
-
-const openTui = <A>(operation: () => Promise<A>) =>
-  Effect.tryPromise({ try: operation, catch: (cause) => new OpenTuiError({ cause }) })
-
-const _insertText = (model: Model, text: string) => update(model, { _tag: "Pasted", text })
-
-const styledTextValue = (value: { readonly chunks: ReadonlyArray<{ readonly text: string }> } | string) =>
-  typeof value === "string" ? value : value.chunks.map((chunk) => chunk.text).join("")
-
-const _streamingShell = (id: string, output?: string) => ({
-  _tag: "ToolCall" as const,
-  id,
-  name: "bash",
-  input: `{"command":"printf ${id}"}`,
-  status: "running" as const,
-  presentation: {
-    family: "shell" as const,
-    action: "shell",
-    activeLabel: "Running",
-    completeLabel: "Ran",
-  },
-  detail: `printf ${id}`,
-  ...(output === undefined ? {} : { output }),
-  files: [],
-})
-
-const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
-  workspace: "/work",
-  pinned: false,
-  archived: false,
-  status: "idle",
-  unread: false,
-  lastActivityAt: 0,
-  ...input,
-})
-
+import { OpenTuiError, openTui, _insertText, styledTextValue, _streamingShell, thread, _giantSubagentModel, _collapsedSubagentModel, nonSpaceBounds } from "./opentui-surface-characterization-14.test-support"
 for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
   test(`keeps composer updates bounded with ${historySize} transcript entries`, () =>
     Effect.runPromise(
@@ -88,117 +45,6 @@ for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
       }),
     ))
 }
-
-const _giantSubagentModel = (childCount: number): Model => {
-  const rootBlock = {
-    _tag: "ToolCall" as const,
-    id: "root-tool",
-    name: "task",
-    input: "{}",
-    status: "complete" as const,
-    presentation: {
-      family: "agent" as const,
-      action: "task",
-      activeLabel: "Subagent working",
-      completeLabel: "Subagent finished",
-    },
-    detail: "delegated task",
-    files: [],
-  }
-  const childBlocks = Array.from({ length: childCount }, (_, index) => ({
-    _tag: "ToolCall" as const,
-    id: `child-${index}`,
-    name: "bash",
-    input: "{}",
-    status: "complete" as const,
-    presentation: {
-      family: "shell" as const,
-      action: "shell",
-      activeLabel: "Running",
-      completeLabel: "Ran",
-    },
-    detail: `cmd-${index}`,
-    files: [],
-  }))
-  const blocks = [rootBlock, ...childBlocks]
-  const items = blocks.map((block, index) => ({
-    _tag: "Block" as const,
-    index,
-    id: `block-${block.id}`,
-    turnId: "turn-1",
-    ...(index === 0 ? {} : { parentId: "root-tool" }),
-  }))
-  return {
-    ...initial("/work", "high"),
-    blocks,
-    items,
-    expandedRowKeys: ["tool:root-tool"],
-    scrollFollow: false,
-  }
-}
-
-const _collapsedSubagentModel = (answerCount: number, childCount: number): Model => {
-  const entries = Array.from({ length: answerCount }, (_, index) => ({
-    role: "assistant" as const,
-    text: `answer ${index}`,
-    turnId: "turn-1",
-  }))
-  const rootBlock = {
-    _tag: "ToolCall" as const,
-    id: "root-tool",
-    name: "task",
-    input: "{}",
-    status: "running" as const,
-    presentation: {
-      family: "agent" as const,
-      action: "task",
-      activeLabel: "Subagent working",
-      completeLabel: "Subagent finished",
-    },
-    detail: "delegated task",
-    files: [],
-  }
-  const childBlocks = Array.from({ length: childCount }, (_, index) => ({
-    _tag: "ToolCall" as const,
-    id: `child-${index}`,
-    name: "bash",
-    input: "{}",
-    status: "complete" as const,
-    presentation: {
-      family: "shell" as const,
-      action: "shell",
-      activeLabel: "Running",
-      completeLabel: "Ran",
-    },
-    detail: `cmd-${index}`,
-    files: [],
-  }))
-  const blocks = [rootBlock, ...childBlocks]
-  const items = [
-    ...entries.map((_, index) => ({
-      _tag: "Entry" as const,
-      index,
-      id: `answer-${index}`,
-      turnId: "turn-1",
-    })),
-    ...blocks.map((block, index) => ({
-      _tag: "Block" as const,
-      index,
-      id: `block-${block.id}`,
-      turnId: "turn-1",
-      ...(index === 0 ? {} : { parentId: "root-tool" }),
-    })),
-  ]
-  return {
-    ...initial("/work", "high"),
-    entries,
-    blocks,
-    items,
-    expandedRowKeys: [],
-    scrollFollow: true,
-  }
-}
-
 for (const panel of ["changed", "workspace"] as const) {
   test(`keeps composer updates bounded with a large ${panel} files sidebar`, () =>
     Effect.runPromise(
@@ -250,7 +96,6 @@ for (const panel of ["changed", "workspace"] as const) {
       }),
     ))
 }
-
 for (const width of [80, 50] as const) {
   test(`renders a visible error action and leaves the composer usable at width ${width}`, () =>
     Effect.runPromise(
@@ -295,21 +140,6 @@ for (const width of [80, 50] as const) {
       }),
     ))
 }
-
-const nonSpaceBounds = (frame: string, height: number) => {
-  const points = frame
-    .split("\n")
-    .slice(0, height - 5)
-    .flatMap((row, y) => Array.from(row, (cell, x) => ({ cell, x, y })))
-    .filter(({ cell }) => cell !== " ")
-  return {
-    left: Math.min(...points.map(({ x }) => x)),
-    right: Math.max(...points.map(({ x }) => x)),
-    top: Math.min(...points.map(({ y }) => y)),
-    bottom: Math.max(...points.map(({ y }) => y)),
-  }
-}
-
 for (const [width, height] of [
   [100, 30],
   [80, 24],
@@ -350,7 +180,6 @@ for (const [width, height] of [
       }),
     ))
 }
-
 for (const height of [13, 16, 19] as const) {
   test(`keeps essential compact welcome copy visible at 60x${height}`, () =>
     Effect.runPromise(
@@ -372,7 +201,6 @@ for (const height of [13, 16, 19] as const) {
       }),
     ))
 }
-
 for (const [width, height] of [
   [140, 40],
   [100, 24],
@@ -480,7 +308,6 @@ for (const [width, height] of [
       }),
     ))
 }
-
 for (const [width, height] of [
   [100, 24],
   [60, 16],
@@ -587,7 +414,6 @@ for (const [width, height] of [
       }),
     ))
 }
-
 test("joins the durable queue to the composer like Amp", () =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -625,142 +451,6 @@ test("joins the durable queue to the composer like Amp", () =>
         expect(rows[surface.queueBox.y]?.startsWith(" ╭")).toBe(true)
         expect(rows[surface.inputBox.y]?.startsWith("╭┴")).toBe(true)
         expect(rows[surface.inputBox.y]?.endsWith("╮")).toBe(true)
-      } finally {
-        surface.destroy()
-        setup.renderer.destroy()
-      }
-    }),
-  ))
-
-test("renders an inline hint on the selected queued row as the queue window moves", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const setup = yield* openTui(() => createTestRenderer({ width: 60, height: 14 }))
-      const items = Array.from({ length: 8 }, (_, index) => ({ id: `q${index}`, prompt: `prompt number ${index}` }))
-      const base = replaceQueue({ ...initial("/work", "medium"), busy: true, width: 60, height: 14 }, items)
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-      try {
-        surface.update({ ...base, queueSelection: "q0" })
-        yield* openTui(() => setup.renderOnce())
-        const top = setup.captureCharFrame()
-        const topRows = top.split("\n")
-        expect(top).not.toContain("queued 1/8")
-        expect(topRows.findIndex((row) => row.includes("Enter to steer"))).toBe(
-          topRows.findIndex((row) => row.includes("prompt number 0")),
-        )
-        surface.update({ ...base, queueSelection: "q7" })
-        yield* openTui(() => setup.renderOnce())
-        const bottom = setup.captureCharFrame()
-        const bottomRows = bottom.split("\n")
-        expect(bottom).not.toContain("queued 8/8")
-        expect(bottomRows.findIndex((row) => row.includes("Enter to steer"))).toBe(
-          bottomRows.findIndex((row) => row.includes("prompt number 7")),
-        )
-        expect(bottom).not.toContain("prompt number 0")
-      } finally {
-        surface.destroy()
-        setup.renderer.destroy()
-      }
-    }),
-  ))
-
-test("shows the editing hint inline on the queued row being edited", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
-      const model = {
-        ...replaceQueue({ ...initial("/work", "medium"), busy: true, width: 80, height: 24 }, [
-          { id: "a", prompt: "alpha" },
-          { id: "b", prompt: "beta" },
-        ]),
-        queueSelection: "b",
-        editingTurnId: "b",
-        input: "beta edited",
-        cursor: "beta edited".length,
-      }
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-      try {
-        surface.update(model)
-        yield* openTui(() => setup.renderOnce())
-        const frame = setup.captureCharFrame()
-        const rows = frame.split("\n")
-        expect(frame).toContain("Editing queued")
-        expect(frame).not.toContain("2/2")
-        expect(frame).toContain("Enter save")
-        expect(frame).toContain("Esc cancel")
-        expect(rows.findIndex((row) => row.includes("Editing queued"))).toBe(
-          rows.findIndex((row) => row.includes("beta")),
-        )
-        expect(surface.queueBox.height).toBe(4)
-      } finally {
-        surface.destroy()
-        setup.renderer.destroy()
-      }
-    }),
-  ))
-
-test("removes a promoted prompt from the queue when it starts", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
-      const base = resetQueue(
-        { ...initial("/work", "medium"), busy: true, width: 80, height: 24, currentThreadId: "t" },
-        "t",
-        1,
-        [
-          { id: "a", prompt: "alpha" },
-          { id: "b", prompt: "beta" },
-        ],
-      )
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-      try {
-        surface.update(base)
-        yield* openTui(() => setup.renderOnce())
-        expect(setup.captureCharFrame()).toContain("beta")
-        const started = update(applyQueueDelta(base, "t", 2, { _tag: "Removed", turnId: "a" }).model, {
-          _tag: "TurnStarted",
-          turnId: "a",
-          prompt: "alpha",
-        })
-        surface.update(started)
-        yield* openTui(() => setup.renderOnce())
-        const frame = setup.captureCharFrame()
-        expect(frame).toContain("beta")
-        expect(frame).not.toContain("queued 1/1")
-        expect(frame).not.toContain("queued 2/2")
-        expect(frame).toContain("alpha")
-      } finally {
-        surface.destroy()
-        setup.renderer.destroy()
-      }
-    }),
-  ))
-
-test("clamps an oversized focused queued prompt to the queue box with an indicator", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const setup = yield* openTui(() => createTestRenderer({ width: 40, height: 12 }))
-      const model = {
-        ...replaceQueue({ ...initial("/work", "medium"), busy: true, width: 40, height: 12 }, [
-          { id: "big", prompt: "x".repeat(400) },
-        ]),
-        queueSelection: "big",
-      }
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-      try {
-        surface.update(model)
-        yield* openTui(() => setup.renderOnce())
-        const text = (surface.queueText.content as unknown as { chunks: ReadonlyArray<{ text: string }> }).chunks
-          .map((chunk) => chunk.text)
-          .join("")
-        expect(text).toContain("…")
-        expect(text.length).toBeLessThan(40)
-        const frame = setup.captureCharFrame()
-        const row = frame.split("\n").find((candidate) => candidate.includes("Enter to steer"))
-        expect(row).toContain("x")
-        expect(row).not.toContain("Backspace to dequeue")
-        expect(row).not.toContain("Ctrl+E to edit")
-        expect(surface.queueBox.height).toBe(3)
       } finally {
         surface.destroy()
         setup.renderer.destroy()

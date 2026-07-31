@@ -13,7 +13,9 @@ import { renderPierreDiff as pierreDiff, type DiffRenderOptions } from "../../pr
 import { renderToolSummary as toolSummary } from "../../presentation/tool/tool-summary"
 import type { TerminalColor, TerminalStyledText, TerminalTextChunk } from "../../presentation/markdown/styled-text"
 
-const color = (value: TerminalColor | RGBA | undefined): RGBA | undefined => {
+export function toOpenColor(value: TerminalColor | RGBA): RGBA
+export function toOpenColor(value: TerminalColor | RGBA | undefined): RGBA | undefined
+export function toOpenColor(value: TerminalColor | RGBA | undefined): RGBA | undefined {
   if (value === undefined || value instanceof RGBA) return value
   if (typeof value === "string") {
     const indexes: Record<string, number> = {
@@ -29,12 +31,25 @@ const color = (value: TerminalColor | RGBA | undefined): RGBA | undefined => {
     }
     return value.startsWith("#") ? RGBA.fromHex(value) : RGBA.fromIndex(indexes[value] ?? 7)
   }
-  if ("_tag" in value && value._tag === "Indexed" && typeof value.index === "number") return RGBA.fromIndex(value.index)
+  if ("toInts" in value && typeof value.toInts === "function") {
+    const terminalColor = value as unknown as {
+      readonly intent?: string
+      readonly slot?: number
+      readonly toInts: () => [number, number, number, number]
+    }
+    if (terminalColor.intent === "indexed" && terminalColor.slot !== undefined)
+      return RGBA.fromIndex(terminalColor.slot)
+    if (terminalColor.intent === "default") return RGBA.defaultBackground()
+    const ints = terminalColor.toInts()
+    return RGBA.fromInts(ints[0], ints[1], ints[2], ints[3])
+  }
+  if ("_tag" in value && value._tag === "Indexed" && typeof (value as { readonly index?: unknown }).index === "number")
+    return RGBA.fromIndex((value as unknown as { readonly index: number }).index)
   return RGBA.defaultBackground()
 }
 export const toOpenChunk = (chunk: TerminalTextChunk | TextChunk): TextChunk => {
-  const fg = color(chunk.fg),
-    bg = color(chunk.bg)
+  const fg = chunk.fg as TextChunk["fg"],
+    bg = chunk.bg as TextChunk["bg"]
   return {
     __isChunk: true,
     text: chunk.text,

@@ -15,6 +15,7 @@ import stringWidth from "string-width"
 import { isFollowing } from "../../presentation/transcript/transcript-viewport"
 import { boundedThreadSidebarWidth, type Model, type QueueItem } from "../../state/model/terminal-state"
 import { colors, spacing } from "../../presentation/terminal/terminal-theme"
+import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { ToolSpinner } from "../rendering/opentui-spinner"
 import { SurfaceLifecycleCleanup } from "./opentui-lifecycle-cleanup"
 import { type Handlers, type SurfaceOptions } from "./opentui-surface-state"
@@ -152,7 +153,7 @@ export class SurfaceConstruction extends SurfaceLifecycleCleanup {
       right: 0,
       width: 1,
       visible: false,
-      trackOptions: { foregroundColor: colors.text, backgroundColor: colors.muted },
+      trackOptions: { foregroundColor: toOpenColor(colors.text), backgroundColor: toOpenColor(colors.muted) },
       onChange: (position) => {
         if (this.scrollbarSyncing || this.destroyed) return
         this.cancelWheelReport()
@@ -165,8 +166,8 @@ export class SurfaceConstruction extends SurfaceLifecycleCleanup {
     this.queueBox = new BoxRenderable(renderer, {
       border: true,
       borderStyle: "rounded",
-      borderColor: colors.text,
-      focusedBorderColor: colors.text,
+      borderColor: toOpenColor(colors.text),
+      focusedBorderColor: toOpenColor(colors.text),
       minHeight: 3,
       paddingLeft: spacing.inputHorizontal,
       paddingRight: spacing.inputHorizontal,
@@ -193,7 +194,7 @@ export class SurfaceConstruction extends SurfaceLifecycleCleanup {
       left: 1,
       top: 0,
       zIndex: 40,
-      fg: colors.text,
+      fg: toOpenColor(colors.text),
       visible: false,
       selectable: false,
     })
@@ -203,30 +204,35 @@ export class SurfaceConstruction extends SurfaceLifecycleCleanup {
       right: 1,
       top: 0,
       zIndex: 40,
-      fg: colors.text,
+      fg: toOpenColor(colors.text),
       visible: false,
       selectable: false,
     })
     this.inputBox = new BoxRenderable(renderer, {
       border: true,
       borderStyle: "rounded",
-      borderColor: colors.text,
-      focusedBorderColor: colors.text,
+      borderColor: toOpenColor(colors.text),
+      focusedBorderColor: toOpenColor(colors.text),
       minHeight: spacing.inputHeight,
       paddingLeft: spacing.inputHorizontal,
       paddingRight: spacing.inputHorizontal,
       flexShrink: 0,
       overflow: "hidden",
     })
-    this.input = new TextRenderable(renderer, { content: "", fg: colors.text, wrapMode: "word", visible: false })
+    this.input = new TextRenderable(renderer, {
+      content: "",
+      fg: toOpenColor(colors.text),
+      wrapMode: "word",
+      visible: false,
+    })
     this.composerEditor = new ProjectedEditorRenderable(renderer, {
       height: 1,
-      textColor: colors.text,
+      textColor: toOpenColor(colors.text),
       backgroundColor: "transparent",
       selectable: false,
       wrapMode: "word",
       showCursor: true,
-      cursorColor: colors.text,
+      cursorColor: toOpenColor(colors.text),
       cursorStyle: typingCursorStyle,
     })
     this.modeLabel = new TextRenderable(renderer, {
@@ -290,14 +296,14 @@ export class SurfaceConstruction extends SurfaceLifecycleCleanup {
       zIndex: 40,
       border: true,
       borderStyle: "rounded",
-      borderColor: colors.green,
-      focusedBorderColor: colors.green,
-      backgroundColor: colors.surface,
+      borderColor: toOpenColor(colors.green),
+      focusedBorderColor: toOpenColor(colors.green),
+      backgroundColor: toOpenColor(colors.surface),
       paddingLeft: 1,
       paddingRight: 1,
       overflow: "hidden",
     })
-    this.toast = new TextRenderable(renderer, { content: "", fg: colors.text })
+    this.toast = new TextRenderable(renderer, { content: "", fg: toOpenColor(colors.text) })
     this.toastBox.add(this.toast)
     this.paletteBox = new BoxRenderable(renderer, {
       visible: false,
@@ -309,14 +315,14 @@ export class SurfaceConstruction extends SurfaceLifecycleCleanup {
       zIndex: 20,
       border: true,
       borderStyle: "rounded",
-      borderColor: colors.text,
-      focusedBorderColor: colors.text,
-      backgroundColor: colors.surface,
+      borderColor: toOpenColor(colors.text),
+      focusedBorderColor: toOpenColor(colors.text),
+      backgroundColor: toOpenColor(colors.surface),
       paddingLeft: 1,
       paddingRight: 1,
       overflow: "hidden",
     })
-    this.palette = new TextRenderable(renderer, { content: "", fg: colors.text, wrapMode: "word" })
+    this.palette = new TextRenderable(renderer, { content: "", fg: toOpenColor(colors.text), wrapMode: "word" })
     this.overlayEditor = new ProjectedEditorRenderable(renderer, {
       visible: false,
       position: "absolute",
@@ -325,12 +331,12 @@ export class SurfaceConstruction extends SurfaceLifecycleCleanup {
       width: 1,
       height: 1,
       zIndex: 1,
-      textColor: colors.text,
+      textColor: toOpenColor(colors.text),
       backgroundColor: "transparent",
       selectable: false,
       wrapMode: "none",
       showCursor: true,
-      cursorColor: colors.text,
+      cursorColor: toOpenColor(colors.text),
       cursorStyle: typingCursorStyle,
     })
     this.sidebar = new TextRenderable(renderer, {
@@ -338,7 +344,7 @@ export class SurfaceConstruction extends SurfaceLifecycleCleanup {
       width: boundedThreadSidebarWidth(renderer.terminalWidth),
       flexShrink: 0,
       visible: false,
-      fg: colors.text,
+      fg: toOpenColor(colors.text),
       wrapMode: "none",
       selectable: false,
     })
@@ -355,8 +361,8 @@ export class SurfaceConstruction extends SurfaceLifecycleCleanup {
       flexShrink: 0,
       border: true,
       borderStyle: "rounded",
-      borderColor: colors.text,
-      focusedBorderColor: colors.text,
+      borderColor: toOpenColor(colors.text),
+      focusedBorderColor: toOpenColor(colors.text),
       paddingLeft: 1,
       paddingRight: 1,
       scrollY: true,
@@ -367,7 +373,7 @@ export class SurfaceConstruction extends SurfaceLifecycleCleanup {
     this.changedFilesBox.onWindowChanged = () => this.refreshSidebarWindow()
     this.changedFilesText = new TextRenderable(renderer, {
       content: "",
-      fg: colors.text,
+      fg: toOpenColor(colors.text),
       selectable: false,
       wrapMode: "none",
     })

@@ -5,7 +5,7 @@ import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Function, Schema } from "effect"
 import { ModeId, modeIds } from "@rika/configuration/behavior-mode"
 import {
-  idle,
+  idle as loadableIdle,
   ready as loadableReady,
   readyOr as loadableReadyOr,
   type Loadable,
@@ -107,15 +107,15 @@ const WorkspaceFilesSchema = Schema.Union([
 const PaletteStateSchema = Schema.Struct({ open: Schema.Boolean, query: Schema.String, selected: Schema.Finite })
 const ModePickerStateSchema = Schema.Struct({ open: Schema.Boolean, selected: Schema.Finite })
 const ModeRouteLabelSchema = Schema.Struct({ name: Schema.String, effort: Schema.String, fast: Schema.Boolean })
-const ModeRoutesSchema = Schema.Record(
+const ModeRouteMapSchema = Schema.Record(
   Schema.String,
   Schema.Struct({ main: ModeRouteLabelSchema, oracle: ModeRouteLabelSchema }),
 )
 export type ModeRouteLabel = typeof ModeRouteLabelSchema.Type
-export type ModeRoutes = typeof ModeRoutesSchema.Type
+export type ModeRouteMap = typeof ModeRouteMapSchema.Type
 const modeLabel = (route: { readonly displayName: string; readonly effort: string; readonly fast: boolean }) =>
   ({ name: route.displayName, effort: route.effort, fast: route.fast }) satisfies ModeRouteLabel
-export const defaultModeRoutes: ModeRoutes = Object.fromEntries(
+export const defaultModeRouteMap: ModeRouteMap = Object.fromEntries(
   modeIds.map((mode) => [
     mode,
     {
@@ -188,7 +188,7 @@ export const Model = Schema.Struct({
   workspace: Schema.String,
   branch: Schema.optional(Schema.String),
   mode: Mode,
-  modeRoutes: ModeRoutesSchema,
+  modeRoutes: ModeRouteMapSchema,
   entries: Schema.Array(Entry),
   blocks: Schema.Array(Schema.Unknown),
   items: Schema.Array(Schema.Unknown),
@@ -284,7 +284,7 @@ const initialImpl: {
   (workspace: string, mode: Mode = "medium"): Model => ({
     workspace,
     mode,
-    modeRoutes: defaultModeRoutes,
+    modeRoutes: defaultModeRouteMap,
     entries: [],
     blocks: [],
     items: [],
@@ -302,7 +302,7 @@ const initialImpl: {
     paletteOpen: false,
     palette: { open: false, query: "", selected: 0 },
     modePicker: { open: false, selected: 0 },
-    filePicker: { open: false, query: "", selected: 0, items: idle },
+    filePicker: { open: false, query: "", selected: 0, items: loadableIdle },
     threadSwitcher: { open: false, query: "", selected: 0, kind: "switch", previewScroll: 0 },
     shortcutsOpen: false,
     shortcutsTrigger: undefined,
@@ -323,17 +323,17 @@ const initialImpl: {
     activeTurnId: undefined,
     fastMode: false,
     changedFilesOpen: false,
-    changedFiles: idle,
+    changedFiles: loadableIdle,
     sidebarWidth: 36,
     threadLoading: false,
     refoldingThreadIds: [],
-    threadPreview: idle,
+    threadPreview: loadableIdle,
   }),
 )
-export const withModeRoutes: {
-  (routes: ModeRoutes): (model: Model) => Model
-  (model: Model, routes: ModeRoutes): Model
-} = Function.dual(2, (model: Model, routes: ModeRoutes): Model => ({ ...model, modeRoutes: routes }))
+export const withModeRouteMap: {
+  (routes: ModeRouteMap): (model: Model) => Model
+  (model: Model, routes: ModeRouteMap): Model
+} = Function.dual(2, (model: Model, routes: ModeRouteMap): Model => ({ ...model, modeRoutes: routes }))
 const nextModeImpl = (mode: Mode): Mode => modeIds[(modeIds.indexOf(mode) + 1) % modeIds.length]!
 const nextUsageDisplayImpl = (display: UsageDisplay | undefined): UsageDisplay => {
   if (display === undefined || display === "cost") return "tokens"
@@ -401,6 +401,9 @@ namespace ViewStateExports {
   export type Model = typeof Model.Type
   export type Mode = typeof Mode.Type
   export type Entry = typeof Entry.Type
+  export type Activity = ActivityState.Activity
+  export type ChangedFile = typeof ChangedFile.Type
+  export type ModeRoutes = typeof ModeRouteMapSchema.Type
   export type TranscriptBlock = import("./terminal-state").TranscriptBlock
   export type TranscriptItem = import("./terminal-state").TranscriptItem
   export type PromptPart = import("./terminal-composer-state").PromptPart
@@ -409,6 +412,8 @@ namespace ViewStateExports {
   export const initial = (workspace: string, mode?: Mode): Model => initialModel(workspace, mode)
   export const update = (model: Model, message: import("../model/terminal-message").Message): Model =>
     updateModel(model, message)
+  export const idle = loadableIdle
+  export const streamActivity = ActivityState.streamActivity
   export const replaceQueue = QueueState.replaceQueue
   export const resetQueue = QueueState.resetQueue
   export const applyQueueDelta = QueueState.applyQueueDelta
@@ -441,6 +446,8 @@ namespace ViewStateExports {
   export const isNarrow = LayoutState.isNarrow
   export const readyOr = loadableReadyOr
   export const filteredThreads = ThreadNavigation.filteredThreads
+  const withModeRoutesView = (model: Model, routes: ModeRoutes): Model => ({ ...model, modeRoutes: routes })
+  export const withModeRoutes = withModeRoutesView
   export const filteredFiles = ThreadNavigation.filteredFiles
   export const selectedThreadMetadata = ThreadNavigation.selectedThreadMetadata
   export const boundedThreadSidebarWidth = LayoutState.boundedThreadSidebarWidth
@@ -469,6 +476,7 @@ export namespace Theme {
 }
 export namespace Format {
   export const formatTokens = FormatModule.formatTokens
+  export const formatBytes = FormatModule.formatBytes
   export const homeRelativePath = FormatModule.homeRelativePath
 }
 export namespace TranscriptPresenter {
@@ -492,6 +500,7 @@ export namespace ExecutionEvents {
   export const projectChildUnits = ExecutionEventsModule.projectChildUnits
 }
 export namespace Session {
+  export type ModelTuning = SessionModule.ModelTuning
   export type Action = SessionModule.Action
   export type Adapter = SessionModule.Adapter
   export const execute = SessionModule.execute

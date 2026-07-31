@@ -23,6 +23,7 @@ import {
 } from "../../state/model/terminal-state"
 import { SurfaceOverlayRegion } from "./opentui-overlay-region"
 import { colors } from "../../presentation/terminal/terminal-theme"
+import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { formatTokens } from "../../presentation/terminal/terminal-format"
 import { loaderFrame } from "../rendering/opentui-spinner"
 import { spinnerFrames } from "../rendering/opentui-spinner"
@@ -111,16 +112,16 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
     const previousRight = this.modeLabel.screenX + this.modeLabel.width
     this.usageLabelWidth = usageText.length === 0 ? 0 : modeLabelWidth(` ${usageText} `)
     if (usageText.length > 0) {
-      const usage = fg(colors.text)(` ${usageText} `)
+      const usage = fg(toOpenColor(colors.text))(` ${usageText} `)
       modeChunks.push(this.usageLabelHovered ? usage : dim(usage))
-      modeChunks.push(fg(colors.text)("─"))
+      modeChunks.push(fg(toOpenColor(colors.text))("─"))
     }
     this.modeSegmentStart = usageText.length === 0 ? 0 : this.usageLabelWidth + 1
-    modeChunks.push(fg(colors.text)(" "))
-    if (model.fastMode) modeChunks.push(fg(colors.amber)("↯"))
+    modeChunks.push(fg(toOpenColor(colors.text))(" "))
+    if (model.fastMode) modeChunks.push(fg(toOpenColor(colors.amber))("↯"))
     const modeText = fg(colors[model.mode])(model.mode)
     modeChunks.push(this.modeLabelHovered ? bold(modeText) : modeText)
-    modeChunks.push(fg(colors.text)(" "))
+    modeChunks.push(fg(toOpenColor(colors.text))(" "))
     const width = modeChunks.reduce((total, chunk) => total + modeLabelWidth(chunk.text), 0)
     if (this.usagePointerX !== undefined && this.modeLabel.width > 0) {
       const screenX = previousRight - width
@@ -129,7 +130,7 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
         this.usageLabelHovered = hovered
         this.renderer.setMousePointer(hovered ? "pointer" : "default")
         if (usageText.length > 0) {
-          const usage = fg(colors.text)(` ${usageText} `)
+          const usage = fg(toOpenColor(colors.text))(` ${usageText} `)
           modeChunks[0] = hovered ? usage : dim(usage)
         }
       }
@@ -167,9 +168,9 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
       const label = formatActivity(current.activity) ?? panelLoading(current)
       if (label !== undefined)
         this.statusLabel.content = new StyledText([
-          fg(colors.text)(" "),
-          fg(colors.blue)(loaderFrame(label, this.loaderPhase)),
-          dim(fg(colors.text)(` ${label} `)),
+          fg(toOpenColor(colors.text))(" "),
+          fg(toOpenColor(colors.blue))(loaderFrame(label, this.loaderPhase)),
+          dim(fg(toOpenColor(colors.text))(` ${label} `)),
         ])
       const glyph = this.toolSpinner.toBraille()
       if (current.busy) this.publishWorkingFrame(glyph)

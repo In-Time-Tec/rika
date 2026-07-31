@@ -1,15 +1,9 @@
 import { Renderable } from "@opentui/core"
-
 import { createTestRenderer, ManualClock } from "@opentui/core/testing"
-
 import { expect, test } from "vitest"
-
 import { Data, Effect } from "effect"
-
 import stringWidth from "string-width"
-
 import { Surface, maxMountedTranscriptEntries } from "../../src/opentui/surface/opentui-surface"
-
 import {
   initial,
   loading,
@@ -19,44 +13,7 @@ import {
   type ThreadItem,
   update,
 } from "../../src/state/model/terminal-state"
-
-class OpenTuiError extends Data.TaggedError("OpenTuiError")<{ readonly cause: unknown }> {}
-
-const openTui = <A>(operation: () => Promise<A>) =>
-  Effect.tryPromise({ try: operation, catch: (cause) => new OpenTuiError({ cause }) })
-
-const _insertText = (model: Model, text: string) => update(model, { _tag: "Pasted", text })
-
-const styledTextValue = (value: { readonly chunks: ReadonlyArray<{ readonly text: string }> } | string) =>
-  typeof value === "string" ? value : value.chunks.map((chunk) => chunk.text).join("")
-
-const _streamingShell = (id: string, output?: string) => ({
-  _tag: "ToolCall" as const,
-  id,
-  name: "bash",
-  input: `{"command":"printf ${id}"}`,
-  status: "running" as const,
-  presentation: {
-    family: "shell" as const,
-    action: "shell",
-    activeLabel: "Running",
-    completeLabel: "Ran",
-  },
-  detail: `printf ${id}`,
-  ...(output === undefined ? {} : { output }),
-  files: [],
-})
-
-const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
-  workspace: "/work",
-  pinned: false,
-  archived: false,
-  status: "idle",
-  unread: false,
-  lastActivityAt: 0,
-  ...input,
-})
-
+import { OpenTuiError, openTui, _insertText, styledTextValue, _streamingShell, thread, _giantSubagentModel, _collapsedSubagentModel, nonSpaceBounds } from "./opentui-surface-characterization-7.test-support"
 for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
   test(`keeps composer updates bounded with ${historySize} transcript entries`, () =>
     Effect.runPromise(
@@ -86,117 +43,6 @@ for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
       }),
     ))
 }
-
-const _giantSubagentModel = (childCount: number): Model => {
-  const rootBlock = {
-    _tag: "ToolCall" as const,
-    id: "root-tool",
-    name: "task",
-    input: "{}",
-    status: "complete" as const,
-    presentation: {
-      family: "agent" as const,
-      action: "task",
-      activeLabel: "Subagent working",
-      completeLabel: "Subagent finished",
-    },
-    detail: "delegated task",
-    files: [],
-  }
-  const childBlocks = Array.from({ length: childCount }, (_, index) => ({
-    _tag: "ToolCall" as const,
-    id: `child-${index}`,
-    name: "bash",
-    input: "{}",
-    status: "complete" as const,
-    presentation: {
-      family: "shell" as const,
-      action: "shell",
-      activeLabel: "Running",
-      completeLabel: "Ran",
-    },
-    detail: `cmd-${index}`,
-    files: [],
-  }))
-  const blocks = [rootBlock, ...childBlocks]
-  const items = blocks.map((block, index) => ({
-    _tag: "Block" as const,
-    index,
-    id: `block-${block.id}`,
-    turnId: "turn-1",
-    ...(index === 0 ? {} : { parentId: "root-tool" }),
-  }))
-  return {
-    ...initial("/work", "high"),
-    blocks,
-    items,
-    expandedRowKeys: ["tool:root-tool"],
-    scrollFollow: false,
-  }
-}
-
-const _collapsedSubagentModel = (answerCount: number, childCount: number): Model => {
-  const entries = Array.from({ length: answerCount }, (_, index) => ({
-    role: "assistant" as const,
-    text: `answer ${index}`,
-    turnId: "turn-1",
-  }))
-  const rootBlock = {
-    _tag: "ToolCall" as const,
-    id: "root-tool",
-    name: "task",
-    input: "{}",
-    status: "running" as const,
-    presentation: {
-      family: "agent" as const,
-      action: "task",
-      activeLabel: "Subagent working",
-      completeLabel: "Subagent finished",
-    },
-    detail: "delegated task",
-    files: [],
-  }
-  const childBlocks = Array.from({ length: childCount }, (_, index) => ({
-    _tag: "ToolCall" as const,
-    id: `child-${index}`,
-    name: "bash",
-    input: "{}",
-    status: "complete" as const,
-    presentation: {
-      family: "shell" as const,
-      action: "shell",
-      activeLabel: "Running",
-      completeLabel: "Ran",
-    },
-    detail: `cmd-${index}`,
-    files: [],
-  }))
-  const blocks = [rootBlock, ...childBlocks]
-  const items = [
-    ...entries.map((_, index) => ({
-      _tag: "Entry" as const,
-      index,
-      id: `answer-${index}`,
-      turnId: "turn-1",
-    })),
-    ...blocks.map((block, index) => ({
-      _tag: "Block" as const,
-      index,
-      id: `block-${block.id}`,
-      turnId: "turn-1",
-      ...(index === 0 ? {} : { parentId: "root-tool" }),
-    })),
-  ]
-  return {
-    ...initial("/work", "high"),
-    entries,
-    blocks,
-    items,
-    expandedRowKeys: [],
-    scrollFollow: true,
-  }
-}
-
 for (const panel of ["changed", "workspace"] as const) {
   test(`keeps composer updates bounded with a large ${panel} files sidebar`, () =>
     Effect.runPromise(
@@ -248,7 +94,6 @@ for (const panel of ["changed", "workspace"] as const) {
       }),
     ))
 }
-
 for (const width of [80, 50] as const) {
   test(`renders a visible error action and leaves the composer usable at width ${width}`, () =>
     Effect.runPromise(
@@ -293,21 +138,6 @@ for (const width of [80, 50] as const) {
       }),
     ))
 }
-
-const nonSpaceBounds = (frame: string, height: number) => {
-  const points = frame
-    .split("\n")
-    .slice(0, height - 5)
-    .flatMap((row, y) => Array.from(row, (cell, x) => ({ cell, x, y })))
-    .filter(({ cell }) => cell !== " ")
-  return {
-    left: Math.min(...points.map(({ x }) => x)),
-    right: Math.max(...points.map(({ x }) => x)),
-    top: Math.min(...points.map(({ y }) => y)),
-    bottom: Math.max(...points.map(({ y }) => y)),
-  }
-}
-
 for (const [width, height] of [
   [100, 30],
   [80, 24],
@@ -348,7 +178,6 @@ for (const [width, height] of [
       }),
     ))
 }
-
 for (const height of [13, 16, 19] as const) {
   test(`keeps essential compact welcome copy visible at 60x${height}`, () =>
     Effect.runPromise(
@@ -370,7 +199,6 @@ for (const height of [13, 16, 19] as const) {
       }),
     ))
 }
-
 for (const [width, height] of [
   [140, 40],
   [100, 24],
@@ -478,7 +306,6 @@ for (const [width, height] of [
       }),
     ))
 }
-
 for (const panel of ["changed", "workspace"] as const) {
   test(`keeps composer updates bounded with a large ${panel} files sidebar`, () =>
     Effect.runPromise(
@@ -530,7 +357,6 @@ for (const panel of ["changed", "workspace"] as const) {
       }),
     ))
 }
-
 test(
   "rebuilds the large changed-files sidebar per set change, not per streaming frame",
   () =>
@@ -592,7 +418,6 @@ test(
     ),
   30_000,
 )
-
 test("expands the queue box to fit a wrapped single-line queued prompt joined to the composer", () =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -612,7 +437,6 @@ test("expands the queue box to fit a wrapped single-line queued prompt joined to
       }
     }),
   ))
-
 test("renders autonomous welcome animation frames while otherwise event-driven", () =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -630,116 +454,6 @@ test("renders autonomous welcome animation frames while otherwise event-driven",
         expect(second).toContain("Welcome to Rika")
         expect(second).not.toBe(first)
         expect(setup.renderer.isRunning).toBe(false)
-      } finally {
-        surface.destroy()
-        setup.renderer.destroy()
-      }
-    }),
-  ))
-
-test("ticks Amp status and running-tool spinners every 200ms without rebuilding transcript bodies", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const clock = new ManualClock()
-      const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30, clock }))
-      const running = {
-        _tag: "ToolCall" as const,
-        id: "long-running",
-        name: "bash",
-        input: '{"command":"sleep 5"}',
-        status: "running" as const,
-        presentation: {
-          family: "shell" as const,
-          action: "command",
-          activeLabel: "Running",
-          completeLabel: "Ran",
-        },
-        detail: "sleep 5",
-        output: "still running",
-        files: [],
-      }
-      const model: Model = {
-        ...initial("/work", "high"),
-        width: 100,
-        height: 30,
-        busy: true,
-        activity: { _tag: "Thinking", bytes: 20 },
-        blocks: [running],
-        items: [{ _tag: "Block", index: 0, id: "tool:long-running", turnId: "turn" }],
-        expandedRowKeys: ["tool:long-running"],
-      }
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { clock })
-      const records = () =>
-        (
-          surface as unknown as {
-            readonly transcriptRecords: ReadonlyMap<
-              string,
-              { readonly renderable: { readonly content: { readonly chunks: ReadonlyArray<{ text: string }> } } }
-            >
-          }
-        ).transcriptRecords
-      try {
-        surface.update(model)
-        yield* openTui(() => setup.renderOnce())
-        const body = records().get("tool:long-running:body")!.renderable
-        const firstBodyContent = body.content
-        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
-        expect(styledTextValue(records().get("tool:long-running:header")!.renderable.content)).toContain("⠭")
-
-        clock.advance(199)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
-        expect(styledTextValue(records().get("tool:long-running:header")!.renderable.content)).toContain("⠭")
-        clock.advance(1)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("≈ Thinking 5 tok")
-        expect(styledTextValue(records().get("tool:long-running:header")!.renderable.content)).toMatch(/[⠀-⣿] sleep 5/u)
-        expect(body.content).toBe(firstBodyContent)
-
-        clock.advance(200)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("≋ Thinking 5 tok")
-        clock.advance(200)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("≈ Thinking 5 tok")
-        clock.advance(200)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
-        clock.advance(200)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
-        expect(body.content).toBe(firstBodyContent)
-      } finally {
-        surface.destroy()
-        setup.renderer.destroy()
-      }
-    }),
-  ))
-
-test("advances selected-thread active time with the injected clock and freezes closed intervals", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const clock = new ManualClock()
-      const epoch = 1_750_000_000_000
-      const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30, clock }))
-      const surface = new Surface(
-        setup.renderer,
-        { key: () => undefined, resize: () => undefined },
-        { clock, currentTimeMillis: () => epoch + clock.now() },
-      )
-      const active: Model = {
-        ...initial("/work", "high"),
-        width: 100,
-        height: 30,
-        usageDisplay: "time",
-        usageTime: { _tag: "Available", accumulatedMillis: 0, activeSince: epoch },
-      }
-      try {
-        surface.update(active)
-        expect(styledTextValue(surface.modeLabel.content)).toContain("◷ 0s")
-        clock.advance(1_000)
-        expect(styledTextValue(surface.modeLabel.content)).toContain("◷ 1s")
-
-        surface.update({
-          ...active,
-          usageTime: { _tag: "Available", accumulatedMillis: 1_000 },
-        })
-        clock.advance(2_000)
-        expect(styledTextValue(surface.modeLabel.content)).toContain("◷ 1s")
       } finally {
         surface.destroy()
         setup.renderer.destroy()

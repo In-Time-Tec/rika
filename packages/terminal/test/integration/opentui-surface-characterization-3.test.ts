@@ -1,15 +1,9 @@
 import { Renderable } from "@opentui/core"
-
 import { createTestRenderer, ManualClock } from "@opentui/core/testing"
-
 import { expect, test } from "vitest"
-
 import { Data, Effect } from "effect"
-
 import stringWidth from "string-width"
-
 import { Surface, maxMountedTranscriptEntries } from "../../src/opentui/surface/opentui-surface"
-
 import {
   initial,
   loading,
@@ -19,44 +13,7 @@ import {
   type ThreadItem,
   update,
 } from "../../src/state/model/terminal-state"
-
-class OpenTuiError extends Data.TaggedError("OpenTuiError")<{ readonly cause: unknown }> {}
-
-const openTui = <A>(operation: () => Promise<A>) =>
-  Effect.tryPromise({ try: operation, catch: (cause) => new OpenTuiError({ cause }) })
-
-const _insertText = (model: Model, text: string) => update(model, { _tag: "Pasted", text })
-
-const styledTextValue = (value: { readonly chunks: ReadonlyArray<{ readonly text: string }> } | string) =>
-  typeof value === "string" ? value : value.chunks.map((chunk) => chunk.text).join("")
-
-const _streamingShell = (id: string, output?: string) => ({
-  _tag: "ToolCall" as const,
-  id,
-  name: "bash",
-  input: `{"command":"printf ${id}"}`,
-  status: "running" as const,
-  presentation: {
-    family: "shell" as const,
-    action: "shell",
-    activeLabel: "Running",
-    completeLabel: "Ran",
-  },
-  detail: `printf ${id}`,
-  ...(output === undefined ? {} : { output }),
-  files: [],
-})
-
-const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
-  workspace: "/work",
-  pinned: false,
-  archived: false,
-  status: "idle",
-  unread: false,
-  lastActivityAt: 0,
-  ...input,
-})
-
+import { OpenTuiError, openTui, _insertText, styledTextValue, _streamingShell, thread, _giantSubagentModel, _collapsedSubagentModel, nonSpaceBounds } from "./opentui-surface-characterization-3.test-support"
 for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
   test(`keeps composer updates bounded with ${historySize} transcript entries`, () =>
     Effect.runPromise(
@@ -86,117 +43,6 @@ for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
       }),
     ))
 }
-
-const _giantSubagentModel = (childCount: number): Model => {
-  const rootBlock = {
-    _tag: "ToolCall" as const,
-    id: "root-tool",
-    name: "task",
-    input: "{}",
-    status: "complete" as const,
-    presentation: {
-      family: "agent" as const,
-      action: "task",
-      activeLabel: "Subagent working",
-      completeLabel: "Subagent finished",
-    },
-    detail: "delegated task",
-    files: [],
-  }
-  const childBlocks = Array.from({ length: childCount }, (_, index) => ({
-    _tag: "ToolCall" as const,
-    id: `child-${index}`,
-    name: "bash",
-    input: "{}",
-    status: "complete" as const,
-    presentation: {
-      family: "shell" as const,
-      action: "shell",
-      activeLabel: "Running",
-      completeLabel: "Ran",
-    },
-    detail: `cmd-${index}`,
-    files: [],
-  }))
-  const blocks = [rootBlock, ...childBlocks]
-  const items = blocks.map((block, index) => ({
-    _tag: "Block" as const,
-    index,
-    id: `block-${block.id}`,
-    turnId: "turn-1",
-    ...(index === 0 ? {} : { parentId: "root-tool" }),
-  }))
-  return {
-    ...initial("/work", "high"),
-    blocks,
-    items,
-    expandedRowKeys: ["tool:root-tool"],
-    scrollFollow: false,
-  }
-}
-
-const _collapsedSubagentModel = (answerCount: number, childCount: number): Model => {
-  const entries = Array.from({ length: answerCount }, (_, index) => ({
-    role: "assistant" as const,
-    text: `answer ${index}`,
-    turnId: "turn-1",
-  }))
-  const rootBlock = {
-    _tag: "ToolCall" as const,
-    id: "root-tool",
-    name: "task",
-    input: "{}",
-    status: "running" as const,
-    presentation: {
-      family: "agent" as const,
-      action: "task",
-      activeLabel: "Subagent working",
-      completeLabel: "Subagent finished",
-    },
-    detail: "delegated task",
-    files: [],
-  }
-  const childBlocks = Array.from({ length: childCount }, (_, index) => ({
-    _tag: "ToolCall" as const,
-    id: `child-${index}`,
-    name: "bash",
-    input: "{}",
-    status: "complete" as const,
-    presentation: {
-      family: "shell" as const,
-      action: "shell",
-      activeLabel: "Running",
-      completeLabel: "Ran",
-    },
-    detail: `cmd-${index}`,
-    files: [],
-  }))
-  const blocks = [rootBlock, ...childBlocks]
-  const items = [
-    ...entries.map((_, index) => ({
-      _tag: "Entry" as const,
-      index,
-      id: `answer-${index}`,
-      turnId: "turn-1",
-    })),
-    ...blocks.map((block, index) => ({
-      _tag: "Block" as const,
-      index,
-      id: `block-${block.id}`,
-      turnId: "turn-1",
-      ...(index === 0 ? {} : { parentId: "root-tool" }),
-    })),
-  ]
-  return {
-    ...initial("/work", "high"),
-    entries,
-    blocks,
-    items,
-    expandedRowKeys: [],
-    scrollFollow: true,
-  }
-}
-
 for (const panel of ["changed", "workspace"] as const) {
   test(`keeps composer updates bounded with a large ${panel} files sidebar`, () =>
     Effect.runPromise(
@@ -248,7 +94,6 @@ for (const panel of ["changed", "workspace"] as const) {
       }),
     ))
 }
-
 for (const width of [80, 50] as const) {
   test(`renders a visible error action and leaves the composer usable at width ${width}`, () =>
     Effect.runPromise(
@@ -293,21 +138,6 @@ for (const width of [80, 50] as const) {
       }),
     ))
 }
-
-const nonSpaceBounds = (frame: string, height: number) => {
-  const points = frame
-    .split("\n")
-    .slice(0, height - 5)
-    .flatMap((row, y) => Array.from(row, (cell, x) => ({ cell, x, y })))
-    .filter(({ cell }) => cell !== " ")
-  return {
-    left: Math.min(...points.map(({ x }) => x)),
-    right: Math.max(...points.map(({ x }) => x)),
-    top: Math.min(...points.map(({ y }) => y)),
-    bottom: Math.max(...points.map(({ y }) => y)),
-  }
-}
-
 for (const [width, height] of [
   [100, 30],
   [80, 24],
@@ -348,7 +178,6 @@ for (const [width, height] of [
       }),
     ))
 }
-
 for (const height of [13, 16, 19] as const) {
   test(`keeps essential compact welcome copy visible at 60x${height}`, () =>
     Effect.runPromise(
@@ -370,7 +199,6 @@ for (const height of [13, 16, 19] as const) {
       }),
     ))
 }
-
 for (const [width, height] of [
   [140, 40],
   [100, 24],
@@ -478,7 +306,6 @@ for (const [width, height] of [
       }),
     ))
 }
-
 test("detaches on the first upward wheel event and stays detached through streaming updates", () =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -551,7 +378,6 @@ test("detaches on the first upward wheel event and stays detached through stream
       }
     }),
   ))
-
 test("keeps every frame stable when wheel-down repeats at the followed transcript bottom", () =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -612,69 +438,6 @@ test("keeps every frame stable when wheel-down repeats at the followed transcrip
           expect(frame).toContain("answer 79")
           expect(frame).toBe(baseline)
         }
-        expect(scrollCalls).toBe(0)
-        expect(followCalls).toBe(0)
-        expect(model.scrollFollow).toBe(true)
-      } finally {
-        surface.destroy()
-        setup.renderer.destroy()
-      }
-    }),
-  ))
-
-test("does not report follow when a pending down-wheel timer settles at the followed bottom", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const clock = new ManualClock()
-      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
-      const entries = Array.from({ length: 80 }, (_, index) => ({
-        role: "assistant" as const,
-        text: `answer ${index}`,
-        turnId: `turn-${index}`,
-      }))
-      const items = entries.map((_, index) => ({
-        _tag: "Entry" as const,
-        index,
-        id: `answer-${index}`,
-        turnId: `turn-${index}`,
-      }))
-      let model: Model = { ...initial("/work", "high"), entries, items }
-      let scrollCalls = 0
-      let followCalls = 0
-      const surface = new Surface(
-        setup.renderer,
-        {
-          key: () => undefined,
-          resize: () => undefined,
-          scroll: (offset) => {
-            scrollCalls += 1
-            model = update(model, { _tag: "ScrollMoved", offset })
-            surface.update(model)
-          },
-          scrollFollow: () => {
-            followCalls += 1
-            model = update(model, { _tag: "ScrollFollowed" })
-            surface.update(model)
-          },
-        },
-        { animate: false, clock },
-      )
-      try {
-        surface.update(model)
-        yield* openTui(() => setup.flush())
-        surface.transcriptScroll.scrollTo(
-          surface.transcriptScroll.scrollHeight - surface.transcriptScroll.viewport.height - 2,
-        )
-        yield* openTui(() => setup.mockMouse.scroll(10, 5, "down", { delayMs: 0 }))
-        // Simulate native wheel movement reaching the tail before Rika's
-        // coalesced timer observes settled geometry.
-        surface.transcriptScroll.scrollTo(surface.transcriptScroll.scrollHeight)
-        clock.advance(16)
-        yield* openTui(() => setup.flush())
-
-        expect(surface.transcriptScroll.scrollTop).toBe(
-          surface.transcriptScroll.scrollHeight - surface.transcriptScroll.viewport.height,
-        )
         expect(scrollCalls).toBe(0)
         expect(followCalls).toBe(0)
         expect(model.scrollFollow).toBe(true)

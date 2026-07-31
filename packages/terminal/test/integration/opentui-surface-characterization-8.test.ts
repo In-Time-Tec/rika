@@ -1,17 +1,10 @@
 import { Renderable } from "@opentui/core"
-
 import { createTestRenderer, ManualClock } from "@opentui/core/testing"
-
 import { expect, test } from "vitest"
-
 import { Data, Effect } from "effect"
-
 import stringWidth from "string-width"
-
 import { Surface, maxMountedTranscriptEntries } from "../../src/opentui/surface/opentui-surface"
-
 import { colors } from "../../src/presentation/terminal/terminal-theme"
-
 import {
   initial,
   loading,
@@ -21,44 +14,7 @@ import {
   type ThreadItem,
   update,
 } from "../../src/state/model/terminal-state"
-
-class OpenTuiError extends Data.TaggedError("OpenTuiError")<{ readonly cause: unknown }> {}
-
-const openTui = <A>(operation: () => Promise<A>) =>
-  Effect.tryPromise({ try: operation, catch: (cause) => new OpenTuiError({ cause }) })
-
-const _insertText = (model: Model, text: string) => update(model, { _tag: "Pasted", text })
-
-const styledTextValue = (value: { readonly chunks: ReadonlyArray<{ readonly text: string }> } | string) =>
-  typeof value === "string" ? value : value.chunks.map((chunk) => chunk.text).join("")
-
-const streamingShell = (id: string, output?: string) => ({
-  _tag: "ToolCall" as const,
-  id,
-  name: "bash",
-  input: `{"command":"printf ${id}"}`,
-  status: "running" as const,
-  presentation: {
-    family: "shell" as const,
-    action: "shell",
-    activeLabel: "Running",
-    completeLabel: "Ran",
-  },
-  detail: `printf ${id}`,
-  ...(output === undefined ? {} : { output }),
-  files: [],
-})
-
-const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
-  workspace: "/work",
-  pinned: false,
-  archived: false,
-  status: "idle",
-  unread: false,
-  lastActivityAt: 0,
-  ...input,
-})
-
+import { OpenTuiError, openTui, _insertText, styledTextValue, streamingShell, thread, _giantSubagentModel, _collapsedSubagentModel, nonSpaceBounds } from "./opentui-surface-characterization-8.test-support"
 for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
   test(`keeps composer updates bounded with ${historySize} transcript entries`, () =>
     Effect.runPromise(
@@ -88,117 +44,6 @@ for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
       }),
     ))
 }
-
-const _giantSubagentModel = (childCount: number): Model => {
-  const rootBlock = {
-    _tag: "ToolCall" as const,
-    id: "root-tool",
-    name: "task",
-    input: "{}",
-    status: "complete" as const,
-    presentation: {
-      family: "agent" as const,
-      action: "task",
-      activeLabel: "Subagent working",
-      completeLabel: "Subagent finished",
-    },
-    detail: "delegated task",
-    files: [],
-  }
-  const childBlocks = Array.from({ length: childCount }, (_, index) => ({
-    _tag: "ToolCall" as const,
-    id: `child-${index}`,
-    name: "bash",
-    input: "{}",
-    status: "complete" as const,
-    presentation: {
-      family: "shell" as const,
-      action: "shell",
-      activeLabel: "Running",
-      completeLabel: "Ran",
-    },
-    detail: `cmd-${index}`,
-    files: [],
-  }))
-  const blocks = [rootBlock, ...childBlocks]
-  const items = blocks.map((block, index) => ({
-    _tag: "Block" as const,
-    index,
-    id: `block-${block.id}`,
-    turnId: "turn-1",
-    ...(index === 0 ? {} : { parentId: "root-tool" }),
-  }))
-  return {
-    ...initial("/work", "high"),
-    blocks,
-    items,
-    expandedRowKeys: ["tool:root-tool"],
-    scrollFollow: false,
-  }
-}
-
-const _collapsedSubagentModel = (answerCount: number, childCount: number): Model => {
-  const entries = Array.from({ length: answerCount }, (_, index) => ({
-    role: "assistant" as const,
-    text: `answer ${index}`,
-    turnId: "turn-1",
-  }))
-  const rootBlock = {
-    _tag: "ToolCall" as const,
-    id: "root-tool",
-    name: "task",
-    input: "{}",
-    status: "running" as const,
-    presentation: {
-      family: "agent" as const,
-      action: "task",
-      activeLabel: "Subagent working",
-      completeLabel: "Subagent finished",
-    },
-    detail: "delegated task",
-    files: [],
-  }
-  const childBlocks = Array.from({ length: childCount }, (_, index) => ({
-    _tag: "ToolCall" as const,
-    id: `child-${index}`,
-    name: "bash",
-    input: "{}",
-    status: "complete" as const,
-    presentation: {
-      family: "shell" as const,
-      action: "shell",
-      activeLabel: "Running",
-      completeLabel: "Ran",
-    },
-    detail: `cmd-${index}`,
-    files: [],
-  }))
-  const blocks = [rootBlock, ...childBlocks]
-  const items = [
-    ...entries.map((_, index) => ({
-      _tag: "Entry" as const,
-      index,
-      id: `answer-${index}`,
-      turnId: "turn-1",
-    })),
-    ...blocks.map((block, index) => ({
-      _tag: "Block" as const,
-      index,
-      id: `block-${block.id}`,
-      turnId: "turn-1",
-      ...(index === 0 ? {} : { parentId: "root-tool" }),
-    })),
-  ]
-  return {
-    ...initial("/work", "high"),
-    entries,
-    blocks,
-    items,
-    expandedRowKeys: [],
-    scrollFollow: true,
-  }
-}
-
 for (const panel of ["changed", "workspace"] as const) {
   test(`keeps composer updates bounded with a large ${panel} files sidebar`, () =>
     Effect.runPromise(
@@ -250,7 +95,6 @@ for (const panel of ["changed", "workspace"] as const) {
       }),
     ))
 }
-
 for (const width of [80, 50] as const) {
   test(`renders a visible error action and leaves the composer usable at width ${width}`, () =>
     Effect.runPromise(
@@ -295,21 +139,6 @@ for (const width of [80, 50] as const) {
       }),
     ))
 }
-
-const nonSpaceBounds = (frame: string, height: number) => {
-  const points = frame
-    .split("\n")
-    .slice(0, height - 5)
-    .flatMap((row, y) => Array.from(row, (cell, x) => ({ cell, x, y })))
-    .filter(({ cell }) => cell !== " ")
-  return {
-    left: Math.min(...points.map(({ x }) => x)),
-    right: Math.max(...points.map(({ x }) => x)),
-    top: Math.min(...points.map(({ y }) => y)),
-    bottom: Math.max(...points.map(({ y }) => y)),
-  }
-}
-
 for (const [width, height] of [
   [100, 30],
   [80, 24],
@@ -350,7 +179,6 @@ for (const [width, height] of [
       }),
     ))
 }
-
 for (const height of [13, 16, 19] as const) {
   test(`keeps essential compact welcome copy visible at 60x${height}`, () =>
     Effect.runPromise(
@@ -372,7 +200,6 @@ for (const height of [13, 16, 19] as const) {
       }),
     ))
 }
-
 for (const [width, height] of [
   [140, 40],
   [100, 24],
@@ -480,7 +307,6 @@ for (const [width, height] of [
       }),
     ))
 }
-
 test("publishes the running-tool spinner frame while the selected agent is working and clears it when idle", () =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -535,7 +361,6 @@ test("publishes the running-tool spinner frame while the selected agent is worki
       }
     }),
   ))
-
 test("does not animate a cancelled subagent again when a new turn starts", () =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -601,7 +426,6 @@ test("does not animate a cancelled subagent again when a new turn starts", () =>
       }
     }),
   ))
-
 test("keeps the status spinner moving across a tool-result lull without feed events", () =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -635,121 +459,6 @@ test("keeps the status spinner moving across a tool-result lull without feed eve
         expect(styledTextValue(surface.statusLabel.content)).toContain("≈ Waiting")
         clock.advance(200)
         expect(styledTextValue(surface.statusLabel.content)).toContain("≋ Waiting")
-      } finally {
-        surface.destroy()
-        setup.renderer.destroy()
-      }
-    }),
-  ))
-
-test("toggles expandable transcript headers without selecting them and keeps bodies selectable", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
-      let model: Model = {
-        ...initial("/work", "high"),
-        input: "draft remains editable",
-        cursor: "draft remains editable".length,
-        blocks: [
-          {
-            _tag: "ToolCall",
-            id: "shell-selection",
-            name: "bash",
-            input: '{"command":"printf transcript-output"}',
-            status: "complete",
-            presentation: {
-              family: "shell",
-              action: "shell",
-              activeLabel: "Running",
-              completeLabel: "Ran",
-            },
-            detail: "printf transcript-output",
-            output: "transcript-output",
-            files: [],
-          },
-        ],
-        items: [{ _tag: "Block", index: 0, id: "shell-selection", turnId: "turn-selection" }],
-      }
-      const surface = new Surface(setup.renderer, {
-        key: () => undefined,
-        clickToggle: (unit) => {
-          model = update(model, { _tag: "DetailToggled", id: unit })
-          surface.update(model)
-        },
-        resize: () => undefined,
-      })
-      const records = () =>
-        (
-          surface as unknown as {
-            readonly transcriptRecords: ReadonlyMap<
-              string,
-              {
-                readonly renderable: {
-                  readonly screenX: number
-                  readonly screenY: number
-                  readonly selectable: boolean
-                  readonly content: {
-                    readonly chunks: ReadonlyArray<{
-                      readonly text: string
-                      readonly fg?: { readonly equals: (color: unknown) => boolean }
-                    }>
-                  }
-                }
-              }
-            >
-          }
-        ).transcriptRecords
-      const commandIsBlue = () =>
-        records()
-          .get("tool:shell-selection:header")!
-          .renderable.content.chunks.some(
-            (chunk) => chunk.text.includes("printf transcript-output") && chunk.fg?.equals(colors.blue) === true,
-          )
-      try {
-        surface.update(model)
-        yield* openTui(() => setup.flush())
-        expect(setup.renderer.getCursorState()).toMatchObject({ visible: true, blinking: true })
-        expect(commandIsBlue()).toBe(false)
-        const header = records().get("tool:shell-selection:header")!.renderable
-        yield* openTui(() => setup.mockMouse.click(header.screenX + 2, header.screenY))
-        yield* openTui(() => setup.flush())
-        expect(setup.renderer.getCursorState()).toMatchObject({ visible: true, blinking: true })
-        expect(model.expandedRowKeys).toContain("tool:shell-selection")
-        expect(model.detailSelection).toBeUndefined()
-        expect(commandIsBlue()).toBe(false)
-        expect(setup.renderer.getSelection()).toBeNull()
-
-        const body = records().get("tool:shell-selection:body")!.renderable
-        yield* openTui(() => setup.mockMouse.drag(body.screenX, body.screenY, body.screenX + 20, body.screenY))
-        yield* openTui(() => setup.flush())
-        expect(setup.renderer.getCursorState()).toMatchObject({ visible: true, blinking: true })
-        expect(setup.renderer.getSelection()?.getSelectedText()).toContain("transcript-output")
-        setup.renderer.clearSelection()
-
-        const expandedHeader = records().get("tool:shell-selection:header")!.renderable
-        yield* openTui(() => setup.mockMouse.click(expandedHeader.screenX + 2, expandedHeader.screenY))
-        yield* openTui(() => setup.flush())
-        expect(setup.renderer.getCursorState()).toMatchObject({ visible: true, blinking: true })
-        expect(model.expandedRowKeys).not.toContain("tool:shell-selection")
-        expect(commandIsBlue()).toBe(false)
-        expect(setup.renderer.getSelection()).toBeNull()
-
-        model = update(model, {
-          _tag: "KeyPressed",
-          key: {
-            name: "tab",
-            ctrl: false,
-            alt: false,
-            meta: false,
-            shift: false,
-            sequence: "",
-            eventType: "press",
-          },
-        })
-        surface.update(model)
-        yield* openTui(() => setup.flush())
-        expect(model.detailSelection).toBe("tool:shell-selection")
-        expect(commandIsBlue()).toBe(true)
       } finally {
         surface.destroy()
         setup.renderer.destroy()

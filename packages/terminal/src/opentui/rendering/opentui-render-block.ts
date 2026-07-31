@@ -9,8 +9,11 @@ import { fg, dim, bg, underline, StyledText } from "@opentui/core"
 import { boundedThreadSidebarWidth, fileSidebarLayoutWidth } from "../../state/model/terminal-state"
 import type { ThreadItem } from "../../state/model/terminal-state"
 import { isThreadBusy } from "../../state/model/terminal-state"
+import { toOpenColor } from "./terminal-text-adapter"
 
 const idleSpinnerFrame = "⠭"
+const toOpenStyledChunk = (chunk: TextChunk): TextChunk =>
+  chunk.fg === undefined ? chunk : Object.assign({}, chunk, { fg: toOpenColor(chunk.fg) })
 const wrapTextToWidth = (text: string, width: number): ReadonlyArray<string> => {
   const lines: Array<string> = []
   for (const hardLine of text.split("\n")) {
@@ -150,7 +153,7 @@ export const renderSidebar: {
         }
         chunks.push(dim(fg(colors.text)("│")))
       })
-    return new StyledText(chunks)
+    return new StyledText(chunks.map(toOpenStyledChunk))
   },
 )
 
@@ -254,7 +257,7 @@ export const renderFileRows = (rows: ReadonlyArray<ChangedFileRow>, hoveredRow?:
       chunks.push(...row.chunks.map((chunk, i) => (i === row.nameIndex ? underline(chunk) : chunk)))
     else chunks.push(...row.chunks)
   }
-  return new StyledText(chunks)
+  return new StyledText(chunks.map(toOpenStyledChunk))
 }
 export const renderChangedFiles: {
   (model: import("../../state/model/terminal-state").Model, innerWidth: number, hoveredRow?: number): StyledText

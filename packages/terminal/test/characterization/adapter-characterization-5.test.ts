@@ -1,57 +1,9 @@
 import { expect, vi } from "vitest"
-
 import { it } from "@effect/vitest"
-
 import { Effect } from "effect"
-
-const _shell = (id: string, command: string, output: string) => ({
-  _tag: "ToolCall" as const,
-  id,
-  name: "bash",
-  input: JSON.stringify({ command }),
-  output,
-  status: "complete" as const,
-  presentation: { family: "shell" as const, action: "command", activeLabel: "Running", completeLabel: "Ran" },
-  detail: command,
-  files: [],
-})
-
-const _windowUnitToolCall = (id: string, family: "agent" | "explore") => ({
-  _tag: "ToolCall" as const,
-  id,
-  name: family === "agent" ? "task" : "read",
-  input: "{}",
-  status: "complete" as const,
-  presentation: {
-    family,
-    action: family === "agent" ? "task" : "read",
-    activeLabel: family === "agent" ? "Exploring" : "Reading",
-    completeLabel: family === "agent" ? "Explored" : "Read",
-  },
-  detail: id,
-  files: [],
-})
-
-const _agentToolBlock = (
-  status: "running" | "complete" | "failed" | "cancelled",
-  detail = "Investigate the crash",
-) => ({
-  _tag: "ToolCall" as const,
-  id: "agent",
-  name: "task",
-  input: "{}",
-  status,
-  presentation: {
-    family: "agent" as const,
-    action: "task",
-    activeLabel: "Subagent working",
-    completeLabel: "Subagent finished",
-  },
-  detail,
-  files: [],
-})
-
-const opentui = vi.hoisted(() => {
+import { Surface, create, renderTranscriptStyled } from "../../src/opentui/surface/opentui-surface"
+import { initial, type Mode, type Model, type ThreadItem } from "../../src/state/model/terminal-state"
+const opentuiValue = vi.hoisted(() => {
   const boxChildren: Array<object> = []
   const keyHandlers = new Set<(key: object) => void>()
   const pasteHandlers = new Set<(event: object) => void>()
@@ -267,17 +219,18 @@ const opentui = vi.hoisted(() => {
     rootChildren,
   }
 })
+const opentui = opentuiValue
 
 vi.mock("@opentui/core", () => ({
-  BoxRenderable: opentui.BoxRenderable,
-  EditBufferRenderable: opentui.EditBufferRenderable,
-  RGBA: opentui.RGBA,
-  ScrollBarRenderable: opentui.ScrollBarRenderable,
-  ScrollBoxRenderable: opentui.ScrollBoxRenderable,
-  SystemClock: opentui.SystemClock,
+  BoxRenderable: opentuiValue.BoxRenderable,
+  EditBufferRenderable: opentuiValue.EditBufferRenderable,
+  RGBA: opentuiValue.RGBA,
+  ScrollBarRenderable: opentuiValue.ScrollBarRenderable,
+  ScrollBoxRenderable: opentuiValue.ScrollBoxRenderable,
+  SystemClock: opentuiValue.SystemClock,
   CliRenderEvents: { FRAME: "frame", RESIZE: "resize", SELECTION: "selection" },
-  TextRenderable: opentui.TextRenderable,
-  createCliRenderer: opentui.createCliRenderer,
+  TextRenderable: opentuiValue.TextRenderable,
+  createCliRenderer: opentuiValue.createCliRenderer,
   decodePasteBytes: (bytes: Uint8Array) => new TextDecoder().decode(bytes),
   fg: (color: string) => (input: string | { text: string }) =>
     typeof input === "string" ? { text: input, fg: color } : { ...input, fg: color },
@@ -293,30 +246,7 @@ vi.mock("@opentui/core", () => ({
   },
   stripAnsiSequences: (text: string) => text,
 }))
-
-import { Surface, create, renderTranscriptStyled } from "../../src/opentui/surface/opentui-surface"
-
-import { initial, type Mode, type Model, type ThreadItem } from "../../src/state/model/terminal-state"
-
-const handlers = () => ({ key: vi.fn(), resize: vi.fn() })
-
-const _nonEmptyLines = (text: string) => text.split("\n").filter((line) => line.length > 0)
-
-const model = (changes: Partial<Model> = {}): Model => ({ ...initial("/workspace", "medium"), ...changes })
-
-const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
-  workspace: "/workspace",
-  pinned: false,
-  archived: false,
-  status: "idle",
-  unread: false,
-  lastActivityAt: 0,
-  ...input,
-})
-
-const createScoped = (callbacks: Parameters<typeof create>[0]) =>
-  Effect.acquireRelease(create(callbacks), (created) => Effect.sync(created.releaseTerminal))
-
+import { _shell, _windowUnitToolCall, _agentToolBlock, handlers, _nonEmptyLines, model, thread, createScoped } from "./adapter-characterization-5.test-support"
 it.effect("renders welcome, entries, modes, activity, cursor, and palette", () =>
   Effect.gen(function* () {
     const callbacks = handlers()
@@ -481,7 +411,6 @@ it.effect("renders welcome, entries, modes, activity, cursor, and palette", () =
     expect(opentui.requestRender.mock.calls.length).toBeGreaterThanOrEqual(7)
   }),
 )
-
 it.effect("routes usage-label clicks to the local display toggle", () =>
   Effect.gen(function* () {
     const usageToggle = vi.fn()
@@ -494,7 +423,6 @@ it.effect("routes usage-label clicks to the local display toggle", () =>
     expect(usageToggle).toHaveBeenCalledOnce()
   }),
 )
-
 it.effect("uses native clock width and pointer hover for the usage label", () =>
   Effect.gen(function* () {
     const { surface } = yield* createScoped(handlers())
@@ -523,7 +451,6 @@ it.effect("uses native clock width and pointer hover for the usage label", () =>
     expect(opentui.renderer.setMousePointer).toHaveBeenLastCalledWith("default")
   }),
 )
-
 it.effect("routes clicks on the usage and mode segments to their own handlers", () =>
   Effect.gen(function* () {
     const usageToggle = vi.fn()
@@ -545,212 +472,5 @@ it.effect("routes clicks on the usage and mode segments to their own handlers", 
     surface.modeLabel.onMouseDown?.({ x: 31 } as never)
     expect(modeToggle).toHaveBeenCalledTimes(1)
     expect(usageToggle).toHaveBeenCalledTimes(1)
-  }),
-)
-
-it.effect("clears usage hover when a narrower selector moves away from the pointer", () =>
-  Effect.gen(function* () {
-    const { surface } = yield* createScoped(handlers())
-    surface.update(
-      model({ usageDisplay: "tokens", usageTokens: { _tag: "Available", total: 123_456, uncountedAttempts: 0 } }),
-    )
-    Object.assign(surface.modeLabel, { screenX: 20 })
-    surface.modeLabel.onMouseOver?.({ x: 20 } as never)
-    expect(opentui.renderer.setMousePointer).toHaveBeenLastCalledWith("pointer")
-
-    surface.update(model({ usageCost: { _tag: "Available", usd: 0, unpricedAttempts: 0 } }))
-    expect(opentui.renderer.setMousePointer).toHaveBeenLastCalledWith("default")
-    expect(
-      (surface.modeLabel.content as { chunks: ReadonlyArray<{ attributes?: number }> }).chunks[0]?.attributes,
-    ).toBe(2)
-  }),
-)
-
-it.effect("clears usage hover after layout moves a right-anchored label under a stationary pointer", () =>
-  Effect.gen(function* () {
-    const { surface } = yield* createScoped(handlers())
-    surface.update(
-      model({ usageDisplay: "tokens", usageTokens: { _tag: "Available", total: 123_456, uncountedAttempts: 0 } }),
-    )
-    Object.assign(surface.modeLabel, { screenX: 20 })
-    surface.modeLabel.onMouseOver?.({ x: 21 } as never)
-    expect(opentui.renderer.setMousePointer).toHaveBeenLastCalledWith("pointer")
-
-    Object.assign(surface.modeLabel, { screenX: 5 })
-    for (const frame of opentui.frameHandlers) frame()
-
-    expect(opentui.renderer.setMousePointer).toHaveBeenLastCalledWith("default")
-    expect(
-      (surface.modeLabel.content as { chunks: ReadonlyArray<{ attributes?: number }> }).chunks[0]?.attributes,
-    ).toBe(2)
-  }),
-)
-
-it.effect("removes its listeners on destroy", () =>
-  Effect.gen(function* () {
-    const callbacks = handlers()
-    const { surface } = yield* createScoped(callbacks)
-    const keyCount = opentui.keyHandlers.size
-    const pasteCount = opentui.pasteHandlers.size
-    const resizeCount = opentui.resizeHandlers.size
-    const selectionCount = opentui.selectionHandlers.size
-
-    surface.destroy()
-
-    expect(opentui.keyHandlers.size).toBe(keyCount - 1)
-    expect(opentui.pasteHandlers.size).toBe(pasteCount - 1)
-    expect(opentui.resizeHandlers.size).toBe(resizeCount - 1)
-    expect(opentui.selectionHandlers.size).toBe(selectionCount - 1)
-  }),
-)
-
-it.effect("ignores a queued loader tick after destroy", () =>
-  Effect.gen(function* () {
-    const { surface } = yield* createScoped(handlers())
-    const loader = surface as unknown as { loaderPhase: number; tickLoader: () => void }
-    const phase = loader.loaderPhase
-
-    surface.destroy()
-    loader.tickLoader()
-
-    expect(loader.loaderPhase).toBe(phase)
-  }),
-)
-
-it.effect("renders mode picker, filtered palette, sidebar visibility, and notice transitions", () =>
-  Effect.gen(function* () {
-    const { surface } = yield* createScoped(handlers())
-    const paletteText = () =>
-      (surface.palette.content as { chunks: ReadonlyArray<{ text: string }> }).chunks.map(({ text }) => text).join("")
-    surface.update(model({ modePicker: { open: true, selected: 2 } }))
-    expect(paletteText()).toContain("high")
-    expect(paletteText()).toContain("Deep reasoning for hard tasks")
-    expect(surface.paletteBox.bottomTitle).toBe(" ←→ turn · esc")
-    surface.update(model({ palette: { open: true, query: "quit", selected: 0 } }))
-    expect(paletteText()).toContain("quit")
-    surface.update(
-      model({
-        threads: [thread({ id: "a", title: "A" })],
-        threadSidebar: { open: false, focused: false, selected: 0, scrollTop: 0 },
-      }),
-    )
-    expect(surface.sidebar.visible).toBe(false)
-    surface.update(model({ entries: [{ role: "assistant", text: "ok" }] }))
-    expect(surface.transcriptScroll.content).toBeInstanceOf(Object)
-  }),
-)
-
-it.effect("create configures the CLI renderer", () =>
-  Effect.gen(function* () {
-    const callbacks = handlers()
-    const result = yield* createScoped(callbacks)
-
-    expect(opentui.createCliRenderer).toHaveBeenLastCalledWith({
-      screenMode: "alternate-screen",
-      exitOnCtrlC: false,
-      exitSignals: [],
-      useMouse: true,
-      enableMouseMovement: true,
-    })
-    expect("renderer" in result).toBe(false)
-    expect(result.surface).toBeInstanceOf(Surface)
-  }),
-)
-
-it.effect("makes the renderer background transparent before constructing the surface", () =>
-  Effect.gen(function* () {
-    opentui.renderer.setBackgroundColor.mockClear()
-    opentui.renderer.root.add.mockClear()
-    yield* createScoped(handlers())
-    expect(opentui.renderer.setBackgroundColor).toHaveBeenCalledWith("transparent")
-    const backgroundOrder = opentui.renderer.setBackgroundColor.mock.invocationCallOrder[0]!
-    const rootAddOrder = opentui.renderer.root.add.mock.invocationCallOrder[0]!
-    expect(backgroundOrder).toBeLessThan(rootAddOrder)
-  }),
-)
-
-it.effect("releases renderer terminal modes once when initialization fails after acquisition", () =>
-  Effect.gen(function* () {
-    opentui.renderer.destroy.mockClear()
-
-    const error = yield* Effect.flip(
-      create({
-        key: vi.fn(),
-        resize: () => {
-          throw new Error("resize failed")
-        },
-      }),
-    )
-
-    expect(String(error)).toContain("resize failed")
-    expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
-  }),
-)
-
-it.effect("releases terminal modes once before other cleanup and prevents editor resume while closing", () =>
-  Effect.gen(function* () {
-    opentui.renderer.destroy.mockClear()
-    opentui.renderer.suspend.mockClear()
-    opentui.renderer.resume.mockClear()
-    const created = yield* createScoped(handlers())
-    const events: Array<string> = []
-    opentui.renderer.destroy.mockImplementation(() => events.push("terminal-released"))
-
-    created.suspendTerminal()
-    created.releaseTerminal()
-    events.push("slow-client-cleanup")
-    created.resumeTerminal()
-    created.releaseTerminal()
-
-    expect(events).toEqual(["terminal-released", "slow-client-cleanup"])
-    expect(opentui.renderer.suspend).toHaveBeenCalledTimes(1)
-    expect(opentui.renderer.resume).not.toHaveBeenCalled()
-    expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
-  }),
-)
-
-it.effect("releases terminal modes when renderer suspension fails", () =>
-  Effect.gen(function* () {
-    opentui.renderer.destroy.mockReset()
-    opentui.renderer.suspend.mockImplementationOnce(() => {
-      throw new Error("suspend failed")
-    })
-    const created = yield* createScoped(handlers())
-
-    expect(() => created.suspendTerminal()).toThrow("suspend failed")
-    expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
-    expect(() => created.releaseTerminal()).not.toThrow()
-    expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
-  }),
-)
-
-it.effect("releases terminal modes when renderer resume fails", () =>
-  Effect.gen(function* () {
-    opentui.renderer.destroy.mockReset()
-    opentui.renderer.resume.mockImplementationOnce(() => {
-      throw new Error("resume failed")
-    })
-    const created = yield* createScoped(handlers())
-
-    created.suspendTerminal()
-    expect(() => created.resumeTerminal()).toThrow("resume failed")
-    expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
-    expect(() => created.releaseTerminal()).not.toThrow()
-    expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
-  }),
-)
-
-it.effect("destroys the renderer when surface cleanup fails", () =>
-  Effect.gen(function* () {
-    opentui.renderer.destroy.mockClear()
-    const created = yield* createScoped(handlers())
-    created.surface.destroy = () => {
-      throw new Error("surface cleanup failed")
-    }
-
-    expect(() => created.releaseTerminal()).not.toThrow()
-    expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
-    expect(() => created.releaseTerminal()).not.toThrow()
-    expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
   }),
 )

@@ -1,57 +1,9 @@
 import { expect, test, vi } from "vitest"
-
 import { it } from "@effect/vitest"
-
 import { Effect } from "effect"
-
-const shell = (id: string, command: string, output: string) => ({
-  _tag: "ToolCall" as const,
-  id,
-  name: "bash",
-  input: JSON.stringify({ command }),
-  output,
-  status: "complete" as const,
-  presentation: { family: "shell" as const, action: "command", activeLabel: "Running", completeLabel: "Ran" },
-  detail: command,
-  files: [],
-})
-
-const _windowUnitToolCall = (id: string, family: "agent" | "explore") => ({
-  _tag: "ToolCall" as const,
-  id,
-  name: family === "agent" ? "task" : "read",
-  input: "{}",
-  status: "complete" as const,
-  presentation: {
-    family,
-    action: family === "agent" ? "task" : "read",
-    activeLabel: family === "agent" ? "Exploring" : "Reading",
-    completeLabel: family === "agent" ? "Explored" : "Read",
-  },
-  detail: id,
-  files: [],
-})
-
-const _agentToolBlock = (
-  status: "running" | "complete" | "failed" | "cancelled",
-  detail = "Investigate the crash",
-) => ({
-  _tag: "ToolCall" as const,
-  id: "agent",
-  name: "task",
-  input: "{}",
-  status,
-  presentation: {
-    family: "agent" as const,
-    action: "task",
-    activeLabel: "Subagent working",
-    completeLabel: "Subagent finished",
-  },
-  detail,
-  files: [],
-})
-
-const opentui = vi.hoisted(() => {
+import { buildTranscript, create, renderTranscriptStyled } from "../../src/opentui/surface/opentui-surface"
+import { initial, ready, type Model, type ThreadItem } from "../../src/state/model/terminal-state"
+const opentuiValue = vi.hoisted(() => {
   const boxChildren: Array<object> = []
   const keyHandlers = new Set<(key: object) => void>()
   const pasteHandlers = new Set<(event: object) => void>()
@@ -267,17 +219,18 @@ const opentui = vi.hoisted(() => {
     rootChildren,
   }
 })
+const opentui = opentuiValue
 
 vi.mock("@opentui/core", () => ({
-  BoxRenderable: opentui.BoxRenderable,
-  EditBufferRenderable: opentui.EditBufferRenderable,
-  RGBA: opentui.RGBA,
-  ScrollBarRenderable: opentui.ScrollBarRenderable,
-  ScrollBoxRenderable: opentui.ScrollBoxRenderable,
-  SystemClock: opentui.SystemClock,
+  BoxRenderable: opentuiValue.BoxRenderable,
+  EditBufferRenderable: opentuiValue.EditBufferRenderable,
+  RGBA: opentuiValue.RGBA,
+  ScrollBarRenderable: opentuiValue.ScrollBarRenderable,
+  ScrollBoxRenderable: opentuiValue.ScrollBoxRenderable,
+  SystemClock: opentuiValue.SystemClock,
   CliRenderEvents: { FRAME: "frame", RESIZE: "resize", SELECTION: "selection" },
-  TextRenderable: opentui.TextRenderable,
-  createCliRenderer: opentui.createCliRenderer,
+  TextRenderable: opentuiValue.TextRenderable,
+  createCliRenderer: opentuiValue.createCliRenderer,
   decodePasteBytes: (bytes: Uint8Array) => new TextDecoder().decode(bytes),
   fg: (color: string) => (input: string | { text: string }) =>
     typeof input === "string" ? { text: input, fg: color } : { ...input, fg: color },
@@ -293,52 +246,7 @@ vi.mock("@opentui/core", () => ({
   },
   stripAnsiSequences: (text: string) => text,
 }))
-
-import { buildTranscript, create, renderTranscriptStyled } from "../../src/opentui/surface/opentui-surface"
-
-import { initial, ready, type Model, type ThreadItem } from "../../src/state/model/terminal-state"
-
-const handlers = () => ({ key: vi.fn(), resize: vi.fn() })
-
-const nonEmptyLines = (text: string) => text.split("\n").filter((line) => line.length > 0)
-
-const subagentToolBlock = {
-  _tag: "ToolCall" as const,
-  id: "agent",
-  name: "task",
-  input: JSON.stringify({ prompt: "Inspect" }),
-  status: "complete" as const,
-  presentation: {
-    family: "agent" as const,
-    action: "task" as const,
-    activeLabel: "Subagent working",
-    completeLabel: "Subagent finished",
-  },
-  detail: "Inspect",
-  output: "done",
-  files: [],
-}
-
-const renderedText = (changes: Partial<Model>): string =>
-  renderTranscriptStyled({ ...initial("/workspace", "medium"), ...changes })
-    .chunks.map((chunk) => chunk.text)
-    .join("")
-
-const model = (changes: Partial<Model> = {}): Model => ({ ...initial("/workspace", "medium"), ...changes })
-
-const _thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
-  workspace: "/workspace",
-  pinned: false,
-  archived: false,
-  status: "idle",
-  unread: false,
-  lastActivityAt: 0,
-  ...input,
-})
-
-const createScoped = (callbacks: Parameters<typeof create>[0]) =>
-  Effect.acquireRelease(create(callbacks), (created) => Effect.sync(created.releaseTerminal))
-
+import { shell, _windowUnitToolCall, _agentToolBlock, handlers, nonEmptyLines, subagentToolBlock, renderedText, model, _thread, createScoped } from "./adapter-characterization-4.test-support"
 test("keeps wrapped response continuations inside the rail and curls the final row", () => {
   const state = model({
     width: 60,
@@ -371,7 +279,6 @@ test("keeps wrapped response continuations inside the rail and curls the final r
   expect(responseRows[responseRows.length - 1]!.startsWith("  ╰   ")).toBe(true)
   for (const row of responseRows) expect(row.length).toBeLessThanOrEqual(60)
 })
-
 test("expands a failed subagent to its prompt and stored error text", () => {
   const lines = nonEmptyLines(
     renderedText({
@@ -390,7 +297,6 @@ test("expands a failed subagent to its prompt and stored error text", () => {
   expect(lines.some((line) => line.includes("AgentToolError: Model gpt-5.6-luna is not available"))).toBe(true)
   expect(lines.filter((line) => line.includes("AgentToolError: Model gpt-5.6-luna is not available"))).toHaveLength(1)
 })
-
 test("renders a finished subagent response as markdown inside the expanded unit", () => {
   const state = model({
     entries: [{ role: "assistant", text: "**Child result**\n\n**Checks passed.**", turnId: "child" }],
@@ -428,7 +334,6 @@ test("renders a finished subagent response as markdown inside the expanded unit"
   expect(text).toContain("Checks passed.")
   expect(text).not.toContain("**")
 })
-
 test("never renders a serialized child result as subagent output", () => {
   const serialized =
     '{"status":"completed","output":[{"type":"text","text":"## Child result\\n\\n**Checks passed.**"}]}'
@@ -462,7 +367,6 @@ test("never renders a serialized child result as subagent output", () => {
   expect(text).not.toContain('"}]}')
   expect(text).not.toContain(serialized)
 })
-
 test("presents successful and failed shell commands with expandable output", () => {
   const command = (status: "complete" | "failed", output: string) =>
     buildTranscript(
@@ -491,7 +395,6 @@ test("presents successful and failed shell commands with expandable output", () 
   expect(successful).toContain("## inspection")
   expect(failed).toContain("fatal: not a git repository")
 })
-
 test("uses the child profile activity label with a Subagent fallback", () => {
   const rendered = buildTranscript(
     model({
@@ -507,7 +410,6 @@ test("uses the child profile activity label with a Subagent fallback", () => {
   expect(text).toContain("Subagent working")
   expect(text).not.toContain("Task working")
 })
-
 it.effect("constructs the render tree and forwards key and resize events", () =>
   Effect.gen(function* () {
     const callbacks = handlers()
@@ -543,195 +445,5 @@ it.effect("constructs the render tree and forwards key and resize events", () =>
       eventType: "repeat",
     })
     expect(callbacks.resize).toHaveBeenLastCalledWith(101, 37)
-  }),
-)
-
-it.effect("registers no SIGWINCH handler and relies on OpenTUI's debounced resize", () =>
-  Effect.gen(function* () {
-    const before = process.listenerCount("SIGWINCH")
-    const callbacks = handlers()
-    const { surface: _surface } = yield* createScoped(callbacks)
-    expect(process.listenerCount("SIGWINCH")).toBe(before)
-    opentui.renderer.resize.mockClear()
-    const stdout = opentui.renderer.stdout as { columns?: number; rows?: number }
-    for (const [columns, rows] of [
-      [100, 40],
-      [90, 30],
-      [140, 45],
-    ] as const) {
-      stdout.columns = columns
-      stdout.rows = rows
-      process.emit("SIGWINCH", "SIGWINCH")
-    }
-    expect(opentui.renderer.resize).not.toHaveBeenCalled()
-    for (const listener of opentui.resizeHandlers) listener(140, 45)
-    expect(callbacks.resize).toHaveBeenLastCalledWith(140, 45)
-  }).pipe(
-    Effect.ensuring(
-      Effect.sync(() => {
-        const stdout = opentui.renderer.stdout as { columns?: number; rows?: number }
-        delete stdout.columns
-        delete stdout.rows
-        opentui.renderer.terminalWidth = 80
-        opentui.renderer.terminalHeight = 24
-      }),
-    ),
-  ),
-)
-
-it.effect("uses the terminal's native blinking block cursor on the composer", () =>
-  Effect.gen(function* () {
-    const callbacks = { key: vi.fn(), paste: vi.fn(), resize: vi.fn() }
-    const { surface } = yield* createScoped(callbacks)
-    surface.update(model({ input: "draft", cursor: 5 }))
-
-    expect(surface.composerEditor.cursorStyle).toEqual({ style: "block", blinking: true })
-    expect(surface.composerEditor.showCursor).toBe(true)
-  }),
-)
-
-it.effect("routes image paste, text paste, and non-empty selections through their dedicated callbacks", () =>
-  Effect.gen(function* () {
-    const callbacks = { key: vi.fn(), paste: vi.fn(), pasteImage: vi.fn(), resize: vi.fn() }
-    yield* createScoped(callbacks)
-
-    for (const listener of opentui.keyHandlers) {
-      listener({
-        name: "v",
-        ctrl: true,
-        option: false,
-        super: false,
-        shift: false,
-        sequence: "v",
-        eventType: "press",
-      })
-      listener({
-        name: "x",
-        ctrl: false,
-        option: false,
-        super: false,
-        shift: false,
-        sequence: "x",
-        eventType: "press",
-      })
-    }
-    for (const listener of opentui.pasteHandlers) {
-      listener({ bytes: new TextEncoder().encode("pasted text") })
-      listener({ bytes: Uint8Array.from([1, 2, 3]), metadata: { kind: "binary", mimeType: "image/png" } })
-      listener({ bytes: new Uint8Array() })
-    }
-    for (const listener of opentui.selectionHandlers) {
-      listener({ getSelectedText: () => "selected text\n" })
-      listener({ getSelectedText: () => "  " })
-    }
-
-    expect(callbacks.pasteImage).toHaveBeenCalledTimes(2)
-    expect(callbacks.pasteImage).toHaveBeenLastCalledWith({
-      bytes: Uint8Array.from([1, 2, 3]),
-      mediaType: "image/png",
-    })
-    expect(callbacks.key).toHaveBeenCalledOnce()
-    expect(callbacks.paste).toHaveBeenCalledOnce()
-    expect(callbacks.paste).toHaveBeenCalledWith("pasted text")
-    expect(opentui.renderer.copyToClipboardOSC52).toHaveBeenCalledWith("selected text")
-  }),
-)
-
-it.effect("never decodes binary paste as text without an image handler", () =>
-  Effect.gen(function* () {
-    const callbacks = { key: vi.fn(), paste: vi.fn(), resize: vi.fn() }
-    yield* createScoped(callbacks)
-
-    for (const listener of opentui.pasteHandlers)
-      listener({ bytes: Uint8Array.from([0xff, 0xfe]), metadata: { kind: "binary" } })
-
-    expect(callbacks.paste).not.toHaveBeenCalled()
-  }),
-)
-
-it.effect("opens a clicked changed file through the host callback", () =>
-  Effect.gen(function* () {
-    const callbacks = { ...handlers(), openPath: vi.fn() }
-    const { surface } = yield* createScoped(callbacks)
-    surface.update(
-      model({
-        changedFilesOpen: true,
-        changedFiles: ready([{ path: "apps/rika/src/main.ts", status: "M", added: 2, removed: 1 }]),
-      }),
-    )
-    const text = surface.changedFilesText as unknown as {
-      screenY: number
-      onMouseDown: (event: { button: number; y: number; stopPropagation: () => void }) => void
-    }
-    text.screenY = 0
-    text.onMouseDown({ button: 0, y: 3, stopPropagation: vi.fn() })
-
-    expect(callbacks.openPath).toHaveBeenCalledWith({ path: "apps/rika/src/main.ts" })
-  }),
-)
-
-it.effect("expands an existing collapsed attachment when the same text is pasted twice quickly", () =>
-  Effect.gen(function* () {
-    const callbacks = { ...handlers(), paste: vi.fn(), expandPaste: vi.fn() }
-    const { surface } = yield* createScoped(callbacks)
-    const token = String.fromCharCode(0xe000)
-    surface.update(
-      model({
-        input: token,
-        cursor: 1,
-        pastedText: [{ type: "text", token, value: "line one\nline two", label: "[Pasted text #1 +2 lines]" }],
-      }),
-    )
-
-    for (const listener of opentui.pasteHandlers) {
-      listener({ bytes: new TextEncoder().encode("line one\nline two") })
-      listener({ bytes: new TextEncoder().encode("line one\nline two") })
-    }
-
-    expect(callbacks.paste).toHaveBeenCalledOnce()
-    expect(callbacks.expandPaste).toHaveBeenCalledWith(token)
-  }),
-)
-
-it.effect("resizes the composer by dragging its top border", () =>
-  Effect.gen(function* () {
-    const callbacks = { ...handlers(), composerResize: vi.fn() }
-    const { surface } = yield* createScoped(callbacks)
-    surface.update(model())
-    const inputBox = surface.inputBox as unknown as {
-      y: number
-      height: number
-      onMouseDown: (event: object) => void
-      onMouseOver: (event: object) => void
-      onMouseMove: (event: object) => void
-      onMouseOut: () => void
-    }
-    const root = opentui.renderer.root as unknown as {
-      onMouseDrag: (event: object) => void
-      onMouseUp: (event: object) => void
-    }
-    inputBox.y = 19
-    const event = (y: number) => ({ button: 0, y, preventDefault: vi.fn(), stopPropagation: vi.fn() })
-
-    inputBox.onMouseDown(event(19))
-    root.onMouseDrag(event(15))
-    expect(callbacks.composerResize).toHaveBeenLastCalledWith(9)
-    root.onMouseUp(event(15))
-    root.onMouseDrag(event(12))
-    expect(callbacks.composerResize).toHaveBeenCalledOnce()
-
-    opentui.renderer.realStdoutWrite.mockClear()
-    inputBox.onMouseOver(event(19))
-    expect(opentui.renderer.realStdoutWrite).toHaveBeenLastCalledWith("\u001b]22;ns-resize\u001b\\")
-    inputBox.onMouseMove(event(20))
-    expect(opentui.renderer.realStdoutWrite).toHaveBeenLastCalledWith("\u001b]22;default\u001b\\")
-    inputBox.onMouseMove(event(19))
-    inputBox.onMouseOut()
-    expect(opentui.renderer.realStdoutWrite).toHaveBeenLastCalledWith("\u001b]22;default\u001b\\")
-
-    surface.update(model({ shortcutsOpen: true }))
-    inputBox.onMouseDown(event(7))
-    root.onMouseDrag(event(3))
-    expect(callbacks.composerResize).toHaveBeenCalledOnce()
   }),
 )

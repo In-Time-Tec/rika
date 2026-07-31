@@ -28,6 +28,7 @@ import {
   type TranscriptItem,
 } from "../../state/model/terminal-state"
 import { colors, spacing } from "../../presentation/terminal/terminal-theme"
+import { toOpenColor } from "../rendering/terminal-text-adapter"
 import {
   includeRowEnd,
   maxMountedTranscriptRows,
@@ -76,12 +77,12 @@ const prependedTranscriptItems = (
 }
 
 export abstract class SurfaceLifecycle extends SurfaceInput {
-  showToast(message: string, color: ColorInput = colors.green): void {
+  showToast(message: string, color: ColorInput = toOpenColor(colors.green)): void {
     const terminalWidth = Math.max(1, this.model?.width ?? this.renderer.width)
     const right = Math.min(2, Math.max(0, terminalWidth - 1))
     const width = Math.max(1, Math.min(stringWidth(message) + 6, terminalWidth - right))
     const visibleMessage = truncateToWidth(message, Math.max(0, width - 6))
-    this.toast.content = new StyledText([fg(color)("✓ "), fg(colors.text)(visibleMessage)])
+    this.toast.content = new StyledText([fg(color)("✓ "), fg(toOpenColor(colors.text))(visibleMessage)])
     this.toastBox.borderColor = color
     this.toastBox.right = right
     this.toastBox.width = width
@@ -278,7 +279,7 @@ export abstract class SurfaceLifecycle extends SurfaceInput {
             descriptors.push({
               key: `${bundle.key}:gap`,
               revision: "gap",
-              content: new StyledText([fg(colors.text)(" ")]),
+              content: new StyledText([fg(toOpenColor(colors.text))(" ")]),
             })
           descriptors.push(...bundle.descriptors)
         }
@@ -362,9 +363,10 @@ export abstract class SurfaceLifecycle extends SurfaceInput {
     let renderedRows = 0
     for (const [steeringIndex, steeringLabel] of steeringLabels.entries()) {
       if (renderedRows >= availableRows) break
-      queueChunks.push(fg(colors.muted)(steeringLabel))
+      queueChunks.push(fg(toOpenColor(colors.muted))(steeringLabel))
       renderedRows += 1
-      if (steeringIndex < steeringLabels.length - 1 || queueLength > 0) queueChunks.push(fg(colors.text)("\n"))
+      if (steeringIndex < steeringLabels.length - 1 || queueLength > 0)
+        queueChunks.push(fg(toOpenColor(colors.text))("\n"))
     }
     hintTop = renderedRows
     for (const [offset, item] of queue.slice(start, end).entries()) {
@@ -372,24 +374,28 @@ export abstract class SurfaceLifecycle extends SurfaceInput {
       const label = clampToRows(labels[index]!, availableRows)
       const labelRows = wrappedRowCount(label, queueTextWidth)
       if (index === hintIndex && hintSegments.length > 0) hintTop = renderedRows
-      queueChunks.push(item.id === model.queueSelection ? bold(fg(colors.text)(label)) : fg(colors.subtle)(label))
+      queueChunks.push(
+        item.id === model.queueSelection
+          ? bold(fg(toOpenColor(colors.text))(label))
+          : fg(toOpenColor(colors.subtle))(label),
+      )
       renderedRows += labelRows
-      if (index < end - 1) queueChunks.push(fg(colors.text)("\n"))
+      if (index < end - 1) queueChunks.push(fg(toOpenColor(colors.text))("\n"))
     }
     this.queueText.content = new StyledText(queueChunks)
     this.queueHint.top = hintTop
     const hintChunks: Array<TextChunk> = []
     for (const [index, segment] of hintSegments.entries()) {
-      hintChunks.push(dim(fg(colors.text)(index === 0 ? " " : " · ")))
+      hintChunks.push(dim(fg(toOpenColor(colors.text))(index === 0 ? " " : " · ")))
       hintChunks.push(fg(colors[model.mode])(segment.accent))
-      if (segment.suffix.length > 0) hintChunks.push(dim(fg(colors.text)(segment.suffix)))
+      if (segment.suffix.length > 0) hintChunks.push(dim(fg(toOpenColor(colors.text))(segment.suffix)))
     }
-    if (hintSegments.length > 0) hintChunks.push(dim(fg(colors.text)(" ")))
+    if (hintSegments.length > 0) hintChunks.push(dim(fg(toOpenColor(colors.text))(" ")))
     this.queueHint.content = new StyledText(hintChunks)
     this.queueHint.visible = hintSegments.length > 0
     this.queueLeftJoint.visible = queue.length > 0 || pendingSteering.length > 0
     this.queueRightJoint.visible = queue.length > 0 || pendingSteering.length > 0
-    this.inputBox.borderColor = colors.text
+    this.inputBox.borderColor = toOpenColor(colors.text)
     this.inputBox.title = ""
     this.modeLabel.right = sidebarWidth + 2
     this.renderModeLabel(model)
@@ -402,16 +408,16 @@ export abstract class SurfaceLifecycle extends SurfaceInput {
       const statusName = activityLabel ?? panelLoadingLabel!
       this.inputBox.bottomTitle = ""
       this.statusLabel.content = new StyledText([
-        fg(colors.text)(" "),
-        fg(colors.blue)(loaderFrame(statusName, this.loaderPhase)),
-        dim(fg(colors.text)(` ${statusName} `)),
+        fg(toOpenColor(colors.text))(" "),
+        fg(toOpenColor(colors.blue))(loaderFrame(statusName, this.loaderPhase)),
+        dim(fg(toOpenColor(colors.text))(` ${statusName} `)),
       ])
     } else {
       this.inputBox.bottomTitle = ""
       this.statusLabel.content = ""
     }
     this.workspaceLabel.right = sidebarWidth + 2
-    this.workspaceLabel.content = new StyledText([dim(fg(colors.text)(workspaceTitle))])
+    this.workspaceLabel.content = new StyledText([dim(fg(toOpenColor(colors.text))(workspaceTitle))])
     this.inputBox.height = renderedInputHeight
     const queueHeight = queue.length > 0 ? this.queueBox.height - 1 : 0
     this.modeLabel.top = model.height - renderedInputHeight

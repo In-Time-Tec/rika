@@ -1,15 +1,9 @@
 import { CliRenderEvents, Renderable } from "@opentui/core"
-
 import { createTestRenderer } from "@opentui/core/testing"
-
 import { expect, test } from "vitest"
-
 import { Data, Effect } from "effect"
-
 import stringWidth from "string-width"
-
 import { Surface, maxMountedTranscriptEntries } from "../../src/opentui/surface/opentui-surface"
-
 import {
   initial,
   loading,
@@ -19,44 +13,7 @@ import {
   type ThreadItem,
   update,
 } from "../../src/state/model/terminal-state"
-
-class OpenTuiError extends Data.TaggedError("OpenTuiError")<{ readonly cause: unknown }> {}
-
-const openTui = <A>(operation: () => Promise<A>) =>
-  Effect.tryPromise({ try: operation, catch: (cause) => new OpenTuiError({ cause }) })
-
-const insertText = (model: Model, text: string) => update(model, { _tag: "Pasted", text })
-
-const styledTextValue = (value: { readonly chunks: ReadonlyArray<{ readonly text: string }> } | string) =>
-  typeof value === "string" ? value : value.chunks.map((chunk) => chunk.text).join("")
-
-const _streamingShell = (id: string, output?: string) => ({
-  _tag: "ToolCall" as const,
-  id,
-  name: "bash",
-  input: `{"command":"printf ${id}"}`,
-  status: "running" as const,
-  presentation: {
-    family: "shell" as const,
-    action: "shell",
-    activeLabel: "Running",
-    completeLabel: "Ran",
-  },
-  detail: `printf ${id}`,
-  ...(output === undefined ? {} : { output }),
-  files: [],
-})
-
-const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
-  workspace: "/work",
-  pinned: false,
-  archived: false,
-  status: "idle",
-  unread: false,
-  lastActivityAt: 0,
-  ...input,
-})
-
+import { OpenTuiError, openTui, insertText, styledTextValue, _streamingShell, thread, _giantSubagentModel, _collapsedSubagentModel, nonSpaceBounds } from "./opentui-surface-characterization-11.test-support"
 for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
   test(`keeps composer updates bounded with ${historySize} transcript entries`, () =>
     Effect.runPromise(
@@ -86,117 +43,6 @@ for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
       }),
     ))
 }
-
-const _giantSubagentModel = (childCount: number): Model => {
-  const rootBlock = {
-    _tag: "ToolCall" as const,
-    id: "root-tool",
-    name: "task",
-    input: "{}",
-    status: "complete" as const,
-    presentation: {
-      family: "agent" as const,
-      action: "task",
-      activeLabel: "Subagent working",
-      completeLabel: "Subagent finished",
-    },
-    detail: "delegated task",
-    files: [],
-  }
-  const childBlocks = Array.from({ length: childCount }, (_, index) => ({
-    _tag: "ToolCall" as const,
-    id: `child-${index}`,
-    name: "bash",
-    input: "{}",
-    status: "complete" as const,
-    presentation: {
-      family: "shell" as const,
-      action: "shell",
-      activeLabel: "Running",
-      completeLabel: "Ran",
-    },
-    detail: `cmd-${index}`,
-    files: [],
-  }))
-  const blocks = [rootBlock, ...childBlocks]
-  const items = blocks.map((block, index) => ({
-    _tag: "Block" as const,
-    index,
-    id: `block-${block.id}`,
-    turnId: "turn-1",
-    ...(index === 0 ? {} : { parentId: "root-tool" }),
-  }))
-  return {
-    ...initial("/work", "high"),
-    blocks,
-    items,
-    expandedRowKeys: ["tool:root-tool"],
-    scrollFollow: false,
-  }
-}
-
-const _collapsedSubagentModel = (answerCount: number, childCount: number): Model => {
-  const entries = Array.from({ length: answerCount }, (_, index) => ({
-    role: "assistant" as const,
-    text: `answer ${index}`,
-    turnId: "turn-1",
-  }))
-  const rootBlock = {
-    _tag: "ToolCall" as const,
-    id: "root-tool",
-    name: "task",
-    input: "{}",
-    status: "running" as const,
-    presentation: {
-      family: "agent" as const,
-      action: "task",
-      activeLabel: "Subagent working",
-      completeLabel: "Subagent finished",
-    },
-    detail: "delegated task",
-    files: [],
-  }
-  const childBlocks = Array.from({ length: childCount }, (_, index) => ({
-    _tag: "ToolCall" as const,
-    id: `child-${index}`,
-    name: "bash",
-    input: "{}",
-    status: "complete" as const,
-    presentation: {
-      family: "shell" as const,
-      action: "shell",
-      activeLabel: "Running",
-      completeLabel: "Ran",
-    },
-    detail: `cmd-${index}`,
-    files: [],
-  }))
-  const blocks = [rootBlock, ...childBlocks]
-  const items = [
-    ...entries.map((_, index) => ({
-      _tag: "Entry" as const,
-      index,
-      id: `answer-${index}`,
-      turnId: "turn-1",
-    })),
-    ...blocks.map((block, index) => ({
-      _tag: "Block" as const,
-      index,
-      id: `block-${block.id}`,
-      turnId: "turn-1",
-      ...(index === 0 ? {} : { parentId: "root-tool" }),
-    })),
-  ]
-  return {
-    ...initial("/work", "high"),
-    entries,
-    blocks,
-    items,
-    expandedRowKeys: [],
-    scrollFollow: true,
-  }
-}
-
 for (const panel of ["changed", "workspace"] as const) {
   test(`keeps composer updates bounded with a large ${panel} files sidebar`, () =>
     Effect.runPromise(
@@ -248,7 +94,6 @@ for (const panel of ["changed", "workspace"] as const) {
       }),
     ))
 }
-
 for (const width of [80, 50] as const) {
   test(`renders a visible error action and leaves the composer usable at width ${width}`, () =>
     Effect.runPromise(
@@ -293,21 +138,6 @@ for (const width of [80, 50] as const) {
       }),
     ))
 }
-
-const nonSpaceBounds = (frame: string, height: number) => {
-  const points = frame
-    .split("\n")
-    .slice(0, height - 5)
-    .flatMap((row, y) => Array.from(row, (cell, x) => ({ cell, x, y })))
-    .filter(({ cell }) => cell !== " ")
-  return {
-    left: Math.min(...points.map(({ x }) => x)),
-    right: Math.max(...points.map(({ x }) => x)),
-    top: Math.min(...points.map(({ y }) => y)),
-    bottom: Math.max(...points.map(({ y }) => y)),
-  }
-}
-
 for (const [width, height] of [
   [100, 30],
   [80, 24],
@@ -348,7 +178,6 @@ for (const [width, height] of [
       }),
     ))
 }
-
 for (const height of [13, 16, 19] as const) {
   test(`keeps essential compact welcome copy visible at 60x${height}`, () =>
     Effect.runPromise(
@@ -370,7 +199,6 @@ for (const height of [13, 16, 19] as const) {
       }),
     ))
 }
-
 for (const [width, height] of [
   [140, 40],
   [100, 24],
@@ -478,7 +306,6 @@ for (const [width, height] of [
       }),
     ))
 }
-
 test("keeps the welcome mark renderable stable while typing", () =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -522,7 +349,6 @@ test("keeps the welcome mark renderable stable while typing", () =>
       }
     }),
   ))
-
 test("drags the sidebar left border to resize it through OpenTUI mouse routing", () =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -576,7 +402,6 @@ test("drags the sidebar left border to resize it through OpenTUI mouse routing",
       }
     }),
   ))
-
 test("routes bracketed multiline paste through the adapter as collapsed text", () =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -603,7 +428,6 @@ test("routes bracketed multiline paste through the adapter as collapsed text", (
       }
     }),
   ))
-
 test("copies trimmed selected transcript text through OSC52", () =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -617,104 +441,6 @@ test("copies trimmed selected transcript text through OSC52", () =>
       try {
         setup.renderer.emit(CliRenderEvents.SELECTION, { getSelectedText: () => "selected transcript  \n" })
         expect(copied).toEqual(["selected transcript"])
-      } finally {
-        surface.destroy()
-        setup.renderer.destroy()
-      }
-    }),
-  ))
-
-test("loads the workspace file tree with Opt+T and keeps it separate from changed files", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 24 }))
-      let model = update(initial("/work", "high"), {
-        _tag: "FilesReplaced",
-        files: ["apps/rika/src/main.ts", "packages/terminal/src/opentui/surface/opentui-surface.ts", "README.md"],
-      })
-      model = update(model, {
-        _tag: "ChangedFilesReplaced",
-        files: [
-          { path: "packages/terminal/src/opentui/surface/opentui-surface.ts", status: "M", added: 4, removed: 1 },
-        ],
-      })
-      const surface = new Surface(setup.renderer, {
-        key: (key) => {
-          model = update(model, { _tag: "KeyPressed", key })
-          surface.update(model)
-        },
-        resize: () => undefined,
-      })
-      try {
-        surface.update(model)
-        setup.mockInput.pressKey("t", { meta: true })
-        yield* openTui(() => setup.flush())
-        expect((model as Model & { readonly workspaceFilesOpen: boolean }).workspaceFilesOpen).toBe(true)
-        expect(model.changedFilesOpen).toBe(false)
-        const workspaceFrame = setup.captureCharFrame()
-        expect(workspaceFrame).toContain("Files (3)")
-        expect(workspaceFrame).toContain("apps/")
-        expect(workspaceFrame).toContain("README.md")
-
-        setup.mockInput.pressKey("s", { meta: true })
-        yield* openTui(() => setup.flush())
-        expect((model as Model & { readonly workspaceFilesOpen: boolean }).workspaceFilesOpen).toBe(false)
-        expect(model.changedFilesOpen).toBe(true)
-        const changedFrame = setup.captureCharFrame()
-        expect(changedFrame).toContain("Changed files (1)")
-        expect(changedFrame).toContain("opentui-surf +4 -1")
-      } finally {
-        surface.destroy()
-        setup.renderer.destroy()
-      }
-    }),
-  ))
-
-test("renders and scrolls nested changed files within the bordered sidebar", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 24 }))
-      const opened: Array<string> = []
-      const surface = new Surface(setup.renderer, {
-        key: () => undefined,
-        openPath: ({ path }) => opened.push(path),
-        resize: () => undefined,
-      })
-      const changedFiles = Array.from({ length: 30 }, (_, index) => ({
-        path: `apps/rika/src/features/feature-${String(index).padStart(2, "0")}.ts`,
-        status: "M",
-        added: index + 1,
-        removed: index,
-      }))
-      try {
-        surface.update({
-          ...initial("/work", "high"),
-          width: 100,
-          height: 24,
-          entries: [{ role: "assistant", text: "answer" }],
-          changedFilesOpen: true,
-          changedFiles: ready(changedFiles),
-        })
-        yield* openTui(() => setup.renderOnce())
-        yield* Effect.sleep("0 millis")
-        yield* openTui(() => setup.renderOnce())
-        const initialFrame = setup.captureCharFrame()
-        expect(initialFrame).toContain("Changed files (30)")
-        expect(initialFrame).toContain("apps/")
-        expect(initialFrame).toContain("  rika/")
-        expect(initialFrame).toContain("feature-00.ts")
-        expect(initialFrame).not.toContain("feature-29.ts")
-        yield* openTui(() => setup.mockMouse.click(72, 5))
-        expect(opened).toEqual(["apps/rika/src/features/feature-00.ts"])
-        surface.changedFilesBox.scrollTo(surface.changedFilesBox.scrollHeight - surface.changedFilesBox.viewport.height)
-        yield* openTui(() => setup.renderOnce())
-        const scrolledFrame = setup.captureCharFrame()
-        expect(scrolledFrame).toContain("feature-29.t +30 -29")
-        expect(scrolledFrame.split("\n")[0]?.slice(66).startsWith("╭")).toBe(true)
-        expect(scrolledFrame.split("\n")[23]?.slice(66).startsWith("╰")).toBe(true)
-        expect(scrolledFrame.split("\n")[23]?.slice(0, 66).startsWith("╰")).toBe(true)
-        yield* openTui(() => setup.mockMouse.click(72, 22))
-        expect(opened).toEqual(["apps/rika/src/features/feature-00.ts", "apps/rika/src/features/feature-29.ts"])
       } finally {
         surface.destroy()
         setup.renderer.destroy()
