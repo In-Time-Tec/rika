@@ -1,4 +1,6 @@
 import { Schema } from "effect"
+import { modelRegistrationIdentity } from "./model-registration-identity"
+export { modelRegistrationIdentity }
 import { ModelRegistrationIdentity } from "./model-registration-identity"
 import { ProviderConnectionSnapshot } from "./provider-connection-snapshot"
 

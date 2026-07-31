@@ -2,7 +2,7 @@ import * as McpConfig from "@rika/extensions/mcp-configuration"
 import * as McpOAuth from "@rika/extensions/mcp-oauth-service"
 import * as SkillRegistry from "@rika/extensions/skill-registry"
 import { Console, Context, Effect, FileSystem, Layer, Path, PlatformError, Schema, Semaphore } from "effect"
-import type * as Operation from "./product-operation-dispatch"
+import type { Input } from "../contract/product-operation"
 import { workspacePaths } from "@rika/configuration/configuration-paths"
 
 export interface Options {
@@ -145,7 +145,7 @@ const readMcpConfiguration = Effect.fn("ExtensionOperations.readMcpConfiguration
 })
 
 export const run = Effect.fn("ExtensionOperations.run")(function* (
-  input: Extract<Operation.Input, { readonly _tag: "Skill" | "Mcp" | "Extension" }>,
+  input: Extract<Input, { readonly _tag: "Skill" | "Mcp" | "Extension" }>,
 ) {
   const service = yield* Service
   const fileSystem = yield* FileSystem.FileSystem
