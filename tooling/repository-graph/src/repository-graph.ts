@@ -89,9 +89,10 @@ const discoverFiles = Effect.fn("RepositoryGraph.discoverFiles")(function* (root
   const fileSystem = yield* FileSystem
   const path = yield* Path
   const paths = yield* Effect.all(
-    sourceRoots.map((entry) =>
+    sourceRoots.flatMap((entry) => [
       fileSystem.glob(`${entry}/**/*.{ts,tsx,prompt.txt}`, { root, exclude: ["**/node_modules/**"] }),
-    ),
+      fileSystem.glob(`${entry}/**/fixtures/**/*.json`, { root, exclude: ["**/node_modules/**"] }),
+    ]),
     { concurrency: "unbounded" },
   )
   return paths
@@ -226,7 +227,7 @@ const buildCompleteGraph = (input: GraphInput, path: Path): GraphArtifact => {
     const testKind = testKindOf(id)
     let nodeKind: GraphNode["kind"] = "source"
     if (external) nodeKind = "external"
-    else if (id.endsWith(".prompt.txt")) nodeKind = "asset"
+    else if (id.endsWith(".prompt.txt") || id.endsWith(".json")) nodeKind = "asset"
     return {
       id,
       ...(external ? {} : { path: id }),
@@ -280,7 +281,7 @@ const buildCompleteGraph = (input: GraphInput, path: Path): GraphArtifact => {
       }
       if (!nodes.has(target)) nodes.set(target, nodeFor(target))
       let relationship: GraphRelationship = "test"
-      if (target.endsWith(".prompt.txt")) relationship = "asset"
+      if (target.endsWith(".prompt.txt") || target.endsWith(".json")) relationship = "asset"
       else if (dependency.typeOnly === true) relationship = "type"
       else if (sourceTest === undefined) relationship = "runtime"
       edges.push({

@@ -2454,6 +2454,16 @@
       "testKind": "contract-test"
     },
     {
+      "id": "packages/persistence/test/fixtures/product-migration-oracle-v27.fixture.json",
+      "path": "packages/persistence/test/fixtures/product-migration-oracle-v27.fixture.json",
+      "workspace": "@rika/persistence",
+      "package": "@rika/persistence",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
       "id": "packages/persistence/test/product-database.test.ts",
       "path": "packages/persistence/test/product-database.test.ts",
       "workspace": "@rika/persistence",
@@ -2933,6 +2943,16 @@
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
+    },
+    {
+      "id": "packages/runtime/test/fixtures/deterministic-model-evidence.json",
+      "path": "packages/runtime/test/fixtures/deterministic-model-evidence.json",
+      "workspace": "@rika/runtime",
+      "package": "@rika/runtime",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
     },
     {
       "id": "packages/runtime/test/lazy-model-registry.test.ts",
@@ -3916,6 +3936,316 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/tui/test/fixtures/visual/cancelled-subagent.styles.json",
+      "path": "packages/tui/test/fixtures/visual/cancelled-subagent.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/changed-files-loading.styles.json",
+      "path": "packages/tui/test/fixtures/visual/changed-files-loading.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/changed-files-ready.styles.json",
+      "path": "packages/tui/test/fixtures/visual/changed-files-ready.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/child-workflow.styles.json",
+      "path": "packages/tui/test/fixtures/visual/child-workflow.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/diff-complex.styles.json",
+      "path": "packages/tui/test/fixtures/visual/diff-complex.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/diff-highlighted.styles.json",
+      "path": "packages/tui/test/fixtures/visual/diff-highlighted.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/diff.styles.json",
+      "path": "packages/tui/test/fixtures/visual/diff.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/edit-streaming.styles.json",
+      "path": "packages/tui/test/fixtures/visual/edit-streaming.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/file-picker.styles.json",
+      "path": "packages/tui/test/fixtures/visual/file-picker.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/image.styles.json",
+      "path": "packages/tui/test/fixtures/visual/image.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/markdown.styles.json",
+      "path": "packages/tui/test/fixtures/visual/markdown.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/metadata.json",
+      "path": "packages/tui/test/fixtures/visual/metadata.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/mode-picker.styles.json",
+      "path": "packages/tui/test/fixtures/visual/mode-picker.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/narrow-layout.styles.json",
+      "path": "packages/tui/test/fixtures/visual/narrow-layout.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/narrow-mode-overlay.styles.json",
+      "path": "packages/tui/test/fixtures/visual/narrow-mode-overlay.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/narrow-palette-overlay.styles.json",
+      "path": "packages/tui/test/fixtures/visual/narrow-palette-overlay.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/palette.styles.json",
+      "path": "packages/tui/test/fixtures/visual/palette.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/prompt.styles.json",
+      "path": "packages/tui/test/fixtures/visual/prompt.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/queued-turn.styles.json",
+      "path": "packages/tui/test/fixtures/visual/queued-turn.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/reasoning-collapsed.styles.json",
+      "path": "packages/tui/test/fixtures/visual/reasoning-collapsed.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/reasoning-expanded.styles.json",
+      "path": "packages/tui/test/fixtures/visual/reasoning-expanded.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/restart-replay.styles.json",
+      "path": "packages/tui/test/fixtures/visual/restart-replay.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/shortcuts.styles.json",
+      "path": "packages/tui/test/fixtures/visual/shortcuts.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/sidebar.styles.json",
+      "path": "packages/tui/test/fixtures/visual/sidebar.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/streaming.styles.json",
+      "path": "packages/tui/test/fixtures/visual/streaming.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/thread-switcher-stacked.styles.json",
+      "path": "packages/tui/test/fixtures/visual/thread-switcher-stacked.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/thread-switcher.styles.json",
+      "path": "packages/tui/test/fixtures/visual/thread-switcher.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/tool-expanded.styles.json",
+      "path": "packages/tui/test/fixtures/visual/tool-expanded.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/tool-group-states.styles.json",
+      "path": "packages/tui/test/fixtures/visual/tool-group-states.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/tool.styles.json",
+      "path": "packages/tui/test/fixtures/visual/tool.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/tui/test/fixtures/visual/welcome.styles.json",
+      "path": "packages/tui/test/fixtures/visual/welcome.styles.json",
+      "workspace": "@rika/tui",
+      "package": "@rika/tui",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
       "id": "packages/tui/test/format.test.ts",
       "path": "packages/tui/test/format.test.ts",
       "workspace": "@rika/tui",
@@ -4345,6 +4675,16 @@
       "workspace": "@rika/repository-graph",
       "package": "@rika/repository-graph",
       "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "tooling/repository-graph/test/fixtures/dependency-cruiser-spike/package.json",
+      "path": "tooling/repository-graph/test/fixtures/dependency-cruiser-spike/package.json",
+      "workspace": "@rika/repository-graph",
+      "package": "@rika/repository-graph",
+      "kind": "asset",
       "production": false,
       "publicExports": [],
       "testKind": "fixture"
@@ -13429,6 +13769,14 @@
       "production": false
     },
     {
+      "from": "packages/persistence/test/product-migration-oracle-v27.test.ts",
+      "to": "packages/persistence/test/fixtures/product-migration-oracle-v27.fixture.json",
+      "specifier": "./fixtures/product-migration-oracle-v27.fixture.json",
+      "kind": "import",
+      "relationship": "asset",
+      "production": true
+    },
+    {
       "from": "packages/persistence/test/recorded-shell-repository.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
@@ -20573,7 +20921,5 @@
       "production": true
     }
   ],
-  "violations": [
-    "packages/persistence/test/product-migration-oracle-v27.test.ts: unresolved internal or asset import ./fixtures/product-migration-oracle-v27.fixture.json"
-  ]
+  "violations": []
 }
