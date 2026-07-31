@@ -18,6 +18,7 @@
     "./turn-repository": "./src/turn-repository.ts",
     "./transcript-page": "./src/transcript-page.ts",
     "./transcript-repository": "./src/transcript-repository.ts",
+    "./transcript-repository-test": "./src/transcript-repository-test.ts",
     "./usage-repository": "./src/usage-repository.ts"
   },
   "scripts": {

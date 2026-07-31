@@ -5,7 +5,7 @@ import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import * as UsageRepository from "@rika/persistence/usage-repository"
-import { Context, Deferred, Effect, Layer, Queue, Ref } from "effect"
+import { Context, Deferred, Effect, Layer, Queue, Ref, Schema } from "effect"
 import { Operation } from "../src/index"
 import { executionRoute } from "./current-state"
 
@@ -27,6 +27,7 @@ const thread = (id: Thread.ThreadId): Thread.Thread => ({
 })
 
 const openTurn: Turn.Turn = {
+  _tag: "AgentExecution",
   id: openTurnId,
   threadId: openThreadId,
   prompt: "opened",
@@ -41,14 +42,29 @@ const openTurn: Turn.Turn = {
 
 const completedEvents = (prefix: string, turnId: string): ReadonlyArray<ExecutionBackend.Event> => [
   {
-    executionId: `execution:${turnId}`,
+    executionId: turnId,
     cursor: `${prefix}-0`,
     sequence: 0,
-    type: "model.output.completed",
+    type: "execution.started",
     createdAt: 0,
+    timestampSource: "server",
+  },
+  {
+    executionId: turnId,
+    cursor: `${prefix}-1`,
+    sequence: 1,
+    type: "model.output.completed",
+    createdAt: 1,
     text: prefix,
   },
-  { executionId: `execution:${turnId}`, cursor: `${prefix}-1`, sequence: 1, type: "execution.completed", createdAt: 1 },
+  {
+    executionId: turnId,
+    cursor: `${prefix}-2`,
+    sequence: 2,
+    type: "execution.completed",
+    createdAt: 2,
+    timestampSource: "server",
+  },
 ]
 
 const inspection = (
@@ -67,9 +83,6 @@ const idleBackend = {
   cancelWorkflow: () => Effect.die("unused"),
   cancel: (turnId: string) => Effect.succeed({ turnId, status: "cancelled" as const, events: [] }),
   steer: (turnId: string) => Effect.succeed({ steeringMessageId: `steering:${turnId}:steering:0`, sequence: 0 }),
-  listApprovals: () => Effect.succeed([]),
-  resolveToolApproval: () => Effect.void,
-  resolvePermission: () => Effect.void,
   resolveInvocationSource: () => Effect.die("unused"),
 }
 
@@ -189,17 +202,67 @@ it.effect("loads an interactive thread while a background projection holds anoth
   })
 })
 
-const pricedEvents = (turnId: string): ReadonlyArray<ExecutionBackend.Event> => [
-  {
-    executionId: `execution:${turnId}`,
-    cursor: "priced-usage",
-    sequence: 0,
-    type: "model.attempt.completed",
-    createdAt: 1,
-    data: { model_attempt_id: "priced-attempt", attempt: 1, cost: { amount: 0.25, currency: "USD" } },
-  },
-  { executionId: `execution:${turnId}`, cursor: "priced-done", sequence: 1, type: "execution.completed", createdAt: 2 },
-]
+const pricedEvents = (
+  turnId: string,
+  children: ReadonlyArray<{ readonly executionId: string }> = [],
+): ReadonlyArray<ExecutionBackend.Event> => {
+  const delegation = children.flatMap((child, index): ReadonlyArray<ExecutionBackend.Event> => {
+    const sequence = index * 2 + 2
+    const callId = `busy-call-${index}`
+    return [
+      {
+        executionId: turnId,
+        cursor: `${callId}-requested`,
+        sequence,
+        type: "tool.call.requested",
+        createdAt: sequence,
+        data: { tool_call_id: callId, tool_name: "task", input: { prompt: child.executionId } },
+      },
+      {
+        executionId: turnId,
+        cursor: `${callId}-spawned`,
+        sequence: sequence + 1,
+        type: "child_run.spawned",
+        createdAt: sequence + 1,
+        childExecutionId: child.executionId,
+        data: { tool_call_id: callId, child_execution_id: child.executionId },
+      },
+    ]
+  })
+  const terminalSequence = delegation.length + 2
+  return [
+    {
+      executionId: turnId,
+      cursor: "priced-started",
+      sequence: 0,
+      type: "execution.started",
+      createdAt: 0,
+      timestampSource: "server",
+    },
+    {
+      executionId: turnId,
+      cursor: "priced-usage",
+      sequence: 1,
+      type: "model.attempt.completed",
+      createdAt: 1,
+      data: {
+        model_call_id: "priced-call",
+        model_attempt_id: "priced-attempt",
+        attempt: 1,
+        cost: { amount: 0.25, currency: "USD" },
+      },
+    },
+    ...delegation,
+    {
+      executionId: turnId,
+      cursor: "priced-done",
+      sequence: terminalSequence,
+      type: "execution.completed",
+      createdAt: terminalSequence,
+      timestampSource: "server",
+    },
+  ]
+}
 
 it.effect("reads every child once under the bounded selection repair and keeps committed usage exact", () =>
   Effect.gen(function* () {
@@ -215,7 +278,11 @@ it.effect("reads every child once under the bounded selection repair and keeps c
       ...idleBackend,
       start: (input) =>
         Ref.set(started, true).pipe(
-          Effect.as({ turnId: input.turnId, status: "completed" as const, events: pricedEvents(input.turnId) }),
+          Effect.as({
+            turnId: input.turnId,
+            status: "completed" as const,
+            events: pricedEvents(input.turnId, children),
+          }),
         ),
       inspect: (turnId) =>
         Effect.gen(function* () {
@@ -229,7 +296,10 @@ it.effect("reads every child once under the bounded selection repair and keeps c
           return {
             turnId,
             status: "completed" as const,
-            events: turnId === String(busyTurnId) ? pricedEvents(turnId) : completedEvents(turnId, turnId),
+            events:
+              turnId === String(busyTurnId) || turnId === `execution:${busyTurnId}`
+                ? pricedEvents(turnId, children)
+                : completedEvents(turnId, turnId),
           }
         }),
     })
@@ -249,13 +319,19 @@ it.effect("reads every child once under the bounded selection repair and keeps c
         const counts = yield* Ref.get(childReads)
         expect([...counts.values()].every((count) => count === 1)).toBe(true)
         expect(client.events.some((event) => event._tag === "ExecutionFailed")).toBe(false)
-        expect(
-          yield* awaitCondition(
-            client.usage
-              .readThread(String(busyThreadId))
-              .pipe(Effect.map((totals) => totals.costNanoUsd === 250_000_000)),
+        const complete = yield* awaitCondition(
+          client.usage
+            .readSource(String(busyTurnId), String(busyTurnId))
+            .pipe(Effect.map((source) => source?.sourceComplete === true)),
+        )
+        const debug = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)({
+          source: yield* client.usage.readSource(String(busyTurnId), String(busyTurnId)),
+          failures: client.events.filter(
+            (event) => event._tag === "ExecutionFailed" || event._tag === "TranscriptProjectionFailed",
           ),
-        ).toBe(true)
+        })
+        expect(complete, debug).toBe(true)
+        expect((yield* client.usage.readThread(String(busyThreadId))).costNanoUsd).toBe(250_000_000)
       }),
     )
   }),

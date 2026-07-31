@@ -66,15 +66,8 @@ describe("tool contracts", () => {
     })
   })
 
-  it("defines permission and output policies for every initial tool", () => {
+  it("defines execution and output policies for every initial tool", () => {
     expect(Catalog.definitions.length).toBeGreaterThanOrEqual(9)
-    expect(Catalog.get("read")?.permission).toBe("allow")
-    expect(Catalog.get("write")?.permission).toBe("allow")
-    expect(Catalog.get("edit")?.permission).toBe("allow")
-    expect(Catalog.get("oracle")?.permission).toBe("allow")
-    expect(Catalog.get("librarian")?.permission).toBe("allow")
-    expect(Catalog.get("review")?.permission).toBe("allow")
-    expect(Catalog.get("task")?.permission).toBe("allow")
     expect(Catalog.get("missing")).toBeUndefined()
     expect(Catalog.definitions.every((definition) => definition.timeoutMillis > 0 && definition.outputLimit > 0)).toBe(
       true,
@@ -150,18 +143,10 @@ describe("tool contracts", () => {
           timeoutSeconds: 601,
         }),
       )
-      expect(Catalog.get("find_thread")).toMatchObject({ productPermission: "thread.read", idempotency: "safe" })
-      expect(Catalog.get("create_thread")).toMatchObject({
-        productPermission: "thread.coordinate",
-        idempotency: "unsafe",
-      })
-      expect(Catalog.get("thread_interact")?.permissionRules).toEqual([
-        { actions: ["status", "preview_messages"], productPermission: "thread.read", idempotency: "safe" },
-        { actions: ["message"], productPermission: "thread.coordinate", idempotency: "unsafe" },
-        { actions: ["steer", "cancel", "stop"], productPermission: "thread.control", idempotency: "unsafe" },
-      ])
+      expect(Catalog.get("find_thread")).toMatchObject({ idempotency: "safe" })
+      expect(Catalog.get("create_thread")).toMatchObject({ idempotency: "unsafe" })
+      expect(Catalog.get("thread_interact")).toMatchObject({ idempotency: "unsafe" })
       expect(Catalog.get("wait_for_threads")).toMatchObject({
-        productPermission: "thread.read",
         idempotency: "safe",
         outputLimit: 40_000,
       })
@@ -184,9 +169,9 @@ describe("tool contracts", () => {
           threadId: "thread-1",
           turnId: "turn-1",
           resultDelivery: "reply",
-          state: "awaiting-approval",
+          state: "running",
         }),
-      ).toMatchObject({ schemaVersion: 2, state: "awaiting-approval" })
+      ).toMatchObject({ schemaVersion: 2, state: "running" })
       yield* Effect.flip(
         Schema.decodeUnknownEffect(ThreadTools.AcceptedSuccess)({
           schemaVersion: 2,

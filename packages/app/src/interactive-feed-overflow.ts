@@ -46,19 +46,19 @@ export const isCritical = (event: InteractiveEvent): boolean => {
     case "ExecutionControlFailed":
     case "ExecutionFailed":
     case "QueueFull":
-    case "ShellPermissionRequested":
-    case "ShellPermissionCancelled":
     case "ShellCompleted":
     case "ExecutionControlled":
     case "TitleCostUpdated":
     case "ThreadTitled":
     case "ThreadPreviewLoaded":
     case "ThreadUsageUpdated":
-    case "TranscriptReplaced":
       return true
     case "ThreadsListed":
     case "ThreadRefolding":
-    case "TranscriptPatched":
+    case "TranscriptProjectionStarted":
+    case "TranscriptProjectionPatched":
+    case "TranscriptProjectionStopped":
+    case "TranscriptProjectionFailed":
     case "TranscriptResyncRequired":
     case "QueueUpdated":
     case "QueueResyncRequired":
@@ -76,13 +76,15 @@ const rememberImpl = (state: State, event: InteractiveEvent) => {
   if (state.criticalOverflowed) return
   const id = threadId(event)
   switch (event._tag) {
-    case "TranscriptPatched":
+    case "TranscriptProjectionStarted":
+    case "TranscriptProjectionPatched":
+    case "TranscriptProjectionStopped":
+    case "TranscriptProjectionFailed":
     case "TranscriptResyncRequired":
     case "TurnStarted":
     case "SelectionLoaded":
     case "TranscriptPagePrepended":
     case "TranscriptPageAppended":
-    case "TranscriptReplaced":
       if (id !== undefined) rememberThread(state, state.transcriptThreadIds, id)
       return
     case "QueueUpdated":
@@ -106,8 +108,6 @@ const rememberImpl = (state: State, event: InteractiveEvent) => {
     case "ExecutionControlFailed":
     case "ExecutionFailed":
     case "QueueFull":
-    case "ShellPermissionRequested":
-    case "ShellPermissionCancelled":
     case "ShellCompleted":
     case "ExecutionControlled":
     case "TitleCostUpdated":

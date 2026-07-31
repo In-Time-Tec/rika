@@ -153,28 +153,6 @@ describe("pasted text attachments", () => {
     expect(ViewState.update(shell, { _tag: "Submitted" })).toBe(shell)
   })
 
-  it("applies explicit permission decisions only to the matching permission", () => {
-    const permission = {
-      _tag: "Permission" as const,
-      id: "one",
-      kind: "permission" as const,
-      title: "Write",
-      detail: "file",
-      status: "pending" as const,
-    }
-    const notice = { _tag: "Notification" as const, title: "Notice", detail: "unchanged" }
-    const model = { ...ViewState.initial("/work"), blocks: [permission, notice] }
-    const updated = ViewState.update(model, { _tag: "PermissionDecisionSelected", id: "one", decision: "deny" })
-
-    expect(updated.blocks).toEqual([{ ...permission, status: "denied" }, notice])
-    expect(updated.pendingAction).toEqual({
-      _tag: "DecidePermission",
-      id: "one",
-      kind: "permission",
-      decision: "deny",
-    })
-  })
-
   it("opens the mode picker without exposing direct mode actions", () => {
     const key = {
       name: "return",

@@ -36,7 +36,6 @@ const Operation = Schema.Union([
     whenTrue: Schema.String,
     whenFalse: Schema.String,
   }),
-  Schema.Struct({ id: Schema.String, kind: Schema.Literal("approval"), prompt: Schema.String }),
   Schema.Struct({ id: Schema.String, kind: Schema.Literal("timer"), durationMs: Schema.Int }),
   Schema.Struct({
     id: Schema.String,
@@ -134,8 +133,6 @@ export const compile = (input: DynamicDefinition): Workflow.RegisterDefinitionPa
           when_true: operationId(operation.whenTrue),
           when_false: operationId(operation.whenFalse),
         }
-      case "approval":
-        return { id, kind: "approval", prompt: operation.prompt }
       case "timer":
         return { id, kind: "timer", duration_ms: operation.durationMs }
       case "retry":

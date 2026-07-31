@@ -8,12 +8,13 @@ import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import { Runtime as ToolRuntime } from "@rika/tools"
 import * as Transcript from "@rika/transcript"
-import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Schema } from "effect"
+import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Result, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import * as ExecutionIngest from "../src/execution-ingest"
 import { Operation } from "../src/index"
 import * as UsageCost from "../src/usage-cost"
 import { createTurn, executionRoute } from "./current-state"
+import { delegationUnit, invalidatedProjection, storeProjection } from "./transcript-repository-fixture"
 
 const collectEvents = (session: Operation.InteractiveSession, events: Array<Operation.InteractiveEvent>) =>
   Effect.forkChild(session.events((event) => events.push(event))).pipe(Effect.andThen(Effect.yieldNow))
@@ -35,7 +36,8 @@ const thread = (id: string, updatedAt: number): Thread.Thread => ({
   updatedAt,
 })
 
-const active = (threadId: Thread.ThreadId, id = "active"): Turn.Turn => ({
+const active = (threadId: Thread.ThreadId, id = "active"): Turn.AgentExecutionTurn => ({
+  _tag: "AgentExecution",
   id: Turn.TurnId.make(id),
   threadId,
   prompt: "active prompt",
@@ -49,23 +51,91 @@ const active = (threadId: Thread.ThreadId, id = "active"): Turn.Turn => ({
   lastCursor: "active-cursor",
 })
 
+const serverEvents = (events: ReadonlyArray<ExecutionBackend.Event>): ReadonlyArray<ExecutionBackend.Event> =>
+  events.map((event) => ({ ...event, timestampSource: "server" as const }))
+
+const completeServerTimeline = (
+  events: ReadonlyArray<ExecutionBackend.Event>,
+): ReadonlyArray<ExecutionBackend.Event> => {
+  if (events.length === 0) return events
+  const stamped = serverEvents(events)
+  if (stamped.some((event) => event.type === "execution.started" || event.type === "execution.accepted")) return stamped
+  const first = stamped[0]!
+  return [
+    {
+      executionId: first.executionId,
+      cursor: `${first.executionId}:started`,
+      sequence: 0,
+      type: "execution.started",
+      createdAt: first.createdAt - 1,
+      timestampSource: "server",
+    },
+    ...stamped.map((event, index) => Object.assign({}, event, { sequence: index + 1 })),
+  ]
+}
+
+const storeCompletedTranscript = Effect.fn("InteractiveSessionTest.storeCompletedTranscript")(function* (
+  transcripts: TranscriptRepository.Interface,
+  turn: Turn.AgentExecutionTurn,
+  cursor: string,
+) {
+  const projection = Transcript.project(String(turn.id), turn.prompt, [
+    {
+      cursor,
+      sequence: 0,
+      type: "execution.completed",
+      createdAt: turn.updatedAt,
+    },
+  ])
+  yield* storeProjection(transcripts, turn, projection, {
+    consumed: { [String(turn.id)]: { cursor, sequence: 0, status: "completed" } },
+    projectionVersion: ExecutionIngest.projectionVersion,
+  })
+})
+
+const completeActive = Effect.fn("InteractiveSessionTest.completeActive")(function* (
+  turns: TurnRepository.Interface,
+  transcripts: TranscriptRepository.Interface,
+  updatedAt: number,
+) {
+  const turn = yield* turns.setStatus(Turn.TurnId.make("active"), "completed", "done", updatedAt)
+  yield* storeCompletedTranscript(transcripts, turn, "done")
+  return turn
+})
+
 const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
-  followAfterPermission: boolean = false,
-  toolApprovalWaitIds: ReadonlyArray<string> = [],
   pagedEvents?: ReadonlyArray<ExecutionBackend.Event>,
   stalePageCursor: boolean = false,
   turnPageRequests?: Ref.Ref<ReadonlyArray<TurnRepository.PageCursor | undefined>>,
   cancelFailure: boolean = false,
+  initialTurnsCompleted: boolean = false,
+  completion?: {
+    readonly release: Deferred.Deferred<void, never>
+    readonly finished: Deferred.Deferred<void, never>
+    readonly finalTurnId: Turn.TurnId
+  },
 ) {
   const older = thread("older", 1)
   const latest = thread("latest", 2)
+  const initialTurns = [active(older.id), active(latest.id, "latest-active")].map((turn) =>
+    initialTurnsCompleted
+      ? Object.assign({}, turn, {
+          status: "completed" as const,
+          lastCursor: `${turn.id}-completed`,
+          updatedAt: 2,
+        })
+      : turn,
+  )
   const repositories = yield* ThreadRepository.makeMemory([older, latest])
-  const turns = yield* TurnRepository.makeMemory([active(older.id), active(latest.id, "latest-active")])
+  const turns = yield* TurnRepository.makeMemory(initialTurns)
   const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
   const controls = yield* Ref.make<ReadonlyArray<ReadonlyArray<unknown>>>([])
-  const permissionResolved = yield* Deferred.make<void>()
   const hiddenExecutions = yield* Ref.make<ReadonlySet<string>>(new Set())
-  const transcripts = Context.get(yield* Layer.build(TranscriptRepository.memoryLayer), TranscriptRepository.Service)
+  const transcripts = yield* TranscriptRepository.makeMemory({ turns })
+  if (initialTurnsCompleted)
+    yield* Effect.forEach(initialTurns, (turn) => storeCompletedTranscript(transcripts, turn, turn.lastCursor!), {
+      discard: true,
+    })
   const record = (...call: ReadonlyArray<unknown>) => Ref.update(controls, (calls) => [...calls, call])
   const backend = ExecutionBackend.Service.of({
     invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
@@ -77,24 +147,34 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
     inspectWorkflow: () => Effect.die("unused"),
     cancelWorkflow: () => Effect.die("unused"),
     start: (input) =>
-      followAfterPermission
+      completion !== undefined
         ? record("start", input.turnId).pipe(
+            Effect.tap(() =>
+              input.turnId === completion.finalTurnId ? Deferred.succeed(completion.finished, undefined) : Effect.void,
+            ),
             Effect.as({
               turnId: input.turnId,
               status: "completed" as const,
-              events: [
+              events: serverEvents([
                 {
-                  executionId: `execution:${input.turnId}`,
+                  executionId: input.turnId,
+                  cursor: "queued-started",
+                  sequence: 0,
+                  type: "execution.started",
+                  createdAt: 2,
+                },
+                {
+                  executionId: input.turnId,
                   cursor: "queued-done",
                   sequence: 1,
                   type: "execution.completed",
                   createdAt: 3,
                 },
-              ],
+              ]),
             }),
           )
         : Effect.die("unused"),
-    ...(followAfterPermission
+    ...(completion !== undefined
       ? {
           follow: (
             turnId: string,
@@ -102,23 +182,25 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
             onEvent?: (event: ExecutionBackend.Event) => void,
           ) => {
             const afterCursor = typeof checkpoint === "string" ? checkpoint : checkpoint?.cursor
-            const output = {
-              executionId: `execution:${turnId}`,
+            const output: ExecutionBackend.Event = {
+              executionId: turnId,
               cursor: "resumed-output",
               sequence: 2,
               type: "model.output.completed",
               createdAt: 2,
+              timestampSource: "server",
               text: "created file",
             }
-            const completed = {
-              executionId: `execution:${turnId}`,
+            const completed: ExecutionBackend.Event = {
+              executionId: turnId,
               cursor: "resumed-done",
               sequence: 3,
               type: "execution.completed",
               createdAt: 3,
+              timestampSource: "server",
             }
             return record("follow", turnId, afterCursor).pipe(
-              Effect.andThen(turnId === "active" ? Deferred.await(permissionResolved) : Effect.void),
+              Effect.andThen(turnId === "active" ? Deferred.await(completion.release) : Effect.void),
               Effect.tap(() => Effect.sync(() => onEvent?.(output))),
               Effect.tap(() => Effect.sync(() => onEvent?.(completed))),
               Effect.as({ turnId, status: "completed" as const, events: [output, completed] }),
@@ -134,12 +216,12 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
             : { turnId, status: "running" as const, waits: [], pendingTools: [], children: [] },
         ),
       ),
-    steer: (turnId, text, now) =>
-      record("steer", turnId, text, now).pipe(
+    steer: (turnId, text, idempotencyIdentity) =>
+      record("steer", turnId, text, idempotencyIdentity).pipe(
         Effect.as({ steeringMessageId: `steering:${turnId}:steering:0`, sequence: 0 }),
       ),
-    cancel: (turnId, now) =>
-      record("cancel", turnId, now).pipe(
+    cancel: (turnId) =>
+      record("cancel", turnId).pipe(
         Effect.andThen(
           cancelFailure
             ? Effect.fail(ExecutionBackend.BackendError.make({ message: "cancel unavailable" }))
@@ -148,20 +230,36 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
         Effect.as({
           turnId,
           status: "cancelled" as const,
-          events: [
+          events: serverEvents([
             {
-              executionId: `execution:${turnId}`,
+              executionId: turnId,
               cursor: "cancel-cursor",
               sequence: 1,
               type: "execution.cancelled",
-              createdAt: now,
+              createdAt: 1,
             },
-          ],
+          ]),
         }),
       ),
     replay: (turnId, cursor) =>
       record("replay", turnId, cursor).pipe(
-        Effect.as({ turnId, status: "running" as const, events: [], lastCursor: cursor }),
+        Effect.as({
+          turnId,
+          status: "running" as const,
+          events:
+            cursor === undefined
+              ? serverEvents([
+                  {
+                    executionId: turnId,
+                    cursor: "active-cursor",
+                    sequence: 0,
+                    type: "execution.started",
+                    createdAt: 0,
+                  },
+                ])
+              : [],
+          lastCursor: cursor ?? "active-cursor",
+        }),
       ),
     ...(pagedEvents === undefined
       ? {}
@@ -202,21 +300,6 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
             )
           },
         }),
-    listApprovals: (turnId) =>
-      record("list-approvals", turnId).pipe(
-        Effect.as(
-          toolApprovalWaitIds.map((waitId) => ({
-            waitId,
-            callId: `call-${waitId}`,
-            toolName: "write",
-            input: { path: "a.ts" },
-            requestedAt: 0,
-          })),
-        ),
-      ),
-    resolveToolApproval: (waitId, approved, now) => record("tool-approval", waitId, approved, now),
-    resolvePermission: (waitId, decision, now) =>
-      record("permission", waitId, decision, now).pipe(Effect.andThen(Deferred.succeed(permissionResolved, undefined))),
     resolveInvocationSource: () => Effect.die("unused"),
   })
   const selectionTurns: TurnRepository.Interface =
@@ -303,9 +386,6 @@ describe("InteractiveSession controls", () => {
           Effect.succeed({ turnId, status: "completed" as const, events: [], lastCursor: cursor }),
         steer: () => Effect.die("unused"),
         cancel: () => Effect.die("unused"),
-        listApprovals: () => Effect.succeed([]),
-        resolveToolApproval: () => Effect.void,
-        resolvePermission: () => Effect.die("unused"),
         resolveInvocationSource: () => Effect.die("unused"),
       })
       const layer = Operation.productLayer({
@@ -347,7 +427,7 @@ describe("InteractiveSession controls", () => {
       yield* collectEvents(beta, betaEvents)
       yield* alpha.submit("alpha prompt")
       yield* beta.submit("beta prompt")
-      yield* Effect.all([alpha.shell("pwd", true), beta.shell("pwd", true)])
+      yield* Effect.all([alpha.shell(undefined, "pwd", true), beta.shell(undefined, "pwd", true)])
       const alphaThreadId = alphaEvents.find((event) => event._tag === "ThreadActivated")?.threadId
       const betaThreadId = betaEvents.find((event) => event._tag === "ThreadActivated")?.threadId
       expect(alphaThreadId).not.toBe(betaThreadId)
@@ -386,29 +466,33 @@ describe("InteractiveSession controls", () => {
           Effect.succeed({
             turnId: input.turnId,
             status: "completed" as const,
-            events: [
+            events: serverEvents([
               {
-                executionId: `execution:${input.turnId}`,
+                executionId: input.turnId,
+                cursor: "started",
+                sequence: 0,
+                type: "execution.started",
+                createdAt: 0,
+              },
+              {
+                executionId: input.turnId,
                 cursor: "output",
                 sequence: 1,
                 type: "model.output.completed",
                 createdAt: 1,
               },
               {
-                executionId: `execution:${input.turnId}`,
+                executionId: input.turnId,
                 cursor: "done",
                 sequence: 2,
                 type: "execution.completed",
                 createdAt: 2,
               },
-            ],
+            ]),
           }),
         replay: () => Effect.die("unused"),
         steer: () => Effect.die("unused"),
         cancel: () => Effect.die("unused"),
-        listApprovals: () => Effect.succeed([]),
-        resolveToolApproval: () => Effect.void,
-        resolvePermission: () => Effect.die("unused"),
         resolveInvocationSource: () => Effect.die("unused"),
       })
       const layer = Operation.productLayer({
@@ -432,9 +516,28 @@ describe("InteractiveSession controls", () => {
       yield* session.reopenThread(1)
       yield* session.submit("")
       while ((yield* turns.get(Turn.TurnId.make("created-turn")))?.status !== "completed") yield* Effect.yieldNow
-      while (events.filter((event) => event._tag !== "ThreadsListed").length < 6) yield* Effect.yieldNow
-      expect(events.filter((event) => event._tag !== "ThreadsListed")).toEqual([
+      while (!events.some((event) => event._tag === "TranscriptProjectionStopped")) yield* Effect.yieldNow
+      expect(
+        events.filter(
+          (event) =>
+            event._tag !== "ThreadsListed" &&
+            event._tag !== "TranscriptProjectionStarted" &&
+            event._tag !== "TranscriptProjectionStopped",
+        ),
+      ).toMatchObject([
         { _tag: "ThreadActivated", threadId: "created", title: "New thread" },
+        {
+          _tag: "SelectionLoaded",
+          selectionEpoch: 0,
+          thread: { id: "created" },
+          entries: [],
+        },
+        {
+          _tag: "ThreadRefolding",
+          selectionEpoch: 0,
+          threadId: "created",
+          refolding: false,
+        },
         {
           _tag: "ThreadUsageUpdated",
           selectionEpoch: 0,
@@ -458,32 +561,59 @@ describe("InteractiveSession controls", () => {
           turn: expect.objectContaining({ id: "created-turn", threadId: "created", prompt: "", status: "running" }),
         },
         {
-          _tag: "TranscriptPatched",
+          _tag: "TranscriptProjectionPatched",
           selectionEpoch: 0,
           threadId: "created",
-          turnId: "created-turn",
-          revision: 1,
-          event: {
-            executionId: "execution:created-turn",
+          rootTurnId: "created-turn",
+          origin: {
+            _tag: "Event",
+            executionId: "created-turn",
+            cursor: "started",
+            sequence: 0,
+            type: "execution.started",
+            createdAt: 0,
+            transient: false,
+          },
+          delta: expect.any(Object),
+        },
+        {
+          _tag: "TranscriptProjectionPatched",
+          selectionEpoch: 0,
+          threadId: "created",
+          rootTurnId: "created-turn",
+          origin: {
+            _tag: "Event",
+            executionId: "created-turn",
             cursor: "output",
             sequence: 1,
             type: "model.output.completed",
             createdAt: 1,
+            transient: false,
           },
+          delta: expect.any(Object),
         },
         {
-          _tag: "TranscriptPatched",
+          _tag: "TranscriptProjectionPatched",
           selectionEpoch: 0,
           threadId: "created",
-          turnId: "created-turn",
-          revision: 2,
-          event: {
-            executionId: "execution:created-turn",
+          rootTurnId: "created-turn",
+          origin: {
+            _tag: "Event",
+            executionId: "created-turn",
             cursor: "done",
             sequence: 2,
             type: "execution.completed",
             createdAt: 2,
+            transient: false,
           },
+          delta: expect.any(Object),
+        },
+        {
+          _tag: "ThreadUsageUpdated",
+          selectionEpoch: 0,
+          threadId: "created",
+          revision: 1,
+          time: { _tag: "Available", accumulatedMillis: 2 },
         },
       ])
       expect(yield* repositories.get(Thread.ThreadId.make("created"))).toMatchObject({ title: "New thread" })
@@ -526,9 +656,6 @@ describe("InteractiveSession controls", () => {
         replay: () => Effect.die("unused"),
         steer: () => Effect.die("unused"),
         cancel: () => Effect.die("unused"),
-        listApprovals: () => Effect.succeed([]),
-        resolveToolApproval: () => Effect.void,
-        resolvePermission: () => Effect.die("unused"),
         resolveInvocationSource: () => Effect.die("unused"),
       })
       const layer = Operation.productLayer({
@@ -654,17 +781,36 @@ describe("InteractiveSession controls", () => {
       yield* session.selectThread(older.id, 1)
       yield* session.steer("change course")
       yield* session.cancel
-      yield* Effect.yieldNow
+      const cancellationProjected = () =>
+        events.some(
+          (event) =>
+            event._tag === "TranscriptProjectionPatched" &&
+            event.origin._tag === "Event" &&
+            event.origin.type === "execution.cancelled",
+        )
+      for (let attempts = 0; attempts < 100 && !cancellationProjected(); attempts += 1) yield* Effect.yieldNow
       expect(yield* Ref.get(controls)).toEqual([
         ["replay", "active", undefined],
         ["steer", "active", "change course", "rika:interactive-steer:active:0"],
-        ["cancel", "active", 0],
+        ["cancel", "active"],
       ])
       expect(yield* turns.get(Turn.TurnId.make("active"))).toMatchObject({
         status: "cancelled",
         lastCursor: "cancel-cursor",
       })
-      expect(events.at(-1)).toEqual({
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          _tag: "TranscriptProjectionPatched",
+          rootTurnId: "active",
+          origin: expect.objectContaining({
+            _tag: "Event",
+            cursor: "cancel-cursor",
+            type: "execution.cancelled",
+          }),
+          rootStatus: "cancelled",
+        }),
+      )
+      expect(events).toContainEqual({
         _tag: "ExecutionControlled",
         selectionEpoch: 1,
         threadId: "older",
@@ -692,15 +838,22 @@ describe("InteractiveSession controls", () => {
           Effect.succeed({
             turnId: input.turnId,
             status: "completed" as const,
-            events: [
+            events: serverEvents([
               {
-                executionId: `execution:${input.turnId}`,
+                executionId: input.turnId,
+                cursor: "replacement-started",
+                sequence: 0,
+                type: "execution.started",
+                createdAt: 3,
+              },
+              {
+                executionId: input.turnId,
                 cursor: "replacement-done",
                 sequence: 1,
                 type: "execution.completed",
                 createdAt: 4,
               },
-            ],
+            ]),
           }),
         replay: (turnId) => Effect.succeed({ turnId, status: "running", events: [] }),
         inspect: (turnId) =>
@@ -717,11 +870,27 @@ describe("InteractiveSession controls", () => {
           turns.get(Turn.TurnId.make("pending")).pipe(
             Effect.orDie,
             Effect.flatMap((pending) => Ref.set(persistedAtCancel, pending)),
-            Effect.as({ turnId, status: "cancelled" as const, events: [] }),
+            Effect.as({
+              turnId,
+              status: "cancelled" as const,
+              events: serverEvents([
+                {
+                  executionId: turnId,
+                  cursor: "interrupt-started",
+                  sequence: 0,
+                  type: "execution.started",
+                  createdAt: 2,
+                },
+                {
+                  executionId: turnId,
+                  cursor: "interrupt-cancelled",
+                  sequence: 1,
+                  type: "execution.cancelled",
+                  createdAt: 3,
+                },
+              ]),
+            }),
           ),
-        listApprovals: () => Effect.succeed([]),
-        resolveToolApproval: () => Effect.void,
-        resolvePermission: () => Effect.void,
         resolveInvocationSource: () => Effect.die("unused"),
       })
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
@@ -745,9 +914,17 @@ describe("InteractiveSession controls", () => {
       yield* collectEvents(checkingSession, events)
       yield* checkingSession.selectThread(older.id, 1)
       yield* checkingSession.interruptAndSend("next prompt")
-      yield* Effect.yieldNow
+      const cancellationProjected = () =>
+        events.some(
+          (event) =>
+            event._tag === "TranscriptProjectionPatched" &&
+            event.origin._tag === "Event" &&
+            event.origin.cursor === "interrupt-cancelled",
+        )
+      for (let attempts = 0; attempts < 100 && !cancellationProjected(); attempts += 1) yield* Effect.yieldNow
       expect(yield* Ref.get(persistedAtCancel)).toMatchObject({ prompt: "next prompt", status: "queued" })
       expect((yield* turns.get(Turn.TurnId.make("active")))?.status).toBe("cancelled")
+      expect(cancellationProjected()).toBe(true)
       expect(yield* turns.get(Turn.TurnId.make("pending"))).toMatchObject({
         status: "completed",
         lastCursor: "replacement-done",
@@ -760,126 +937,16 @@ describe("InteractiveSession controls", () => {
     }),
   )
 
-  it.effect("maps allow, deny, and always permission decisions", () =>
-    Effect.gen(function* () {
-      const { session, controls } = yield* makeHarness()
-      const events: Array<Operation.InteractiveEvent> = []
-      yield* collectEvents(session, events)
-      yield* session.selectThread("older", 1)
-      yield* Ref.set(controls, [])
-      events.length = 0
-      yield* session.resolvePermission("allow-wait", "permission", "allow")
-      yield* session.resolvePermission("deny-wait", "permission", "deny")
-      yield* session.resolvePermission("always-wait", "permission", "always")
-      yield* Effect.yieldNow
-      expect((yield* Ref.get(controls)).filter(([operation]) => operation !== "replay")).toEqual([
-        ["permission", "allow-wait", "Approved", 0],
-        ["permission", "deny-wait", "Denied", 0],
-        ["permission", "always-wait", "Always", 0],
-      ])
-      const resolved = events.filter((event) => event._tag === "ExecutionControlled")
-      expect(resolved).toHaveLength(3)
-      expect(resolved.every((event) => event.action === "permission-resolved" && event.selectionEpoch === 1)).toBe(true)
-    }),
-  )
-
-  it.effect("resolves pending tool approvals through the tool approval endpoint", () =>
-    Effect.gen(function* () {
-      const { session, controls } = yield* makeHarness(false, ["allow-tool", "always-tool", "deny-tool"])
-      const events: Array<Operation.InteractiveEvent> = []
-      yield* collectEvents(session, events)
-      yield* session.selectThread("older", 1)
-      yield* Ref.set(controls, [])
-      yield* session.resolvePermission("allow-tool", "tool-approval", "allow")
-      yield* session.resolvePermission("always-tool", "tool-approval", "always")
-      yield* session.resolvePermission("deny-tool", "tool-approval", "deny")
-      expect((yield* Ref.get(controls)).filter(([operation]) => operation !== "replay")).toEqual([
-        ["tool-approval", "allow-tool", true, 0],
-        ["tool-approval", "always-tool", true, 0],
-        ["tool-approval", "deny-tool", false, 0],
-      ])
-    }),
-  )
-
-  it.effect("follows an approved durable permission through completion and drains the queue", () =>
-    Effect.gen(function* () {
-      const priorOutput = {
-        executionId: "execution:active",
-        cursor: "prior-output",
-        sequence: 0,
-        type: "model.output.completed",
-        createdAt: 1,
-        text: "work before permission",
-      }
-      const priorPermission = {
-        executionId: "execution:active",
-        cursor: "permission-wait",
-        sequence: 1,
-        type: "permission.ask.requested",
-        createdAt: 1,
-        data: { wait_id: "permission-wait", title: "Allow work" },
-      }
-      const { session, turns, older } = yield* makeHarness(true, [], [priorOutput, priorPermission])
-      yield* turns.setStatus(Turn.TurnId.make("active"), "waiting", "wait-cursor", 2)
-      yield* createTurn(turns, {
-        id: Turn.TurnId.make("queued-after-wait"),
-        threadId: older.id,
-        prompt: "queued prompt",
-        now: 3,
-      })
-      const events: Array<Operation.InteractiveEvent> = []
-      yield* collectEvents(session, events)
-      yield* session.selectThread(older.id, 1)
-      yield* session.resolvePermission("permission-wait", "permission", "allow")
-      yield* Effect.yieldNow
-      expect(yield* turns.get(Turn.TurnId.make("active"))).toMatchObject({
-        status: "completed",
-        lastCursor: "resumed-done",
-      })
-      expect(yield* turns.get(Turn.TurnId.make("queued-after-wait"))).toMatchObject({
-        status: "completed",
-        lastCursor: "queued-done",
-      })
-      expect(events).toContainEqual({
-        _tag: "TranscriptPatched",
-        selectionEpoch: 1,
-        threadId: "older",
-        turnId: "active",
-        revision: expect.any(Number),
-        event: expect.objectContaining({ type: "model.output.completed", text: "created file" }),
-      })
-      expect(events).toContainEqual({
-        _tag: "TranscriptPatched",
-        selectionEpoch: 1,
-        threadId: "older",
-        turnId: "active",
-        revision: expect.any(Number),
-        event: expect.objectContaining({ cursor: "resumed-done", type: "execution.completed" }),
-      })
-      events.length = 0
-      yield* session.selectThread(older.id, 2)
-      yield* Effect.yieldNow
-      const page = events.find((event) => event._tag === "SelectionLoaded")
-      expect(page?._tag === "SelectionLoaded" ? page.entries : []).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            unit: expect.objectContaining({
-              content: expect.objectContaining({ _tag: "Entry", text: "work before permission" }),
-            }),
-          }),
-          expect.objectContaining({
-            unit: expect.objectContaining({
-              content: expect.objectContaining({ _tag: "Entry", text: "created file" }),
-            }),
-          }),
-        ]),
-      )
-    }),
-  )
-
   it.effect("starts every queued turn exactly once after a waiting turn completes", () =>
     Effect.gen(function* () {
-      const { session, turns, controls, older } = yield* makeHarness(true)
+      const release = yield* Deferred.make<void>()
+      const finished = yield* Deferred.make<void>()
+      const finalTurnId = Turn.TurnId.make("promoted-three")
+      const { session, turns, controls, older } = yield* makeHarness(undefined, false, undefined, false, false, {
+        release,
+        finished,
+        finalTurnId,
+      })
       const events: Array<Operation.InteractiveEvent> = []
       yield* turns.setStatus(Turn.TurnId.make("active"), "waiting", "wait-cursor", 2)
       for (const [index, id] of ["promoted-one", "promoted-two", "promoted-three"].entries())
@@ -890,13 +957,10 @@ describe("InteractiveSession controls", () => {
           now: 10 + index,
         })
       yield* collectEvents(session, events)
-      yield* session.selectThread(older.id, 1)
-      yield* session.resolvePermission("permission-wait", "permission", "allow")
-      while (
-        (yield* turns.get(Turn.TurnId.make("promoted-three")))?.status !== "completed" ||
-        events.filter((event) => event._tag === "TurnStarted").length < 3
-      )
-        yield* Effect.yieldNow
+      const selection = yield* Effect.forkChild(session.selectThread(older.id, 1))
+      yield* Deferred.succeed(release, undefined)
+      yield* Deferred.await(finished)
+      yield* Fiber.join(selection)
       const calls = yield* Ref.get(controls)
       expect(calls.filter((call) => call[0] === "start")).toEqual([
         ["start", "promoted-one"],
@@ -904,23 +968,17 @@ describe("InteractiveSession controls", () => {
         ["start", "promoted-three"],
       ])
       expect(calls.some((call) => call[0] === "follow" && String(call[1]).startsWith("promoted-"))).toBe(false)
-      expect(
-        events
-          .filter((event) => event._tag === "TurnStarted")
-          .map((event) => (event._tag === "TurnStarted" ? String(event.turn.id) : "")),
-      ).toEqual(["promoted-one", "promoted-two", "promoted-three"])
     }),
   )
 
   it.effect(
-    "persists approved shell output, keeps incognito output transient, denies execution, and queues while busy",
+    "runs shell input without approval, keeps incognito output transient, and records alongside active work",
     () =>
       Effect.gen(function* () {
         const repositories = yield* ThreadRepository.makeMemory()
         const turns = yield* TurnRepository.makeMemory()
         const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
         const commands = yield* Ref.make<ReadonlyArray<string>>([])
-        const permissionWorkspaces = yield* Ref.make<ReadonlyArray<string>>([])
         let turnNumber = 0
         const layer = Operation.productLayer({
           repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),
@@ -941,9 +999,6 @@ describe("InteractiveSession controls", () => {
               replay: () => Effect.die("unused"),
               steer: () => Effect.die("unused"),
               cancel: () => Effect.die("unused"),
-              listApprovals: () => Effect.succeed([]),
-              resolveToolApproval: () => Effect.void,
-              resolvePermission: () => Effect.die("unused"),
               resolveInvocationSource: () => Effect.die("unused"),
             }),
           ),
@@ -951,12 +1006,10 @@ describe("InteractiveSession controls", () => {
             ToolRuntime.testLayer((request) => {
               const command = request._tag === "Shell" ? request.args.join(" ") : request._tag
               return Ref.update(commands, (values) => [...values, command]).pipe(
-                Effect.as({ text: `output:${command}`, truncated: false }),
+                Effect.as({ text: `output:${command}`, truncated: false, exitCode: 0 }),
               )
             }),
           defaultWorkspace: "/work",
-          shellPermission: (workspace) =>
-            Ref.update(permissionWorkspaces, (values) => [...values, workspace]).pipe(Effect.as("ask" as const)),
           makeThreadId: Effect.succeed(Thread.ThreadId.make("shell-thread")),
           makeTurnId: Effect.sync(() => Turn.TurnId.make(`shell-turn-${turnNumber++}`)),
           interactive: (_, session) =>
@@ -968,44 +1021,43 @@ describe("InteractiveSession controls", () => {
           operation.run({ _tag: "Interactive", prompt: [], ephemeral: false, workspace: "/client-shell" }),
         )
         yield* waitForSessions(sessions)
-        expect(yield* Ref.get(permissionWorkspaces)).toContain("/client-shell")
         const session = (yield* Ref.get(sessions))[0]
         if (session === undefined) return yield* Effect.die("Missing interactive session")
         const allEvents: Array<Operation.InteractiveEvent> = []
         yield* collectEvents(session, allEvents)
 
-        const runShell = Effect.fn("InteractiveSessionTest.runShell")(function* (
-          command: string,
-          incognito: boolean,
-          decision: "allow" | "deny" | "always",
-        ) {
+        const runShell = Effect.fn("InteractiveSessionTest.runShell")(function* (command: string, incognito: boolean) {
           const first = allEvents.length
-          const fiber = yield* Effect.forkChild(session.shell(command, incognito))
-          while (!allEvents.slice(first).some((event) => event._tag === "ShellPermissionRequested"))
+          yield* session.shell(undefined, command, incognito)
+          while (!allEvents.slice(first).some((event) => event._tag === "ShellCompleted" && event.command === command))
             yield* Effect.yieldNow
-          const permission = allEvents.slice(first).find((event) => event._tag === "ShellPermissionRequested")
-          if (permission?._tag !== "ShellPermissionRequested") return yield* Effect.die("Missing shell permission")
-          yield* session.resolvePermission(permission.id, "permission", decision)
-          yield* Fiber.join(fiber)
-          yield* Effect.yieldNow
           return allEvents.slice(first)
         })
 
-        const persisted = yield* runShell("printf persisted", false, "allow")
+        const persisted = yield* runShell("printf persisted", false)
+        const shellSelectionIndex = persisted.findIndex((event) => event._tag === "SelectionLoaded")
+        const shellSnapshotIndex = persisted.findIndex((event) => event._tag === "TranscriptProjectionStarted")
+        expect(shellSelectionIndex).toBeGreaterThanOrEqual(0)
+        expect(shellSnapshotIndex).toBeGreaterThan(shellSelectionIndex)
+        expect(persisted.filter((event) => event._tag === "SelectionLoaded")).toHaveLength(1)
+        expect(persisted[shellSelectionIndex]).toMatchObject({
+          selectionEpoch: 0,
+          thread: { id: "shell-thread" },
+          entries: [],
+        })
+        expect(persisted.filter((event) => event._tag === "TranscriptProjectionStarted")).toHaveLength(1)
         expect(persisted.find((event) => event._tag === "ShellCompleted")).toMatchObject({ incognito: false })
         expect((yield* turns.list(Thread.ThreadId.make("shell-thread")))[0]).toMatchObject({
-          prompt: expect.stringContaining("output:-lc printf persisted"),
+          _tag: "RecordedShell",
+          prompt: "$ printf persisted",
           status: "completed",
+          result: { text: "output:-lc printf persisted", truncated: false, exitCode: 0 },
         })
 
-        const denied = yield* runShell("printf denied", false, "deny")
-        expect(denied.find((event) => event._tag === "ExecutionFailed")).toMatchObject({
-          message: "Shell command denied",
-        })
         expect(yield* Ref.get(commands)).toEqual(["-lc printf persisted"])
 
         const beforeIncognito = (yield* turns.list(Thread.ThreadId.make("shell-thread"))).length
-        const incognito = yield* runShell("printf secret", true, "always")
+        const incognito = yield* runShell("printf secret", true)
         expect(incognito.find((event) => event._tag === "ShellCompleted")).toMatchObject({ incognito: true })
         expect((yield* turns.list(Thread.ThreadId.make("shell-thread"))).length).toBe(beforeIncognito)
         expect(yield* Ref.get(commands)).toEqual(["-lc printf persisted", "-lc printf secret"])
@@ -1019,36 +1071,40 @@ describe("InteractiveSession controls", () => {
           },
           128,
         )
-        const queuedStart = allEvents.length
-        yield* session.shell("printf queued", false)
-        while (!allEvents.slice(queuedStart).some((event) => event._tag === "QueueUpdated")) yield* Effect.yieldNow
-        const queued = allEvents.slice(queuedStart)
-        expect(queued.some((event) => event._tag === "ShellPermissionRequested")).toBe(false)
-        expect(queued.findLast((event) => event._tag === "QueueUpdated")).toMatchObject({
-          change: { _tag: "Added", item: { prompt: expect.stringContaining("printf queued") } },
-        })
+        const concurrentStart = allEvents.length
+        yield* session.shell(Thread.ThreadId.make("shell-thread"), "printf alongside", false)
+        while (!allEvents.slice(concurrentStart).some((event) => event._tag === "ShellCompleted"))
+          yield* Effect.yieldNow
+        const concurrent = allEvents.slice(concurrentStart)
+        expect(concurrent.some((event) => event._tag === "QueueUpdated")).toBe(false)
         expect(
-          (yield* turns.list(Thread.ThreadId.make("shell-thread"))).find((turn) =>
-            turn.prompt.startsWith("$ printf queued"),
+          (yield* turns.list(Thread.ThreadId.make("shell-thread"))).find(
+            (turn) => Turn.isRecordedShell(turn) && turn.command === "printf alongside",
           ),
-        ).toMatchObject({ status: "queued" })
+        ).toMatchObject({
+          _tag: "RecordedShell",
+          status: "completed",
+          result: { text: "output:-lc printf alongside", exitCode: 0 },
+        })
+        expect(yield* turns.get(Turn.TurnId.make("active-shell-blocker"))).toMatchObject({ status: "running" })
       }),
   )
 
-  it.effect("selects a thread, reopens the latest thread, and replays after the requested cursor", () =>
+  it.effect("selects a thread and reopens the latest persisted projection without raw replay", () =>
     Effect.gen(function* () {
-      const { session, controls, older } = yield* makeHarness()
+      const { session, controls, older } = yield* makeHarness(undefined, false, undefined, false, true)
       const events: Array<Operation.InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
       yield* session.reopenThread(2)
-      yield* session.replay("latest-active", "cursor-7")
       while (!events.some((event) => event._tag === "ThreadUsageUpdated" && event.selectionEpoch === 2))
         yield* Effect.yieldNow
-      yield* awaitSelectionEntries(events, (entries) => entries.some((entry) => entry.turn.id === "latest-active"))
+      const reopened = yield* awaitSelectionEntries(events, (entries) =>
+        entries.some((entry) => entry.turn.id === "latest-active"),
+      )
       expect(events.some((event) => event._tag === "SelectionLoaded" && event.thread.id === "older")).toBe(true)
-      expect(latestSelectionEntries(events)?.map((entry) => entry.turn.id)).toEqual(["latest-active"])
-      expect(events.filter((event) => event._tag === "TranscriptPatched")).toEqual([])
+      expect(reopened.map((entry) => entry.turn.id)).toEqual(["latest-active"])
+      expect(events.filter((event) => event._tag === "TranscriptProjectionPatched")).toEqual([])
       expect(events.find((event) => event._tag === "ThreadUsageUpdated" && event.selectionEpoch === 2)).toEqual({
         _tag: "ThreadUsageUpdated",
         selectionEpoch: 2,
@@ -1058,11 +1114,7 @@ describe("InteractiveSession controls", () => {
         tokens: { _tag: "Unavailable" },
         time: { _tag: "Unavailable" },
       })
-      expect(yield* Ref.get(controls)).toEqual([
-        ["replay", "active", undefined],
-        ["replay", "latest-active", undefined],
-        ["replay", "latest-active", "cursor-7"],
-      ])
+      expect(yield* Ref.get(controls)).toEqual([])
     }),
   )
 
@@ -1079,7 +1131,7 @@ describe("InteractiveSession controls", () => {
           text: `event ${index + 1}`,
         }),
       )
-      const { session, controls, older } = yield* makeHarness(false, [], pagedEvents)
+      const { session, controls, older } = yield* makeHarness(pagedEvents)
       const events: Array<Operation.InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
@@ -1116,7 +1168,7 @@ describe("InteractiveSession controls", () => {
           text: `event ${index + 1}`,
         }),
       )
-      const { session, controls, older } = yield* makeHarness(false, [], pagedEvents, true)
+      const { session, controls, older } = yield* makeHarness(pagedEvents, true)
       const events: Array<Operation.InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
@@ -1136,48 +1188,54 @@ describe("InteractiveSession controls", () => {
 
   it.effect("keeps queued turns in the queue and out of the transcript when selecting a thread", () =>
     Effect.gen(function* () {
-      const { session, turns, controls, older } = yield* makeHarness()
+      const { session, turns, transcripts, controls, older } = yield* makeHarness()
       const queued = yield* createTurn(turns, {
         id: Turn.TurnId.make("queued-selection"),
         threadId: older.id,
         prompt: "queued prompt",
         now: 2,
       })
-      const shell = yield* turns.copy(
-        {
-          id: Turn.TurnId.make("recorded-shell"),
-          threadId: older.id,
-          prompt: "$ printf recorded\n\noutput:recorded",
-          author: { _tag: "Human" },
-          lineage: { _tag: "Original" },
-          executionRoute: executionRoute(),
-          status: "completed",
-          stopIntent: "none",
-          createdAt: 3,
-          updatedAt: 4,
-        },
-        128,
-      )
-      yield* turns.setStatus(Turn.TurnId.make("active"), "completed", "done", 5)
+      const shell: Turn.TerminalRecordedShellTurn = {
+        _tag: "RecordedShell",
+        id: Turn.TurnId.make("recorded-shell"),
+        threadId: older.id,
+        prompt: "$ printf recorded",
+        command: "printf recorded",
+        author: { _tag: "Human" },
+        lineage: { _tag: "Original" },
+        status: "completed",
+        stopIntent: "none",
+        createdAt: 3,
+        updatedAt: 4,
+        result: { text: "output:recorded", truncated: false },
+      }
+      yield* transcripts.copyRecordedShell(shell, ExecutionIngest.projectionVersion)
+      yield* completeActive(turns, transcripts, 5)
       const events: Array<Operation.InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
       yield* Effect.yieldNow
 
       expect(events.find((event) => event._tag === "SelectionLoaded")).toMatchObject({ queue: [{ id: queued.id }] })
-      expect(yield* awaitSelectionEntries(events, (entries) => entries.length >= 2)).toMatchObject([
+      const entries = yield* awaitSelectionEntries(events, (loaded) => loaded.length >= 2)
+      expect(entries).toMatchObject([
         { turn: { id: "active" }, unit: { content: { _tag: "Entry" } } },
-        { turn: { id: shell.id, status: "completed" }, unit: { content: { _tag: "Entry" } } },
+        {
+          turn: { id: shell.id },
+          unit: { content: { _tag: "Block", block: { _tag: "ToolCall", output: "output:recorded" } } },
+        },
       ])
-      expect(yield* Ref.get(controls)).toEqual([["replay", "active", undefined]])
+      expect(entries.some((entry) => entry.turn.id === queued.id)).toBe(false)
+      expect(entries.some((entry) => entry.turn.id === shell.id)).toBe(true)
+      expect(yield* Ref.get(controls)).toEqual([])
     }),
   )
 
   it.effect("bounds the initial page and exhausts older pages without duplicate units", () =>
     Effect.gen(function* () {
       const turnPageRequests = yield* Ref.make<ReadonlyArray<TurnRepository.PageCursor | undefined>>([])
-      const { session, turns, older } = yield* makeHarness(false, [], undefined, false, turnPageRequests)
-      yield* turns.setStatus(Turn.TurnId.make("active"), "completed", "done", 2)
+      const { session, turns, transcripts, older } = yield* makeHarness(undefined, false, turnPageRequests)
+      yield* completeActive(turns, transcripts, 2)
       for (let index = 0; index < 240; index += 1) {
         const created = yield* createTurn(turns, {
           id: Turn.TurnId.make(`history-${index.toString().padStart(3, "0")}`),
@@ -1185,7 +1243,8 @@ describe("InteractiveSession controls", () => {
           prompt: `history ${index}`,
           now: index + 10,
         })
-        yield* turns.setStatus(created.id, "completed", undefined, index + 10)
+        const completed = yield* turns.setStatus(created.id, "completed", undefined, index + 10)
+        yield* storeCompletedTranscript(transcripts, completed, `history-${index}-done`)
       }
       const events: Array<Operation.InteractiveEvent> = []
       yield* collectEvents(session, events)
@@ -1236,35 +1295,20 @@ describe("InteractiveSession controls", () => {
         hasOlder = prepended.hasOlder
         if (prepended.oldestCursor !== undefined) before = prepended.oldestCursor
       }
-      let replacements = -1
-      for (let idle = 0, attempt = 0; idle < 100 && attempt < 20000; attempt += 1) {
-        const observed = events.filter((event) => event._tag === "TranscriptReplaced").length
-        idle = observed === replacements ? idle + 1 : 0
-        replacements = observed
-        yield* Effect.yieldNow
-      }
-      const loadedKeys = new Set(loaded.map((entry) => entry.unit.key))
-      for (const replacement of events) {
-        if (replacement._tag !== "TranscriptReplaced") continue
-        for (const entry of replacement.entries) {
-          if (loadedKeys.has(entry.unit.key)) continue
-          loadedKeys.add(entry.unit.key)
-          loaded.push(entry)
-        }
-      }
       expect(hasOlder).toBe(false)
       expect(new Set(loaded.map((entry) => entry.unit.key)).size).toBe(loaded.length)
       expect(loaded.some((entry) => entry.unit.key === "turn:active:user")).toBe(true)
       expect(loaded.some((entry) => entry.unit.key === "turn:history-000:user")).toBe(true)
       expect(loaded.some((entry) => entry.unit.key === "turn:history-239:user")).toBe(true)
-      expect((yield* Ref.get(turnPageRequests)).length).toBeGreaterThan(turnPagesBeforeIdle)
+      expect(yield* Ref.get(turnPageRequests)).toHaveLength(turnPagesBeforeIdle)
+      expect(events.filter((event) => event._tag === "TranscriptPagePrepended").length).toBeGreaterThan(0)
     }),
   )
 
   it.effect("stops the initial semantic page at the nearest Turn boundary", () =>
     Effect.gen(function* () {
       const { session, turns, transcripts, older } = yield* makeHarness()
-      yield* turns.setStatus(Turn.TurnId.make("active"), "completed", "done", 2)
+      yield* completeActive(turns, transcripts, 2)
       for (let turnIndex = 0; turnIndex < 5; turnIndex += 1) {
         const created = yield* createTurn(turns, {
           id: Turn.TurnId.make(`boundary-${turnIndex}`),
@@ -1274,50 +1318,48 @@ describe("InteractiveSession controls", () => {
         })
         const completed = yield* turns.setStatus(created.id, "completed", undefined, turnIndex + 10)
         const units: Array<Transcript.Unit> = [
-          {
-            key: `turn:${created.id}:user`,
-            turnId: created.id,
-            order: { sequence: 0, part: 0 },
-            revision: 0,
-            content: { _tag: "Entry", role: "user", text: created.prompt },
-          },
+          Transcript.empty(created.id, created.prompt).units[0]!,
           ...Array.from(
             { length: 72 },
             (_, index): Transcript.Unit => ({
               key: `${created.id}:assistant:${index.toString().padStart(2, "0")}`,
               turnId: created.id,
-              order: { sequence: index + 1, part: 0 },
+              order: Transcript.unitOrder(`${created.id}:assistant:${index.toString().padStart(2, "0")}`, index + 1),
               revision: index + 1,
               content: { _tag: "Entry", role: "assistant", text: `${created.id} ${index} ${"x".repeat(50_000)}` },
             }),
           ),
         ]
-        yield* transcripts.replace(completed, { ...Transcript.empty(created.id, created.prompt), units, revision: 72 })
+        yield* storeProjection(transcripts, completed, {
+          ...Transcript.empty(created.id, created.prompt),
+          units,
+          revision: 72,
+        })
       }
       const events: Array<Operation.InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
-      yield* Effect.yieldNow
-
-      const initial = events.find((event) => event._tag === "SelectionLoaded")
-      const loaded = initial?._tag === "SelectionLoaded" ? initial.entries : []
+      const initial = yield* awaitSelectionLoaded(
+        events,
+        (event) => event.entries.length > 0 && event.oldestCursor !== undefined,
+      )
+      const loaded = initial.entries
       const encoded = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(initial)
       expect(new TextEncoder().encode(encoded).byteLength).toBeLessThan(10 * 1024 * 1024)
       expect(loaded.length).toBeGreaterThan(0)
       expect(loaded[0]?.unit.key).toBe(`turn:${loaded[0]?.turn.id}:user`)
-      expect(initial?._tag === "SelectionLoaded" ? initial.hasOlder : false).toBe(true)
-      if (initial?._tag !== "SelectionLoaded" || initial.oldestCursor === undefined)
-        return yield* Effect.die("missing initial transcript cursor")
+      expect(initial.hasOlder).toBe(true)
+      if (initial.oldestCursor === undefined) return yield* Effect.die("missing initial transcript cursor")
 
+      const pagesBefore = events.filter((event) => event._tag === "TranscriptPagePrepended").length
       yield* session.loadOlder(
         older.id,
         1,
         initial.oldestCursor,
         loaded.map((entry) => entry.unit.key),
       )
-      yield* Effect.yieldNow
-      const prepended = events.find((event) => event._tag === "TranscriptPagePrepended")
-      const olderEntries = prepended?._tag === "TranscriptPagePrepended" ? prepended.entries : []
+      const prepended = yield* awaitPrependedPage(events, pagesBefore)
+      const olderEntries = prepended.entries
       expect(olderEntries).toHaveLength(50)
       expect(olderEntries.at(-1)?.unit.key).not.toBe(loaded[0]?.unit.key)
       expect(new Set([...olderEntries, ...loaded].map((entry) => entry.unit.key)).size).toBe(
@@ -1329,7 +1371,7 @@ describe("InteractiveSession controls", () => {
   it.effect("keeps a prior conversation boundary when nested units crowd the newest Turn past the wire page", () =>
     Effect.gen(function* () {
       const { session, turns, transcripts, older } = yield* makeHarness()
-      yield* turns.setStatus(Turn.TurnId.make("active"), "completed", "done", 2)
+      yield* completeActive(turns, transcripts, 2)
       const created = yield* createTurn(turns, {
         id: Turn.TurnId.make("oversized"),
         threadId: older.id,
@@ -1337,25 +1379,24 @@ describe("InteractiveSession controls", () => {
         now: 10,
       })
       const completed = yield* turns.setStatus(created.id, "completed", undefined, 10)
+      const childExecutionId = `child:${created.id}`
+      const parent = delegationUnit(created.id, "nested-agent", childExecutionId, 2)
+      if (parent.content._tag !== "Block" || parent.content.block._tag !== "ToolCall")
+        return yield* Effect.die("missing nested parent tool")
+      const parentId = parent.content.block.id
       const units: Array<Transcript.Unit> = [
-        {
-          key: `turn:${created.id}:user`,
-          turnId: created.id,
-          order: { sequence: 0, part: 0 },
-          revision: 0,
-          content: { _tag: "Entry", role: "user", text: created.prompt },
-        },
+        Transcript.empty(created.id, created.prompt).units[0]!,
         {
           key: `${created.id}:assistant:opening`,
           turnId: created.id,
-          order: { sequence: 1, part: 0 },
+          order: Transcript.unitOrder(`${created.id}:assistant:opening`, 1),
           revision: 1,
           content: { _tag: "Entry", role: "assistant", text: "opening response" },
         },
         {
           key: `compaction:${created.id}`,
           turnId: created.id,
-          order: { sequence: 1, part: 1 },
+          order: Transcript.unitOrder(`compaction:${created.id}`, 1, 1),
           revision: 2,
           content: {
             _tag: "Block",
@@ -1367,39 +1408,49 @@ describe("InteractiveSession controls", () => {
             },
           },
         },
+        parent,
         ...Array.from(
           { length: 260 },
-          (_, index): Transcript.Unit => ({
-            key: `${created.id}:assistant:${index.toString().padStart(3, "0")}`,
-            turnId: created.id,
-            order: { sequence: index + 2, part: 0 },
-            revision: index + 2,
-            parentId: "nested-agent",
-            content: {
-              _tag: "Block",
-              block: { _tag: "Notification", title: String(index), detail: "x".repeat(40_000) },
-            },
-          }),
+          (_, index): Transcript.Unit =>
+            Transcript.attachUnit(
+              {
+                key: `${created.id}:assistant:${index.toString().padStart(3, "0")}`,
+                turnId: childExecutionId,
+                order: Transcript.unitOrder(`${created.id}:assistant:${index.toString().padStart(3, "0")}`, index),
+                revision: index,
+                content: {
+                  _tag: "Block",
+                  block: { _tag: "Notification", title: String(index), detail: "x".repeat(40_000) },
+                },
+              },
+              parent,
+              parentId,
+              childExecutionId,
+            ),
         ),
         {
           key: `${created.id}:assistant:final`,
           turnId: created.id,
-          order: { sequence: 262, part: 0 },
+          order: Transcript.unitOrder(`${created.id}:assistant:final`, 262),
           revision: 262,
           content: { _tag: "Entry", role: "assistant", text: "final response" },
         },
       ]
-      yield* transcripts.replace(completed, { ...Transcript.empty(created.id, created.prompt), units, revision: 262 })
+      yield* storeProjection(transcripts, completed, {
+        ...Transcript.empty(created.id, created.prompt),
+        units,
+        revision: 262,
+      })
       const events: Array<Operation.InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
-      yield* Effect.yieldNow
-
-      const loaded = yield* awaitSelectionEntries(events, (entries) =>
-        entries.some((entry) => entry.unit.key === "turn:active:user"),
+      const initial = yield* awaitSelectionLoaded(
+        events,
+        (event) =>
+          event.oldestCursor !== undefined && event.entries.some((entry) => entry.unit.key === "turn:active:user"),
       )
-      const initial = events.find((event) => event._tag === "SelectionLoaded")
-      const cursor = initial?._tag === "SelectionLoaded" ? initial.oldestCursor : undefined
+      const loaded = initial.entries
+      const cursor = initial.oldestCursor
       if (cursor === undefined) return yield* Effect.die("missing initial transcript cursor")
       const encoded = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(initial)
       expect(new TextEncoder().encode(encoded).byteLength).toBeLessThan(10 * 1024 * 1024)
@@ -1409,10 +1460,10 @@ describe("InteractiveSession controls", () => {
       expect(loaded.some((entry) => entry.unit.key === `${created.id}:assistant:opening`)).toBe(true)
       expect(loaded.some((entry) => entry.unit.key === `${created.id}:assistant:final`)).toBe(true)
       expect(loaded.filter((entry) => entry.unit.key === `compaction:${created.id}`)).toHaveLength(1)
-      expect(cursor?.key).not.toBe(`turn:${created.id}:user`)
+      expect(cursor.orderKey).not.toBe(Transcript.encodeUnitOrder(Transcript.unitOrder(`turn:${created.id}:user`, 0)))
 
       const olderEntries: Array<TranscriptRepository.Entry> = []
-      let hasOlder = initial?._tag === "SelectionLoaded" ? initial.hasOlder : false
+      let hasOlder = initial.hasOlder
       let before = cursor
       for (let page = 0; page < 20 && hasOlder; page += 1) {
         const previousPages = events.filter((event) => event._tag === "TranscriptPagePrepended").length
@@ -1435,11 +1486,11 @@ describe("InteractiveSession controls", () => {
         if (prepended.oldestCursor !== undefined) before = prepended.oldestCursor
       }
       expect(olderEntries.length).toBeGreaterThan(0)
-      const cursorEntry = loaded.find((entry) => entry.unit.key === cursor?.key)
-      expect(olderEntries.at(-1)?.unit.order.sequence).toBeLessThan(cursorEntry!.unit.order.sequence)
+      const cursorEntry = loaded.find((entry) => Transcript.encodeUnitOrder(entry.unit.order) === cursor.orderKey)
+      expect(Transcript.compareUnitOrder(olderEntries.at(-1)!.unit.order, cursorEntry!.unit.order)).toBeLessThan(0)
       const allEntries = [...olderEntries, ...loaded]
       expect(new Set(allEntries.map((entry) => entry.unit.key)).size).toBe(allEntries.length)
-      expect(allEntries.filter((entry) => entry.unit.parentId === "nested-agent")).toHaveLength(260)
+      expect(allEntries.filter((entry) => entry.unit.parentId === parentId)).toHaveLength(260)
       expect(hasOlder).toBe(false)
     }),
   )
@@ -1447,7 +1498,7 @@ describe("InteractiveSession controls", () => {
   it.effect("keeps earlier conversation Turns when a cancelled Turn's child units outnumber the wire page", () =>
     Effect.gen(function* () {
       const { session, turns, transcripts, older } = yield* makeHarness()
-      yield* turns.setStatus(Turn.TurnId.make("active"), "completed", "done", 2)
+      yield* completeActive(turns, transcripts, 2)
       const conversation = [
         { id: "hey", prompt: "Hey", reply: "Hey! What can I help you with?", children: 0 },
         { id: "explore", prompt: "Explore this project", reply: "I’ll trace the current path flow.", children: 600 },
@@ -1462,34 +1513,37 @@ describe("InteractiveSession controls", () => {
           now: index + 10,
         })
         const completed = yield* turns.setStatus(created.id, "completed", undefined, index + 10)
+        const childExecutionId = `child:${created.id}`
+        const parent =
+          entry.children === 0 ? undefined : delegationUnit(created.id, `delegate-${created.id}`, childExecutionId, 2)
         const units: Array<Transcript.Unit> = [
-          {
-            key: `turn:${created.id}:user`,
-            turnId: created.id,
-            order: { sequence: 0, part: 0 },
-            revision: 0,
-            content: { _tag: "Entry", role: "user", text: entry.prompt },
-          },
+          Transcript.empty(created.id, entry.prompt).units[0]!,
           {
             key: `assistant:${created.id}:0`,
             turnId: created.id,
-            order: { sequence: 1, part: 0 },
+            order: Transcript.unitOrder(`assistant:${created.id}:0`, 1),
             revision: 1,
             content: { _tag: "Entry", role: "assistant", text: entry.reply },
           },
-          ...Array.from(
-            { length: entry.children },
-            (_, child): Transcript.Unit => ({
-              key: `${created.id}:child:${child.toString().padStart(3, "0")}`,
-              turnId: `child:${created.id}`,
-              parentId: `tool:${created.id}:delegate`,
-              order: { sequence: child + 2, part: 0 },
-              revision: child + 2,
-              content: { _tag: "Block", block: { _tag: "Reasoning", text: `child ${child}` } },
-            }),
-          ),
+          ...(parent === undefined ? [] : [parent]),
+          ...Array.from({ length: entry.children }, (_, child): Transcript.Unit => {
+            if (parent === undefined || parent.content._tag !== "Block" || parent.content.block._tag !== "ToolCall")
+              throw new TypeError(`Turn ${created.id} has no child parent tool`)
+            return Transcript.attachUnit(
+              {
+                key: `${created.id}:child:${child.toString().padStart(3, "0")}`,
+                turnId: childExecutionId,
+                order: Transcript.unitOrder(`${created.id}:child:${child.toString().padStart(3, "0")}`, child),
+                revision: child,
+                content: { _tag: "Block", block: { _tag: "Reasoning", text: `child ${child}` } },
+              },
+              parent,
+              parent.content.block.id,
+              childExecutionId,
+            )
+          }),
         ]
-        yield* transcripts.replace(completed, {
+        yield* storeProjection(transcripts, completed, {
           ...Transcript.empty(created.id, created.prompt),
           units,
           revision: units.length,
@@ -1498,10 +1552,12 @@ describe("InteractiveSession controls", () => {
       const events: Array<Operation.InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
-      yield* Effect.yieldNow
-
-      const initial = events.find((event) => event._tag === "SelectionLoaded")
-      const loaded = initial?._tag === "SelectionLoaded" ? initial.entries : []
+      const expectedRootKeys = conversation.flatMap((entry) => [`turn:${entry.id}:user`, `assistant:${entry.id}:0`])
+      const initial = yield* awaitSelectionLoaded(events, (event) => {
+        const keys = new Set(event.entries.map((entry) => entry.unit.key))
+        return expectedRootKeys.every((key) => keys.has(key))
+      })
+      const loaded = initial.entries
       const keys = new Set(loaded.map((entry) => entry.unit.key))
       for (const entry of conversation) {
         expect(keys.has(`turn:${entry.id}:user`)).toBe(true)
@@ -1512,7 +1568,7 @@ describe("InteractiveSession controls", () => {
       expect(newest.filter((entry) => entry.unit.parentId !== undefined).length).toBeGreaterThan(0)
       expect(loaded.filter((entry) => entry.turn.id === "explore" && entry.unit.parentId !== undefined)).toHaveLength(0)
       expect(keys.size).toBe(loaded.length)
-      expect(initial?._tag === "SelectionLoaded" ? initial.hasOlder : false).toBe(true)
+      expect(initial.hasOlder).toBe(true)
     }),
   )
 
@@ -1535,7 +1591,7 @@ describe("InteractiveSession controls", () => {
 
   it.effect("keeps the active turn running when the cancellation request fails", () =>
     Effect.gen(function* () {
-      const { session, turns, older } = yield* makeHarness(false, [], undefined, false, undefined, true)
+      const { session, turns, older } = yield* makeHarness(undefined, false, undefined, true)
       const events: Array<Operation.InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
@@ -1552,7 +1608,14 @@ describe("InteractiveSession controls", () => {
 const subagentToolId = "done:call_1"
 const subagentChildId = "child:execution%3Adone:call_1"
 
-const subagentRootEvents: ReadonlyArray<ExecutionBackend.Event> = [
+const subagentRootEvents: ReadonlyArray<ExecutionBackend.Event> = serverEvents([
+  {
+    executionId: "execution:done",
+    cursor: "done-started",
+    sequence: 0,
+    type: "execution.started",
+    createdAt: 0,
+  },
   {
     executionId: "execution:done",
     cursor: "done-call",
@@ -1586,9 +1649,16 @@ const subagentRootEvents: ReadonlyArray<ExecutionBackend.Event> = [
     data: { tool_call_id: "call_1", output: { output: [{ type: "text", text: "**All tests pass.**" }] } },
   },
   { executionId: "execution:done", cursor: "done-final", sequence: 5, type: "execution.completed", createdAt: 5 },
-]
+])
 
-const subagentChildEvents: ReadonlyArray<ExecutionBackend.Event> = [
+const subagentChildEvents: ReadonlyArray<ExecutionBackend.Event> = serverEvents([
+  {
+    executionId: subagentChildId,
+    cursor: "childstarted~a0",
+    sequence: 0,
+    type: "execution.started",
+    createdAt: 0,
+  },
   {
     executionId: subagentChildId,
     cursor: "childtool~a1",
@@ -1614,20 +1684,28 @@ const subagentChildEvents: ReadonlyArray<ExecutionBackend.Event> = [
     text: "**All tests pass.**",
   },
   { executionId: subagentChildId, cursor: "childdone~a4", sequence: 4, type: "execution.completed", createdAt: 4 },
-]
+])
 
 const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagentReloadHarness")(function* (options: {
   readonly storedTree: Transcript.Projection
   readonly turnLastCursor: string
   readonly childReplayEvents: ReadonlyArray<ExecutionBackend.Event>
+  readonly consumed?: Readonly<
+    Record<
+      string,
+      { readonly cursor: string; readonly sequence: number; readonly status?: "completed" | "failed" | "cancelled" }
+    >
+  >
   readonly turnStatus?: Turn.Status
   readonly followed?: Ref.Ref<ReadonlyArray<string>>
   readonly inspection?: (executionId: string) => ExecutionBackend.Inspection | undefined
   readonly replayEvents?: (executionId: string) => ReadonlyArray<ExecutionBackend.Event>
   readonly pageEvents?: (executionId: string, after: string | undefined) => ExecutionBackend.EventPage
+  readonly projectionVersion?: number
 }) {
   const subagentThread = thread("subagent-thread", 1)
-  const doneTurn: Turn.Turn = {
+  const doneTurn: Turn.AgentExecutionTurn = {
+    _tag: "AgentExecution",
     id: Turn.TurnId.make("done"),
     threadId: subagentThread.id,
     prompt: "delegate",
@@ -1643,8 +1721,18 @@ const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagent
   const repositories = yield* ThreadRepository.makeMemory([subagentThread])
   const turns = yield* TurnRepository.makeMemory([doneTurn])
   const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
-  const transcripts = Context.get(yield* Layer.build(TranscriptRepository.memoryLayer), TranscriptRepository.Service)
-  yield* transcripts.replace(doneTurn, options.storedTree)
+  const transcripts =
+    options.projectionVersion === TranscriptRepository.invalidatedProjectionVersion
+      ? yield* TranscriptRepository.makeMemory({
+          initial: [invalidatedProjection(doneTurn, options.storedTree.revision)],
+          turns,
+        })
+      : yield* TranscriptRepository.makeMemory({ turns })
+  if (options.projectionVersion !== TranscriptRepository.invalidatedProjectionVersion)
+    yield* storeProjection(transcripts, doneTurn, options.storedTree, {
+      ...(options.consumed === undefined ? {} : { consumed: options.consumed }),
+      ...(options.projectionVersion === undefined ? {} : { projectionVersion: options.projectionVersion }),
+    })
   const inspection = (turnId: string): ExecutionBackend.Inspection | undefined => {
     if (options.inspection !== undefined) return options.inspection(turnId)
     if (turnId !== "done") return { turnId, status: "completed", waits: [], pendingTools: [], children: [] }
@@ -1657,8 +1745,20 @@ const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagent
       children: [{ executionId: subagentChildId, status: "completed" }],
     }
   }
-  const eventsFor = (turnId: string): ReadonlyArray<ExecutionBackend.Event> =>
-    options.replayEvents?.(turnId) ?? (turnId === subagentChildId ? options.childReplayEvents : [])
+  const eventsFor = (turnId: string): ReadonlyArray<ExecutionBackend.Event> => {
+    const replay = options.replayEvents?.(turnId)
+    if (replay !== undefined)
+      return completeServerTimeline(replay).map((event) => Object.assign({}, event, { executionId: turnId }))
+    if (turnId === "done")
+      return completeServerTimeline(subagentRootEvents).map((event) =>
+        Object.assign({}, event, { executionId: turnId }),
+      )
+    if (turnId === subagentChildId)
+      return completeServerTimeline(options.childReplayEvents).map((event) =>
+        Object.assign({}, event, { executionId: turnId }),
+      )
+    return []
+  }
   const backend = ExecutionBackend.Service.of({
     invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
     createFanOut: () => Effect.die("unused"),
@@ -1702,9 +1802,6 @@ const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagent
           ...(events.at(-1) === undefined ? {} : { newestCursor: events.at(-1)!.cursor }),
         }
       }),
-    listApprovals: () => Effect.succeed([]),
-    resolveToolApproval: () => Effect.void,
-    resolvePermission: () => Effect.void,
     resolveInvocationSource: () => Effect.die("unused"),
   })
   const layer = Operation.productLayer({
@@ -1727,21 +1824,103 @@ const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagent
   return { session, subagentThread, transcripts, turns }
 })
 
+interface ObservedProjectionStream {
+  readonly turn: Turn.AgentExecutionTurn
+  readonly streamId: string
+  readonly patchRevision: number
+  readonly state: Extract<Operation.InteractiveEvent, { readonly _tag: "TranscriptProjectionStarted" }>["state"]
+  readonly units: ReadonlyMap<string, Transcript.Unit>
+  readonly rootStatus?: "completed" | "failed" | "cancelled"
+}
+
+const observedProjectionEntries = (stream: ObservedProjectionStream): ReadonlyArray<TranscriptRepository.Entry> => {
+  const turn = stream.rootStatus === undefined ? stream.turn : { ...stream.turn, status: stream.rootStatus }
+  return [...stream.units.values()].map((unit) => ({
+    turn,
+    unit,
+    projectionRevision: stream.state.revision,
+    projectionModelPhase: stream.state.modelPhase,
+  }))
+}
+
+const sortObservedEntries = (entries: ReadonlyArray<TranscriptRepository.Entry>) =>
+  entries.toSorted(
+    (left, right) =>
+      left.turn.createdAt - right.turn.createdAt ||
+      String(left.turn.id).localeCompare(String(right.turn.id)) ||
+      Transcript.compareUnitOrder(left.unit.order, right.unit.order),
+  )
+
 const latestSelectionEntries = (events: ReadonlyArray<Operation.InteractiveEvent>) => {
   let entries: ReadonlyArray<TranscriptRepository.Entry> | undefined
+  let selectionEpoch: number | undefined
+  let threadId: string | undefined
+  const streams = new Map<string, ObservedProjectionStream>()
   for (const event of events) {
-    if (event._tag === "SelectionLoaded") entries = event.entries
-    else if (event._tag === "TranscriptReplaced") {
-      const replaced = new Set(event.entries.map((entry) => entry.turn.id))
-      entries = [...(entries ?? []).filter((entry) => !replaced.has(entry.turn.id)), ...event.entries].toSorted(
-        (left, right) =>
-          left.turn.createdAt - right.turn.createdAt ||
-          left.unit.order.sequence - right.unit.order.sequence ||
-          left.unit.order.part - right.unit.order.part,
+    if (event._tag === "SelectionLoaded") {
+      entries = event.entries
+      selectionEpoch = event.selectionEpoch
+      threadId = String(event.thread.id)
+      streams.clear()
+      continue
+    }
+    if (event._tag === "TranscriptProjectionStarted") {
+      if (!Turn.isAgentExecution(event.turn)) continue
+      if (
+        selectionEpoch !== undefined &&
+        (event.selectionEpoch !== selectionEpoch || String(event.threadId) !== threadId)
       )
+        continue
+      selectionEpoch = event.selectionEpoch
+      threadId = String(event.threadId)
+      streams.set(String(event.rootTurnId), {
+        turn: event.turn,
+        streamId: event.streamId,
+        patchRevision: event.patchRevision,
+        state: event.state,
+        units: new Map(event.units.map((unit) => [unit.key, unit])),
+        ...(event.rootStatus === undefined ? {} : { rootStatus: event.rootStatus }),
+      })
+      continue
+    }
+    if (event._tag === "TranscriptProjectionPatched") {
+      if (event.selectionEpoch !== selectionEpoch || String(event.threadId) !== threadId) continue
+      const rootTurnId = String(event.rootTurnId)
+      const current = streams.get(rootTurnId)
+      if (
+        current === undefined ||
+        current.streamId !== event.streamId ||
+        current.patchRevision !== event.baseRevision ||
+        event.patchRevision !== event.baseRevision + 1
+      )
+        continue
+      const units = new Map(current.units)
+      for (const key of event.delta.remove) units.delete(key)
+      for (const unit of event.delta.upsert) units.set(unit.key, unit)
+      streams.set(rootTurnId, {
+        ...current,
+        patchRevision: event.patchRevision,
+        state: event.state,
+        units,
+        ...(event.rootStatus === undefined ? {} : { rootStatus: event.rootStatus }),
+      })
+      continue
+    }
+    if (event._tag === "TranscriptProjectionStopped") {
+      if (event.selectionEpoch !== selectionEpoch || String(event.threadId) !== threadId) continue
+      const rootTurnId = String(event.rootTurnId)
+      const current = streams.get(rootTurnId)
+      if (current === undefined || current.streamId !== event.streamId || current.patchRevision !== event.patchRevision)
+        continue
+      streams.set(rootTurnId, { ...current, rootStatus: event.status })
     }
   }
-  return entries
+  if (entries === undefined && streams.size === 0) return undefined
+  const roots = new Set(streams.keys())
+  return sortObservedEntries([
+    ...(entries ?? []).filter((entry) => !roots.has(String(entry.turn.id))),
+    ...[...streams.values()].flatMap(observedProjectionEntries),
+  ])
 }
 
 const awaitSelectionEntries = (
@@ -1755,6 +1934,48 @@ const awaitSelectionEntries = (
       yield* Effect.yieldNow
     }
     return latestSelectionEntries(events) ?? []
+  })
+
+type SelectionLoadedEvent = Extract<Operation.InteractiveEvent, { readonly _tag: "SelectionLoaded" }>
+type TranscriptPagePrependedEvent = Extract<Operation.InteractiveEvent, { readonly _tag: "TranscriptPagePrepended" }>
+
+const awaitSelectionLoaded = (
+  events: ReadonlyArray<Operation.InteractiveEvent>,
+  until: (event: SelectionLoadedEvent) => boolean,
+) =>
+  Effect.gen(function* () {
+    for (let attempt = 0; attempt < 2_000; attempt += 1) {
+      const event = events.findLast(
+        (candidate): candidate is SelectionLoadedEvent => candidate._tag === "SelectionLoaded" && until(candidate),
+      )
+      if (event !== undefined) return event
+      yield* Effect.yieldNow
+    }
+    const detail = events.map((event) => {
+      if (event._tag === "SelectionLoaded")
+        return {
+          tag: event._tag,
+          entries: event.entries.map((entry) => entry.unit.key),
+          hasOlder: event.hasOlder,
+          oldestCursor: event.oldestCursor,
+        }
+      if (event._tag === "ExecutionFailed") return { tag: event._tag, message: event.message }
+      return { tag: event._tag }
+    })
+    const encoded = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(detail).pipe(Effect.orDie)
+    return yield* Effect.die(`selection did not load the expected transcript page: ${encoded}`)
+  })
+
+const awaitPrependedPage = (events: ReadonlyArray<Operation.InteractiveEvent>, previousCount: number) =>
+  Effect.gen(function* () {
+    for (let attempt = 0; attempt < 2_000; attempt += 1) {
+      const pages = events.filter(
+        (event): event is TranscriptPagePrependedEvent => event._tag === "TranscriptPagePrepended",
+      )
+      if (pages.length > previousCount) return pages.at(-1)!
+      yield* Effect.yieldNow
+    }
+    return yield* Effect.die("older transcript page did not load")
   })
 
 const selectionEntriesFor = (
@@ -1799,10 +2020,10 @@ const nestedSubagentExpectations = (entries: ReadonlyArray<TranscriptRepository.
 }
 
 describe("InteractiveSession subagent reload", () => {
-  it.effect("corrects terminal child outcomes in an already-failed checkpoint", () =>
+  it.effect("refolds terminal child outcomes from Relay after a projection-version change", () =>
     Effect.gen(function* () {
-      const failedRoot = Transcript.project("done", "delegate", [
-        ...subagentRootEvents.slice(0, 2),
+      const failedRootEvents: ReadonlyArray<ExecutionBackend.Event> = [
+        ...subagentRootEvents.slice(0, 3),
         {
           executionId: "execution:done",
           cursor: "failed-root",
@@ -1811,7 +2032,8 @@ describe("InteractiveSession subagent reload", () => {
           createdAt: 5,
           text: "root failed after delegation",
         },
-      ])
+      ]
+      const failedRoot = Transcript.project("done", "delegate", failedRootEvents)
       const completedChild = Transcript.project(subagentChildId, "", subagentChildEvents)
       const storedTree = Transcript.withNestedProjections(failedRoot, [
         { parentId: subagentToolId, projection: completedChild },
@@ -1821,6 +2043,8 @@ describe("InteractiveSession subagent reload", () => {
         turnLastCursor: "failed-root",
         childReplayEvents: subagentChildEvents,
         turnStatus: "failed",
+        replayEvents: (executionId) => (executionId === "done" ? failedRootEvents : subagentChildEvents),
+        projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
       })
 
       const reconciledParent = (entries: ReadonlyArray<TranscriptRepository.Entry>) =>
@@ -2033,10 +2257,19 @@ describe("InteractiveSession subagent reload", () => {
         turnStatus: "running",
         inspection: (executionId) => inspections[executionId],
         replayEvents: (executionId) => replayEvents[executionId] ?? [],
+        projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
       })
 
       const { entries, events } = yield* selectionEntriesFor(session, subagentThread.id)
-      for (let attempt = 0; attempt < 400 && !events.some((event) => event._tag === "ThreadUsageUpdated"); attempt += 1)
+      for (
+        let attempt = 0;
+        attempt < 400 &&
+        !events.some(
+          (event) =>
+            event._tag === "ThreadUsageUpdated" && event.cost._tag === "Available" && event.tokens._tag === "Available",
+        );
+        attempt += 1
+      )
         yield* Effect.yieldNow
       const root = entries.filter((entry) => entry.turn.id === "done" && entry.unit.parentId === undefined)
       const tools = root.flatMap((entry) =>
@@ -2045,9 +2278,14 @@ describe("InteractiveSession subagent reload", () => {
           : [],
       )
 
-      expect(root.every((entry) => entry.turn.status === "failed" && entry.turn.lastCursor === "root-failed")).toBe(
-        true,
-      )
+      expect(
+        root.every(
+          (entry) =>
+            Turn.isAgentExecution(entry.turn) &&
+            entry.turn.status === "failed" &&
+            entry.turn.lastCursor === "root-failed",
+        ),
+      ).toBe(true)
       expect(root).toContainEqual(
         expect.objectContaining({
           unit: expect.objectContaining({
@@ -2071,7 +2309,7 @@ describe("InteractiveSession subagent reload", () => {
             entry.unit.turnId === completedChildId &&
             entry.unit.content._tag === "Block" &&
             entry.unit.content.block._tag === "ToolCall" &&
-            entry.unit.content.block.id === `${completedChildId}:nested`,
+            entry.unit.content.block.id === Transcript.scopedIdentity(completedChildId, "nested"),
         )?.unit.content,
       ).toMatchObject({ _tag: "Block", block: { _tag: "ToolCall", status: "complete" } })
       expect(
@@ -2090,13 +2328,13 @@ describe("InteractiveSession subagent reload", () => {
             entry.unit.content.block.status === "running",
         ),
       ).toBe(false)
-      expect(events.find((event) => event._tag === "ThreadUsageUpdated")).toMatchObject({
+      expect(events.findLast((event) => event._tag === "ThreadUsageUpdated")).toMatchObject({
         _tag: "ThreadUsageUpdated",
         selectionEpoch: 1,
         threadId: "subagent-thread",
         cost: { _tag: "Available", usd: 1.25, unpricedAttempts: 0 },
         tokens: { _tag: "Available", total: 30, uncountedAttempts: 0 },
-        time: { _tag: "Unavailable" },
+        time: { _tag: "Available" },
       })
     }),
   )
@@ -2104,10 +2342,14 @@ describe("InteractiveSession subagent reload", () => {
   it.effect("renders an already-completed child from persisted units after following it once", () =>
     Effect.gen(function* () {
       const followed = yield* Ref.make<ReadonlyArray<string>>([])
-      const rootProjection = Transcript.project("done", "delegate", subagentRootEvents.slice(0, 2))
+      const rootProjection = Transcript.project("done", "delegate", subagentRootEvents.slice(0, 3))
+      const storedTree = Transcript.withNestedProjections(rootProjection, [
+        { parentId: subagentToolId, projection: Transcript.empty(subagentChildId, "") },
+      ])
       const { session, subagentThread } = yield* makeSubagentReloadHarness({
-        storedTree: rootProjection,
-        turnLastCursor: subagentRootEvents[1]!.cursor,
+        storedTree,
+        turnLastCursor: subagentRootEvents[2]!.cursor,
+        replayEvents: (executionId) => (executionId === "done" ? subagentRootEvents.slice(0, 3) : subagentChildEvents),
         childReplayEvents: subagentChildEvents,
         turnStatus: "running",
         followed,
@@ -2151,7 +2393,25 @@ describe("InteractiveSession subagent reload", () => {
         },
       ]
       const nestedEvents: ReadonlyArray<ExecutionBackend.Event> = [
-        { executionId: nestedId, cursor: "nested-complete", sequence: 1, type: "execution.completed", createdAt: 4 },
+        {
+          executionId: nestedId,
+          cursor: "nested-started",
+          sequence: 0,
+          type: "execution.started",
+          createdAt: 4,
+          timestampSource: "server",
+        },
+      ]
+      const failedRootEvents: ReadonlyArray<ExecutionBackend.Event> = [
+        ...subagentRootEvents.slice(0, 3),
+        {
+          executionId: "execution:done",
+          cursor: "root-failed",
+          sequence: 3,
+          type: "execution.failed",
+          createdAt: 6,
+          text: "root failed after its descendants finished",
+        },
       ]
       const inspection = (executionId: string): ExecutionBackend.Inspection => {
         let children: ExecutionBackend.Inspection["children"] = []
@@ -2168,14 +2428,23 @@ describe("InteractiveSession subagent reload", () => {
           children,
         }
       }
+      const rootProjection = Transcript.project("done", "delegate", failedRootEvents)
+      const storedTree = Transcript.withNestedProjections(rootProjection, [
+        { parentId: subagentToolId, projection: Transcript.empty(subagentChildId, "") },
+      ])
       const { session, subagentThread } = yield* makeSubagentReloadHarness({
-        storedTree: Transcript.project("done", "delegate", subagentRootEvents.slice(0, 2)),
-        turnLastCursor: subagentRootEvents[1]!.cursor,
+        storedTree,
+        turnLastCursor: "root-failed",
         childReplayEvents: childEvents,
+        consumed: {
+          done: { cursor: "root-failed", sequence: 3, status: "failed" },
+          [Transcript.executionKey(subagentChildId)]: { cursor: "", sequence: -1 },
+        },
         turnStatus: "failed",
         followed,
         inspection,
         replayEvents: (executionId) => {
+          if (executionId === "done") return failedRootEvents
           if (executionId === subagentChildId) return childEvents
           if (executionId === nestedId) return nestedEvents
           return []
@@ -2187,42 +2456,75 @@ describe("InteractiveSession subagent reload", () => {
       for (
         let attempt = 0;
         attempt < 400 &&
-        !events.some((event) => event._tag === "TranscriptPatched" && event.event.cursor === "nested-complete");
+        !events.some(
+          (event) =>
+            event._tag === "TranscriptProjectionPatched" &&
+            event.origin._tag === "Event" &&
+            event.origin.cursor === "nested-complete",
+        );
         attempt += 1
       )
         yield* Effect.yieldNow
 
       expect(yield* Ref.get(followed)).toContain(nestedId)
-      expect(
-        events.some(
-          (event) =>
-            event._tag === "TranscriptPatched" && event.turnId === nestedId && event.event.cursor === "nested-complete",
-        ),
-      ).toBe(true)
+      expect(events.some((event) => event._tag === "TranscriptProjectionFailed")).toBe(false)
     }),
   )
 
-  it.effect("repairs a persisted subagent tree whose child transcript is empty", () =>
+  it.effect("resumes an exact empty child checkpoint from its durable event suffix", () =>
     Effect.gen(function* () {
       const rootProjection = Transcript.project("done", "delegate", subagentRootEvents)
       const brokenTree = Transcript.withNestedProjections(rootProjection, [
         { parentId: subagentToolId, projection: Transcript.empty(subagentChildId, "") },
       ])
-      const { session, subagentThread } = yield* makeSubagentReloadHarness({
+      const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
         storedTree: { ...brokenTree, pricingVersion: Transcript.pricingVersion },
         turnLastCursor: "done-final",
         childReplayEvents: subagentChildEvents,
+        consumed: {
+          done: { cursor: "done-final", sequence: 5, status: "completed" },
+          [Transcript.executionKey(subagentChildId)]: { cursor: "", sequence: -1 },
+        },
       })
       const { entries, events } = yield* selectionEntriesFor(session, subagentThread.id, nestedSubagentReady)
       expect(events.filter((event) => event._tag === "SelectionLoaded")).toHaveLength(1)
-      expect(events.filter((event) => event._tag === "TranscriptReplaced").length).toBeLessThanOrEqual(1)
-      const { nestedTool, nestedAnswer } = nestedSubagentExpectations(entries)
-      expect(nestedTool).toBe(true)
-      expect(nestedAnswer).toBe(true)
+      expect(events.some((event) => event._tag === "TranscriptProjectionFailed")).toBe(false)
+      for (
+        let attempt = 0;
+        attempt < 400 &&
+        (yield* transcripts.get(Turn.TurnId.make("done")))?.executionCheckpoints.find(
+          (checkpoint) => checkpoint.executionKey === Transcript.executionKey(subagentChildId),
+        )?.cursor !== "childdone~a4";
+        attempt += 1
+      )
+        yield* Effect.yieldNow
+      expect(
+        (yield* transcripts.get(Turn.TurnId.make("done")))?.executionCheckpoints.find(
+          (checkpoint) => checkpoint.executionKey === Transcript.executionKey(subagentChildId),
+        ),
+      ).toMatchObject({ cursor: "childdone~a4", status: "completed" })
+      expect(
+        entries.filter(
+          (entry) =>
+            entry.unit.turnId === subagentChildId &&
+            entry.unit.content._tag === "Block" &&
+            entry.unit.content.block._tag === "ToolCall" &&
+            entry.unit.content.block.name === "bash",
+        ),
+      ).toHaveLength(1)
+      expect(
+        entries.filter(
+          (entry) =>
+            entry.unit.turnId === subagentChildId &&
+            entry.unit.content._tag === "Entry" &&
+            entry.unit.content.role === "assistant" &&
+            entry.unit.content.text.includes("All tests pass."),
+        ),
+      ).toHaveLength(1)
     }),
   )
 
-  it.effect("consumes a child with no replayable transcript once and never follows it again", () =>
+  it.effect("does not promote a refold when a terminal child exposes no durable events", () =>
     Effect.gen(function* () {
       const followed = yield* Ref.make<ReadonlyArray<string>>([])
       const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
@@ -2230,6 +2532,7 @@ describe("InteractiveSession subagent reload", () => {
         turnLastCursor: "done-final",
         childReplayEvents: [],
         followed,
+        projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
         inspection: (executionId) => ({
           turnId: executionId,
           status: "completed",
@@ -2242,54 +2545,33 @@ describe("InteractiveSession subagent reload", () => {
 
       yield* selectionEntriesFor(session, subagentThread.id)
       const stored = yield* transcripts.get(Turn.TurnId.make("done"))
-      expect(stored?.consumed?.[subagentChildId]?.status).toBe("completed")
-      expect(stored?.childTreeReconciled).toBe(true)
-      const consumedFollows = yield* Ref.get(followed)
+      expect(stored?.projectionVersion).toBe(TranscriptRepository.invalidatedProjectionVersion)
+      expect(stored?.executionCheckpoints.find((entry) => entry.executionKey === subagentChildId)).toBeUndefined()
+      const failedFollows = yield* Ref.get(followed)
 
       yield* session.reopenThread(2)
       for (let attempt = 0; attempt < 200; attempt += 1) yield* Effect.yieldNow
-      expect(yield* Ref.get(followed)).toEqual(consumedFollows)
+      expect((yield* Ref.get(followed)).length).toBeGreaterThan(failedFollows.length)
     }),
   )
 
-  it.effect("keeps persisted subagent transcripts when the backend can no longer replay the child", () =>
+  it.effect("keeps an invalidated projection empty when Relay cannot refold its child", () =>
     Effect.gen(function* () {
-      const rootProjection = Transcript.project("done", "delegate", subagentRootEvents)
-      const linkedRoot: Transcript.Projection = {
-        ...rootProjection,
-        units: rootProjection.units.flatMap((unit) => {
-          if (unit.content._tag !== "Block") return [unit]
-          if (unit.content.block._tag === "ChildAgent") return []
-          if (unit.content.block._tag === "ToolCall" && unit.content.block.id === subagentToolId)
-            return [
-              {
-                ...unit,
-                content: {
-                  _tag: "Block" as const,
-                  block: { ...unit.content.block, childId: subagentChildId, status: "complete" as const },
-                },
-              },
-            ]
-          return [unit]
-        }),
-      }
-      const childProjection = Transcript.project(subagentChildId, "", subagentChildEvents)
-      const richTree = Transcript.withNestedProjections(linkedRoot, [
-        { parentId: subagentToolId, projection: childProjection },
-      ])
-      const { session, subagentThread } = yield* makeSubagentReloadHarness({
-        storedTree: { ...richTree, pricingVersion: Transcript.pricingVersion },
+      const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
+        storedTree: Transcript.project("done", "delegate", subagentRootEvents),
         turnLastCursor: "done-later",
         childReplayEvents: [],
+        projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
       })
-      const { entries } = yield* selectionEntriesFor(session, subagentThread.id, nestedSubagentReady)
-      const { nestedTool, nestedAnswer } = nestedSubagentExpectations(entries)
-      expect(nestedTool).toBe(true)
-      expect(nestedAnswer).toBe(true)
+      yield* selectionEntriesFor(session, subagentThread.id)
+      const stored = yield* transcripts.get(Turn.TurnId.make("done"))
+      expect(stored?.projectionVersion).toBe(TranscriptRepository.invalidatedProjectionVersion)
+      expect(stored?.units).toEqual([])
+      expect(stored?.executionCheckpoints).toEqual([])
     }),
   )
 
-  it.effect("does not replay a reconciled terminal child tree when the thread reopens", () =>
+  it.effect("does not replay a refolded terminal child tree when the thread reopens", () =>
     Effect.gen(function* () {
       const rootProjection = Transcript.project("done", "delegate", subagentRootEvents)
       const childProjection = Transcript.project(subagentChildId, "", subagentChildEvents)
@@ -2318,6 +2600,7 @@ describe("InteractiveSession subagent reload", () => {
         turnLastCursor: "done-final",
         childReplayEvents: subagentChildEvents,
         inspection,
+        projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
         replayEvents: (executionId) => {
           eventPages += 1
           if (executionId === "done") return subagentRootEvents
@@ -2332,18 +2615,19 @@ describe("InteractiveSession subagent reload", () => {
       expect(repairedPages).toBeGreaterThan(0)
 
       yield* session.reopenThread(2)
-      expect(inspections).toBe(repairedInspections + 1)
+      expect(inspections).toBe(repairedInspections)
       expect(eventPages).toBe(repairedPages)
     }),
   )
 
-  it.effect("does not mark a persisted terminal turn reconciled while Relay reports active execution", () =>
+  it.effect("does not promote an invalidated projection while Relay reports active execution", () =>
     Effect.gen(function* () {
       let inspections = 0
       const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
         storedTree: Transcript.project("done", "delegate", subagentRootEvents),
         turnLastCursor: "done-final",
         childReplayEvents: [],
+        projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
         inspection: (executionId) => {
           inspections += 1
           return {
@@ -2357,11 +2641,20 @@ describe("InteractiveSession subagent reload", () => {
         },
       })
 
-      yield* selectionEntriesFor(session, subagentThread.id)
-      expect((yield* transcripts.get(Turn.TurnId.make("done")))?.childTreeReconciled).toBe(false)
+      const { events } = yield* selectionEntriesFor(session, subagentThread.id)
+      for (
+        let attempt = 0;
+        attempt < 400 && !events.some((event) => event._tag === "TranscriptProjectionFailed");
+        attempt += 1
+      )
+        yield* Effect.yieldNow
+      expect((yield* transcripts.get(Turn.TurnId.make("done")))?.projectionVersion).toBe(
+        TranscriptRepository.invalidatedProjectionVersion,
+      )
+      expect(events.some((event) => event._tag === "TranscriptProjectionFailed")).toBe(true)
       const firstInspections = inspections
       yield* session.reopenThread(2)
-      expect(inspections).toBeGreaterThan(firstInspections)
+      expect(inspections).toBe(firstInspections)
     }),
   )
 
@@ -2372,6 +2665,7 @@ describe("InteractiveSession subagent reload", () => {
         storedTree: Transcript.project("done", "delegate", subagentRootEvents),
         turnLastCursor: "done-final",
         childReplayEvents: subagentChildEvents,
+        projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
         inspection: (executionId) => {
           if (executionId !== "done")
             return childAvailable
@@ -2396,19 +2690,24 @@ describe("InteractiveSession subagent reload", () => {
 
       yield* selectionEntriesFor(session, subagentThread.id)
       const unreadable = yield* transcripts.get(Turn.TurnId.make("done"))
-      expect(unreadable?.childTreeReconciled).toBe(false)
-      expect(unreadable?.consumed?.[subagentChildId]?.status).toBeUndefined()
+      expect(unreadable?.projectionVersion).toBe(TranscriptRepository.invalidatedProjectionVersion)
+      expect(
+        unreadable?.executionCheckpoints.find((entry) => entry.executionKey === subagentChildId)?.status,
+      ).toBeUndefined()
 
       childAvailable = true
       yield* session.reopenThread(2)
       for (
         let attempt = 0;
-        attempt < 400 && (yield* transcripts.get(Turn.TurnId.make("done")))?.childTreeReconciled !== true;
+        attempt < 400 &&
+        (yield* transcripts.get(Turn.TurnId.make("done")))?.projectionVersion !== ExecutionIngest.projectionVersion;
         attempt += 1
       )
         yield* Effect.yieldNow
       const readable = yield* transcripts.get(Turn.TurnId.make("done"))
-      expect(readable?.consumed?.[subagentChildId]?.status).toBe("completed")
+      expect(readable?.executionCheckpoints.find((entry) => entry.executionKey === subagentChildId)?.status).toBe(
+        "completed",
+      )
       expect(
         readable?.units.some(
           (unit) =>
@@ -2420,7 +2719,7 @@ describe("InteractiveSession subagent reload", () => {
     }),
   )
 
-  it.effect("consumes a child that only inspection reveals before reconciling the tree", () =>
+  it.effect("rejects an inspection-only child that has no durable parent attachment", () =>
     Effect.gen(function* () {
       const lateChild = `${subagentChildId}:late`
       let rootInspections = 0
@@ -2428,6 +2727,7 @@ describe("InteractiveSession subagent reload", () => {
         storedTree: Transcript.project("done", "delegate", subagentRootEvents),
         turnLastCursor: "done-final",
         childReplayEvents: subagentChildEvents,
+        projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
         inspection: (executionId) => {
           if (executionId === "done") rootInspections += 1
           return {
@@ -2448,15 +2748,21 @@ describe("InteractiveSession subagent reload", () => {
       })
 
       yield* selectionEntriesFor(session, subagentThread.id)
+      for (
+        let attempt = 0;
+        attempt < 400 &&
+        (yield* transcripts.get(Turn.TurnId.make("done")))?.projectionVersion !== ExecutionIngest.projectionVersion;
+        attempt += 1
+      )
+        yield* Effect.yieldNow
       expect(rootInspections).toBeGreaterThan(1)
       const stored = yield* transcripts.get(Turn.TurnId.make("done"))
-      expect(Object.keys(stored?.consumed ?? {}).toSorted()).toEqual(["done", subagentChildId, lateChild].toSorted())
-      expect(stored?.consumed?.[lateChild]?.status).toBe("completed")
-      expect(stored?.childTreeReconciled).toBe(true)
+      expect(stored?.projectionVersion).toBe(ExecutionIngest.projectionVersion)
+      expect(stored?.executionCheckpoints.find((entry) => entry.executionKey === lateChild)).toBeUndefined()
     }),
   )
 
-  it.effect("certifies only replayed root and child projections and excludes stored orphan children", () =>
+  it.effect("refolds only durable root and child events and excludes stale stored children", () =>
     Effect.gen(function* () {
       const staleChild = Transcript.project(subagentChildId, "", [
         ...subagentChildEvents,
@@ -2477,17 +2783,24 @@ describe("InteractiveSession subagent reload", () => {
           text: "orphan stored child",
         },
       ])
-      const storedTree = Transcript.withNestedProjections(
+      const staleTree = Transcript.withNestedProjections(
         Transcript.project("done", "wrong stored prompt", subagentRootEvents),
-        [
-          { parentId: subagentToolId, projection: staleChild },
-          { parentId: "orphan-parent", projection: orphan },
-        ],
+        [{ parentId: subagentToolId, projection: staleChild }],
       )
+      const staleParent = staleTree.units.find(
+        (unit) => unit.content._tag === "Block" && unit.content.block._tag === "ToolCall",
+      )!
+      const storedTree = {
+        ...staleTree,
+        units: staleTree.units.concat(
+          orphan.units.map((unit) => Transcript.attachUnit(unit, staleParent, "orphan-parent", "orphan-child")),
+        ),
+      }
       const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
         storedTree,
         turnLastCursor: "done-final",
         childReplayEvents: subagentChildEvents,
+        projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
         replayEvents: (executionId) => (executionId === "done" ? subagentRootEvents : subagentChildEvents),
         inspection: (executionId) => ({
           turnId: executionId,
@@ -2501,7 +2814,7 @@ describe("InteractiveSession subagent reload", () => {
 
       yield* selectionEntriesFor(session, subagentThread.id)
       const stored = yield* transcripts.get(Turn.TurnId.make("done"))
-      expect(stored?.childTreeReconciled).toBe(true)
+      expect(stored?.projectionVersion).toBe(ExecutionIngest.projectionVersion)
       expect(stored?.units.some((unit) => unit.content._tag === "Entry" && unit.content.text === "delegate")).toBe(true)
       expect(
         stored?.units.some(
@@ -2512,42 +2825,34 @@ describe("InteractiveSession subagent reload", () => {
     }),
   )
 
-  it.effect("keeps persisted root units when Relay can no longer replay the root", () =>
+  it.effect("does not promote a refold when Relay cannot replay the root", () =>
     Effect.gen(function* () {
       const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
         storedTree: Transcript.project("done", "delegate", subagentRootEvents),
         turnLastCursor: "done-final",
         childReplayEvents: subagentChildEvents,
+        projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
         replayEvents: (executionId) => (executionId === subagentChildId ? subagentChildEvents : []),
       })
 
-      const { entries } = yield* selectionEntriesFor(session, subagentThread.id, nestedSubagentReady)
-      expect(
-        entries.some(
-          (entry) =>
-            entry.unit.parentId === undefined &&
-            entry.unit.content._tag === "Block" &&
-            entry.unit.content.block._tag === "ToolCall" &&
-            entry.unit.content.block.id === subagentToolId,
-        ),
-      ).toBe(true)
-      const { nestedTool, nestedAnswer } = nestedSubagentExpectations(entries)
-      expect(nestedTool).toBe(true)
-      expect(nestedAnswer).toBe(true)
-      expect((yield* transcripts.get(Turn.TurnId.make("done")))?.consumed?.done?.status).toBe("completed")
+      yield* selectionEntriesFor(session, subagentThread.id)
+      const stored = yield* transcripts.get(Turn.TurnId.make("done"))
+      expect(stored?.projectionVersion).toBe(TranscriptRepository.invalidatedProjectionVersion)
+      expect(stored?.executionCheckpoints.find((entry) => entry.executionKey === "done")).toBeUndefined()
     }),
   )
 })
 
 const spendThread = thread("spend-thread", 1)
 const spendTurnId = Turn.TurnId.make("spend-turn")
-const spendExecutionId = `execution:${String(spendTurnId)}`
+const spendExecutionId = String(spendTurnId)
 
 const stamped = (
   cursor: string,
-  type: "execution.started" | "execution.completed",
+  type: ExecutionBackend.Event["type"],
   createdAt: number,
   sequence: number,
+  fields: Record<string, unknown> = {},
 ): ExecutionBackend.Event =>
   ({
     executionId: spendExecutionId,
@@ -2556,26 +2861,15 @@ const stamped = (
     type,
     createdAt,
     timestampSource: "server",
+    ...fields,
   }) as ExecutionBackend.Event
 
 const spendEvents: ReadonlyArray<ExecutionBackend.Event> = [
   stamped("spend-started", "execution.started", 10_000, 1),
-  {
-    executionId: spendExecutionId,
-    cursor: "spend-usage",
-    sequence: 2,
-    type: "model.attempt.completed",
-    createdAt: 20_000,
+  stamped("spend-usage", "model.attempt.completed", 20_000, 2, {
     data: { model_attempt_id: "spend-attempt", attempt: 1, cost: { amount: 0.75, currency: "USD" } },
-  },
-  {
-    executionId: spendExecutionId,
-    cursor: "spend-answer",
-    sequence: 3,
-    type: "model.output.completed",
-    createdAt: 30_000,
-    text: "spent",
-  },
+  }),
+  stamped("spend-answer", "model.output.completed", 30_000, 3, { text: "spent" }),
 ]
 
 const spendCompleted = stamped("spend-completed", "execution.completed", 40_000, 4)
@@ -2583,11 +2877,17 @@ const spendCompleted = stamped("spend-completed", "execution.completed", 40_000,
 const spendTimeline: ReadonlyArray<ExecutionBackend.Event> = [...spendEvents, spendCompleted]
 
 const legacyUsageRow = () => {
-  const snapshot = spendTimeline.reduce(
-    (folded, event) =>
-      UsageCost.observe(folded, { threadId: String(spendThread.id), turnId: String(spendTurnId), event }),
+  const folded = UsageCost.foldBatch(
     UsageCost.empty,
+    spendTimeline.map((event) => ({
+      threadId: String(spendThread.id),
+      turnId: String(spendTurnId),
+      event,
+    })),
+    new Set([spendExecutionId]),
   )
+  if (Result.isFailure(folded)) throw folded.failure
+  const snapshot = folded.success
   const totals = UsageCost.materialize(snapshot, String(spendTurnId), String(spendThread.id))
   return {
     foldJson: JSON.stringify({
@@ -2611,7 +2911,8 @@ const makeSpendHarness = Effect.fn("InteractiveSessionTest.makeSpendHarness")(fu
   readonly turnStatus?: Turn.Status
   readonly legacy?: boolean
 }) {
-  const spendTurn: Turn.Turn = {
+  const spendTurn: Turn.AgentExecutionTurn = {
+    _tag: "AgentExecution",
     id: spendTurnId,
     threadId: spendThread.id,
     prompt: "spend prompt",
@@ -2622,20 +2923,42 @@ const makeSpendHarness = Effect.fn("InteractiveSessionTest.makeSpendHarness")(fu
     stopIntent: "none",
     createdAt: 1,
     updatedAt: 1,
+    ...(options.turnStatus === undefined ? {} : { lastCursor: "spend-completed" }),
   }
   const repositories = yield* ThreadRepository.makeMemory([spendThread])
   const turns = yield* TurnRepository.makeMemory([spendTurn])
   const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
-  const transcripts = Context.get(yield* Layer.build(TranscriptRepository.memoryLayer), TranscriptRepository.Service)
-  const usage = Context.get(yield* Layer.build(UsageRepository.memoryLayer), UsageRepository.Service)
+  const transcripts =
+    options.legacy === true
+      ? yield* TranscriptRepository.makeMemory({
+          initial: [
+            invalidatedProjection(
+              spendTurn,
+              Transcript.project(String(spendTurnId), spendTurn.prompt, spendTimeline).revision,
+            ),
+          ],
+          turns,
+        })
+      : yield* TranscriptRepository.makeMemory({ turns })
   const follows = yield* Ref.make(0)
   const blocked = yield* Ref.make(0)
-  if (options.legacy === true) {
-    yield* transcripts.replace(spendTurn, Transcript.project(String(spendTurnId), spendTurn.prompt, spendTimeline), {})
-    const legacy = legacyUsageRow()
-    yield* usage.admit(String(spendTurnId), String(spendThread.id))
-    yield* usage.commitFold(String(spendTurnId), 0, legacy.foldJson, legacy.totals)
-  }
+  const legacy = options.legacy === true ? legacyUsageRow() : undefined
+  const usage = yield* UsageRepository.makeMemory({
+    initial:
+      legacy === undefined
+        ? []
+        : [
+            {
+              sourceId: String(spendTurnId),
+              turnId: String(spendTurnId),
+              threadId: String(spendThread.id),
+              revision: 1,
+              projectionVersion: UsageRepository.projectionVersion - 1,
+              foldJson: legacy.foldJson,
+              ...legacy.totals,
+            },
+          ],
+  })
   const terminal = {
     turnId: String(spendTurnId),
     status: "completed" as const,
@@ -2653,12 +2976,13 @@ const makeSpendHarness = Effect.fn("InteractiveSessionTest.makeSpendHarness")(fu
     inspectWorkflow: () => Effect.die("unused"),
     cancelWorkflow: () => Effect.die("unused"),
     start: () => Effect.die("unused"),
-    inspect: () =>
-      Effect.succeed(
-        options.turnStatus === undefined
-          ? { ...terminal, status: "running" as const, lastCursor: "spend-answer" }
-          : { ...terminal, lastCursor: "spend-completed" },
-      ),
+    inspect: (turnId) => {
+      if (String(turnId) !== String(spendTurnId)) return Effect.void.pipe(Effect.as(undefined))
+      if (options.turnStatus === undefined) {
+        return Effect.succeed({ ...terminal, status: "running" as const, lastCursor: "spend-answer" })
+      }
+      return Effect.succeed({ ...terminal, lastCursor: "spend-completed" })
+    },
     follow: (turnId, cursor, onEvent) =>
       options.legacy === true
         ? Ref.update(follows, (count) => count + 1).pipe(
@@ -2705,9 +3029,6 @@ const makeSpendHarness = Effect.fn("InteractiveSessionTest.makeSpendHarness")(fu
           turnId: String(turnId),
         }),
       ),
-    listApprovals: () => Effect.succeed([]),
-    resolveToolApproval: () => Effect.void,
-    resolvePermission: () => Effect.void,
     resolveInvocationSource: () => Effect.die("unused"),
   })
   const layer = Operation.productLayer({
@@ -2760,7 +3081,7 @@ describe("InteractiveSession persisted usage", () => {
     }),
   )
 
-  it.effect("holds the displayed total when the same events are replayed into the feed after reselecting", () =>
+  it.effect("holds the displayed total when the persisted projection is reselected", () =>
     Effect.gen(function* () {
       const { session, usage } = yield* makeSpendHarness({ turnStatus: "completed" })
       const events: Array<Operation.InteractiveEvent> = []
@@ -2776,17 +3097,18 @@ describe("InteractiveSession persisted usage", () => {
 
       yield* session.selectThread(spendThread.id, 2)
       for (let attempt = 0; attempt < 5; attempt += 1) yield* settle
-      const beforeReplay = events.length
-      yield* session.replay(String(spendTurnId), undefined)
       for (let attempt = 0; attempt < 10; attempt += 1) yield* settle
 
-      const patched = events
-        .slice(beforeReplay)
-        .filter((event) => event._tag === "TranscriptPatched" && String(event.turnId) === String(spendTurnId))
       const updates = events.flatMap((event) => (event._tag === "ThreadUsageUpdated" ? [event] : []))
       const shown = updates.flatMap((event) => (event.cost._tag === "Available" ? [event.cost.usd] : []))
 
-      expect(patched.length).toBeGreaterThan(0)
+      expect(events.some((event) => event._tag === "SelectionLoaded" && event.selectionEpoch === 2)).toBe(true)
+      const reselectedOrigins = events.flatMap((event) =>
+        event._tag === "TranscriptProjectionPatched" && event.selectionEpoch === 2 && event.origin._tag === "Event"
+          ? [`${event.origin.executionId}:${event.origin.cursor}:${event.origin.type}`]
+          : [],
+      )
+      expect(new Set(reselectedOrigins).size).toBe(reselectedOrigins.length)
       expect(updates.some((event) => event.selectionEpoch === 2)).toBe(true)
       expect(shown.length).toBeGreaterThan(0)
       expect(Math.max(...shown)).toBe(0.75)
@@ -2813,9 +3135,9 @@ describe("InteractiveSession persisted usage", () => {
         Effect.andThen(Effect.forEach(Array.from({ length: 100 }), () => Effect.yieldNow, { discard: true })),
       )
       expect((yield* transcripts.get(spendTurnId))?.projectionVersion).toBe(
-        TranscriptRepository.legacyProjectionVersion,
+        TranscriptRepository.invalidatedProjectionVersion,
       )
-      expect((yield* transcripts.get(spendTurnId))?.consumed).toBeUndefined()
+      expect((yield* transcripts.get(spendTurnId))?.executionCheckpoints).toEqual([])
       expect((yield* usage.readTurn(String(spendTurnId)))?.costNanoUsd).toBe(750_000_000)
       expect((yield* usage.readTurn(String(spendTurnId)))?.activeMillis).toBeUndefined()
       expect((yield* usage.readThread(String(spendThread.id))).activeMillis).toBeUndefined()
@@ -2836,7 +3158,11 @@ describe("InteractiveSession persisted usage", () => {
       const shown = updates.flatMap((event) => (event.cost._tag === "Available" ? [event.cost.usd] : []))
 
       expect(refolded?.projectionVersion).toBe(ExecutionIngest.projectionVersion)
-      expect(refolded?.consumed?.[Transcript.executionKey(String(spendTurnId))]?.status).toBe("completed")
+      expect(
+        refolded?.executionCheckpoints.find(
+          (entry) => entry.executionKey === Transcript.executionKey(String(spendTurnId)),
+        )?.status,
+      ).toBe("completed")
       expect(persistedTurn?.activeMillis).toBe(30_000)
       expect(persistedTurn?.costNanoUsd).toBe(750_000_000)
       expect((yield* usage.readThread(String(spendThread.id))).activeMillis).toBe(30_000)

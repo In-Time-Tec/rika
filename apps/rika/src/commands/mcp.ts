@@ -60,19 +60,6 @@ export const command = Command.make("mcp").pipe(
     Command.make("remove", { name: nameArgument }, ({ name }) => dispatch({ _tag: "Mcp", action: "remove", name })),
     Command.make("enable", { name: nameArgument }, ({ name }) => dispatch({ _tag: "Mcp", action: "enable", name })),
     Command.make("disable", { name: nameArgument }, ({ name }) => dispatch({ _tag: "Mcp", action: "disable", name })),
-    Command.make(
-      "approve",
-      { name: nameArgument, workspace: Flag.directory("workspace").pipe(Flag.optional) },
-      ({ name, workspace }) => {
-        const selectedWorkspace = Option.getOrUndefined(workspace)
-        return dispatch({
-          _tag: "Mcp",
-          action: "approve",
-          name,
-          ...(selectedWorkspace === undefined ? {} : { workspace: selectedWorkspace }),
-        })
-      },
-    ),
     Command.make("doctor", {}, () => dispatch({ _tag: "Mcp", action: "doctor" })),
     oauth,
   ]),

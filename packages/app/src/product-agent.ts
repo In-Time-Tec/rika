@@ -85,9 +85,9 @@ export const layer = Layer.effect(
           .cancelFanOut(id, at, reason)
           .pipe(Effect.mapError((cause) => InvocationError.make({ message: cause.message }))),
       ),
-      cancelChild: Effect.fn("ProductAgent.cancelChild")((id, at) =>
+      cancelChild: Effect.fn("ProductAgent.cancelChild")((id, _at) =>
         backend
-          .cancel(id, at, ExecutionBackend.executionReference)
+          .cancel(id, ExecutionBackend.executionReference)
           .pipe(Effect.mapError((cause) => InvocationError.make({ message: cause.message }))),
       ),
       runParallel: Effect.fn("ProductAgent.runParallel")((input) =>

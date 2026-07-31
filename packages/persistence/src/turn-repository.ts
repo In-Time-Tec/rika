@@ -1,18 +1,23 @@
-import { Context, Effect, Layer, Ref, Schema } from "effect"
+import { Context, Effect, Layer, Ref, Schema, Semaphore } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { ThreadId } from "./thread-schema"
 import { ExecutionStatus } from "@rika/tools"
 import {
+  AgentExecutionTurn,
   ExecutionExtensionPin,
   ExecutionRoutePin,
   PromptPart,
+  RecordedShellTurn,
   Status,
   StopIntent,
   Turn,
   TurnAuthor,
   TurnId,
   TurnLineage,
+  isAgentExecution,
+  isRunningRecordedShell,
 } from "./turn-schema"
+import type { RunningRecordedShellTurn } from "./turn-schema"
 
 export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("TurnRepositoryError", {
   message: Schema.String,
@@ -63,8 +68,8 @@ export interface QueueItemChange {
   readonly queuedCount: number
   readonly becameNonempty: boolean
   readonly change:
-    | { readonly _tag: "Added"; readonly turn: Turn }
-    | { readonly _tag: "Updated"; readonly turn: Turn }
+    | { readonly _tag: "Added"; readonly turn: AgentExecutionTurn }
+    | { readonly _tag: "Updated"; readonly turn: AgentExecutionTurn }
     | { readonly _tag: "Removed"; readonly turnId: TurnId }
 }
 
@@ -72,22 +77,22 @@ export interface QueueSnapshot {
   readonly threadId: ThreadId
   readonly revision: number
   readonly queuedCount: number
-  readonly turns: ReadonlyArray<Turn>
+  readonly turns: ReadonlyArray<AgentExecutionTurn>
 }
 
-export type Submission = Turn & { readonly queue?: QueueItemChange }
+export type Submission = AgentExecutionTurn & { readonly queue?: QueueItemChange }
 
 export interface QueueClaim {
-  readonly turn: Turn
+  readonly turn: AgentExecutionTurn
   readonly token: string
 }
 
 export type QueueClaimFinish =
-  | { readonly _tag: "Transitioned"; readonly turn: Turn; readonly queue: QueueItemChange }
+  | { readonly _tag: "Transitioned"; readonly turn: AgentExecutionTurn; readonly queue: QueueItemChange }
   | { readonly _tag: "Unavailable" }
 
 export interface QueuedTurnTake {
-  readonly turn: Turn
+  readonly turn: AgentExecutionTurn
   readonly queue: QueueItemChange
 }
 
@@ -102,7 +107,10 @@ export const maximumPageSize = 200
 
 export interface Interface {
   readonly createForSubmission: (input: CreateInput) => Effect.Effect<Submission, RepositoryError | QueueFull>
-  readonly copy: (turn: Turn, queueCapacity: number) => Effect.Effect<Submission, RepositoryError | QueueFull>
+  readonly copy: (
+    turn: AgentExecutionTurn,
+    queueCapacity: number,
+  ) => Effect.Effect<Submission, RepositoryError | QueueFull>
   readonly get: (id: TurnId) => Effect.Effect<Turn | undefined, RepositoryError>
   readonly list: (threadId: ThreadId) => Effect.Effect<ReadonlyArray<Turn>, RepositoryError>
   readonly listRecentNonqueued: (
@@ -110,11 +118,11 @@ export interface Interface {
     limit: number,
   ) => Effect.Effect<ReadonlyArray<Turn>, RepositoryError>
   readonly page: (threadId: ThreadId, options?: PageOptions) => Effect.Effect<PageResult, RepositoryError>
-  readonly findActive: (threadId: ThreadId) => Effect.Effect<Turn | undefined, RepositoryError>
+  readonly findActive: (threadId: ThreadId) => Effect.Effect<AgentExecutionTurn | undefined, RepositoryError>
   readonly readQueue: (threadId: ThreadId) => Effect.Effect<QueueSnapshot, RepositoryError>
-  readonly listNonterminal: Effect.Effect<ReadonlyArray<Turn>, RepositoryError>
-  readonly listStopRequested: Effect.Effect<ReadonlyArray<Turn>, RepositoryError>
-  readonly requestStop: (id: TurnId, now: number) => Effect.Effect<Turn | undefined, RepositoryError>
+  readonly listNonterminal: Effect.Effect<ReadonlyArray<AgentExecutionTurn>, RepositoryError>
+  readonly listStopRequested: Effect.Effect<ReadonlyArray<AgentExecutionTurn>, RepositoryError>
+  readonly requestStop: (id: TurnId, now: number) => Effect.Effect<AgentExecutionTurn | undefined, RepositoryError>
   readonly claimNextQueued: (threadId: ThreadId, now: number) => Effect.Effect<QueueClaim | undefined, RepositoryError>
   readonly finishQueuedClaim: (
     claim: QueueClaim,
@@ -129,23 +137,26 @@ export interface Interface {
     id: TurnId,
     prompt: string,
     now: number,
-  ) => Effect.Effect<Turn & { readonly queue: QueueItemChange }, RepositoryError>
+  ) => Effect.Effect<AgentExecutionTurn & { readonly queue: QueueItemChange }, RepositoryError>
   readonly takeQueued: (id: TurnId) => Effect.Effect<QueuedTurnTake, RepositoryError | QueuedTurnUnavailable>
   readonly dequeue: (id: TurnId) => Effect.Effect<QueueItemChange, RepositoryError>
   readonly requeueAccepted: (
     id: TurnId,
     queueCapacity: number,
     now: number,
-  ) => Effect.Effect<Turn & { readonly queue: QueueItemChange }, RepositoryError | QueueFull>
+  ) => Effect.Effect<AgentExecutionTurn & { readonly queue: QueueItemChange }, RepositoryError | QueueFull>
   readonly requestQueueWake: (threadId: ThreadId) => Effect.Effect<QueueWake | undefined, RepositoryError>
   readonly consumeQueueWake: (threadId: ThreadId, generation: number) => Effect.Effect<boolean, RepositoryError>
-  readonly setExtensionPin: (id: TurnId, pin: ExecutionExtensionPin) => Effect.Effect<Turn, RepositoryError>
+  readonly setExtensionPin: (
+    id: TurnId,
+    pin: ExecutionExtensionPin,
+  ) => Effect.Effect<AgentExecutionTurn, RepositoryError>
   readonly setStatus: (
     id: TurnId,
     status: Status,
     lastCursor: string | undefined,
     now: number,
-  ) => Effect.Effect<Turn, RepositoryError>
+  ) => Effect.Effect<AgentExecutionTurn, RepositoryError>
   readonly startAccepted: (id: TurnId, now: number) => Effect.Effect<boolean, RepositoryError>
   readonly cancelAccepted: (id: TurnId, now: number) => Effect.Effect<boolean, RepositoryError>
   readonly repairCursor: (
@@ -159,18 +170,49 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@rika/persistence/turn-repository/Service") {}
 
 const isTerminalStatus = ExecutionStatus.isTerminalStatus
+const MemoryCoordinatorTypeId = Symbol("@rika/persistence/turn-repository/MemoryCoordinator")
+
+type TerminalStatus = "completed" | "failed" | "cancelled"
+export type MemoryRefoldWrite<A> = { readonly _tag: "Commit"; readonly value: A } | { readonly _tag: "Stale" }
+type MemoryRefoldResult<A> =
+  | { readonly _tag: "Committed"; readonly turn: AgentExecutionTurn; readonly value: A }
+  | { readonly _tag: "Stale" }
+
+interface MemoryCoordinator {
+  readonly withLock: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
+  readonly agentExecutions: Effect.Effect<ReadonlyArray<AgentExecutionTurn>>
+  readonly adoptRefold: <A>(
+    expected: Pick<AgentExecutionTurn, "id" | "status" | "lastCursor">,
+    status: TerminalStatus,
+    cursor: string,
+    write: (turn: AgentExecutionTurn) => Effect.Effect<MemoryRefoldWrite<A>>,
+  ) => Effect.Effect<MemoryRefoldResult<A>>
+  readonly writeRecordedShell: <A>(
+    expected: RunningRecordedShellTurn | undefined,
+    turn: RecordedShellTurn,
+    write: (turn: RecordedShellTurn) => Effect.Effect<MemoryRefoldWrite<A>>,
+  ) => Effect.Effect<MemoryRefoldWrite<{ readonly turn: RecordedShellTurn; readonly value: A }>>
+}
+
+export const memoryCoordinator = (repository: Interface): MemoryCoordinator | undefined =>
+  (repository as Interface & { readonly [MemoryCoordinatorTypeId]?: MemoryCoordinator })[MemoryCoordinatorTypeId]
 
 const Row = Schema.Struct({
   id: Schema.String,
   thread_id: Schema.String,
+  turn_kind: Schema.String,
   prompt: Schema.String,
   status: Schema.String,
   stop_intent: Schema.optionalKey(Schema.NullOr(Schema.String)),
   last_cursor: Schema.NullOr(Schema.String),
   extension_pin_json: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  execution_route_json: Schema.String,
+  execution_route_json: Schema.NullOr(Schema.String),
   review_fan_out_id: Schema.optionalKey(Schema.NullOr(Schema.String)),
   prompt_parts_json: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  shell_command: Schema.NullOr(Schema.String),
+  shell_result_text: Schema.NullOr(Schema.String),
+  shell_result_truncated: Schema.NullOr(Schema.Finite),
+  shell_result_exit_code: Schema.NullOr(Schema.Finite),
   author_json: Schema.String,
   lineage_json: Schema.String,
   created_at: Schema.Finite,
@@ -190,13 +232,15 @@ const PromptPartsJson = Schema.fromJsonString(Schema.Array(PromptPart))
 const ExecutionRouteJson = Schema.fromJsonString(ExecutionRoutePin)
 const AuthorJson = Schema.fromJsonString(TurnAuthor)
 const LineageJson = Schema.fromJsonString(TurnLineage)
-const repositoryError = (error: unknown) => RepositoryError.make({ message: String(error) })
+const repositoryError = (error: unknown) =>
+  Schema.is(RepositoryError)(error) ? error : RepositoryError.make({ message: String(error) })
 const submissionError = (error: unknown) => (Schema.is(QueueFull)(error) ? error : repositoryError(error))
 const takeQueuedError = (error: unknown) => (Schema.is(QueuedTurnUnavailable)(error) ? error : repositoryError(error))
 const missing = (id: TurnId) => RepositoryError.make({ message: `Turn ${id} does not exist` })
 const queuedTurnUnavailable = (id: TurnId) =>
   QueuedTurnUnavailable.make({ turnId: id, message: `Turn ${id} is not queued` })
-const clone = (turn: Turn): Turn => structuredClone(turn)
+const clone = <T extends Turn>(turn: T): T => structuredClone(turn)
+const sameTurn = Schema.toEquivalence(Turn)
 const pageSize = (limit: number | undefined) =>
   Math.min(maximumPageSize, Math.max(1, Math.floor(limit ?? defaultPageSize)))
 const cursorFor = (turn: Turn | undefined): PageCursor | undefined =>
@@ -225,7 +269,7 @@ type MemorySubmissionResult =
 type MemoryRequeueResult =
   | { readonly _tag: "Unavailable" }
   | { readonly _tag: "Full"; readonly error: QueueFull }
-  | { readonly _tag: "Queued"; readonly value: Turn & { readonly queue: QueueItemChange } }
+  | { readonly _tag: "Queued"; readonly value: AgentExecutionTurn & { readonly queue: QueueItemChange } }
 
 const emptyQueueState: MemoryQueueState = {
   revision: 0,
@@ -244,6 +288,46 @@ const withQueueState = (state: MemoryState, threadId: ThreadId, queue: MemoryQue
 const decode = (row: unknown) =>
   Effect.gen(function* () {
     const value = yield* Schema.decodeUnknownEffect(Row)(row)
+    const author = yield* Schema.decodeUnknownEffect(AuthorJson)(value.author_json)
+    const lineage = yield* Schema.decodeUnknownEffect(LineageJson)(value.lineage_json)
+    const id = yield* Schema.decodeUnknownEffect(TurnId)(value.id)
+    const threadId = yield* Schema.decodeUnknownEffect(ThreadId)(value.thread_id)
+    if (value.turn_kind === "RecordedShell") {
+      if (value.shell_command === null)
+        return yield* RepositoryError.make({ message: `Recorded shell turn ${id} has no command` })
+      const terminal = value.status !== "running"
+      if (
+        terminal &&
+        (value.shell_result_text === null || (value.shell_result_truncated !== 0 && value.shell_result_truncated !== 1))
+      )
+        return yield* RepositoryError.make({ message: `Recorded shell turn ${id} has no terminal result` })
+      return yield* Schema.decodeUnknownEffect(Turn)({
+        _tag: "RecordedShell",
+        id,
+        threadId,
+        prompt: value.prompt,
+        command: value.shell_command,
+        status: value.status,
+        stopIntent: "none",
+        author,
+        lineage,
+        createdAt: value.created_at,
+        updatedAt: value.updated_at,
+        ...(terminal
+          ? {
+              result: {
+                text: value.shell_result_text,
+                truncated: value.shell_result_truncated === 1,
+                ...(value.shell_result_exit_code === null ? {} : { exitCode: value.shell_result_exit_code }),
+              },
+            }
+          : {}),
+      })
+    }
+    if (value.turn_kind !== "AgentExecution")
+      return yield* RepositoryError.make({ message: `Turn ${id} has unknown kind ${value.turn_kind}` })
+    if (value.execution_route_json === null)
+      return yield* RepositoryError.make({ message: `Agent execution turn ${id} has no execution route` })
     const status = yield* Schema.decodeUnknownEffect(Status)(value.status)
     const extensionPin =
       value.extension_pin_json == null
@@ -254,11 +338,10 @@ const decode = (row: unknown) =>
         ? undefined
         : yield* Schema.decodeUnknownEffect(PromptPartsJson)(value.prompt_parts_json)
     const executionRoute = yield* Schema.decodeUnknownEffect(ExecutionRouteJson)(value.execution_route_json)
-    const author = yield* Schema.decodeUnknownEffect(AuthorJson)(value.author_json)
-    const lineage = yield* Schema.decodeUnknownEffect(LineageJson)(value.lineage_json)
     return {
-      id: TurnId.make(value.id),
-      threadId: ThreadId.make(value.thread_id),
+      _tag: "AgentExecution" as const,
+      id,
+      threadId,
       prompt: value.prompt,
       ...(promptParts === undefined ? {} : { promptParts }),
       status,
@@ -274,6 +357,12 @@ const decode = (row: unknown) =>
     }
   }).pipe(Effect.mapError(repositoryError))
 
+const decodeAgent = (row: unknown) =>
+  decode(row).pipe(Effect.filterOrFail(isAgentExecution, () => repositoryError("Expected an AgentExecution turn")))
+
+export const StoredTurnRow = Row
+export const decodeStoredTurn = decode
+
 const encodeExtensionPin = (pin: ExecutionExtensionPin) =>
   Schema.encodeEffect(ExtensionPinJson)(pin).pipe(Effect.mapError(repositoryError))
 
@@ -282,7 +371,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
     const initialTurns = new Map(initial.map((turn) => [turn.id, clone(turn)]))
     const initialQueues = new Map<ThreadId, MemoryQueueState>()
     for (const turn of initialTurns.values()) {
-      if (turn.status !== "queued") continue
+      if (!isAgentExecution(turn) || turn.status !== "queued") continue
       const current = initialQueues.get(turn.threadId) ?? emptyQueueState
       initialQueues.set(turn.threadId, {
         ...current,
@@ -296,16 +385,85 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
       claims: new Map(),
       nextClaimToken: 1,
     })
+    const admission = yield* Semaphore.make(1)
+    const withLock: MemoryCoordinator["withLock"] = (effect) => admission.withPermits(1)(Effect.uninterruptible(effect))
+    const readState = withLock(Ref.get(state))
+    const modifyState = <A>(f: (state: MemoryState) => readonly [A, MemoryState]) => withLock(Ref.modify(state, f))
+    const updateState = (f: (state: MemoryState) => MemoryState) => withLock(Ref.update(state, f))
+    const agentExecutions: MemoryCoordinator["agentExecutions"] = Ref.get(state).pipe(
+      Effect.map((current) => [...current.turns.values()].filter(isAgentExecution).map(clone)),
+    )
+    const adoptRefold: MemoryCoordinator["adoptRefold"] = (expected, status, cursor, write) =>
+      withLock(
+        Effect.gen(function* () {
+          const currentState = yield* Ref.get(state)
+          const current = currentState.turns.get(expected.id)
+          if (
+            current === undefined ||
+            !isAgentExecution(current) ||
+            current.status !== expected.status ||
+            current.lastCursor !== expected.lastCursor
+          )
+            return { _tag: "Stale" as const }
+          const next: AgentExecutionTurn = { ...current, status, lastCursor: cursor }
+          const written = yield* write(clone(next))
+          if (written._tag === "Stale") return written
+          yield* Ref.set(state, {
+            ...currentState,
+            turns: new Map(currentState.turns).set(expected.id, next),
+          })
+          return { _tag: "Committed" as const, turn: clone(next), value: written.value }
+        }),
+      )
+    const writeRecordedShell: MemoryCoordinator["writeRecordedShell"] = (expected, turn, write) =>
+      withLock(
+        Effect.gen(function* () {
+          const currentState = yield* Ref.get(state)
+          const current = currentState.turns.get(turn.id)
+          if (expected === undefined) {
+            if (current !== undefined) return { _tag: "Stale" as const }
+          } else if (
+            current === undefined ||
+            !isRunningRecordedShell(current) ||
+            !isRunningRecordedShell(expected) ||
+            !sameTurn(current, expected) ||
+            isRunningRecordedShell(turn) ||
+            turn.threadId !== current.threadId ||
+            turn.prompt !== current.prompt ||
+            turn.command !== current.command ||
+            turn.createdAt !== current.createdAt
+          ) {
+            return { _tag: "Stale" as const }
+          }
+          const written = yield* write(clone(turn))
+          if (written._tag === "Stale") return written
+          yield* Ref.set(state, {
+            ...currentState,
+            turns: new Map(currentState.turns).set(turn.id, clone(turn)),
+          })
+          return {
+            _tag: "Commit" as const,
+            value: { turn: clone(turn), value: written.value },
+          }
+        }),
+      )
     const get = Effect.fn("TurnRepository.get")(function* (id: TurnId) {
-      const turn = (yield* Ref.get(state)).turns.get(id)
+      const turn = (yield* readState).turns.get(id)
       return turn === undefined ? undefined : clone(turn)
     })
     return Service.of({
+      [MemoryCoordinatorTypeId]: {
+        withLock,
+        agentExecutions,
+        adoptRefold,
+        writeRecordedShell,
+      } satisfies MemoryCoordinator,
       createForSubmission: Effect.fn("TurnRepository.createForSubmission")(function* (input) {
-        const result = yield* Ref.modify(state, (current): readonly [MemorySubmissionResult, MemoryState] => {
+        const result = yield* modifyState((current): readonly [MemorySubmissionResult, MemoryState] => {
           if (current.turns.has(input.id)) return [{ _tag: "Duplicate" as const }, current] as const
           const active = [...current.turns.values()].some(
-            (turn) => turn.threadId === input.threadId && ExecutionStatus.occupiesQueue(turn.status),
+            (turn) =>
+              isAgentExecution(turn) && turn.threadId === input.threadId && ExecutionStatus.occupiesQueue(turn.status),
           )
           const previousQueue = queueState(current, input.threadId)
           if (active && previousQueue.queuedCount >= input.queueCapacity)
@@ -322,7 +480,8 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
             ] as const
           const { queueCapacity, now, ...submission } = input
           void queueCapacity
-          const turn: Turn = {
+          const turn: AgentExecutionTurn = {
+            _tag: "AgentExecution",
             ...submission,
             author: input.author ?? { _tag: "Human" },
             lineage: input.lineage ?? { _tag: "Original" },
@@ -356,7 +515,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
         return result.submission
       }),
       copy: Effect.fn("TurnRepository.copy")(function* (turn, queueCapacity) {
-        const result = yield* Ref.modify(state, (current): readonly [MemorySubmissionResult, MemoryState] => {
+        const result = yield* modifyState((current): readonly [MemorySubmissionResult, MemoryState] => {
           if (current.turns.has(turn.id)) return [{ _tag: "Duplicate" as const }, current]
           const previousQueue = queueState(current, turn.threadId)
           if (turn.status === "queued" && previousQueue.queuedCount >= queueCapacity)
@@ -398,13 +557,13 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
       }),
       get,
       list: Effect.fn("TurnRepository.list")(function* (threadId) {
-        return [...(yield* Ref.get(state)).turns.values()]
+        return [...(yield* readState).turns.values()]
           .filter((turn) => turn.threadId === threadId)
           .toSorted((left, right) => left.createdAt - right.createdAt)
           .map(clone)
       }),
       listRecentNonqueued: Effect.fn("TurnRepository.listRecentNonqueued")(function* (threadId, limit) {
-        return [...(yield* Ref.get(state)).turns.values()]
+        return [...(yield* readState).turns.values()]
           .filter((turn) => turn.threadId === threadId && turn.status !== "queued")
           .toSorted((left, right) => right.createdAt - left.createdAt || right.id.localeCompare(left.id))
           .slice(0, Math.max(0, Math.floor(limit)))
@@ -413,7 +572,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
       }),
       page: Effect.fn("TurnRepository.page")(function* (threadId, options = {}) {
         const limit = pageSize(options.limit)
-        const descending = [...(yield* Ref.get(state)).turns.values()]
+        const descending = [...(yield* readState).turns.values()]
           .filter(
             (turn) =>
               turn.threadId === threadId &&
@@ -432,50 +591,73 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
         }
       }),
       findActive: Effect.fn("TurnRepository.findActive")(function* (threadId) {
-        return [...(yield* Ref.get(state)).turns.values()]
-          .filter((turn) => turn.threadId === threadId && ExecutionStatus.isActiveStatus(turn.status))
+        return [...(yield* readState).turns.values()]
+          .filter(
+            (turn): turn is AgentExecutionTurn =>
+              isAgentExecution(turn) && turn.threadId === threadId && ExecutionStatus.isActiveStatus(turn.status),
+          )
           .toSorted((left, right) => left.createdAt - right.createdAt)[0]
       }),
       readQueue: Effect.fn("TurnRepository.readQueue")(function* (threadId) {
-        const current = yield* Ref.get(state)
+        const current = yield* readState
         const queue = queueState(current, threadId)
         const turns = [...current.turns.values()]
-          .filter((turn) => turn.threadId === threadId && turn.status === "queued")
+          .filter(
+            (turn): turn is AgentExecutionTurn =>
+              isAgentExecution(turn) && turn.threadId === threadId && turn.status === "queued",
+          )
           .toSorted((left, right) => left.createdAt - right.createdAt)
           .map(clone)
         return { threadId, revision: queue.revision, queuedCount: queue.queuedCount, turns }
       }),
       listNonterminal: Effect.gen(function* () {
-        return [...(yield* Ref.get(state)).turns.values()]
-          .filter((turn) => ExecutionStatus.occupiesQueue(turn.status) && turn.stopIntent === "none")
+        return [...(yield* readState).turns.values()]
+          .filter(
+            (turn): turn is AgentExecutionTurn =>
+              isAgentExecution(turn) && ExecutionStatus.occupiesQueue(turn.status) && turn.stopIntent === "none",
+          )
           .toSorted((left, right) => left.createdAt - right.createdAt)
           .map(clone)
       }).pipe(Effect.withSpan("TurnRepository.listNonterminal")),
       listStopRequested: Effect.gen(function* () {
-        return [...(yield* Ref.get(state)).turns.values()]
-          .filter((turn) => ExecutionStatus.occupiesQueue(turn.status) && turn.stopIntent === "requested")
+        return [...(yield* readState).turns.values()]
+          .filter(
+            (turn): turn is AgentExecutionTurn =>
+              isAgentExecution(turn) && ExecutionStatus.occupiesQueue(turn.status) && turn.stopIntent === "requested",
+          )
           .toSorted((left, right) => left.createdAt - right.createdAt)
           .map(clone)
       }).pipe(Effect.withSpan("TurnRepository.listStopRequested")),
       requestStop: Effect.fn("TurnRepository.requestStop")(function* (id, now) {
-        return yield* Ref.modify(state, (current) => {
+        return yield* modifyState((current) => {
           const existing = current.turns.get(id)
-          if (existing === undefined || !ExecutionStatus.occupiesQueue(existing.status)) {
+          if (
+            existing === undefined ||
+            !isAgentExecution(existing) ||
+            !ExecutionStatus.occupiesQueue(existing.status)
+          ) {
             return [undefined, current] as const
           }
-          const updated: Turn = { ...existing, stopIntent: "requested", updatedAt: now }
+          const updated: AgentExecutionTurn = { ...existing, stopIntent: "requested", updatedAt: now }
           const turns = new Map(current.turns)
           turns.set(id, updated)
           return [clone(updated), { ...current, turns }] as const
         })
       }),
       claimNextQueued: Effect.fn("TurnRepository.claimNextQueued")(function* (threadId, _now) {
-        return yield* Ref.modify(state, (current) => {
+        return yield* modifyState((current) => {
           const hasActive = [...current.turns.values()].some(
-            (turn) => turn.threadId === threadId && ExecutionStatus.isActiveStatus(turn.status),
+            (turn) =>
+              isAgentExecution(turn) && turn.threadId === threadId && ExecutionStatus.isActiveStatus(turn.status),
           )
           const queued = [...current.turns.values()]
-            .filter((turn) => turn.threadId === threadId && turn.status === "queued" && !current.claims.has(turn.id))
+            .filter(
+              (turn): turn is AgentExecutionTurn =>
+                isAgentExecution(turn) &&
+                turn.threadId === threadId &&
+                turn.status === "queued" &&
+                !current.claims.has(turn.id),
+            )
             .toSorted((left, right) => left.createdAt - right.createdAt)[0]
           const hasClaim = [...current.claims.keys()].some((id) => current.turns.get(id)?.threadId === threadId)
           if (hasActive || hasClaim || queued === undefined) return [undefined, current]
@@ -492,13 +674,18 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
       }),
       finishQueuedClaim: Effect.fn("TurnRepository.finishQueuedClaim")(
         function* (claim, status, lastCursor, extensionPin, now) {
-          return yield* Ref.modify(state, (current): readonly [QueueClaimFinish, MemoryState] => {
+          return yield* modifyState((current): readonly [QueueClaimFinish, MemoryState] => {
             const existing = current.turns.get(claim.turn.id)
-            if (existing?.status !== "queued" || current.claims.get(claim.turn.id) !== claim.token)
+            if (
+              existing === undefined ||
+              !isAgentExecution(existing) ||
+              existing.status !== "queued" ||
+              current.claims.get(claim.turn.id) !== claim.token
+            )
               return [{ _tag: "Unavailable" }, current]
             const { lastCursor: previousCursor, ...withoutCursor } = existing
             void previousCursor
-            const nextTurn: Turn = {
+            const nextTurn: AgentExecutionTurn = {
               ...withoutCursor,
               status,
               ...(lastCursor === undefined ? {} : { lastCursor }),
@@ -532,16 +719,16 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
         },
       ),
       releaseQueuedClaim: Effect.fn("TurnRepository.releaseQueuedClaim")(function* (claim) {
-        yield* Ref.update(state, (current) => {
+        yield* updateState((current) => {
           if (current.claims.get(claim.turn.id) !== claim.token) return current
           const claims = new Map(current.claims)
           claims.delete(claim.turn.id)
           return { ...current, claims }
         })
       }),
-      resetQueueClaims: Ref.update(state, (current) => ({ ...current, claims: new Map() })),
+      resetQueueClaims: updateState((current) => ({ ...current, claims: new Map() })),
       editQueued: Effect.fn("TurnRepository.editQueued")(function* (id, prompt, now) {
-        const result = yield* Ref.modify(state, (current) => {
+        const result = yield* modifyState((current) => {
           const turn = current.turns.get(id)
           if (turn === undefined || turn.status !== "queued") return [undefined, current]
           const { promptParts: _promptParts, ...withoutParts } = turn
@@ -571,7 +758,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
         return result
       }),
       takeQueued: Effect.fn("TurnRepository.takeQueued")(function* (id) {
-        const result = yield* Ref.modify(state, (current) => {
+        const result = yield* modifyState((current) => {
           const turn = current.turns.get(id)
           if (turn === undefined || turn.status !== "queued") return [undefined, current]
           const turns = new Map(current.turns)
@@ -597,7 +784,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
         return result
       }),
       dequeue: Effect.fn("TurnRepository.dequeue")(function* (id) {
-        const result = yield* Ref.modify(state, (current) => {
+        const result = yield* modifyState((current) => {
           const turn = current.turns.get(id)
           if (turn === undefined || turn.status !== "queued") return [undefined, current]
           const turns = new Map(current.turns)
@@ -623,11 +810,12 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
         return result
       }),
       requeueAccepted: Effect.fn("TurnRepository.requeueAccepted")(function* (id, queueCapacity, now) {
-        const result = yield* Ref.modify(state, (current): readonly [MemoryRequeueResult, MemoryState] => {
+        const result = yield* modifyState((current): readonly [MemoryRequeueResult, MemoryState] => {
           const turn = current.turns.get(id)
           if (turn === undefined || turn.status !== "accepted") return [{ _tag: "Unavailable" as const }, current]
           const hasOtherActive = [...current.turns.values()].some(
             (candidate) =>
+              isAgentExecution(candidate) &&
               candidate.id !== id &&
               candidate.threadId === turn.threadId &&
               ExecutionStatus.isActiveStatus(candidate.status),
@@ -670,7 +858,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
         return result.value
       }),
       requestQueueWake: Effect.fn("TurnRepository.requestQueueWake")(function* (threadId) {
-        return yield* Ref.modify(state, (current) => {
+        return yield* modifyState((current) => {
           const queue = queueState(current, threadId)
           if (queue.queuedCount === 0) return [undefined, current]
           if (queue.wakePending)
@@ -683,46 +871,55 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
         })
       }),
       consumeQueueWake: Effect.fn("TurnRepository.consumeQueueWake")(function* (threadId, generation) {
-        return yield* Ref.modify(state, (current) => {
+        return yield* modifyState((current) => {
           const queue = queueState(current, threadId)
           if (!queue.wakePending || queue.wakeGeneration !== generation) return [false, current]
           return [true, withQueueState(current, threadId, { ...queue, wakePending: false })]
         })
       }),
       setExtensionPin: Effect.fn("TurnRepository.setExtensionPin")(function* (id, pin) {
-        const current = yield* get(id)
-        if (current === undefined) return yield* missing(id)
-        const encoded = yield* Schema.encodeEffect(ExtensionPinJson)(pin).pipe(Effect.mapError(repositoryError))
-        if (
-          current.extensionPin !== undefined &&
-          (yield* Schema.encodeEffect(ExtensionPinJson)(current.extensionPin).pipe(
-            Effect.mapError(repositoryError),
-          )) !== encoded
+        return yield* withLock(
+          Effect.gen(function* () {
+            const currentState = yield* Ref.get(state)
+            const current = currentState.turns.get(id)
+            if (current === undefined || !isAgentExecution(current)) return yield* missing(id)
+            const encoded = yield* Schema.encodeEffect(ExtensionPinJson)(pin).pipe(Effect.mapError(repositoryError))
+            if (
+              current.extensionPin !== undefined &&
+              (yield* Schema.encodeEffect(ExtensionPinJson)(current.extensionPin).pipe(
+                Effect.mapError(repositoryError),
+              )) !== encoded
+            )
+              return yield* RepositoryError.make({ message: `Turn ${id} extension pin is immutable` })
+            const next = { ...current, extensionPin: structuredClone(pin) }
+            yield* Ref.set(state, {
+              ...currentState,
+              turns: new Map(currentState.turns).set(id, next),
+            })
+            return clone(next)
+          }),
         )
-          return yield* RepositoryError.make({ message: `Turn ${id} extension pin is immutable` })
-        const next = { ...current, extensionPin: structuredClone(pin) }
-        yield* Ref.update(state, (currentState) => ({
-          ...currentState,
-          turns: new Map(currentState.turns).set(id, next),
-        }))
-        return clone(next)
       }),
       setStatus: Effect.fn("TurnRepository.setStatus")(function* (id, status, lastCursor, now) {
-        const updated = yield* Ref.modify(
-          state,
+        const updated = yield* modifyState(
           (
             currentState,
           ): readonly [
-            { readonly _tag: "Missing" } | { readonly _tag: "Queued" } | { readonly _tag: "Ok"; readonly turn: Turn },
+            (
+              | { readonly _tag: "Missing" }
+              | { readonly _tag: "Queued" }
+              | { readonly _tag: "Ok"; readonly turn: AgentExecutionTurn }
+            ),
             MemoryState,
           ] => {
             const current = currentState.turns.get(id)
             if (current === undefined) return [{ _tag: "Missing" }, currentState]
+            if (!isAgentExecution(current)) return [{ _tag: "Missing" }, currentState]
             if (status === "queued" || current.status === "queued") return [{ _tag: "Queued" }, currentState]
             if (isTerminalStatus(current.status)) return [{ _tag: "Ok", turn: clone(current) }, currentState]
             const { lastCursor: previousCursor, ...withoutCursor } = current
             void previousCursor
-            const next: Turn = {
+            const next: AgentExecutionTurn = {
               ...withoutCursor,
               status,
               ...(lastCursor === undefined ? {} : { lastCursor }),
@@ -743,33 +940,43 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
         return updated.turn
       }),
       startAccepted: Effect.fn("TurnRepository.startAccepted")(function* (id, now) {
-        return yield* Ref.modify(state, (currentState) => {
+        return yield* modifyState((currentState) => {
           const current = currentState.turns.get(id)
-          if (current === undefined || current.status !== "accepted") return [false, currentState]
-          const next: Turn = { ...current, status: "running", updatedAt: now }
+          if (current === undefined || !isAgentExecution(current) || current.status !== "accepted")
+            return [false, currentState]
+          const next: AgentExecutionTurn = { ...current, status: "running", updatedAt: now }
           return [true, { ...currentState, turns: new Map(currentState.turns).set(id, next) }]
         })
       }),
       cancelAccepted: Effect.fn("TurnRepository.cancelAccepted")(function* (id, now) {
-        return yield* Ref.modify(state, (currentState) => {
+        return yield* modifyState((currentState) => {
           const current = currentState.turns.get(id)
-          if (current === undefined || current.status !== "accepted") return [false, currentState]
-          const next: Turn = { ...current, status: "cancelled", updatedAt: now }
+          if (current === undefined || !isAgentExecution(current) || current.status !== "accepted")
+            return [false, currentState]
+          const next: AgentExecutionTurn = { ...current, status: "cancelled", updatedAt: now }
           return [true, { ...currentState, turns: new Map(currentState.turns).set(id, next) }]
         })
       }),
       repairCursor: Effect.fn("TurnRepository.repairCursor")(function* (id, status, expectedCursor, cursor) {
-        return yield* Ref.modify(state, (currentState) => {
+        return yield* modifyState((currentState) => {
           const current = currentState.turns.get(id)
-          if (current === undefined || current.status !== status || current.lastCursor !== expectedCursor)
+          if (
+            current === undefined ||
+            !isAgentExecution(current) ||
+            current.status !== status ||
+            current.lastCursor !== expectedCursor
+          )
             return [false, currentState]
           const { lastCursor: previousCursor, ...withoutCursor } = current
           void previousCursor
-          const next: Turn = { ...withoutCursor, ...(cursor === undefined ? {} : { lastCursor: cursor }) }
+          const next: AgentExecutionTurn = {
+            ...withoutCursor,
+            ...(cursor === undefined ? {} : { lastCursor: cursor }),
+          }
           return [true, { ...currentState, turns: new Map(currentState.turns).set(id, next) }]
         })
       }),
-    })
+    } as Interface & { readonly [MemoryCoordinatorTypeId]: MemoryCoordinator })
   })
 
 export const memoryLayer = (initial: ReadonlyArray<Turn> = []) => Layer.effect(Service, makeMemory(initial))
@@ -800,13 +1007,13 @@ export const layer = Layer.effect(
         return yield* sql
           .withTransaction(
             Effect.gen(function* () {
-              yield* sql`INSERT INTO rika_turns (id, thread_id, prompt, prompt_parts_json, execution_route_json, review_fan_out_id, author_json, lineage_json, status, created_at, updated_at)
-                VALUES (${input.id}, ${input.threadId}, ${input.prompt}, ${promptParts}, ${executionRoute}, ${input.reviewFanOutId ?? null}, ${author}, ${lineage},
-                  CASE WHEN EXISTS (SELECT 1 FROM rika_turns WHERE thread_id = ${input.threadId} AND status IN ('queued', 'accepted', 'running', 'waiting')) THEN 'queued' ELSE 'accepted' END,
+              yield* sql`INSERT INTO rika_turns (id, thread_id, turn_kind, prompt, prompt_parts_json, execution_route_json, review_fan_out_id, author_json, lineage_json, status, created_at, updated_at)
+                VALUES (${input.id}, ${input.threadId}, 'AgentExecution', ${input.prompt}, ${promptParts}, ${executionRoute}, ${input.reviewFanOutId ?? null}, ${author}, ${lineage},
+                  CASE WHEN EXISTS (SELECT 1 FROM rika_turns WHERE thread_id = ${input.threadId} AND turn_kind = 'AgentExecution' AND status IN ('queued', 'accepted', 'running', 'waiting')) THEN 'queued' ELSE 'accepted' END,
                   ${input.now}, ${input.now})`
               const rows = yield* sql`SELECT * FROM rika_turns WHERE id = ${input.id}`
               if (rows[0] === undefined) return yield* missing(input.id)
-              const turn = yield* decode(rows[0])
+              const turn = yield* decodeAgent(rows[0])
               if (turn.status !== "queued") return turn
               yield* sql`INSERT INTO rika_thread_queue_state (thread_id) VALUES (${input.threadId}) ON CONFLICT (thread_id) DO NOTHING`
               const queueRows = yield* sql`UPDATE rika_thread_queue_state
@@ -856,8 +1063,8 @@ export const layer = Layer.effect(
         return yield* sql
           .withTransaction(
             Effect.gen(function* () {
-              yield* sql`INSERT INTO rika_turns (id, thread_id, prompt, prompt_parts_json, status, last_cursor, extension_pin_json, execution_route_json, review_fan_out_id, author_json, lineage_json, created_at, updated_at)
-                VALUES (${turn.id}, ${turn.threadId}, ${turn.prompt}, ${promptParts}, ${turn.status}, ${turn.lastCursor ?? null}, ${extensionPin}, ${executionRoute}, ${turn.reviewFanOutId ?? null}, ${author}, ${lineage}, ${turn.createdAt}, ${turn.updatedAt})`
+              yield* sql`INSERT INTO rika_turns (id, thread_id, turn_kind, prompt, prompt_parts_json, status, last_cursor, extension_pin_json, execution_route_json, review_fan_out_id, author_json, lineage_json, created_at, updated_at)
+                VALUES (${turn.id}, ${turn.threadId}, 'AgentExecution', ${turn.prompt}, ${promptParts}, ${turn.status}, ${turn.lastCursor ?? null}, ${extensionPin}, ${executionRoute}, ${turn.reviewFanOutId ?? null}, ${author}, ${lineage}, ${turn.createdAt}, ${turn.updatedAt})`
               if (turn.status !== "queued") return turn
               yield* sql`INSERT INTO rika_thread_queue_state (thread_id) VALUES (${turn.threadId}) ON CONFLICT (thread_id) DO NOTHING`
               const queueRows = yield* sql`UPDATE rika_thread_queue_state
@@ -926,10 +1133,10 @@ export const layer = Layer.effect(
       }),
       findActive: Effect.fn("TurnRepository.findActive")(function* (threadId) {
         const rows =
-          yield* sql`SELECT * FROM rika_turns WHERE thread_id = ${threadId} AND status IN ('accepted', 'running', 'waiting') ORDER BY created_at ASC, rowid ASC LIMIT 1`.pipe(
+          yield* sql`SELECT * FROM rika_turns WHERE thread_id = ${threadId} AND turn_kind = 'AgentExecution' AND status IN ('accepted', 'running', 'waiting') ORDER BY created_at ASC, rowid ASC LIMIT 1`.pipe(
             Effect.mapError(repositoryError),
           )
-        return rows[0] === undefined ? undefined : yield* decode(rows[0])
+        return rows[0] === undefined ? undefined : yield* decodeAgent(rows[0])
       }),
       readQueue: Effect.fn("TurnRepository.readQueue")(function* (threadId) {
         return yield* sql
@@ -938,8 +1145,8 @@ export const layer = Layer.effect(
               const stateRows = yield* sql`SELECT * FROM rika_thread_queue_state WHERE thread_id = ${threadId}`
               const state = stateRows[0] === undefined ? undefined : yield* decodeQueueState(stateRows[0])
               const rows =
-                yield* sql`SELECT * FROM rika_turns WHERE thread_id = ${threadId} AND status = 'queued' ORDER BY created_at ASC, rowid ASC`
-              const turns = yield* Effect.all(rows.map(decode))
+                yield* sql`SELECT * FROM rika_turns WHERE thread_id = ${threadId} AND turn_kind = 'AgentExecution' AND status = 'queued' ORDER BY created_at ASC, rowid ASC`
+              const turns = yield* Effect.all(rows.map(decodeAgent))
               return {
                 threadId,
                 revision: state?.revision ?? 0,
@@ -952,37 +1159,38 @@ export const layer = Layer.effect(
       }),
       listNonterminal: Effect.gen(function* () {
         const rows =
-          yield* sql`SELECT * FROM rika_turns WHERE status IN ('queued', 'accepted', 'running', 'waiting') AND stop_intent = 'none' ORDER BY created_at ASC, rowid ASC`.pipe(
+          yield* sql`SELECT * FROM rika_turns WHERE turn_kind = 'AgentExecution' AND status IN ('queued', 'accepted', 'running', 'waiting') AND stop_intent = 'none' ORDER BY created_at ASC, rowid ASC`.pipe(
             Effect.mapError(repositoryError),
           )
-        return yield* Effect.all(rows.map(decode))
+        return yield* Effect.all(rows.map(decodeAgent))
       }).pipe(Effect.withSpan("TurnRepository.listNonterminal")),
       listStopRequested: Effect.gen(function* () {
         const rows =
-          yield* sql`SELECT * FROM rika_turns WHERE status IN ('queued', 'accepted', 'running', 'waiting') AND stop_intent = 'requested' ORDER BY created_at ASC, rowid ASC`.pipe(
+          yield* sql`SELECT * FROM rika_turns WHERE turn_kind = 'AgentExecution' AND status IN ('queued', 'accepted', 'running', 'waiting') AND stop_intent = 'requested' ORDER BY created_at ASC, rowid ASC`.pipe(
             Effect.mapError(repositoryError),
           )
-        return yield* Effect.all(rows.map(decode))
+        return yield* Effect.all(rows.map(decodeAgent))
       }).pipe(Effect.withSpan("TurnRepository.listStopRequested")),
       requestStop: Effect.fn("TurnRepository.requestStop")(function* (id, now) {
         const rows = yield* sql`UPDATE rika_turns SET stop_intent = 'requested', updated_at = ${now}
-          WHERE id = ${id} AND status IN ('queued', 'accepted', 'running', 'waiting') RETURNING *`.pipe(
+          WHERE id = ${id} AND turn_kind = 'AgentExecution' AND status IN ('queued', 'accepted', 'running', 'waiting') RETURNING *`.pipe(
           Effect.mapError(repositoryError),
         )
         const row = rows[0]
-        return row === undefined ? undefined : yield* decode(row)
+        return row === undefined ? undefined : yield* decodeAgent(row)
       }),
       claimNextQueued: Effect.fn("TurnRepository.claimNextQueued")(function* (threadId, _now) {
         return yield* sql
           .withTransaction(
             Effect.gen(function* () {
               const rows = yield* sql`UPDATE rika_turns SET queue_claim_token = hex(randomblob(16))
-                WHERE id = (SELECT id FROM rika_turns WHERE thread_id = ${threadId} AND status = 'queued' AND queue_claim_token IS NULL ORDER BY created_at ASC, rowid ASC LIMIT 1)
-                AND NOT EXISTS (SELECT 1 FROM rika_turns WHERE thread_id = ${threadId} AND status IN ('accepted', 'running', 'waiting'))
-                AND NOT EXISTS (SELECT 1 FROM rika_turns WHERE thread_id = ${threadId} AND queue_claim_token IS NOT NULL)
+                WHERE id = (SELECT id FROM rika_turns WHERE thread_id = ${threadId} AND turn_kind = 'AgentExecution' AND status = 'queued' AND queue_claim_token IS NULL ORDER BY created_at ASC, rowid ASC LIMIT 1)
+                AND turn_kind = 'AgentExecution'
+                AND NOT EXISTS (SELECT 1 FROM rika_turns WHERE thread_id = ${threadId} AND turn_kind = 'AgentExecution' AND status IN ('accepted', 'running', 'waiting'))
+                AND NOT EXISTS (SELECT 1 FROM rika_turns WHERE thread_id = ${threadId} AND turn_kind = 'AgentExecution' AND queue_claim_token IS NOT NULL)
                 RETURNING *`
               if (rows[0] === undefined) return undefined
-              const turn = yield* decode(rows[0])
+              const turn = yield* decodeAgent(rows[0])
               return { turn, token: String((rows[0] as { queue_claim_token: unknown }).queue_claim_token) }
             }),
           )
@@ -996,9 +1204,9 @@ export const layer = Layer.effect(
               Effect.gen(function* () {
                 const rows = yield* sql`UPDATE rika_turns
             SET status = ${status}, last_cursor = ${lastCursor ?? null}, extension_pin_json = COALESCE(extension_pin_json, ${encodedPin ?? null}), updated_at = ${now}, queue_claim_token = NULL
-            WHERE id = ${claim.turn.id} AND status = 'queued' AND queue_claim_token = ${claim.token} RETURNING *`
+            WHERE id = ${claim.turn.id} AND turn_kind = 'AgentExecution' AND status = 'queued' AND queue_claim_token = ${claim.token} RETURNING *`
                 if (rows[0] === undefined) return { _tag: "Unavailable" as const }
-                const turn = yield* decode(rows[0])
+                const turn = yield* decodeAgent(rows[0])
                 const queueRows = yield* sql`UPDATE rika_thread_queue_state
             SET revision = revision + 1, queued_count = MAX(queued_count - 1, 0)
             WHERE thread_id = ${turn.threadId} RETURNING *`
@@ -1023,23 +1231,24 @@ export const layer = Layer.effect(
       ),
       releaseQueuedClaim: Effect.fn("TurnRepository.releaseQueuedClaim")(function* (claim) {
         yield* sql`UPDATE rika_turns SET queue_claim_token = NULL
-          WHERE id = ${claim.turn.id} AND status = 'queued' AND queue_claim_token = ${claim.token}`.pipe(
+          WHERE id = ${claim.turn.id} AND turn_kind = 'AgentExecution' AND status = 'queued' AND queue_claim_token = ${claim.token}`.pipe(
           Effect.asVoid,
           Effect.mapError(repositoryError),
         )
       }),
-      resetQueueClaims: sql`UPDATE rika_turns SET queue_claim_token = NULL WHERE queue_claim_token IS NOT NULL`.pipe(
-        Effect.asVoid,
-        Effect.mapError(repositoryError),
-      ),
+      resetQueueClaims:
+        sql`UPDATE rika_turns SET queue_claim_token = NULL WHERE turn_kind = 'AgentExecution' AND queue_claim_token IS NOT NULL`.pipe(
+          Effect.asVoid,
+          Effect.mapError(repositoryError),
+        ),
       editQueued: Effect.fn("TurnRepository.editQueued")(function* (id, prompt, now) {
         return yield* sql
           .withTransaction(
             Effect.gen(function* () {
               const rows =
-                yield* sql`UPDATE rika_turns SET prompt = ${prompt}, prompt_parts_json = NULL, updated_at = ${now}, queue_claim_token = NULL WHERE id = ${id} AND status = 'queued' RETURNING *`
+                yield* sql`UPDATE rika_turns SET prompt = ${prompt}, prompt_parts_json = NULL, updated_at = ${now}, queue_claim_token = NULL WHERE id = ${id} AND turn_kind = 'AgentExecution' AND status = 'queued' RETURNING *`
               if (rows[0] === undefined) return yield* RepositoryError.make({ message: `Turn ${id} is not queued` })
-              const turn = yield* decode(rows[0])
+              const turn = yield* decodeAgent(rows[0])
               const queueRows = yield* sql`UPDATE rika_thread_queue_state
                 SET revision = revision + 1
                 WHERE thread_id = ${turn.threadId}
@@ -1065,9 +1274,10 @@ export const layer = Layer.effect(
         return yield* sql
           .withTransaction(
             Effect.gen(function* () {
-              const rows = yield* sql`DELETE FROM rika_turns WHERE id = ${id} AND status = 'queued' RETURNING *`
+              const rows =
+                yield* sql`DELETE FROM rika_turns WHERE id = ${id} AND turn_kind = 'AgentExecution' AND status = 'queued' RETURNING *`
               if (rows[0] === undefined) return yield* queuedTurnUnavailable(id)
-              const turn = yield* decode(rows[0])
+              const turn = yield* decodeAgent(rows[0])
               const queueRows = yield* sql`UPDATE rika_thread_queue_state
                 SET revision = revision + 1, queued_count = MAX(queued_count - 1, 0)
                 WHERE thread_id = ${turn.threadId}
@@ -1093,9 +1303,10 @@ export const layer = Layer.effect(
         return yield* sql
           .withTransaction(
             Effect.gen(function* () {
-              const rows = yield* sql`DELETE FROM rika_turns WHERE id = ${id} AND status = 'queued' RETURNING *`
+              const rows =
+                yield* sql`DELETE FROM rika_turns WHERE id = ${id} AND turn_kind = 'AgentExecution' AND status = 'queued' RETURNING *`
               if (rows[0] === undefined) return yield* RepositoryError.make({ message: `Turn ${id} is not queued` })
-              const turn = yield* decode(rows[0])
+              const turn = yield* decodeAgent(rows[0])
               const queueRows = yield* sql`UPDATE rika_thread_queue_state
                 SET revision = revision + 1, queued_count = MAX(queued_count - 1, 0)
                 WHERE thread_id = ${turn.threadId}
@@ -1118,12 +1329,13 @@ export const layer = Layer.effect(
         return yield* sql
           .withTransaction(
             Effect.gen(function* () {
-              const currentRows = yield* sql`SELECT * FROM rika_turns WHERE id = ${id} AND status = 'accepted'`
+              const currentRows =
+                yield* sql`SELECT * FROM rika_turns WHERE id = ${id} AND turn_kind = 'AgentExecution' AND status = 'accepted'`
               if (currentRows[0] === undefined)
                 return yield* RepositoryError.make({ message: `Turn ${id} is not an unowned accepted turn` })
-              const current = yield* decode(currentRows[0])
+              const current = yield* decodeAgent(currentRows[0])
               const otherActive = yield* sql`SELECT id FROM rika_turns
-                WHERE thread_id = ${current.threadId} AND id != ${id} AND status IN ('accepted', 'running', 'waiting') LIMIT 1`
+                WHERE thread_id = ${current.threadId} AND turn_kind = 'AgentExecution' AND id != ${id} AND status IN ('accepted', 'running', 'waiting') LIMIT 1`
               if (otherActive[0] !== undefined)
                 return yield* RepositoryError.make({ message: `Turn ${id} is not an unowned accepted turn` })
               yield* sql`INSERT INTO rika_thread_queue_state (thread_id) VALUES (${current.threadId}) ON CONFLICT (thread_id) DO NOTHING`
@@ -1144,10 +1356,10 @@ export const layer = Layer.effect(
                 })
               }
               const updatedRows = yield* sql`UPDATE rika_turns SET status = 'queued', updated_at = ${now}
-                WHERE id = ${id} AND status = 'accepted' RETURNING *`
+                WHERE id = ${id} AND turn_kind = 'AgentExecution' AND status = 'accepted' RETURNING *`
               if (updatedRows[0] === undefined)
                 return yield* RepositoryError.make({ message: `Turn ${id} is not an unowned accepted turn` })
-              const turn = yield* decode(updatedRows[0])
+              const turn = yield* decodeAgent(updatedRows[0])
               const state = yield* decodeQueueState(queueRows[0])
               return {
                 ...turn,
@@ -1194,14 +1406,15 @@ export const layer = Layer.effect(
       setExtensionPin: Effect.fn("TurnRepository.setExtensionPin")(function* (id, pin) {
         const encoded = yield* Schema.encodeEffect(ExtensionPinJson)(pin).pipe(Effect.mapError(repositoryError))
         const rows = yield* sql`UPDATE rika_turns SET extension_pin_json = ${encoded}
-          WHERE id = ${id} AND (extension_pin_json IS NULL OR extension_pin_json = ${encoded}) RETURNING *`.pipe(
+          WHERE id = ${id} AND turn_kind = 'AgentExecution'
+            AND (extension_pin_json IS NULL OR extension_pin_json = ${encoded}) RETURNING *`.pipe(
           Effect.mapError(repositoryError),
         )
         if (rows[0] === undefined)
           return yield* RepositoryError.make({
             message: `Turn ${id} extension pin is immutable or turn does not exist`,
           })
-        return yield* decode(rows[0])
+        return yield* decodeAgent(rows[0])
       }),
       setStatus: Effect.fn("TurnRepository.setStatus")(function* (id, status, lastCursor, now) {
         if (status === "queued")
@@ -1211,7 +1424,7 @@ export const layer = Layer.effect(
         return yield* sql
           .withTransaction(
             Effect.gen(function* () {
-              const before = yield* sql`SELECT * FROM rika_turns WHERE id = ${id}`
+              const before = yield* sql`SELECT * FROM rika_turns WHERE id = ${id} AND turn_kind = 'AgentExecution'`
               if (before[0] === undefined) return yield* missing(id)
               const wasQueued = String((before[0] as { status?: unknown }).status) === "queued"
               if (wasQueued)
@@ -1220,10 +1433,10 @@ export const layer = Layer.effect(
                 })
               const rows =
                 yield* sql`UPDATE rika_turns SET status = ${status}, last_cursor = ${lastCursor ?? null}, updated_at = ${now}
-                WHERE id = ${id} AND status NOT IN ('completed', 'failed', 'cancelled')
+                WHERE id = ${id} AND turn_kind = 'AgentExecution' AND status NOT IN ('completed', 'failed', 'cancelled')
                 RETURNING *`
-              if (rows[0] === undefined) return yield* decode(before[0])
-              const turn = yield* decode(rows[0])
+              if (rows[0] === undefined) return yield* decodeAgent(before[0])
+              const turn = yield* decodeAgent(rows[0])
               return turn
             }),
           )
@@ -1231,19 +1444,20 @@ export const layer = Layer.effect(
       }),
       startAccepted: Effect.fn("TurnRepository.startAccepted")(function* (id, now) {
         const rows = yield* sql`UPDATE rika_turns SET status = 'running', updated_at = ${now}
-          WHERE id = ${id} AND status = 'accepted'
+          WHERE id = ${id} AND turn_kind = 'AgentExecution' AND status = 'accepted'
           RETURNING id`.pipe(Effect.mapError(repositoryError))
         return rows[0] !== undefined
       }),
       cancelAccepted: Effect.fn("TurnRepository.cancelAccepted")(function* (id, now) {
         const rows = yield* sql`UPDATE rika_turns SET status = 'cancelled', updated_at = ${now}
-          WHERE id = ${id} AND status = 'accepted'
+          WHERE id = ${id} AND turn_kind = 'AgentExecution' AND status = 'accepted'
           RETURNING id`.pipe(Effect.mapError(repositoryError))
         return rows[0] !== undefined
       }),
       repairCursor: Effect.fn("TurnRepository.repairCursor")(function* (id, status, expectedCursor, cursor) {
         const rows = yield* sql`UPDATE rika_turns SET last_cursor = ${cursor ?? null}
           WHERE id = ${id}
+            AND turn_kind = 'AgentExecution'
             AND status = ${status}
             AND (last_cursor = ${expectedCursor ?? null} OR (last_cursor IS NULL AND ${expectedCursor ?? null} IS NULL))
           RETURNING id`.pipe(Effect.mapError(repositoryError))

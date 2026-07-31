@@ -294,9 +294,10 @@ export const layer = Layer.effect(
             const row = yield* Schema.decodeUnknownEffect(Row)(value)
             const labels = yield* Schema.decodeUnknownEffect(LabelsJson)(row.labels_json)
             const lineage = yield* Schema.decodeUnknownEffect(LineageJson)(row.lineage_json)
+            const id = yield* Schema.decodeUnknownEffect(ThreadId)(row.id)
             return {
               thread: {
-                id: ThreadId.make(row.id),
+                id,
                 workspace: row.workspace,
                 title: row.title,
                 labels,

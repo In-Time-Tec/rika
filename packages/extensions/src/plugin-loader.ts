@@ -3,7 +3,6 @@ import type { AgentProfile, Json, Mode, PluginV1, Registrar, Tool, UiAction } fr
 import * as PluginDigest from "./plugin-digest"
 import type { Generation } from "./plugin-registry"
 import * as PluginRegistry from "./plugin-registry"
-import * as PluginTrust from "./plugin-trust"
 
 export interface Source {
   readonly id: string
@@ -16,11 +15,7 @@ export class LoadError extends Schema.TaggedErrorClass<LoadError>()("@rika/exten
   message: Schema.String,
 }) {}
 
-export const reload = Effect.fn("PluginLoader.reload")(function* (
-  workspaceIdentity: string,
-  sources: ReadonlyArray<Source>,
-) {
-  const trust = yield* PluginTrust.Service
+export const reload = Effect.fn("PluginLoader.reload")(function* (sources: ReadonlyArray<Source>) {
   const registry = yield* PluginRegistry.Service
   const tools = new Map<string, Tool>()
   const modes = new Map<string, Mode>()
@@ -34,11 +29,6 @@ export const reload = Effect.fn("PluginLoader.reload")(function* (
   }
   for (const source of sources.toSorted((left, right) => left.id.localeCompare(right.id))) {
     const sourceDigest = yield* PluginDigest.source(source.content)
-    const trusted = yield* trust.isTrusted(workspaceIdentity, source.id, sourceDigest)
-    if (!trusted) {
-      diagnostics.push(`${source.id}: workspace trust required for ${sourceDigest}`)
-      continue
-    }
     const loaded = yield* Effect.exit(source.load)
     if (Exit.isFailure(loaded)) {
       diagnostics.push(`${source.id}: load failed: ${String(loaded.cause)}`)

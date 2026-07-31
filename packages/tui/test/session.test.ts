@@ -10,7 +10,6 @@ test("dispatches every session action and reports absent optional callbacks", ()
     steer: vi.fn(),
     interruptAndSend: vi.fn(),
     cancel: vi.fn(),
-    decidePermission: vi.fn(),
     selectThread: vi.fn(),
   }
   const actions: ReadonlyArray<Action> = [
@@ -21,7 +20,6 @@ test("dispatches every session action and reports absent optional callbacks", ()
     { _tag: "Steer", prompt: "c" },
     { _tag: "InterruptAndSend", prompt: "d" },
     { _tag: "Cancel" },
-    { _tag: "DecidePermission", id: "p", kind: "permission", decision: "deny" },
     { _tag: "SelectThread", id: "t" },
   ]
   for (const action of actions) expect(execute(adapter, action)).toBe(true)

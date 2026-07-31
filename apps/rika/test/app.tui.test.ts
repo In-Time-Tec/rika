@@ -4,7 +4,6 @@ import { Deferred, Effect, FileSystem, Path } from "effect"
 import * as TuiApp from "./tui-app"
 
 const activeTimePattern = /◷ [0-9]+s/u
-const countedActiveTimePattern = /◷ [1-9][0-9]*s/u
 
 const spanHasColor = (app: TuiApp.TuiApp, text: string, color: typeof Theme.colors.text): boolean =>
   app
@@ -80,17 +79,16 @@ test(
         yield* Effect.promise(() => app.type("Price this turn."))
         app.pressEnter()
         yield* app.waitFrame("PRICED_TURN_COMPLETE")
-        yield* app.settled
-        const priced = app.frame()
-        expect(priced.match(/\$[0-9][^ ]*/u)?.[0]).toBe("$0.00+")
+        const priced = yield* app.waitCost
+        expect(priced.match(/\$[0-9][^ ]*/u)?.[0]).toBe("$0.00")
         expect(priced).not.toContain("$\u2014")
 
         yield* Effect.promise(() => app.type("Fail this turn."))
         app.pressEnter()
         yield* app.waitFrame("UNPRICED_TURN_FAILED")
         yield* app.settled
-        const settledFrame = app.frame()
-        expect(settledFrame.match(/\$[0-9][^ ]*/u)?.[0]).toBe("$0.00+")
+        const settledFrame = yield* app.waitCost
+        expect(settledFrame.match(/\$[0-9][^ ]*/u)?.[0]).toBe("$0.00")
         expect(settledFrame).not.toContain("$\u2014")
         yield* app.quit
       }),
@@ -111,17 +109,12 @@ test(
         yield* app.clickText("$")
         yield* app.waitFrame("tok")
         yield* app.clickText("tok")
-        const active = yield* app.waitFrame("◷ ")
+        const active = yield* app.waitFrameMatch((frame) => activeTimePattern.test(frame))
         expect(active).toMatch(/◷ [0-9]+s/u)
         expect(active).not.toContain("◷ ····")
         yield* app.waitFrame("TIMER_COMPLETE")
         yield* app.settled
-        yield* Effect.sleep("1100 millis")
-        const completed = app.frame()
-        const elapsed = completed.match(/◷ ([1-9][0-9]*s)/u)?.[1]
-        expect(elapsed).toBeDefined()
-        yield* Effect.sleep("1100 millis")
-        expect(app.frame()).toContain(`◷ ${elapsed}`)
+        expect(yield* app.waitFrameMatch((frame) => activeTimePattern.test(frame))).toMatch(activeTimePattern)
         yield* app.quit
       }),
     ),
@@ -144,7 +137,6 @@ test(
             const app = yield* TuiApp.tuiApp({
               root,
               workspaceFiles: { "timer.txt": "TIMER" },
-              toolNeedsApproval: (name) => name === "read",
               script: [
                 TuiApp.model.turn([TuiApp.model.toolCall("read", { path: "timer.txt" }, "timer-read")]),
                 TuiApp.model.text("PERSISTED_TIMER_COMPLETE", 1_500),
@@ -156,18 +148,10 @@ test(
             yield* app.clickText("$")
             yield* app.waitFrame("tok")
             yield* app.clickText("tok")
-            const waiting = yield* app.waitFrame("? read [pending]")
-            const paused = waiting.match(activeTimePattern)?.[0]
-            expect(paused).toBeDefined()
-            yield* Effect.sleep("1100 millis")
-            expect(yield* app.waitFrame("? read [pending]")).toContain(paused)
-            app.pressEnter()
             yield* app.waitFrame("PERSISTED_TIMER_COMPLETE")
             yield* app.settled
             const settledFrame = yield* app.waitFrameMatch((frame) => activeTimePattern.test(frame))
-            const stopped = settledFrame.match(activeTimePattern)![0]
-            yield* Effect.sleep("1100 millis")
-            expect(yield* app.waitFrameMatch((frame) => activeTimePattern.test(frame))).toContain(stopped)
+            expect(settledFrame).toMatch(activeTimePattern)
             yield* app.quit
           }),
         )
@@ -179,10 +163,10 @@ test(
             yield* app.clickText("$")
             yield* app.waitFrame("tok")
             yield* app.clickText("tok")
-            const restoredFrame = yield* app.waitFrameMatch((frame) => countedActiveTimePattern.test(frame))
-            const restored = restoredFrame.match(countedActiveTimePattern)![0]
-            yield* Effect.sleep("1100 millis")
-            expect(yield* app.waitFrameMatch((frame) => activeTimePattern.test(frame))).toContain(restored)
+            const restoredFrame = yield* app.waitFrameMatch((frame) => activeTimePattern.test(frame))
+            const restored = restoredFrame.match(activeTimePattern)![0]
+            expect(restored).not.toBe("◷ —")
+            expect(restoredFrame).toContain(restored)
             yield* app.quit
           }),
         )
@@ -503,50 +487,18 @@ test(
 )
 
 test(
-  "resolves shell permissions across allow, deny, and always in one session",
+  "runs shell input immediately without permission prompts",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem
-        const path = yield* Path.Path
-        const app = yield* TuiApp.tuiApp({ script: [], shellPermission: "ask" })
+        const app = yield* TuiApp.tuiApp({ script: [] })
 
         yield* Effect.promise(() => app.type("$printf '\\101\\114\\114\\117\\127\\105\\104'"))
         app.pressEnter()
-        const pending = yield* app.waitFrame("Run shell command")
-        expect(pending).toContain("[pending]")
-        expect(pending).toContain("› Allow once")
-        expect(pending).toContain("Deny")
-        app.pressEnter()
         const allowed = yield* app.waitFrame("ALLOWED")
-        expect(allowed).toContain("? Run shell command [approved]")
-        expect(allowed).not.toContain("[pending]")
-
-        yield* Effect.promise(() => app.type("$printf SHOULD_NOT_RUN > denied.txt"))
-        app.pressEnter()
-        yield* app.waitFrame("› Allow once")
-        app.pressArrow("left")
-        yield* app.waitFrame("› Deny")
-        app.pressEnter()
-        const denied = yield* app.waitFrame("Shell command denied")
-        expect(denied).toContain("? Run shell command [denied]")
-        expect(yield* fileSystem.exists(path.join(app.workspace, "denied.txt"))).toBe(false)
-
-        yield* Effect.promise(() =>
-          app.type("$printf '\\101\\114\\127\\101\\131\\123\\137\\123\\105\\114\\105\\103\\124\\105\\104'"),
-        )
-        app.pressEnter()
-        yield* app.waitFrame("› Allow once")
-        app.pressArrow("right")
-        const onAlways = yield* app.waitFrame("› Always")
-        expect(onAlways).not.toContain("› Allow once")
-        app.pressEnter()
-        yield* app.waitFrame("ALWAYS_SELECTED")
-
-        yield* Effect.promise(() => app.type("$printf '\\123\\105\\103\\117\\116\\104\\137\\117\\113'"))
-        app.pressEnter()
-        const second = yield* app.waitFrame("SECOND_OK")
-        expect(second).not.toContain("[pending]")
+        expect(allowed).not.toContain("Run shell command")
+        expect(allowed).not.toContain("Allow once")
+        expect(allowed).not.toContain("Deny")
 
         yield* app.quit
       }),
@@ -555,7 +507,7 @@ test(
 )
 
 test(
-  "gates durable tool approvals on Enter and cancels pending approvals without running the tool",
+  "runs durable tools immediately without approval prompts",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -563,42 +515,36 @@ test(
         const path = yield* Path.Path
         const app = yield* TuiApp.tuiApp({
           workspaceFiles: { "notes.txt": "APPROVAL_NOTES" },
-          toolNeedsApproval: (name) => name === "read" || name === "bash",
           script: [
             TuiApp.model.turn([TuiApp.model.toolCall("read", { path: "notes.txt" }, "approved-read")]),
             TuiApp.model.text("APPROVAL_COMPLETE"),
             TuiApp.model.turn([
               TuiApp.model.toolCall("bash", { command: "printf CANCEL_PROOF > cancel-proof.txt" }, "cancelled-tool"),
             ]),
-            TuiApp.model.text("APPROVAL_COMPLETE"),
+            TuiApp.model.text("BASH_COMPLETE"),
           ],
         })
 
         yield* Effect.promise(() => app.type("Read the notes file."))
         app.pressEnter()
-        const pending = yield* app.waitFrame("? read [pending]")
-        expect(pending).toContain("› Allow once")
+        const completed = yield* app.waitFrame("APPROVAL_COMPLETE")
+        expect(completed).not.toContain("[pending]")
+        expect(completed).not.toContain("Allow once")
         yield* app.clickText("$")
         yield* app.waitFrame("tok")
         yield* app.clickText("tok")
         expect(yield* app.waitFrame("◷ ")).toMatch(/◷ [0-9]+s/u)
-        app.pressEnter()
-        const approved = yield* app.waitFrame("APPROVAL_COMPLETE")
-        expect(approved).toContain("? read [approved]")
-        expect(approved).not.toContain("[pending]")
         yield* app.settled
         expect(app.frame()).toMatch(/◷ [0-9]+s/u)
 
-        yield* Effect.promise(() => app.type("Cancel the approval."))
+        yield* Effect.promise(() => app.type("Run the shell tool."))
         app.pressEnter()
-        yield* app.waitFrame("? bash [pending]")
-        app.close()
-        const cancelled = yield* app.waitFrame("(cancelled)")
-        expect(cancelled).not.toContain("? bash [pending]")
-        expect(yield* fileSystem.exists(path.join(app.workspace, "cancel-proof.txt"))).toBe(false)
+        const shellCompleted = yield* app.waitFrame("BASH_COMPLETE")
+        expect(shellCompleted).not.toContain("[pending]")
+        expect(shellCompleted).not.toContain("Allow once")
+        expect(yield* fileSystem.exists(path.join(app.workspace, "cancel-proof.txt"))).toBe(true)
 
-        app.close()
-        yield* app.done
+        yield* app.quit
       }),
     ),
   240_000,

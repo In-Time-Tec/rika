@@ -13,7 +13,7 @@ test(
               {
                 type: "toolCall",
                 name: "bash",
-                params: { command: "printf TOO_LATE" },
+                params: { command: "sleep 10; touch cancellation-side-effect" },
                 id: "cancel-busy-turn",
               },
             ],
@@ -23,11 +23,10 @@ test(
         const result = yield* interactivePty(
           [
             { after: "Welcome to Rika", write: "cancel this turn\r" },
-            { after: "› Allow once", write: "\u0003" },
+            { after: "Runn", write: "\u0003" },
             { after: "(cancelled)", write: "\u0003", checkRunning: true },
           ],
           script,
-          ["bash"],
         )
         expect(result.timedOut, result.output).toBe(false)
         expect(result.actionsCompleted).toBe(3)
@@ -35,6 +34,7 @@ test(
         expect(result.exitCode, result.output).toBe(0)
         expect(result.output).toContain("(cancelled)")
         expect(result.output).toContain(".#*+:")
+        expect(result.workspaceFiles).not.toContain("cancellation-side-effect")
         expect(result.clientLogs).not.toContain('"message":"process.failed"')
         expect(result.names.filter((name) => name.endsWith(".open.jsonl"))).toEqual([])
       }),

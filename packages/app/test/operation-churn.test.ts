@@ -4,7 +4,7 @@ import * as Thread from "@rika/persistence/thread"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
-import { Deferred, Effect, Fiber, Layer, Queue } from "effect"
+import { Deferred, Effect, Fiber, Layer, Queue, Schema } from "effect"
 import { Operation } from "../src/index"
 
 type Client = {
@@ -15,7 +15,11 @@ type Client = {
 }
 
 const patchSequences = (client: Client) =>
-  client.events.flatMap((event) => (event._tag === "TranscriptPatched" ? [event.event.sequence] : []))
+  client.events.flatMap((event) =>
+    event._tag === "TranscriptProjectionPatched" && event.origin._tag === "Event" && event.origin.sequence > 2
+      ? [event.origin.sequence - 3]
+      : [],
+  )
 
 it.effect("delivers each joined subscriber suffix exactly once through subscribe and unsubscribe churn", () =>
   Effect.gen(function* () {
@@ -35,13 +39,32 @@ it.effect("delivers each joined subscriber suffix exactly once through subscribe
     const following = yield* Deferred.make<void>()
     const liveEvents = yield* Queue.unbounded<ExecutionBackend.Event>()
     const emitted: Array<ExecutionBackend.Event> = []
-    const streamed: ReadonlyArray<ExecutionBackend.Event> = Array.from({ length: 8 }, (_, sequence) => ({
+    const lifecycleEvents: ReadonlyArray<ExecutionBackend.Event> = [
+      {
+        executionId: "execution:churn-turn",
+        cursor: "churn-accepted",
+        sequence: 1,
+        type: "execution.accepted",
+        createdAt: 1,
+        timestampSource: "server",
+      },
+      {
+        executionId: "execution:churn-turn",
+        cursor: "churn-started",
+        sequence: 2,
+        type: "execution.started",
+        createdAt: 2,
+        timestampSource: "server",
+      },
+    ]
+    const streamed: ReadonlyArray<ExecutionBackend.Event> = Array.from({ length: 8 }, (_, index) => ({
       executionId: "execution:churn-turn",
-      cursor: `churn-${sequence}`,
-      sequence,
-      type: sequence === 7 ? "execution.completed" : "model.output.delta",
-      createdAt: sequence,
-      ...(sequence === 7 ? {} : { text: String(sequence) }),
+      cursor: `churn-${index}`,
+      sequence: index + 3,
+      type: index === 7 ? "execution.completed" : "model.output.delta",
+      createdAt: index + 3,
+      timestampSource: "server",
+      ...(index === 7 ? {} : { text: String(index) }),
     }))
     let running = false
     const backend = ExecutionBackend.Service.of({
@@ -68,8 +91,12 @@ it.effect("delivers each joined subscriber suffix exactly once through subscribe
       follow: (turnId, _afterCursor, onEvent) =>
         Effect.gen(function* () {
           yield* Deferred.succeed(following, undefined)
-          const events: Array<ExecutionBackend.Event> = []
-          while (events.length < streamed.length) {
+          const events: Array<ExecutionBackend.Event> = [...lifecycleEvents]
+          for (const event of lifecycleEvents) {
+            emitted.push(event)
+            onEvent?.(event)
+          }
+          while (events.length < streamed.length + lifecycleEvents.length) {
             const event = yield* Queue.take(liveEvents)
             events.push(event)
             onEvent?.(event)
@@ -88,9 +115,6 @@ it.effect("delivers each joined subscriber suffix exactly once through subscribe
           running ? { turnId, status: "running" as const, waits: [], pendingTools: [], children: [] } : undefined,
         ),
       steer: (turnId) => Effect.succeed({ steeringMessageId: `steering:${turnId}:steering:0`, sequence: 0 }),
-      listApprovals: () => Effect.succeed([]),
-      resolveToolApproval: () => Effect.void,
-      resolvePermission: () => Effect.void,
       resolveInvocationSource: () => Effect.die("unused"),
     })
     const registrations = yield* Queue.unbounded<{
@@ -140,7 +164,27 @@ it.effect("delivers each joined subscriber suffix exactly once through subscribe
           })
           const release = Effect.fn("OperationChurnTest.release")(function* (sequence: number, source: Client) {
             yield* Queue.offer(releases, undefined)
-            while (!patchSequences(source).includes(sequence)) yield* Effect.yieldNow
+            for (let attempt = 0; attempt < 4_000; attempt += 1) {
+              if (patchSequences(source).includes(sequence)) return
+              yield* Effect.yieldNow
+            }
+            const encoded = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(
+              source.events.map((event) => {
+                if (event._tag === "TranscriptProjectionFailed") {
+                  return {
+                    tag: event._tag,
+                    executionId: event.executionId,
+                    reason: event.reason,
+                    message: event.message,
+                  }
+                }
+                if (event._tag === "TranscriptProjectionPatched") {
+                  return { tag: event._tag, origin: event.origin }
+                }
+                return { tag: event._tag }
+              }),
+            )
+            return yield* Effect.die(`Projection sequence ${sequence} was not published: ${encoded}`)
           })
 
           const initial = yield* Effect.forEach(Array.from({ length: 4 }), () => open(true), { concurrency: 1 })
@@ -197,10 +241,10 @@ it.effect("delivers each joined subscriber suffix exactly once through subscribe
           const expected = [
             [0, 1, 2, 3, 4, 5, 6, 7],
             [0, 1, 2, 3, 4, 5, 6, 7],
-            [2, 3, 4, 5, 6, 7],
-            [2, 3, 4, 5, 6, 7],
-            [4, 5, 6, 7],
-            [4, 5, 6, 7],
+            [3, 4, 5, 6, 7],
+            [3, 4, 5, 6, 7],
+            [5, 6, 7],
+            [5, 6, 7],
           ]
           for (const [index, client] of survivors.entries()) expect(patchSequences(client)).toEqual(expected[index])
           for (const client of [source, initial[3]!]) {
@@ -209,7 +253,12 @@ it.effect("delivers each joined subscriber suffix exactly once through subscribe
             )
             expect(startedEvents).toHaveLength(1)
             expect(client.events.indexOf(startedEvents[0]!)).toBeLessThan(
-              client.events.findIndex((event) => event._tag === "TranscriptPatched" && event.event.sequence === 0),
+              client.events.findIndex(
+                (event) =>
+                  event._tag === "TranscriptProjectionPatched" &&
+                  event.origin._tag === "Event" &&
+                  event.origin.sequence === 3,
+              ),
             )
           }
         }).pipe(Effect.provide(context))

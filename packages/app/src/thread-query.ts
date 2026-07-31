@@ -92,7 +92,7 @@ export interface FindSuccess {
   readonly schemaVersion: 2
   readonly threads: ReadonlyArray<{
     readonly threadId: string
-    readonly state: "idle" | "queued" | "running" | "awaiting-approval" | "error"
+    readonly state: "idle" | "queued" | "running" | "error"
     readonly archived: boolean
     readonly title: string
     readonly updatedAt: string
@@ -138,24 +138,40 @@ const safeText = (text: string, limit: number) => [...text].slice(0, limit).join
 const threadState = (
   threadTurns: ReadonlyArray<TurnRepository.PageResult["turns"][number]>,
 ): FindSuccess["threads"][number]["state"] => ThreadState.threadState(threadTurns.map((turn) => turn.status))
+
+interface ChildLink {
+  readonly executionId: string
+  readonly parentId: string
+  readonly text: string
+}
+
+const childLink = (unit: Transcript.Unit): ChildLink | undefined => {
+  if (unit.content._tag !== "Block") return undefined
+  const block = unit.content.block
+  if (block._tag === "ChildAgent") return { executionId: block.id, parentId: block.id, text: block.summary }
+  if (block._tag === "ToolCall" && block.childId !== undefined)
+    return { executionId: block.childId, parentId: block.id, text: block.output ?? block.detail }
+  return undefined
+}
+
 const message = (
   unit: Transcript.Unit,
   all: ReadonlyArray<Transcript.Unit>,
   textLimit = 12_000,
 ): Message | undefined => {
   if (unit.content._tag === "Entry") return { role: unit.content.role, text: safeText(unit.content.text, textLimit) }
-  const block = unit.content.block
-  if (block._tag !== "ChildAgent") return undefined
+  const link = childLink(unit)
+  if (link === undefined) return undefined
   const children = all
-    .filter((candidate) => candidate.parentId === block.id)
+    .filter((candidate) => candidate.parentId === link.parentId)
     .flatMap((candidate) => {
       const rendered = message(candidate, all, textLimit)
       return rendered === undefined ? [] : [rendered]
     })
   return {
     role: "child",
-    text: safeText(block.summary, textLimit),
-    childExecutionId: block.id,
+    text: safeText(link.text, textLimit),
+    childExecutionId: link.executionId,
     ...(children.length === 0 ? {} : { children }),
   }
 }
@@ -348,12 +364,7 @@ export const makeForWorkspace = (workspace: string) =>
         const page = yield* transcripts
           .page(threadId, { before: input.selector.before, limit: 200 })
           .pipe(Effect.mapError(mapError))
-        const root = page.entries.find(
-          (entry) =>
-            entry.unit.content._tag === "Block" &&
-            entry.unit.content.block._tag === "ChildAgent" &&
-            entry.unit.content.block.id === childExecutionId,
-        )
+        const root = page.entries.find((entry) => childLink(entry.unit)?.executionId === childExecutionId)
         if (root === undefined) {
           const continuation =
             page.hasOlder && page.oldestCursor !== undefined
@@ -363,21 +374,24 @@ export const makeForWorkspace = (workspace: string) =>
         }
         const projection = yield* transcripts.get(root.turn.id).pipe(Effect.mapError(mapError))
         const units = projection?.units ?? [root.unit]
+        const rootLink = childLink(root.unit)
+        if (rootLink === undefined)
+          return yield* QueryError.make({ message: `Child execution ${childExecutionId} has no parent block` })
+        const rootParentId = rootLink.parentId
         const descendants: Array<Transcript.Unit> = []
-        const parentIds = new Set([childExecutionId])
+        const parentIds = new Set([rootParentId])
         for (const unit of units) {
           if (unit.parentId === undefined || !parentIds.has(unit.parentId)) continue
           descendants.push(unit)
-          if (unit.content._tag === "Block" && unit.content.block._tag === "ChildAgent")
-            parentIds.add(unit.content.block.id)
+          const link = childLink(unit)
+          if (link !== undefined) parentIds.add(link.parentId)
         }
         const offset = Math.min(input.selector.offset ?? 0, descendants.length)
         const blockParents = new Map(
-          descendants.flatMap((unit) =>
-            unit.content._tag === "Block" && unit.content.block._tag === "ChildAgent"
-              ? ([[unit.content.block.id, unit]] as const)
-              : [],
-          ),
+          descendants.flatMap((unit) => {
+            const link = childLink(unit)
+            return link === undefined ? [] : ([[link.parentId, unit]] as const)
+          }),
         )
         const selected = new Set<Transcript.Unit>()
         let nextOffset = offset
@@ -386,7 +400,7 @@ export const makeForWorkspace = (workspace: string) =>
           const candidate = descendants[index]!
           const trial = new Set(selected).add(candidate)
           let parentId = candidate.parentId
-          while (parentId !== undefined && parentId !== childExecutionId) {
+          while (parentId !== undefined && parentId !== rootParentId) {
             const parent = blockParents.get(parentId)
             if (parent === undefined) break
             trial.add(parent)

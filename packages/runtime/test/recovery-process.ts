@@ -85,8 +85,6 @@ const main = Effect.gen(function* () {
     selection: fixture.selection,
     modelVariantPolicy: "fixed-selection",
     toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
-    toolNeedsApproval: () => false,
-    permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
     additionalToolkit: contextToolkit,
     additionalHandlerLayer: contextToolkit.toLayer({
       context_probe: () =>
@@ -110,7 +108,6 @@ const main = Effect.gen(function* () {
                 threadId: "thread-recovery",
                 turnId: message.value ?? "turn-recovery",
                 prompt: promptSecret,
-                startedAt: 1,
               }).pipe(
                 Effect.flatMap((result) => send({ id: message.id, ok: true, value: result.status })),
                 Effect.catch((error) => send({ id: message.id, ok: false, error: String(error) })),

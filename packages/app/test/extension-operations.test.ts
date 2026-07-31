@@ -23,7 +23,6 @@ describe("ExtensionOperations", () => {
           globalRoot: `${root}/global`,
           workspaceRoot: `${root}/skills`,
           configPath: `${root}/config/mcp.json`,
-          trustPath: `${root}/trust.json`,
           generationsPath: `${root}/generations.json`,
         }
         yield* fs.makeDirectory(`${options.globalRoot}/global-skill`, { recursive: true })
@@ -56,8 +55,6 @@ describe("ExtensionOperations", () => {
           yield* ExtensionOperations.run({ _tag: "Mcp", action: "list" })
           yield* ExtensionOperations.run({ _tag: "Mcp", action: "doctor" })
           yield* ExtensionOperations.run({ _tag: "Mcp", action: "enable", name: "remote" })
-          yield* ExtensionOperations.run({ _tag: "Mcp", action: "approve", name: "remote" })
-          yield* ExtensionOperations.run({ _tag: "Mcp", action: "approve", name: "remote", workspace: "/other" })
           yield* ExtensionOperations.run({ _tag: "Mcp", action: "remove", name: "local" })
           yield* ExtensionOperations.run({ _tag: "Extension", action: "enable", name: "plug" })
           yield* ExtensionOperations.run({ _tag: "Extension", action: "disable", name: "plug" })
@@ -71,7 +68,6 @@ describe("ExtensionOperations", () => {
         expect(logs[2]).toContain("unauthenticated")
         expect(logs[4]).toContain('"enabled":false')
         expect(logs.at(-1)).toContain('"generation":1')
-        expect(yield* fs.readFileString(options.trustPath)).toContain("/other:remote")
       }).pipe(
         provideLayer(
           Layer.merge(BunServices.layer, SkillRegistry.fileSystemLayer.pipe(Layer.provide(BunServices.layer))),
@@ -91,7 +87,6 @@ describe("ExtensionOperations", () => {
           globalRoot: `${root}/global`,
           workspaceRoot: `${root}/host/.rika/skills`,
           configPath: `${root}/host/.rika/mcp.json`,
-          trustPath: `${root}/trust.json`,
           generationsPath: `${root}/host/.rika/extensions.json`,
         }
         yield* fs.makeDirectory(source, { recursive: true })
@@ -136,7 +131,6 @@ describe("ExtensionOperations", () => {
           globalRoot: `${root}/global`,
           workspaceRoot,
           configPath: `${root}/workspace/.rika/mcp.json`,
-          trustPath: `${root}/trust.json`,
           generationsPath: `${root}/workspace/.rika/extensions.json`,
         }
         yield* fs.makeDirectory(source, { recursive: true })
@@ -194,7 +188,6 @@ describe("ExtensionOperations", () => {
           globalRoot: `${root}/global`,
           workspaceRoot: `${root}/skills`,
           configPath: `${root}/bad.json`,
-          trustPath: `${root}/trust.json`,
           generationsPath: `${root}/generations.json`,
         }
         yield* fs.writeFileString(options.configPath, "{")
@@ -230,7 +223,6 @@ describe("ExtensionOperations", () => {
           globalRoot: `${root}/global`,
           workspaceRoot: `${root}/skills`,
           configPath: `${root}/mcp.json`,
-          trustPath: `${root}/trust.json`,
           generationsPath: `${root}/generations.json`,
         }
         const run = (input: Parameters<typeof ExtensionOperations.run>[0]) => ExtensionOperations.run(input)
@@ -240,7 +232,7 @@ describe("ExtensionOperations", () => {
             (yield* Effect.flip(run({ _tag: "Mcp", action: "add", name: "local", url: "https://example.test" })))
               .message,
           ).toContain("Duplicate server")
-          for (const action of ["remove", "enable", "disable", "approve"] as const) {
+          for (const action of ["remove", "enable", "disable"] as const) {
             expect((yield* Effect.flip(run({ _tag: "Mcp", action, name: "missing" }))).message).toContain("not found")
           }
           expect(yield* fs.readFileString(options.configPath)).toContain('"command": "runner"')
@@ -262,11 +254,6 @@ describe("ExtensionOperations", () => {
           expect((yield* Effect.flip(run({ _tag: "Mcp", action: "disable", name: "local" }))).message).toContain(
             "disabled",
           )
-          yield* fs.writeFileString(options.configPath, '{"servers":{"local":{"command":"runner"}}}')
-          yield* fs.writeFileString(options.trustPath, '{"approved":"secret"}')
-          expect((yield* Effect.flip(run({ _tag: "Mcp", action: "approve", name: "local" }))).message).toContain(
-            "approved",
-          )
         }).pipe(provideLayer(Layer.merge(ExtensionOperations.layer(options), oauthLayer)))
         yield* program
       }).pipe(
@@ -286,7 +273,6 @@ describe("ExtensionOperations", () => {
           globalRoot: `${root}/global`,
           workspaceRoot: `${root}/skills`,
           configPath: `${root}/mcp.json`,
-          trustPath: `${root}/trust.json`,
           generationsPath: `${root}/generations.json`,
         }
         const names = Array.from({ length: 24 }, (_, index) => `server-${index}`)
@@ -320,7 +306,6 @@ describe("ExtensionOperations", () => {
           globalRoot: `${root}/global`,
           workspaceRoot: `${root}/skills`,
           configPath: `${root}/config.json`,
-          trustPath: `${root}/trust.json`,
           generationsPath: `${root}/generations.json`,
         }
         yield* fs.writeFileString(options.configPath, '{"servers":"invalid","disabled":["remote"]}')
@@ -351,7 +336,6 @@ describe("ExtensionOperations", () => {
           globalRoot: `${root}/global`,
           workspaceRoot: `${root}/skills`,
           configPath: `${root}/mcp.json`,
-          trustPath: `${root}/trust.json`,
           generationsPath: `${root}/extensions.json`,
         }
         const run = (action: "enable" | "disable" | "rollback", name: string) =>
@@ -391,7 +375,6 @@ describe("ExtensionOperations", () => {
           globalRoot: `${root}/global`,
           workspaceRoot: `${root}/skills`,
           configPath: `${root}/mcp.json`,
-          trustPath: `${root}/trust.json`,
           generationsPath: `${root}/extensions.json`,
         }
         const run = (input: Parameters<typeof ExtensionOperations.run>[0]) =>
@@ -431,7 +414,6 @@ describe("ExtensionOperations", () => {
           globalRoot: `${root}/global`,
           workspaceRoot: `${root}/skills`,
           configPath: `${root}/mcp.json`,
-          trustPath: `${root}/trust.json`,
           generationsPath: `${root}/extensions.json`,
         }
         const names = Array.from({ length: 32 }, (_, index) => `extension-${index}`)

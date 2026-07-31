@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { compile, definitions } from "../src/workflow-definitions"
+import { compile, definitions, type DynamicDefinition } from "../src/workflow-definitions"
 
 describe("workflow definitions", () => {
   it("compiles pinned v2 product workflows with grounded children and joins", () => {
@@ -32,10 +32,9 @@ describe("workflow definitions", () => {
       name: "extension",
       entry: "sequence",
       operations: [
-        { id: "sequence", kind: "sequence", operations: ["approval", "timer", "branch"] },
-        { id: "approval", kind: "approval", prompt: "Continue?" },
+        { id: "sequence", kind: "sequence", operations: ["timer", "branch"] },
         { id: "timer", kind: "timer", durationMs: 10 },
-        { id: "branch", kind: "branch", condition: "approved", whenTrue: "retry", whenFalse: "cancel" },
+        { id: "branch", kind: "branch", condition: "complete", whenTrue: "retry", whenFalse: "cancel" },
         { id: "child", kind: "child", profile: "Task", prompt: "work" },
         { id: "tool", kind: "tool", toolName: "workspace.read", input: { path: "README.md" } },
         { id: "tool-empty", kind: "tool", toolName: "git.status" },
@@ -58,7 +57,6 @@ describe("workflow definitions", () => {
     expect(result.definition.version).toBe(2)
     expect(result.definition.operations.map((operation) => operation.kind)).toEqual([
       "sequence",
-      "approval",
       "timer",
       "branch",
       "child",
@@ -88,6 +86,16 @@ describe("workflow definitions", () => {
     })
   })
 
+  it("rejects approval operations before registration", () => {
+    const definition = {
+      schemaVersion: 1,
+      name: "approval",
+      entry: "approval",
+      operations: [{ id: "approval", kind: "approval", prompt: "Continue?" }],
+    } as unknown as DynamicDefinition
+    expect(() => compile(definition)).toThrow()
+  })
+
   it.each([
     {
       name: "a missing entry",
@@ -106,7 +114,7 @@ describe("workflow definitions", () => {
         entry: "same",
         operations: [
           { id: "same", kind: "timer" as const, durationMs: 0 },
-          { id: "same", kind: "approval" as const, prompt: "Continue?" },
+          { id: "same", kind: "child" as const, profile: "Task", prompt: "work" },
         ],
       },
     },

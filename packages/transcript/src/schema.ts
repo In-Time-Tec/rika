@@ -1,9 +1,24 @@
 import { Schema } from "effect"
 
+const SourceSequence = Schema.Finite.check(
+  Schema.isInt(),
+  Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+)
+const OrderSequence = Schema.Finite.check(
+  Schema.isInt(),
+  Schema.isBetween({ minimum: -1, maximum: Number.MAX_SAFE_INTEGER }),
+)
+const OrderPart = Schema.Finite.check(
+  Schema.isInt(),
+  Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+)
+const WellFormedString = Schema.String.check(Schema.isPattern(/^(?:[^\uD800-\uDFFF]|[\uD800-\uDBFF][\uDC00-\uDFFF])*$/))
+const WellFormedNonEmptyString = WellFormedString.check(Schema.isMinLength(1))
+
 export const SourceEvent = Schema.Struct({
   childExecutionId: Schema.optionalKey(Schema.String),
   cursor: Schema.String,
-  sequence: Schema.Finite,
+  sequence: SourceSequence,
   type: Schema.String,
   createdAt: Schema.Finite,
   text: Schema.optionalKey(Schema.String),
@@ -19,7 +34,7 @@ export const Presentation = Schema.Struct({
   completeLabel: Schema.String,
   failedLabel: Schema.optionalKey(Schema.String),
   rowDisplay: Schema.optionalKey(Schema.Literal("continuation")),
-  outputDisplay: Schema.optionalKey(Schema.Literals(["hidden", "expandable"])),
+  outputDisplay: Schema.optionalKey(Schema.Literals(["hidden", "expandable", "inline"])),
   counter: Schema.optionalKey(
     Schema.Literals([
       "file",
@@ -100,13 +115,6 @@ const ErrorBlock = Schema.TaggedStruct("Error", {
   turnId: Schema.optionalKey(Schema.String),
   recovery: Schema.optionalKey(Schema.String),
 })
-const Permission = Schema.TaggedStruct("Permission", {
-  id: Schema.String,
-  kind: Schema.Literals(["permission", "tool-approval"]),
-  title: Schema.String,
-  detail: Schema.String,
-  status: Schema.Literals(["pending", "approved", "denied"]),
-})
 const ChildAgent = Schema.TaggedStruct("ChildAgent", {
   id: Schema.String,
   name: Schema.String,
@@ -136,7 +144,6 @@ export const Block = Schema.Union([
   Compaction,
   Notification,
   ErrorBlock,
-  Permission,
   ChildAgent,
   Workflow,
   ImageAttachment,
@@ -152,11 +159,21 @@ export const Content = Schema.Union([
 ])
 export type Content = typeof Content.Type
 
+export const UnitOrderSegment = Schema.Struct({
+  sequence: OrderSequence,
+  part: OrderPart,
+  key: WellFormedNonEmptyString,
+})
+export type UnitOrderSegment = typeof UnitOrderSegment.Type
+
+export const UnitOrder = Schema.NonEmptyArray(UnitOrderSegment)
+export type UnitOrder = typeof UnitOrder.Type
+
 export const Unit = Schema.Struct({
-  key: Schema.String,
-  turnId: Schema.String,
-  parentId: Schema.optionalKey(Schema.String),
-  order: Schema.Struct({ sequence: Schema.Finite, part: Schema.Finite }),
+  key: WellFormedNonEmptyString,
+  turnId: WellFormedString,
+  parentId: Schema.optionalKey(WellFormedString),
+  order: UnitOrder,
   revision: Schema.Finite,
   executionOutcome: Schema.optionalKey(
     Schema.Struct({
@@ -168,16 +185,22 @@ export const Unit = Schema.Struct({
 })
 export type Unit = typeof Unit.Type
 
-export const Projection = Schema.Struct({
-  units: Schema.Array(Unit),
+const ProjectionStateFields = {
   revision: Schema.Finite,
   modelPhase: Schema.Finite,
   usableCompletionSequence: Schema.optionalKey(Schema.Finite),
-  transientIndexes: Schema.optionalKey(Schema.Record(Schema.String, Schema.Finite)),
   oldestCursor: Schema.optionalKey(Schema.String),
   checkpointCursor: Schema.optionalKey(Schema.String),
   costUsd: Schema.optionalKey(Schema.Finite),
   usageCursors: Schema.optionalKey(Schema.Array(Schema.String)),
   pricingVersion: Schema.optionalKey(Schema.String),
+} as const
+
+export const ProjectionState = Schema.Struct(ProjectionStateFields)
+export type ProjectionState = typeof ProjectionState.Type
+
+export const Projection = Schema.Struct({
+  units: Schema.Array(Unit),
+  ...ProjectionStateFields,
 })
 export type Projection = typeof Projection.Type

@@ -16,6 +16,7 @@ const PackageJson = Schema.Struct({
 })
 
 const forbiddenProtocols = ["file:", "link:"] as const
+const autoresearchLinkPrefix = "file:/private/tmp/rika-autoresearch-links/"
 const externalFrameworks = new Set([
   "@batonfx/core",
   "@batonfx/mcp",
@@ -48,11 +49,13 @@ const allDependencies = (manifest: PackageManifest) => ({
   ...manifest.peerDependencies,
 })
 
+const isForbiddenLocalLink = (version: string) =>
+  forbiddenProtocols.some((protocol) => version.startsWith(protocol)) && !version.startsWith(autoresearchLinkPrefix)
+
 export const checkDependencyManifests = (manifests: ReadonlyArray<NamedManifest>) =>
   manifests.flatMap(({ path, manifest }) =>
     Object.entries(allDependencies(manifest)).flatMap(([name, version]) => {
-      if (forbiddenProtocols.some((protocol) => version.startsWith(protocol)))
-        return [`${path}: ${name} uses ${version}`]
+      if (isForbiddenLocalLink(version)) return [`${path}: ${name} uses ${version}`]
       if (externalFrameworks.has(name) && version.startsWith("workspace:"))
         return [`${path}: ${name} uses external workspace linking`]
       if (manifest.name === "@rika/tools" && isLanguageModelProviderPackage(name))

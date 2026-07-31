@@ -1,5 +1,15 @@
 import { describe, expect, it } from "@effect/vitest"
-import { applyEvent, empty, isTransientEvent, project, type Projection, type SourceEvent } from "../src"
+import {
+  applyEvent,
+  applyFoldEvent,
+  empty,
+  isTransientEvent,
+  project,
+  restoreProjectionFold,
+  snapshotFoldProjection,
+  type Projection,
+  type SourceEvent,
+} from "../src"
 
 const attemptData = (attempt: string) => ({ model_call_id: `call-${attempt}`, model_attempt_id: `attempt-${attempt}` })
 
@@ -31,8 +41,11 @@ const durableEvent = (sequence: number, type: string, data?: Record<string, unkn
 
 const keysOf = (projection: Projection) => projection.units.map((unit) => unit.key)
 
-const fold = (events: ReadonlyArray<SourceEvent>, projection: Projection) =>
-  events.reduce((current, event) => applyEvent(current, event), projection)
+const fold = (events: ReadonlyArray<SourceEvent>, projection: Projection) => {
+  const retained = restoreProjectionFold(projection)
+  for (const event of events) applyFoldEvent(retained, event)
+  return snapshotFoldProjection(retained)
+}
 
 const assistantText = (projection: Projection): string => {
   const unit = projection.units.find(
@@ -198,8 +211,8 @@ describe("transient events", () => {
     expect(keysOf(streamed)).toEqual(keysOf(reattached))
     expect(keysOf(reattached)).toEqual([
       "turn:turn-a:user",
-      "reasoning:turn-a:0",
-      "assistant:turn-a:0",
+      "assistant:turn-a:%n0",
+      "reasoning:turn-a:%n0",
       "tool:turn-a:call_t80",
       "tool:turn-a:call_BLq",
     ])
@@ -241,8 +254,11 @@ describe("transient events", () => {
       empty("turn-c", "prompt"),
     )
     const batch = [transientDelta(1, "hel", 4), transientDelta(2, "lo", 4)]
-    const streamed = fold(batch, base)
-    const redelivered = fold(batch, streamed)
+    const retained = restoreProjectionFold(base)
+    for (const event of batch) applyFoldEvent(retained, event)
+    const streamed = snapshotFoldProjection(retained)
+    for (const event of batch) applyFoldEvent(retained, event)
+    const redelivered = snapshotFoldProjection(retained)
 
     expect(assistantText(streamed)).toBe("hello")
     expect(assistantText(redelivered)).toBe("hello")
@@ -280,6 +296,20 @@ describe("transient events", () => {
     expect(assistantText(streamed)).toBe("the complete answer")
     expect(assistantText(late)).toBe("the complete answer")
     expect(keysOf(late)).toEqual(keysOf(streamed))
+  })
+
+  it("rejects a terminal boundary with unresolved transient content", () => {
+    const retained = restoreProjectionFold(
+      fold(
+        [durableEvent(2, "model.input.prepared"), durableEvent(4, "model.attempt.started")],
+        empty("turn-f", "prompt"),
+      ),
+    )
+    applyFoldEvent(retained, transientDelta(1, "partial", 4))
+
+    expect(() => applyFoldEvent(retained, durableEvent(5, "execution.completed"))).toThrow(
+      "unresolved transient units assistant:turn-f:%n0",
+    )
   })
 
   it("keeps legacy durable delta histories advancing the revision", () => {

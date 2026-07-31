@@ -2,14 +2,16 @@ import { describe, expect, it } from "@effect/vitest"
 import { providers } from "@opencode-ai/models/snapshot"
 import {
   applyEvent,
+  childOrder,
   childParentMatch,
   empty,
-  ensureChildTool,
+  finalAssistantOutput,
   hasRunningBlocks,
+  identityKey,
   project,
-  reconcileChild,
   settleChild,
   settleRunning,
+  unitOrder,
   withNestedProjections,
   type SourceEvent,
 } from "../src"
@@ -91,6 +93,38 @@ describe("Transcript projection", () => {
     expect(
       projection.units.filter((unit) => unit.content._tag === "Entry" && unit.content.role === "user"),
     ).toHaveLength(1)
+    expect(finalAssistantOutput(projection, "turn-a")).toBe("final")
+  })
+
+  it("does not treat assistant text before the last root tool as the final output", () => {
+    const projection = project("turn-a", "prompt", [
+      { cursor: "answer", sequence: 1, type: "model.output.completed", createdAt: 1, text: "not final" },
+      {
+        cursor: "tool",
+        sequence: 2,
+        type: "tool.call.requested",
+        createdAt: 2,
+        data: { tool_call_id: "read", tool_name: "read", input: { path: "a.ts" } },
+      },
+      {
+        cursor: "result",
+        sequence: 3,
+        type: "tool.result.received",
+        createdAt: 3,
+        data: { tool_call_id: "read", output: { text: "contents" } },
+      },
+      { cursor: "complete", sequence: 4, type: "execution.completed", createdAt: 4 },
+    ])
+
+    expect(finalAssistantOutput(projection, "turn-a")).toBeUndefined()
+  })
+
+  it("does not treat an unfinished assistant stream as the final output", () => {
+    const projection = project("turn-a", "prompt", [
+      { cursor: "partial", sequence: 1, type: "model.output.delta", createdAt: 1, text: "partial" },
+    ])
+
+    expect(finalAssistantOutput(projection, "turn-a")).toBeUndefined()
   })
 
   it("keeps a delegation card running when its result is a spawned subagent handle", () => {
@@ -571,7 +605,7 @@ describe("Transcript projection", () => {
 
     expect(projection.units).toHaveLength(2)
     expect(projection.units[1]).toMatchObject({
-      key: `tool:turn-a:${callId}`,
+      key: identityKey("tool", "turn-a", callId),
       revision: 2,
       content: {
         _tag: "Block",
@@ -1139,20 +1173,6 @@ describe("Transcript projection", () => {
         data: { title: "Ready", detail: "Review the result" },
       },
       {
-        cursor: "permission-1",
-        sequence: 9,
-        type: "permission.ask.requested",
-        createdAt: 9,
-        data: { wait_id: "permission", title: "Allow read", input: { path: "a.ts" } },
-      },
-      {
-        cursor: "permission-2",
-        sequence: 10,
-        type: "permission.ask.resolved",
-        createdAt: 10,
-        data: { wait_id: "permission", title: "Allow read", approved: false },
-      },
-      {
         cursor: "child-1",
         sequence: 11,
         type: "child_run.spawned",
@@ -1171,7 +1191,7 @@ describe("Transcript projection", () => {
         sequence: 13,
         type: "workflow.waiting",
         createdAt: 13,
-        data: { run_id: "delivery-1", workflow: "delivery", step: "approval" },
+        data: { run_id: "delivery-1", workflow: "delivery", step: "verification" },
       },
       {
         cursor: "workflow-2",
@@ -1199,7 +1219,6 @@ describe("Transcript projection", () => {
       "Diff",
       "Compaction",
       "Notification",
-      "Permission",
       "ChildAgent",
       "Workflow",
       "ImageAttachment",
@@ -1210,9 +1229,6 @@ describe("Transcript projection", () => {
       14,
     ])
     expect(projection.units.find((item) => item.key === "compaction:turn-a")).toMatchObject({ revision: 7 })
-    expect(projection.units.find((item) => item.key === "permission:turn-a:permission")).toMatchObject({
-      content: { _tag: "Block", block: { status: "denied" } },
-    })
     expect(projection.revision).toBe(16)
     expect(projection.oldestCursor).toBe("reason")
     expect(projection.checkpointCursor).toBe("error")
@@ -1253,34 +1269,6 @@ describe("Transcript projection", () => {
         createdAt: 6,
         data: { tool_call_id: "call", output: "ok" },
       },
-      {
-        cursor: "approval-requested",
-        sequence: 7,
-        type: "tool.approval.requested",
-        createdAt: 7,
-        data: { wait_id: "approval", tool_name: "bash" },
-      },
-      {
-        cursor: "approval-resolved",
-        sequence: 8,
-        type: "tool.approval.resolved",
-        createdAt: 8,
-        data: { wait_id: "approval", tool_name: "bash", approved: true },
-      },
-      {
-        cursor: "permission-requested",
-        sequence: 9,
-        type: "permission.ask.requested",
-        createdAt: 9,
-        data: { wait_id: "permission" },
-      },
-      {
-        cursor: "permission-resolved",
-        sequence: 10,
-        type: "permission.ask.resolved",
-        createdAt: 10,
-        data: { wait_id: "permission", approved: true },
-      },
       { cursor: "wait-created", sequence: 11, type: "wait.created", createdAt: 11, data: { wait_id: "wait" } },
       { cursor: "wait-woken", sequence: 12, type: "wait.woken", createdAt: 12, data: { wait_id: "wait" } },
       { cursor: "wait-timeout", sequence: 13, type: "wait.timed_out", createdAt: 13, data: { wait_id: "wait" } },
@@ -1320,9 +1308,6 @@ describe("Transcript projection", () => {
       expect(applyEvent(projection, event)).toEqual(projection)
     }
 
-    expect(projection.units.find((item) => item.key === "permission:turn-a:approval")).toMatchObject({
-      content: { _tag: "Block", block: { status: "approved" } },
-    })
     expect(projection.units.find((item) => item.key === "child:turn-a:member")).toMatchObject({
       content: { _tag: "Block", block: { status: "failed", summary: "member failed" } },
     })
@@ -1352,16 +1337,45 @@ describe("Transcript projection", () => {
     expect(first).toEqual(second)
     expect(root).toEqual(rootBefore)
     expect(child).toEqual(childBefore)
+    expect(finalAssistantOutput(first, "root")).toBeUndefined()
     expect(first.units.map(({ key, revision, parentId, order }) => ({ key, revision, parentId, order }))).toEqual([
-      { key: "turn:root:user", revision: 0, parentId: undefined, order: { sequence: 0, part: 0 } },
-      { key: "tool:root:child", revision: 2, parentId: undefined, order: { sequence: 1, part: 0 } },
-      { key: "turn:child:user", revision: 0, parentId: "root:child", order: { sequence: 2, part: 0 } },
-      { key: "assistant:child:0", revision: 7, parentId: "root:child", order: { sequence: 3, part: 0 } },
+      {
+        key: "turn:root:user",
+        revision: 0,
+        parentId: undefined,
+        order: unitOrder("turn:root:user", -1),
+      },
+      {
+        key: "tool:root:child",
+        revision: 2,
+        parentId: undefined,
+        order: unitOrder("tool:root:child", 2),
+      },
+      {
+        key: "turn:child:user",
+        revision: 0,
+        parentId: "root:child",
+        order: childOrder(unitOrder("tool:root:child", 2), "child", unitOrder("turn:child:user", -1)),
+      },
+      {
+        key: "assistant:child:%n0",
+        revision: 7,
+        parentId: "root:child",
+        order: childOrder(unitOrder("tool:root:child", 2), "child", unitOrder("assistant:child:%n0", 7)),
+      },
     ])
   })
 
   it("keeps a recovered root completion on the root execution instead of its failed nested child", () => {
-    const root = empty("root", "delegate")
+    const root = project("root", "delegate", [
+      {
+        cursor: "agent",
+        sequence: 0,
+        type: "tool.call.requested",
+        createdAt: 0,
+        data: { tool_call_id: "agent", tool_name: "task", input: {} },
+      },
+    ])
     const failedChild = project("child", "", [
       { cursor: "failed", sequence: 0, type: "execution.failed", createdAt: 1, text: "child failed" },
     ])
@@ -1619,11 +1633,6 @@ describe("Transcript projection", () => {
     expect(hasRunningBlocks(settledOrphan)).toBe(false)
     expect(hasRunningBlocks(swept)).toBe(false)
     expect(settleChild(settledOrphan, "child-1", "failed", 120)).toEqual(settledOrphan)
-    expect(
-      reconcileChild(swept, "child-1", "complete", 50).units.find((item) => item.key === "tool:turn-a:call"),
-    ).toMatchObject({
-      content: { _tag: "Block", block: { _tag: "ToolCall", status: "complete" } },
-    })
   })
 
   it("matches a child to its scoped parent tool and rejects a same-callId tool in another scope", () => {
@@ -1695,23 +1704,6 @@ describe("Transcript projection", () => {
     const foreign = { id: "other-turn:agent", scope: "other-turn", childId: undefined, family: "agent" as const }
 
     expect(childParentMatch([foreign], "child:execution%3Aparent-turn:agent")).toBeUndefined()
-  })
-
-  it("ensures a scoped agent tool for a child and stays idempotent when it already exists", () => {
-    const childId = "execution:parent:child:spawn"
-    const created = ensureChildTool(empty("parent", "prompt"), childId, "oracle")
-
-    expect(created.tool).toMatchObject({ _tag: "ToolCall", id: "parent:child:spawn", childId })
-    expect(created.tool.presentation.family).toBe("agent")
-    expect(created.projection.units.find((unit) => unit.key === "tool:parent:child:spawn")).toBeDefined()
-
-    const again = ensureChildTool(created.projection, childId, "oracle")
-
-    expect(again.projection).toBe(created.projection)
-    expect(again.tool.id).toBe("parent:child:spawn")
-    expect(
-      again.projection.units.filter((unit) => unit.content._tag === "Block" && unit.content.block._tag === "ToolCall"),
-    ).toHaveLength(1)
   })
 
   it("records one error unit with a failed outcome and a non-empty reason when the execution fails", () => {
@@ -1804,10 +1796,10 @@ describe("Transcript projection", () => {
       },
       { cursor: "output-4", sequence: 4, type: "model.output.completed", createdAt: 4, text: "Refocused." },
     ])
-    const steering = projection.units.find((candidate) => candidate.key === "steering:turn:3:0")
+    const steering = projection.units.find((candidate) => candidate.key === "steering:turn:%n3:%n0")
     expect(steering?.content).toEqual({ _tag: "Entry", role: "user", text: "Focus on the fixture text." })
     const keys = projection.units.map((candidate) => candidate.key)
-    expect(keys.indexOf("steering:turn:3:0")).toBeGreaterThan(keys.indexOf("tool:turn:call"))
+    expect(keys.indexOf("steering:turn:%n3:%n0")).toBeGreaterThan(keys.indexOf("tool:turn:call"))
   })
 
   it("ignores an empty steering drain event", () => {
@@ -1848,7 +1840,7 @@ describe("Transcript projection", () => {
         },
       },
     ])
-    const steering = projection.units.filter((candidate) => candidate.key.startsWith("steering:turn:2"))
+    const steering = projection.units.filter((candidate) => candidate.key.startsWith("steering:turn:%n2"))
     expect(steering.map((candidate) => candidate.content)).toEqual([
       { _tag: "Entry", role: "user", text: "First correction." },
       { _tag: "Entry", role: "user", text: "Second correction." },
@@ -1871,7 +1863,7 @@ describe("Transcript projection", () => {
     }
     const first = applyEvent(empty("turn", "prompt"), delivered)
     const replayed = applyEvent(first, delivered)
-    expect(replayed.units.filter((candidate) => candidate.key === "steering:turn:1:0")).toHaveLength(1)
+    expect(replayed.units.filter((candidate) => candidate.key === "steering:turn:%n1:%n0")).toHaveLength(1)
   })
 
   it("shows a notice when a model attempt is retried after the stream was cut off", () => {

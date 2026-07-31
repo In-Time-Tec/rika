@@ -48,8 +48,6 @@ const provideLayerScoped =
 const withClientWorkspace = (input: Operation.Input, workspace: string): Operation.Input => {
   if (input._tag === "Interactive" || input._tag === "Run" || input._tag === "Review")
     return { ...input, clientWorkspace: workspace, workspace: input.workspace ?? workspace }
-  if (input._tag === "Mcp" && input.action === "approve")
-    return { ...input, clientWorkspace: workspace, workspace: input.workspace ?? workspace }
   if (
     input._tag === "Skill" ||
     input._tag === "Mcp" ||

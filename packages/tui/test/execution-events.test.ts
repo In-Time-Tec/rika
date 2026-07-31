@@ -51,9 +51,9 @@ describe("ExecutionEvents.projectUnits", () => {
 
     expect(model.items.map((item) => (item as ViewState.TranscriptItem).id)).toEqual([
       "turn:turn:user",
-      "assistant:turn:0",
+      Transcript.identityKey("assistant", "turn", 0),
       "tool:turn:call",
-      "assistant:turn:1",
+      Transcript.identityKey("assistant", "turn", 1),
     ])
   })
 
@@ -175,8 +175,8 @@ describe("ExecutionEvents.projectUnits", () => {
     expect(transcriptUnitId(model, parentUnit)).toBe("tool:turn:agent")
     if (parentUnit.kind !== "tool") throw new Error("Expected tool unit")
     expect(parentUnit.children?.map((unit) => transcriptUnitId(model, unit))).toEqual([
-      "tool:child:turn:oracle:read",
-      "tool:child:turn:oracle:shell",
+      Transcript.identityKey("tool", "child:turn:oracle", "read"),
+      Transcript.identityKey("tool", "child:turn:oracle", "shell"),
     ])
   })
 
@@ -223,7 +223,7 @@ describe("ExecutionEvents.projectUnits", () => {
       ])
       model = ExecutionEvents.projectChildUnits(
         model,
-        `${orchestratorId}:${["one", "two", "three", "four"][index]}`,
+        Transcript.scopedIdentity(orchestratorId, ["one", "two", "three", "four"][index]!),
         child.units,
       )
     }
@@ -329,7 +329,7 @@ describe("ExecutionEvents.projectUnits", () => {
     expect(model.items).toContainEqual(
       expect.objectContaining({
         _tag: "Entry",
-        id: "assistant:child:turn:oracle:0",
+        id: Transcript.identityKey("assistant", "child:turn:oracle", 0),
         parentId: "turn:agent",
       }),
     )
@@ -407,7 +407,7 @@ describe("ExecutionEvents.projectUnits", () => {
       expect(model.items).toContainEqual(
         expect.objectContaining({
           _tag: "Block",
-          id: "execution:child:turn:agent:failed",
+          id: Transcript.identityKey("execution", "child:turn:agent", "failed"),
           parentId: "turn:agent",
         }),
       )
@@ -440,7 +440,11 @@ describe("ExecutionEvents.projectUnits", () => {
       false,
     )
     expect(model.items).toContainEqual(
-      expect.objectContaining({ _tag: "Block", id: "tool:child:turn:agent:nested", parentId: "turn:agent" }),
+      expect.objectContaining({
+        _tag: "Block",
+        id: Transcript.identityKey("tool", "child:turn:agent", "nested"),
+        parentId: "turn:agent",
+      }),
     )
   })
 
@@ -514,7 +518,10 @@ describe("ExecutionEvents.projectUnits", () => {
         (block as { childId?: string }).childId === "grandchild",
     )
     expect(grandchildTools).toHaveLength(1)
-    expect(grandchildTools[0]).toMatchObject({ id: "child:turn:agent:gc", status: "complete" })
+    expect(grandchildTools[0]).toMatchObject({
+      id: Transcript.scopedIdentity("child:turn:agent", "gc"),
+      status: "complete",
+    })
     expect(model.blocks.some((block) => (block as ViewState.TranscriptBlock)._tag === "ChildAgent")).toBe(false)
     expect(model.blocks.filter((block) => (block as ViewState.TranscriptBlock)._tag === "ToolCall").length).toBe(
       toolCount,
@@ -603,7 +610,7 @@ describe("ExecutionEvents.projectUnits", () => {
     expect(model.blocks).toEqual([
       expect.objectContaining({
         _tag: "ToolCall",
-        id: `${turnId}:${toolCallId}`,
+        id: Transcript.scopedIdentity(turnId, toolCallId),
         childId,
         status: "running",
       }),
@@ -654,7 +661,7 @@ describe("ExecutionEvents.projectUnits", () => {
       }),
     ])
     let model = ExecutionEvents.projectUnits(ViewState.initial("/work"), projection.units)
-    const childRow = "block:child:turn:execution:child:turn:task"
+    const childRow = transcriptUnitId(model, transcriptUnits(model)[1]!)
     model = { ...model, detailSelection: childRow, expandedRowKeys: [childRow] }
     projection = Transcript.applyEvent(
       projection,
@@ -832,7 +839,11 @@ describe("ExecutionEvents.projectUnits", () => {
     for (const model of [live, reloaded]) {
       expect(model.blocks).toEqual([
         expect.objectContaining({ _tag: "ToolCall", id: "turn:agent", status: "cancelled" }),
-        expect.objectContaining({ _tag: "ToolCall", id: `${childId}:shell`, status: "cancelled" }),
+        expect.objectContaining({
+          _tag: "ToolCall",
+          id: Transcript.scopedIdentity(childId, "shell"),
+          status: "cancelled",
+        }),
       ])
       expect(model.entries.filter((entry) => entry.role === "notice")).toEqual([])
     }

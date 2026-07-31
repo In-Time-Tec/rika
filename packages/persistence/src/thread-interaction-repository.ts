@@ -1,12 +1,20 @@
 import { Context, Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { Thread, ThreadId } from "./thread-schema"
-import { ExecutionRoutePin, Turn, TurnId } from "./turn-schema"
+import * as TurnRepository from "./turn-repository"
+import { ExecutionRoutePin, Turn, TurnId, isAgentExecution } from "./turn-schema"
 import { ExecutionStatus } from "@rika/tools"
 
 export const ReceiptKind = Schema.Literals(["create", "message", "steer", "cancel", "stop"])
 export type ReceiptKind = typeof ReceiptKind.Type
-export const ResultDelivery = Schema.Literals(["awaiting-result", "ready", "delivered", "source-unavailable"])
+export const ResultDelivery = Schema.Literals([
+  "awaiting-result",
+  "ready",
+  "delivered",
+  "failed",
+  "cancelled",
+  "source-unavailable",
+])
 export type ResultDelivery = typeof ResultDelivery.Type
 
 export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("ThreadInteractionRepositoryError", {
@@ -72,13 +80,12 @@ export interface BindThreadControlInput extends Invocation {
 export interface DeliverThreadResultInput {
   readonly targetTurnId: TurnId
   readonly deliveredTurnId: TurnId
-  readonly prompt: string
   readonly queueCapacity: number
   readonly now: number
 }
-export interface MarkResultReadyInput {
+export interface SettleThreadResultInput {
   readonly targetTurnId: TurnId
-  readonly readiness: RootProjectionReadiness
+  readonly result: RootResult
   readonly now: number
 }
 export interface AcceptedThreadTurn {
@@ -99,21 +106,29 @@ export interface DeliveredThreadResult {
   readonly delivery: "delivered" | "source-unavailable"
   readonly deliveredTurnId?: TurnId
 }
-export type RootProjectionReadiness =
-  | { readonly _tag: "WaitingReady"; readonly cursor: string; readonly sequence: number }
-  | { readonly _tag: "TerminalReady"; readonly cursor?: string; readonly sequence?: number; readonly output?: string }
-  | { readonly _tag: "CancelledBeforeStartReady" }
-export interface ResultRoute {
+export type RootResult =
+  | { readonly status: "completed"; readonly cursor: string; readonly sequence: number; readonly output: string }
+  | { readonly status: "failed"; readonly cursor: string; readonly sequence: number; readonly reason?: string }
+  | ((
+      | { readonly cursor: string; readonly sequence: number }
+      | { readonly cursor?: never; readonly sequence?: never }
+    ) & { readonly status: "cancelled"; readonly reason?: string })
+interface ResultRouteBase {
   readonly targetTurnId: TurnId
   readonly kind: "manual" | "reply"
   readonly sourceThreadId?: ThreadId
   readonly sourceTurnId?: TurnId
-  readonly delivery: ResultDelivery
-  readonly readySequence?: number
-  readonly deliveredTurnId?: TurnId
   readonly createdAt: number
   readonly updatedAt: number
 }
+export type ResultRoute =
+  | (ResultRouteBase & { readonly delivery: "awaiting-result" | "failed" | "cancelled" })
+  | (ResultRouteBase & { readonly delivery: "ready"; readonly readySequence: number })
+  | (ResultRouteBase & {
+      readonly delivery: "delivered" | "source-unavailable"
+      readonly readySequence: number
+      readonly deliveredTurnId?: TurnId
+    })
 export interface ThreadRelationship {
   readonly kind: "created" | "message" | "reply" | "fork"
   readonly sourceThreadId: ThreadId
@@ -143,14 +158,14 @@ export interface Interface {
   readonly bindStop: (
     input: BindThreadControlInput,
   ) => Effect.Effect<BoundThreadControl, RepositoryError | InvocationConflict>
-  readonly markResultReady: (input: MarkResultReadyInput) => Effect.Effect<ResultRoute | undefined, RepositoryError>
+  readonly settleResult: (input: SettleThreadResultInput) => Effect.Effect<ResultRoute | undefined, RepositoryError>
   readonly deliverResult: (
     input: DeliverThreadResultInput,
   ) => Effect.Effect<DeliveredThreadResult, RepositoryError | QueueFull | ResultNotReady>
   readonly getStatus: (threadId: ThreadId) => Effect.Effect<Thread | undefined, RepositoryError>
   readonly getMessages: (threadId: ThreadId) => Effect.Effect<ReadonlyArray<Turn>, RepositoryError>
   readonly getResultRoute: (targetTurnId: TurnId) => Effect.Effect<ResultRoute | undefined, RepositoryError>
-  readonly getReadiness: (targetTurnId: TurnId) => Effect.Effect<RootProjectionReadiness | undefined, RepositoryError>
+  readonly getRootResult: (targetTurnId: TurnId) => Effect.Effect<RootResult | undefined, RepositoryError>
   readonly listRelationships: (
     threadId: ThreadId,
     limit?: number,
@@ -177,20 +192,20 @@ interface State {
   readonly turns: ReadonlyMap<TurnId, Turn>
   readonly receipts: ReadonlyMap<string, Receipt>
   readonly routes: ReadonlyMap<TurnId, ResultRoute>
-  readonly readiness: ReadonlyMap<TurnId, RootProjectionReadiness>
+  readonly results: ReadonlyMap<TurnId, RootResult>
   readonly relationships: ReadonlyArray<ThreadRelationship>
   readonly revisions: ReadonlyMap<ThreadId, number>
 }
 const error = (cause: unknown) => RepositoryError.make({ message: String(cause) })
 const terminal = ExecutionStatus.isTerminalStatus
-const active = (turn: Turn) => !terminal(turn.status) && turn.status !== "queued"
+const active = (turn: Turn) => isAgentExecution(turn) && !terminal(turn.status) && turn.status !== "queued"
 const clone = <A>(value: A): A => structuredClone(value)
 const initialState = (threads: ReadonlyArray<Thread>, turns: ReadonlyArray<Turn>): State => ({
   threads: new Map(threads.map((x) => [x.id, clone(x)])),
   turns: new Map(turns.map((x) => [x.id, clone(x)])),
   receipts: new Map(),
   routes: new Map(),
-  readiness: new Map(),
+  results: new Map(),
   relationships: [],
   revisions: new Map(),
 })
@@ -222,7 +237,11 @@ export const makeMemory = (seed: MemoryInput = {}) =>
         if (related >= input.maximumAdmissions)
           return [Effect.fail(reject("admission-limit", "Admission limit exceeded")), current]
         const workspaceActive = [...current.turns.values()].filter(
-          (x) => !terminal(x.status) && current.threads.get(x.threadId)?.workspace === source.workspace,
+          (x) =>
+            isAgentExecution(x) &&
+            x.author._tag === "Agent" &&
+            !terminal(x.status) &&
+            current.threads.get(x.threadId)?.workspace === source.workspace,
         ).length
         if (workspaceActive >= input.maximumWorkspaceActive)
           return [Effect.fail(reject("workspace-active-limit", "Workspace active limit exceeded")), current]
@@ -248,6 +267,7 @@ export const makeMemory = (seed: MemoryInput = {}) =>
         const status = existingActive ? ("queued" as const) : ("accepted" as const)
         const revision = (current.revisions.get(targetId) ?? 0) + (status === "queued" ? 1 : 0)
         const turn: Turn = {
+          _tag: "AgentExecution",
           id: input.turnId,
           threadId: targetId,
           prompt: input.prompt,
@@ -335,9 +355,9 @@ export const makeMemory = (seed: MemoryInput = {}) =>
             : { targetThreadId: input.targetThreadId, targetTurnId: root.id, outcome: "bound" }
         let next = current
         if (kind === "stop") {
-          const stopped = [...current.turns.values()].filter(
-            (x) => x.threadId === input.targetThreadId && x.status === "queued",
-          )
+          const stopped = [...current.turns.values()]
+            .filter(isAgentExecution)
+            .filter((x) => x.threadId === input.targetThreadId && x.status === "queued")
           const revision = (current.revisions.get(input.targetThreadId) ?? 0) + (stopped.length > 0 ? 1 : 0)
           const changed = new Map(current.turns)
           for (const item of stopped) changed.set(item.id, { ...item, status: "cancelled", updatedAt: input.now })
@@ -367,23 +387,25 @@ export const makeMemory = (seed: MemoryInput = {}) =>
       bindSteer: (input) => bind("steer", input),
       bindCancel: (input) => bind("cancel", input),
       bindStop: (input) => bind("stop", input),
-      markResultReady: (input) =>
+      settleResult: (input) =>
         Ref.modify(state, (current) => {
           const route = current.routes.get(input.targetTurnId)
           if (route === undefined || route.delivery !== "awaiting-result") return [undefined, current]
-          const sequence = input.readiness._tag === "CancelledBeforeStartReady" ? 0 : input.readiness.sequence
-          const ready: ResultRoute = {
-            ...route,
-            delivery: "ready",
-            ...(sequence === undefined ? {} : { readySequence: sequence }),
-            updatedAt: input.now,
-          }
+          const settled: ResultRoute =
+            input.result.status === "completed"
+              ? {
+                  ...route,
+                  delivery: "ready",
+                  readySequence: input.result.sequence,
+                  updatedAt: input.now,
+                }
+              : { ...route, delivery: input.result.status, updatedAt: input.now }
           return [
-            clone(ready),
+            clone(settled),
             {
               ...current,
-              routes: new Map(current.routes).set(input.targetTurnId, ready),
-              readiness: new Map(current.readiness).set(input.targetTurnId, input.readiness),
+              routes: new Map(current.routes).set(input.targetTurnId, settled),
+              results: new Map(current.results).set(input.targetTurnId, clone(input.result)),
             },
           ]
         }),
@@ -403,9 +425,12 @@ export const makeMemory = (seed: MemoryInput = {}) =>
             return [Effect.fail(ResultNotReady.make({ targetTurnId: input.targetTurnId })), current]
           if (route.kind === "manual")
             return [Effect.fail(ResultNotReady.make({ targetTurnId: input.targetTurnId })), current]
+          const result = current.results.get(input.targetTurnId)
+          if (result?.status !== "completed")
+            return [Effect.fail(ResultNotReady.make({ targetTurnId: input.targetTurnId })), current]
           const source = route.sourceThreadId === undefined ? undefined : current.threads.get(route.sourceThreadId)
           if (source === undefined || source.archived) {
-            const unavailable = { ...route, delivery: "source-unavailable" as const, updatedAt: input.now }
+            const unavailable: ResultRoute = { ...route, delivery: "source-unavailable", updatedAt: input.now }
             return [
               Effect.succeed({ targetTurnId: input.targetTurnId, delivery: "source-unavailable" }),
               { ...current, routes: new Map(current.routes).set(input.targetTurnId, unavailable) },
@@ -413,16 +438,19 @@ export const makeMemory = (seed: MemoryInput = {}) =>
           }
           const running = [...current.turns.values()].some((x) => x.threadId === source.id && active(x))
           const count = [...current.turns.values()].filter(
-            (x) => x.threadId === source.id && x.status === "queued",
+            (x) => isAgentExecution(x) && x.threadId === source.id && x.status === "queued",
           ).length
           if (running && count >= input.queueCapacity)
             return [Effect.fail(QueueFull.make({ threadId: source.id, capacity: input.queueCapacity, count })), current]
           const target = current.turns.get(input.targetTurnId)!
+          if (!isAgentExecution(target))
+            return [Effect.fail(ResultNotReady.make({ targetTurnId: input.targetTurnId })), current]
           const depth = target.author._tag === "Agent" ? target.author.threadCreationDepth : 0
           const turn: Turn = {
+            _tag: "AgentExecution",
             id: input.deliveredTurnId,
             threadId: source.id,
-            prompt: input.prompt,
+            prompt: result.output,
             status: running ? "queued" : "accepted",
             stopIntent: "none",
             executionRoute: target.executionRoute,
@@ -436,7 +464,12 @@ export const makeMemory = (seed: MemoryInput = {}) =>
             createdAt: input.now,
             updatedAt: input.now,
           }
-          const delivered = { ...route, delivery: "delivered" as const, deliveredTurnId: turn.id, updatedAt: input.now }
+          const delivered: ResultRoute = {
+            ...route,
+            delivery: "delivered",
+            deliveredTurnId: turn.id,
+            updatedAt: input.now,
+          }
           const relationship: ThreadRelationship = {
             kind: "reply",
             sourceThreadId: target.threadId,
@@ -477,9 +510,9 @@ export const makeMemory = (seed: MemoryInput = {}) =>
           Effect.map((x) => x.routes.get(id)),
           Effect.map((x) => (x === undefined ? undefined : clone(x))),
         ),
-      getReadiness: (id) =>
+      getRootResult: (id) =>
         Ref.get(state).pipe(
-          Effect.map((x) => x.readiness.get(id)),
+          Effect.map((x) => x.results.get(id)),
           Effect.map((x) => (x === undefined ? undefined : clone(x))),
         ),
       listRelationships: (id, limit = 20, before) =>
@@ -601,7 +634,8 @@ export const layer = Layer.effect(
             const workspaceActive = yield* sql<{
               readonly count: number
             }>`SELECT COUNT(*) AS count FROM rika_turns t JOIN rika_threads h ON h.id = t.thread_id
-      WHERE h.workspace = ${source.workspace} AND t.status IN ('accepted', 'queued', 'running', 'waiting') AND json_extract(t.author_json, '$._tag') = 'Agent'`
+      WHERE h.workspace = ${source.workspace} AND t.turn_kind = 'AgentExecution'
+        AND t.status IN ('accepted', 'queued', 'running', 'waiting') AND json_extract(t.author_json, '$._tag') = 'Agent'`
             if (workspaceActive[0]!.count >= input.maximumWorkspaceActive)
               return yield* reject("workspace-active-limit", "Workspace active limit exceeded")
             const targetId =
@@ -626,10 +660,10 @@ export const layer = Layer.effect(
             }
             const activeRows = yield* sql<{
               readonly count: number
-            }>`SELECT COUNT(*) AS count FROM rika_turns WHERE thread_id = ${targetId} AND status IN ('accepted', 'running', 'waiting')`
+            }>`SELECT COUNT(*) AS count FROM rika_turns WHERE thread_id = ${targetId} AND turn_kind = 'AgentExecution' AND status IN ('accepted', 'running', 'waiting')`
             const queuedRows = yield* sql<{
               readonly count: number
-            }>`SELECT COUNT(*) AS count FROM rika_turns WHERE thread_id = ${targetId} AND status = 'queued'`
+            }>`SELECT COUNT(*) AS count FROM rika_turns WHERE thread_id = ${targetId} AND turn_kind = 'AgentExecution' AND status = 'queued'`
             const isActive = activeRows[0]!.count > 0
             if (isActive && queuedRows[0]!.count >= input.queueCapacity)
               return yield* QueueFull.make({
@@ -653,8 +687,8 @@ export const layer = Layer.effect(
               sourceRootTurnId: input.sourceRootTurnId,
               threadCreationDepth: input.threadCreationDepth,
             })
-            yield* sql`INSERT INTO rika_turns (id, thread_id, prompt, status, execution_route_json, author_json, lineage_json, created_at, updated_at)
-      VALUES (${input.turnId}, ${targetId}, ${input.prompt}, ${status}, ${route}, ${author}, '{"_tag":"Original"}', ${input.now}, ${input.now})`
+            yield* sql`INSERT INTO rika_turns (id, thread_id, turn_kind, prompt, status, execution_route_json, author_json, lineage_json, created_at, updated_at)
+      VALUES (${input.turnId}, ${targetId}, 'AgentExecution', ${input.prompt}, ${status}, ${route}, ${author}, '{"_tag":"Original"}', ${input.now}, ${input.now})`
             yield* sql`INSERT INTO rika_thread_relationships (id, kind, source_thread_id, source_turn_id, target_thread_id, target_turn_id, created_at)
       VALUES (${input.invocationDigest}, ${kind === "create" ? "created" : "message"}, ${input.sourceThreadId}, ${input.sourceRootTurnId}, ${targetId}, ${input.turnId}, ${input.now})`
             yield* sql`INSERT INTO rika_thread_result_routes (id, kind, source_thread_id, source_turn_id, target_thread_id, target_turn_id, delivery, created_at, updated_at)
@@ -680,14 +714,14 @@ export const layer = Layer.effect(
             const roots = yield* sql<{
               readonly id: string
             }>`SELECT id FROM rika_turns WHERE thread_id = ${input.targetThreadId}
-      AND status IN ('accepted', 'running', 'waiting') ORDER BY created_at ASC, id ASC LIMIT 1`
+      AND turn_kind = 'AgentExecution' AND status IN ('accepted', 'running', 'waiting') ORDER BY created_at ASC, id ASC LIMIT 1`
             const root = roots[0]
             let queueRevision: number | undefined
             let stoppedTurnIds: ReadonlyArray<TurnId> | undefined
             if (kind === "stop") {
               const stopped = yield* sql<{
                 readonly id: string
-              }>`SELECT id FROM rika_turns WHERE thread_id = ${input.targetThreadId} AND status = 'queued' ORDER BY created_at ASC, id ASC`
+              }>`SELECT id FROM rika_turns WHERE thread_id = ${input.targetThreadId} AND turn_kind = 'AgentExecution' AND status = 'queued' ORDER BY created_at ASC, id ASC`
               stoppedTurnIds = stopped.map((row) => TurnId.make(row.id))
               yield* sql`INSERT INTO rika_thread_queue_state (thread_id) VALUES (${input.targetThreadId}) ON CONFLICT (thread_id) DO NOTHING`
               if (stopped.length > 0) {
@@ -695,7 +729,7 @@ export const layer = Layer.effect(
                   readonly revision: number
                 }>`UPDATE rika_thread_queue_state SET revision = revision + 1, queued_count = 0 WHERE thread_id = ${input.targetThreadId} RETURNING revision`
                 queueRevision = revisions[0]!.revision
-                yield* sql`UPDATE rika_turns SET status = 'cancelled', updated_at = ${input.now}, queue_claim_token = NULL WHERE thread_id = ${input.targetThreadId} AND status = 'queued'`
+                yield* sql`UPDATE rika_turns SET status = 'cancelled', updated_at = ${input.now}, queue_claim_token = NULL WHERE thread_id = ${input.targetThreadId} AND turn_kind = 'AgentExecution' AND status = 'queued'`
               } else {
                 const revisions = yield* sql<{
                   readonly revision: number
@@ -723,17 +757,25 @@ export const layer = Layer.effect(
           }),
         )
         .pipe(Effect.mapError(controlFailure))
-    const routeFromRow = (row: any): ResultRoute => ({
-      targetTurnId: TurnId.make(row.target_turn_id),
-      kind: row.kind,
-      ...(row.source_thread_id == null ? {} : { sourceThreadId: ThreadId.make(row.source_thread_id) }),
-      ...(row.source_turn_id == null ? {} : { sourceTurnId: TurnId.make(row.source_turn_id) }),
-      delivery: row.delivery,
-      ...(row.ready_sequence == null ? {} : { readySequence: row.ready_sequence }),
-      ...(row.delivered_turn_id == null ? {} : { deliveredTurnId: TurnId.make(row.delivered_turn_id) }),
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    })
+    const routeFromRow = (row: any): ResultRoute => {
+      const base: ResultRouteBase = {
+        targetTurnId: TurnId.make(row.target_turn_id),
+        kind: row.kind,
+        ...(row.source_thread_id == null ? {} : { sourceThreadId: ThreadId.make(row.source_thread_id) }),
+        ...(row.source_turn_id == null ? {} : { sourceTurnId: TurnId.make(row.source_turn_id) }),
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }
+      if (row.delivery === "awaiting-result" || row.delivery === "failed" || row.delivery === "cancelled")
+        return { ...base, delivery: row.delivery }
+      if (row.delivery === "ready") return { ...base, delivery: "ready", readySequence: row.ready_sequence }
+      return {
+        ...base,
+        delivery: row.delivery,
+        readySequence: row.ready_sequence,
+        ...(row.delivered_turn_id == null ? {} : { deliveredTurnId: TurnId.make(row.delivered_turn_id) }),
+      }
+    }
     const getRoute = (id: TurnId) =>
       sql<any>`SELECT * FROM rika_thread_result_routes WHERE target_turn_id = ${id}`.pipe(
         Effect.map((rows) => (rows[0] === undefined ? undefined : routeFromRow(rows[0]))),
@@ -745,15 +787,19 @@ export const layer = Layer.effect(
       bindSteer: (input) => bind("steer", input),
       bindCancel: (input) => bind("cancel", input),
       bindStop: (input) => bind("stop", input),
-      markResultReady: (input) =>
+      settleResult: (input) =>
         sql
           .withTransaction(
             Effect.gen(function* () {
               const route = yield* getRoute(input.targetTurnId)
               if (route === undefined || route.delivery !== "awaiting-result") return undefined
-              const sequence = input.readiness._tag === "CancelledBeforeStartReady" ? 0 : input.readiness.sequence
-              yield* sql`INSERT INTO rika_thread_root_readiness (turn_id, state, cursor, sequence, output, updated_at) VALUES (${input.targetTurnId}, ${input.readiness._tag}, ${"cursor" in input.readiness ? (input.readiness.cursor ?? null) : null}, ${sequence ?? null}, ${input.readiness._tag === "TerminalReady" ? (input.readiness.output ?? null) : null}, ${input.now}) ON CONFLICT(turn_id) DO UPDATE SET state=excluded.state, cursor=excluded.cursor, sequence=excluded.sequence, output=excluded.output, updated_at=excluded.updated_at`
-              yield* sql`UPDATE rika_thread_result_routes SET delivery='ready', ready_sequence=${sequence ?? null}, updated_at=${input.now} WHERE target_turn_id=${input.targetTurnId}`
+              const cursor = "cursor" in input.result ? (input.result.cursor ?? null) : null
+              const sequence = "sequence" in input.result ? (input.result.sequence ?? null) : null
+              const output = input.result.status === "completed" ? input.result.output : null
+              const reason = input.result.status === "completed" ? null : (input.result.reason ?? null)
+              const delivery = input.result.status === "completed" ? "ready" : input.result.status
+              yield* sql`INSERT INTO rika_thread_root_results (turn_id, status, cursor, sequence, output, reason, updated_at) VALUES (${input.targetTurnId}, ${input.result.status}, ${cursor}, ${sequence}, ${output}, ${reason}, ${input.now}) ON CONFLICT(turn_id) DO UPDATE SET status=excluded.status, cursor=excluded.cursor, sequence=excluded.sequence, output=excluded.output, reason=excluded.reason, updated_at=excluded.updated_at`
+              yield* sql`UPDATE rika_thread_result_routes SET delivery=${delivery}, ready_sequence=${input.result.status === "completed" ? input.result.sequence : null}, updated_at=${input.now} WHERE target_turn_id=${input.targetTurnId}`
               return yield* getRoute(input.targetTurnId)
             }),
           )
@@ -771,6 +817,11 @@ export const layer = Layer.effect(
                 }
               if (route === undefined || route.delivery !== "ready" || route.kind !== "reply")
                 return yield* ResultNotReady.make({ targetTurnId: input.targetTurnId })
+              const results = yield* sql<{
+                readonly output: string
+              }>`SELECT output FROM rika_thread_root_results WHERE turn_id=${input.targetTurnId} AND status='completed'`
+              const result = results[0]
+              if (result === undefined) return yield* ResultNotReady.make({ targetTurnId: input.targetTurnId })
               const sources = yield* sql<{
                 readonly archived: number
               }>`SELECT archived FROM rika_threads WHERE id=${route.sourceThreadId!}`
@@ -780,10 +831,10 @@ export const layer = Layer.effect(
               }
               const activeRows = yield* sql<{
                 readonly count: number
-              }>`SELECT COUNT(*) AS count FROM rika_turns WHERE thread_id=${route.sourceThreadId!} AND status IN ('accepted','running','waiting')`
+              }>`SELECT COUNT(*) AS count FROM rika_turns WHERE thread_id=${route.sourceThreadId!} AND turn_kind='AgentExecution' AND status IN ('accepted','running','waiting')`
               const queuedRows = yield* sql<{
                 readonly count: number
-              }>`SELECT COUNT(*) AS count FROM rika_turns WHERE thread_id=${route.sourceThreadId!} AND status='queued'`
+              }>`SELECT COUNT(*) AS count FROM rika_turns WHERE thread_id=${route.sourceThreadId!} AND turn_kind='AgentExecution' AND status='queued'`
               const busy = activeRows[0]!.count > 0
               if (busy && queuedRows[0]!.count >= input.queueCapacity)
                 return yield* QueueFull.make({
@@ -795,7 +846,7 @@ export const layer = Layer.effect(
                 readonly thread_id: string
                 readonly execution_route_json: string
                 readonly author_json: string
-              }>`SELECT thread_id, execution_route_json, author_json FROM rika_turns WHERE id=${input.targetTurnId}`
+              }>`SELECT thread_id, execution_route_json, author_json FROM rika_turns WHERE id=${input.targetTurnId} AND turn_kind='AgentExecution'`
               const target = targets[0]!
               const targetAuthor = yield* decodeJson<any>(target.author_json)
               const author = yield* encodeJson({
@@ -804,7 +855,7 @@ export const layer = Layer.effect(
                 sourceRootTurnId: input.targetTurnId,
                 threadCreationDepth: targetAuthor.threadCreationDepth ?? 0,
               })
-              yield* sql`INSERT INTO rika_turns (id, thread_id, prompt, status, execution_route_json, author_json, lineage_json, created_at, updated_at) VALUES (${input.deliveredTurnId}, ${route.sourceThreadId!}, ${input.prompt}, ${busy ? "queued" : "accepted"}, ${target.execution_route_json}, ${author}, '{"_tag":"Original"}', ${input.now}, ${input.now})`
+              yield* sql`INSERT INTO rika_turns (id, thread_id, turn_kind, prompt, status, execution_route_json, author_json, lineage_json, created_at, updated_at) VALUES (${input.deliveredTurnId}, ${route.sourceThreadId!}, 'AgentExecution', ${result.output}, ${busy ? "queued" : "accepted"}, ${target.execution_route_json}, ${author}, '{"_tag":"Original"}', ${input.now}, ${input.now})`
               if (busy) {
                 yield* sql`INSERT INTO rika_thread_queue_state (thread_id) VALUES (${route.sourceThreadId!}) ON CONFLICT (thread_id) DO NOTHING`
                 yield* sql`UPDATE rika_thread_queue_state SET revision = revision + 1, queued_count = queued_count + 1 WHERE thread_id = ${route.sourceThreadId!}`
@@ -843,41 +894,32 @@ export const layer = Layer.effect(
         ),
       getMessages: (id) =>
         sql<any>`SELECT * FROM rika_turns WHERE thread_id=${id} ORDER BY created_at ASC, id ASC`.pipe(
-          Effect.flatMap((rows) =>
-            Effect.forEach(rows, (row) =>
-              Effect.gen(function* () {
-                return {
-                  id: TurnId.make(row.id),
-                  threadId: ThreadId.make(row.thread_id),
-                  prompt: row.prompt,
-                  status: row.status,
-                  stopIntent: row.stop_intent === "requested" ? "requested" : "none",
-                  executionRoute: yield* decodeJson<any>(row.execution_route_json),
-                  author: yield* decodeJson<any>(row.author_json),
-                  lineage: yield* decodeJson<any>(row.lineage_json),
-                  createdAt: row.created_at,
-                  updatedAt: row.updated_at,
-                } as Turn
-              }),
-            ),
-          ),
+          Effect.flatMap((rows) => Effect.forEach(rows, TurnRepository.decodeStoredTurn)),
           Effect.mapError(error),
         ),
       getResultRoute: getRoute,
-      getReadiness: (id) =>
-        sql<any>`SELECT state, cursor, sequence, output FROM rika_thread_root_readiness WHERE turn_id=${id}`.pipe(
+      getRootResult: (id) =>
+        sql<any>`SELECT status, cursor, sequence, output, reason FROM rika_thread_root_results WHERE turn_id=${id}`.pipe(
           Effect.map((rows) => {
             const row = rows[0]
             if (row === undefined) return undefined
-            if (row.state === "CancelledBeforeStartReady") return { _tag: "CancelledBeforeStartReady" as const }
-            if (row.state === "WaitingReady")
-              return { _tag: "WaitingReady" as const, cursor: row.cursor, sequence: row.sequence }
-            return {
-              _tag: "TerminalReady" as const,
-              ...(row.cursor == null ? {} : { cursor: row.cursor }),
-              ...(row.sequence == null ? {} : { sequence: row.sequence }),
-              ...(row.output == null ? {} : { output: row.output }),
-            }
+            if (row.status === "completed")
+              return { status: "completed" as const, cursor: row.cursor, sequence: row.sequence, output: row.output }
+            if (row.status === "failed")
+              return {
+                status: "failed" as const,
+                cursor: row.cursor,
+                sequence: row.sequence,
+                ...(row.reason == null ? {} : { reason: row.reason }),
+              }
+            return row.cursor == null
+              ? { status: "cancelled" as const, ...(row.reason == null ? {} : { reason: row.reason }) }
+              : {
+                  status: "cancelled" as const,
+                  cursor: row.cursor,
+                  sequence: row.sequence,
+                  ...(row.reason == null ? {} : { reason: row.reason }),
+                }
           }),
           Effect.mapError(error),
         ),

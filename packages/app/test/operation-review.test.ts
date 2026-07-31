@@ -25,9 +25,6 @@ const backend = ExecutionBackend.Service.of({
   cancel: () => Effect.die("unused"),
   inspect: () => Effect.void.pipe(Effect.as(undefined)),
   steer: () => Effect.die("unused"),
-  listApprovals: () => Effect.succeed([]),
-  resolveToolApproval: () => Effect.die("unused"),
-  resolvePermission: () => Effect.die("unused"),
   resolveInvocationSource: () => Effect.die("unused"),
 })
 
@@ -245,7 +242,10 @@ describe("Operation review dispatcher", () => {
       const submitted = yield* Ref.get(capturedRequest)
       expect(submitted?.checks).toHaveLength(3)
       expect(submitted).toMatchObject({ workspace: "/work", executionRoute: route })
-      expect((yield* turns.get(Turn.TurnId.make("review-turn")))?.executionRoute).toEqual(route)
+      const reviewTurn = yield* turns.get(Turn.TurnId.make("review-turn"))
+      expect(
+        reviewTurn !== undefined && Turn.isAgentExecution(reviewTurn) ? reviewTurn.executionRoute : undefined,
+      ).toEqual(route)
       expect(yield* turns.get(Turn.TurnId.make("review-turn"))).toMatchObject({
         status: "completed",
         reviewFanOutId: "review:review-turn",

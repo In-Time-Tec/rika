@@ -36,9 +36,6 @@ describe("ProductAgent", () => {
         cancel: (id) => Effect.succeed({ turnId: id, status: "cancelled", events: [] }),
         inspect: () => Effect.die("unused"),
         steer: () => Effect.die("unused"),
-        listApprovals: () => Effect.die("unused"),
-        resolveToolApproval: () => Effect.die("unused"),
-        resolvePermission: () => Effect.die("unused"),
         resolveInvocationSource: () => Effect.die("unused"),
       })
       const layer = ProductAgent.layer.pipe(Layer.provide(Layer.succeed(ExecutionBackend.Service, backend)))
@@ -110,9 +107,6 @@ describe("ProductAgent", () => {
         cancel: () => Effect.die("unused"),
         inspect: () => Effect.die("unused"),
         steer: () => Effect.die("unused"),
-        listApprovals: () => Effect.die("unused"),
-        resolveToolApproval: () => Effect.die("unused"),
-        resolvePermission: () => Effect.die("unused"),
         resolveInvocationSource: () => Effect.die("unused"),
       })
       const result = yield* Effect.gen(function* () {
@@ -154,9 +148,6 @@ describe("ProductAgent", () => {
         },
         inspect: () => Effect.die("unused"),
         steer: () => Effect.die("unused"),
-        listApprovals: () => Effect.die("unused"),
-        resolveToolApproval: () => Effect.die("unused"),
-        resolvePermission: () => Effect.die("unused"),
         resolveInvocationSource: () => Effect.die("unused"),
       })
       const result = yield* Effect.gen(function* () {
@@ -213,9 +204,6 @@ describe("ProductAgent", () => {
             return undefined
           }),
         steer: () => Effect.die("unused"),
-        listApprovals: () => Effect.die("unused"),
-        resolveToolApproval: () => Effect.die("unused"),
-        resolvePermission: () => Effect.die("unused"),
         resolveInvocationSource: () => Effect.die("unused"),
       })
       const result = yield* Effect.gen(function* () {
@@ -251,9 +239,6 @@ describe("ProductAgent", () => {
         cancel: () => Effect.fail(failure),
         inspect: () => Effect.die("unused"),
         steer: () => Effect.die("unused"),
-        listApprovals: () => Effect.die("unused"),
-        resolveToolApproval: () => Effect.die("unused"),
-        resolvePermission: () => Effect.die("unused"),
         resolveInvocationSource: () => Effect.die("unused"),
       })
       const layer = ProductAgent.layer.pipe(Layer.provide(Layer.succeed(ExecutionBackend.Service, backend)))
@@ -327,9 +312,6 @@ describe("ProductAgent", () => {
         cancel: () => Effect.die("unused"),
         inspect: () => Effect.die("unused"),
         steer: () => Effect.die("unused"),
-        listApprovals: () => Effect.die("unused"),
-        resolveToolApproval: () => Effect.die("unused"),
-        resolvePermission: () => Effect.die("unused"),
         resolveInvocationSource: () => Effect.die("unused"),
       })
       const result = yield* Effect.gen(function* () {

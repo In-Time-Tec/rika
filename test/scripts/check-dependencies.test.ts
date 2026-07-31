@@ -13,6 +13,19 @@ describe("dependency boundaries", () => {
     ])
   })
 
+  test("allows autoresearch local package links and rejects other file links", () => {
+    expect(
+      checkDependencyManifests([
+        manifest("@rika/cli", {
+          "@relayfx/sdk": "file:/private/tmp/rika-autoresearch-links/relayfx-sdk-0.7.32.tgz",
+        }),
+      ]),
+    ).toEqual([])
+    expect(
+      checkDependencyManifests([manifest("@rika/cli", { "@relayfx/sdk": "file:/tmp/other/relayfx-sdk.tgz" })]),
+    ).toEqual(["@rika/cli/package.json: @relayfx/sdk uses file:/tmp/other/relayfx-sdk.tgz"])
+  })
+
   test("allows web-research SDKs but rejects language-model provider SDKs in tools", () => {
     expect(checkDependencyManifests([manifest("@rika/tools", { "parallel-web": "1.1.0" })])).toEqual([])
     expect(

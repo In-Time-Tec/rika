@@ -117,7 +117,7 @@ describe("ConfigContract", () => {
     }
   })
 
-  it.each(["gateways", "models", "modes", "agents", "compaction"])(
+  it.each(["gateways", "models", "modes", "agents", "compaction", "permissions"])(
     "rejects user-owned internal configuration key %s",
     (key) =>
       expect(() => ConfigContract.decodeSettingsInput("settings.json", { [key]: {} })).toThrowError(/unknown key/),
@@ -256,7 +256,6 @@ describe("ConfigContract", () => {
   it.each([
     ["keymap", []],
     ["keymap", { submit: 1 }],
-    ["permissions", { shell: "sometimes" }],
     ["extensionRoots", "extensions"],
     ["extensionRoots", ["valid", 1]],
     ["mcp", []],

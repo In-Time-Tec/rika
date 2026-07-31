@@ -80,7 +80,10 @@ it.effect("memory turns preserve structured image prompt parts", () =>
       ],
       now: 1,
     })
-    expect((yield* repository.get(created.id))?.promptParts).toEqual(created.promptParts)
+    const stored = yield* repository.get(created.id)
+    expect(stored !== undefined && Turn.isAgentExecution(stored) ? stored.promptParts : undefined).toEqual(
+      created.promptParts,
+    )
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
@@ -381,6 +384,7 @@ it.effect("memory claims stay queued and edit or dequeue invalidate preparation"
     const threadId = Thread.ThreadId.make("claim-races")
     const queued = yield* repository.copy(
       {
+        _tag: "AgentExecution",
         id: Turn.TurnId.make("claimed"),
         threadId,
         prompt: "before",
@@ -516,6 +520,7 @@ it.effect("memory copies exact queue status and requeues an unowned accepted cla
     const threadId = Thread.ThreadId.make("copy-thread")
     const copied = yield* repository.copy(
       {
+        _tag: "AgentExecution",
         id: Turn.TurnId.make("copied-queued"),
         threadId,
         prompt: "copied",
@@ -533,6 +538,7 @@ it.effect("memory copies exact queue status and requeues an unowned accepted cla
     const overflow = yield* Effect.result(
       repository.copy(
         {
+          _tag: "AgentExecution",
           id: Turn.TurnId.make("copied-overflow"),
           threadId,
           prompt: "overflow",
@@ -639,6 +645,7 @@ it.effect("memory lists nonterminal turns and rejects a missing extension pin", 
     provideLayer(
       TurnRepository.memoryLayer([
         {
+          _tag: "AgentExecution",
           id: Turn.TurnId.make("b"),
           threadId: Thread.ThreadId.make("thread-a"),
           prompt: "b",
@@ -651,6 +658,7 @@ it.effect("memory lists nonterminal turns and rejects a missing extension pin", 
           updatedAt: 1,
         },
         {
+          _tag: "AgentExecution",
           id: Turn.TurnId.make("a"),
           threadId: Thread.ThreadId.make("thread-a"),
           prompt: "a",
@@ -707,7 +715,7 @@ it.effect("memory editQueued replaces content and clears stale prompt parts", ()
     yield* repository.editQueued(queued.id, "edited", 3)
     const stored = yield* repository.get(queued.id)
     expect(stored?.prompt).toBe("edited")
-    expect(stored?.promptParts).toBeUndefined()
+    expect(stored !== undefined && Turn.isAgentExecution(stored) ? stored.promptParts : undefined).toBeUndefined()
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
@@ -737,6 +745,7 @@ it.effect("memory seeds queue revision to match the seeded queued count", () =>
     provideLayer(
       TurnRepository.memoryLayer([
         {
+          _tag: "AgentExecution",
           id: Turn.TurnId.make("s1"),
           threadId: Thread.ThreadId.make("thread-seed"),
           prompt: "one",
@@ -749,6 +758,7 @@ it.effect("memory seeds queue revision to match the seeded queued count", () =>
           updatedAt: 1,
         },
         {
+          _tag: "AgentExecution",
           id: Turn.TurnId.make("s2"),
           threadId: Thread.ThreadId.make("thread-seed"),
           prompt: "two",
@@ -768,8 +778,13 @@ it.effect("memory seeds queue revision to match the seeded queued count", () =>
 const row = (overrides: Partial<Record<string, unknown>> = {}) => ({
   id: "turn-a",
   thread_id: "thread-a",
+  turn_kind: "AgentExecution",
   prompt: "hello",
   execution_route_json: JSON.stringify(Turn.testExecutionRoute()),
+  shell_command: null,
+  shell_result_text: null,
+  shell_result_truncated: null,
+  shell_result_exit_code: null,
   author_json: '{"_tag":"Human"}',
   lineage_json: '{"_tag":"Original"}',
   status: "accepted",
@@ -820,9 +835,9 @@ it.effect("sql turns create, get, list, and decode cursor variants", () =>
       const missing = yield* repository.get(Turn.TurnId.make("missing"))
       const listed = yield* repository.list(Thread.ThreadId.make("thread-a"))
       expect(created.lastCursor).toBeUndefined()
-      expect(found?.lastCursor).toBe("cursor-a")
+      expect(found !== undefined && Turn.isAgentExecution(found) ? found.lastCursor : undefined).toBe("cursor-a")
       expect(missing).toBeUndefined()
-      expect(listed.map((turn) => turn.lastCursor)).toEqual([undefined, "cursor-b"])
+      expect(listed.filter(Turn.isAgentExecution).map((turn) => turn.lastCursor)).toEqual([undefined, "cursor-b"])
       const parameters = sql.statements[0]?.parameters ?? []
       expect(parameters.slice(0, 4)).toEqual(["turn-a", "thread-a", "hello", null])
       const executionRoute = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(String(parameters[4]))
@@ -885,7 +900,9 @@ it.effect("sql setStatus refuses to move a queued turn out of the queue", () =>
       expect(
         (yield* Effect.result(repository.setStatus(Turn.TurnId.make("turn-a"), "completed", undefined, 5)))._tag,
       ).toBe("Failure")
-      expect(sql.statements.map((statement) => statement.sql)).toEqual(["SELECT * FROM rika_turns WHERE id = ?"])
+      expect(sql.statements.map((statement) => statement.sql)).toEqual([
+        "SELECT * FROM rika_turns WHERE id = ? AND turn_kind = 'AgentExecution'",
+      ])
     }),
   ),
 )
@@ -1044,7 +1061,7 @@ it.effect("sql edits and dequeues only queued turns", () =>
       expect((yield* Effect.result(repository.dequeue(Turn.TurnId.make("active"))))._tag).toBe("Failure")
       expect(sql.statements).toEqual([
         {
-          sql: "UPDATE rika_turns SET prompt = ?, prompt_parts_json = NULL, updated_at = ?, queue_claim_token = NULL WHERE id = ? AND status = 'queued' RETURNING *",
+          sql: "UPDATE rika_turns SET prompt = ?, prompt_parts_json = NULL, updated_at = ?, queue_claim_token = NULL WHERE id = ? AND turn_kind = 'AgentExecution' AND status = 'queued' RETURNING *",
           parameters: ["after", 3, "turn-a"],
         },
         {
@@ -1052,15 +1069,21 @@ it.effect("sql edits and dequeues only queued turns", () =>
           parameters: ["thread-a"],
         },
         {
-          sql: "UPDATE rika_turns SET prompt = ?, prompt_parts_json = NULL, updated_at = ?, queue_claim_token = NULL WHERE id = ? AND status = 'queued' RETURNING *",
+          sql: "UPDATE rika_turns SET prompt = ?, prompt_parts_json = NULL, updated_at = ?, queue_claim_token = NULL WHERE id = ? AND turn_kind = 'AgentExecution' AND status = 'queued' RETURNING *",
           parameters: ["invalid", 4, "active"],
         },
-        { sql: "DELETE FROM rika_turns WHERE id = ? AND status = 'queued' RETURNING *", parameters: ["turn-a"] },
+        {
+          sql: "DELETE FROM rika_turns WHERE id = ? AND turn_kind = 'AgentExecution' AND status = 'queued' RETURNING *",
+          parameters: ["turn-a"],
+        },
         {
           sql: "UPDATE rika_thread_queue_state SET revision = revision + 1, queued_count = MAX(queued_count - 1, 0) WHERE thread_id = ? RETURNING *",
           parameters: ["thread-a"],
         },
-        { sql: "DELETE FROM rika_turns WHERE id = ? AND status = 'queued' RETURNING *", parameters: ["active"] },
+        {
+          sql: "DELETE FROM rika_turns WHERE id = ? AND turn_kind = 'AgentExecution' AND status = 'queued' RETURNING *",
+          parameters: ["active"],
+        },
       ])
     }),
   ),

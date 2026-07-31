@@ -83,7 +83,6 @@ export interface StartInput {
   readonly turnId: string
   readonly prompt: string
   readonly promptParts?: ReadonlyArray<PromptPart>
-  readonly startedAt: number
   readonly extensionPin?: ExecutionExtensionPin
   readonly executionRoute: ExecutionRoutePin
   readonly reasoningEffort?: string
@@ -202,12 +201,20 @@ export interface InvocationSource {
   readonly threadId: string
   readonly callerProfile: AgentProfile | "Root" | "Title"
   readonly threadCreationDepth: number
-  readonly permissions: ReadonlyArray<{ readonly name: string; readonly value: unknown }>
 }
 
 export interface SteerReceipt {
   readonly steeringMessageId: string
   readonly sequence: number
+}
+
+export interface PendingApproval {
+  readonly waitId: string
+  readonly executionId: string
+  readonly callId: string
+  readonly toolName: string
+  readonly input: unknown
+  readonly requestedAt: number
 }
 
 export interface EventPage {
@@ -230,15 +237,6 @@ export interface Inspection {
     readonly requestedAt: number
   }>
   readonly children: ReadonlyArray<{ readonly executionId: string; readonly status: Status }>
-}
-
-export interface Approval {
-  readonly waitId: string
-  readonly executionId?: string
-  readonly callId: string
-  readonly toolName: string
-  readonly input: unknown
-  readonly requestedAt: number
 }
 
 export class BackendError extends Schema.TaggedErrorClass<BackendError>()("ExecutionBackendError", {
@@ -318,11 +316,7 @@ export interface Interface {
     reference?: ExecutionReference,
   ) => Effect.Effect<EventPage, BackendError>
   readonly listOpenRootExecutions?: Effect.Effect<ReadonlyArray<OpenRootExecution>, BackendError>
-  readonly cancel: (
-    turnId: string,
-    cancelledAt: number,
-    reference?: ExecutionReference,
-  ) => Effect.Effect<Result, BackendError>
+  readonly cancel: (turnId: string, reference?: ExecutionReference) => Effect.Effect<Result, BackendError>
   readonly inspect: (
     turnId: string,
     reference?: ExecutionReference,
@@ -332,22 +326,21 @@ export interface Interface {
     turnId: string,
     text: string,
     idempotencyIdentity: string,
-    createdAt: number,
     reference?: ExecutionReference,
   ) => Effect.Effect<SteerReceipt, BackendError>
-  readonly listApprovals: (
+  readonly listApprovals?: (
     turnId: string,
     reference?: ExecutionReference,
-  ) => Effect.Effect<ReadonlyArray<Approval>, BackendError>
-  readonly resolveToolApproval: (
+  ) => Effect.Effect<ReadonlyArray<PendingApproval>, BackendError>
+  readonly resolveToolApproval?: (
     waitId: string,
     approved: boolean,
     resolvedAt: number,
     comment?: string,
   ) => Effect.Effect<void, BackendError>
-  readonly resolvePermission: (
+  readonly resolvePermission?: (
     waitId: string,
-    answer: "Approved" | "Denied" | "Always",
+    answer: "Always" | "Approved" | "Denied",
     resolvedAt: number,
     reason?: string,
   ) => Effect.Effect<void, BackendError>

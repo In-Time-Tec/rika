@@ -13,10 +13,9 @@ import { command as ToolsCommand } from "./commands/tools"
 import { command as WorkflowsCommand } from "./commands/workflows"
 import * as ReleaseUpdate from "./release-update"
 import { modeIds, type ModeId } from "@rika/config/modes"
+import { version } from "./version"
 
-declare const RIKA_VERSION: string | undefined
-
-export const version = typeof RIKA_VERSION === "string" ? RIKA_VERSION : "0.0.0"
+export { version }
 
 const mode = Flag.choice("mode", modeIds).pipe(Flag.withAlias("m"), Flag.optional)
 const workspace = Flag.directory("workspace").pipe(Flag.optional)
@@ -133,7 +132,9 @@ export function readStreamInput(
         catch: (cause) =>
           Schema.is(Operation.InvalidInput)(cause)
             ? cause
-            : Operation.InvalidInput.make({ message: `Unable to parse JSON input: ${String(cause)}` }),
+            : Operation.InvalidInput.make({
+                message: `Unable to parse JSON input: ${String(cause)}`,
+              }),
       }),
     ),
   )
@@ -211,7 +212,11 @@ export const command = Command.make(
     if (values.execute)
       return validateRunInput(runInput(values)).pipe(Effect.flatMap(readStreamInput), Effect.flatMap(dispatch))
     if (values.streamJson || values.streamJsonInput || values.streamJsonThinking) {
-      return Effect.fail(Operation.InvalidInput.make({ message: "stream flags require --execute or the run command" }))
+      return Effect.fail(
+        Operation.InvalidInput.make({
+          message: "stream flags require --execute or the run command",
+        }),
+      )
     }
     const selectedMode = optionalValue(values.mode)
     const selectedWorkspace = optionalValue(values.workspace)
@@ -229,7 +234,10 @@ export const command = Command.make(
       Effect.flatMap((fileSystem) => Effect.result(fileSystem.stat(selectedWorkspace))),
       Effect.filterOrFail(
         (result) => result._tag === "Success" && result.success.type === "Directory",
-        () => Operation.InvalidInput.make({ message: `Workspace is not a directory: ${selectedWorkspace}` }),
+        () =>
+          Operation.InvalidInput.make({
+            message: `Workspace is not a directory: ${selectedWorkspace}`,
+          }),
       ),
       Effect.flatMap(() => dispatch(input)),
     )

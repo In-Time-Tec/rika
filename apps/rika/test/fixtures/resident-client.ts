@@ -235,8 +235,11 @@ const program = Effect.gen(function* () {
                   const events = yield* Queue.unbounded<string>()
                   const feed = yield* Effect.forkChild(
                     session.events((event) => {
-                      if (event._tag !== "TranscriptPatched") return
-                      Queue.offerUnsafe(events, `${event.turnId}:${event.event.type}`)
+                      if (event._tag !== "TranscriptProjectionPatched" || event.origin._tag !== "Event") return
+                      Queue.offerUnsafe(
+                        events,
+                        `${Transcript.executionKey(event.origin.executionId)}:${event.origin.type}`,
+                      )
                     }),
                   )
                   const tags = [yield* Queue.take(events), yield* Queue.take(events), yield* Queue.take(events)]
@@ -256,6 +259,7 @@ const program = Effect.gen(function* () {
                   const startedAt = eventClock.currentTimeMillisUnsafe()
                   const threadId = Thread.ThreadId.make("timed-tool-thread")
                   const turn = {
+                    _tag: "AgentExecution" as const,
                     id: Turn.TurnId.make("timed-tool-turn"),
                     threadId,
                     prompt: "timed tools",
@@ -286,16 +290,17 @@ const program = Effect.gen(function* () {
                     })),
                     revisions: new Map(),
                     liveProjections: new Map(),
-                    transientEventCursors: new Set(),
                     threadCostUsd: 0,
                   }
                   const feed = yield* Effect.forkChild(
                     session.events((event) => {
-                      if (event._tag !== "TranscriptPatched") return
+                      if (event._tag !== "TranscriptProjectionStarted" && event._tag !== "TranscriptProjectionPatched")
+                        return
                       state = InteractiveController.update(state, event).state
+                      if (event._tag !== "TranscriptProjectionPatched" || event.origin._tag !== "Event") return
                       Queue.offerUnsafe(
                         events,
-                        `${event.event.type}:${eventClock.currentTimeMillisUnsafe() - startedAt}:${ViewState.formatActivity(state.model.activity)}`,
+                        `${event.origin.type}:${eventClock.currentTimeMillisUnsafe() - startedAt}:${ViewState.formatActivity(state.model.activity)}`,
                       )
                     }),
                   )
@@ -569,7 +574,11 @@ const program = Effect.gen(function* () {
                       yield* Effect.sleep("350 millis")
                       const feed = yield* Effect.forkChild(
                         session.events((event) => {
-                          tags.push(event._tag === "TranscriptPatched" ? event.event.type : event._tag)
+                          tags.push(
+                            event._tag === "TranscriptProjectionPatched" && event.origin._tag === "Event"
+                              ? event.origin.type
+                              : event._tag,
+                          )
                           if (event._tag === "TranscriptResyncRequired") Queue.offerUnsafe(completed, undefined)
                         }),
                       )

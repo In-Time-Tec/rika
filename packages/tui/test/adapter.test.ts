@@ -809,7 +809,6 @@ describe("Surface", () => {
         turnId: "turn-4",
         recovery: "Press Enter to retry.",
       },
-      { _tag: "Permission", id: "p", kind: "tool-approval", title: "Write", detail: "a", status: "pending" },
       { _tag: "ChildAgent", id: "child", name: "child", summary: "work", status: "running", activity: [] },
       { _tag: "Workflow", name: "flow", step: "wait", status: "waiting" },
       { _tag: "ImageAttachment", name: "a.png", mediaType: "image/png" },
@@ -827,12 +826,6 @@ describe("Surface", () => {
       currentThreadId: "a",
       threads: [thread({ id: "a", title: "One", unread: true }), thread({ id: "b", title: "Two" })],
     })
-    const styledTranscript = renderTranscriptStyled(state)
-      .chunks.map((chunk) => chunk.text)
-      .join("")
-    expect(styledTranscript).toContain("Allow once")
-    expect(styledTranscript).toContain("Always")
-    expect(styledTranscript).toContain("Deny")
     const sidebar = renderSidebar(state)
       .chunks.map((chunk) => chunk.text)
       .join("")
@@ -2125,8 +2118,24 @@ describe("Surface", () => {
       }
       surface.update(model({ mode: "medium", busy: false, costUsd: 0.0074 }))
       expect(modeLabelText()).toBe(" $0.007 ─ medium ")
-      surface.update(model({ mode: "medium", busy: false, costUsd: 5.4449 }))
+      surface.update(
+        model({
+          mode: "medium",
+          busy: false,
+          costUsd: 5.4449,
+          usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 2 },
+        }),
+      )
       expect(modeLabelText()).toBe(" $5.44 ─ medium ")
+      surface.update(
+        model({
+          mode: "medium",
+          busy: false,
+          costUsd: 0.0074,
+          usageCost: { _tag: "Available", usd: 0.0074, unpricedAttempts: 1 },
+        }),
+      )
+      expect(modeLabelText()).toBe(" $0.007 ─ medium ")
       surface.update(model({ mode: "medium", busy: false, costUsd: 5.4449, fastMode: true }))
       expect(modeLabelText()).toBe(" $5.44 ─ ↯medium ")
       const globalTotalUsd = 12.34

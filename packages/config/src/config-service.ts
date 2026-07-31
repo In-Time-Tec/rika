@@ -154,10 +154,6 @@ const mergeSettings = (global: SettingsInput, workspace: SettingsInput): Setting
       ),
     },
     keymap: { ...defaults.keymap, ...global.keymap, ...workspace.keymap },
-    permissions: {
-      shell:
-        workspace.permissions?.shell ?? global.permissions?.shell ?? defaults.permissions.shell ?? ("allow" as const),
-    },
     extensionRoots: workspace.extensionRoots ?? global.extensionRoots ?? defaults.extensionRoots,
     mcp: { ...defaults.mcp, ...global.mcp, ...workspace.mcp },
     notifications: { ...defaults.notifications, ...global.notifications, ...workspace.notifications },

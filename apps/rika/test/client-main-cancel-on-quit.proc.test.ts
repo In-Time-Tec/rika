@@ -12,6 +12,7 @@ const blockedTurnScript = Schema.encodeUnknownEffect(UnknownJson)([
         id: "cancel-on-quit",
       },
     ],
+    delayMs: 10_000,
   },
   { parts: [{ type: "text", text: "too late" }] },
 ])
@@ -29,14 +30,14 @@ const quitCancelsBlockedTurn = (
       const result = yield* interactivePty(
         [
           { after: "Welcome to Rika", write: `${prompt}\r`, timeoutMs: 22_000 },
-          { after: "› Allow once", ...quit, timeoutMs: 22_000 },
+          { after: "Waiting", ...quit, delayMs: 500, timeoutMs: 22_000 },
         ],
         yield* blockedTurnScript,
-        ["bash"],
         { RIKA_INTERNAL_RESIDENT_GRACE: "20000", RIKA_INTERNAL_RESIDENT_ABANDON: abandonMilliseconds },
       )
       expect(result.timedOut, result.output).toBe(false)
       expect(result.actionsCompleted, result.output).toBe(2)
+      expect(result.output).not.toContain("UNAPPROVED")
       yield* awaitTurnStatus(result.database, prompt, "cancelled")
     }),
   )
@@ -80,15 +81,15 @@ test(
         const result = yield* interactivePty(
           [
             { after: "Welcome to Rika", write: `${prompt}\r`, timeoutMs: 22_000 },
-            { after: "› Allow once", write: "", closePty: true, timeoutMs: 22_000 },
+            { after: "Waiting", write: "", closePty: true, delayMs: 500, timeoutMs: 22_000 },
             { after: "", write: "", turnPrompt: prompt, turnStatus: "cancelled", timeoutMs: 22_000 },
           ],
           yield* blockedTurnScript,
-          ["bash"],
           { RIKA_INTERNAL_RESIDENT_GRACE: "20000", RIKA_INTERNAL_RESIDENT_ABANDON: withoutAbandonmentFallback },
         )
         expect(result.timedOut, result.output).toBe(false)
         expect(result.actionsCompleted, result.output).toBe(3)
+        expect(result.output).not.toContain("UNAPPROVED")
         yield* awaitTurnStatus(result.database, prompt, "cancelled")
       }),
     ),

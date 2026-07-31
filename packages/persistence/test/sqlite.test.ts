@@ -8,6 +8,12 @@ import { Database, Thread, ThreadRepository, ThreadSummaryRepository } from "../
 import * as TurnRepository from "../src/turn-repository"
 import * as TranscriptRepository from "../src/transcript-repository"
 import * as Turn from "../src/turn-schema"
+import {
+  attachedExecutionCheckpoint,
+  commitAll,
+  executionCheckpoint,
+  projectionVersion,
+} from "./transcript-repository-fixtures"
 
 const id = Thread.ThreadId.make("thread-a")
 
@@ -208,7 +214,7 @@ const createPreBranchDatabase = (filename: string) => {
   database.close()
 }
 
-test("migrates a pre-branch database without losing product or queue data", () => {
+test("migrates a pre-branch database while invalidating its rebuildable transcript projection", () => {
   const program = Effect.scoped(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -235,12 +241,13 @@ test("migrates a pre-branch database without losing product or queue data", () =
             pinned: true,
           })
           const storedTurns = yield* turns.list(id)
+          const storedAgentTurns = storedTurns.filter(Turn.isAgentExecution)
           expect(storedTurns.map((turn) => String(turn.id))).toEqual([
             "completed-turn",
             "legacy-unpinned-turn",
             "queued-turn",
           ])
-          const migratedRoute = storedTurns.find((turn) => turn.id === "completed-turn")?.executionRoute
+          const migratedRoute = storedAgentTurns.find((turn) => turn.id === "completed-turn")?.executionRoute
           expect(migratedRoute).toMatchObject({
             main: { providerProtocol: "test", providerBaseUrl: "test://model", providerApiKeyEnv: "TEST_API_KEY" },
             oracle: { providerProtocol: "test", providerBaseUrl: "test://model", providerApiKeyEnv: "TEST_API_KEY" },
@@ -258,17 +265,16 @@ test("migrates a pre-branch database without losing product or queue data", () =
           expect(migratedRoute?.main).not.toHaveProperty("gatewayProtocol")
           expect(migratedRoute?.main).not.toHaveProperty("gatewayBaseUrl")
           expect(migratedRoute?.main).not.toHaveProperty("gatewayAuth")
-          expect(storedTurns.find((turn) => turn.id === "legacy-unpinned-turn")?.executionRoute).toBeDefined()
+          expect(storedAgentTurns.find((turn) => turn.id === "legacy-unpinned-turn")?.executionRoute).toBeDefined()
           expect(yield* transcripts.get(Turn.TurnId.make("completed-turn"))).toMatchObject({
             revision: 1,
             modelPhase: -1,
-            checkpointCursor: "completed-cursor",
-            costUsd: 0.5,
-            units: [{ content: { _tag: "Entry", role: "user", text: "completed prompt" } }],
+            checkpointCursor: undefined,
+            costUsd: undefined,
+            projectionVersion: 2,
+            units: [],
           })
-          expect(yield* transcripts.page(id)).toMatchObject({
-            entries: [{ turn: { id: "completed-turn" }, unit: { key: "completed-turn:user" } }],
-          })
+          expect(yield* transcripts.page(id)).toMatchObject({ entries: [] })
           expect(yield* turns.readQueue(id)).toMatchObject({
             revision: 1,
             queuedCount: 1,
@@ -290,8 +296,8 @@ test("migrates a pre-branch database without losing product or queue data", () =
           expect(added).toMatchObject({ status: "queued", queue: { revision: 3, queuedCount: 2 } })
           expect(yield* turns.dequeue(added.id)).toMatchObject({ revision: 4, queuedCount: 1 })
           const migrationRows = yield* sql`SELECT migration_id, name FROM rika_migrations ORDER BY migration_id`
-          expect(migrationRows.at(-1)).toEqual({ migration_id: 24, name: "drop_usage_repairs" })
-          expect(yield* sql`SELECT COUNT(*) AS count FROM rika_transcript_entries`).toEqual([{ count: 1 }])
+          expect(migrationRows.at(-1)).toEqual({ migration_id: 27, name: "usage_projection_sources" })
+          expect(yield* sql`SELECT name FROM sqlite_schema WHERE name = 'rika_transcript_entries'`).toEqual([])
         }).pipe(provideLayer(layer)),
       )
       const reopenedDatabase = Database.layer(filename)
@@ -311,9 +317,10 @@ test("migrates a pre-branch database without losing product or queue data", () =
             turns: [{ id: "queued-turn", prompt: "edited queued prompt" }],
           })
           expect(yield* transcripts.get(Turn.TurnId.make("completed-turn"))).toMatchObject({
-            units: [{ content: { _tag: "Entry", text: "completed prompt" } }],
+            projectionVersion: 2,
+            units: [],
           })
-          expect(yield* sql`SELECT COUNT(*) AS count FROM rika_migrations`).toEqual([{ count: 24 }])
+          expect(yield* sql`SELECT COUNT(*) AS count FROM rika_migrations`).toEqual([{ count: 27 }])
         }).pipe(provideLayer(reopened)),
       )
     }),
@@ -448,33 +455,25 @@ test("creates, persists, and reopens the current schema", () => {
         })
         const transcript = yield* TranscriptRepository.Service
         const storedTurn = yield* turns.get(Turn.TurnId.make("turn-a"))
-        if (storedTurn === undefined) return yield* Effect.die("turn-a was not stored")
-        yield* transcript.replace(
+        if (storedTurn === undefined || !Turn.isAgentExecution(storedTurn))
+          return yield* Effect.die("turn-a was not stored as an agent execution")
+        const projection = Transcript.project(storedTurn.id, storedTurn.prompt, [
+          { cursor: "cursor-a", sequence: 1, type: "execution.completed", createdAt: 4 },
+        ])
+        yield* commitAll(transcript, storedTurn, projection, undefined)
+        yield* transcript.commitDelta(
           storedTurn,
-          Transcript.project(storedTurn.id, storedTurn.prompt, [
-            { cursor: "cursor-a", sequence: 1, type: "execution.completed", createdAt: 4 },
-          ]),
+          Transcript.projectionState({ ...projection, revision: 2, checkpointCursor: "cursor-b" }),
+          { upsert: [], remove: [] },
+          {
+            executionCheckpoints: [
+              executionCheckpoint(storedTurn, { ...projection, revision: 2, checkpointCursor: "cursor-b" }),
+            ],
+            projectionVersion,
+            expectedGeneration: 0,
+          },
         )
-        yield* transcript.append(storedTurn, {
-          cursor: "cursor-b",
-          sequence: 2,
-          type: "model.usage.reported",
-          createdAt: 5,
-        })
-        yield* transcript.append(storedTurn, {
-          cursor: "cursor-b",
-          sequence: 2,
-          type: "model.usage.reported",
-          createdAt: 5,
-        })
         const beforeRejectedReplacement = yield* transcript.get(storedTurn.id)
-        yield* transcript.replace(
-          storedTurn,
-          Transcript.project(storedTurn.id, storedTurn.prompt, [
-            { cursor: "cursor-a", sequence: 1, type: "execution.completed", createdAt: 4 },
-          ]),
-        )
-        expect(yield* transcript.get(storedTurn.id)).toEqual(beforeRejectedReplacement)
         const malformed = {
           ...Transcript.project(storedTurn.id, storedTurn.prompt, [
             { cursor: "cursor-c", sequence: 3, type: "model.output.completed", createdAt: 6, text: "invalid" },
@@ -489,7 +488,20 @@ test("creates, persists, and reopens the current schema", () => {
             },
           ],
         } as unknown as Transcript.Projection
-        expect((yield* Effect.result(transcript.replace(storedTurn, malformed)))._tag).toBe("Failure")
+        expect(
+          (yield* Effect.result(
+            transcript.commitDelta(
+              storedTurn,
+              Transcript.projectionState(malformed),
+              { upsert: malformed.units, remove: [] },
+              {
+                executionCheckpoints: [executionCheckpoint(storedTurn, malformed)],
+                projectionVersion,
+                expectedGeneration: 1,
+              },
+            ),
+          ))._tag,
+        ).toBe("Failure")
         expect(yield* transcript.get(storedTurn.id)).toEqual(beforeRejectedReplacement)
         const sql = yield* SqlClient
         const queryPlan = yield* sql`EXPLAIN QUERY PLAN
@@ -498,7 +510,7 @@ test("creates, persists, and reopens the current schema", () => {
           JOIN rika_transcript_checkpoints c ON c.turn_id = u.turn_id
           JOIN rika_turns t ON t.id = u.turn_id
           WHERE u.thread_id = ${id}
-          ORDER BY u.created_at DESC, u.turn_id DESC, u.unit_sequence DESC, u.unit_part DESC, u.unit_key DESC
+          ORDER BY u.created_at DESC, u.turn_id DESC, u.unit_order_key DESC
           LIMIT 51`
         const decodedPlan = yield* Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ detail: Schema.String })))(
           queryPlan,
@@ -510,16 +522,16 @@ test("creates, persists, and reopens the current schema", () => {
           JOIN rika_transcript_checkpoints c ON c.turn_id = u.turn_id
           JOIN rika_turns t ON t.id = u.turn_id
           WHERE u.thread_id = ${id} AND
-            (u.created_at, u.turn_id, u.unit_sequence, u.unit_part, u.unit_key) <
-            (${storedTurn.createdAt}, ${storedTurn.id}, 2, 0, "turn:turn-a:user")
-          ORDER BY u.created_at DESC, u.turn_id DESC, u.unit_sequence DESC, u.unit_part DESC, u.unit_key DESC
+            (u.created_at, u.turn_id, u.unit_order_key) <
+            (${storedTurn.createdAt}, ${storedTurn.id}, ${Transcript.encodeUnitOrder(projection.units[0]!.order)})
+          ORDER BY u.created_at DESC, u.turn_id DESC, u.unit_order_key DESC
           LIMIT 51`
         const decodedCursorPlan = yield* Schema.decodeUnknownEffect(
           Schema.Array(Schema.Struct({ detail: Schema.String })),
         )(cursorPlan)
         const cursorDetails = decodedCursorPlan.map((row) => row.detail).join("\n")
         expect(cursorDetails).toContain("rika_transcript_units_page")
-        expect(cursorDetails).toContain("(created_at,turn_id,unit_sequence,unit_part,unit_key)<")
+        expect(cursorDetails).toContain("(created_at,turn_id,unit_order_key)<")
         expect(cursorDetails).not.toContain("TEMP B-TREE")
       }).pipe(provideLayer(layer))
       const reopenedDatabase = Database.layer(filename)
@@ -552,8 +564,12 @@ test("creates, persists, and reopens the current schema", () => {
             expect(result.thread?.title).toBe("First")
             expect(result.thread?.labels).toEqual(["local"])
             expect(result.turn?.status).toBe("completed")
-            expect(result.turn?.lastCursor).toBe("cursor-a")
-            expect(result.turn?.extensionPin).toEqual({
+            expect(
+              result.turn !== undefined && Turn.isAgentExecution(result.turn) ? result.turn.lastCursor : undefined,
+            ).toBe("cursor-a")
+            expect(
+              result.turn !== undefined && Turn.isAgentExecution(result.turn) ? result.turn.extensionPin : undefined,
+            ).toEqual({
               generation: "generation-a",
               sourceDigest: "source-a",
               configFingerprint: "config-a",
@@ -638,7 +654,20 @@ test("reopens a completed nested transcript through the SQLite page", () => {
           const projection = Transcript.withNestedProjections(parent, [
             { parentId: `${target.id}:agent`, projection: child },
           ])
-          yield* transcripts.replace(completed, projection)
+          const parentTool = parent.units.find(
+            (unit) => unit.content._tag === "Block" && unit.content.block._tag === "ToolCall",
+          )
+          if (parentTool === undefined) return yield* Effect.die("nested transcript had no parent tool")
+          yield* commitAll(transcripts, completed, projection, undefined, projectionVersion, [
+            executionCheckpoint(completed, projection),
+            attachedExecutionCheckpoint(
+              childId,
+              child,
+              Transcript.executionKey(String(target.id)),
+              parentTool,
+              "completed",
+            ),
+          ])
           return projection.units
         }).pipe(provideLayer(layer)),
       )
@@ -843,7 +872,7 @@ test("enforces current foreign keys and cascades thread deletion", () => {
           prompt: "cascade",
           now: 2,
         })
-        yield* transcripts.replace(turn, Transcript.empty(turn.id, turn.prompt))
+        yield* commitAll(transcripts, turn, Transcript.empty(turn.id, turn.prompt), undefined)
         const orphan = yield* Effect.result(sql`INSERT INTO rika_turns
           (id, thread_id, prompt, status, created_at, updated_at)
           VALUES ('orphan', 'missing-thread', 'orphan', 'accepted', 3, 3)`)
@@ -1106,6 +1135,7 @@ test("SQLite queue copy, take, and accepted rollback stay atomic", () => {
 
         const copied = yield* turns.copy(
           {
+            _tag: "AgentExecution",
             id: Turn.TurnId.make("sqlite-copied-queued"),
             threadId: copyThread,
             prompt: "copied",
@@ -1125,6 +1155,7 @@ test("SQLite queue copy, take, and accepted rollback stay atomic", () => {
           yield* Effect.result(
             turns.copy(
               {
+                _tag: "AgentExecution",
                 id: overflowId,
                 threadId: copyThread,
                 prompt: "overflow",
@@ -1267,15 +1298,15 @@ test("malformed SQLite product rows fail through typed repositories", () => {
           prompt: "persist",
           now: 2,
         })
-        yield* transcripts.replace(turn, Transcript.empty(turn.id, turn.prompt))
+        yield* commitAll(transcripts, turn, Transcript.empty(turn.id, turn.prompt), undefined)
         yield* sql`UPDATE rika_threads SET labels_json = 'not-json' WHERE id = ${id}`
         expect(yield* Effect.result(threads.get(id))).toMatchObject({
           _tag: "Failure",
           failure: { _tag: "ThreadRepositoryError" },
         })
         yield* sql`INSERT INTO rika_transcript_units
-          (unit_key, turn_id, thread_id, unit_sequence, unit_part, revision, unit_json, created_at, updated_at)
-          VALUES ('malformed-unit', ${turn.id}, ${id}, 1, 0, 1, 'not-json', 2, 2)`
+          (turn_id, unit_key, execution_key, thread_id, unit_order_key, revision, unit_json, created_at, updated_at)
+          VALUES (${turn.id}, 'malformed-unit', ${Transcript.executionKey(turn.id)}, ${id}, 'malformed-order', 1, 'not-json', 2, 2)`
         expect(yield* Effect.result(transcripts.get(turn.id))).toMatchObject({
           _tag: "Failure",
           failure: { _tag: "TranscriptRepositoryError" },

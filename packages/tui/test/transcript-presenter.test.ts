@@ -45,10 +45,22 @@ const grandchildProjection = Transcript.project("child:child:turn:oracle:nested"
   event("shell-result", 1, "tool.result.received", { data: { tool_call_id: "shell", output: "passed" } }),
 ])
 
+const entryUnit = (key: string, sequence: number, text: string): Transcript.Unit => ({
+  key,
+  turnId: "ordered-turn",
+  order: Transcript.unitOrder(key, sequence),
+  revision: sequence,
+  content: { _tag: "Entry", role: "assistant", text },
+})
+
 const nestedModel = () => {
   let model = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), parentProjection.units)
   model = TranscriptPresenter.applyChildUnits(model, "turn:agent", childProjection.units)
-  model = TranscriptPresenter.applyChildUnits(model, "child:turn:oracle:nested", grandchildProjection.units)
+  model = TranscriptPresenter.applyChildUnits(
+    model,
+    Transcript.scopedIdentity("child:turn:oracle", "nested"),
+    grandchildProjection.units,
+  )
   return model
 }
 
@@ -94,7 +106,7 @@ describe("TranscriptPresenter", () => {
     const attached = TranscriptPresenter.attachChildProjections(base, new Set<string>(), projections)
     const expected = TranscriptPresenter.applyChildUnits(
       TranscriptPresenter.applyChildUnits(base, "turn:agent", childProjection.units),
-      "child:turn:oracle:nested",
+      Transcript.scopedIdentity("child:turn:oracle", "nested"),
       grandchildProjection.units,
     )
     expect(attached.model).toEqual(expected)
@@ -125,6 +137,120 @@ describe("TranscriptPresenter", () => {
     expect(updated.blocks).not.toBe(base.blocks)
     const changed = updated.blocks.filter((block, index) => block !== base.blocks[index])
     expect(changed).toHaveLength(1)
+  })
+
+  it("inserts a new unit at its stable intrinsic order", () => {
+    const later = entryUnit("ordered:later", 2, "later")
+    const earlier = entryUnit("ordered:earlier", 1, "earlier")
+    const base = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), [later])
+    const inserted = TranscriptPresenter.applyTurnUnits(base, [earlier])
+    const orderedText = (inserted.items as ReadonlyArray<ViewState.TranscriptItem>).map((item) =>
+      item._tag === "Entry" ? inserted.entries[item.index]?.text : undefined,
+    )
+    expect(orderedText).toEqual(["earlier", "later"])
+  })
+
+  it("orders one reverse delta across nested executions by the root projection order", () => {
+    const parentOrder = Transcript.unitOrder("tool:root:agent", 1)
+    const earlier: Transcript.Unit = {
+      ...entryUnit("child-a:answer", 1, "earlier child"),
+      turnId: "child-a",
+      parentId: "root:agent",
+      order: Transcript.childOrder(parentOrder, "child-a", Transcript.unitOrder("child-a:answer", 1)),
+    }
+    const later: Transcript.Unit = {
+      ...entryUnit("child-z:answer", 1, "later child"),
+      turnId: "child-z",
+      parentId: "root:agent",
+      order: Transcript.childOrder(parentOrder, "child-z", Transcript.unitOrder("child-z:answer", 1)),
+    }
+    const inserted = TranscriptPresenter.applyTurnDelta(ViewState.initial("/work"), "root", {
+      upsert: [later, earlier],
+      remove: [],
+    })
+    const orderedText = (inserted.items as ReadonlyArray<ViewState.TranscriptItem>).map((item) =>
+      item._tag === "Entry" ? inserted.entries[item.index]?.text : undefined,
+    )
+
+    expect(orderedText).toEqual(["earlier child", "later child"])
+  })
+
+  it("applies removals without rebuilding unaffected transcript storage", () => {
+    const first = entryUnit("remove:first", 1, "first")
+    const removed = entryUnit("remove:middle", 2, "middle")
+    const last = entryUnit("remove:last", 3, "last")
+    const base = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), [first, removed, last])
+    const updated = TranscriptPresenter.applyTurnDelta(base, "ordered-turn", { upsert: [], remove: [removed.key] })
+    expect((updated.items as ReadonlyArray<ViewState.TranscriptItem>).map((item) => item.id)).toEqual([
+      first.key,
+      last.key,
+    ])
+    expect(updated.entries.map((entry) => entry.text)).toEqual(["first", "last"])
+    expect(updated.blocks).toBe(base.blocks)
+  })
+
+  it("lets an upsert win when one patch also removes the same unit key", () => {
+    const initial = entryUnit("collision", 1, "before")
+    const replacement = { ...initial, revision: 2, content: { ...initial.content, text: "after" } }
+    const base = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), [initial])
+    const updated = TranscriptPresenter.applyTurnDelta(base, "ordered-turn", {
+      upsert: [replacement],
+      remove: [initial.key],
+    })
+    expect(updated.items).toHaveLength(1)
+    expect(updated.entries.map((entry) => entry.text)).toEqual(["after"])
+  })
+
+  it("removes nested child rows without disturbing their parent tool", () => {
+    const nested = Transcript.withNestedProjections(parentProjection, [
+      { parentId: "turn:agent", projection: childProjection },
+    ])
+    const childKeys = nested.units.filter((unit) => unit.turnId === "child:turn:oracle").map((unit) => unit.key)
+    const base = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), nested.units)
+    const updated = TranscriptPresenter.applyTurnDelta(base, "turn", { upsert: [], remove: childKeys })
+    const itemIds = new Set(
+      (updated.items as ReadonlyArray<ViewState.TranscriptItem>).flatMap((item) =>
+        item.id === undefined ? [] : [item.id],
+      ),
+    )
+    expect(childKeys.some((key) => itemIds.has(key))).toBe(false)
+    expect(updated.blocks).toContainEqual(expect.objectContaining({ _tag: "ToolCall", id: "turn:agent" }))
+    const parent = TranscriptPresenter.rows(updated).find(
+      (row) =>
+        row.kind === "tool" &&
+        row.blocks.some((index) => {
+          const block = updated.blocks[index] as Transcript.Block | undefined
+          return block?._tag === "ToolCall" && block.id === "turn:agent"
+        }),
+    )
+    expect(parent?.kind === "tool" ? (parent.children ?? []) : []).toEqual([])
+  })
+
+  it("removes every status derived from a hidden child outcome", () => {
+    const tool = parentProjection.units.find(
+      (unit) => unit.content._tag === "Block" && unit.content.block._tag === "ToolCall",
+    )!
+    const outcome: Transcript.Unit = {
+      key: "execution:child:outcome",
+      turnId: "child",
+      parentId: "turn:agent",
+      order: Transcript.childOrder(tool.order, "child", Transcript.unitOrder("execution:child:outcome", 2)),
+      revision: 2,
+      content: { _tag: "Entry", role: "notice", text: "" },
+      executionOutcome: { status: "failed", reason: "child failed" },
+    }
+    const projected = TranscriptPresenter.applyRootUnits(ViewState.initial("/work"), "turn", [tool, outcome])
+    const removed = TranscriptPresenter.applyTurnDelta(projected, "turn", {
+      upsert: [],
+      remove: [outcome.key],
+    })
+    const fresh = TranscriptPresenter.applyRootUnits(ViewState.initial("/work"), "turn", [tool])
+
+    expect(projected.childExecutionOutcomes).toEqual({
+      "turn:agent": { status: "failed", reason: "child failed" },
+    })
+    expect(removed.childExecutionOutcomes).toEqual({})
+    expect(removed.blocks).toEqual(fresh.blocks)
   })
 
   it("keeps an applied child outcome when the parent's stale units reproject", () => {

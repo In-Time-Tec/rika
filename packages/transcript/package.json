@@ -6,6 +6,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./fold": "./src/fold.ts",
     "./schema": "./src/schema.ts"
   },
   "scripts": {

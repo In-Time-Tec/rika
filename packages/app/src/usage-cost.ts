@@ -1,7 +1,7 @@
 import { ExecutionStatus } from "@rika/tools"
 import type * as ExecutionBackend from "@rika/runtime/contract"
 import * as Transcript from "@rika/transcript"
-import { Duration, Function } from "effect"
+import { Duration, Function, Result, Schema } from "effect"
 
 export interface RootExecution {
   readonly threadId: string
@@ -30,12 +30,57 @@ export interface Snapshot {
   readonly turns: ReadonlyMap<string, Totals>
   readonly threads: ReadonlyMap<string, Totals>
   readonly global: Totals
-  readonly usageCursors: ReadonlySet<string>
+  readonly deliveries: ReadonlyMap<string, DeliveryIdentity>
   readonly attempts: ReadonlyMap<string, AttemptCost>
   readonly executionAttempts: ReadonlyMap<string, ReadonlySet<string>>
   readonly activeEvents: ReadonlyMap<string, ActiveEvent>
-  readonly malformedExecutions: ReadonlySet<string>
+  readonly executionEvents: ReadonlyMap<string, ReadonlyArray<ActiveEvent>>
 }
+
+interface DeliveryIdentity {
+  readonly threadId: string
+  readonly turnId: string
+  readonly type: string
+  readonly createdAt: number
+  readonly sequence: number
+  readonly data: string
+}
+
+export type ProjectionFailureReason =
+  | "missing-server-stamp"
+  | "invalid-identity"
+  | "invalid-timestamp"
+  | "invalid-sequence"
+  | "cursor-conflict"
+  | "duplicate-sequence"
+  | "timestamp-regression"
+  | "invalid-transition"
+  | "post-terminal"
+  | "unsupported-version"
+  | "decode-failure"
+
+export class ProjectionFailure extends Schema.TaggedErrorClass<ProjectionFailure>()("UsageProjectionFailure", {
+  message: Schema.String,
+  reason: Schema.Literals([
+    "missing-server-stamp",
+    "invalid-identity",
+    "invalid-timestamp",
+    "invalid-sequence",
+    "cursor-conflict",
+    "duplicate-sequence",
+    "timestamp-regression",
+    "invalid-transition",
+    "post-terminal",
+    "unsupported-version",
+    "decode-failure",
+  ]),
+  field: Schema.optional(Schema.String),
+  threadId: Schema.optional(Schema.String),
+  turnId: Schema.optional(Schema.String),
+  executionId: Schema.optional(Schema.String),
+  cursor: Schema.optional(Schema.String),
+  sequence: Schema.optional(Schema.Finite),
+}) {}
 
 export interface ActiveTime {
   readonly accumulated: Duration.Duration
@@ -48,6 +93,7 @@ interface ActiveEvent {
   readonly key: string
   readonly executionId: string
   readonly threadId: string
+  readonly turnId: string
   readonly type: ActiveEventType
   readonly createdAt: number
   readonly sequence: number
@@ -99,17 +145,151 @@ export interface AttemptCost {
   readonly tokens: AttemptTokens
 }
 
-export const foldVersion = 3
+export const foldVersion = 5
 
 export const empty: Snapshot = {
   turns: new Map(),
   threads: new Map(),
   global: noTotals,
-  usageCursors: new Set(),
+  deliveries: new Map(),
   attempts: new Map(),
   executionAttempts: new Map(),
   activeEvents: new Map(),
-  malformedExecutions: new Set(),
+  executionEvents: new Map(),
+}
+
+declare const UsageFoldType: unique symbol
+
+export interface UsageFold {
+  readonly [UsageFoldType]: typeof UsageFoldType
+}
+
+interface MutableUsage {
+  turns: Map<string, Totals>
+  threads: Map<string, Totals>
+  global: Totals
+  deliveries: Map<string, DeliveryIdentity>
+  attempts: Map<string, AttemptCost>
+  executionAttempts: Map<string, Set<string>>
+  activeEvents: Map<string, ActiveEvent>
+  executionEvents: Map<string, Array<ActiveEvent>>
+}
+
+interface UsageChanged {
+  turns: boolean
+  threads: boolean
+  global: boolean
+  deliveries: boolean
+  attempts: boolean
+  executionAttempts: boolean
+  activeEvents: boolean
+  executionEvents: boolean
+}
+
+interface OwnedUsageFold {
+  published: Snapshot
+  mutable: MutableUsage
+  changed: UsageChanged
+}
+
+const usageOwned = new WeakMap<UsageFold, OwnedUsageFold>()
+const snapshotToFold = new WeakMap<Snapshot, UsageFold>()
+
+const usageOwner = (fold: UsageFold): OwnedUsageFold => {
+  const value = usageOwned.get(fold)
+  if (value === undefined) throw new TypeError("Unknown usage fold")
+  return value
+}
+
+const cloneExecutionAttempts = (source: ReadonlyMap<string, ReadonlySet<string>>) =>
+  new Map([...source].map(([key, values]) => [key, new Set(values)]))
+
+const cloneExecutionEvents = (source: ReadonlyMap<string, ReadonlyArray<ActiveEvent>>) =>
+  new Map([...source].map(([key, values]) => [key, [...values]]))
+
+const mutableFromSnapshot = (snapshot: Snapshot): MutableUsage => ({
+  turns: new Map(snapshot.turns),
+  threads: new Map(snapshot.threads),
+  global: { ...snapshot.global },
+  deliveries: new Map(snapshot.deliveries),
+  attempts: new Map(snapshot.attempts),
+  executionAttempts: cloneExecutionAttempts(snapshot.executionAttempts),
+  activeEvents: new Map(snapshot.activeEvents),
+  executionEvents: cloneExecutionEvents(snapshot.executionEvents),
+})
+
+const unchangedUsageChanged = (): UsageChanged => ({
+  turns: false,
+  threads: false,
+  global: false,
+  deliveries: false,
+  attempts: false,
+  executionAttempts: false,
+  activeEvents: false,
+  executionEvents: false,
+})
+
+const makeUsageFold = (snapshot: Snapshot, trackSnapshot: boolean): UsageFold => {
+  const fold = {} as UsageFold
+  usageOwned.set(fold, {
+    published: snapshot,
+    mutable: mutableFromSnapshot(snapshot),
+    changed: unchangedUsageChanged(),
+  })
+  if (trackSnapshot) snapshotToFold.set(snapshot, fold)
+  return fold
+}
+
+export const restoreUsageFold: {
+  (snapshot: Snapshot): UsageFold
+  (): (snapshot: Snapshot) => UsageFold
+} = Function.dual(
+  (args) => typeof args[0] === "object" && args[0] !== null && "turns" in args[0],
+  (snapshot: Snapshot): UsageFold => {
+    if (snapshot === empty) return makeUsageFold(snapshot, false)
+    const existing = snapshotToFold.get(snapshot)
+    if (existing !== undefined) return existing
+    return makeUsageFold(snapshot, true)
+  },
+)
+
+const freshUsageFold = (snapshot: Snapshot): UsageFold => makeUsageFold(snapshot, false)
+
+export const usageFoldChanged = (fold: UsageFold): boolean => {
+  const changed = usageOwner(fold).changed
+  return (
+    changed.turns ||
+    changed.threads ||
+    changed.global ||
+    changed.deliveries ||
+    changed.attempts ||
+    changed.executionAttempts ||
+    changed.activeEvents ||
+    changed.executionEvents
+  )
+}
+
+export const snapshotUsageFold = (fold: UsageFold): Snapshot => {
+  const value = usageOwner(fold)
+  if (!usageFoldChanged(fold)) return value.published
+  const snap: Snapshot = {
+    turns: value.changed.turns ? new Map(value.mutable.turns) : value.published.turns,
+    threads: value.changed.threads ? new Map(value.mutable.threads) : value.published.threads,
+    global: value.changed.global ? { ...value.mutable.global } : value.published.global,
+    deliveries: value.changed.deliveries ? new Map(value.mutable.deliveries) : value.published.deliveries,
+    attempts: value.changed.attempts ? new Map(value.mutable.attempts) : value.published.attempts,
+    executionAttempts: value.changed.executionAttempts
+      ? cloneExecutionAttempts(value.mutable.executionAttempts)
+      : value.published.executionAttempts,
+    activeEvents: value.changed.activeEvents ? new Map(value.mutable.activeEvents) : value.published.activeEvents,
+    executionEvents: value.changed.executionEvents
+      ? cloneExecutionEvents(value.mutable.executionEvents)
+      : value.published.executionEvents,
+  }
+  value.published = snap
+  value.changed = unchangedUsageChanged()
+  snapshotToFold.set(snap, fold)
+  return snap
 }
 
 type SerializedSnapshot = {
@@ -117,11 +297,11 @@ type SerializedSnapshot = {
   readonly turns: ReadonlyArray<readonly [string, Totals]>
   readonly threads: ReadonlyArray<readonly [string, Totals]>
   readonly global: Totals
-  readonly usageCursors: ReadonlyArray<string>
+  readonly deliveries: ReadonlyArray<readonly [string, DeliveryIdentity]>
   readonly attempts: ReadonlyArray<readonly [string, AttemptCost]>
   readonly executionAttempts: ReadonlyArray<readonly [string, ReadonlyArray<string>]>
   readonly activeEvents: ReadonlyArray<readonly [string, ActiveEvent]>
-  readonly malformedExecutions: ReadonlyArray<string>
+  readonly executionEvents: ReadonlyArray<readonly [string, ReadonlyArray<ActiveEvent>]>
 }
 
 export const serialize = (snapshot: Snapshot): string =>
@@ -130,27 +310,104 @@ export const serialize = (snapshot: Snapshot): string =>
     turns: [...snapshot.turns],
     threads: [...snapshot.threads],
     global: snapshot.global,
-    usageCursors: [...snapshot.usageCursors],
+    deliveries: [...snapshot.deliveries],
     attempts: [...snapshot.attempts],
     executionAttempts: [...snapshot.executionAttempts].map(([key, values]) => [key, [...values]]),
     activeEvents: [...snapshot.activeEvents],
-    malformedExecutions: [...snapshot.malformedExecutions],
+    executionEvents: [...snapshot.executionEvents],
   } satisfies SerializedSnapshot)
 
-export const deserialize = (json: string): Snapshot | undefined => {
-  const value = JSON.parse(json) as SerializedSnapshot
-  if (value.version !== foldVersion) return undefined
-  return {
-    turns: new Map(value.turns),
-    threads: new Map(value.threads),
-    global: value.global,
-    usageCursors: new Set(value.usageCursors),
-    attempts: new Map(value.attempts),
-    executionAttempts: new Map(value.executionAttempts.map(([key, values]) => [key, new Set(values)])),
-    activeEvents: new Map(value.activeEvents),
-    malformedExecutions: new Set(value.malformedExecutions),
+export const deserialize = (json: string): Result.Result<Snapshot, ProjectionFailure> => {
+  let value: unknown
+  try {
+    value = JSON.parse(json)
+  } catch {
+    return Result.fail(ProjectionFailure.make({ reason: "decode-failure", message: "Snapshot is not valid JSON" }))
+  }
+  if (!isRecord(value) || value.version !== foldVersion)
+    return Result.fail(
+      ProjectionFailure.make({ reason: "unsupported-version", message: "Snapshot fold version is unsupported" }),
+    )
+  if (!isSerializedSnapshot(value))
+    return Result.fail(
+      ProjectionFailure.make({ reason: "decode-failure", message: "Snapshot has malformed nested state" }),
+    )
+  try {
+    return Result.succeed({
+      turns: new Map(value.turns),
+      threads: new Map(value.threads),
+      global: value.global,
+      deliveries: new Map(value.deliveries),
+      attempts: new Map(value.attempts),
+      executionAttempts: new Map(value.executionAttempts.map(([key, values]) => [key, new Set(values)])),
+      activeEvents: new Map(value.activeEvents),
+      executionEvents: new Map(value.executionEvents),
+    })
+  } catch {
+    return Result.fail(
+      ProjectionFailure.make({ reason: "decode-failure", message: "Snapshot map entries are invalid" }),
+    )
   }
 }
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+
+const isFiniteNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value)
+const isString = (value: unknown): value is string => typeof value === "string"
+const isTuple = (value: unknown): value is readonly [unknown, unknown] => Array.isArray(value) && value.length === 2
+const isEntries = (value: unknown, check: (value: unknown) => boolean): boolean =>
+  Array.isArray(value) && value.every((entry) => isTuple(entry) && isString(entry[0]) && check(entry[1]))
+const isTotals = (value: unknown): value is Totals =>
+  isRecord(value) &&
+  ["costUsd", "pricedAttempts", "unpricedAttempts", "tokens", "countedAttempts", "uncountedAttempts"].every((key) =>
+    isFiniteNumber(value[key]),
+  )
+const isDelivery = (value: unknown): value is DeliveryIdentity =>
+  isRecord(value) &&
+  isString(value.threadId) &&
+  isString(value.turnId) &&
+  isString(value.type) &&
+  isFiniteNumber(value.createdAt) &&
+  isFiniteNumber(value.sequence) &&
+  isString(value.data)
+const isPricing = (value: unknown): value is AttemptPricing =>
+  isRecord(value) &&
+  (value._tag === "Announced" ||
+    (value._tag === "Priced" &&
+      isFiniteNumber(value.usd) &&
+      (value.source === "provider" || value.source === "estimate")) ||
+    (value._tag === "Unpriceable" && isString(value.reason)))
+const isTokens = (value: unknown): value is AttemptTokens =>
+  isRecord(value) &&
+  (value._tag === "Announced" ||
+    (value._tag === "Counted" && isFiniteNumber(value.total)) ||
+    (value._tag === "Uncounted" && isString(value.reason)))
+const isAttempt = (value: unknown): value is AttemptCost =>
+  isRecord(value) &&
+  isString(value.threadId) &&
+  isString(value.turnId) &&
+  isPricing(value.cost) &&
+  isTokens(value.tokens)
+const isActiveEvent = (value: unknown): value is ActiveEvent =>
+  isRecord(value) &&
+  isString(value.key) &&
+  isString(value.executionId) &&
+  isString(value.threadId) &&
+  isString(value.turnId) &&
+  isString(value.type) &&
+  activeEventTypes.has(value.type) &&
+  isFiniteNumber(value.createdAt) &&
+  isFiniteNumber(value.sequence)
+const isSerializedSnapshot = (value: Readonly<Record<string, unknown>>): value is SerializedSnapshot =>
+  isEntries(value.turns, isTotals) &&
+  isEntries(value.threads, isTotals) &&
+  isTotals(value.global) &&
+  isEntries(value.deliveries, isDelivery) &&
+  isEntries(value.attempts, isAttempt) &&
+  isEntries(value.executionAttempts, (item) => Array.isArray(item) && item.every(isString)) &&
+  isEntries(value.activeEvents, isActiveEvent) &&
+  isEntries(value.executionEvents, (item) => Array.isArray(item) && item.every(isActiveEvent))
 
 export const materialize: {
   (
@@ -280,6 +537,29 @@ const executionIntervals = (events: ReadonlyArray<ActiveEvent>): ReadonlyArray<I
   return intervals
 }
 
+const lifecycleFailure = (events: ReadonlyArray<ActiveEvent>): ProjectionFailureReason | undefined => {
+  let state: "initial" | "accepted" | "active" | "waiting" | "terminal" = "initial"
+  for (const event of events) {
+    if (state === "terminal") return "post-terminal"
+    if (event.type === "execution.accepted") {
+      if (state !== "initial") return "invalid-transition"
+      state = "accepted"
+    } else if (event.type === "execution.started") {
+      if (state !== "initial" && state !== "accepted" && state !== "waiting") return "invalid-transition"
+      state = "active"
+    } else if (event.type === "wait.created") {
+      if (state !== "active") return "invalid-transition"
+      state = "waiting"
+    } else if (event.type === "wait.woken" || event.type === "wait.timed_out") {
+      if (state !== "waiting") return "invalid-transition"
+      state = "active"
+    } else {
+      state = "terminal"
+    }
+  }
+  return undefined
+}
+
 const unionIntervals = (intervals: ReadonlyArray<Interval>): ActiveTime => {
   const ordered = intervals.toSorted(
     (left, right) => left.start - right.start || (left.end ?? Infinity) - (right.end ?? Infinity),
@@ -310,7 +590,7 @@ const unionIntervals = (intervals: ReadonlyArray<Interval>): ActiveTime => {
 const activeIntervals = (snapshot: Snapshot, threadId: string): ReadonlyArray<Interval> | undefined => {
   const executions = new Map<string, Array<ActiveEvent>>()
   for (const event of snapshot.activeEvents.values()) {
-    if (event.threadId !== threadId || snapshot.malformedExecutions.has(event.executionId)) continue
+    if (event.threadId !== threadId) continue
     const group = executions.get(event.executionId)
     if (group === undefined) executions.set(event.executionId, [event])
     else group.push(event)
@@ -326,11 +606,6 @@ const activeIntervals = (snapshot: Snapshot, threadId: string): ReadonlyArray<In
   return known ? intervals : undefined
 }
 
-const malformedExecution = (snapshot: Snapshot, executionId: string): Snapshot => ({
-  ...snapshot,
-  malformedExecutions: new Set(snapshot.malformedExecutions).add(executionId),
-})
-
 export const activeTime: {
   (snapshot: Snapshot, threadId: string): ActiveTimeAvailability
   (threadId: string): (snapshot: Snapshot) => ActiveTimeAvailability
@@ -338,42 +613,6 @@ export const activeTime: {
   const intervals = activeIntervals(snapshot, threadId)
   return intervals === undefined ? { _tag: "Unavailable" } : { _tag: "Available", ...unionIntervals(intervals) }
 })
-
-const observeActive = (
-  snapshot: Snapshot,
-  input: RootExecution & { readonly event: ExecutionBackend.Event },
-): Snapshot => {
-  const event = input.event
-  if (!isActiveEventType(event.type)) return snapshot
-  if (!isServerStamped(event)) return malformedExecution(snapshot, event.executionId)
-  if (
-    event.executionId.length === 0 ||
-    !Number.isFinite(event.createdAt) ||
-    event.createdAt < 0 ||
-    !Number.isSafeInteger(event.sequence)
-  )
-    return malformedExecution(snapshot, event.executionId)
-  const key = `${event.executionId}\u0000${event.cursor}`
-  const previous = snapshot.activeEvents.get(key)
-  if (previous !== undefined)
-    return previous.threadId === input.threadId &&
-      previous.type === event.type &&
-      previous.createdAt === event.createdAt &&
-      previous.sequence === event.sequence
-      ? snapshot
-      : malformedExecution(snapshot, event.executionId)
-  return {
-    ...snapshot,
-    activeEvents: new Map(snapshot.activeEvents).set(key, {
-      key,
-      executionId: event.executionId,
-      threadId: input.threadId,
-      type: event.type,
-      createdAt: event.createdAt,
-      sequence: event.sequence,
-    }),
-  }
-}
 
 export const eventCostUsd = (event: ExecutionBackend.Event): number | undefined =>
   event.type === "model.usage.reported"
@@ -383,6 +622,28 @@ export const eventCostUsd = (event: ExecutionBackend.Event): number | undefined 
 const stringField = (data: Readonly<Record<string, unknown>> | undefined, name: string) => {
   const value = data?.[name]
   return typeof value === "string" && value.length > 0 ? value : undefined
+}
+
+const canonicalJson = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`
+  if (isRecord(value))
+    return `{${Object.keys(value)
+      .toSorted()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(",")}}`
+  return JSON.stringify(value) ?? "null"
+}
+
+const providerCostUsd = (data: Readonly<Record<string, unknown>>): number | undefined => {
+  const cost = data.cost
+  const valid =
+    cost !== null &&
+    typeof cost === "object" &&
+    typeof (cost as { amount?: unknown }).amount === "number" &&
+    Number.isFinite((cost as { amount: number }).amount) &&
+    (cost as { amount: number }).amount >= 0 &&
+    (cost as { currency?: unknown }).currency === "USD"
+  return valid ? (cost as { amount: number }).amount : undefined
 }
 
 const settledWithoutUsage = (reason: UnpriceableReason | UncountableReason): boolean =>
@@ -467,8 +728,7 @@ const accumulate = (left: Totals, right: Totals): Totals => ({
   uncountedAttempts: left.uncountedAttempts + right.uncountedAttempts,
 })
 
-const addScope = (scope: ReadonlyMap<string, Totals>, key: string, delta: Totals): ReadonlyMap<string, Totals> =>
-  new Map(scope).set(key, accumulate(scope.get(key) ?? noTotals, delta))
+const unreadableKey = (key: string) => `unreadable\u0000${key}`
 
 export const turnTotals: {
   (snapshot: Snapshot, turnId: string): Totals
@@ -480,56 +740,57 @@ export const threadTotals: {
   (threadId: string): (snapshot: Snapshot) => Totals
 } = Function.dual(2, (snapshot: Snapshot, threadId: string): Totals => snapshot.threads.get(threadId) ?? noTotals)
 
-const writeAttempt = (
-  snapshot: Snapshot,
+const addScopeMutable = (scope: Map<string, Totals>, key: string, delta: Totals): void => {
+  scope.set(key, accumulate(scope.get(key) ?? noTotals, delta))
+}
+
+const writeAttemptMutable = (
+  value: OwnedUsageFold,
   executionId: string | undefined,
   attemptKey: string,
   previous: AttemptCost | undefined,
   next: AttemptCost,
-): Snapshot => {
-  if (previous === next) return snapshot
-  const attempts = new Map(snapshot.attempts).set(attemptKey, next)
-  const executionAttempts =
-    executionId === undefined || snapshot.executionAttempts.get(executionId)?.has(attemptKey) === true
-      ? snapshot.executionAttempts
-      : new Map(snapshot.executionAttempts).set(
-          executionId,
-          new Set([...(snapshot.executionAttempts.get(executionId) ?? []), attemptKey]),
-        )
+): void => {
+  if (previous === next) return
+  value.mutable.attempts.set(attemptKey, next)
+  value.changed.attempts = true
+  if (executionId !== undefined) {
+    const existingKeys = value.mutable.executionAttempts.get(executionId)
+    if (existingKeys === undefined || !existingKeys.has(attemptKey)) {
+      const keys = existingKeys ?? new Set<string>()
+      keys.add(attemptKey)
+      value.mutable.executionAttempts.set(executionId, keys)
+      value.changed.executionAttempts = true
+    }
+  }
   const delta = difference(contribution(next), previous === undefined ? noTotals : contribution(previous))
-  if (!shifts(delta)) return { ...snapshot, attempts, executionAttempts }
-  return {
-    ...snapshot,
-    attempts,
-    executionAttempts,
-    turns: addScope(snapshot.turns, next.turnId, delta),
-    threads: addScope(snapshot.threads, next.threadId, delta),
-    global: accumulate(snapshot.global, delta),
-  }
+  if (!shifts(delta)) return
+  addScopeMutable(value.mutable.turns, next.turnId, delta)
+  addScopeMutable(value.mutable.threads, next.threadId, delta)
+  value.mutable.global = accumulate(value.mutable.global, delta)
+  value.changed.turns = true
+  value.changed.threads = true
+  value.changed.global = true
 }
 
-const settleExecution = (snapshot: Snapshot, executionId: string, reason: SettlementReason): Snapshot => {
-  const attemptKeys = snapshot.executionAttempts.get(executionId)
-  if (attemptKeys === undefined) return snapshot
-  let settled = snapshot
+const settleExecutionMutable = (value: OwnedUsageFold, executionId: string, reason: SettlementReason): void => {
+  const attemptKeys = value.mutable.executionAttempts.get(executionId)
+  if (attemptKeys === undefined) return
   for (const attemptKey of attemptKeys) {
-    const previous = settled.attempts.get(attemptKey)
+    const previous = value.mutable.attempts.get(attemptKey)
     if (previous === undefined) continue
-    settled = writeAttempt(settled, executionId, attemptKey, previous, settle(previous, reason))
+    writeAttemptMutable(value, executionId, attemptKey, previous, settle(previous, reason))
   }
-  return settled
 }
 
-const unreadableKey = (key: string) => `unreadable\u0000${key}`
-
-const unreadable = (
-  snapshot: Snapshot,
+const unreadableMutable = (
+  value: OwnedUsageFold,
   input: RootExecution,
   key: string,
   reason: UnpriceableReason & UncountableReason,
-): Snapshot => {
+): void => {
   const attemptKey = unreadableKey(key)
-  return writeAttempt(snapshot, undefined, attemptKey, snapshot.attempts.get(attemptKey), {
+  writeAttemptMutable(value, undefined, attemptKey, value.mutable.attempts.get(attemptKey), {
     threadId: input.threadId,
     turnId: input.turnId,
     cost: { _tag: "Unpriceable", reason },
@@ -537,31 +798,195 @@ const unreadable = (
   })
 }
 
-const providerCostUsd = (data: Readonly<Record<string, unknown>>): number | undefined => {
-  const cost = data.cost
-  const valid =
-    cost !== null &&
-    typeof cost === "object" &&
-    typeof (cost as { amount?: unknown }).amount === "number" &&
-    Number.isFinite((cost as { amount: number }).amount) &&
-    (cost as { amount: number }).amount >= 0 &&
-    (cost as { currency?: unknown }).currency === "USD"
-  return valid ? (cost as { amount: number }).amount : undefined
+const applyActive = (
+  value: OwnedUsageFold,
+  input: RootExecution & { readonly event: ExecutionBackend.Event },
+): Result.Result<void, ProjectionFailure> => {
+  const event = input.event
+  if (!isActiveEventType(event.type)) return Result.succeed(undefined)
+  const context = {
+    threadId: input.threadId,
+    turnId: input.turnId,
+    executionId: event.executionId,
+    cursor: event.cursor,
+    sequence: event.sequence,
+  }
+  if (!isServerStamped(event))
+    return Result.fail(
+      ProjectionFailure.make({
+        reason: "missing-server-stamp",
+        message: "Lifecycle event lacks a server timestamp",
+        ...context,
+      }),
+    )
+  if (event.executionId.length === 0)
+    return Result.fail(
+      ProjectionFailure.make({
+        reason: "invalid-identity",
+        message: "Execution identity is empty",
+        field: "executionId",
+        ...context,
+      }),
+    )
+  if (event.cursor.length === 0)
+    return Result.fail(
+      ProjectionFailure.make({
+        reason: "invalid-identity",
+        message: "Event cursor is empty",
+        field: "cursor",
+        ...context,
+      }),
+    )
+  if (!Number.isSafeInteger(event.createdAt) || event.createdAt < 0)
+    return Result.fail(
+      ProjectionFailure.make({ reason: "invalid-timestamp", message: "Lifecycle timestamp is invalid", ...context }),
+    )
+  if (!Number.isSafeInteger(event.sequence) || event.sequence < 0)
+    return Result.fail(
+      ProjectionFailure.make({ reason: "invalid-sequence", message: "Lifecycle sequence is invalid", ...context }),
+    )
+  const key = `${event.executionId}\u0000${event.cursor}`
+  const previous = value.mutable.activeEvents.get(key)
+  if (previous !== undefined) {
+    const exact =
+      previous.threadId === input.threadId &&
+      previous.turnId === input.turnId &&
+      previous.type === event.type &&
+      previous.createdAt === event.createdAt &&
+      previous.sequence === event.sequence
+    return exact
+      ? Result.succeed(undefined)
+      : Result.fail(
+          ProjectionFailure.make({
+            reason: "cursor-conflict",
+            message: "Lifecycle cursor has conflicting ownership or content",
+            ...context,
+          }),
+        )
+  }
+  const executionEvents = value.mutable.executionEvents.get(event.executionId) ?? []
+  const insertion = executionEvents.findIndex((item) => item.sequence >= event.sequence)
+  const index = insertion < 0 ? executionEvents.length : insertion
+  const sameSequence = executionEvents[index]?.sequence === event.sequence
+  if (sameSequence)
+    return Result.fail(
+      ProjectionFailure.make({
+        reason: "duplicate-sequence",
+        message: "Lifecycle sequence is already occupied",
+        ...context,
+      }),
+    )
+  const before = executionEvents[index - 1]
+  const after = executionEvents[index]
+  if (
+    (before !== undefined && before.createdAt > event.createdAt) ||
+    (after !== undefined && after.createdAt < event.createdAt)
+  )
+    return Result.fail(
+      ProjectionFailure.make({
+        reason: "timestamp-regression",
+        message: "Lifecycle timestamp regresses relative to its sequence",
+        ...context,
+      }),
+    )
+  const activeEvent: ActiveEvent = {
+    key,
+    executionId: event.executionId,
+    threadId: input.threadId,
+    turnId: input.turnId,
+    type: event.type,
+    createdAt: event.createdAt,
+    sequence: event.sequence,
+  }
+  const nextExecutionEvents = [...executionEvents.slice(0, index), activeEvent, ...executionEvents.slice(index)]
+  const invalid = lifecycleFailure(nextExecutionEvents)
+  if (invalid !== undefined && executionEvents.length > 0 && index === executionEvents.length)
+    return Result.fail(
+      ProjectionFailure.make({
+        reason: invalid,
+        message: "Lifecycle event is not valid in execution sequence",
+        ...context,
+      }),
+    )
+  value.mutable.activeEvents.set(key, activeEvent)
+  value.changed.activeEvents = true
+  let events = value.mutable.executionEvents.get(event.executionId)
+  if (events === undefined) {
+    events = []
+    value.mutable.executionEvents.set(event.executionId, events)
+  }
+  events.splice(index, 0, activeEvent)
+  value.changed.executionEvents = true
+  return Result.succeed(undefined)
 }
 
-const observeAttempt = (
-  snapshot: Snapshot,
+const applyAttempt = (
+  value: OwnedUsageFold,
   input: RootExecution & { readonly event: ExecutionBackend.Event },
-): Snapshot => {
+): Result.Result<void, ProjectionFailure> => {
   const event = input.event
   if (event.executionId.length === 0)
-    return unreadable(snapshot, input, `${event.cursor}\u0000${event.sequence}`, "delivery-malformed")
+    return Result.fail(
+      ProjectionFailure.make({
+        reason: "invalid-identity",
+        message: "Execution identity is empty",
+        field: "executionId",
+        threadId: input.threadId,
+        turnId: input.turnId,
+        executionId: event.executionId,
+        cursor: event.cursor,
+        sequence: event.sequence,
+      }),
+    )
+  if (event.cursor.length === 0)
+    return Result.fail(
+      ProjectionFailure.make({
+        reason: "invalid-identity",
+        message: "Event cursor is empty",
+        field: "cursor",
+        threadId: input.threadId,
+        turnId: input.turnId,
+        executionId: event.executionId,
+        cursor: event.cursor,
+        sequence: event.sequence,
+      }),
+    )
   const deliveryKey = `${event.executionId}\u0000${event.cursor}`
-  if (snapshot.usageCursors.has(deliveryKey)) return snapshot
+  const identity: DeliveryIdentity = {
+    threadId: input.threadId,
+    turnId: input.turnId,
+    type: event.type,
+    createdAt: event.createdAt,
+    sequence: event.sequence,
+    data: canonicalJson(event.data ?? null),
+  }
+  const delivered = value.mutable.deliveries.get(deliveryKey)
+  if (delivered !== undefined)
+    return delivered.threadId === identity.threadId &&
+      delivered.turnId === identity.turnId &&
+      delivered.type === identity.type &&
+      delivered.createdAt === identity.createdAt &&
+      delivered.sequence === identity.sequence &&
+      delivered.data === identity.data
+      ? Result.succeed(undefined)
+      : Result.fail(
+          ProjectionFailure.make({
+            reason: "cursor-conflict",
+            message: "Attempt cursor has conflicting ownership or semantic content",
+            threadId: input.threadId,
+            turnId: input.turnId,
+            executionId: event.executionId,
+            cursor: event.cursor,
+            sequence: event.sequence,
+          }),
+        )
   const attemptId = stringField(event.data, "model_attempt_id")
-  if (attemptId === undefined) return unreadable(snapshot, input, deliveryKey, "delivery-malformed")
+  if (attemptId === undefined) {
+    unreadableMutable(value, input, deliveryKey, "delivery-malformed")
+    return Result.succeed(undefined)
+  }
   const attemptKey = `${event.executionId}\u0000${attemptId}`
-  const previous = snapshot.attempts.get(attemptKey)
+  const previous = value.mutable.attempts.get(attemptKey)
   const current: AttemptCost = previous ?? {
     threadId: input.threadId,
     turnId: input.turnId,
@@ -595,26 +1020,107 @@ const observeAttempt = (
           : providerPriced(current.cost, amount),
     }
   }
-  return {
-    ...writeAttempt(snapshot, event.executionId, attemptKey, previous, next),
-    usageCursors: new Set(snapshot.usageCursors).add(deliveryKey),
-  }
+  writeAttemptMutable(value, event.executionId, attemptKey, previous, next)
+  value.mutable.deliveries.set(deliveryKey, identity)
+  value.changed.deliveries = true
+  return Result.succeed(undefined)
 }
 
-export const observe: {
-  (input: RootExecution & { readonly event: ExecutionBackend.Event }): (snapshot: Snapshot) => Snapshot
-  (snapshot: Snapshot, input: RootExecution & { readonly event: ExecutionBackend.Event }): Snapshot
+export const applyUsageFoldEvent: {
+  (
+    input: RootExecution & { readonly event: ExecutionBackend.Event },
+  ): (fold: UsageFold) => Result.Result<void, ProjectionFailure>
+  (
+    fold: UsageFold,
+    input: RootExecution & { readonly event: ExecutionBackend.Event },
+  ): Result.Result<void, ProjectionFailure>
 } = Function.dual(
   2,
-  (snapshot: Snapshot, input: RootExecution & { readonly event: ExecutionBackend.Event }): Snapshot => {
-    if (Transcript.isTransientEvent(input.event)) return snapshot
-    if (isActiveEventType(input.event.type)) {
-      const active = observeActive(snapshot, input)
-      return isTerminalEventType(input.event.type) && input.event.executionId.length > 0
-        ? settleExecution(active, input.event.executionId, "settled-without-usage")
-        : active
+  (
+    fold: UsageFold,
+    input: RootExecution & { readonly event: ExecutionBackend.Event },
+  ): Result.Result<void, ProjectionFailure> => {
+    const executionId = Transcript.executionKey(input.event.executionId)
+    const normalized =
+      executionId === input.event.executionId ? input : { ...input, event: { ...input.event, executionId } }
+    if (Transcript.isTransientEvent(normalized.event)) return Result.succeed(undefined)
+    const value = usageOwner(fold)
+    if (isActiveEventType(normalized.event.type)) {
+      const active = applyActive(value, normalized)
+      if (Result.isFailure(active)) return active
+      if (isTerminalEventType(normalized.event.type) && normalized.event.executionId.length > 0)
+        settleExecutionMutable(value, normalized.event.executionId, "settled-without-usage")
+      return Result.succeed(undefined)
     }
-    if (!attemptEventTypes.has(input.event.type)) return snapshot
-    return observeAttempt(snapshot, input)
+    if (!attemptEventTypes.has(normalized.event.type)) return Result.succeed(undefined)
+    return applyAttempt(value, normalized)
+  },
+)
+
+export const observe: {
+  (
+    input: RootExecution & { readonly event: ExecutionBackend.Event },
+  ): (snapshot: Snapshot) => Result.Result<Snapshot, ProjectionFailure>
+  (
+    snapshot: Snapshot,
+    input: RootExecution & { readonly event: ExecutionBackend.Event },
+  ): Result.Result<Snapshot, ProjectionFailure>
+} = Function.dual(
+  2,
+  (
+    snapshot: Snapshot,
+    input: RootExecution & { readonly event: ExecutionBackend.Event },
+  ): Result.Result<Snapshot, ProjectionFailure> => {
+    const fold = restoreUsageFold(snapshot)
+    const applied = applyUsageFoldEvent(fold, input)
+    if (Result.isFailure(applied)) return Result.fail(applied.failure)
+    return Result.succeed(usageFoldChanged(fold) ? snapshotUsageFold(fold) : snapshot)
+  },
+)
+
+const isSnapshot = (value: unknown): value is Snapshot =>
+  typeof value === "object" && value !== null && "turns" in value && value.turns instanceof Map
+
+export const foldBatch: {
+  (
+    observations: ReadonlyArray<RootExecution & { readonly event: ExecutionBackend.Event }>,
+    completeExecutionIds?: ReadonlySet<string>,
+  ): (snapshot: Snapshot) => Result.Result<Snapshot, ProjectionFailure>
+  (
+    snapshot: Snapshot,
+    observations: ReadonlyArray<RootExecution & { readonly event: ExecutionBackend.Event }>,
+    completeExecutionIds?: ReadonlySet<string>,
+  ): Result.Result<Snapshot, ProjectionFailure>
+} = Function.dual(
+  (args): boolean => args.length > 0 && isSnapshot(args[0]),
+  (
+    snapshot: Snapshot,
+    observations: ReadonlyArray<RootExecution & { readonly event: ExecutionBackend.Event }>,
+    completeExecutionIds: ReadonlySet<string> = new Set(),
+  ): Result.Result<Snapshot, ProjectionFailure> => {
+    const fold = freshUsageFold(snapshot)
+    for (const observation of observations) {
+      const next = applyUsageFoldEvent(fold, observation)
+      if (Result.isFailure(next)) return Result.fail(next.failure)
+    }
+    const candidate = usageFoldChanged(fold) ? snapshotUsageFold(fold) : snapshot
+    for (const identity of completeExecutionIds) {
+      const executionId = Transcript.executionKey(identity)
+      const events = candidate.executionEvents.get(executionId) ?? []
+      if (events.length === 0 || executionIntervals(events) === undefined) {
+        const event = events.toSorted((left, right) => left.sequence - right.sequence)[0]
+        return Result.fail(
+          ProjectionFailure.make({
+            reason: "invalid-transition",
+            message: "Completed execution has incomplete or invalid lifecycle evidence",
+            executionId,
+            threadId: event?.threadId,
+            cursor: event?.key.split("\u0000")[1],
+            sequence: event?.sequence,
+          }),
+        )
+      }
+    }
+    return Result.succeed(candidate)
   },
 )

@@ -118,8 +118,6 @@ test("three Task calls in one model turn run as overlapping durable children", (
         selection: fixture.selection,
         modelVariantPolicy: "fixed-selection",
         toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
-        toolNeedsApproval: () => false,
-        permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
       })
       const backendContext = yield* Layer.build(backendLayer)
       return yield* Effect.gen(function* () {
@@ -128,7 +126,6 @@ test("three Task calls in one model turn run as overlapping durable children", (
           threadId: "thread-parallel-spawn",
           turnId: "turn-parallel-spawn",
           prompt: parallelRootPrompt,
-          startedAt: 1,
         })
         const database = yield* Effect.acquireRelease(
           Effect.sync(() => new Database(`${directory}/execution.db`, { readonly: true })),
@@ -255,8 +252,6 @@ test("ReadThread uses the Oracle route and receives the current Thread identity"
           read_thread_transcript: () => Effect.succeed({ text: "", truncated: false }),
         }),
         toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
-        toolNeedsApproval: () => false,
-        permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
       })
       const backendContext = yield* Layer.build(backendLayer)
       return yield* Effect.gen(function* () {
@@ -270,7 +265,6 @@ test("ReadThread uses the Oracle route and receives the current Thread identity"
           threadId: "thread-current-context",
           turnId: "turn-current-context",
           prompt: "Recover an earlier requirement.",
-          startedAt: 1,
           executionRoute: route,
         })
         const database = yield* Effect.acquireRelease(
@@ -375,8 +369,6 @@ test("a nested subagent delegates ReadThread without broadening its Relay scope"
             ),
         }),
         toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
-        toolNeedsApproval: () => false,
-        permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
       })
       const backendContext = yield* Layer.build(backendLayer)
       return yield* Effect.gen(function* () {
@@ -390,7 +382,6 @@ test("a nested subagent delegates ReadThread without broadening its Relay scope"
           threadId: "thread-nested-current-context",
           turnId: "turn-nested-current-context",
           prompt: "Ask Oracle to recover this thread's earlier requirement.",
-          startedAt: 1,
           executionRoute: route,
         })
         const database = yield* Effect.acquireRelease(
@@ -482,8 +473,6 @@ test("parallel Task calls fall back to the pinned main Sol route when no agent r
         registration: sol.registration,
         selection: sol.selection,
         toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
-        toolNeedsApproval: () => false,
-        permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
       })
       const backendContext = yield* Layer.build(backendLayer)
       return yield* Effect.gen(function* () {
@@ -492,7 +481,6 @@ test("parallel Task calls fall back to the pinned main Sol route when no agent r
           threadId: "thread-high-models",
           turnId: "turn-high-models",
           prompt: "Run three tasks together.",
-          startedAt: 1,
           executionRoute,
         })
         const database = yield* Effect.acquireRelease(
@@ -620,8 +608,6 @@ test("depth-one Task agents can use specialists but cannot delegate more Tasks",
         additionalRegistrations: [solRegistration],
         selection: terra.selection,
         toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
-        toolNeedsApproval: () => false,
-        permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
       })
       const backendContext = yield* Layer.build(backendLayer)
       return yield* Effect.gen(function* () {
@@ -630,7 +616,6 @@ test("depth-one Task agents can use specialists but cannot delegate more Tasks",
           threadId: "thread-nested-spawn",
           turnId: "turn-nested-spawn",
           prompt: nestedRootPrompt,
-          startedAt: 1,
           executionRoute,
         })
         const database = yield* Effect.acquireRelease(
@@ -809,8 +794,6 @@ test("model spawns a durable Oracle child through the handoff tool and resumes w
         selection: fixture.selection,
         modelVariantPolicy: "fixed-selection",
         toolRuntimeLayer: runtimeLayer,
-        toolNeedsApproval: () => false,
-        permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
         compaction: {
           contextWindow: 1_000_000,
           reserveTokens: 100,
@@ -824,7 +807,6 @@ test("model spawns a durable Oracle child through the handoff tool and resumes w
           threadId: "thread-subagent",
           turnId: "turn-subagent",
           prompt: "Ask the Oracle to investigate the boundary.",
-          startedAt: 1,
         })
         const settled = yield* backend.replay("turn-subagent").pipe(
           Effect.repeat({
@@ -950,8 +932,6 @@ test("handoff children resolve real workspace tools through their parent Rika tu
               )
             : Effect.succeed(resolved)
         },
-        toolNeedsApproval: () => false,
-        permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
       })
       const backendContext = yield* Layer.build(backendLayer)
       return yield* Effect.gen(function* () {
@@ -960,7 +940,6 @@ test("handoff children resolve real workspace tools through their parent Rika tu
           threadId: "thread-review",
           turnId: "turn-review",
           prompt: "Ask Review to inspect AGENTS.md.",
-          startedAt: 1,
         })
         const settled = yield* backend.replay("turn-review").pipe(
           Effect.repeat({
@@ -995,85 +974,6 @@ test("handoff children resolve real workspace tools through their parent Rika tu
           expect(settled.status).toBe("completed")
           expect(toolResult?.error).toBeNull()
           expect(toolResult?.output_json).toContain("child workspace marker")
-        }),
-      ),
-    ),
-  )
-}, 60_000)
-
-test("handoff child approval asks surface through the parent and resume after approval", () => {
-  const program = Effect.scoped(
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem
-      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-subagent-permission-" })
-      yield* fileSystem.writeFileString(`${directory}/fixture.txt`, "permission marker")
-      const fixture = yield* routedModel({
-        lanes: [
-          {
-            steps: [
-              TestModel.toolCall("review", { prompt: "Read fixture.txt." }, { id: "call-parent-review" }),
-              TestModel.toolCall("await_subagents", {}, { id: "call-join" }),
-              TestModel.text("Parent received the approved child result."),
-            ],
-          },
-          {
-            when: (prompt) => !prompt.includes("Ask Review to read fixture.txt."),
-            steps: [
-              TestModel.toolCall("read", { path: "fixture.txt" }, { id: "call-child-permission" }),
-              TestModel.text("Child read the fixture."),
-            ],
-          },
-        ],
-      })
-      const backendLayer = RelayExecutionBackend.layer({
-        filename: `${directory}/execution.db`,
-        workspace: directory,
-        registration: fixture.registration,
-        selection: fixture.selection,
-        modelVariantPolicy: "fixed-selection",
-        toolRuntimeLayer: Runtime.layer(directory).pipe(
-          Layer.catch((error) =>
-            Layer.effectContext(Effect.fail(ExecutionBackend.BackendError.make({ message: String(error) }))),
-          ),
-        ),
-        toolNeedsApproval: (name) => name === "read",
-      })
-      const backendContext = yield* Layer.build(backendLayer)
-      return yield* Effect.gen(function* () {
-        const backend = yield* ExecutionBackend.Service
-        const input = {
-          threadId: "thread-child-permission",
-          turnId: "turn-child-permission",
-          prompt: "Ask Review to read fixture.txt.",
-          startedAt: 1,
-        }
-        const waiting = yield* start(backend, input)
-        const ask = waiting.events.find((event) => event.type === "tool.approval.requested")
-        const waitId = ask?.data?.wait_id
-        if (typeof waitId !== "string") return yield* Effect.die("Missing child permission wait")
-        const approvals = yield* backend.listApprovals(input.turnId)
-        yield* backend.resolveToolApproval(waitId, true, 2, "test approval")
-        const completed = yield* start(backend, input)
-        return { waiting, ask, approvals, completed, requests: yield* fixture.requests }
-      }).pipe(Effect.provide(backendContext))
-    }),
-  )
-  return Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const bunContext = yield* Layer.build(BunServices.layer)
-        return yield* program.pipe(Effect.provide(bunContext))
-      }),
-    ).pipe(
-      Effect.tap(({ waiting, ask, approvals, completed, requests }) =>
-        Effect.sync(() => {
-          expect(waiting.status).toBe("waiting")
-          expect(String(ask?.data?.execution_id).startsWith("child:execution%3Aturn-child-permission:")).toBe(true)
-          expect(ask?.executionId).toBe(ask?.data?.execution_id)
-          expect(ask?.cursor).toBeTypeOf("string")
-          expect(approvals[0]?.executionId).toBe(String(ask?.data?.execution_id))
-          expect(completed.status).toBe("completed")
-          expect(requests.length).toBeGreaterThanOrEqual(3)
         }),
       ),
     ),
@@ -1115,8 +1015,6 @@ test("parent and handoff child may reuse a model tool-call identifier", () => {
             Layer.effectContext(Effect.fail(ExecutionBackend.BackendError.make({ message: String(error) }))),
           ),
         ),
-        toolNeedsApproval: () => false,
-        permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
         compaction: {
           contextWindow: 1_000_000,
           reserveTokens: 100,
@@ -1130,7 +1028,6 @@ test("parent and handoff child may reuse a model tool-call identifier", () => {
           threadId: "thread-shared-call-id",
           turnId: "turn-shared-call-id",
           prompt: "Ask Review to read fixture.txt.",
-          startedAt: 1,
         })
         const inspection = yield* backend.inspect("turn-shared-call-id")
         const database = yield* Effect.acquireRelease(

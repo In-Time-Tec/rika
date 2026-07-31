@@ -1,341 +1,658 @@
-import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Transcript from "@rika/transcript"
 import { expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer, Schema } from "effect"
-import { SqlClient } from "effect/unstable/sql/SqlClient"
-import * as Database from "../src/product-database"
+import { Effect } from "effect"
 import * as Thread from "../src/thread-schema"
-import * as ThreadRepository from "../src/thread-repository"
 import * as TranscriptRepository from "../src/transcript-repository"
 import * as TurnRepository from "../src/turn-repository"
 import * as Turn from "../src/turn-schema"
+import {
+  attachedExecutionCheckpoint,
+  commitAll,
+  event,
+  executionCheckpoint,
+  invalidCheckpointGraphs,
+  nestedProjection,
+  projectionVersion,
+  turn,
+  unit,
+} from "./transcript-repository-fixtures"
 
-const provideLayer =
-  <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
-  <A, E, R>(effect: Effect.Effect<A, E, R | ROut>) =>
-    Effect.gen(function* () {
-      const context = yield* Layer.build(layer)
-      return yield* effect.pipe(Effect.provide(context))
-    })
-
-const turn = (index: number): Turn.Turn => ({
-  id: Turn.TurnId.make(`turn-${index}`),
-  threadId: Thread.ThreadId.make("thread-a"),
-  prompt: `prompt ${index}`,
-  executionRoute: Turn.testExecutionRoute(),
-  status: "completed",
-  stopIntent: "none",
-  author: { _tag: "Human" },
-  lineage: { _tag: "Original" },
-  createdAt: index,
-  updatedAt: index,
-})
-
-const usageData = (inputTokens: number) => ({
-  provider: "openai",
-  model: "gpt-5.6-sol",
-  input_tokens: inputTokens,
-  input_tokens_uncached: inputTokens,
-  input_tokens_cache_read: 0,
-  input_tokens_cache_write: 0,
-  output_tokens: 0,
-})
-
-const event = (index: number): Transcript.SourceEvent => ({
-  cursor: `cursor-${index}`,
-  sequence: index,
-  type: index === 2 ? "execution.completed" : "model.output.completed",
-  createdAt: index,
-  text: `output ${index}`,
-})
-
-const semanticUnit = (turnId: Turn.TurnId, sequence: number, part: number, key: string): Transcript.Unit => ({
-  key,
-  turnId,
-  order: { sequence, part },
-  revision: 0,
-  content: { _tag: "Entry", role: "assistant", text: key },
-})
-
-const childExecutionKey = (target: Turn.Turn) => Transcript.executionKey(`execution:${target.id}:child:agent`)
-
-const consumedScript = (repository: TranscriptRepository.Interface, target: Turn.Turn) =>
-  Effect.gen(function* () {
-    const child = childExecutionKey(target)
-    const projection = Transcript.project(target.id, target.prompt, [event(0), event(1)])
-    const legacy = yield* repository.replace(target, projection)
-    const folded = yield* repository.replace(target, projection, {
-      consumed: { [target.id]: { cursor: "cursor-1", sequence: 1 }, [child]: { cursor: "child-3", sequence: 3 } },
-      projectionVersion: 2,
-    })
-    const appended = yield* repository.appendAll(target, [event(2)])
-    const terminal = yield* repository.replace(
-      target,
-      Transcript.project(target.id, target.prompt, [event(0), event(1), event(2)]),
-      {
-        consumed: {
-          [target.id]: { cursor: "cursor-2", sequence: 2, status: "completed" },
-          [child]: { cursor: "child-9", sequence: 9, status: "failed" },
-        },
-      },
-    )
-    return [legacy, folded, appended, terminal].map((state) => ({
-      consumed: state.consumed,
-      projectionVersion: state.projectionVersion,
-    }))
-  })
-
-const consumedTimeline = (target: Turn.Turn) => {
-  const child = childExecutionKey(target)
-  const inFlight = { [target.id]: { cursor: "cursor-1", sequence: 1 }, [child]: { cursor: "child-3", sequence: 3 } }
-  const settled = {
-    [target.id]: { cursor: "cursor-2", sequence: 2, status: "completed" },
-    [child]: { cursor: "child-9", sequence: 9, status: "failed" },
-  }
-  return [
-    { consumed: undefined, projectionVersion: 1 },
-    { consumed: inFlight, projectionVersion: 2 },
-    { consumed: inFlight, projectionVersion: 2 },
-    { consumed: settled, projectionVersion: 2 },
-  ]
+const compareExecutionCheckpoints = (
+  left: TranscriptRepository.ExecutionCheckpoint,
+  right: TranscriptRepository.ExecutionCheckpoint,
+): number => {
+  if (left.executionKey < right.executionKey) return -1
+  if (left.executionKey > right.executionKey) return 1
+  return 0
 }
 
-it.layer(TranscriptRepository.memoryLayer)("transcript repository", (test) => {
-  test.effect("stores a bounded semantic projection and ignores duplicate source events", () =>
-    Effect.gen(function* () {
-      const repository = yield* TranscriptRepository.Service
-      const first = Transcript.project(turn(1).id, turn(1).prompt, [event(0), event(1)])
-      yield* repository.replace(turn(1), first)
-      const appended = yield* repository.appendAll(turn(1), [event(2)])
-      const duplicate = yield* repository.append(turn(1), event(2))
-      expect(appended.units.map((item) => item.content._tag)).toEqual(["Entry", "Entry"])
-      expect(appended.revision).toBe(2)
-      expect(duplicate.revision).toBe(2)
-      expect(duplicate.checkpointCursor).toBe("cursor-2")
-    }),
-  )
+it.effect("lists terminal roots whose current projection has an unfinished child", () =>
+  Effect.gen(function* () {
+    const target = turn(700)
+    const turns = yield* TurnRepository.makeMemory([target])
+    const repository = yield* TranscriptRepository.makeMemory({ turns })
+    const nested = nestedProjection(target, "child:turn-700:parent")
 
-  test.effect("appends a resumed suffix without replacing earlier semantic units", () =>
-    Effect.gen(function* () {
-      const repository = yield* TranscriptRepository.Service
-      const target = { ...turn(4), threadId: Thread.ThreadId.make("thread-resumed") }
-      yield* repository.replace(target, Transcript.project(target.id, target.prompt, [event(0)]))
-      const resumed = yield* repository.appendAll(target, [
+    expect(yield* repository.listProjectionRecoveryCandidates(projectionVersion)).toEqual([
+      { threadId: target.threadId, turnId: target.id },
+    ])
+    expect(
+      yield* commitAll(repository, target, nested.projection, undefined, projectionVersion, nested.checkpoints),
+    ).toBe("committed")
+    expect(yield* repository.listProjectionRecoveryCandidates(projectionVersion)).toEqual([
+      { threadId: target.threadId, turnId: target.id },
+    ])
+
+    const stored = yield* repository.get(target.id)
+    if (stored === undefined) return yield* Effect.die("nested projection was not stored")
+    const terminal = nested.checkpoints.map((checkpoint) =>
+      checkpoint.attachment === undefined ? checkpoint : { ...checkpoint, status: "completed" as const },
+    )
+    expect(
+      yield* repository.commitDelta(
+        target,
+        Transcript.projectionState(nested.projection),
+        { upsert: [], remove: [] },
         {
-          cursor: "permission-1",
-          sequence: 1,
-          type: "permission.ask.requested",
-          createdAt: 1,
-          data: { wait_id: "wait-1", title: "Allow work" },
+          executionCheckpoints: terminal,
+          projectionVersion,
+          expectedGeneration: stored.checkpointGeneration,
         },
-        { cursor: "resumed-input", sequence: 2, type: "model.input.prepared", createdAt: 2 },
+      ),
+    ).toBe("committed")
+    expect(yield* repository.listProjectionRecoveryCandidates(projectionVersion)).toEqual([])
+  }),
+)
+
+it.effect("loads a migration-invalidated empty projection for authoritative refold", () =>
+  Effect.gen(function* () {
+    const target = turn(0)
+    const invalidated: TranscriptRepository.Projection = {
+      turn: target,
+      units: [],
+      checkpointGeneration: 4,
+      revision: 9,
+      modelPhase: -1,
+      usableCompletionSequence: undefined,
+      oldestCursor: undefined,
+      checkpointCursor: undefined,
+      costUsd: undefined,
+      usageCursors: undefined,
+      pricingVersion: undefined,
+      executionCheckpoints: [],
+      projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
+    }
+    const repository = yield* TranscriptRepository.makeMemory({ initial: [invalidated] })
+    expect(yield* repository.get(target.id)).toEqual(invalidated)
+    expect(
+      (yield* Effect.result(TranscriptRepository.makeMemory({ initial: [{ ...invalidated, revision: -2 }] })))._tag,
+    ).toBe("Failure")
+
+    const replacement = Transcript.project(target.id, target.prompt, [event(0), event(1), event(2)])
+    expect(
+      yield* repository.replaceForRefold(target, replacement, {
+        executionCheckpoints: [executionCheckpoint(target, replacement, "completed")],
+        projectionVersion,
+        expectedProjectionVersion: TranscriptRepository.invalidatedProjectionVersion,
+        expectedGeneration: invalidated.checkpointGeneration,
+      }),
+    ).toMatchObject({ _tag: "Committed" })
+    expect(yield* repository.get(target.id)).toMatchObject({
+      units: replacement.units,
+      checkpointGeneration: 5,
+      projectionVersion,
+    })
+  }),
+)
+
+it.effect("authoritatively adopts corrected terminal outcomes in paired memory repositories", () =>
+  Effect.gen(function* () {
+    for (const [index, status, type] of [
+      [100, "failed", "execution.failed"],
+      [101, "cancelled", "execution.cancelled"],
+    ] as const) {
+      const target = turn(index)
+      const obsolete = Transcript.project(target.id, target.prompt, [event(0), event(1)])
+      const turns = yield* TurnRepository.makeMemory([target])
+      const repository = yield* TranscriptRepository.makeMemory({ turns })
+      yield* commitAll(repository, target, obsolete, undefined, 2)
+      const before = yield* repository.get(target.id)
+      if (before === undefined) return yield* Effect.die("obsolete projection was not stored")
+      const replacement = Transcript.project(target.id, target.prompt, [
         {
-          cursor: "resumed-2",
-          sequence: 3,
-          type: "model.output.completed",
-          createdAt: 3,
-          text: "resumed output",
+          cursor: `${status}-cursor`,
+          sequence: 0,
+          type,
+          createdAt: 10,
+          ...(status === "failed" ? { text: "failed" } : {}),
         },
       ])
-      expect(
-        resumed.units.flatMap((item) =>
-          item.content._tag === "Entry" && item.content.role === "assistant" ? [item.content.text] : [],
-        ),
-      ).toEqual(["output 0", "resumed output"])
-      expect(resumed.checkpointCursor).toBe("resumed-2")
-    }),
-  )
-
-  test.effect("keeps a reconciled child-tree marker until a new source event arrives", () =>
-    Effect.gen(function* () {
-      const repository = yield* TranscriptRepository.Service
-      const target = { ...turn(5), threadId: Thread.ThreadId.make("thread-reconciled") }
-      const projection = Transcript.project(target.id, target.prompt, [event(0), event(1)])
-      const reconciled = yield* repository.replace(target, projection, { childTreeReconciled: true })
-      const equalReplacement = yield* repository.replace(target, projection)
-      const duplicate = yield* repository.append(target, event(1))
-      const changed = yield* repository.append(target, event(2))
-      const changedProjection = Transcript.project(target.id, target.prompt, [event(0), event(1), event(2)])
-      const restored = yield* repository.replace(target, changedProjection, { childTreeReconciled: true })
-      const explicitlyCleared = yield* repository.replace(target, changedProjection, { childTreeReconciled: false })
-      const stale = yield* repository.replace(target, projection, { childTreeReconciled: true })
-      expect(reconciled.childTreeReconciled).toBe(true)
-      expect(equalReplacement.childTreeReconciled).toBe(true)
-      expect(duplicate.childTreeReconciled).toBe(true)
-      expect(changed.childTreeReconciled).toBe(false)
-      expect(restored.childTreeReconciled).toBe(true)
-      expect(explicitlyCleared.childTreeReconciled).toBe(false)
-      expect(stale.childTreeReconciled).toBe(false)
-    }),
-  )
-
-  test.effect("does not let an older rebuild overwrite a newer projection", () =>
-    Effect.gen(function* () {
-      const repository = yield* TranscriptRepository.Service
-      const target = { ...turn(7), threadId: Thread.ThreadId.make("thread-b") }
-      const newer = Transcript.project(target.id, target.prompt, [event(0), event(1)])
-      const older = Transcript.project(target.id, target.prompt, [event(0)])
-      yield* repository.replace(target, newer)
-      expect(yield* repository.replace(target, older)).toMatchObject({
-        revision: 1,
-        checkpointCursor: "cursor-1",
-      })
-    }),
-  )
-
-  test.effect("rejects a reconciled replacement when an equal-revision usage append wins the race", () =>
-    Effect.gen(function* () {
-      const repository = yield* TranscriptRepository.Service
-      const target = { ...turn(6), threadId: Thread.ThreadId.make("thread-usage-race") }
-      const projection = Transcript.project(target.id, target.prompt, [event(0), event(1)])
-      const snapshot = yield* repository.replace(target, projection, { childTreeReconciled: true })
-      const usage: Transcript.SourceEvent = {
-        cursor: "usage-late",
-        sequence: 1,
-        type: "model.usage.reported",
-        createdAt: 2,
-        data: usageData(1_000),
+      const options = {
+        executionCheckpoints: [executionCheckpoint(target, replacement, status)],
+        projectionVersion,
+        expectedProjectionVersion: 2,
+        expectedGeneration: before.checkpointGeneration,
       }
-
-      const appended = yield* repository.append(target, usage)
-      const rejected = yield* repository.replace(target, projection, {
-        childTreeReconciled: true,
-        ifGeneration: snapshot.projectionGeneration,
-      })
-
-      expect(appended.revision).toBe(snapshot.revision)
-      expect(appended.childTreeReconciled).toBe(false)
-      expect(appended.usageCursors).toContain("usage-late")
-      expect(rejected.costUsd).toBe(appended.costUsd)
-      expect(rejected.usageCursors).toEqual(appended.usageCursors)
-      expect(rejected.childTreeReconciled).toBe(false)
-    }),
-  )
-
-  test.effect("rejects stale certifiers after equal-revision replacement and explicit marker clear", () =>
-    Effect.gen(function* () {
-      const repository = yield* TranscriptRepository.Service
-      const target = { ...turn(9), threadId: Thread.ThreadId.make("thread-generation-races") }
-      const projection = Transcript.project(target.id, target.prompt, [event(0), event(1)])
-      const snapshot = yield* repository.replace(target, projection)
-      const replacement = {
-        ...projection,
-        units: projection.units.map((unit, index) =>
-          index === 0 && unit.content._tag === "Entry"
-            ? { ...unit, content: { ...unit.content, text: "equal revision replacement" } }
-            : unit,
-        ),
-      }
-      const replaced = yield* repository.replace(target, replacement)
-      const staleAfterReplacement = yield* repository.replace(target, projection, {
-        childTreeReconciled: true,
-        ifGeneration: snapshot.projectionGeneration,
-      })
-      const certified = yield* repository.replace(target, replacement, { childTreeReconciled: true })
-      const cleared = yield* repository.replace(target, replacement, { childTreeReconciled: false })
-      const staleAfterClear = yield* repository.replace(target, replacement, {
-        childTreeReconciled: true,
-        ifGeneration: certified.projectionGeneration,
-      })
-
-      expect(replaced.projectionGeneration).toBeGreaterThan(snapshot.projectionGeneration)
-      expect(staleAfterReplacement.units).toEqual(replaced.units)
-      expect(staleAfterReplacement.childTreeReconciled).toBe(false)
-      expect(cleared.projectionGeneration).toBeGreaterThan(certified.projectionGeneration)
-      expect(staleAfterClear.childTreeReconciled).toBe(false)
-      expect(staleAfterClear.projectionGeneration).toBe(cleared.projectionGeneration)
-    }),
-  )
-
-  test.effect("keeps replacement monotonic when stale and current rebuilds race", () =>
-    Effect.gen(function* () {
-      const repository = yield* TranscriptRepository.Service
-      const target = { ...turn(8), threadId: Thread.ThreadId.make("thread-race") }
-      const stale = Transcript.project(target.id, target.prompt, [event(0)])
-      const current = Transcript.project(target.id, target.prompt, [event(0), event(1), event(2)])
-      yield* Effect.all(
-        [repository.replace(target, stale), repository.replace(target, current), repository.replace(target, stale)],
-        { concurrency: "unbounded" },
-      )
+      const committed = yield* repository.replaceForRefold(target, replacement, options)
+      expect(committed).toMatchObject({ _tag: "Committed", turn: { status, lastCursor: `${status}-cursor` } })
+      expect(yield* turns.get(target.id)).toMatchObject({ status, lastCursor: `${status}-cursor` })
       expect(yield* repository.get(target.id)).toMatchObject({
-        revision: 2,
-        checkpointCursor: "cursor-2",
+        turn: { status, lastCursor: `${status}-cursor` },
+        units: replacement.units,
       })
+      expect(
+        yield* repository.replaceForRefold(target, replacement, {
+          ...options,
+          projectionVersion: projectionVersion + 1,
+          expectedProjectionVersion: projectionVersion,
+          expectedGeneration: before.checkpointGeneration + 1,
+        }),
+      ).toEqual({ _tag: "Stale" })
+      expect(yield* turns.get(target.id)).toMatchObject({ status, lastCursor: `${status}-cursor` })
+    }
+  }),
+)
+
+it.effect("rejects a refold when the paired memory Turn tuple advanced concurrently", () =>
+  Effect.gen(function* () {
+    const target = turn(103)
+    const turns = yield* TurnRepository.makeMemory([target])
+    const repository = yield* TranscriptRepository.makeMemory({ turns })
+    const obsolete = Transcript.project(target.id, target.prompt, [event(0), event(1)])
+    yield* commitAll(repository, target, obsolete, undefined, 2)
+    const before = yield* repository.get(target.id)
+    if (before === undefined) return yield* Effect.die("obsolete projection was not stored")
+    expect(yield* turns.repairCursor(target.id, "completed", undefined, "newer-cursor")).toBe(true)
+    const newer = yield* turns.get(target.id)
+    const preserved = yield* repository.get(target.id)
+    const replacement = Transcript.project(target.id, target.prompt, [
+      { cursor: "refold-failed", sequence: 0, type: "execution.failed", createdAt: 10, text: "failed" },
+    ])
+
+    expect(
+      yield* repository.replaceForRefold(target, replacement, {
+        executionCheckpoints: [executionCheckpoint(target, replacement, "failed")],
+        projectionVersion,
+        expectedProjectionVersion: 2,
+        expectedGeneration: before.checkpointGeneration,
+      }),
+    ).toEqual({ _tag: "Stale" })
+    expect(yield* turns.get(target.id)).toEqual(newer)
+    expect(yield* repository.get(target.id)).toEqual(preserved)
+  }),
+)
+
+it.effect("rejects contradictory checkpoint and projected terminal outcomes in paired memory repositories", () =>
+  Effect.gen(function* () {
+    const target = turn(102)
+    const turns = yield* TurnRepository.makeMemory([target])
+    const repository = yield* TranscriptRepository.makeMemory({ turns })
+    const obsolete = Transcript.project(target.id, target.prompt, [event(0), event(1)])
+    yield* commitAll(repository, target, obsolete, undefined, 2)
+    const before = yield* repository.get(target.id)
+    if (before === undefined) return yield* Effect.die("obsolete projection was not stored")
+    const replacement = Transcript.project(target.id, target.prompt, [
+      { cursor: "cancelled", sequence: 0, type: "execution.cancelled", createdAt: 10 },
+    ])
+    const rejected = yield* Effect.result(
+      repository.replaceForRefold(target, replacement, {
+        executionCheckpoints: [executionCheckpoint(target, replacement, "failed")],
+        projectionVersion,
+        expectedProjectionVersion: 2,
+        expectedGeneration: before.checkpointGeneration,
+      }),
+    )
+    expect(rejected._tag).toBe("Failure")
+    if (rejected._tag === "Failure") expect(rejected.failure.message).toContain("contradictory terminal root outcomes")
+    expect(yield* turns.get(target.id)).toEqual(target)
+    expect(yield* repository.get(target.id)).toEqual(before)
+  }),
+)
+
+it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract", (test) => {
+  test.effect("restricts durable tuple identifiers to SQLite-stable ASCII text", () =>
+    Effect.sync(() => {
+      expect(() => Thread.ThreadId.make("thread-\ue000")).toThrow()
+      expect(() => Thread.ThreadId.make("thread with space")).toThrow()
+      expect(() => Turn.TurnId.make("turn-\u{10000}")).toThrow()
+      expect(() => Turn.TurnId.make("turn\nline")).toThrow()
     }),
   )
 
-  test.effect("pages semantic units across and within turns in chronological order", () =>
+  test.effect("rejects projection scalars outside the shared durable domain", () =>
     Effect.gen(function* () {
       const repository = yield* TranscriptRepository.Service
-      for (let index = 0; index < 3; index += 1)
-        yield* repository.replace(turn(index), Transcript.project(turn(index).id, turn(index).prompt, [event(index)]))
-      const newest = yield* repository.page(Thread.ThreadId.make("thread-a"), { limit: 3 })
-      const older = yield* repository.page(Thread.ThreadId.make("thread-a"), {
-        before: newest.oldestCursor,
-        limit: 3,
-      })
-      expect(newest.entries.map((entry) => [entry.turn.id, entry.unit.content._tag])).toEqual([
-        [Turn.TurnId.make("turn-1"), "Entry"],
-        [Turn.TurnId.make("turn-1"), "Entry"],
-        [Turn.TurnId.make("turn-2"), "Entry"],
-      ])
-      expect(newest.hasOlder).toBe(true)
-      expect(older.entries.map((entry) => entry.turn.id)).toEqual([
-        Turn.TurnId.make("turn-0"),
-        Turn.TurnId.make("turn-0"),
-      ])
-    }),
-  )
+      const cases: ReadonlyArray<{
+        readonly name: string
+        readonly version?: number
+        readonly update: (state: Transcript.ProjectionState) => Transcript.ProjectionState
+      }> = [
+        { name: "projection-version", version: 0, update: (state) => state },
+        { name: "revision", update: (state) => ({ ...state, revision: -2 }) },
+        { name: "model-phase", update: (state) => ({ ...state, modelPhase: -2 }) },
+        {
+          name: "completion-sequence",
+          update: (state) => ({ ...state, usableCompletionSequence: -1 }),
+        },
+        { name: "cost", update: (state) => ({ ...state, costUsd: -0.01 }) },
+        {
+          name: "unsafe-revision",
+          update: (state) => ({ ...state, revision: Number.MAX_SAFE_INTEGER + 1 }),
+        },
+      ]
 
-  test.effect("navigates older, newer, then older again without gaps", () =>
-    Effect.gen(function* () {
-      const repository = yield* TranscriptRepository.Service
-      const threadId = Thread.ThreadId.make("thread-bidirectional")
-      for (let index = 0; index < 5; index += 1) {
-        const target = { ...turn(index), threadId }
-        yield* repository.replace(target, Transcript.project(target.id, target.prompt, [event(index)]))
+      for (const [index, candidate] of cases.entries()) {
+        const target = turn(600 + index)
+        const projection = Transcript.empty(target.id, target.prompt)
+        const state = candidate.update(Transcript.projectionState(projection))
+        const result = yield* Effect.result(
+          repository.commitDelta(
+            target,
+            state,
+            { upsert: projection.units, remove: [] },
+            {
+              executionCheckpoints: [executionCheckpoint(target, state)],
+              projectionVersion: candidate.version ?? projectionVersion,
+              expectedGeneration: undefined,
+            },
+          ),
+        )
+        expect(result._tag, candidate.name).toBe("Failure")
+        expect(yield* repository.get(target.id)).toBeUndefined()
       }
-      const newest = yield* repository.page(threadId, { limit: 4 })
-      const older = yield* repository.page(threadId, { before: newest.oldestCursor, limit: 4 })
-      if (older.newestCursor === undefined) return yield* Effect.die("missing older page cursor")
-      const newer = yield* repository.page(threadId, { after: older.newestCursor, limit: 4 })
-      if (newer.oldestCursor === undefined) return yield* Effect.die("missing newer page cursor")
-      const olderAgain = yield* repository.page(threadId, { before: newer.oldestCursor, limit: 4 })
+    }),
+  )
 
-      expect(olderAgain.entries.map((entry) => entry.unit.key)).toEqual(older.entries.map((entry) => entry.unit.key))
-      expect(new Set([...older.entries, ...newer.entries].map((entry) => entry.unit.key)).size).toBe(
-        older.entries.length + newer.entries.length,
+  test.effect("upserts and removes only named units while preserving every omitted unit", () =>
+    Effect.gen(function* () {
+      const repository = yield* TranscriptRepository.Service
+      const target = turn(1)
+      const initial = Transcript.project(target.id, target.prompt, [event(0), event(1)])
+      expect(yield* commitAll(repository, target, initial, undefined)).toBe("committed")
+      const stored = yield* repository.get(target.id)
+      if (stored === undefined) return yield* Effect.die("initial projection was not stored")
+      const assistant = stored.units.find(
+        (candidate) => candidate.content._tag === "Entry" && candidate.content.role === "assistant",
+      )
+      if (assistant === undefined || assistant.content._tag !== "Entry")
+        return yield* Effect.die("assistant unit was not stored")
+      const updated = {
+        ...assistant,
+        revision: 2,
+        content: { ...assistant.content, text: "updated once" },
+      }
+      expect(
+        yield* repository.commitDelta(
+          target,
+          Transcript.projectionState({ ...initial, revision: 2 }),
+          { upsert: [updated], remove: [] },
+          {
+            executionCheckpoints: [executionCheckpoint(target, { ...initial, revision: 2 })],
+            projectionVersion,
+            expectedGeneration: stored.checkpointGeneration,
+          },
+        ),
+      ).toBe("committed")
+      const afterUpdate = yield* repository.get(target.id)
+      expect(afterUpdate?.units).toHaveLength(stored.units.length)
+      expect(afterUpdate?.units.find((candidate) => candidate.key === updated.key)).toEqual(updated)
+      expect(afterUpdate?.units.find((candidate) => candidate.key !== updated.key)).toEqual(
+        stored.units.find((candidate) => candidate.key !== updated.key),
+      )
+      const moved = { ...updated, order: Transcript.unitOrder(updated.key, 50) }
+      const movedResult = yield* Effect.result(
+        repository.commitDelta(
+          target,
+          Transcript.projectionState({ ...initial, revision: 3 }),
+          { upsert: [moved], remove: [] },
+          {
+            executionCheckpoints: [executionCheckpoint(target, { ...initial, revision: 3 })],
+            projectionVersion,
+            expectedGeneration: afterUpdate?.checkpointGeneration,
+          },
+        ),
+      )
+      expect(movedResult._tag).toBe("Failure")
+      expect(yield* repository.get(target.id)).toEqual(afterUpdate)
+      expect(
+        yield* repository.commitDelta(
+          target,
+          Transcript.projectionState({ ...initial, revision: 3 }),
+          { upsert: [], remove: [updated.key] },
+          {
+            executionCheckpoints: [executionCheckpoint(target, { ...initial, revision: 3 })],
+            projectionVersion,
+            expectedGeneration: afterUpdate?.checkpointGeneration,
+          },
+        ),
+      ).toBe("committed")
+      expect((yield* repository.get(target.id))?.units.map((candidate) => candidate.key)).not.toContain(updated.key)
+    }),
+  )
+
+  test.effect("uses an exact checkpoint compare-and-swap and changes nothing on conflict", () =>
+    Effect.gen(function* () {
+      const repository = yield* TranscriptRepository.Service
+      const target = turn(2)
+      const initial = { ...Transcript.project(target.id, target.prompt, [event(0)]), revision: 4 }
+      yield* commitAll(repository, target, initial, undefined)
+      const before = yield* repository.get(target.id)
+      const replacement = Transcript.project(target.id, target.prompt, [event(0), event(1)])
+      const result = yield* repository.commitDelta(
+        target,
+        Transcript.projectionState({ ...replacement, revision: 6 }),
+        { upsert: replacement.units, remove: [] },
+        {
+          executionCheckpoints: [executionCheckpoint(target, { ...replacement, revision: 6 })],
+          projectionVersion,
+          expectedGeneration: 3,
+        },
+      )
+      expect(result).toBe("stale")
+      expect(yield* repository.get(target.id)).toEqual(before)
+      expect(
+        yield* repository.commitDelta(
+          target,
+          Transcript.projectionState({ ...replacement, revision: 3 }),
+          { upsert: replacement.units, remove: [] },
+          {
+            executionCheckpoints: [executionCheckpoint(target, { ...replacement, revision: 3 })],
+            projectionVersion,
+            expectedGeneration: 0,
+          },
+        ),
+      ).toBe("stale")
+      expect(yield* repository.get(target.id)).toEqual(before)
+    }),
+  )
+
+  test.effect("atomically couples an attached child to its parent unit", () =>
+    Effect.gen(function* () {
+      const repository = yield* TranscriptRepository.Service
+      const target = turn(150)
+      const nested = nestedProjection(target, "child:turn-150:parent")
+
+      expect(
+        yield* commitAll(repository, target, nested.projection, undefined, projectionVersion, nested.checkpoints),
+      ).toBe("committed")
+      const before = yield* repository.get(target.id)
+      expect(before?.executionCheckpoints).toHaveLength(2)
+
+      const removal = yield* Effect.result(
+        repository.commitDelta(
+          target,
+          Transcript.projectionState(nested.projection),
+          { upsert: [], remove: [nested.parent.key] },
+          {
+            executionCheckpoints: nested.checkpoints,
+            projectionVersion,
+            expectedGeneration: before?.checkpointGeneration,
+          },
+        ),
+      )
+
+      expect(removal._tag).toBe("Failure")
+      expect(yield* repository.get(target.id)).toEqual(before)
+    }),
+  )
+
+  test.effect("requires a complete root-connected checkpoint graph for refold", () =>
+    Effect.gen(function* () {
+      const repository = yield* TranscriptRepository.Service
+      const target = turn(151)
+      const obsolete = Transcript.empty(target.id, target.prompt)
+      expect(yield* commitAll(repository, target, obsolete, undefined, 2)).toBe("committed")
+      const before = yield* repository.get(target.id)
+      if (before === undefined) return yield* Effect.die("obsolete projection was not stored")
+      const nested = nestedProjection(target, "child:turn-151:parent")
+
+      for (const candidate of invalidCheckpointGraphs(target, nested, "child:turn-151:peer")) {
+        const result = yield* Effect.result(
+          repository.replaceForRefold(target, nested.projection, {
+            executionCheckpoints: candidate.checkpoints,
+            projectionVersion,
+            expectedProjectionVersion: 2,
+            expectedGeneration: before.checkpointGeneration,
+          }),
+        )
+        expect(result._tag, candidate.name).toBe("Failure")
+        if (result._tag === "Failure")
+          expect(result.failure, candidate.name).toBeInstanceOf(TranscriptRepository.RepositoryError)
+        expect(yield* repository.get(target.id), candidate.name).toEqual(before)
+      }
+
+      expect(
+        yield* repository.replaceForRefold(target, nested.projection, {
+          executionCheckpoints: nested.checkpoints,
+          projectionVersion,
+          expectedProjectionVersion: 2,
+          expectedGeneration: before.checkpointGeneration,
+        }),
+      ).toMatchObject({ _tag: "Committed" })
+      const stored = yield* repository.get(target.id)
+      expect(stored?.units).toEqual(nested.projection.units)
+      expect(stored?.executionCheckpoints).toEqual(nested.checkpoints.toSorted(compareExecutionCheckpoints))
+      expect(stored?.projectionVersion).toBe(projectionVersion)
+    }),
+  )
+
+  test.effect("rejects checkpoint cursors that contradict exact fold state", () =>
+    Effect.gen(function* () {
+      const repository = yield* TranscriptRepository.Service
+      const target = turn(200)
+      const projection = Transcript.project(target.id, target.prompt, [event(0)])
+      yield* commitAll(repository, target, projection, undefined)
+      const before = yield* repository.get(target.id)
+      const key = Transcript.executionKey(String(target.id))
+      const result = yield* Effect.result(
+        repository.commitDelta(
+          target,
+          Transcript.projectionState(projection),
+          { upsert: [], remove: [] },
+          {
+            executionCheckpoints: [
+              { ...executionCheckpoint(target, projection), executionKey: key, cursor: "contradictory" },
+            ],
+            projectionVersion,
+            expectedGeneration: before?.checkpointGeneration,
+          },
+        ),
+      )
+      expect(result._tag).toBe("Failure")
+      expect(yield* repository.get(target.id)).toEqual(before)
+    }),
+  )
+
+  test.effect("advances checkpoint authority without inventing a source-event revision", () =>
+    Effect.gen(function* () {
+      const repository = yield* TranscriptRepository.Service
+      const target = turn(300)
+      const projection = Transcript.project(target.id, target.prompt, [event(0)])
+      yield* commitAll(repository, target, projection, undefined)
+      const initial = yield* repository.get(target.id)
+      if (initial === undefined) return yield* Effect.die("initial projection was not stored")
+      const assistant = initial.units.find(
+        (candidate) => candidate.content._tag === "Entry" && candidate.content.role === "assistant",
+      )
+      if (assistant === undefined || assistant.content._tag !== "Entry")
+        return yield* Effect.die("assistant unit was not stored")
+      const updated = { ...assistant, content: { ...assistant.content, text: "same-event update" } }
+      expect(
+        yield* repository.commitDelta(
+          target,
+          Transcript.projectionState(projection),
+          { upsert: [updated], remove: [] },
+          {
+            executionCheckpoints: [executionCheckpoint(target, projection)],
+            projectionVersion,
+            expectedGeneration: initial.checkpointGeneration,
+          },
+        ),
+      ).toBe("committed")
+      const committed = yield* repository.get(target.id)
+      expect(committed?.revision).toBe(projection.revision)
+      expect(committed?.checkpointGeneration).toBe(initial.checkpointGeneration + 1)
+      expect(
+        yield* repository.commitDelta(
+          target,
+          Transcript.projectionState(projection),
+          { upsert: [], remove: [updated.key] },
+          {
+            executionCheckpoints: [executionCheckpoint(target, projection)],
+            projectionVersion,
+            expectedGeneration: initial.checkpointGeneration,
+          },
+        ),
+      ).toBe("stale")
+      expect(yield* repository.get(target.id)).toEqual(committed)
+    }),
+  )
+
+  test.effect("fails duplicate and non-intrinsic identities without changing the checkpoint", () =>
+    Effect.gen(function* () {
+      const repository = yield* TranscriptRepository.Service
+      const target = turn(3)
+      const initial = { ...Transcript.empty(target.id, target.prompt), revision: 0 }
+      yield* commitAll(repository, target, initial, undefined)
+      const before = yield* repository.get(target.id)
+      const duplicate = unit(target.id, 1, 0, "duplicate")
+      const duplicateFailure = yield* Effect.result(
+        repository.commitDelta(
+          target,
+          Transcript.projectionState({ ...initial, revision: 1 }),
+          { upsert: [duplicate, { ...duplicate, revision: 2 }], remove: [] },
+          {
+            executionCheckpoints: [executionCheckpoint(target, { ...initial, revision: 1 })],
+            projectionVersion,
+            expectedGeneration: 0,
+          },
+        ),
+      )
+      const invalid = { ...unit(target.id, 2, 0, "invalid"), order: Transcript.unitOrder("other", 2) }
+      const intrinsicFailure = yield* Effect.result(
+        repository.commitDelta(
+          target,
+          Transcript.projectionState({ ...initial, revision: 1 }),
+          { upsert: [invalid], remove: [] },
+          {
+            executionCheckpoints: [executionCheckpoint(target, { ...initial, revision: 1 })],
+            projectionVersion,
+            expectedGeneration: 0,
+          },
+        ),
+      )
+      expect(duplicateFailure._tag).toBe("Failure")
+      expect(intrinsicFailure._tag).toBe("Failure")
+      expect(yield* repository.get(target.id)).toEqual(before)
+    }),
+  )
+
+  test.effect("authoritatively refolds an invalidated projection and removes obsolete units", () =>
+    Effect.gen(function* () {
+      const repository = yield* TranscriptRepository.Service
+      const target = turn(4)
+      const obsolete = { ...Transcript.project(target.id, target.prompt, [event(0), event(1)]), revision: 50 }
+      yield* commitAll(repository, target, obsolete, undefined, 2)
+      const replacement = Transcript.project(target.id, target.prompt, [event(2)])
+      expect(
+        yield* repository.replaceForRefold(target, replacement, {
+          executionCheckpoints: [executionCheckpoint(target, replacement, "completed")],
+          projectionVersion,
+          expectedProjectionVersion: 2,
+          expectedGeneration: 0,
+        }),
+      ).toMatchObject({ _tag: "Committed" })
+      const stored = yield* repository.get(target.id)
+      expect(stored?.projectionVersion).toBe(projectionVersion)
+      expect(stored?.revision).toBe(replacement.revision)
+      expect(stored?.units).toEqual(replacement.units)
+      expect(
+        yield* repository.replaceForRefold(target, replacement, {
+          executionCheckpoints: [executionCheckpoint(target, replacement, "completed")],
+          projectionVersion,
+          expectedProjectionVersion: 2,
+          expectedGeneration: 0,
+        }),
+      ).toEqual({ _tag: "Stale" })
+      expect(yield* repository.get(target.id)).toEqual(stored)
+    }),
+  )
+
+  test.effect("filters every keyset page by exact projection version", () =>
+    Effect.gen(function* () {
+      const repository = yield* TranscriptRepository.Service
+      const threadId = Thread.ThreadId.make("thread-version-filter")
+      const stale = { ...turn(40, threadId), id: Turn.TurnId.make("turn-filter-stale") }
+      const currentOlder = { ...turn(41, threadId), id: Turn.TurnId.make("turn-filter-current-a") }
+      const currentNewer = { ...turn(42, threadId), id: Turn.TurnId.make("turn-filter-current-b") }
+      for (const [target, version] of [
+        [stale, 2],
+        [currentOlder, projectionVersion],
+        [currentNewer, projectionVersion],
+      ] as const)
+        yield* commitAll(repository, target, Transcript.empty(target.id, target.prompt), undefined, version)
+
+      const newest = yield* repository.page(threadId, { limit: 1, projectionVersion })
+      expect(newest.entries.map((entry) => entry.turn.id)).toEqual([currentNewer.id])
+      expect(newest.hasOlder).toBe(true)
+      if (newest.oldestCursor === undefined) return yield* Effect.die("filtered page had no oldest cursor")
+
+      const older = yield* repository.page(threadId, {
+        before: newest.oldestCursor,
+        limit: 1,
+        projectionVersion,
+      })
+      expect(older.entries.map((entry) => entry.turn.id)).toEqual([currentOlder.id])
+      expect(older.hasOlder).toBe(false)
+      if (older.newestCursor === undefined) return yield* Effect.die("filtered page had no newest cursor")
+
+      const newer = yield* repository.page(threadId, {
+        after: older.newestCursor,
+        limit: 1,
+        projectionVersion,
+      })
+      expect(newer.entries.map((entry) => entry.turn.id)).toEqual([currentNewer.id])
+      expect(newer.hasNewer).toBe(false)
+      expect(
+        (yield* repository.page(threadId, { limit: 10, projectionVersion: 2 })).entries.map((entry) => entry.turn.id),
+      ).toEqual([stale.id])
+      expect((yield* repository.page(threadId, { limit: 10, projectionVersion: 4 })).entries).toEqual([])
+      expect(new Set((yield* repository.page(threadId, { limit: 10 })).entries.map((entry) => entry.turn.id))).toEqual(
+        new Set([stale.id, currentOlder.id, currentNewer.id]),
       )
     }),
   )
 
-  test.effect("uses every keyset field without duplicates or gaps across tied pages", () =>
+  test.effect("keyset-paginates tied turns and nested paths without duplicates or gaps", () =>
     Effect.gen(function* () {
       const repository = yield* TranscriptRepository.Service
       const threadId = Thread.ThreadId.make("thread-keyset")
-      const tiedTurns = [
-        Object.assign(turn(40), { id: Turn.TurnId.make("turn-a"), threadId, createdAt: 100, updatedAt: 100 }),
-        Object.assign(turn(40), { id: Turn.TurnId.make("turn-b"), threadId, createdAt: 100, updatedAt: 100 }),
+      const targets = [
+        { ...turn(10, threadId), id: Turn.TurnId.make("turn-a"), createdAt: 100, updatedAt: 100 },
+        { ...turn(11, threadId), id: Turn.TurnId.make("turn-b"), createdAt: 100, updatedAt: 100 },
       ]
-      for (const target of tiedTurns) {
+      for (const target of targets) {
         const units = [
-          semanticUnit(target.id, 1, 0, `${target.id}:sequence`),
-          semanticUnit(target.id, 1, 1, `${target.id}:part-a`),
-          semanticUnit(target.id, 1, 1, `${target.id}:part-b`),
-          semanticUnit(target.id, 2, 0, `${target.id}:latest`),
+          unit(target.id, 1, 0, `${target.id}:sequence`),
+          unit(target.id, 1, 1, `${target.id}:part-a`),
+          unit(target.id, 1, 1, `${target.id}:part-b`),
+          unit(target.id, 2, 0, `${target.id}:latest`),
         ]
-        yield* repository.replace(target, { ...Transcript.empty(target.id, target.prompt), units })
+        yield* commitAll(
+          repository,
+          target,
+          { ...Transcript.empty(target.id, target.prompt), units, revision: 2 },
+          undefined,
+        )
       }
-
       const collected: Array<TranscriptRepository.Entry> = []
       let cursor: TranscriptRepository.PageCursor | undefined
-      do {
-        const page = yield* repository.page(threadId, { before: cursor, limit: 2 })
+      while (true) {
+        const page = yield* repository.page(threadId, { ...(cursor === undefined ? {} : { before: cursor }), limit: 2 })
         collected.unshift(...page.entries)
-        cursor = page.hasOlder ? page.oldestCursor : undefined
-        if (!page.hasOlder) break
-      } while (cursor !== undefined)
-
+        if (!page.hasOlder || page.oldestCursor === undefined) break
+        cursor = page.oldestCursor
+      }
       expect(collected.map((entry) => entry.unit.key)).toEqual([
         "turn-a:sequence",
         "turn-a:part-a",
@@ -347,761 +664,91 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository", (test) => {
         "turn-b:latest",
       ])
       expect(new Set(collected.map((entry) => entry.unit.key)).size).toBe(collected.length)
+      const newest = yield* repository.page(threadId, { limit: 3 })
+      if (newest.oldestCursor === undefined) return yield* Effect.die("newest page had no cursor")
+      const older = yield* repository.page(threadId, { before: newest.oldestCursor, limit: 3 })
+      if (older.newestCursor === undefined) return yield* Effect.die("older page had no cursor")
+      const newer = yield* repository.page(threadId, { after: older.newestCursor, limit: 3 })
+      expect(new Set([...older.entries, ...newer.entries].map((entry) => entry.unit.key)).size).toBe(
+        older.entries.length + newer.entries.length,
+      )
+      const olderAgain = yield* repository.page(threadId, { before: newest.oldestCursor, limit: 3 })
+      expect(olderAgain.entries.map((entry) => entry.unit.key)).toEqual(older.entries.map((entry) => entry.unit.key))
+      expect(
+        (yield* Effect.result(
+          repository.page(threadId, { before: newest.oldestCursor, after: older.newestCursor, limit: 3 }),
+        ))._tag,
+      ).toBe("Failure")
+    }),
+  )
+
+  test.effect("round-trips intrinsic nested order and keeps totals independent of page size", () =>
+    Effect.gen(function* () {
+      const repository = yield* TranscriptRepository.Service
+      const threadId = Thread.ThreadId.make("thread-nested")
+      const target = turn(20, threadId)
+      const childId = "turn-20:child"
+      const parent = Transcript.project(target.id, target.prompt, [
+        {
+          cursor: "tool",
+          sequence: 0,
+          type: "tool.call.requested",
+          createdAt: 0,
+          data: { tool_call_id: "agent", tool_name: "task", input: {} },
+        },
+      ])
+      const child = Transcript.project(childId, "", [event(0), event(1)])
+      const nested = {
+        ...Transcript.withNestedProjections(parent, [{ parentId: `${target.id}:agent`, projection: child }]),
+        revision: 4,
+        costUsd: 1.25,
+        pricingVersion: Transcript.pricingVersion,
+        usableCompletionSequence: 3,
+      }
+      const parentTool = parent.units.find(
+        (candidate) => candidate.content._tag === "Block" && candidate.content.block._tag === "ToolCall",
+      )
+      if (parentTool === undefined) return yield* Effect.die("nested transcript had no parent tool")
+      yield* commitAll(repository, target, nested, undefined, projectionVersion, [
+        executionCheckpoint(target, nested),
+        attachedExecutionCheckpoint(childId, child, Transcript.executionKey(String(target.id)), parentTool),
+      ])
+      const other = turn(21, threadId)
+      yield* commitAll(
+        repository,
+        other,
+        { ...Transcript.empty(other.id, other.prompt), revision: 0, costUsd: 2.5 },
+        undefined,
+      )
+      const stored = yield* repository.get(target.id)
+      const page = yield* repository.page(threadId, { limit: 1 })
+      expect(stored?.units).toEqual(nested.units)
+      expect(stored?.pricingVersion).toBe(Transcript.pricingVersion)
+      expect(stored?.usableCompletionSequence).toBe(3)
+      expect(page.threadCostUsd).toBe(3.75)
+      expect(yield* repository.globalCostUsd).toBe(3.75)
     }),
   )
 
   test.effect("clamps page limits to one and two hundred", () =>
     Effect.gen(function* () {
       const repository = yield* TranscriptRepository.Service
-      const target = { ...turn(41), threadId: Thread.ThreadId.make("thread-limits") }
-      const units: Array<Transcript.Unit> = Array.from({ length: 201 }, (_, index) => ({
-        key: `${target.id}:unit-${String(index).padStart(3, "0")}`,
-        turnId: target.id,
-        order: { sequence: index, part: 0 },
-        revision: 0,
-        content: { _tag: "Entry", role: "assistant", text: String(index) },
-      }))
-      yield* repository.replace(target, { ...Transcript.empty(target.id, target.prompt), units })
-
+      const target = turn(30, Thread.ThreadId.make("thread-limits"))
+      const units = Array.from({ length: 201 }, (_, index) =>
+        unit(target.id, index, 0, `${target.id}:unit-${String(index).padStart(3, "0")}`),
+      )
+      yield* commitAll(
+        repository,
+        target,
+        { ...Transcript.empty(target.id, target.prompt), units, revision: 200 },
+        undefined,
+      )
       const minimum = yield* repository.page(target.threadId, { limit: 0 })
       const maximum = yield* repository.page(target.threadId, { limit: 999 })
       expect(minimum.entries).toHaveLength(1)
       expect(minimum.hasOlder).toBe(true)
       expect(maximum.entries).toHaveLength(200)
       expect(maximum.hasOlder).toBe(true)
-      expect(maximum.entries.map((entry) => entry.unit.order.sequence)).toEqual(
-        Array.from({ length: 200 }, (_, index) => index + 1),
-      )
-    }),
-  )
-
-  test.effect("reloads interleaved units in the same order the projection built them", () =>
-    Effect.gen(function* () {
-      const repository = yield* TranscriptRepository.Service
-      const target = { ...turn(31), threadId: Thread.ThreadId.make("thread-order") }
-      const projection = Transcript.project(target.id, target.prompt, [
-        { cursor: "prepared", sequence: 0, type: "model.input.prepared", createdAt: 0 },
-        { cursor: "reason", sequence: 1, type: "model.reasoning.delta", createdAt: 1, text: "thinking" },
-        { cursor: "answer", sequence: 2, type: "model.output.completed", createdAt: 2, text: "answer" },
-        {
-          cursor: "call",
-          sequence: 3,
-          type: "tool.call.requested",
-          createdAt: 3,
-          data: { call_id: "call-a", name: "read", input: { path: "x.ts" } },
-        },
-        {
-          cursor: "result",
-          sequence: 4,
-          type: "tool.result.received",
-          createdAt: 4,
-          data: { tool_call_id: "call-a", output: "contents" },
-        },
-      ])
-      yield* repository.replace(target, projection)
-      const page = yield* repository.page(Thread.ThreadId.make("thread-order"), { limit: 200 })
-      expect(page.entries.map((entry) => entry.unit.key)).toEqual(projection.units.map((unit) => unit.key))
-      expect(page.entries.map((entry) => entry.unit.content._tag)).toEqual(["Entry", "Block", "Entry", "Block"])
-    }),
-  )
-
-  test.effect("round-trips a completed subagent tree through the durable page shape", () =>
-    Effect.gen(function* () {
-      const repository = yield* TranscriptRepository.Service
-      const target = { ...turn(32), threadId: Thread.ThreadId.make("thread-subagent") }
-      const childId = "turn-32:child:agent"
-      const parent = Transcript.project(target.id, target.prompt, [
-        {
-          cursor: "agent",
-          sequence: 0,
-          type: "tool.call.requested",
-          createdAt: 0,
-          data: {
-            tool_call_id: "agent",
-            tool_name: "transfer_to_oracle",
-            input: { input: [{ type: "text", text: "Review the projection" }] },
-          },
-        },
-        {
-          cursor: "spawned",
-          sequence: 1,
-          type: "child_run.spawned",
-          createdAt: 1,
-          data: { tool_call_id: "agent", child_execution_id: `execution:${childId}` },
-        },
-        {
-          cursor: "result",
-          sequence: 2,
-          type: "tool.result.received",
-          createdAt: 2,
-          data: {
-            tool_call_id: "agent",
-            output:
-              '{"status":"completed","output":[{"type":"text","text":"## Review complete\\n\\n**No defects found.**"}]}',
-          },
-        },
-        { cursor: "done", sequence: 3, type: "execution.completed", createdAt: 3 },
-      ])
-      const child = Transcript.project(childId, "", [
-        {
-          cursor: "read",
-          sequence: 0,
-          type: "tool.call.requested",
-          createdAt: 0,
-          data: { tool_call_id: "read", tool_name: "read", input: { path: "src/projection.ts" } },
-        },
-        {
-          cursor: "answer",
-          sequence: 1,
-          type: "model.output.completed",
-          createdAt: 1,
-          text: "## Review complete\n\n**No defects found.**",
-        },
-        { cursor: "child-done", sequence: 2, type: "execution.completed", createdAt: 2 },
-      ])
-      const live = Transcript.withNestedProjections(parent, [{ parentId: `${target.id}:agent`, projection: child }])
-
-      yield* repository.replace(target, live)
-      const page = yield* repository.page(target.threadId, { limit: 200 })
-
-      expect(page.entries.map((entry) => entry.unit)).toEqual(live.units)
-      expect(page.entries.filter((entry) => entry.unit.parentId === `${target.id}:agent`)).toHaveLength(
-        child.units.length,
-      )
-      expect(
-        page.entries.some(
-          (entry) =>
-            entry.unit.parentId === `${target.id}:agent` &&
-            entry.unit.content._tag === "Entry" &&
-            entry.unit.content.role === "assistant" &&
-            entry.unit.content.text === "## Review complete\n\n**No defects found.**",
-        ),
-      ).toBe(true)
-    }),
-  )
-
-  test.effect("returns one page-independent thread cost and restores projection fold state", () =>
-    Effect.gen(function* () {
-      const repository = yield* TranscriptRepository.Service
-      const firstTurn = turn(21)
-      const secondTurn = turn(22)
-      const first = {
-        ...Transcript.project(firstTurn.id, firstTurn.prompt, [
-          { cursor: "phase", sequence: 0, type: "model.input.prepared", createdAt: 0 },
-        ]),
-        costUsd: 1.25,
-      }
-      const second = { ...Transcript.empty(secondTurn.id, secondTurn.prompt), costUsd: 2.5 }
-      yield* repository.replace(firstTurn, first)
-      yield* repository.replace(secondTurn, second)
-      const stored = yield* repository.get(firstTurn.id)
-      const page = yield* repository.page(Thread.ThreadId.make("thread-a"), { limit: 1 })
-      expect(stored).toMatchObject({ modelPhase: 0 })
-      expect(page.threadCostUsd).toBe(3.75)
-    }),
-  )
-
-  test.effect("stores the pricing version and accepts a lower current-version rebuild", () =>
-    Effect.gen(function* () {
-      const repository = yield* TranscriptRepository.Service
-      const target = turn(23)
-      const stale = { ...Transcript.empty(target.id, target.prompt), costUsd: 15 }
-      yield* repository.replace(target, stale)
-      expect(yield* repository.get(target.id)).toMatchObject({ costUsd: 15, pricingVersion: undefined })
-
-      const rebuilt = {
-        ...Transcript.empty(target.id, target.prompt),
-        costUsd: 5,
-        pricingVersion: Transcript.pricingVersion,
-      }
-      expect(yield* repository.replace(target, rebuilt)).toMatchObject({
-        costUsd: 5,
-        pricingVersion: Transcript.pricingVersion,
-      })
-    }),
-  )
-
-  test.effect("counts redelivered usage once across batches and sums global cost", () =>
-    Effect.gen(function* () {
-      const repository = yield* TranscriptRepository.Service
-      const target = { ...turn(51), threadId: Thread.ThreadId.make("thread-usage") }
-      const other = { ...turn(52), id: Turn.TurnId.make("turn-52"), threadId: Thread.ThreadId.make("thread-usage-b") }
-      const usage: Transcript.SourceEvent = {
-        cursor: "usage-1",
-        sequence: 5,
-        type: "model.usage.reported",
-        createdAt: 5,
-        data: usageData(250_000),
-      }
-      const before = yield* repository.globalCostUsd
-      yield* repository.appendAll(target, [usage])
-      const redelivered = yield* repository.appendAll(target, [
-        usage,
-        {
-          cursor: "late-usage",
-          sequence: 2,
-          type: "model.usage.reported",
-          createdAt: 6,
-          data: usageData(150_000),
-        },
-        { cursor: "completed", sequence: 6, type: "execution.completed", createdAt: 7 },
-      ])
-      yield* repository.replace(other, { ...Transcript.empty(other.id, other.prompt), costUsd: 0.5 })
-      const after = yield* repository.globalCostUsd
-      expect(redelivered.costUsd).toBeCloseTo(2, 10)
-      expect(redelivered.usageCursors).toEqual(["usage-1", "late-usage"])
-      expect(after - before).toBeCloseTo(2.5, 10)
-    }),
-  )
-
-  test.effect("carries per-execution consumption state and projection version across checkpoint writes", () =>
-    Effect.gen(function* () {
-      const repository = yield* TranscriptRepository.Service
-      const target = { ...turn(61), threadId: Thread.ThreadId.make("thread-consumed") }
-      const timeline = yield* consumedScript(repository, target)
-      const reread = yield* repository.get(target.id)
-
-      expect(timeline).toEqual(consumedTimeline(target))
-      expect(reread?.consumed).toEqual(consumedTimeline(target).at(-1)?.consumed)
-      expect(reread?.projectionVersion).toBe(2)
-    }),
-  )
-
-  test.effect("keeps consumption state out of the source projection it folds", () =>
-    Effect.gen(function* () {
-      const repository = yield* TranscriptRepository.Service
-      const target = { ...turn(62), threadId: Thread.ThreadId.make("thread-consumed-source") }
-      const usage: Transcript.SourceEvent = {
-        cursor: "usage-consumed",
-        sequence: 3,
-        type: "model.usage.reported",
-        createdAt: 3,
-        data: usageData(250_000),
-      }
-      yield* repository.replace(target, Transcript.project(target.id, target.prompt, [event(0)]), {
-        consumed: { [target.id]: { cursor: "cursor-0", sequence: 0 } },
-        projectionVersion: 2,
-      })
-      const appended = yield* repository.appendAll(target, [usage])
-
-      expect(appended.costUsd).toBeCloseTo(1.25, 10)
-      expect(appended.consumed).toEqual({ [target.id]: { cursor: "cursor-0", sequence: 0 } })
-      expect(appended.projectionVersion).toBe(2)
     }),
   )
 })
-
-it.effect("persists an execution outcome appended after the initial projection", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem
-      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-transcript-outcome-" })
-      const filename = `${directory}/rika.db`
-      const threadId = Thread.ThreadId.make("thread-durable-outcome")
-      const targetId = Turn.TurnId.make("turn-durable-outcome")
-      const database = Database.layer(filename)
-      const layer = Layer.mergeAll(
-        database,
-        ThreadRepository.layer.pipe(Layer.provide(database)),
-        TurnRepository.layer.pipe(Layer.provide(database)),
-        TranscriptRepository.layer.pipe(Layer.provide(database)),
-      )
-
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const threads = yield* ThreadRepository.Service
-          const turns = yield* TurnRepository.Service
-          const transcripts = yield* TranscriptRepository.Service
-          yield* threads.create({ id: threadId, workspace: "/work/outcome", title: "Outcome", now: 1 })
-          yield* turns.createForSubmission({
-            id: targetId,
-            threadId,
-            prompt: "persist completion",
-            executionRoute: Turn.testExecutionRoute(),
-            queueCapacity: 128,
-            now: 2,
-          })
-          yield* turns.setStatus(targetId, "completed", undefined, 3)
-          const target = yield* turns.get(targetId)
-          if (target === undefined) return yield* Effect.die("turn was not stored")
-          const projection = Transcript.project(target.id, target.prompt, [event(0)])
-          const snapshot = yield* transcripts.replace(target, projection)
-          const replacement = {
-            ...projection,
-            units: projection.units.map((unit, index) =>
-              index === 0 && unit.content._tag === "Entry"
-                ? { ...unit, content: { ...unit.content, text: "durable equal revision replacement" } }
-                : unit,
-            ),
-          }
-          const replaced = yield* transcripts.replace(target, replacement)
-          const staleAfterReplacement = yield* transcripts.replace(target, projection, {
-            childTreeReconciled: true,
-            ifGeneration: snapshot.projectionGeneration,
-          })
-          const certified = yield* transcripts.replace(target, replacement, { childTreeReconciled: true })
-          const cleared = yield* transcripts.replace(target, replacement, { childTreeReconciled: false })
-          const staleAfterClear = yield* transcripts.replace(target, replacement, {
-            childTreeReconciled: true,
-            ifGeneration: certified.projectionGeneration,
-          })
-          expect(staleAfterReplacement.units).toEqual(replaced.units)
-          expect(staleAfterReplacement.childTreeReconciled).toBe(false)
-          expect(staleAfterClear.childTreeReconciled).toBe(false)
-          expect(staleAfterClear.projectionGeneration).toBe(cleared.projectionGeneration)
-          yield* transcripts.append(target, {
-            cursor: "completed",
-            sequence: 7,
-            type: "execution.completed",
-            createdAt: 4,
-          })
-        }).pipe(provideLayer(layer)),
-      )
-
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const transcripts = yield* TranscriptRepository.Service
-          const reloaded = yield* transcripts.get(targetId)
-          expect(reloaded?.units.find((unit) => unit.key === `turn:${targetId}:user`)).toMatchObject({
-            revision: 7,
-            executionOutcome: { status: "complete" },
-          })
-        }).pipe(provideLayer(layer)),
-      )
-    }),
-  ).pipe(provideLayer(BunServices.layer)),
-)
-
-it.effect("pages a reopened SQLite transcript without duplicate units", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem
-      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-transcript-sqlite-page-" })
-      const filename = `${directory}/rika.db`
-      const threadId = Thread.ThreadId.make("thread-sqlite-page")
-      const targetId = Turn.TurnId.make("turn-sqlite-page")
-      const makeLayer = () => {
-        const database = Database.layer(filename)
-        return Layer.mergeAll(
-          database,
-          ThreadRepository.layer.pipe(Layer.provide(database)),
-          TurnRepository.layer.pipe(Layer.provide(database)),
-          TranscriptRepository.layer.pipe(Layer.provide(database)),
-        )
-      }
-
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const threads = yield* ThreadRepository.Service
-          const turns = yield* TurnRepository.Service
-          const transcripts = yield* TranscriptRepository.Service
-          yield* threads.create({ id: threadId, workspace: "/work/page", title: "Page", now: 1 })
-          yield* turns.createForSubmission({
-            id: targetId,
-            threadId,
-            prompt: "persist me",
-            executionRoute: Turn.testExecutionRoute(),
-            queueCapacity: 128,
-            now: 2,
-          })
-          const target = yield* turns.setStatus(targetId, "completed", "cursor-124", 3)
-          const units = Array.from({ length: 125 }, (_, index) =>
-            semanticUnit(targetId, index, 0, `sqlite-page-unit-${index.toString().padStart(3, "0")}`),
-          )
-          yield* transcripts.replace(
-            target,
-            {
-              ...Transcript.empty(target.id, target.prompt),
-              units,
-              revision: 124,
-              checkpointCursor: "cursor-124",
-            },
-            { childTreeReconciled: true },
-          )
-        }).pipe(provideLayer(makeLayer())),
-      )
-
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const transcripts = yield* TranscriptRepository.Service
-          const turns = yield* TurnRepository.Service
-          const target = yield* turns.get(targetId)
-          const stored = yield* transcripts.get(targetId)
-          if (target === undefined || stored === undefined) return yield* Effect.die("transcript was not stored")
-          const projection: Transcript.Projection = {
-            units: stored.units,
-            revision: stored.revision,
-            modelPhase: stored.modelPhase,
-            ...(stored.oldestCursor === undefined ? {} : { oldestCursor: stored.oldestCursor }),
-            ...(stored.checkpointCursor === undefined ? {} : { checkpointCursor: stored.checkpointCursor }),
-            ...(stored.costUsd === undefined ? {} : { costUsd: stored.costUsd }),
-            ...(stored.usageCursors === undefined ? {} : { usageCursors: stored.usageCursors }),
-            ...(stored.pricingVersion === undefined ? {} : { pricingVersion: stored.pricingVersion }),
-          }
-          expect(stored.childTreeReconciled).toBe(true)
-          expect((yield* transcripts.replace(target, projection)).childTreeReconciled).toBe(true)
-          expect(
-            (yield* transcripts.replace(target, projection, { childTreeReconciled: false })).childTreeReconciled,
-          ).toBe(false)
-          const keys: Array<string> = []
-          let before: TranscriptRepository.PageCursor | undefined
-          let hasOlder = true
-          while (hasOlder) {
-            const page = yield* transcripts.page(threadId, { ...(before === undefined ? {} : { before }), limit: 17 })
-            keys.push(...page.entries.map((entry) => entry.unit.key))
-            hasOlder = page.hasOlder
-            before = page.oldestCursor
-          }
-          expect(keys).toHaveLength(125)
-          expect(new Set(keys).size).toBe(125)
-        }).pipe(provideLayer(makeLayer())),
-      )
-    }),
-  ).pipe(provideLayer(BunServices.layer)),
-)
-
-it.effect("returns a typed repository error for a malformed durable unit after reopen", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem
-      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-transcript-page-" })
-      const filename = `${directory}/rika.db`
-      const threadId = Thread.ThreadId.make("thread-durable-page")
-      const targetId = Turn.TurnId.make("turn-durable-page")
-      const makeLayer = () => {
-        const database = Database.layer(filename)
-        return Layer.mergeAll(
-          database,
-          ThreadRepository.layer.pipe(Layer.provide(database)),
-          TurnRepository.layer.pipe(Layer.provide(database)),
-          TranscriptRepository.layer.pipe(Layer.provide(database)),
-        )
-      }
-
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const threads = yield* ThreadRepository.Service
-          const turns = yield* TurnRepository.Service
-          const transcripts = yield* TranscriptRepository.Service
-          const sql = yield* SqlClient
-          yield* threads.create({ id: threadId, workspace: "/work/page", title: "Page", now: 1 })
-          const created = yield* turns.createForSubmission({
-            id: targetId,
-            threadId,
-            prompt: "persist me",
-            executionRoute: Turn.testExecutionRoute(),
-            queueCapacity: 128,
-            now: 2,
-          })
-          yield* turns.setStatus(targetId, "completed", undefined, 3)
-          const target = yield* turns.get(targetId)
-          if (target === undefined) return yield* Effect.die("turn was not stored")
-          yield* transcripts.replace(target, Transcript.project(target.id, target.prompt, [event(0)]))
-          yield* sql`UPDATE rika_transcript_units SET unit_json = ${"{"} WHERE turn_id = ${targetId}`
-          expect(created.id).toBe(targetId)
-        }).pipe(provideLayer(makeLayer())),
-      )
-
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const transcripts = yield* TranscriptRepository.Service
-          const failure = yield* Effect.flip(transcripts.page(threadId, { limit: 1 }))
-          expect(failure).toBeInstanceOf(TranscriptRepository.RepositoryError)
-          expect(failure._tag).toBe("TranscriptRepositoryError")
-        }).pipe(provideLayer(makeLayer())),
-      )
-    }),
-  ).pipe(provideLayer(BunServices.layer)),
-)
-
-it.effect("persists usage cursors across reopen so redelivered usage never double counts", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem
-      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-transcript-usage-" })
-      const filename = `${directory}/rika.db`
-      const threadId = Thread.ThreadId.make("thread-usage-durable")
-      const targetId = Turn.TurnId.make("turn-usage-durable")
-      const usage: Transcript.SourceEvent = {
-        cursor: "usage-1",
-        sequence: 5,
-        type: "model.usage.reported",
-        createdAt: 5,
-        data: usageData(250_000),
-      }
-      const makeLayer = () => {
-        const database = Database.layer(filename)
-        return Layer.mergeAll(
-          database,
-          ThreadRepository.layer.pipe(Layer.provide(database)),
-          TurnRepository.layer.pipe(Layer.provide(database)),
-          TranscriptRepository.layer.pipe(Layer.provide(database)),
-        )
-      }
-
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const threads = yield* ThreadRepository.Service
-          const turns = yield* TurnRepository.Service
-          const transcripts = yield* TranscriptRepository.Service
-          yield* threads.create({ id: threadId, workspace: "/work/usage", title: "Usage", now: 1 })
-          yield* turns.createForSubmission({
-            id: targetId,
-            threadId,
-            prompt: "count me",
-            executionRoute: Turn.testExecutionRoute(),
-            queueCapacity: 128,
-            now: 2,
-          })
-          yield* turns.setStatus(targetId, "completed", undefined, 3)
-          const target = yield* turns.get(targetId)
-          if (target === undefined) return yield* Effect.die("turn was not stored")
-          yield* transcripts.appendAll(target, [usage])
-        }).pipe(provideLayer(makeLayer())),
-      )
-
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const turns = yield* TurnRepository.Service
-          const transcripts = yield* TranscriptRepository.Service
-          const target = yield* turns.get(targetId)
-          if (target === undefined) return yield* Effect.die("turn was not stored")
-          const redelivered = yield* transcripts.appendAll(target, [
-            usage,
-            { cursor: "completed", sequence: 6, type: "execution.completed", createdAt: 6 },
-          ])
-          expect(redelivered.costUsd).toBeCloseTo(1.25, 10)
-          expect(redelivered.usageCursors).toEqual(["usage-1"])
-          expect(yield* transcripts.globalCostUsd).toBeCloseTo(1.25, 10)
-        }).pipe(provideLayer(makeLayer())),
-      )
-    }),
-  ).pipe(provideLayer(BunServices.layer)),
-)
-
-it.effect("keyset-paginates a durable subagent tree whose nested units outnumber the page", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem
-      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-transcript-nested-page-" })
-      const filename = `${directory}/rika.db`
-      const threadId = Thread.ThreadId.make("thread-nested-page")
-      const targetId = Turn.TurnId.make("turn-nested-page")
-      const childId = "turn-nested-page:child:agent"
-      const database = Database.layer(filename)
-      const layer = Layer.mergeAll(
-        database,
-        ThreadRepository.layer.pipe(Layer.provide(database)),
-        TurnRepository.layer.pipe(Layer.provide(database)),
-        TranscriptRepository.layer.pipe(Layer.provide(database)),
-      )
-      const parent = Transcript.project(targetId, "delegate", [
-        {
-          cursor: "agent",
-          sequence: 0,
-          type: "tool.call.requested",
-          createdAt: 0,
-          data: {
-            tool_call_id: "agent",
-            tool_name: "transfer_to_oracle",
-            input: { input: [{ type: "text", text: "Investigate" }] },
-          },
-        },
-        {
-          cursor: "spawned",
-          sequence: 1,
-          type: "child_run.spawned",
-          createdAt: 1,
-          data: { tool_call_id: "agent", child_execution_id: `execution:${childId}` },
-        },
-        { cursor: "done", sequence: 2, type: "execution.completed", createdAt: 2 },
-      ])
-      const child = Transcript.project(
-        childId,
-        "",
-        Array.from({ length: 8 }, (_, index) => ({
-          cursor: `child-tool-${index}`,
-          sequence: index,
-          type: "tool.call.requested" as const,
-          createdAt: index,
-          data: { tool_call_id: `child-call-${index}`, tool_name: "read", input: { path: `file-${index}.ts` } },
-        })),
-      )
-      const live = Transcript.withNestedProjections(parent, [{ parentId: `${targetId}:agent`, projection: child }])
-
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const threads = yield* ThreadRepository.Service
-          const turns = yield* TurnRepository.Service
-          const transcripts = yield* TranscriptRepository.Service
-          yield* threads.create({ id: threadId, workspace: "/work/nested", title: "Nested", now: 1 })
-          yield* turns.createForSubmission({
-            id: targetId,
-            threadId,
-            prompt: "delegate",
-            executionRoute: Turn.testExecutionRoute(),
-            queueCapacity: 128,
-            now: 2,
-          })
-          yield* turns.setStatus(targetId, "completed", undefined, 3)
-          const target = yield* turns.get(targetId)
-          if (target === undefined) return yield* Effect.die("turn was not stored")
-          yield* transcripts.replace(target, live)
-
-          const collected: Array<string> = []
-          let before: TranscriptRepository.PageCursor | undefined
-          for (let iteration = 0; iteration < live.units.length + 5; iteration += 1) {
-            const page = yield* transcripts.page(threadId, { ...(before === undefined ? {} : { before }), limit: 3 })
-            collected.push(...page.entries.map((entry) => entry.unit.key))
-            if (!page.hasOlder || page.oldestCursor === undefined) break
-            before = page.oldestCursor
-          }
-
-          expect(new Set(collected).size).toBe(live.units.length)
-          expect(collected.length).toBe(live.units.length)
-          expect(new Set(collected)).toEqual(new Set(live.units.map((unit) => unit.key)))
-        }).pipe(provideLayer(layer)),
-      )
-    }),
-  ).pipe(provideLayer(BunServices.layer)),
-)
-
-it.effect("persists per-execution consumption state and projection version across reopen", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem
-      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-transcript-consumed-" })
-      const filename = `${directory}/rika.db`
-      const threadId = Thread.ThreadId.make("thread-consumed-durable")
-      const targetId = Turn.TurnId.make("turn-consumed-durable")
-      const makeLayer = () => {
-        const database = Database.layer(filename)
-        return Layer.mergeAll(
-          database,
-          ThreadRepository.layer.pipe(Layer.provide(database)),
-          TurnRepository.layer.pipe(Layer.provide(database)),
-          TranscriptRepository.layer.pipe(Layer.provide(database)),
-        )
-      }
-
-      const target = yield* Effect.scoped(
-        Effect.gen(function* () {
-          const threads = yield* ThreadRepository.Service
-          const turns = yield* TurnRepository.Service
-          const transcripts = yield* TranscriptRepository.Service
-          const sql = yield* SqlClient
-          yield* threads.create({ id: threadId, workspace: "/work/consumed", title: "Consumed", now: 1 })
-          yield* turns.createForSubmission({
-            id: targetId,
-            threadId,
-            prompt: "fold me",
-            executionRoute: Turn.testExecutionRoute(),
-            queueCapacity: 128,
-            now: 2,
-          })
-          const stored = yield* turns.setStatus(targetId, "completed", undefined, 3)
-          yield* transcripts.replace(stored, Transcript.project(stored.id, stored.prompt, [event(0)]))
-          expect(
-            yield* sql`SELECT consumed_json, projection_version FROM rika_transcript_checkpoints
-            WHERE turn_id = ${targetId}`,
-          ).toEqual([{ consumed_json: null, projection_version: 1 }])
-          const timeline = yield* consumedScript(transcripts, stored)
-          expect(timeline).toEqual(consumedTimeline(stored))
-          return stored
-        }).pipe(provideLayer(makeLayer())),
-      )
-
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const transcripts = yield* TranscriptRepository.Service
-          const sql = yield* SqlClient
-          const reopened = yield* transcripts.get(targetId)
-          expect(reopened?.consumed).toEqual(consumedTimeline(target).at(-1)?.consumed)
-          expect(reopened?.projectionVersion).toBe(2)
-          expect((yield* transcripts.appendAll(target, [event(2)])).consumed).toEqual(reopened?.consumed)
-
-          yield* sql`UPDATE rika_transcript_checkpoints SET consumed_json = ${'{"root":{"cursor":1}}'}
-            WHERE turn_id = ${targetId}`
-          const failure = yield* Effect.flip(transcripts.get(targetId))
-          expect(failure).toBeInstanceOf(TranscriptRepository.RepositoryError)
-        }).pipe(provideLayer(makeLayer())),
-      )
-    }),
-  ).pipe(provideLayer(BunServices.layer)),
-)
-
-it.effect("commits durable units and consumption state in one transaction", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem
-      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-transcript-atomic-" })
-      const threadId = Thread.ThreadId.make("thread-consumed-atomic")
-      const targetId = Turn.TurnId.make("turn-consumed-atomic")
-      const database = Database.layer(`${directory}/rika.db`)
-      const layer = Layer.mergeAll(
-        database,
-        ThreadRepository.layer.pipe(Layer.provide(database)),
-        TurnRepository.layer.pipe(Layer.provide(database)),
-        TranscriptRepository.layer.pipe(Layer.provide(database)),
-      )
-
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const threads = yield* ThreadRepository.Service
-          const turns = yield* TurnRepository.Service
-          const transcripts = yield* TranscriptRepository.Service
-          const sql = yield* SqlClient
-          yield* threads.create({ id: threadId, workspace: "/work/atomic", title: "Atomic", now: 1 })
-          yield* turns.createForSubmission({
-            id: targetId,
-            threadId,
-            prompt: "fold me",
-            executionRoute: Turn.testExecutionRoute(),
-            queueCapacity: 128,
-            now: 2,
-          })
-          const target = yield* turns.setStatus(targetId, "completed", undefined, 3)
-          const committed = yield* transcripts.replace(
-            target,
-            Transcript.project(target.id, target.prompt, [event(0), event(1)]),
-            { consumed: { [targetId]: { cursor: "cursor-1", sequence: 1 } }, projectionVersion: 2 },
-          )
-          const malformed = {
-            ...Transcript.project(target.id, target.prompt, [event(0), event(1)]),
-            revision: 3,
-            units: [
-              {
-                key: "invalid",
-                turnId: target.id,
-                order: { sequence: 3, part: 0 },
-                revision: 3,
-                content: { _tag: "Entry", role: "invalid", text: "invalid" },
-              },
-            ],
-          } as unknown as Transcript.Projection
-          const rejected = yield* Effect.result(
-            transcripts.replace(target, malformed, {
-              consumed: { [targetId]: { cursor: "cursor-3", sequence: 3, status: "completed" } },
-              projectionVersion: 2,
-            }),
-          )
-
-          const durable = yield* Schema.decodeUnknownEffect(
-            Schema.Array(
-              Schema.Struct({
-                consumed_json: Schema.fromJsonString(TranscriptRepository.ConsumedExecutions),
-              }),
-            ),
-          )(yield* sql`SELECT consumed_json FROM rika_transcript_checkpoints WHERE turn_id = ${targetId}`)
-
-          expect(rejected._tag).toBe("Failure")
-          expect(yield* transcripts.get(targetId)).toEqual(committed)
-          expect(durable).toEqual([{ consumed_json: { [targetId]: { cursor: "cursor-1", sequence: 1 } } }])
-          expect(yield* sql`SELECT COUNT(*) AS units FROM rika_transcript_units WHERE turn_id = ${targetId}`).toEqual([
-            { units: committed.units.length },
-          ])
-        }).pipe(provideLayer(layer)),
-      )
-    }),
-  ).pipe(provideLayer(BunServices.layer)),
-)

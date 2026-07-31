@@ -25,7 +25,8 @@ const thread = (id: string, updatedAt: number, archived = false): Thread.Thread 
   updatedAt,
 })
 
-const turn = (target: Thread.Thread, prompt: string): Turn.Turn => ({
+const turn = (target: Thread.Thread, prompt: string): Turn.AgentExecutionTurn => ({
+  _tag: "AgentExecution",
   id: Turn.TurnId.make(`turn-${target.id}`),
   threadId: target.id,
   prompt,
@@ -38,37 +39,52 @@ const turn = (target: Thread.Thread, prompt: string): Turn.Turn => ({
   updatedAt: target.updatedAt,
 })
 
-const assistant = (target: Turn.Turn, text: string, parentId?: string): Transcript.Unit => ({
-  key: `${target.id}:${parentId ?? "root"}:${text}`,
-  turnId: target.id,
-  ...(parentId === undefined ? {} : { parentId }),
-  order: { sequence: 1, part: 0 },
-  revision: 1,
-  content: { _tag: "Entry", role: "assistant", text },
-})
+const assistant = (target: Turn.AgentExecutionTurn, text: string, parentId?: string): Transcript.Unit => {
+  const key = `${target.id}:${parentId ?? "root"}:${text}`
+  return {
+    key,
+    turnId: target.id,
+    ...(parentId === undefined ? {} : { parentId }),
+    order: Transcript.unitOrder(key, 1),
+    revision: 1,
+    content: { _tag: "Entry", role: "assistant", text },
+  }
+}
 
-const edit = (target: Turn.Turn, path: string, status: "complete" | "failed"): Transcript.Unit => ({
-  key: `${target.id}:edit:${path}:${status}`,
-  turnId: target.id,
-  order: { sequence: 2, part: 0 },
-  revision: 2,
-  content: {
-    _tag: "Block",
-    block: {
-      _tag: "ToolCall",
-      id: "edit",
-      name: "apply_patch",
-      input: "raw secret input",
-      status,
-      presentation: { family: "edit", action: "edit", activeLabel: "Editing", completeLabel: "Edited" },
-      detail: "raw command detail",
-      output: "raw shell output",
-      files: [
-        { key: path, path, kind: "update", patch: "secret diff", additions: 1, deletions: 1, preview: false, status },
-      ],
+const edit = (target: Turn.Turn, path: string, status: "complete" | "failed"): Transcript.Unit => {
+  const key = `${target.id}:edit:${path}:${status}`
+  return {
+    key,
+    turnId: target.id,
+    order: Transcript.unitOrder(key, 2),
+    revision: 2,
+    content: {
+      _tag: "Block",
+      block: {
+        _tag: "ToolCall",
+        id: "edit",
+        name: "apply_patch",
+        input: "raw secret input",
+        status,
+        presentation: { family: "edit", action: "edit", activeLabel: "Editing", completeLabel: "Edited" },
+        detail: "raw command detail",
+        output: "raw shell output",
+        files: [
+          {
+            key: path,
+            path,
+            kind: "update",
+            patch: "secret diff",
+            additions: 1,
+            deletions: 1,
+            preview: false,
+            status,
+          },
+        ],
+      },
     },
-  },
-})
+  }
+}
 
 const exercise = (repository: Search.Interface) =>
   Effect.gen(function* () {
@@ -208,14 +224,67 @@ describe("thread search repository", () => {
           DROP TABLE rika_thread_relationships;
           DROP TABLE rika_thread_invocation_receipts;
           DROP TABLE rika_thread_result_routes;
-          DROP TABLE rika_thread_root_readiness;
+          DROP TABLE rika_thread_root_results;
+          ALTER TABLE rika_turns DROP COLUMN turn_kind;
+          ALTER TABLE rika_turns DROP COLUMN shell_command;
+          ALTER TABLE rika_turns DROP COLUMN shell_result_text;
+          ALTER TABLE rika_turns DROP COLUMN shell_result_truncated;
+          ALTER TABLE rika_turns DROP COLUMN shell_result_exit_code;
           ALTER TABLE rika_threads DROP COLUMN lineage_json;
           ALTER TABLE rika_turns DROP COLUMN author_json;
           ALTER TABLE rika_turns DROP COLUMN lineage_json;
           ALTER TABLE rika_turns DROP COLUMN stop_intent;
-          ALTER TABLE rika_transcript_checkpoints DROP COLUMN child_tree_reconciled;
-          ALTER TABLE rika_transcript_checkpoints DROP COLUMN projection_generation;
-          DELETE FROM rika_migrations WHERE migration_id IN (17, 18, 19, 20, 21, 22, 23, 24);
+          DROP TABLE rika_transcript_execution_checkpoints;
+          DROP TABLE rika_transcript_units;
+          DROP TABLE rika_transcript_checkpoints;
+          CREATE TABLE rika_transcript_checkpoints (
+            turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+            thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+            drafts_json TEXT NOT NULL DEFAULT '[]',
+            revision INTEGER NOT NULL DEFAULT -1,
+            projection_version INTEGER NOT NULL DEFAULT 2,
+            oldest_cursor TEXT,
+            checkpoint_cursor TEXT,
+            cost_usd REAL,
+            updated_at INTEGER NOT NULL,
+            model_phase INTEGER NOT NULL DEFAULT -1,
+            usage_cursors_json TEXT,
+            pricing_version TEXT
+          );
+          CREATE TABLE rika_transcript_units (
+            unit_key TEXT PRIMARY KEY NOT NULL,
+            turn_id TEXT NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+            thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+            unit_sequence INTEGER NOT NULL,
+            unit_part INTEGER NOT NULL,
+            revision INTEGER NOT NULL,
+            unit_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+          );
+          CREATE INDEX rika_transcript_units_page ON rika_transcript_units (
+            thread_id, created_at DESC, turn_id DESC, unit_sequence DESC, unit_part DESC, unit_key DESC
+          );
+          CREATE INDEX rika_transcript_units_turn ON rika_transcript_units (
+            turn_id, unit_sequence ASC, unit_part ASC, unit_key ASC
+          );
+          CREATE TABLE rika_transcript_entries (
+            turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+            thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+            prompt TEXT NOT NULL,
+            status TEXT NOT NULL,
+            events_json TEXT NOT NULL DEFAULT '[]',
+            revision INTEGER NOT NULL DEFAULT 1,
+            projection_version INTEGER NOT NULL DEFAULT 1,
+            oldest_cursor TEXT,
+            checkpoint_cursor TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+          );
+          CREATE INDEX rika_transcript_page ON rika_transcript_entries (
+            thread_id, created_at DESC, turn_id DESC
+          );
+          DELETE FROM rika_migrations WHERE migration_id IN (17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27);
           INSERT INTO rika_workspaces (path, created_at) VALUES ('/work/current', 1);
           INSERT INTO rika_threads (id, workspace, title, labels_json, created_at, updated_at)
             VALUES ('legacy', '/work/current', 'Legacy title', '["legacy-label"]', 1, 2);
@@ -229,6 +298,14 @@ describe("thread search repository", () => {
         const repository = yield* Search.Service.pipe(Effect.provide(context))
         const result = yield* repository.search({ workspace: "/work/current", query: "historical" })
         expect(result.results).toMatchObject([{ threadId: "legacy", matchedBy: ["humanPrompt"] }])
+        yield* Effect.sync(() => {
+          const migrated = new NativeDatabase(filename, { readonly: true })
+          expect(
+            migrated.query("SELECT migration_id, name FROM rika_migrations ORDER BY migration_id DESC LIMIT 1").all(),
+          ).toEqual([{ migration_id: 27, name: "usage_projection_sources" }])
+          expect(migrated.query("SELECT COUNT(*) AS count FROM rika_migrations").all()).toEqual([{ count: 27 }])
+          migrated.close()
+        })
       }).pipe(provideBun),
     ),
   )

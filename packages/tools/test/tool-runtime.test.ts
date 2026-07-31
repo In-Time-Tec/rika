@@ -334,6 +334,21 @@ describe("Runtime", () => {
     }).pipe(provide(environment.runtime))
   })
 
+  it.effect("preserves direct shell output without spending the output budget on duplicate channel fields", () => {
+    const environment = testEnvironment()
+    return Effect.gen(function* () {
+      const runtime = yield* Runtime.Service
+      const failed = yield* runtime.run({ _tag: "Shell", command: "bad", args: [] })
+      const large = yield* runtime.run({ _tag: "Shell", command: "large", args: [] })
+
+      expect(failed).toMatchObject({ text: "outerr", truncated: false, running: false, exitCode: 7 })
+      expect(failed).not.toHaveProperty("stdout")
+      expect(failed).not.toHaveProperty("stderr")
+      expect(large.text).toBe("x".repeat(40_000))
+      expect(large.truncated).toBe(true)
+    }).pipe(provide(environment.runtime))
+  })
+
   it.effect("maps foreign filesystem and process errors to ToolError", () => {
     const environment = testEnvironment()
     return Effect.gen(function* () {

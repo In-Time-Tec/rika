@@ -32,6 +32,7 @@ const sourceThread: Thread.Thread = {
 }
 
 const sourceTurn: Turn.Turn = {
+  _tag: "AgentExecution",
   id: Turn.TurnId.make("source-turn"),
   threadId: sourceThread.id,
   prompt: "Coordinate",
@@ -49,7 +50,6 @@ const authority: ExecutionBackend.InvocationSource = {
   threadId: sourceThread.id,
   callerProfile: "Root",
   threadCreationDepth: 0,
-  permissions: ["thread.read", "thread.coordinate", "thread.control"].map((name) => ({ name, value: true })),
 }
 
 const serviceHarness = Effect.gen(function* () {
@@ -77,18 +77,15 @@ const serviceHarness = Effect.gen(function* () {
     cancelWorkflow: () => Effect.die("unused"),
     start: () => Effect.die("unused"),
     replay: () => Effect.die("unused"),
-    cancel: (turnId, now) =>
-      Ref.update(controls, (items) => [...items, ["cancel", turnId, now]]).pipe(
+    cancel: (turnId) =>
+      Ref.update(controls, (items) => [...items, ["cancel", turnId]]).pipe(
         Effect.as({ turnId, status: "cancelled" as const, events: [] }),
       ),
     inspect: () => Effect.die("unused"),
-    steer: (turnId, text, identity, now) =>
-      Ref.update(controls, (items) => [...items, ["steer", turnId, text, identity, now]]).pipe(
+    steer: (turnId, text, identity) =>
+      Ref.update(controls, (items) => [...items, ["steer", turnId, text, identity]]).pipe(
         Effect.as({ steeringMessageId: "steering", sequence: 1 }),
       ),
-    listApprovals: () => Effect.die("unused"),
-    resolveToolApproval: () => Effect.die("unused"),
-    resolvePermission: () => Effect.die("unused"),
     resolveInvocationSource: () => Effect.succeed(authority),
   })
   const service = yield* ThreadToolService.make({
@@ -203,7 +200,7 @@ describe("ThreadToolService gateway", () => {
         { ...invocation, callId: "cancel", idempotencyKeyDigest: "cancel-key", toolName: "thread_interact" },
         { action: "cancel", threadId: "target" },
       )
-      expect(yield* Ref.get(controls)).toEqual([["steer", "target-turn", "Focus", "steer-key", 1]])
+      expect(yield* Ref.get(controls)).toEqual([["steer", "target-turn", "Focus", "steer-key"]])
       expect(yield* turns.get(Turn.TurnId.make("target-turn"))).toEqual(
         expect.objectContaining({ id: "target-turn", status: "cancelled" }),
       )
@@ -222,9 +219,9 @@ describe("ThreadToolService gateway", () => {
         { targets: [{ threadId: manual.threadId, turnId: manual.turnId }], timeoutSeconds: 1 },
       )
       expect(timedOut).toMatchObject({ timedOut: true, targets: [{ text: "Waiting" }] })
-      yield* interactions.markResultReady({
+      yield* interactions.settleResult({
         targetTurnId: Turn.TurnId.make(manual.turnId),
-        readiness: { _tag: "TerminalReady", cursor: "done", sequence: 2, output: "Finished" },
+        result: { status: "completed", cursor: "done", sequence: 2, output: "Finished" },
         now: 3,
       })
       const completed = yield* service.waitForThreads(
@@ -237,9 +234,9 @@ describe("ThreadToolService gateway", () => {
         { ...invocation, idempotencyKeyDigest: "reply-create" },
         { prompt: "Reply" },
       )
-      yield* interactions.markResultReady({
+      yield* interactions.settleResult({
         targetTurnId: Turn.TurnId.make(reply.turnId),
-        readiness: { _tag: "TerminalReady", cursor: "reply", sequence: 3, output: "Waiting" },
+        result: { status: "completed", cursor: "reply", sequence: 3, output: "Waiting" },
         now: 4,
       })
       expect(

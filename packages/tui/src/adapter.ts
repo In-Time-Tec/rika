@@ -264,8 +264,6 @@ export const renderBlock: {
         return `${head(`! ${block.title}`)}\n${body(block.detail)}`
       case "Error":
         return `${head(`✖ ERROR: ${block.title}${block.turnId === undefined ? "" : ` · Turn ${block.turnId}`}`)}\n${body(block.detail)}${block.recovery === undefined ? "" : `\n${body(`Next: ${block.recovery}`)}`}`
-      case "Permission":
-        return `${head(`? ${block.title} [${block.status}]`)}\n${body(block.detail)}`
       case "ChildAgent": {
         let icon = "✗"
         if (block.status === "running") icon = "⠿"
@@ -818,8 +816,7 @@ const transcriptUnitRevision = (
   else ids.push(identityRevision(model.blocks[unit.block]))
   pushExpanded(unitKey)
   const selected = model.detailSelection === unitKey ? "1" : "0"
-  const permission = unit.kind === "block" ? model.permissionSelection : -1
-  return `${ids.join(".")}|${bits.join("")}|${selected}|${model.width}|${permission}`
+  return `${ids.join(".")}|${bits.join("")}|${selected}|${model.width}`
 }
 
 interface TranscriptRangeBundle {
@@ -1140,7 +1137,8 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
     const cancelled = unit.block.status === "cancelled"
     const lines = command.split("\n")
     const output = isToolOutputDisplayed(unit.block) ? unit.block.output : undefined
-    const expandable = output !== undefined && output.length > 0
+    const inlineOutput = unit.block.presentation.outputDisplay === "inline"
+    const expandable = !inlineOutput && output !== undefined && output.length > 0
     const exitCode = shellExitCode(unit.block)
     if (selected) {
       const exit = failed ? ` (exit code: ${exitCode ?? 1})` : ""
@@ -1176,7 +1174,7 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
       if (cancelled) append(italic(fg(colors.amber)(" (cancelled)")))
       if (expandable) append(marker(expanded))
     }
-    if (expanded && output !== undefined) {
+    if ((expanded || inlineOutput) && output !== undefined && output.length > 0) {
       append(fg(colors.text)("\n"))
       append(
         dim(
@@ -1470,12 +1468,6 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
     if (block._tag === "ContextUsage") color = colors.muted
     else if (block._tag === "Error") color = colors.red
     append(fg(color)(renderBlock(block, transcriptWrapWidth(model.width))))
-    if (block._tag === "Permission" && block.status === "pending") {
-      const options = ["Allow once", "Always", "Deny"]
-        .map((option, optionIndex) => `${optionIndex === model.permissionSelection ? "›" : " "} ${option}`)
-        .join("   ")
-      append(fg(colors.text)(`\n${wrapBodyText(options, transcriptWrapWidth(model.width), "  ")}`))
-    }
   }
   const isUnitVisible = (unit: TranscriptUnit): boolean =>
     unit.kind !== "reasoning" || rowExpanded(transcriptUnitId(model, unit))
@@ -1671,7 +1663,6 @@ interface TranscriptRenderInput {
   readonly items: Model["items"]
   readonly expandedRowKeys: Model["expandedRowKeys"]
   readonly detailSelection: Model["detailSelection"]
-  readonly permissionSelection: number
   readonly width: number
   readonly windowEnd: number
   readonly rowWindowEnd: number
@@ -2461,7 +2452,7 @@ export class Surface {
       else usageText = "···· tok"
     } else {
       const partial = model.usageCost?._tag === "Available" && model.usageCost.unpricedAttempts > 0 ? "+" : ""
-      if (model.costUsd !== undefined) usageText = `${formatCost(model.costUsd)}${partial}`
+      if (model.costUsd !== undefined) usageText = formatCost(model.costUsd)
       else if (model.usageCost?._tag === "Available") usageText = `${formatCost(model.usageCost.usd)}${partial}`
       else if (model.usageCost?._tag === "Unavailable") usageText = "$—"
       else if (model.usageCost?._tag === "Loading" || model.busy) usageText = "$····"
@@ -2888,7 +2879,6 @@ export class Surface {
       previous.items !== input.items ||
       previous.expandedRowKeys !== input.expandedRowKeys ||
       previous.detailSelection !== input.detailSelection ||
-      previous.permissionSelection !== input.permissionSelection ||
       previous.width !== input.width ||
       previous.windowEnd !== input.windowEnd ||
       previous.rowWindowEnd !== input.rowWindowEnd
@@ -3083,7 +3073,6 @@ export class Surface {
         items: renderModel.items,
         expandedRowKeys: renderModel.expandedRowKeys,
         detailSelection: renderModel.detailSelection,
-        permissionSelection: renderModel.permissionSelection,
         width: renderModel.width,
         windowEnd: this.transcriptWindowEnd,
         rowWindowEnd: this.transcriptRowWindow.end,

@@ -399,8 +399,6 @@ it.effect("dispatches every MCP operation and validates add transport", () =>
       [["mcp", "remove", "x"], { _tag: "Mcp", action: "remove", name: "x" }],
       [["mcp", "enable", "x"], { _tag: "Mcp", action: "enable", name: "x" }],
       [["mcp", "disable", "x"], { _tag: "Mcp", action: "disable", name: "x" }],
-      [["mcp", "approve", "x"], { _tag: "Mcp", action: "approve", name: "x" }],
-      [["mcp", "approve", "x", "--workspace", "."], { _tag: "Mcp", action: "approve", name: "x", workspace }],
       [["mcp", "doctor"], { _tag: "Mcp", action: "doctor" }],
       [["mcp", "oauth", "login", "x"], { _tag: "Mcp", action: "oauth-login", name: "x" }],
       [["mcp", "oauth", "logout", "x"], { _tag: "Mcp", action: "oauth-logout", name: "x" }],

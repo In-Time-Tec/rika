@@ -12,7 +12,6 @@ test("routes session actions only through available adapter callbacks", () => {
     steer: (prompt) => calls.push(`steer:${prompt}`),
     interruptAndSend: (prompt) => calls.push(`interrupt:${prompt}`),
     cancel: () => calls.push("cancel"),
-    decidePermission: (id, _kind, decision) => calls.push(`${id}:${decision}`),
   }
   expect(
     Session.execute(adapter, {
@@ -28,9 +27,6 @@ test("routes session actions only through available adapter callbacks", () => {
   expect(Session.execute(adapter, { _tag: "InterruptAndSend", prompt: "urgent" })).toBe(true)
   expect(Session.execute(adapter, { _tag: "Cancel" })).toBe(true)
   expect(Session.execute(adapter, { _tag: "Quit" })).toBe(true)
-  expect(
-    Session.execute(adapter, { _tag: "DecidePermission", id: "p", kind: "tool-approval", decision: "always" }),
-  ).toBe(true)
   expect(calls).toEqual([
     "submit:one",
     "edit:one:changed",
@@ -39,7 +35,6 @@ test("routes session actions only through available adapter callbacks", () => {
     "interrupt:urgent",
     "cancel",
     "quit",
-    "p:always",
   ])
 })
 
@@ -63,7 +58,7 @@ test("restarts through the shared event mapper and preserves transcript across q
     { cursor: "1", sequence: 1, type: "model.output.delta", text: "hel" },
     { cursor: "2", sequence: 2, type: "reasoning.delta", text: "checking" },
     { cursor: "3", sequence: 3, type: "child.started", content: [{ profile: "Oracle", summary: "reviewing" }] },
-    { cursor: "4", sequence: 4, type: "workflow.waiting", content: [{ workflow: "delivery", step: "approval" }] },
+    { cursor: "4", sequence: 4, type: "workflow.waiting", content: [{ workflow: "delivery", step: "verification" }] },
     { cursor: "5", sequence: 5, type: "model.output.completed", text: "hello" },
   ] as const
   const source = events.map((event) => Object.assign({}, event, { createdAt: event.sequence }))

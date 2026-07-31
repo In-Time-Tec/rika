@@ -80,7 +80,6 @@ export const run = Effect.fn("ConfigOperations.run")(function* (
         settings: {
           providers,
           keymap: config.settings.keymap,
-          permissions: config.settings.permissions,
           extensionRoots: config.settings.extensionRoots,
           mcp,
           notifications: config.settings.notifications,

@@ -85,17 +85,22 @@ const tuiTraceEventTypes = new Set([
 ])
 
 const traceTuiModelEvent = (seenDeltas: Set<string>, event: Operation.InteractiveEvent) => {
-  if (event._tag !== "TranscriptPatched" || !tuiTraceEventTypes.has(event.event.type)) return Effect.void
-  const delta = event.event.type.endsWith(".delta")
-  const key = `${event.turnId}:${event.event.type}`
+  if (
+    event._tag !== "TranscriptProjectionPatched" ||
+    event.origin._tag !== "Event" ||
+    !tuiTraceEventTypes.has(event.origin.type)
+  )
+    return Effect.void
+  const delta = event.origin.type.endsWith(".delta")
+  const key = `${event.rootTurnId}:${event.origin.executionId}:${event.origin.type}`
   if (delta && seenDeltas.has(key)) return Effect.void
   if (delta) seenDeltas.add(key)
   return Effect.logInfo("tui.model.event_applied").pipe(
     Effect.annotateLogs({
-      "rika.event.cursor": event.event.cursor,
-      "rika.event.type": event.event.type,
+      "rika.event.cursor": event.origin.cursor,
+      "rika.event.type": event.origin.type,
       "rika.thread.id": String(event.threadId),
-      "rika.turn.id": String(event.turnId),
+      "rika.turn.id": String(event.rootTurnId),
     }),
   )
 }
@@ -582,8 +587,6 @@ const main = Command.run(command, { version }).pipe(
 const withClientWorkspaceImpl = (input: Operation.Input, workspace: string): Operation.Input => {
   if (input._tag === "Interactive" || input._tag === "Run" || input._tag === "Review")
     return { ...input, clientWorkspace: workspace, workspace: input.workspace ?? workspace }
-  if (input._tag === "Mcp" && input.action === "approve")
-    return { ...input, clientWorkspace: workspace, workspace: input.workspace ?? workspace }
   if (
     input._tag === "Skill" ||
     input._tag === "Mcp" ||
@@ -707,8 +710,7 @@ export const interactiveTui =
         let loadedTranscriptEntries: ReadonlyArray<TranscriptRepository.Entry> = []
         let projectionRevisions = new Map<string, number>()
         let liveTranscriptProjections = new Map<string, Transcript.Projection>()
-        let transientTranscriptEventCursors = new Set<string>()
-        let attachedChildRevisions: ReadonlyMap<string, number> | undefined
+        let projectionStreams = new Map<string, InteractiveController.ProjectionStream>()
         let threadCostUsd: number | undefined
         let transcriptHasOlder = false
         let transcriptHasNewer = false
@@ -759,10 +761,12 @@ export const interactiveTui =
           if (closed) return
           if (
             event._tag === "SelectionLoaded" ||
-            event._tag === "TranscriptReplaced" ||
             event._tag === "TranscriptPagePrepended" ||
             event._tag === "TranscriptPageAppended" ||
-            event._tag === "TranscriptPatched" ||
+            event._tag === "TranscriptProjectionStarted" ||
+            event._tag === "TranscriptProjectionPatched" ||
+            event._tag === "TranscriptProjectionStopped" ||
+            event._tag === "TranscriptProjectionFailed" ||
             event._tag === "TranscriptResyncRequired" ||
             event._tag === "ThreadUsageUpdated" ||
             event._tag === "ThreadRefolding"
@@ -778,8 +782,7 @@ export const interactiveTui =
                 entries: loadedTranscriptEntries,
                 revisions: projectionRevisions,
                 liveProjections: liveTranscriptProjections,
-                transientEventCursors: transientTranscriptEventCursors,
-                ...(attachedChildRevisions === undefined ? {} : { attachedChildRevisions }),
+                projectionStreams,
                 ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
                 hasOlder: transcriptHasOlder,
                 hasNewer: transcriptHasNewer,
@@ -794,8 +797,7 @@ export const interactiveTui =
             loadedTranscriptEntries = controlled.state.entries
             projectionRevisions = new Map(controlled.state.revisions)
             liveTranscriptProjections = new Map(controlled.state.liveProjections)
-            transientTranscriptEventCursors = new Set(controlled.state.transientEventCursors)
-            attachedChildRevisions = controlled.state.attachedChildRevisions
+            projectionStreams = new Map(controlled.state.projectionStreams)
             threadCostUsd = controlled.state.threadCostUsd
             transcriptHasOlder = controlled.state.hasOlder ?? false
             transcriptHasNewer = controlled.state.hasNewer ?? false
@@ -817,16 +819,11 @@ export const interactiveTui =
               (model.currentThreadId !== previousThreadId || model.currentThreadTitle !== previousThreadTitle)
             )
               refreshTerminalTitle()
-            if (event._tag === "TranscriptPatched" && event.event.type === "steering.delivered") {
-              const rawSequences = event.event.data?.message_sequences
-              const sequences = Array.isArray(rawSequences)
-                ? rawSequences.filter((value): value is number => typeof value === "number")
-                : []
-              if (sequences.length > 0)
-                model = ViewState.update(model, { _tag: "SteeringDelivered", turnId: event.turnId, sequences })
-            }
-            if (event._tag === "TranscriptPatched") fork(traceTuiModelEvent(appliedDeltas, event))
-            if (event._tag === "TranscriptResyncRequired" && model.currentThreadId !== undefined)
+            if (event._tag === "TranscriptProjectionPatched") fork(traceTuiModelEvent(appliedDeltas, event))
+            if (
+              (event._tag === "TranscriptResyncRequired" || controlled.resync === true) &&
+              model.currentThreadId !== undefined
+            )
               requestSelectionResync(model.currentThreadId, event.selectionEpoch)
             if (controlled.preserveAnchor) {
               if (applyingFeedBatch) feedPreserveAnchor = true
@@ -834,12 +831,8 @@ export const interactiveTui =
             } else
               render(
                 event._tag === "TranscriptResyncRequired" ||
-                  (event._tag === "TranscriptPatched" &&
-                    (event.event.type === "execution.completed" ||
-                      event.event.type === "execution.failed" ||
-                      event.event.type === "execution.cancelled" ||
-                      event.event.type === "permission.ask.requested" ||
-                      event.event.type === "tool.approval.requested")),
+                  event._tag === "TranscriptProjectionStopped" ||
+                  event._tag === "TranscriptProjectionFailed",
               )
             if (selectionStartedAt !== undefined && event._tag === "SelectionLoaded")
               fork(
@@ -994,22 +987,9 @@ export const interactiveTui =
             if (event.selectionEpoch !== activeSelectionEpoch) return
             if (model.currentThreadId !== undefined && model.currentThreadId !== event.threadId) return
             model = InteractiveController.updateQueue(model, event).model
-          } else if (event._tag === "ShellPermissionRequested") {
-            model = ViewState.update(model, {
-              _tag: "BlockAdded",
-              block: {
-                _tag: "Permission",
-                id: event.id,
-                kind: "permission",
-                title: "Run shell command",
-                detail: event.command,
-                status: "pending",
-              },
-            })
-          } else if (event._tag === "ShellPermissionCancelled") {
-            model = ViewState.update(model, { _tag: "PermissionCancelled", id: event.id })
           } else if (event._tag === "ShellCompleted") {
-            model = ViewState.update(model, { _tag: "AssistantCompleted", text: event.text })
+            if (model.currentThreadId !== event.threadId) return
+            if (event.incognito) model = ViewState.update(model, { _tag: "AssistantCompleted", text: event.text })
             model = ViewState.update(model, { _tag: "ExecutionCompleted" })
           } else if (event._tag === "TitleCostUpdated") {
             if (model.currentThreadId === event.threadId) {
@@ -1075,9 +1055,6 @@ export const interactiveTui =
             if (renderer !== undefined && !renderSuppressed) renderer.surface.update(model, feedPreserveAnchor)
             feedPreserveAnchor = false
           },
-          lane: (event) =>
-            event._tag === "TranscriptPatched" ? `${String(event.threadId)}:${String(event.turnId)}` : undefined,
-          urgent: InteractiveController.isUrgentFeedEvent,
         })
         let closing = false
         let teardownStarted = false
@@ -1226,7 +1203,11 @@ export const interactiveTui =
           const classified = ViewState.classifyPrompt(prompt)
           const effect =
             classified._tag === "Shell"
-              ? session.shell(classified.command, classified.incognito)
+              ? session.shell(
+                  model.currentThreadId === undefined ? undefined : Thread.ThreadId.make(model.currentThreadId),
+                  classified.command,
+                  classified.incognito,
+                )
               : materializePromptParts(parts, model.workspace).pipe(
                   Effect.flatMap((materialized) =>
                     session.submit(classified.prompt, mode, materialized, tuning, submissionId),
@@ -1453,16 +1434,17 @@ export const interactiveTui =
           steer: (prompt, turnId) => run(session.steer(prompt, turnId)),
           interruptAndSend: (prompt) => run(session.interruptAndSend(prompt)),
           cancel: () => run(session.cancel),
-          decidePermission: (id, kind, decision) => run(session.resolvePermission(id, kind, decision)),
           selectThread: (id) => {
             startSelection((epoch) => session.selectThread(id, epoch))
           },
         }
         const consumePendingAction = () => {
-          const action = model.pendingAction
+          const action = model.pendingAction as Session.Action | undefined
           const paletteCommand = InteractiveController.paletteCommand(action)
           if (paletteCommand?._tag === "NewThread") startSelection(() => session.newThread)
-          else if (action !== undefined) Session.execute(adapter, action as Session.Action)
+          else if (action !== undefined) {
+            Session.execute(adapter, action)
+          }
           model = ViewState.update(model, { _tag: "PaletteActionConsumed" })
         }
         initialization = fork(
@@ -1713,10 +1695,6 @@ export const interactiveTui =
                   ),
                 )
                 const startInitialSelection = () => {
-                  if (input.last === true)
-                    return Effect.sync(() => startSelection((epoch) => session.reopenThread(epoch))).pipe(
-                      Effect.flatMap(Fiber.join),
-                    )
                   if (input.threadId === undefined) return Effect.void
                   return Effect.sync(() =>
                     startSelection((epoch) => session.selectThread(input.threadId!, epoch)),

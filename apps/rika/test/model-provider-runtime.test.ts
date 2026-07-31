@@ -15,7 +15,7 @@ import {
   executionRoutePin,
   executionRoutePinFromPrepared,
   modelRoutesForExecution,
-} from "../src/resident-main"
+} from "../src/resident-product"
 import * as BedrockAuthRefresh from "../src/bedrock-auth-refresh"
 import * as ModelProviderRuntime from "../src/model-provider-runtime"
 
@@ -442,7 +442,6 @@ test("compacts a restored durable session and replays a nested OpenAI Responses 
             threadId: "thread-openai-overflow",
             turnId: "turn-openai-history",
             prompt: "read fixture.txt and retain the result for the next turn",
-            startedAt: 1,
             executionRoute: executionRoutePin(settings, "medium"),
           })
           expect(historyExecution.status, encodeJson(historyExecution.events)).toBe("completed")
@@ -451,7 +450,6 @@ test("compacts a restored durable session and replays a nested OpenAI Responses 
             threadId: "thread-openai-overflow",
             turnId: "turn-openai-overflow",
             prompt: "recover the restored session from the provider overflow",
-            startedAt: 2,
             executionRoute: executionRoutePin(settings, "medium"),
           })
           const database = new Database(`${directory}/execution.db`, { readonly: true })

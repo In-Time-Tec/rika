@@ -59,12 +59,7 @@ const withBackend = <A, E, AdditionalTools extends Record<string, Tool.Any> = {}
   ) => Effect.Effect<A, E, ExecutionBackend.Service | FileSystem.FileSystem>,
   options?: Pick<
     RelayExecutionBackend.LayerOptions<AdditionalTools>,
-    | "modelResilience"
-    | "compaction"
-    | "permissionPolicy"
-    | "modelVariantPolicy"
-    | "additionalToolkit"
-    | "additionalHandlerLayer"
+    "modelResilience" | "compaction" | "modelVariantPolicy" | "additionalToolkit" | "additionalHandlerLayer"
   > & {
     readonly registration?: (fixture: TestModel.Fixture) => ModelRegistry.Registration
   },
@@ -102,7 +97,6 @@ test(
               threadId: "thread-a",
               turnId: "turn-a",
               prompt: "hello",
-              startedAt: 1,
               onEvent: (event: ExecutionBackend.Event) => streamed.push(event),
             }
             const first = yield* start(backend, input)
@@ -172,7 +166,6 @@ test(
                 threadId: "thread-a",
                 turnId: "turn-a",
                 prompt: "hello",
-                startedAt: 1,
                 onEvent: (event: ExecutionBackend.Event) => streamed.push(event),
               })
               const replay = yield* backend.replay("turn-a")
@@ -221,7 +214,6 @@ test(
                 threadId: "thread-invocation",
                 turnId: "turn-invocation",
                 prompt: "probe",
-                startedAt: 1,
               })
             }),
           {
@@ -269,7 +261,6 @@ test(
               { type: "image", mediaType: "image/png", data: "AQID", filename: "shot.png" },
               { type: "text", text: " closely" },
             ],
-            startedAt: 1,
           })
           const requests = yield* fixture.requests
           const parts = requests[0]?.prompt.content.flatMap((message) =>
@@ -308,13 +299,11 @@ test(
                 { type: "text", text: "stash changes please" },
                 { type: "text", text: "\n\n<resolved-context>\nguidance\n</resolved-context>" },
               ],
-              startedAt: 1,
             })
             const second = yield* start(backend, {
               threadId: "thread-text-parts",
               turnId: "turn-text-parts-2",
               prompt: "continue please",
-              startedAt: 2,
             })
             expect(first.status).toBe("completed")
             expect(second.status).toBe("completed")
@@ -348,7 +337,6 @@ test(
             turnId: "turn-malformed-image",
             prompt: "inspect [Image #1]",
             promptParts: [{ type: "image", mediaType: "image/png", data: "not-base64", filename: "shot.png" }],
-            startedAt: 1,
           })
           expect(result.status).toBe("failed")
           expect(yield* fixture.requests).toHaveLength(0)
@@ -383,7 +371,6 @@ test(
               turnId: "turn-dynamic-image",
               prompt: "inspect image",
               promptParts: [{ type: "image", mediaType: "image/png", data: "AQID", filename: "shot.png" }],
-              startedAt: 1,
               executionRoute,
             })
             const requests = yield* dynamic.requests
@@ -426,7 +413,6 @@ test(
                 threadId: "thread-tools",
                 turnId: "turn-tools",
                 prompt: "read fixture.txt",
-                startedAt: 1,
               })
               return { result, requests: yield* fixture.requests }
             }),
@@ -457,7 +443,6 @@ test(
                 threadId: "thread-tool-failure",
                 turnId: "turn-tool-failure",
                 prompt: "read missing.txt",
-                startedAt: 1,
               })
               const stored = yield* Effect.acquireUseRelease(
                 Effect.sync(() => new Database(`${directory}/execution.db`, { readonly: true })),
@@ -507,13 +492,11 @@ test(
                 threadId: "thread-reused-call-id",
                 turnId: "first-reused-call-id",
                 prompt: "first",
-                startedAt: 1,
               })
               const second = yield* start(backend, {
                 threadId: "thread-reused-call-id",
                 turnId: "second-reused-call-id",
                 prompt: "second",
-                startedAt: 2,
               })
               const calls = yield* Effect.acquireUseRelease(
                 Effect.sync(() => new Database(`${directory}/execution.db`, { readonly: true })),
@@ -585,7 +568,6 @@ test(
                 threadId: "thread-live-tool-events",
                 turnId: "turn-live-tool-events",
                 prompt: "run the timed tool",
-                startedAt: 1,
                 onEvent: (event) => received.push({ type: event.type, at: clock.currentTimeMillisUnsafe() }),
               })
               return { received, result }
@@ -655,18 +637,15 @@ test(
                   ? Effect.fail(ExecutionBackend.BackendError.make({ message: `Unknown execution ${executionId}` }))
                   : Effect.succeed(workspace)
               },
-              toolNeedsApproval: () => false,
-              permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
             })
             yield* provide(
               Effect.gen(function* () {
                 const backend = yield* ExecutionBackend.Service
-                yield* start(backend, { threadId: "first-thread", turnId: "first-turn", prompt: "first", startedAt: 1 })
+                yield* start(backend, { threadId: "first-thread", turnId: "first-turn", prompt: "first" })
                 yield* start(backend, {
                   threadId: "second-thread",
                   turnId: "second-turn",
                   prompt: "second",
-                  startedAt: 2,
                 })
               }),
               backendLayer,
@@ -733,8 +712,6 @@ test(
                     )
                   : Effect.succeed(resolved)
               },
-              toolNeedsApproval: () => false,
-              permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
             })
             return yield* provide(
               Effect.gen(function* () {
@@ -794,7 +771,6 @@ test(
                 threadId: "thread-stream",
                 turnId: "turn-stream",
                 prompt: "go",
-                startedAt: 1,
               })
               return yield* backend.replay(completed.turnId)
             }),
@@ -826,7 +802,6 @@ test.skipIf(!("reasoning" in TestModel))(
                 threadId: "thread-reasoning",
                 turnId: "turn-reasoning",
                 prompt: "reason",
-                startedAt: 1,
               })
               return { completed, replay: yield* backend.replay(completed.turnId) }
             }),
@@ -860,7 +835,7 @@ test(
               (fixture) =>
                 Effect.gen(function* () {
                   const backend = yield* ExecutionBackend.Service
-                  const result = yield* start(backend, { threadId: turnId, turnId, prompt: "call tool", startedAt: 1 })
+                  const result = yield* start(backend, { threadId: turnId, turnId, prompt: "call tool" })
                   return { result, requests: yield* fixture.requests }
                 }),
             )
@@ -895,7 +870,6 @@ test(
                 threadId: "thread-failure",
                 turnId: "turn-failure",
                 prompt: "fail",
-                startedAt: 1,
               })
             }),
         )
@@ -924,7 +898,6 @@ test(
                 threadId: "thread-long-child",
                 turnId: "turn-long-child-parent",
                 prompt: "prepare fan-out",
-                startedAt: 1,
               })
               yield* createFanOut(backend, {
                 parentTurnId: "turn-long-child-parent",
@@ -1005,7 +978,6 @@ test(
                   threadId: "thread-routes",
                   turnId: "turn-routes-parent",
                   prompt: "prepare fan-out",
-                  startedAt: 1,
                   executionRoute,
                 })
                 yield* createFanOut(backend, {
@@ -1073,7 +1045,6 @@ test(
                 threadId: "thread-retry",
                 turnId: "turn-retry",
                 prompt: "retry",
-                startedAt: 1,
               })
               return { result, requests: yield* fixture.requests }
             }),
@@ -1121,7 +1092,6 @@ test(
                 threadId: "thread-overflow-recovery",
                 turnId: "turn-overflow-recovery",
                 prompt: "read fixture.txt and finish",
-                startedAt: 1,
               })
               const database = new Database(`${directory}/execution.db`, { readonly: true })
               const checkpoints = database
@@ -1186,7 +1156,6 @@ test(
                 threadId: "thread-overflow-twice",
                 turnId: "turn-overflow-twice",
                 prompt: "read fixture.txt and finish",
-                startedAt: 1,
               })
               const database = new Database(`${directory}/execution.db`, { readonly: true })
               const checkpoint = database
@@ -1236,13 +1205,13 @@ test(
                 yield* fileSystem.writeFileString(`${directory}/fixture.txt`, "fixture")
                 const backend = yield* ExecutionBackend.Service
                 const fiber = yield* Effect.forkScoped(
-                  start(backend, { threadId: "thread-steer", turnId: "turn-steer", prompt: "start", startedAt: 1 }),
+                  start(backend, { threadId: "thread-steer", turnId: "turn-steer", prompt: "start" }),
                 )
                 yield* fixture.awaitRequests(1)
-                const receipt = yield* backend.steer("turn-steer", "focus on the fixture", "steer-request-1", 2)
-                const retriedReceipt = yield* backend.steer("turn-steer", "focus on the fixture", "steer-request-1", 2)
+                const receipt = yield* backend.steer("turn-steer", "focus on the fixture", "steer-request-1")
+                const retriedReceipt = yield* backend.steer("turn-steer", "focus on the fixture", "steer-request-1")
                 const conflict = yield* Effect.flip(
-                  backend.steer("turn-steer", "use a different fixture", "steer-request-1", 2),
+                  backend.steer("turn-steer", "use a different fixture", "steer-request-1"),
                 )
                 const result = yield* Fiber.join(fiber)
                 return { result, receipt, retriedReceipt, conflict, requests: yield* fixture.requests }
@@ -1309,7 +1278,6 @@ test(
               threadId: "thread-compaction",
               turnId: "turn-compaction",
               prompt: "read fixture.txt and finish",
-              startedAt: 1,
             }
             const run = <A, E>(effect: Effect.Effect<A, E, ExecutionBackend.Service>) =>
               provide(effect, RelayExecutionBackend.layer(options))
@@ -1384,10 +1352,10 @@ test(
               Effect.gen(function* () {
                 const backend = yield* ExecutionBackend.Service
                 const fiber = yield* Effect.forkScoped(
-                  start(backend, { threadId: "thread-a", turnId: "turn-cancel", prompt: "wait", startedAt: 1 }),
+                  start(backend, { threadId: "thread-a", turnId: "turn-cancel", prompt: "wait" }),
                 )
                 yield* fixture.awaitRequests(1)
-                const accepted = yield* backend.cancel("turn-cancel", 2)
+                const accepted = yield* backend.cancel("turn-cancel")
                 const completed = yield* Fiber.join(fiber)
                 return { accepted, completed }
               }),
@@ -1405,101 +1373,6 @@ test(
     ),
   30_000,
 )
-
-for (const answer of ["Approved", "Denied", "Always"] as const) {
-  test(
-    `resumes a durable permission wait after restart with ${answer} and no duplicate tool effects`,
-    () =>
-      runNative(
-        Effect.gen(function* () {
-          const result = yield* Effect.scoped(
-            Effect.gen(function* () {
-              const fileSystem = yield* FileSystem.FileSystem
-              const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-permission-" })
-              yield* fileSystem.writeFileString(`${directory}/fixture.txt`, "permission fixture")
-              const fixture = yield* TestModel.make([
-                TestModel.turn([TestModel.toolCall("read", { path: "fixture.txt" }, { id: `read-${answer}` })]),
-                TestModel.text(`${answer} complete`),
-              ])
-              const options = {
-                filename: `${directory}/execution.db`,
-                workspace: directory,
-                registration: fixture.registration,
-                selection: fixture.selection,
-                modelVariantPolicy: "fixed-selection" as const,
-                permissionPolicy: { rules: [{ pattern: "read", level: "ask" as const }] },
-              }
-              const useBackend = <A, E>(effect: Effect.Effect<A, E, ExecutionBackend.Service>) =>
-                provide(effect, RelayExecutionBackend.layer(options))
-              const input = {
-                threadId: `thread-${answer}`,
-                turnId: `turn-${answer}`,
-                prompt: "read fixture",
-                ...(answer === "Approved"
-                  ? {
-                      promptParts: [
-                        { type: "text" as const, text: "read " },
-                        { type: "image" as const, mediaType: "image/png", data: "AQID", filename: "shot.png" },
-                        { type: "text" as const, text: " fixture" },
-                      ],
-                    }
-                  : {}),
-                startedAt: 1,
-              }
-              const waiting = yield* useBackend(
-                Effect.gen(function* () {
-                  const backend = yield* ExecutionBackend.Service
-                  const started = yield* start(backend, input)
-                  const inspection = yield* backend.inspect(input.turnId)
-                  return { started, waits: inspection?.waits ?? [] }
-                }),
-              )
-              expect(waiting.started.status).toBe("waiting")
-              expect(waiting.waits).toHaveLength(1)
-              const waitId = waiting.waits[0]!.id
-              const completed = yield* useBackend(
-                Effect.gen(function* () {
-                  const backend = yield* ExecutionBackend.Service
-                  yield* backend.resolvePermission(waitId, answer, 2, "test decision")
-                  const resumed = yield* start(backend, input)
-                  const duplicate = yield* start(backend, input)
-                  const replay = yield* backend.replay(input.turnId)
-                  return { resumed, duplicate, replay, approvals: yield* backend.listApprovals(input.turnId) }
-                }),
-              )
-              return { ...completed, requests: yield* fixture.requests }
-            }),
-          )
-          expect(result.resumed.status).toBe(answer === "Denied" ? "failed" : "completed")
-          expect(result.duplicate.status).toBe(answer === "Denied" ? "failed" : "completed")
-          expect(result.approvals).toEqual([])
-          expect(result.requests).toHaveLength(answer === "Denied" ? 1 : 2)
-          if (answer === "Approved") {
-            const userParts = result.requests[1]?.prompt.content.flatMap((message) =>
-              message.role === "user" && Array.isArray(message.content) ? message.content : [],
-            )
-            expect(userParts).toMatchObject([
-              { type: "text", text: "read " },
-              {
-                type: "file",
-                mediaType: "image/png",
-                data: new URL("data:image/png;base64,AQID"),
-                fileName: "shot.png",
-              },
-              { type: "text", text: " fixture" },
-            ])
-          }
-          expect(result.replay.events.filter((event) => event.type === "tool.result.received")).toHaveLength(
-            answer === "Denied" ? 0 : 1,
-          )
-          expect(result.replay.events.map((event) => event.cursor)).toEqual(
-            result.duplicate.events.map((event) => event.cursor),
-          )
-        }),
-      ),
-    60_000,
-  )
-}
 
 test(
   "thread host entity wakes on a delivered promotion and invokes the registered promoter",
@@ -1556,7 +1429,6 @@ test(
               threadId: "thread-history",
               turnId: "turn-history",
               prompt: "hello",
-              startedAt: 1,
             })
             const history = executionEventHistoryFor(`${directory}/execution.db`)
             const database = new Database(`${directory}/execution.db`, { readonly: true })

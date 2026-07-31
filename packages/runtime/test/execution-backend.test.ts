@@ -370,28 +370,6 @@ const provideBackendWithThreadTools = (implementation: Client.Interface) => {
 }
 
 describe("ExecutionBackend Relay client adapter", () => {
-  it("treats a non-terminal child run as live subagent work", () => {
-    expect(RelayExecutionBackend.hasLiveSubagentWork({ child_runs: [{ status: "running" }], waiting_on: [] })).toBe(
-      true,
-    )
-    expect(RelayExecutionBackend.hasLiveSubagentWork({ child_runs: [{ status: "completed" }], waiting_on: [] })).toBe(
-      false,
-    )
-  })
-
-  it("treats an open child join wait as live subagent work even when every child settled", () => {
-    expect(
-      RelayExecutionBackend.hasLiveSubagentWork({
-        child_runs: [{ status: "completed" }],
-        waiting_on: [{ mode: "child" }],
-      }),
-    ).toBe(true)
-  })
-
-  it("does not treat an approval wait without children as live subagent work", () => {
-    expect(RelayExecutionBackend.hasLiveSubagentWork({ child_runs: [], waiting_on: [{ mode: "event" }] })).toBe(false)
-  })
-
   it("keeps preset inheritance separate from explicit child-run overrides", () => {
     const base = {
       child_execution_id: Ids.ChildExecutionId.make("child:one"),
@@ -443,7 +421,7 @@ describe("ExecutionBackend Relay client adapter", () => {
       const fixture = yield* makeClient({ startStatus: "queued", streamEvents })
       const result = yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
-        return yield* start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "prompt", startedAt: 100 })
+        return yield* start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "prompt" })
       }).pipe(provideBackendWithThreadTools(fixture.implementation))
       const registrations = yield* Ref.get(fixture.registrations)
       const starts = yield* Ref.get(fixture.starts)
@@ -512,18 +490,17 @@ describe("ExecutionBackend Relay client adapter", () => {
       })
       yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
-        yield* start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "first", startedAt: 1 })
+        yield* start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "first" })
         yield* start(backend, {
           threadId: "session:thread-a",
           turnId: "execution:turn-a",
           prompt: "second",
-          startedAt: 2,
         })
         yield* backend.inspect("execution:turn-a")
         yield* backend.replay("execution:turn-a")
         if (backend.pageEvents === undefined) return yield* Effect.die("Missing event paging")
         yield* backend.pageEvents("execution:turn-a", "forward")
-        yield* backend.cancel("execution:turn-a", 3)
+        yield* backend.cancel("execution:turn-a")
       }).pipe(provideBackendWithThreadTools(fixture.implementation))
 
       expect(yield* Ref.get(fixture.starts)).toMatchObject([
@@ -573,7 +550,6 @@ describe("ExecutionBackend Relay client adapter", () => {
           threadId: "thread-a",
           turnId: "turn-a",
           prompt: "prompt",
-          startedAt: 1,
         })
         const followed = yield* backend.follow!("turn-a", undefined)
         return { started, followed }
@@ -636,7 +612,6 @@ describe("ExecutionBackend Relay client adapter", () => {
             threadId: "thread-a",
             turnId: "turn-a",
             prompt: "prompt",
-            startedAt: 1,
             onEvent: (event) => seen.push(event.type),
           }),
         )
@@ -672,7 +647,6 @@ describe("ExecutionBackend Relay client adapter", () => {
           threadId: "thread-observed",
           turnId: "turn-observed",
           prompt: "SECRET_PROMPT",
-          startedAt: 1,
         })
       }).pipe(provideConfiguredBackend(fixture.implementation, { selection }, Logger.layer([logger])))
       const records = yield* Effect.forEach(lines, (line) =>
@@ -761,7 +735,6 @@ describe("ExecutionBackend Relay client adapter", () => {
             { type: "image", mediaType: "image/png", data: "cG5n", filename: "shot.png" },
             { type: "text", text: " after" },
           ],
-          startedAt: 1,
         })
       }).pipe(provideBackend(fixture.implementation))
       expect((yield* Ref.get(fixture.starts))[0]?.input).toEqual([
@@ -779,7 +752,7 @@ describe("ExecutionBackend Relay client adapter", () => {
         const fixture = yield* makeClient({ streamEvents: [relayEvent(type, 1), relayEvent("model.output.delta", 2)] })
         const result = yield* Effect.gen(function* () {
           const backend = yield* ExecutionBackend.Service
-          return yield* start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "prompt", startedAt: 1 })
+          return yield* start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "prompt" })
         }).pipe(provideBackend(fixture.implementation))
         expect(result.events.map((value) => value.type)).toEqual([type])
       }),
@@ -797,7 +770,7 @@ describe("ExecutionBackend Relay client adapter", () => {
       })
       const result = yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
-        return yield* start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "prompt", startedAt: 1 })
+        return yield* start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "prompt" })
       }).pipe(provideBackend(fixture.implementation))
 
       expect(result.events[0]).toMatchObject({
@@ -820,7 +793,7 @@ describe("ExecutionBackend Relay client adapter", () => {
       })
       const result = yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
-        return yield* start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "prompt", startedAt: 1 })
+        return yield* start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "prompt" })
       }).pipe(provideBackend(fixture.implementation))
 
       expect(result.events[0]?.text).toBe("Automatic compaction could not reduce the thread enough for this model.")
@@ -836,7 +809,7 @@ describe("ExecutionBackend Relay client adapter", () => {
       })
       const result = yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
-        return yield* start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "prompt", startedAt: 1 })
+        return yield* start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "prompt" })
       }).pipe(provideBackend(fixture.implementation))
 
       expect(result.events[0]?.text).toBe("content failure")
@@ -850,14 +823,97 @@ describe("ExecutionBackend Relay client adapter", () => {
         const fixture = yield* makeClient({ startStatus: status, streamEvents: [relayEvent("execution.completed", 1)] })
         const result = yield* Effect.gen(function* () {
           const backend = yield* ExecutionBackend.Service
-          return yield* start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "prompt", startedAt: 1 })
+          return yield* start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "prompt" })
         }).pipe(provideBackend(fixture.implementation))
         expect(result.status).toBe("completed")
       }),
   )
 
+  it.effect("detects an approval wait from inspection metadata after reconnect", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient()
+      Object.assign(fixture.implementation.executions, {
+        inspect: () =>
+          Effect.succeed({
+            status: "waiting",
+            last_event_cursor: "cursor-resume",
+            waiting_on: [
+              {
+                wait_id: Ids.WaitId.make("wait:approval"),
+                execution_id: Ids.ExecutionId.make("execution:turn-a"),
+                mode: "event",
+                state: "open",
+                metadata: { kind: "tool-permission" },
+                created_at: 1,
+              },
+            ],
+            pending_tool_calls: [],
+            child_runs: [],
+          }),
+        pageEvents: () =>
+          Effect.succeed({
+            events: [
+              {
+                execution_id: Ids.ExecutionId.make("execution:turn-a"),
+                type: "model.output.delta",
+                sequence: 1,
+                cursor: "cursor-resume",
+                created_at: 1,
+              },
+            ],
+            has_more: false,
+          }),
+        follow: () => Stream.never,
+      })
+      const result = yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        if (backend.follow === undefined) return yield* Effect.die("Missing execution follow")
+        return yield* backend.follow("turn-a", "cursor-resume")
+      }).pipe(provideBackend(fixture.implementation))
+
+      expect(result.status).toBe("waiting")
+      expect(yield* Ref.get(fixture.cancellations)).toEqual([])
+    }),
+  )
+
+  it.effect.each([
+    ["reply", {}],
+    ["until", {}],
+    ["child", { kind: "child_join" }],
+    ["event", { kind: "external" }],
+  ] as const)("does not classify a legal %s wait as approval", ([mode, metadata]) =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient({ streamEvents: [relayEvent("execution.completed", 1)] })
+      Object.assign(fixture.implementation.executions, {
+        inspect: () =>
+          Effect.succeed({
+            status: "waiting",
+            waiting_on: [
+              {
+                wait_id: Ids.WaitId.make("wait:legal"),
+                execution_id: Ids.ExecutionId.make("execution:turn-a"),
+                mode,
+                state: "open",
+                metadata,
+                created_at: 1,
+              },
+            ],
+            pending_tool_calls: [],
+            child_runs: [],
+          }),
+      })
+      const result = yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        return yield* start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "prompt" })
+      }).pipe(provideBackend(fixture.implementation))
+
+      expect(result.status).toBe("completed")
+      expect(yield* Ref.get(fixture.cancellations)).toEqual([])
+    }),
+  )
+
   it.effect.each(["queued", "running"] as const)(
-    "returns waiting when a %s execution reaches either actionable request",
+    "waits without cancelling when a %s execution reaches a permission request",
     (startStatus) =>
       Effect.forEach(["permission.ask.requested", "tool.approval.requested"] as const, (actionableType) =>
         Effect.gen(function* () {
@@ -876,13 +932,13 @@ describe("ExecutionBackend Relay client adapter", () => {
               threadId: "thread-a",
               turnId: "turn-a",
               prompt: "prompt",
-              startedAt: 1,
               onEvent: (item) => seen.push(item.type),
             })
           }).pipe(provideBackend(fixture.implementation))
           expect(result.status).toBe("waiting")
-          expect(result.events.map((value) => value.type)).toEqual(["model.output.delta", actionableType])
+          expect(result.events.map((item) => item.type)).toEqual(["model.output.delta", actionableType])
           expect(seen).toEqual(["model.output.delta", actionableType])
+          expect(yield* Ref.get(fixture.cancellations)).toEqual([])
         }),
       ),
   )
@@ -905,7 +961,6 @@ describe("ExecutionBackend Relay client adapter", () => {
             threadId: "thread-a",
             turnId: "turn-a",
             prompt: "prompt",
-            startedAt: 1,
             onEvent: (item) => seen.push(item.type),
           })
         }).pipe(provideBackend(fixture.implementation))
@@ -924,7 +979,6 @@ describe("ExecutionBackend Relay client adapter", () => {
           threadId: "thread-variant",
           turnId: "turn-variant",
           prompt: "prompt",
-          startedAt: 1,
           executionRoute: {
             ...currentExecutionRoute(),
             main: {
@@ -955,7 +1009,6 @@ describe("ExecutionBackend Relay client adapter", () => {
           threadId: "thread-fixed",
           turnId: "turn-fixed",
           prompt: "prompt",
-          startedAt: 1,
           reasoningEffort: "xhigh",
           fastMode: true,
         })
@@ -973,10 +1026,9 @@ describe("ExecutionBackend Relay client adapter", () => {
     }),
   )
 
-  it.effect("registers compaction and permission policy options", () =>
+  it.effect("registers compaction and unconditional permission rules", () =>
     Effect.gen(function* () {
       const fixture = yield* makeClient({ streamEvents: [relayEvent("execution.completed", 1)] })
-      const permissionPolicy = [{ tool: "bash", action: "deny" }] as never
       yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
         const route = currentExecutionRoute()
@@ -984,7 +1036,6 @@ describe("ExecutionBackend Relay client adapter", () => {
           threadId: "thread-a",
           turnId: "turn-a",
           prompt: "prompt",
-          startedAt: 1,
           executionRoute: {
             ...route,
             main: {
@@ -997,11 +1048,10 @@ describe("ExecutionBackend Relay client adapter", () => {
         provideConfiguredBackend(fixture.implementation, {
           selection,
           compaction: { contextWindow: 10_000, reserveTokens: 500, keepRecentTokens: 2_000 },
-          permissionPolicy,
         }),
       )
       expect((yield* Ref.get(fixture.registrations))[0]).toMatchObject({
-        permission_rules: permissionPolicy,
+        permission_rules: { rules: [], fallback: "allow" },
         metadata: { steering_enabled: true },
         compaction_policy: {
           context_window: 10_000,
@@ -1009,26 +1059,6 @@ describe("ExecutionBackend Relay client adapter", () => {
           keep_recent_tokens: 2_000,
         },
       })
-    }),
-  )
-
-  it.effect("resolves permission policy from the durable execution", () =>
-    Effect.gen(function* () {
-      const fixture = yield* makeClient({ streamEvents: [relayEvent("execution.completed", 1)] })
-      const permissionPolicy = { rules: [{ pattern: "bash", level: "deny" as const }] }
-      yield* Effect.gen(function* () {
-        const backend = yield* ExecutionBackend.Service
-        yield* start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "prompt", startedAt: 1 })
-      }).pipe(
-        provideConfiguredBackend(fixture.implementation, {
-          selection,
-          permissionPolicyForExecution: (executionId) =>
-            executionId === "execution:turn-a"
-              ? Effect.succeed(permissionPolicy)
-              : Effect.fail(ExecutionBackend.BackendError.make({ message: "Unexpected execution" })),
-        }),
-      )
-      expect((yield* Ref.get(fixture.registrations))[0]).toMatchObject({ permission_rules: permissionPolicy })
     }),
   )
 
@@ -1097,7 +1127,7 @@ describe("ExecutionBackend Relay client adapter", () => {
     }),
   )
 
-  it.effect("cancels with deterministic payload and returns the accepted status and replayed events", () =>
+  it.effect("owns the cancellation payload timestamp and returns the accepted status and replayed events", () =>
     Effect.gen(function* () {
       const fixture = yield* makeClient({
         existingStatus: "running",
@@ -1106,9 +1136,9 @@ describe("ExecutionBackend Relay client adapter", () => {
       })
       const result = yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
-        return yield* backend.cancel("turn-a", 50)
+        return yield* backend.cancel("turn-a")
       }).pipe(provideBackend(fixture.implementation))
-      expect(yield* Ref.get(fixture.cancellations)).toEqual([{ execution_id: "execution:turn-a", cancelled_at: 50 }])
+      expect(yield* Ref.get(fixture.cancellations)).toEqual([{ execution_id: "execution:turn-a", cancelled_at: 0 }])
       expect(result.status).toBe("queued")
       expect(result.events.map((value) => value.type)).toEqual(["execution.cancelled"])
     }),
@@ -1137,7 +1167,7 @@ describe("ExecutionBackend Relay client adapter", () => {
       })
       yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
-        yield* backend.cancel("turn-a", 50)
+        yield* backend.cancel("turn-a")
       }).pipe(provideBackend(fixture.implementation))
       expect((yield* Ref.get(fixture.cancellations)).map((input) => input.execution_id)).toEqual([
         root,
@@ -1157,7 +1187,7 @@ describe("ExecutionBackend Relay client adapter", () => {
       })
       const cancellation = yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
-        return yield* backend.cancel("turn-a", 50)
+        return yield* backend.cancel("turn-a")
       }).pipe(provideBackend(fixture.implementation), Effect.forkChild)
       yield* TestClock.adjust("50 millis")
       const result = yield* Fiber.join(cancellation)
@@ -1176,7 +1206,7 @@ describe("ExecutionBackend Relay client adapter", () => {
       const failure = yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
         if (operation === "replay") return yield* Effect.flip(backend.replay("turn-a"))
-        return yield* Effect.flip(backend.cancel("turn-a", 2))
+        return yield* Effect.flip(backend.cancel("turn-a"))
       }).pipe(provideBackend(fixture.implementation))
       expect(failure._tag).toBe("ExecutionBackendError")
       expect(failure.message).toContain(`${operation} failed`)
@@ -1203,7 +1233,6 @@ describe("ExecutionBackend Relay client adapter", () => {
           threadId: "thread-a",
           turnId: "turn-a",
           prompt: "prompt",
-          startedAt: 1,
         })
       }).pipe(provideBackend(implementation), Effect.flip)
       const starts = yield* Ref.get(fixture.starts)
@@ -1247,7 +1276,6 @@ describe("ExecutionBackend Relay client adapter", () => {
           threadId: "thread-a",
           turnId: "turn-a",
           prompt: "prompt",
-          startedAt: 1,
         })
       }).pipe(provideBackend(implementation), Effect.forkChild)
 
@@ -1265,10 +1293,9 @@ describe("ExecutionBackend Relay client adapter", () => {
         fail: "start",
         existingStatus: "failed",
         streamEvents: [
-          relayEvent("permission.ask.requested", 1, undefined, { wait_id: "wait:resolved" }),
-          relayEvent("permission.ask.resolved", 2, undefined, { wait_id: "wait:resolved", approved: true }),
-          relayEvent("execution.failed", 3, [], { message: "canonical failure" }),
-          relayEvent("model.output.delta", 4, [Content.text("ignored")]),
+          relayEvent("model.output.completed", 1, [Content.text("partial")]),
+          relayEvent("execution.failed", 2, [], { message: "canonical failure" }),
+          relayEvent("model.output.delta", 3, [Content.text("ignored")]),
         ],
         openWaitIds: ["wait:unrelated"],
       })
@@ -1279,7 +1306,6 @@ describe("ExecutionBackend Relay client adapter", () => {
           threadId: "thread-a",
           turnId: "turn-a",
           prompt: "prompt",
-          startedAt: 1,
           onEvent: (item) => seen.push(item.type),
         })
       }).pipe(provideBackend(fixture.implementation))
@@ -1288,13 +1314,9 @@ describe("ExecutionBackend Relay client adapter", () => {
       expect(yield* Ref.get(fixture.lookups)).toEqual(["execution:turn-a"])
       expect(yield* Ref.get(fixture.replays)).toEqual([])
       expect(result.status).toBe("failed")
-      expect(result.events.map((item) => item.type)).toEqual([
-        "permission.ask.requested",
-        "permission.ask.resolved",
-        "execution.failed",
-      ])
-      expect(result.events[2]).toMatchObject({ text: "canonical failure", data: { message: "canonical failure" } })
-      expect(seen).toEqual(["permission.ask.requested", "permission.ask.resolved", "execution.failed"])
+      expect(result.events.map((item) => item.type)).toEqual(["model.output.completed", "execution.failed"])
+      expect(result.events[1]).toMatchObject({ text: "canonical failure", data: { message: "canonical failure" } })
+      expect(seen).toEqual(["model.output.completed", "execution.failed"])
     }),
   )
 
@@ -1315,7 +1337,6 @@ describe("ExecutionBackend Relay client adapter", () => {
           threadId: "thread-a",
           turnId: "turn-a",
           prompt: "prompt",
-          startedAt: 1,
           onEvent: (item) => seen.push(item.type),
         })
       }).pipe(provideBackend(fixture.implementation))
@@ -1340,9 +1361,7 @@ describe("ExecutionBackend Relay client adapter", () => {
       }
       const failure = yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
-        return yield* Effect.flip(
-          start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "prompt", startedAt: 1 }),
-        )
+        return yield* Effect.flip(start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "prompt" }))
       }).pipe(provideBackend(implementation))
 
       expect(failure.message).toContain("start failed")
@@ -1356,9 +1375,7 @@ describe("ExecutionBackend Relay client adapter", () => {
       const fixture = yield* makeClient({ fail: "register" })
       const failure = yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
-        return yield* Effect.flip(
-          start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "prompt", startedAt: 1 }),
-        )
+        return yield* Effect.flip(start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "prompt" }))
       }).pipe(provideBackend(fixture.implementation))
 
       expect(failure.message).toContain("register failed")
@@ -1367,7 +1384,7 @@ describe("ExecutionBackend Relay client adapter", () => {
     }),
   )
 
-  it.effect("adapts fan-out, workflow, child, inspection, steering, and approval operations", () =>
+  it.effect("adapts fan-out, workflow, child, inspection, and steering operations", () =>
     Effect.gen(function* () {
       const fixture = yield* makeClient()
       const calls: Array<[string, unknown]> = []
@@ -1426,14 +1443,6 @@ describe("ExecutionBackend Relay client adapter", () => {
           }),
         steer: (input: unknown) => (calls.push(["steer", input]), Effect.succeed({})),
       })
-      Object.assign(fixture.implementation.tools, {
-        listPendingApprovals: () =>
-          Effect.succeed({
-            approvals: [{ wait_id: "wait-1", tool_call_id: "call-1", tool_name: "bash", input: {}, requested_at: 3 }],
-          }),
-        resolveApproval: (input: unknown) => (calls.push(["approval", input]), Effect.succeed({})),
-        resolvePermission: (input: unknown) => (calls.push(["permission", input]), Effect.succeed({})),
-      })
       const result = yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
         return {
@@ -1462,10 +1471,7 @@ describe("ExecutionBackend Relay client adapter", () => {
             prompt: "work",
           }),
           inspection: yield* backend.inspect("parent-1"),
-          approvals: yield* backend.listApprovals("parent-1"),
-          steer: yield* backend.steer("parent-1", "continue", "steer-parent-1", 5),
-          approval: yield* backend.resolveToolApproval("wait-1", true, 6, "ok"),
-          permission: yield* backend.resolvePermission("wait-1", "Approved", 7, "safe"),
+          steer: yield* backend.steer("parent-1", "continue", "steer-parent-1"),
         }
       }).pipe(provideBackend(fixture.implementation))
       expect(result.fan).toMatchObject({ fanOutId: "fan-1", parentTurnId: "parent-1", join: "quorum" })
@@ -1477,8 +1483,7 @@ describe("ExecutionBackend Relay client adapter", () => {
       expect(result.startedWorkflow).toMatchObject({ runId: "run-1", workflow: "delivery", revision: 2 })
       expect(result.child).toEqual({ parentTurnId: "parent-1", childId: "one", profile: "Task", type: "accepted" })
       expect(result.inspection).toMatchObject({ status: "waiting", lastCursor: "last" })
-      expect(result.approvals[0]).toMatchObject({ waitId: "wait-1", callId: "call-1" })
-      expect(calls).toHaveLength(10)
+      expect(calls).toHaveLength(8)
     }),
   )
 
@@ -1498,7 +1503,7 @@ describe("ExecutionBackend Relay client adapter", () => {
       const fiber = yield* Effect.forkChild(
         Effect.gen(function* () {
           const backend = yield* ExecutionBackend.Service
-          return yield* backend.steer("turn-race", "continue", "steer-turn-race", 5)
+          return yield* backend.steer("turn-race", "continue", "steer-turn-race")
         }).pipe(provideBackend(fixture.implementation)),
       )
       yield* TestClock.adjust("25 millis")
@@ -1547,10 +1552,6 @@ describe("ExecutionBackend Relay client adapter", () => {
         },
       })
       Object.assign(fixture.implementation.executions, { get: () => Effect.void })
-      Object.assign(fixture.implementation.tools, {
-        resolveApproval: (input: unknown) => (calls.push(input), Effect.succeed({})),
-        resolvePermission: (input: unknown) => (calls.push(input), Effect.succeed({})),
-      })
       const values = yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
         return [
@@ -1560,8 +1561,6 @@ describe("ExecutionBackend Relay client adapter", () => {
           yield* backend.inspectWorkflow("r"),
           yield* backend.cancelWorkflow("r"),
           yield* backend.inspect("missing"),
-          yield* backend.resolveToolApproval("wait", false, 2),
-          yield* backend.resolvePermission("wait", "Denied", 3),
         ]
       }).pipe(provideBackend(fixture.implementation))
       expect(values[0]).toBeUndefined()
@@ -1570,8 +1569,6 @@ describe("ExecutionBackend Relay client adapter", () => {
       expect(values[4]).toBeUndefined()
       expect(values[5]).toBeUndefined()
       expect(calls).toContainEqual({ fan_out_id: "fan", cancelled_at: 1 })
-      expect(calls).toContainEqual({ wait_id: "wait", approved: false, resolved_at: 2 })
-      expect(calls).toContainEqual({ wait_id: "wait", answer: "Denied", resolved_at: 3 })
     }),
   )
 
@@ -1651,7 +1648,7 @@ describe("ExecutionBackend Relay client adapter", () => {
         yield* backend.replay(childId, undefined, ExecutionBackend.executionReference)
         if (backend.pageEvents === undefined) return yield* Effect.die("Missing event paging")
         yield* backend.pageEvents(childId, "forward", undefined, undefined, ExecutionBackend.executionReference)
-        yield* backend.cancel(childId, 10, ExecutionBackend.executionReference)
+        yield* backend.cancel(childId, ExecutionBackend.executionReference)
         return childId
       }).pipe(provideBackend(fixture.implementation))
 
@@ -1700,7 +1697,62 @@ describe("ExecutionBackend Relay client adapter", () => {
     ),
   )
 
-  it.effect("surfaces nested child permission asks and approvals through the parent execution", () =>
+  it.effect("launches each tree follow once when inspection and root events report the same child", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeClient()
+        const rootExecutionId = Ids.ExecutionId.make("execution:parent")
+        const childExecutionId = Ids.ChildExecutionId.make("execution:parent:child:Task:call-task")
+        const subscriptions = yield* Ref.make<ReadonlyArray<string>>([])
+        const finalizations = yield* Ref.make<ReadonlyArray<string>>([])
+        const rootSubscribed = yield* Deferred.make<void>()
+        const childSubscribed = yield* Deferred.make<void>()
+        const spawned = {
+          ...relayEvent("child_run.spawned", 1, undefined, { child_execution_id: childExecutionId }),
+          execution_id: rootExecutionId,
+          child_execution_id: childExecutionId,
+        }
+        Object.assign(fixture.implementation.executions, {
+          inspect: (id: Ids.ExecutionId) =>
+            Effect.succeed({
+              status: "running",
+              waiting_on: [],
+              pending_tool_calls: [],
+              child_runs: id === rootExecutionId ? [{ child_execution_id: childExecutionId, status: "running" }] : [],
+            }),
+          follow: (input: { readonly execution_id: Ids.ExecutionId }) => {
+            const executionId = String(input.execution_id)
+            return Stream.unwrap(
+              Ref.update(subscriptions, (executionIds) => [...executionIds, executionId]).pipe(
+                Effect.andThen(
+                  Deferred.succeed(executionId === rootExecutionId ? rootSubscribed : childSubscribed, undefined),
+                ),
+                Effect.as(
+                  executionId === rootExecutionId
+                    ? Stream.concat(Stream.succeed({ _tag: "event" as const, event: spawned }), Stream.never)
+                    : Stream.never,
+                ),
+              ),
+            ).pipe(Stream.ensuring(Ref.update(finalizations, (executionIds) => [...executionIds, executionId])))
+          },
+        })
+
+        yield* Effect.gen(function* () {
+          const backend = yield* ExecutionBackend.Service
+          if (backend.follow === undefined) return yield* Effect.die("Missing execution follow")
+          const follower = yield* Effect.forkChild(backend.follow("parent", undefined))
+          yield* Deferred.await(rootSubscribed)
+          yield* Deferred.await(childSubscribed)
+
+          expect(yield* Ref.get(subscriptions)).toEqual([rootExecutionId, childExecutionId])
+          yield* Fiber.interrupt(follower)
+          expect((yield* Ref.get(finalizations)).toSorted()).toEqual([rootExecutionId, childExecutionId].toSorted())
+        }).pipe(provideBackend(fixture.implementation))
+      }),
+    ),
+  )
+
+  it.effect("keeps the root waiting when a child reaches a permission request", () =>
     Effect.gen(function* () {
       const fixture = yield* makeClient()
       const rootExecutionId = Ids.ExecutionId.make("execution:parent")
@@ -1752,48 +1804,16 @@ describe("ExecutionBackend Relay client adapter", () => {
             })),
           ),
       })
-      Object.assign(fixture.implementation.tools, {
-        listPendingApprovals: (input: { readonly execution_id: Ids.ExecutionId }) =>
-          Effect.succeed({
-            approvals:
-              String(input.execution_id) === String(childExecutionId)
-                ? [
-                    {
-                      wait_id: "approval-child",
-                      execution_id: childExecutionId,
-                      tool_call_id: "call-approval-child",
-                      tool_name: "bash",
-                      input: { command: "pwd" },
-                      requested_at: 3,
-                    },
-                  ]
-                : [],
-          }),
-      })
+      const seen: Array<string> = []
       const result = yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
         if (backend.follow === undefined) return yield* Effect.die("Missing execution follow")
-        return {
-          followed: yield* backend.follow("parent", undefined),
-          approvals: yield* backend.listApprovals("parent"),
-        }
+        return yield* backend.follow("parent", undefined, (item) => seen.push(item.type))
       }).pipe(provideBackend(fixture.implementation))
 
-      expect(result.followed.status).toBe("waiting")
-      expect(result.followed.events.find((event) => event.type === "permission.ask.requested")?.data).toMatchObject({
-        wait_id: "wait-child",
-        execution_id: childExecutionId,
-      })
-      expect(result.approvals).toEqual([
-        {
-          waitId: "approval-child",
-          executionId: childExecutionId,
-          callId: "call-approval-child",
-          toolName: "bash",
-          input: { command: "pwd" },
-          requestedAt: 3,
-        },
-      ])
+      expect(result.status).toBe("waiting")
+      expect(seen).toEqual(["child_run.spawned", "permission.ask.requested"])
+      expect(yield* Ref.get(fixture.cancellations)).toEqual([])
     }),
   )
 
@@ -1846,7 +1866,6 @@ describe("ExecutionBackend Relay client adapter", () => {
           threadId: "thread",
           turnId: "other-turn",
           prompt: "prompt",
-          startedAt: 1,
           executionRoute: route,
         })
         yield* createFanOut(backend, {

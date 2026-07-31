@@ -473,7 +473,7 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
     if (block._tag === "ToolCall") {
       const children = nestedTools(block.id)
       const agentResponse = agentResponseFor(block)
-      if (children.length > 0 || agentResponse !== undefined) {
+      if (block.presentation.outputDisplay === "inline" || children.length > 0 || agentResponse !== undefined) {
         flush()
         units.push({
           kind: "tool",
@@ -518,7 +518,10 @@ export const isExpandableUnit: {
     const block = model.blocks[index] as Extract<TranscriptBlock, { _tag: "ToolCall" }>
     return (
       (block.presentation.family === "agent" && block.detail.length > 0) ||
-      (isToolOutputDisplayed(block) && block.output !== undefined && block.output.length > 0)
+      (block.presentation.outputDisplay !== "inline" &&
+        isToolOutputDisplayed(block) &&
+        block.output !== undefined &&
+        block.output.length > 0)
     )
   })
 })

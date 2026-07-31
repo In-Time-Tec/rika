@@ -73,7 +73,6 @@ import {
   mainInstructions,
   names as agentProfileNames,
   parentPermissions,
-  permissionsForProfile,
   presets,
   resolve,
   resolveTitle,
@@ -139,10 +138,6 @@ const observableEventTypes = new Set([
   "tool.call.requested",
   "tool.result.received",
   "steering.delivered",
-  "tool.approval.requested",
-  "tool.approval.resolved",
-  "permission.ask.requested",
-  "permission.ask.resolved",
   "wait.created",
   "wait.woken",
   "wait.timed_out",
@@ -157,6 +152,7 @@ const observableEventTypes = new Set([
   "execution.cancelled",
 ])
 const toolExecutionPolicy = { concurrency: "unbounded" as const }
+const allowAllPermissionRules = { rules: [], fallback: "allow" } satisfies Permissions.Ruleset
 const memoryDatabaseFilename = ":memory:"
 const unsafeRecoveryFailure = "Parent execution stopped before its first durable chat checkpoint"
 const outlivedParentReason = "Parent execution ended before this subagent's report was collected"
@@ -191,8 +187,6 @@ export interface LayerOptions<AdditionalTools extends Record<string, Tool.Any> =
   readonly modelResilience?: ModelResilience.Interface
   readonly compaction?: Compaction.DefaultOptions
   readonly oracleCompaction?: Compaction.DefaultOptions
-  readonly permissionPolicy?: Permissions.Ruleset
-  readonly permissionPolicyForExecution?: (executionId: string) => Effect.Effect<Permissions.Ruleset, BackendError>
   readonly additionalToolkit?: Toolkit.Toolkit<AdditionalTools>
   readonly additionalHandlerLayer?: Layer.Layer<
     Tool.HandlersFor<AdditionalTools>,
@@ -204,7 +198,6 @@ export interface LayerOptions<AdditionalTools extends Record<string, Tool.Any> =
     workspace: string,
   ) => Layer.Layer<RikaToolRuntime.Service, BackendError, RuntimeRequirements | ProcessRegistry.Service>
   readonly resolveWorkspace?: (executionId: string) => Effect.Effect<string, BackendError>
-  readonly toolNeedsApproval?: (name: string) => boolean
   readonly recoveryChildSettlementGrace?: Duration.Input
 }
 
@@ -577,14 +570,6 @@ const threadIdFromMetadata = (metadata: Readonly<Record<string, unknown>> | unde
   const threadId = metadata?.rika_thread_id
   return typeof threadId === "string" && threadId.length > 0 ? threadId : undefined
 }
-const grantedPermissions = (permissions: ReadonlyArray<{ readonly name: string; readonly value: unknown }>) =>
-  permissions.filter((permission) => permission.value === true).map((permission) => permission.name)
-const permissionsFromMetadata = (metadata: Readonly<Record<string, unknown>> | undefined) => {
-  const granted = metadata?.rika_permissions
-  if (!Array.isArray(granted)) return undefined
-  const names = granted.filter((name): name is string => typeof name === "string")
-  return names.length === granted.length ? names.map((name) => ({ name, value: true })) : undefined
-}
 
 const cursorOf = (checkpoint: string | ExecutionCheckpoint | undefined) =>
   typeof checkpoint === "string" ? checkpoint : checkpoint?.cursor
@@ -762,22 +747,46 @@ export const resolveChildResult = ({ childExecutionId, events, reconciled }: Chi
   if (status === "completed") return AgentTools.report({ childExecutionId, output })
   return AgentTools.failed({ childExecutionId, reason: failure ?? unreconciledReason(status), output })
 }
+const terminalChildStatuses = new Set(["completed", "failed", "cancelled"])
+
 const awaitChildResult = (client: Client.Interface, childId: string) => {
   const childExecutionId = Ids.ExecutionId.make(childId)
   return awaitExecutionAvailable(client, childExecutionId).pipe(
-    Effect.andThen(Stream.runCollect(client.executions.follow({ execution_id: childExecutionId }))),
-    Effect.map((items) => {
-      const collected = [...items]
-      const stopped = collected.find(
-        (item): item is Extract<typeof item, { _tag: "stopped" }> => item._tag === "stopped",
-      )
-      const reconciled = stopped?.reason._tag === "terminal" ? stopped.reason.status : undefined
-      return resolveChildResult({
-        childExecutionId: childId,
-        events: collected.flatMap((item) => (item._tag === "event" ? [item.event] : [])),
-        ...(reconciled === "completed" || reconciled === "failed" || reconciled === "cancelled" ? { reconciled } : {}),
-      })
-    }),
+    Effect.flatMap(() =>
+      Effect.gen(function* () {
+        const inspection = yield* client.executions.inspect(childExecutionId)
+        if (terminalChildStatuses.has(inspection.status)) {
+          const page = yield* client.executions.pageEvents({
+            execution_id: childExecutionId,
+            direction: "backward",
+            limit: 256,
+          })
+          return resolveChildResult({
+            childExecutionId: childId,
+            events: page.events,
+            reconciled: inspection.status as "completed" | "failed" | "cancelled",
+          })
+        }
+        const items = yield* Stream.runCollect(
+          client.executions.follow({
+            execution_id: childExecutionId,
+            ...(inspection.last_event_cursor === undefined ? {} : { after_cursor: inspection.last_event_cursor }),
+          }),
+        )
+        const collected = [...items]
+        const stopped = collected.find(
+          (item): item is Extract<typeof item, { _tag: "stopped" }> => item._tag === "stopped",
+        )
+        const reconciled = stopped?.reason._tag === "terminal" ? stopped.reason.status : undefined
+        return resolveChildResult({
+          childExecutionId: childId,
+          events: collected.flatMap((item) => (item._tag === "event" ? [item.event] : [])),
+          ...(reconciled === "completed" || reconciled === "failed" || reconciled === "cancelled"
+            ? { reconciled }
+            : {}),
+        })
+      }),
+    ),
   )
 }
 const workflowExecutionId = (runId: string, ownerTurnId?: string, workspace?: string) => {
@@ -1276,8 +1285,6 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
     | "additionalToolkit"
     | "compaction"
     | "oracleCompaction"
-    | "permissionPolicy"
-    | "permissionPolicyForExecution"
     | "defaultReasoningEffort"
     | "modelVariantPolicy"
   > & {
@@ -1293,12 +1300,6 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
     Effect.gen(function* () {
       const client = yield* Client.Service
       if (options.onClientReady !== undefined) yield* options.onClientReady(client)
-      const permissionPolicyFor = (execution: string) =>
-        options.permissionPolicyForExecution === undefined
-          ? Effect.succeed(options.permissionPolicy)
-          : options
-              .permissionPolicyForExecution(execution)
-              .pipe(Effect.map((policy) => policy as Permissions.Ruleset | undefined))
       const registry =
         Option.getOrUndefined(yield* Effect.serviceOption(ThreadHost.Registry)) ?? (yield* ThreadHost.makeRegistry)
       const hostInstances = new Map<string, Resident.Instance>()
@@ -1639,14 +1640,12 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
             return yield* Effect.gen(function* () {
               const startedAt = yield* Clock.currentTimeMillis
               const id = executionId(input.turnId)
-              const permissionPolicy = yield* permissionPolicyFor(String(id))
               const durableRoute = yield* Schema.decodeUnknownEffect(Schema.Json)(input.executionRoute)
               const metadata = {
                 steering_enabled: true,
                 rika_execution_id: String(id),
                 rika_thread_id: input.threadId,
                 rika_agent_depth: 0,
-                rika_permissions: grantedPermissions(rootPermissions),
                 rika_reasoning_effort: input.reasoningEffort ?? input.executionRoute.main.effort,
                 rika_execution_route: durableRoute,
               }
@@ -1738,7 +1737,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                 tools: rootTools.map((tool) => ({ name: tool.name })),
                 tool_execution: toolExecutionPolicy,
                 permissions: rootPermissions,
-                ...(permissionPolicy === undefined ? {} : { permission_rules: permissionPolicy }),
+                permission_rules: allowAllPermissionRules,
                 metadata,
                 ...(rootCompaction === undefined ? {} : { compaction_policy: rootCompaction }),
                 child_run_presets: childRunPresets,
@@ -1882,7 +1881,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
           } while (cursor !== undefined)
           return roots
         }).pipe(Effect.withSpan("ExecutionBackend.listOpenRootExecutions")),
-        cancel: Effect.fn("ExecutionBackend.cancel")(function* (turnId, cancelledAt, reference) {
+        cancel: Effect.fn("ExecutionBackend.cancel")(function* (turnId, reference) {
           return yield* Effect.gen(function* () {
             const id = executionId(turnId, reference)
             yield* awaitExecutionAvailable(client, id).pipe(
@@ -1894,6 +1893,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                   ),
               }),
             )
+            const cancelledAt = yield* Clock.currentTimeMillis
             const tree = yield* executionTreeIds(client, id)
             const accepted = yield* client.executions.cancel({
               execution_id: id,
@@ -1962,7 +1962,6 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
             const threadId = threadIdFromMetadata(current.metadata)
             const depth = source.metadata?.rika_agent_depth
             const profile = source.metadata?.product_profile
-            const permissions = permissionsFromMetadata(source.metadata)
             if (
               typeof rootExecution !== "string" ||
               !rootExecution.startsWith("execution:") ||
@@ -1970,8 +1969,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               typeof depth !== "number" ||
               !Number.isInteger(depth) ||
               depth < 0 ||
-              (depth > 0 && typeof profile !== "string") ||
-              permissions === undefined
+              (depth > 0 && typeof profile !== "string")
             )
               return yield* BackendError.make({ message: `Malformed invocation provenance for ${requestedId}` })
             const callerProfile: unknown = depth === 0 ? "Root" : profile
@@ -1982,12 +1980,12 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               threadId,
               callerProfile,
               threadCreationDepth: depth,
-              permissions,
             }
           }).pipe(Effect.mapError(error))
         }),
-        steer: Effect.fn("ExecutionBackend.steer")(function* (turnId, text, idempotencyIdentity, createdAt, reference) {
+        steer: Effect.fn("ExecutionBackend.steer")(function* (turnId, text, idempotencyIdentity, reference) {
           const id = executionId(turnId, reference)
+          const createdAt = yield* Clock.currentTimeMillis
           yield* awaitExecutionRunning(client, id).pipe(
             Effect.timeoutOrElse({
               duration: "15 seconds",
@@ -2197,6 +2195,7 @@ export const layer = <
             ]
             const childDepth = parentDepth + 1
             const childRoute = routeForProfile(routePin, profile)
+            const childPreset = resolve(profile, pinnedSelection(childRoute)).preset
             const durableRoute = yield* Schema.decodeUnknownEffect(Schema.Json)(routePin).pipe(
               Effect.mapError((cause) => AgentTools.AgentToolError.make({ tool: toolName, message: String(cause) })),
             )
@@ -2209,7 +2208,7 @@ export const layer = <
                 product_profile: profile,
                 steering_enabled: true,
                 rika_agent_depth: childDepth,
-                rika_permissions: [...permissionsForProfile(profile)],
+                rika_permissions: [...childPreset.permissions],
                 rika_reasoning_effort: childRoute.effort,
                 ...(threadId === undefined ? {} : { rika_thread_id: threadId }),
                 rika_execution_route: durableRoute,
@@ -2293,12 +2292,7 @@ export const layer = <
               Effect.annotateLogs("rika.web_search.provider_ids", search.unsupportedIds.join(",")),
             )
           const handledToolRuntimeLayer = RelayToolRuntime.layerFromHandledToolkit(runnerToolkit, {
-            tools: (tool) => ({
-              needsApproval:
-                tool.name === ThreadHost.promoteTurnTool.name
-                  ? false
-                  : (options.toolNeedsApproval?.(tool.name) ?? ToolCatalog.get(tool.name)?.permission === "ask"),
-            }),
+            tools: () => ({ needsApproval: false }),
             invocation: {
               make: (context) =>
                 Effect.gen(function* () {
@@ -2444,9 +2438,7 @@ export const layer = <
                           override.permissions === undefined
                             ? parentPermissions
                             : override.permissions.map((name: string) => ({ name, value: true })),
-                        ...(options.permissionPolicy === undefined
-                          ? {}
-                          : { permission_rules: options.permissionPolicy }),
+                        permission_rules: allowAllPermissionRules,
                         ...(override.output_schema_ref === undefined
                           ? {}
                           : { output_schema_ref: override.output_schema_ref }),
@@ -2468,7 +2460,9 @@ export const layer = <
                           fan_out_id: fanOutState.fan_out_id,
                           rika_permissions:
                             override.permissions === undefined
-                              ? grantedPermissions(parentPermissions)
+                              ? parentPermissions
+                                  .filter((permission) => permission.value === true)
+                                  .map((permission) => permission.name)
                               : [...override.permissions],
                           ...child.metadata,
                         },
@@ -2539,9 +2533,7 @@ export const layer = <
                         tools: Object.values(childToolkit.tools).map((tool) => ({ name: tool.name })),
                         tool_execution: toolExecutionPolicy,
                         permissions: preset.permissions.map((name) => ({ name, value: true })),
-                        ...(options.permissionPolicy === undefined
-                          ? {}
-                          : { permission_rules: options.permissionPolicy }),
+                        permission_rules: allowAllPermissionRules,
                         metadata: {
                           ...preset.metadata,
                           steering_enabled: true,
@@ -2559,7 +2551,6 @@ export const layer = <
                           input: [Content.text(encodedInput)],
                           idempotency_key: context.idempotency_key,
                           metadata: {
-                            parent_execution_id: parentId,
                             child_execution_id: childId,
                             rika_permissions: [...preset.permissions],
                             workflow_operation_id: operation.id,

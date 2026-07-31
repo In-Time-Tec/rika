@@ -4,6 +4,7 @@ import { ConfigContract, ConfigService } from "@rika/config"
 import * as Database from "@rika/persistence/database"
 import * as ThreadRepository from "@rika/persistence/repository"
 import * as Thread from "@rika/persistence/thread"
+import * as TranscriptRepository from "@rika/persistence/transcript-repository"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
@@ -57,9 +58,6 @@ const backend = ExecutionBackend.Service.of({
   cancel: (turnId) => Effect.succeed({ turnId, status: "cancelled", events: [] }),
   inspect: () => Effect.void.pipe(Effect.as(undefined)),
   steer: (turnId) => Effect.succeed({ steeringMessageId: `steering:${turnId}:steering:0`, sequence: 0 }),
-  listApprovals: () => Effect.succeed([]),
-  resolveToolApproval: () => Effect.void,
-  resolvePermission: () => Effect.void,
 })
 
 const withServices = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | Scope.Scope>) =>
@@ -127,9 +125,14 @@ const operationLayer = (
   const database = Database.layer(context.databasePath)
   const repositoryLayer = ThreadRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
   const turnRepositoryLayer = TurnRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
+  const transcriptRepositoryLayer = TranscriptRepository.layer.pipe(
+    Layer.provide(database),
+    Layer.provide(BunServices.layer),
+  )
   return Operation.productLayer({
     repositoryLayer,
     turnRepositoryLayer,
+    transcriptRepositoryLayer,
     backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
     defaultWorkspace: context.workspace,
     makeThreadId: Effect.sync(() => Thread.ThreadId.make(`cli-thread-${(identifierSequence += 1)}`)),

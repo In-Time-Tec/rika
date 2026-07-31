@@ -46,6 +46,7 @@ export const PtyAction = Schema.Struct({
   closePty: Schema.optionalKey(Schema.Boolean),
   turnPrompt: Schema.optionalKey(Schema.String),
   turnStatus: Schema.optionalKey(Schema.String),
+  delayMs: Schema.optionalKey(Schema.Int),
   timeoutMs: Schema.optionalKey(Schema.Int),
 })
 export const PtyActions = Schema.fromJsonString(Schema.Array(PtyAction))
@@ -81,10 +82,10 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
     readonly closePty?: boolean
     readonly turnPrompt?: string
     readonly turnStatus?: string
+    readonly delayMs?: number
     readonly timeoutMs?: number
   }>,
   modelScript?: string,
-  toolApprovals?: ReadonlyArray<string>,
   residentEnvironment?: Readonly<Record<string, string>>,
 ) {
   const fs = yield* FileSystem.FileSystem
@@ -111,7 +112,6 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
     RELAY_EVENT_POLL_IDLE_INTERVAL_MILLIS: "250",
     RELAY_SCHEDULER_POLL_INTERVAL_MILLIS: "100",
     ...residentEnvironment,
-    ...(toolApprovals === undefined ? {} : { RIKA_TEST_APPROVAL_TOOLS: toolApprovals.join(",") }),
     ...(modelScript === undefined
       ? { RIKA_TEST_MODEL_RESPONSE: "completed" }
       : { RIKA_TEST_MODEL_SCRIPT: modelScript }),
@@ -156,11 +156,13 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
     names.filter((name) => name.startsWith("client-") && name.endsWith(".jsonl")),
     (name) => fs.readFileString(`${state}/diagnostics/${name}`),
   )
+  const workspaceFiles = yield* fs.readDirectory(workspace)
   return {
     ...result,
     output: stripTerminalControl(Buffer.from(result.output, "base64").toString("utf8")),
     clientLogs: clientLogs.join("\n"),
     names,
+    workspaceFiles,
     database: `${state}/rika.db`,
   }
 })

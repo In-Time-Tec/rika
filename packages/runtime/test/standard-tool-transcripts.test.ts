@@ -56,8 +56,6 @@ for (const [name, parameters, malformedField] of cases) {
           modelVariantPolicy: "fixed-selection",
           webSearchCredentials: { parallel: Redacted.make("web-test-key") },
           toolRuntimeLayer: runtimeLayer,
-          toolNeedsApproval: () => false,
-          permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
         })
         const backendContext = yield* Layer.build(backendLayer)
         return yield* Effect.gen(function* () {
@@ -66,7 +64,6 @@ for (const [name, parameters, malformedField] of cases) {
             threadId: `thread-${name}`,
             turnId: `turn-${name}`,
             prompt: `invoke ${name}`,
-            startedAt: 1,
           })
           return { completed, replay: yield* backend.replay(`turn-${name}`), requests: yield* fixture.requests }
         }).pipe(Effect.provide(backendContext))
@@ -83,7 +80,6 @@ for (const [name, parameters, malformedField] of cases) {
           Effect.gen(function* () {
             const transcript = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(result.requests[1])
             yield* Effect.sync(() => {
-              const definition = Catalog.get(name)!
               const types = result.replay.events.map((event) => event.type)
               expect(result.completed.status).toBe("completed")
               expect(types).toContain("tool.call.requested")
@@ -91,7 +87,6 @@ for (const [name, parameters, malformedField] of cases) {
               expect(result.replay.events).toEqual(
                 result.completed.events.filter((event) => event.data?.transient_index === undefined),
               )
-              expect(definition.permission).toBe("allow")
               expect(transcript).not.toContain("rika-tool-matrix-")
               if (name !== "read") expect(transcript).toContain('"truncated":true')
               if (name === "read") expect(transcript).toContain("[REDACTED]")
@@ -128,8 +123,6 @@ for (const [name, parameters, malformedField] of cases) {
                     modelVariantPolicy: "fixed-selection",
                     webSearchCredentials: { parallel: Redacted.make("web-test-key") },
                     toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "unexpected", truncated: false })),
-                    toolNeedsApproval: () => false,
-                    permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
                   }),
                 )
                 return yield* Effect.gen(function* () {
@@ -138,7 +131,6 @@ for (const [name, parameters, malformedField] of cases) {
                     threadId: `bad-${name}`,
                     turnId: `bad-${name}`,
                     prompt: "bad",
-                    startedAt: 1,
                   })
                   return { execution, requests: yield* fixture.requests }
                 }).pipe(Effect.provide(backendContext))

@@ -6,8 +6,9 @@ export const Status = Schema.Literals(statuses)
 export type Status = typeof Status.Type
 
 export const terminalStatuses = ["completed", "failed", "cancelled"] as const satisfies ReadonlyArray<Status>
+export type TerminalStatus = (typeof terminalStatuses)[number]
 
-export const isTerminalStatus = (status: Status): boolean => {
+export const isTerminalStatus = (status: Status): status is TerminalStatus => {
   switch (status) {
     case "completed":
     case "failed":

@@ -5,7 +5,7 @@ import * as ThreadRepository from "./thread-repository"
 import { ThreadId } from "./thread-schema"
 import { EditTotals, RepairCandidate, ThreadSummary } from "./thread-summary-schema"
 import * as TurnRepository from "./turn-repository"
-import { Status, TurnId } from "./turn-schema"
+import { Status, TurnId, isAgentExecution } from "./turn-schema"
 import * as ThreadState from "./thread-state"
 
 export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("ThreadSummaryRepositoryError", {
@@ -78,30 +78,33 @@ const listLimit = (value: number | undefined) => Math.min(Math.max(value ?? 100,
 
 const decodeSummary = (row: unknown) =>
   Schema.decodeUnknownEffect(SummaryRow)(row).pipe(
-    Effect.map((value): ThreadSummary => {
-      const editTotals =
-        value.turn_count > 0 && value.turn_count === value.current_activity_count
-          ? {
-              added: Math.max(0, value.added),
-              modified: Math.max(0, value.modified),
-              removed: Math.max(0, value.removed),
-            }
-          : undefined
-      return {
-        id: ThreadId.make(value.id),
-        workspace: value.workspace,
-        title: value.title,
-        pinned: value.pinned === 1,
-        archived: value.archived === 1,
-        status: ThreadState.threadStateFromRank({
-          rank: value.status_rank,
-          lastStatus: value.last_status ?? undefined,
-        }),
-        unread: value.last_activity_at > (value.last_read_at ?? 0),
-        lastActivityAt: value.last_activity_at,
-        ...(editTotals === undefined ? {} : { editTotals }),
-      }
-    }),
+    Effect.flatMap((value) =>
+      Effect.gen(function* () {
+        const editTotals =
+          value.turn_count > 0 && value.turn_count === value.current_activity_count
+            ? {
+                added: Math.max(0, value.added),
+                modified: Math.max(0, value.modified),
+                removed: Math.max(0, value.removed),
+              }
+            : undefined
+        const id = yield* Schema.decodeUnknownEffect(ThreadId)(value.id)
+        return {
+          id,
+          workspace: value.workspace,
+          title: value.title,
+          pinned: value.pinned === 1,
+          archived: value.archived === 1,
+          status: ThreadState.threadStateFromRank({
+            rank: value.status_rank,
+            lastStatus: value.last_status ?? undefined,
+          }),
+          unread: value.last_activity_at > (value.last_read_at ?? 0),
+          lastActivityAt: value.last_activity_at,
+          ...(editTotals === undefined ? {} : { editTotals }),
+        } satisfies ThreadSummary
+      }),
+    ),
     Effect.mapError(repositoryError),
   )
 
@@ -109,9 +112,11 @@ const decodeRepair = (row: unknown) =>
   Effect.gen(function* () {
     const value = yield* Schema.decodeUnknownEffect(RepairRow)(row)
     const status = yield* Schema.decodeUnknownEffect(Status)(value.status)
+    const turnId = yield* Schema.decodeUnknownEffect(TurnId)(value.turn_id)
+    const threadId = yield* Schema.decodeUnknownEffect(ThreadId)(value.thread_id)
     return RepairCandidate.make({
-      turnId: TurnId.make(value.turn_id),
-      threadId: ThreadId.make(value.thread_id),
+      turnId,
+      threadId,
       status,
       ...(value.last_cursor === null ? {} : { lastCursor: value.last_cursor }),
     })
@@ -144,8 +149,10 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
         const currentProjected = history.flatMap((turn) => {
           const activity = activityValues.get(turn.id)
           return activity !== undefined &&
-            activity.projectedCursor === turn.lastCursor &&
-            (!ExecutionStatus.isTerminalStatus(turn.status) || activity.complete)
+            (isAgentExecution(turn)
+              ? activity.projectedCursor === turn.lastCursor &&
+                (!ExecutionStatus.isTerminalStatus(turn.status) || activity.complete)
+              : !ExecutionStatus.isTerminalStatus(turn.status) || activity.complete)
             ? [activity]
             : []
         })
@@ -223,6 +230,7 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
         turns.list(thread.id).pipe(Effect.mapError(repositoryError)),
       )).flat()
       return history
+        .filter(isAgentExecution)
         .filter((turn) => {
           const activity = activityValues.get(turn.id)
           return (
@@ -313,9 +321,11 @@ export const layer = Layer.effect(
           turn.last_cursor
         FROM rika_turns AS turn
         LEFT JOIN rika_thread_turn_activity AS activity ON activity.turn_id = turn.id
-        WHERE activity.turn_id IS NULL
+        WHERE turn.turn_kind = 'AgentExecution' AND (
+          activity.turn_id IS NULL
           OR activity.projected_cursor IS NOT turn.last_cursor
           OR (turn.status IN ('completed', 'failed', 'cancelled') AND activity.complete = 0)
+        )
         ORDER BY turn.created_at ASC, turn.rowid ASC
         LIMIT ${listLimit(limit)}`.pipe(Effect.mapError(repositoryError))
         return yield* Effect.all(rows.map(decodeRepair))

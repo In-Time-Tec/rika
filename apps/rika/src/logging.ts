@@ -1,4 +1,17 @@
-import { Cause, Clock, DateTime, Duration, Effect, FileSystem, Layer, Logger, Option, Path, References } from "effect"
+import {
+  Cause,
+  Clock,
+  DateTime,
+  Duration,
+  Effect,
+  FileSystem,
+  Layer,
+  Logger,
+  Option,
+  Path,
+  Queue,
+  References,
+} from "effect"
 
 export type ProcessRole = "client" | "resident"
 export type LogLevel = "debug" | "info" | "warning" | "error"
@@ -242,9 +255,30 @@ export const layer = (options: {
         ),
       ),
     )
-    return yield* structuredLogger.pipe(
-      Logger.toFile(open, { flag: "ax", mode: 0o600, batchWindow: Duration.seconds(1) }),
+    const logFile = yield* fs.open(open, { flag: "ax", mode: 0o600 })
+    const encoder = new TextEncoder()
+    const wakeups = yield* Queue.sliding<void>(1)
+    let buffer: Array<string> = []
+    const flush = Effect.suspend(() => {
+      if (buffer.length === 0) return Effect.void
+      const chunk = buffer
+      buffer = []
+      return Effect.ignore(logFile.write(encoder.encode(`${chunk.join("\n")}\n`)))
+    })
+    yield* Effect.forkScoped(
+      Effect.gen(function* () {
+        while (true) {
+          yield* Queue.take(wakeups)
+          yield* Effect.sleep(Duration.seconds(1))
+          yield* flush
+        }
+      }),
     )
+    yield* Effect.addFinalizer(() => flush)
+    return Logger.make((options_) => {
+      buffer.push(structuredLogger.log(options_))
+      Queue.offerUnsafe(wakeups, undefined)
+    })
   })
   return Layer.merge(
     Logger.layer([logger]),

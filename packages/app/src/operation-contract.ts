@@ -2,9 +2,9 @@ import * as Thread from "@rika/persistence/thread"
 import * as ThreadSummary from "@rika/persistence/thread-summary"
 import * as TranscriptPage from "@rika/persistence/transcript-page"
 import * as Turn from "@rika/persistence/turn"
-import * as ExecutionBackend from "@rika/runtime/contract"
 import { Context, Effect, Function, Layer, Runtime, Schema } from "effect"
 import { ModeId } from "@rika/config/modes"
+import * as IngestProjection from "./execution-ingest-projection-contract"
 
 const Mode = ModeId
 const ClientWorkspace = { clientWorkspace: Schema.optionalKey(Schema.String) }
@@ -156,13 +156,6 @@ const McpNamed = Schema.Struct({
   action: Schema.Literals(["remove", "enable", "disable", "oauth-login", "oauth-logout"]),
   name: Schema.String,
 })
-const McpApprove = Schema.Struct({
-  ...ClientWorkspace,
-  _tag: Schema.tag("Mcp"),
-  action: Schema.tag("approve"),
-  name: Schema.String,
-  workspace: Schema.optionalKey(Schema.String),
-})
 const McpOauthStatus = Schema.Struct({
   ...ClientWorkspace,
   _tag: Schema.tag("Mcp"),
@@ -235,7 +228,6 @@ export const Input = Schema.Union([
   McpAddCommand,
   McpAddUrl,
   McpNamed,
-  McpApprove,
   McpOauthStatus,
   SkillList,
   SkillNamed,
@@ -335,16 +327,50 @@ export type InteractiveEvent =
       readonly globalCostUsd: number
     }
   | {
-      readonly _tag: "TranscriptPatched"
+      readonly _tag: "TranscriptProjectionStarted"
       readonly selectionEpoch: number
       readonly threadId: Thread.ThreadId
-      readonly turnId: Turn.TurnId
-      readonly rootTurnId?: Turn.TurnId
-      readonly rootTurnCostUsd?: number
-      readonly threadCostUsd?: number
-      readonly globalCostUsd?: number
-      readonly event: ExecutionBackend.Event
-      readonly revision: number
+      readonly rootTurnId: Turn.TurnId
+      readonly turn: Turn.Turn
+      readonly streamId: string
+      readonly patchRevision: number
+      readonly state: IngestProjection.VisibleState
+      readonly units: ReadonlyArray<IngestProjection.Unit>
+      readonly rootStatus?: IngestProjection.TerminalStatus
+    }
+  | {
+      readonly _tag: "TranscriptProjectionPatched"
+      readonly selectionEpoch: number
+      readonly threadId: Thread.ThreadId
+      readonly rootTurnId: Turn.TurnId
+      readonly turn?: Turn.Turn
+      readonly streamId: string
+      readonly baseRevision: number
+      readonly patchRevision: number
+      readonly origin: IngestProjection.ProjectionOrigin
+      readonly state: IngestProjection.VisibleState
+      readonly delta: IngestProjection.UnitDelta
+      readonly rootStatus?: IngestProjection.TerminalStatus
+    }
+  | {
+      readonly _tag: "TranscriptProjectionStopped"
+      readonly selectionEpoch: number
+      readonly threadId: Thread.ThreadId
+      readonly rootTurnId: Turn.TurnId
+      readonly streamId: string
+      readonly patchRevision: number
+      readonly status: IngestProjection.TerminalStatus
+    }
+  | {
+      readonly _tag: "TranscriptProjectionFailed"
+      readonly selectionEpoch: number
+      readonly threadId: Thread.ThreadId
+      readonly rootTurnId: Turn.TurnId
+      readonly streamId: string
+      readonly patchRevision: number
+      readonly executionId: string
+      readonly reason: string
+      readonly message: string
     }
   | {
       readonly _tag: "TranscriptResyncRequired"
@@ -429,16 +455,6 @@ export type InteractiveEvent =
       readonly activeTurn?: Turn.Turn
     }
   | {
-      readonly _tag: "TranscriptReplaced"
-      readonly selectionEpoch: number
-      readonly threadId: Thread.ThreadId
-      readonly entries: ReadonlyArray<TranscriptPage.Entry>
-      readonly hasOlder: boolean
-      readonly threadCostUsd?: number
-      readonly globalCostUsd?: number
-      readonly oldestCursor?: TranscriptPage.PageCursor
-    }
-  | {
       readonly _tag: "TranscriptPagePrepended"
       readonly selectionEpoch: number
       readonly threadId: Thread.ThreadId
@@ -458,15 +474,20 @@ export type InteractiveEvent =
       readonly threadCostUsd?: number
       readonly newestCursor?: TranscriptPage.PageCursor
     }
-  | { readonly _tag: "ShellPermissionRequested"; readonly id: string; readonly command: string }
-  | { readonly _tag: "ShellPermissionCancelled"; readonly id: string }
-  | { readonly _tag: "ShellCompleted"; readonly command: string; readonly text: string; readonly incognito: boolean }
+  | {
+      readonly _tag: "ShellCompleted"
+      readonly threadId: Thread.ThreadId
+      readonly command: string
+      readonly text: string
+      readonly incognito: boolean
+      readonly status: "completed" | "failed" | "cancelled"
+    }
   | {
       readonly _tag: "ExecutionControlled"
       readonly selectionEpoch: number
       readonly threadId?: Thread.ThreadId
       readonly turnId?: Turn.TurnId
-      readonly action: "steered" | "cancelled" | "permission-resolved"
+      readonly action: "steered" | "cancelled"
       readonly agentResponseArrived?: boolean
       readonly steeringSequence?: number
       readonly steeringText?: string
@@ -518,16 +539,34 @@ export const InteractiveEventSchema = Schema.Union([
     globalCostUsd: Schema.Finite,
   }),
   Schema.Struct({
-    _tag: Schema.tag("TranscriptPatched"),
+    _tag: Schema.tag("TranscriptProjectionStarted"),
+    selectionEpoch: Schema.Int,
+    ...IngestProjection.SnapshotSchema.fields,
+  }),
+  Schema.Struct({
+    _tag: Schema.tag("TranscriptProjectionPatched"),
+    selectionEpoch: Schema.Int,
+    ...IngestProjection.PatchSchema.fields,
+  }),
+  Schema.Struct({
+    _tag: Schema.tag("TranscriptProjectionStopped"),
     selectionEpoch: Schema.Int,
     threadId: Thread.ThreadId,
-    turnId: Turn.TurnId,
-    rootTurnId: Schema.optionalKey(Turn.TurnId),
-    rootTurnCostUsd: Schema.optionalKey(Schema.Finite),
-    threadCostUsd: Schema.optionalKey(Schema.Finite),
-    globalCostUsd: Schema.optionalKey(Schema.Finite),
-    event: ExecutionBackend.Event,
-    revision: Schema.Finite,
+    rootTurnId: Turn.TurnId,
+    streamId: Schema.String,
+    patchRevision: Schema.Int,
+    status: IngestProjection.TerminalStatusSchema,
+  }),
+  Schema.Struct({
+    _tag: Schema.tag("TranscriptProjectionFailed"),
+    selectionEpoch: Schema.Int,
+    threadId: Thread.ThreadId,
+    rootTurnId: Turn.TurnId,
+    streamId: Schema.String,
+    patchRevision: Schema.Int,
+    executionId: Schema.String,
+    reason: Schema.String,
+    message: Schema.String,
   }),
   Schema.Struct({
     _tag: Schema.tag("TranscriptResyncRequired"),
@@ -638,16 +677,6 @@ export const InteractiveEventSchema = Schema.Union([
     activeTurn: Schema.optionalKey(Turn.Turn),
   }),
   Schema.Struct({
-    _tag: Schema.tag("TranscriptReplaced"),
-    selectionEpoch: Schema.Int,
-    threadId: Thread.ThreadId,
-    entries: Schema.Array(TranscriptPage.EntrySchema),
-    hasOlder: Schema.Boolean,
-    threadCostUsd: Schema.optionalKey(Schema.Finite),
-    globalCostUsd: Schema.optionalKey(Schema.Finite),
-    oldestCursor: Schema.optionalKey(TranscriptPage.PageCursor),
-  }),
-  Schema.Struct({
     _tag: Schema.tag("TranscriptPagePrepended"),
     selectionEpoch: Schema.Int,
     threadId: Thread.ThreadId,
@@ -667,20 +696,20 @@ export const InteractiveEventSchema = Schema.Union([
     threadCostUsd: Schema.optionalKey(Schema.Finite),
     newestCursor: Schema.optionalKey(TranscriptPage.PageCursor),
   }),
-  Schema.Struct({ _tag: Schema.tag("ShellPermissionRequested"), id: Schema.String, command: Schema.String }),
-  Schema.Struct({ _tag: Schema.tag("ShellPermissionCancelled"), id: Schema.String }),
   Schema.Struct({
     _tag: Schema.tag("ShellCompleted"),
+    threadId: Thread.ThreadId,
     command: Schema.String,
     text: Schema.String,
     incognito: Schema.Boolean,
+    status: Schema.Literals(["completed", "failed", "cancelled"]),
   }),
   Schema.Struct({
     _tag: Schema.tag("ExecutionControlled"),
     selectionEpoch: Schema.Int,
     threadId: Schema.optionalKey(Thread.ThreadId),
     turnId: Schema.optionalKey(Turn.TurnId),
-    action: Schema.Literals(["steered", "cancelled", "permission-resolved"]),
+    action: Schema.Literals(["steered", "cancelled"]),
     agentResponseArrived: Schema.optionalKey(Schema.Boolean),
     steeringSequence: Schema.optionalKey(Schema.Int),
     steeringText: Schema.optionalKey(Schema.String),
@@ -716,7 +745,12 @@ export const InteractiveCommand = Schema.Union([
       }),
     ),
   }),
-  Schema.Struct({ _tag: Schema.tag("Shell"), command: Schema.String, incognito: Schema.Boolean }),
+  Schema.Struct({
+    _tag: Schema.tag("Shell"),
+    threadId: Schema.optionalKey(Thread.ThreadId),
+    command: Schema.String,
+    incognito: Schema.Boolean,
+  }),
   Schema.Struct({ _tag: Schema.tag("EditQueued"), turnId: Schema.String, prompt: Schema.String }),
   Schema.Struct({ _tag: Schema.tag("Dequeue"), turnId: Schema.String }),
   Schema.Struct({ _tag: Schema.tag("SteerQueued"), turnId: Schema.String, text: Schema.String }),
@@ -725,12 +759,6 @@ export const InteractiveCommand = Schema.Union([
   Schema.Struct({ _tag: Schema.tag("Cancel") }),
   Schema.Struct({ _tag: Schema.tag("Quit") }),
   Schema.Struct({ _tag: Schema.tag("NewThread") }),
-  Schema.Struct({
-    _tag: Schema.tag("ResolvePermission"),
-    waitId: Schema.String,
-    kind: Schema.Literals(["permission", "tool-approval"]),
-    decision: Schema.Literals(["allow", "deny", "always"]),
-  }),
   Schema.Struct({
     _tag: Schema.tag("SelectThread"),
     threadId: Schema.String,
@@ -752,11 +780,6 @@ export const InteractiveCommand = Schema.Union([
   }),
   Schema.Struct({ _tag: Schema.tag("PreviewThread"), threadId: Schema.String }),
   Schema.Struct({ _tag: Schema.tag("ReopenThread"), selectionEpoch: Schema.Int }),
-  Schema.Struct({
-    _tag: Schema.tag("Replay"),
-    turnId: Schema.String,
-    afterCursor: Schema.optionalKey(Schema.String),
-  }),
 ])
 export type InteractiveCommand = typeof InteractiveCommand.Type
 
@@ -769,7 +792,11 @@ export interface InteractiveSession {
     modelTuning?: { readonly fastMode?: boolean },
     submissionId?: string,
   ) => Effect.Effect<void, OperationUnavailable>
-  readonly shell: (command: string, incognito: boolean) => Effect.Effect<void, OperationUnavailable>
+  readonly shell: (
+    threadId: Thread.ThreadId | undefined,
+    command: string,
+    incognito: boolean,
+  ) => Effect.Effect<void, OperationUnavailable>
   readonly editQueued: (turnId: string, prompt: string) => Effect.Effect<void, OperationUnavailable>
   readonly dequeue: (turnId: string) => Effect.Effect<void, OperationUnavailable>
   readonly steerQueued: (turnId: string, text: string) => Effect.Effect<void, OperationUnavailable>
@@ -778,11 +805,6 @@ export interface InteractiveSession {
   readonly cancel: Effect.Effect<void, OperationUnavailable>
   readonly quit: Effect.Effect<void, OperationUnavailable>
   readonly newThread: Effect.Effect<void, OperationUnavailable>
-  readonly resolvePermission: (
-    waitId: string,
-    kind: "permission" | "tool-approval",
-    decision: "allow" | "deny" | "always",
-  ) => Effect.Effect<void, OperationUnavailable>
   readonly selectThread: (threadId: string, selectionEpoch: number) => Effect.Effect<void, OperationUnavailable>
   readonly readQueue: (threadId: string) => Effect.Effect<void, OperationUnavailable>
   readonly loadOlder: (
@@ -798,7 +820,6 @@ export interface InteractiveSession {
   ) => Effect.Effect<void, OperationUnavailable>
   readonly previewThread: (threadId: string) => Effect.Effect<void, OperationUnavailable>
   readonly reopenThread: (selectionEpoch: number) => Effect.Effect<void, OperationUnavailable>
-  readonly replay: (turnId: string, afterCursor: string | undefined) => Effect.Effect<void, OperationUnavailable>
 }
 
 const executeInteractiveCommandImpl = (session: InteractiveSession, command: InteractiveCommand) => {
@@ -812,7 +833,7 @@ const executeInteractiveCommandImpl = (session: InteractiveSession, command: Int
         command.submissionId,
       )
     case "Shell":
-      return session.shell(command.command, command.incognito)
+      return session.shell(command.threadId, command.command, command.incognito)
     case "EditQueued":
       return session.editQueued(command.turnId, command.prompt)
     case "Dequeue":
@@ -829,8 +850,6 @@ const executeInteractiveCommandImpl = (session: InteractiveSession, command: Int
       return session.quit
     case "NewThread":
       return session.newThread
-    case "ResolvePermission":
-      return session.resolvePermission(command.waitId, command.kind, command.decision)
     case "SelectThread":
       return session.selectThread(command.threadId, command.selectionEpoch)
     case "ReadQueue":
@@ -843,8 +862,6 @@ const executeInteractiveCommandImpl = (session: InteractiveSession, command: Int
       return session.previewThread(command.threadId)
     case "ReopenThread":
       return session.reopenThread(command.selectionEpoch)
-    case "Replay":
-      return session.replay(command.turnId, command.afterCursor)
   }
 }
 

@@ -7,7 +7,6 @@ export interface Options {
   readonly globalRoot: string
   readonly workspaceRoot: string
   readonly configPath: string
-  readonly trustPath: string
   readonly generationsPath: string
 }
 
@@ -294,13 +293,6 @@ export const run = Effect.fn("ExtensionOperations.run")(function* (
           return yield* Error.make({ message: `Duplicate server: ${input.name}` })
         if ("name" in input && input.action !== "add" && !names.has(input.name))
           return yield* Error.make({ message: `MCP server not found: ${input.name}` })
-        if (input.action === "approve") {
-          const trust = yield* readDocument(fileSystem, options.trustPath)
-          const approved = new Set(yield* stringArray(trust.approved, "approved"))
-          approved.add(`${input.workspace ?? options.workspaceRoot}:${input.name}`)
-          yield* writeDocument(fileSystem, path, options.trustPath, { ...trust, approved: [...approved].toSorted() })
-          return
-        }
         if (input.action === "add") {
           const definition =
             "url" in input ? { url: input.url } : { command: input.command[0], args: input.command.slice(1) }

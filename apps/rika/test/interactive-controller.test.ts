@@ -6,6 +6,7 @@ import * as Turn from "@rika/persistence/turn"
 import * as Transcript from "@rika/transcript"
 import { ExecutionEvents, Keys, Palette, ViewState } from "@rika/tui"
 import { renderTranscriptStyled } from "@rika/tui/adapter"
+import { HashMap } from "effect"
 import { expect, it } from "vitest"
 
 const thread: Thread.Thread = {
@@ -33,6 +34,7 @@ const entries = (
   }> = [],
 ) => {
   const turn = {
+    _tag: "AgentExecution" as const,
     id: Turn.TurnId.make(id),
     threadId: thread.id,
     prompt: id,
@@ -58,12 +60,19 @@ const entries = (
   )
 }
 
+type AgentTranscriptEntry = Omit<TranscriptRepository.Entry, "turn"> & {
+  readonly turn: Turn.AgentExecutionTurn
+}
+
+const asRunningEntry = (entry: TranscriptRepository.Entry): AgentTranscriptEntry => {
+  if (!Turn.isAgentExecution(entry.turn)) throw new TypeError("Running transcript fixture requires an agent turn")
+  return { ...entry, turn: { ...entry.turn, status: "running" } }
+}
+
 const cursor = (entry: TranscriptRepository.Entry): TranscriptRepository.PageCursor => ({
   createdAt: entry.turn.createdAt,
   turnId: entry.turn.id,
-  sequence: entry.unit.order.sequence,
-  part: entry.unit.order.part,
-  key: entry.unit.key,
+  orderKey: Transcript.encodeUnitOrder(entry.unit.order),
 })
 
 const initialState = (): InteractiveController.State => ({
@@ -72,10 +81,144 @@ const initialState = (): InteractiveController.State => ({
   entries: [],
   revisions: new Map(),
   liveProjections: new Map(),
-  transientEventCursors: new Set(),
   threadCostUsd: 0,
   selectionEpoch: 0,
 })
+
+const visibleState = (projection: Transcript.Projection) => ({
+  revision: projection.revision,
+  modelPhase: projection.modelPhase,
+  ...(projection.usableCompletionSequence === undefined
+    ? {}
+    : { usableCompletionSequence: projection.usableCompletionSequence }),
+})
+
+const unitDelta = (previous: Transcript.Projection, next: Transcript.Projection): Transcript.UnitDelta => {
+  const previousUnits = new Map(previous.units.map((unit) => [unit.key, unit] as const))
+  const nextUnits = new Map(next.units.map((unit) => [unit.key, unit] as const))
+  return {
+    upsert: next.units.filter((unit) => JSON.stringify(previousUnits.get(unit.key)) !== JSON.stringify(unit)),
+    remove: previous.units.flatMap((unit) => (nextUnits.has(unit.key) ? [] : [unit.key])),
+  }
+}
+
+const projectionOrigin = (
+  event: Transcript.SourceEvent,
+  executionId: string,
+): Extract<
+  Extract<Operation.InteractiveEvent, { readonly _tag: "TranscriptProjectionPatched" }>["origin"],
+  { readonly _tag: "Event" }
+> => {
+  const blockId = event.data?.tool_call_id ?? event.data?.call_id ?? event.data?.id
+  const messageSequences = event.type === "steering.delivered" ? event.data?.message_sequences : undefined
+  const steeringSequences = Array.isArray(messageSequences)
+    ? messageSequences.filter((value): value is number => Number.isSafeInteger(value))
+    : undefined
+  return {
+    _tag: "Event",
+    executionId,
+    cursor: event.cursor,
+    sequence: event.sequence,
+    type: event.type,
+    createdAt: event.createdAt,
+    transient: Transcript.isTransientEvent(event),
+    ...(event.text === undefined ? {} : { text: event.text }),
+    ...(typeof blockId === "string" ? { blockId } : {}),
+    ...(steeringSequences === undefined || steeringSequences.length === 0 ? {} : { steeringSequences }),
+  }
+}
+
+const terminalRootStatus = (event: Transcript.SourceEvent): "completed" | "failed" | "cancelled" | undefined => {
+  if (event.type === "execution.completed") return "completed"
+  if (event.type === "execution.failed") return "failed"
+  if (event.type === "execution.cancelled") return "cancelled"
+  return undefined
+}
+
+const transientDelta = (index: number, text: string): Transcript.SourceEvent => ({
+  cursor: `transient-${index}`,
+  sequence: 2,
+  type: "model.output.delta",
+  createdAt: 3 + index,
+  text,
+  data: { delta: text, transient_index: index, model_call_id: "call-1", model_attempt_id: "attempt-1" },
+})
+
+const startProjection = (state: InteractiveController.State, turn: Turn.Turn, projection: Transcript.Projection) =>
+  InteractiveController.update(state, {
+    _tag: "TranscriptProjectionStarted",
+    selectionEpoch: state.selectionEpoch,
+    threadId: turn.threadId,
+    rootTurnId: turn.id,
+    turn,
+    streamId: `stream:${turn.id}`,
+    patchRevision: 0,
+    state: visibleState(projection),
+    units: projection.units,
+  })
+
+const openProjectionStream = (state: InteractiveController.State, turnId: string) => {
+  const stream = state.projectionStreams?.get(turnId)
+  if (stream?._tag !== "Open") throw new Error(`Projection ${turnId} is not open`)
+  return stream
+}
+
+const makeProjectionFeed = (
+  selected: InteractiveController.State,
+  turn: Turn.Turn,
+  initialProjection: Transcript.Projection,
+) => {
+  const streamId = `stream:${turn.id}`
+  let state = startProjection(selected, turn, initialProjection).state
+  let projection = initialProjection
+  let patchRevision = 0
+  return {
+    get state() {
+      return state
+    },
+    get projection() {
+      return projection
+    },
+    apply(
+      event: Transcript.SourceEvent,
+      options: { readonly executionId?: string; readonly projection?: Transcript.Projection } = {},
+    ) {
+      const next = options.projection ?? Transcript.applyEvent(projection, event)
+      const baseRevision = patchRevision
+      patchRevision += 1
+      const rootStatus = terminalRootStatus(event)
+      const update = InteractiveController.update(state, {
+        _tag: "TranscriptProjectionPatched",
+        selectionEpoch: state.selectionEpoch,
+        threadId: turn.threadId,
+        rootTurnId: turn.id,
+        streamId,
+        baseRevision,
+        patchRevision,
+        origin: projectionOrigin(event, options.executionId ?? `execution:${turn.id}`),
+        state: visibleState(next),
+        delta: unitDelta(projection, next),
+        ...(rootStatus === undefined ? {} : { rootStatus }),
+      })
+      state = update.state
+      projection = next
+      return update
+    },
+    stop(status: "completed" | "failed" | "cancelled") {
+      const update = InteractiveController.update(state, {
+        _tag: "TranscriptProjectionStopped",
+        selectionEpoch: state.selectionEpoch,
+        threadId: turn.threadId,
+        rootTurnId: turn.id,
+        streamId,
+        patchRevision,
+        status,
+      })
+      state = update.state
+      return update
+    },
+  }
+}
 
 const key = (input: Partial<Keys.Key> & Pick<Keys.Key, "name">): Keys.Key => ({
   name: input.name,
@@ -300,8 +443,12 @@ it("preserves repository order across Turns with overlapping event sequences", (
   expect(page.state.model.entries.map((entry) => entry.text)).toEqual(["old", "old answer", "new", "new answer"])
 })
 
-it("rejects duplicate patches and stale units with the same semantic identity", () => {
+it("keeps a live projection when stale persisted units arrive for the same Turn", () => {
   const initial = initialState()
+  const persisted = entries("new", 2, [
+    { cursor: "page-1", sequence: 1, type: "model.output.completed", createdAt: 1, text: "page answer" },
+  ])
+  const turn = { ...persisted[0]!.turn, status: "running" as const }
   const page = InteractiveController.update(initial, {
     _tag: "SelectionLoaded",
     selectionEpoch: 1,
@@ -309,57 +456,41 @@ it("rejects duplicate patches and stale units with the same semantic identity", 
     queueRevision: 0,
     queue: [],
     thread,
-    entries: entries("new", 2, [
-      { cursor: "page-1", sequence: 1, type: "model.output.completed", createdAt: 1, text: "page answer" },
-    ]),
+    entries: persisted,
     hasOlder: false,
     threadCostUsd: 0,
+    activeTurn: turn,
   })
   const liveEvent = {
-    executionId: "execution:new",
     cursor: "live-2",
     sequence: 2,
     type: "model.output.completed",
     createdAt: 2,
     text: "live answer",
   }
-  const patched = InteractiveController.update(page.state, {
-    _tag: "TranscriptPatched",
-    selectionEpoch: 1,
-    threadId: thread.id,
-    turnId: Turn.TurnId.make("new"),
-    event: liveEvent,
-    revision: 2,
-  })
-  expect(patched.state.liveProjections.has("new")).toBe(false)
-  expect(patched.state.entries.some((entry) => entry.turn.id === "new" && entry.projectionRevision === 2)).toBe(true)
-  const duplicate = InteractiveController.update(patched.state, {
-    _tag: "TranscriptPatched",
-    selectionEpoch: 1,
-    threadId: thread.id,
-    turnId: Turn.TurnId.make("new"),
-    event: liveEvent,
-    revision: 2,
-  })
-  const stale = InteractiveController.update(duplicate.state, {
+  const projection = Transcript.project(turn.id, turn.prompt, [
+    { cursor: "page-1", sequence: 1, type: "model.output.completed", createdAt: 1, text: "page answer" },
+  ])
+  const feed = makeProjectionFeed(page.state, turn, projection)
+  const patched = feed.apply(liveEvent)
+  const stale = InteractiveController.update(patched.state, {
     _tag: "SelectionLoaded",
     selectionEpoch: 1,
     activitySequence: 0,
     queueRevision: 0,
     queue: [],
     thread,
-    entries: entries("new", 2, [
-      { cursor: "page-1", sequence: 1, type: "model.output.completed", createdAt: 1, text: "page answer" },
-    ]),
+    entries: persisted,
     hasOlder: false,
     threadCostUsd: 0,
+    activeTurn: turn,
   })
   const staleOlderEntry = entries("new", 2, [
     { cursor: "older-0", sequence: 0, type: "model.output.completed", createdAt: 0, text: "older answer" },
   ]).find((entry) => entry.unit.content._tag === "Entry" && entry.unit.content.role === "assistant")
   expect(staleOlderEntry).toBeDefined()
   if (staleOlderEntry === undefined) return
-  const prepended = InteractiveController.update(duplicate.state, {
+  const prepended = InteractiveController.update(patched.state, {
     _tag: "TranscriptPagePrepended",
     selectionEpoch: 1,
     threadId: thread.id,
@@ -369,14 +500,20 @@ it("rejects duplicate patches and stale units with the same semantic identity", 
   })
 
   expect(patched.state.model.entries.at(-1)?.text).toBe("live answer")
-  expect(duplicate.state).toBe(patched.state)
   expect(stale.state).toBe(patched.state)
   expect(prepended.state.model.entries.map((entry) => entry.text)).not.toContain("older answer")
+  expect(prepended.state.model.entries.map((entry) => entry.text)).toContain("live answer")
   expect(prepended.state.revisions.get("new")).toBe(2)
 })
 
 it("applies transient output deltas that share the durable head sequence", () => {
   const initial = initialState()
+  const source = [
+    { cursor: "started-1", sequence: 1, type: "execution.started", createdAt: 1 },
+    { cursor: "prepared-2", sequence: 2, type: "model.input.prepared", createdAt: 2 },
+  ]
+  const persisted = entries("new", 2, source)
+  const turn = { ...persisted[0]!.turn, status: "running" as const }
   const page = InteractiveController.update(initial, {
     _tag: "SelectionLoaded",
     selectionEpoch: 1,
@@ -384,53 +521,26 @@ it("applies transient output deltas that share the durable head sequence", () =>
     queueRevision: 0,
     queue: [],
     thread,
-    entries: entries("new", 2, [
-      { cursor: "started-1", sequence: 1, type: "execution.started", createdAt: 1 },
-      { cursor: "prepared-2", sequence: 2, type: "model.input.prepared", createdAt: 2 },
-    ]),
+    entries: persisted,
     hasOlder: false,
     threadCostUsd: 0,
+    activeTurn: turn,
   })
   expect(page.state.revisions.get("new")).toBe(2)
 
-  const transientDelta = (index: number, text: string) => ({
-    _tag: "TranscriptPatched" as const,
-    selectionEpoch: 1,
-    threadId: thread.id,
-    turnId: Turn.TurnId.make("new"),
-    event: {
-      executionId: "execution:new",
-      cursor: `transient-${index}`,
-      sequence: 2,
-      type: "model.output.delta",
-      createdAt: 3 + index,
-      text,
-      data: { delta: text, transient_index: index, model_call_id: "call-1", model_attempt_id: "attempt-1" },
-    },
-    revision: 2,
-  })
-  const first = InteractiveController.update(page.state, transientDelta(1, "hel"))
-  const second = InteractiveController.update(first.state, transientDelta(2, "lo"))
-  const duplicate = InteractiveController.update(second.state, transientDelta(2, "lo"))
-  const completed = InteractiveController.update(duplicate.state, {
-    _tag: "TranscriptPatched",
-    selectionEpoch: 1,
-    threadId: thread.id,
-    turnId: Turn.TurnId.make("new"),
-    event: {
-      executionId: "execution:new",
-      cursor: "cycle-3",
-      sequence: 3,
-      type: "model.cycle.completed",
-      createdAt: 6,
-      text: "hello world",
-    },
-    revision: 3,
+  const feed = makeProjectionFeed(page.state, turn, Transcript.project(turn.id, turn.prompt, source))
+  const first = feed.apply(transientDelta(1, "hel"))
+  const second = feed.apply(transientDelta(2, "lo"))
+  const completed = feed.apply({
+    cursor: "cycle-3",
+    sequence: 3,
+    type: "model.cycle.completed",
+    createdAt: 6,
+    text: "hello world",
   })
 
   expect(first.state.model.entries.at(-1)?.text).toBe("hel")
   expect(second.state.model.entries.at(-1)?.text).toBe("hello")
-  expect(duplicate.state.model.entries.at(-1)?.text).toBe("hello")
   expect(first.state.revisions.get("new")).toBe(2)
   expect(second.state.revisions.get("new")).toBe(2)
   expect(completed.state.model.entries.at(-1)?.text).toBe("hello world")
@@ -487,6 +597,8 @@ it("reconciles a stale prepended tool call with its newer retained result", () =
 
 it("owns transcript page, prepend, and patch reduction", () => {
   const initial = initialState()
+  const currentEntries = entries("new", 2)
+  const activeTurn = { ...currentEntries[0]!.turn, status: "running" as const }
   const page = InteractiveController.update(initial, {
     _tag: "SelectionLoaded",
     selectionEpoch: 1,
@@ -494,9 +606,10 @@ it("owns transcript page, prepend, and patch reduction", () => {
     queueRevision: 0,
     queue: [],
     thread,
-    entries: entries("new", 2),
+    entries: currentEntries,
     hasOlder: true,
     threadCostUsd: 0,
+    activeTurn,
   })
   const prepended = InteractiveController.update(page.state, {
     _tag: "TranscriptPagePrepended",
@@ -506,26 +619,17 @@ it("owns transcript page, prepend, and patch reduction", () => {
     hasOlder: false,
     threadCostUsd: 0,
   })
-  const patched = InteractiveController.update(prepended.state, {
-    _tag: "TranscriptPatched",
-    selectionEpoch: 1,
-    threadId: thread.id,
-    turnId: Turn.TurnId.make("new"),
-    event: {
-      executionId: `execution:${Turn.TurnId.make("new")}`,
-      cursor: "cursor-1",
-      sequence: 1,
-      type: "model.output.completed",
-      createdAt: 3,
-      text: "answer",
-    },
-    revision: 2,
+  const feed = makeProjectionFeed(prepended.state, activeTurn, Transcript.empty(activeTurn.id, activeTurn.prompt))
+  const patched = feed.apply({
+    cursor: "cursor-1",
+    sequence: 1,
+    type: "model.output.completed",
+    createdAt: 3,
+    text: "answer",
   })
-  expect(page.state.entries.map((value) => value.turn.id)).toEqual([Turn.TurnId.make("new")])
-  expect(prepended.state.entries.map((value) => value.turn.id)).toEqual([
-    Turn.TurnId.make("old"),
-    Turn.TurnId.make("new"),
-  ])
+  expect(page.state.entries).toEqual([])
+  expect(page.state.liveProjections.has(activeTurn.id)).toBe(true)
+  expect(prepended.state.entries.map((value) => value.turn.id)).toEqual([Turn.TurnId.make("old")])
   expect(prepended.preserveAnchor).toBe(true)
   expect(patched.state.model.entries.at(-1)).toMatchObject({ role: "assistant", text: "answer" })
 })
@@ -559,9 +663,9 @@ it("normalizes malformed page order and duplicate units across selection and pre
 
   expect(selected.state.entries.map((entry) => entry.unit.key)).toEqual([
     "turn:old:user",
-    "assistant:old:0",
+    Transcript.identityKey("assistant", "old", 0),
     "turn:new:user",
-    "assistant:new:0",
+    Transcript.identityKey("assistant", "new", 0),
   ])
   expect(prepended.state.entries).toEqual(selected.state.entries)
   expect(prepended.state.model.entries.map((entry) => entry.text)).toEqual(["old", "old answer", "new", "new answer"])
@@ -575,7 +679,7 @@ it("inserts an older partial Turn page between retained opening and final entrie
     unit: {
       key: unitKey,
       turnId: turn.id,
-      order: { sequence, part: 0 },
+      order: Transcript.unitOrder(unitKey, sequence),
       revision: sequence,
       content: { _tag: "Entry" as const, role: "assistant" as const, text },
     },
@@ -606,7 +710,9 @@ it("inserts an older partial Turn page between retained opening and final entrie
   expect(prepended.state.model.entries.map((value) => value.text)).toEqual(["opening", "middle 2", "middle 3", "final"])
 })
 
-it("projects replayed child execution tools beneath the matching subagent", () => {
+it("projects child execution units beneath the matching subagent", () => {
+  const pageEntries = entries("parent", 2)
+  const turn = { ...pageEntries[0]!.turn, status: "running" as const }
   const page = InteractiveController.update(initialState(), {
     _tag: "SelectionLoaded",
     selectionEpoch: 1,
@@ -614,94 +720,84 @@ it("projects replayed child execution tools beneath the matching subagent", () =
     queueRevision: 0,
     queue: [],
     thread,
-    entries: entries("parent", 2),
+    entries: pageEntries,
     hasOlder: false,
     threadCostUsd: 0,
+    activeTurn: turn,
   })
-  const requested = InteractiveController.update(page.state, {
-    _tag: "TranscriptPatched",
-    selectionEpoch: 1,
-    threadId: thread.id,
-    turnId: Turn.TurnId.make("parent"),
-    event: {
-      executionId: "execution:parent",
-      cursor: "agent",
-      sequence: 0,
-      type: "tool.call.requested",
-      createdAt: 3,
-      data: { tool_call_id: "agent", tool_name: "oracle", input: { prompt: "Review the code" } },
+  const requestedEvent: Transcript.SourceEvent = {
+    cursor: "agent",
+    sequence: 0,
+    type: "tool.call.requested",
+    createdAt: 3,
+    data: { tool_call_id: "agent", tool_name: "oracle", input: { prompt: "Review the code" } },
+  }
+  const spawnedEvent: Transcript.SourceEvent = {
+    cursor: "spawned",
+    sequence: 1,
+    type: "child_run.spawned",
+    createdAt: 4,
+    data: {
+      tool_call_id: "agent",
+      child_execution_id: "execution:parent:child:agent",
     },
-    revision: 0,
+  }
+  const childToolEvent: Transcript.SourceEvent = {
+    cursor: "child-read",
+    sequence: 0,
+    type: "tool.call.requested",
+    createdAt: 5,
+    data: { tool_call_id: "read", tool_name: "read", input: { path: "src/a.ts" } },
+  }
+  const childResponseEvent: Transcript.SourceEvent = {
+    cursor: "child-response",
+    sequence: 1,
+    type: "model.output.completed",
+    createdAt: 6,
+    text: "## Review complete\n\n**No defects found.**",
+  }
+  let parent = Transcript.empty(turn.id, turn.prompt)
+  const feed = makeProjectionFeed(page.state, turn, parent)
+  parent = Transcript.applyEvent(parent, requestedEvent)
+  feed.apply(requestedEvent, { projection: parent })
+  parent = Transcript.applyEvent(parent, spawnedEvent)
+  feed.apply(spawnedEvent, { projection: parent })
+  const childId = "parent:child:agent"
+  let childProjection = Transcript.applyEvent(Transcript.empty(childId, ""), childToolEvent)
+  const child = feed.apply(childToolEvent, {
+    executionId: `execution:${childId}`,
+    projection: Transcript.withNestedProjections(parent, [
+      { parentId: `${turn.id}:agent`, projection: childProjection },
+    ]),
   })
-  const spawned = InteractiveController.update(requested.state, {
-    _tag: "TranscriptPatched",
-    selectionEpoch: 1,
-    threadId: thread.id,
-    turnId: Turn.TurnId.make("parent"),
-    event: {
-      executionId: "execution:parent",
-      cursor: "spawned",
-      sequence: 1,
-      type: "child_run.spawned",
-      createdAt: 4,
-      data: {
-        tool_call_id: "agent",
-        child_execution_id: "execution:parent:child:agent",
-      },
-    },
-    revision: 1,
-  })
-  const child = InteractiveController.update(spawned.state, {
-    _tag: "TranscriptPatched",
-    selectionEpoch: 1,
-    threadId: thread.id,
-    turnId: Turn.TurnId.make("parent:child:agent"),
-    event: {
-      executionId: "execution:parent:child:agent",
-      cursor: "child-read",
-      sequence: 0,
-      type: "tool.call.requested",
-      createdAt: 5,
-      data: { tool_call_id: "read", tool_name: "read", input: { path: "src/a.ts" } },
-    },
-    revision: 0,
-  })
-  const response = InteractiveController.update(child.state, {
-    _tag: "TranscriptPatched",
-    selectionEpoch: 1,
-    threadId: thread.id,
-    turnId: Turn.TurnId.make("parent:child:agent"),
-    event: {
-      executionId: "execution:parent:child:agent",
-      cursor: "child-response",
-      sequence: 1,
-      type: "model.output.completed",
-      createdAt: 6,
-      text: "## Review complete\n\n**No defects found.**",
-    },
-    revision: 1,
+  childProjection = Transcript.applyEvent(childProjection, childResponseEvent)
+  const response = feed.apply(childResponseEvent, {
+    executionId: `execution:${childId}`,
+    projection: Transcript.withNestedProjections(parent, [
+      { parentId: `${turn.id}:agent`, projection: childProjection },
+    ]),
   })
 
   expect(child.state.model.blocks).toEqual([
     expect.objectContaining({ _tag: "ToolCall", id: "parent:agent", childId: "execution:parent:child:agent" }),
-    expect.objectContaining({ _tag: "ToolCall", id: "parent:child:agent:read" }),
+    expect.objectContaining({ _tag: "ToolCall", id: Transcript.scopedIdentity(childId, "read") }),
   ])
   expect(child.state.model.items[2]).toMatchObject({
-    id: "tool:parent:child:agent:read",
+    id: Transcript.identityKey("tool", childId, "read"),
     parentId: "parent:agent",
   })
-  expect(child.state.revisions.get("parent:child:agent")).toBe(0)
+  expect(child.state.revisions.get("parent")).toBe(1)
   expect(response.state.model.entries).toContainEqual(
     expect.objectContaining({ role: "assistant", text: "## Review complete\n\n**No defects found.**" }),
   )
   expect(response.state.model.items).toContainEqual(
     expect.objectContaining({
       _tag: "Entry",
-      id: "assistant:parent:child:agent:0",
+      id: Transcript.identityKey("assistant", childId, 0),
       parentId: "parent:agent",
     }),
   )
-  expect(response.state.revisions.get("parent:child:agent")).toBe(1)
+  expect(response.state.revisions.get("parent")).toBe(1)
 })
 
 it("attaches parallel child streams when task rows lack explicit spawn links", () => {
@@ -709,74 +805,71 @@ it("attaches parallel child streams when task rows lack explicit spawn links", (
   const childIds = ["one", "two", "three", "four"].map(
     (callId) => `child:execution%3A${turnId}:rika:execution%3A${turnId}:${callId}`,
   )
-  let state = InteractiveController.update(initialState(), {
+  const pageEntries = entries(turnId, 2)
+  const turn = { ...pageEntries[0]!.turn, status: "running" as const }
+  const selected = InteractiveController.update(initialState(), {
     _tag: "SelectionLoaded",
     selectionEpoch: 1,
     activitySequence: 0,
     queueRevision: 0,
     queue: [],
     thread,
-    entries: entries(turnId, 2),
+    entries: pageEntries,
     hasOlder: false,
     threadCostUsd: 0,
-  }).state
+    activeTurn: turn,
+  })
+  let parent = Transcript.empty(turnId, turn.prompt)
+  const feed = makeProjectionFeed(selected.state, turn, parent)
 
-  for (const [sequence, callId] of ["one", "two", "three", "four"].entries())
-    state = InteractiveController.update(state, {
-      _tag: "TranscriptPatched",
-      selectionEpoch: 1,
-      threadId: thread.id,
-      turnId: Turn.TurnId.make(turnId),
-      event: {
-        executionId: `execution:${turnId}`,
-        cursor: `task-${callId}`,
-        sequence,
-        type: "tool.call.requested",
-        createdAt: 3,
-        data: { tool_call_id: callId, tool_name: "task", input: { prompt: `Explore ${callId}` } },
-      },
-      revision: sequence,
-    }).state
-
-  for (const [index, childId] of childIds.entries()) {
-    state = InteractiveController.update(state, {
-      _tag: "TranscriptPatched",
-      selectionEpoch: 1,
-      threadId: thread.id,
-      turnId: Turn.TurnId.make(childId),
-      event: {
-        executionId: `execution:${childId}`,
-        cursor: `child-tool-${index}`,
-        sequence: 0,
-        type: "tool.call.requested",
-        createdAt: 4,
-        data: { tool_call_id: "read", tool_name: "read", input: { path: `src/${index}.ts` } },
-      },
-      revision: 0,
-    }).state
-    state = InteractiveController.update(state, {
-      _tag: "TranscriptPatched",
-      selectionEpoch: 1,
-      threadId: thread.id,
-      turnId: Turn.TurnId.make(childId),
-      event: {
-        executionId: `execution:${childId}`,
-        cursor: `child-response-${index}`,
-        sequence: 1,
-        type: "model.output.completed",
-        createdAt: 5,
-        text: `## Agent ${index + 1}\n\n**Complete.**`,
-      },
-      revision: 1,
-    }).state
+  for (const [sequence, callId] of ["one", "two", "three", "four"].entries()) {
+    const event: Transcript.SourceEvent = {
+      cursor: `task-${callId}`,
+      sequence,
+      type: "tool.call.requested",
+      createdAt: 3,
+      data: { tool_call_id: callId, tool_name: "task", input: { prompt: `Explore ${callId}` } },
+    }
+    parent = Transcript.applyEvent(parent, event)
+    feed.apply(event, { projection: parent })
   }
 
-  const toolRows = (state.model.items as ReadonlyArray<ViewState.TranscriptItem>).filter(
+  const children = new Map<string, Transcript.Projection>()
+  for (const [index, childId] of childIds.entries()) {
+    const toolEvent: Transcript.SourceEvent = {
+      cursor: `child-tool-${index}`,
+      sequence: 0,
+      type: "tool.call.requested",
+      createdAt: 4,
+      data: { tool_call_id: "read", tool_name: "read", input: { path: `src/${index}.ts` } },
+    }
+    const responseEvent: Transcript.SourceEvent = {
+      cursor: `child-response-${index}`,
+      sequence: 1,
+      type: "model.output.completed",
+      createdAt: 5,
+      text: `## Agent ${index + 1}\n\n**Complete.**`,
+    }
+    children.set(childId, Transcript.applyEvent(Transcript.empty(childId, ""), toolEvent))
+    const nested = () =>
+      Transcript.withNestedProjections(
+        parent,
+        [...children].map(([, projection], childIndex) => ({
+          parentId: `${turnId}:${["one", "two", "three", "four"][childIndex]}`,
+          projection,
+        })),
+      )
+    feed.apply(toolEvent, { executionId: `execution:${childId}`, projection: nested() })
+    children.set(childId, Transcript.applyEvent(children.get(childId)!, responseEvent))
+    feed.apply(responseEvent, { executionId: `execution:${childId}`, projection: nested() })
+  }
+
+  const toolRows = (feed.state.model.items as ReadonlyArray<ViewState.TranscriptItem>).filter(
     (item) => item._tag === "Block" && item.id?.startsWith("tool:"),
   )
   expect(toolRows).toHaveLength(8)
   expect(toolRows.filter((item) => item.parentId !== undefined)).toHaveLength(4)
-  expect(state.model.entries.filter((entry) => entry.text.startsWith("## Agent"))).toHaveLength(4)
+  expect(feed.state.model.entries.filter((entry) => entry.text.startsWith("## Agent"))).toHaveLength(4)
 })
 
 it("reloads one completed subagent tree with rendered markdown and no serialized result", () => {
@@ -866,7 +959,7 @@ it("reloads one completed subagent tree with rendered markdown and no serialized
   expect(loaded.state.model.items).toContainEqual(
     expect.objectContaining({
       _tag: "Entry",
-      id: `assistant:${childId}:0`,
+      id: Transcript.identityKey("assistant", childId, 0),
       parentId: `${target.id}:agent`,
     }),
   )
@@ -935,7 +1028,7 @@ it("keeps cancelled child tools terminal in live and reloaded projections", () =
   for (const model of [live, loaded]) {
     expect(model.blocks).toEqual([
       expect.objectContaining({ id: `${target.id}:agent`, status: "cancelled" }),
-      expect.objectContaining({ id: `${childId}:bash`, status: "cancelled" }),
+      expect.objectContaining({ id: Transcript.scopedIdentity(childId, "bash"), status: "cancelled" }),
     ])
     expect(model.entries.filter((entry) => entry.role === "notice")).toEqual([])
     expect(
@@ -946,141 +1039,8 @@ it("keeps cancelled child tools terminal in live and reloaded projections", () =
   }
 })
 
-it("buffers live child patches until the parent subagent link arrives", () => {
-  const page = InteractiveController.update(initialState(), {
-    _tag: "SelectionLoaded",
-    selectionEpoch: 1,
-    activitySequence: 0,
-    queueRevision: 0,
-    queue: [],
-    thread,
-    entries: entries("parent", 2),
-    hasOlder: false,
-    threadCostUsd: 0,
-  })
-  const child = InteractiveController.update(page.state, {
-    _tag: "TranscriptPatched",
-    selectionEpoch: 1,
-    threadId: thread.id,
-    turnId: Turn.TurnId.make("parent:child:agent"),
-    event: {
-      executionId: "execution:parent:child:agent",
-      cursor: "child-read",
-      sequence: 0,
-      type: "tool.call.requested",
-      createdAt: 3,
-      data: { tool_call_id: "read", tool_name: "read", input: { path: "src/a.ts" } },
-    },
-    revision: 0,
-  })
-  const requested = InteractiveController.update(child.state, {
-    _tag: "TranscriptPatched",
-    selectionEpoch: 1,
-    threadId: thread.id,
-    turnId: Turn.TurnId.make("parent"),
-    event: {
-      executionId: "execution:parent",
-      cursor: "agent",
-      sequence: 0,
-      type: "tool.call.requested",
-      createdAt: 4,
-      data: { tool_call_id: "agent", tool_name: "oracle", input: { prompt: "Review the code" } },
-    },
-    revision: 0,
-  })
-  const spawned = InteractiveController.update(requested.state, {
-    _tag: "TranscriptPatched",
-    selectionEpoch: 1,
-    threadId: thread.id,
-    turnId: Turn.TurnId.make("parent"),
-    event: {
-      executionId: "execution:parent",
-      cursor: "spawned",
-      sequence: 1,
-      type: "child_run.spawned",
-      createdAt: 5,
-      data: { tool_call_id: "agent", child_execution_id: "execution:parent:child:agent" },
-    },
-    revision: 1,
-  })
-
-  expect(child.state.liveProjections.get("parent:child:agent")?.units).toHaveLength(2)
-  expect(child.state.model.blocks).not.toContainEqual(expect.objectContaining({ id: "parent:child:agent:read" }))
-  expect(spawned.state.model.blocks).toEqual([
-    expect.objectContaining({ _tag: "ToolCall", id: "parent:agent" }),
-    expect.objectContaining({ _tag: "ToolCall", id: "parent:child:agent:read" }),
-  ])
-  expect(spawned.state.model.items[2]).toMatchObject({
-    id: "tool:parent:child:agent:read",
-    parentId: "parent:agent",
-  })
-})
-
-it("surfaces a child projection whose parent tool has not arrived instead of dropping it", () => {
-  const page = InteractiveController.update(initialState(), {
-    _tag: "SelectionLoaded",
-    selectionEpoch: 1,
-    activitySequence: 0,
-    queueRevision: 0,
-    queue: [],
-    thread,
-    entries: entries("parent", 2),
-    hasOlder: false,
-    threadCostUsd: 0,
-  })
-  const child = InteractiveController.update(page.state, {
-    _tag: "TranscriptPatched",
-    selectionEpoch: 1,
-    threadId: thread.id,
-    turnId: Turn.TurnId.make("parent:child:agent"),
-    event: {
-      executionId: "execution:parent:child:agent",
-      cursor: "child-read",
-      sequence: 0,
-      type: "tool.call.requested",
-      createdAt: 3,
-      data: { tool_call_id: "read", tool_name: "read", input: { path: "src/a.ts" } },
-    },
-    revision: 0,
-  })
-  const requested = InteractiveController.update(child.state, {
-    _tag: "TranscriptPatched",
-    selectionEpoch: 1,
-    threadId: thread.id,
-    turnId: Turn.TurnId.make("parent"),
-    event: {
-      executionId: "execution:parent",
-      cursor: "agent",
-      sequence: 0,
-      type: "tool.call.requested",
-      createdAt: 4,
-      data: { tool_call_id: "agent", tool_name: "oracle", input: { prompt: "Review" } },
-    },
-    revision: 0,
-  })
-  const spawned = InteractiveController.update(requested.state, {
-    _tag: "TranscriptPatched",
-    selectionEpoch: 1,
-    threadId: thread.id,
-    turnId: Turn.TurnId.make("parent"),
-    event: {
-      executionId: "execution:parent",
-      cursor: "spawned",
-      sequence: 1,
-      type: "child_run.spawned",
-      createdAt: 5,
-      data: { tool_call_id: "agent", child_execution_id: "execution:parent:child:agent" },
-    },
-    revision: 1,
-  })
-
-  expect(child.unattached).toContain("parent:child:agent")
-  expect(child.state.model.blocks).not.toContainEqual(expect.objectContaining({ id: "parent:child:agent:read" }))
-  expect(spawned.unattached ?? []).not.toContain("parent:child:agent")
-  expect(spawned.state.model.blocks).toContainEqual(expect.objectContaining({ id: "parent:child:agent:read" }))
-})
-
-const runningTurn = (id: string): Turn.Turn => ({
+const runningTurn = (id: string): Turn.AgentExecutionTurn => ({
+  _tag: "AgentExecution",
   id: Turn.TurnId.make(id),
   threadId: thread.id,
   prompt: `${id} prompt`,
@@ -1099,7 +1059,7 @@ const orphanEntries = (turn: Turn.Turn, count: number) =>
     unit: {
       key: `${turn.id}:nested:${index}`,
       turnId: turn.id,
-      order: { sequence: index + 10, part: 0 },
+      order: Transcript.unitOrder(`${turn.id}:nested:${index}`, index + 10),
       revision: index + 10,
       parentId: `${turn.id}:agent`,
       content: {
@@ -1126,6 +1086,431 @@ const populatedSelection = (turn: Turn.Turn) =>
     threadCostUsd: 0,
     activeTurn: turn,
   })
+
+const projectionEvent = (turn: Turn.Turn, text: string, transient = false) => ({
+  executionId: `execution:${turn.id}`,
+  cursor: `output:${text}`,
+  sequence: 1,
+  type: "model.output.delta",
+  createdAt: 3,
+  text,
+  ...(transient ? { data: { transient: true } } : {}),
+})
+
+it("installs an authoritative projection snapshot for the active turn", () => {
+  const active = runningTurn("projection-snapshot")
+  const selected = populatedSelection(active)
+  const projection = Transcript.project(active.id, active.prompt, [projectionEvent(active, "live answer")])
+  const started = startProjection(selected.state, active, projection)
+
+  expect(started.state.model.entries.map((entry) => entry.text)).toContain("live answer")
+  expect(started.state.projectionStreams?.get(active.id)).toMatchObject({
+    streamId: `stream:${active.id}`,
+    patchRevision: 0,
+    state: visibleState(projection),
+  })
+  expect(HashMap.size(openProjectionStream(started.state, active.id).units)).toBe(projection.units.length)
+})
+
+it("keeps every open projection visible when snapshots arrive in sequence", () => {
+  const active = runningTurn("projection-active")
+  const concurrent = { ...runningTurn("projection-concurrent"), createdAt: 3, updatedAt: 3 }
+  const activeProjection = Transcript.project(active.id, active.prompt, [projectionEvent(active, "active answer")])
+  const concurrentProjection = Transcript.project(concurrent.id, concurrent.prompt, [
+    projectionEvent(concurrent, "concurrent answer"),
+  ])
+  const activeStarted = startProjection(populatedSelection(active).state, active, activeProjection)
+  const concurrentStarted = startProjection(activeStarted.state, concurrent, concurrentProjection)
+
+  expect(concurrentStarted.state.model.entries.map((entry) => entry.text)).toEqual(
+    expect.arrayContaining([active.prompt, "active answer", concurrent.prompt, "concurrent answer"]),
+  )
+  expect(concurrentStarted.state.projectionStreams?.size).toBe(2)
+})
+
+it("applies exact projection upserts and removals without replaying source events", () => {
+  const active = runningTurn("projection-delta")
+  const initialProjection = Transcript.project(active.id, active.prompt, [projectionEvent(active, "hel")])
+  const selected = populatedSelection(active)
+  const started = startProjection(selected.state, active, initialProjection)
+  const updatedProjection = Transcript.project(active.id, active.prompt, [projectionEvent(active, "hello")])
+  const updatedUnit = updatedProjection.units.find(
+    (unit) => unit.content._tag === "Entry" && unit.content.role === "assistant",
+  )!
+  const patched = InteractiveController.update(started.state, {
+    _tag: "TranscriptProjectionPatched",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    rootTurnId: active.id,
+    streamId: `stream:${active.id}`,
+    baseRevision: 0,
+    patchRevision: 1,
+    origin: {
+      _tag: "Event",
+      executionId: `execution:${active.id}`,
+      cursor: "output:hello",
+      sequence: 1,
+      type: "model.output.delta",
+      createdAt: 3,
+      transient: false,
+    },
+    state: visibleState(updatedProjection),
+    delta: { upsert: [updatedUnit], remove: [] },
+  })
+  const removed = InteractiveController.update(patched.state, {
+    _tag: "TranscriptProjectionPatched",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    rootTurnId: active.id,
+    streamId: `stream:${active.id}`,
+    baseRevision: 1,
+    patchRevision: 2,
+    origin: { _tag: "Discovery", executionId: `execution:${active.id}` },
+    state: visibleState(updatedProjection),
+    delta: { upsert: [], remove: [updatedUnit.key] },
+  })
+
+  expect(patched.resync).toBeUndefined()
+  expect(patched.state.model.entries.map((entry) => entry.text)).toContain("hello")
+  expect(patched.state.model.entries.map((entry) => entry.text)).not.toContain("hel")
+  expect(removed.state.model.entries.map((entry) => entry.text)).not.toContain("hello")
+  expect(HashMap.has(openProjectionStream(removed.state, active.id).units, updatedUnit.key)).toBe(false)
+})
+
+it("inserts a newly discovered projection unit at its stable order", () => {
+  const active = runningTurn("projection-order")
+  const later: Transcript.Unit = {
+    key: `${active.id}:later`,
+    turnId: active.id,
+    order: Transcript.unitOrder(`${active.id}:later`, 2),
+    revision: 2,
+    content: { _tag: "Entry", role: "assistant", text: "later" },
+  }
+  const earlier: Transcript.Unit = {
+    key: `${active.id}:earlier`,
+    turnId: active.id,
+    order: Transcript.unitOrder(`${active.id}:earlier`, 1),
+    revision: 1,
+    content: { _tag: "Entry", role: "assistant", text: "earlier" },
+  }
+  const projection = { ...Transcript.empty(active.id, active.prompt), units: [later] }
+  const started = startProjection(populatedSelection(active).state, active, projection)
+  const patched = InteractiveController.update(started.state, {
+    _tag: "TranscriptProjectionPatched",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    rootTurnId: active.id,
+    streamId: `stream:${active.id}`,
+    baseRevision: 0,
+    patchRevision: 1,
+    origin: { _tag: "Discovery", executionId: `execution:${active.id}` },
+    state: visibleState(projection),
+    delta: { upsert: [earlier], remove: [] },
+  })
+  const orderedText = (patched.state.model.items as ReadonlyArray<ViewState.TranscriptItem>)
+    .filter((item) => item.id === earlier.key || item.id === later.key)
+    .map((item) => (item._tag === "Entry" ? patched.state.model.entries[item.index]?.text : undefined))
+
+  expect(patched.resync).toBeUndefined()
+  expect(orderedText).toEqual(["earlier", "later"])
+})
+
+it("requests an authoritative resync for a projection stream or revision mismatch", () => {
+  const active = runningTurn("projection-gap")
+  const projection = Transcript.project(active.id, active.prompt, [])
+  const started = startProjection(populatedSelection(active).state, active, projection)
+  const patch = {
+    _tag: "TranscriptProjectionPatched" as const,
+    selectionEpoch: 1,
+    threadId: thread.id,
+    rootTurnId: active.id,
+    streamId: `stream:${active.id}`,
+    baseRevision: 0,
+    patchRevision: 1,
+    origin: { _tag: "Discovery" as const, executionId: `execution:${active.id}` },
+    state: visibleState(projection),
+    delta: { upsert: [], remove: [] },
+  }
+
+  expect(InteractiveController.update(started.state, { ...patch, streamId: "wrong-stream" }).resync).toBe(true)
+  expect(InteractiveController.update(started.state, { ...patch, patchRevision: 2 }).resync).toBe(true)
+  expect(started.state.projectionStreams?.get(active.id)?.patchRevision).toBe(0)
+})
+
+it("keeps the visible projection at a terminal boundary and rejects later patches", () => {
+  const active = runningTurn("projection-terminal")
+  const projection = Transcript.project(active.id, active.prompt, [projectionEvent(active, "final answer")])
+  const started = startProjection(populatedSelection(active).state, active, projection)
+  const terminal = InteractiveController.update(started.state, {
+    _tag: "TranscriptProjectionPatched",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    rootTurnId: active.id,
+    streamId: `stream:${active.id}`,
+    baseRevision: 0,
+    patchRevision: 1,
+    origin: { _tag: "Discovery", executionId: `execution:${active.id}` },
+    state: visibleState(projection),
+    delta: { upsert: [], remove: [] },
+    rootStatus: "completed",
+  })
+  const stopped = InteractiveController.update(terminal.state, {
+    _tag: "TranscriptProjectionStopped",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    rootTurnId: active.id,
+    streamId: `stream:${active.id}`,
+    patchRevision: 1,
+    status: "completed",
+  })
+  const late = InteractiveController.update(stopped.state, {
+    _tag: "TranscriptProjectionPatched",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    rootTurnId: active.id,
+    streamId: `stream:${active.id}`,
+    baseRevision: 1,
+    patchRevision: 2,
+    origin: { _tag: "Discovery", executionId: `execution:${active.id}` },
+    state: visibleState(projection),
+    delta: { upsert: [], remove: [] },
+  })
+
+  expect(stopped.state.model.entries.map((entry) => entry.text)).toContain("final answer")
+  expect(stopped.state.model).toMatchObject({ busy: false, activeTurnId: undefined })
+  expect(stopped.state.projectionStreams?.get(active.id)).toEqual({
+    _tag: "Stopped",
+    streamId: `stream:${active.id}`,
+    patchRevision: 1,
+    boundary: { _tag: "Stopped", status: "completed" },
+  })
+  expect(stopped.state.projectionStreams?.get(active.id)).not.toHaveProperty("units")
+  expect(late.resync).toBe(true)
+})
+
+it("rejects a terminal boundary that contradicts the last projection patch", () => {
+  const active = runningTurn("projection-terminal-mismatch")
+  const projection = Transcript.project(active.id, active.prompt, [projectionEvent(active, "final answer")])
+  const started = startProjection(populatedSelection(active).state, active, projection)
+  const patched = InteractiveController.update(started.state, {
+    _tag: "TranscriptProjectionPatched",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    rootTurnId: active.id,
+    streamId: `stream:${active.id}`,
+    baseRevision: 0,
+    patchRevision: 1,
+    origin: { _tag: "Discovery", executionId: `execution:${active.id}` },
+    state: visibleState(projection),
+    delta: { upsert: [], remove: [] },
+    rootStatus: "failed",
+  })
+  const stopped = InteractiveController.update(patched.state, {
+    _tag: "TranscriptProjectionStopped",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    rootTurnId: active.id,
+    streamId: `stream:${active.id}`,
+    patchRevision: 1,
+    status: "completed",
+  })
+
+  expect(stopped.resync).toBe(true)
+  expect(stopped.state).toBe(patched.state)
+})
+
+it("settles a recorded shell projection without treating it as an agent execution", () => {
+  const running: Turn.RunningRecordedShellTurn = {
+    _tag: "RecordedShell",
+    id: Turn.TurnId.make("recorded-shell"),
+    threadId: thread.id,
+    prompt: "$ printf done",
+    command: "printf done",
+    status: "running",
+    stopIntent: "none",
+    author: { _tag: "Human" },
+    lineage: { _tag: "Original" },
+    createdAt: 2,
+    updatedAt: 2,
+  }
+  const initial = Transcript.recordedShellProjection({ id: running.id, command: running.command, status: "running" })
+  const started = startProjection(populatedSelection(running).state, running, initial)
+  const terminal: Turn.TerminalRecordedShellTurn = {
+    ...running,
+    status: "completed",
+    result: { text: "done", truncated: false, exitCode: 0 },
+    updatedAt: 3,
+  }
+  const settled = Transcript.settleRecordedShellProjection(initial, terminal)
+  const patched = InteractiveController.update(started.state, {
+    _tag: "TranscriptProjectionPatched",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    rootTurnId: terminal.id,
+    turn: terminal,
+    streamId: `stream:${terminal.id}`,
+    baseRevision: 0,
+    patchRevision: 1,
+    origin: { _tag: "RecordedShell", phase: "settled" },
+    state: visibleState(settled),
+    delta: unitDelta(initial, settled),
+    rootStatus: "completed",
+  })
+  const stopped = InteractiveController.update(patched.state, {
+    _tag: "TranscriptProjectionStopped",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    rootTurnId: terminal.id,
+    streamId: `stream:${terminal.id}`,
+    patchRevision: 1,
+    status: "completed",
+  })
+
+  expect(patched.resync).toBeUndefined()
+  expect(patched.state.replayTurns.get(terminal.id)).toEqual(terminal)
+  expect(stopped.resync).toBeUndefined()
+  expect(stopped.state.projectionStreams?.get(terminal.id)).toMatchObject({
+    _tag: "Stopped",
+    boundary: { _tag: "Stopped", status: "completed" },
+  })
+  expect(stopped.state.model.blocks).toContainEqual(
+    expect.objectContaining({
+      _tag: "ToolCall",
+      id: `${terminal.id}:recorded-shell`,
+      status: "complete",
+      output: "done",
+    }),
+  )
+})
+
+it("retains the typed projection failure boundary and requests resync", () => {
+  const active = runningTurn("projection-failure")
+  const projection = Transcript.project(active.id, active.prompt, [])
+  const started = startProjection(populatedSelection(active).state, active, projection)
+  const failed = InteractiveController.update(started.state, {
+    _tag: "TranscriptProjectionFailed",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    rootTurnId: active.id,
+    streamId: `stream:${active.id}`,
+    patchRevision: 0,
+    executionId: `execution:${active.id}`,
+    reason: "BackendReadFailed",
+    message: "backend unavailable",
+  })
+
+  expect(failed.resync).toBe(true)
+  expect(failed.state.projectionStreams?.get(active.id)).toMatchObject({
+    _tag: "Failed",
+    boundary: {
+      _tag: "Failed",
+      executionId: `execution:${active.id}`,
+      reason: "BackendReadFailed",
+      message: "backend unavailable",
+    },
+  })
+})
+
+it("renders transient projection deltas without advancing the durable fold revision", () => {
+  const active = runningTurn("projection-transient")
+  const projection = Transcript.project(active.id, active.prompt, [])
+  const started = startProjection(populatedSelection(active).state, active, projection)
+  const transientProjection = Transcript.project(active.id, active.prompt, [projectionEvent(active, "stream", true)])
+  const transientUnit = transientProjection.units.find(
+    (unit) => unit.content._tag === "Entry" && unit.content.role === "assistant",
+  )!
+  const patched = InteractiveController.update(started.state, {
+    _tag: "TranscriptProjectionPatched",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    rootTurnId: active.id,
+    streamId: `stream:${active.id}`,
+    baseRevision: 0,
+    patchRevision: 1,
+    origin: {
+      _tag: "Event",
+      executionId: `execution:${active.id}`,
+      cursor: "transient",
+      sequence: 1,
+      type: "model.output.delta",
+      createdAt: 3,
+      transient: true,
+      text: "stream",
+    },
+    state: visibleState(projection),
+    delta: { upsert: [transientUnit], remove: [] },
+  })
+
+  expect(patched.state.model.entries.map((entry) => entry.text)).toContain("stream")
+  expect(patched.state.projectionStreams?.get(active.id)).toMatchObject({
+    patchRevision: 1,
+    state: visibleState(projection),
+  })
+})
+
+it("does not traverse unchanged projection units for a one-unit delta", () => {
+  const active = runningTurn("projection-complexity")
+  const template = Transcript.project(active.id, active.prompt, []).units[0]!
+  let unchangedReads = 0
+  const units = Array.from(
+    { length: 2_000 },
+    (_, index) =>
+      new Proxy(
+        {
+          ...template,
+          key: `${active.id}:unit:${index}`,
+          order: Transcript.unitOrder(active.id, index),
+          content: { _tag: "Entry" as const, role: "assistant" as const, text: `line ${index}` },
+        },
+        {
+          get(target, property, receiver) {
+            if (index !== 1_000 && (property === "key" || property === "content" || property === "order"))
+              unchangedReads += 1
+            return Reflect.get(target, property, receiver)
+          },
+        },
+      ),
+  )
+  const projection = { ...Transcript.project(active.id, active.prompt, []), units }
+  const started = startProjection(populatedSelection(active).state, active, projection)
+  const replacement = {
+    ...units[1_000]!,
+    content: { _tag: "Entry" as const, role: "assistant" as const, text: "changed" },
+  }
+  unchangedReads = 0
+  const patched = InteractiveController.update(started.state, {
+    _tag: "TranscriptProjectionPatched",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    rootTurnId: active.id,
+    streamId: `stream:${active.id}`,
+    baseRevision: 0,
+    patchRevision: 1,
+    origin: { _tag: "Discovery", executionId: `execution:${active.id}` },
+    state: visibleState(projection),
+    delta: { upsert: [replacement], remove: [] },
+  })
+
+  expect(patched.resync).toBeUndefined()
+  expect(unchangedReads).toBe(0)
+  expect(HashMap.size(openProjectionStream(patched.state, active.id).units)).toBe(2_000)
+  unchangedReads = 0
+  const removed = InteractiveController.update(patched.state, {
+    _tag: "TranscriptProjectionPatched",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    rootTurnId: active.id,
+    streamId: `stream:${active.id}`,
+    baseRevision: 1,
+    patchRevision: 2,
+    origin: { _tag: "Discovery", executionId: `execution:${active.id}` },
+    state: visibleState(projection),
+    delta: { upsert: [], remove: [replacement.key] },
+  })
+  expect(removed.resync).toBeUndefined()
+  expect(unchangedReads).toBe(0)
+  expect(HashMap.size(openProjectionStream(removed.state, active.id).units)).toBe(1_999)
+})
 
 it("keeps a populated view when a reload delivers a window that renders nothing", () => {
   const active = runningTurn("active")
@@ -1164,20 +1549,13 @@ it("repaints live patches for the in-flight turn after a reload that renders not
     threadCostUsd: 0,
     activeTurn: active,
   })
-  const patched = InteractiveController.update(reloaded.state, {
-    _tag: "TranscriptPatched",
-    selectionEpoch: 2,
-    threadId: thread.id,
-    turnId: active.id,
-    event: {
-      executionId: "execution:active",
-      cursor: "answer",
-      sequence: 9,
-      type: "model.output.completed",
-      createdAt: 9,
-      text: "live answer",
-    },
-    revision: 9,
+  const feed = makeProjectionFeed(reloaded.state, active, Transcript.empty(active.id, active.prompt))
+  const patched = feed.apply({
+    cursor: "answer",
+    sequence: 9,
+    type: "model.output.completed",
+    createdAt: 9,
+    text: "live answer",
   })
 
   const texts = patched.state.model.entries.map((value) => value.text)
@@ -1199,20 +1577,13 @@ it("seeds the in-flight turn so an empty reload still paints and keeps taking li
     threadCostUsd: 0,
     activeTurn: active,
   })
-  const patched = InteractiveController.update(reloaded.state, {
-    _tag: "TranscriptPatched",
-    selectionEpoch: 2,
-    threadId: thread.id,
-    turnId: active.id,
-    event: {
-      executionId: "execution:active",
-      cursor: "answer",
-      sequence: 9,
-      type: "model.output.completed",
-      createdAt: 9,
-      text: "live answer",
-    },
-    revision: 9,
+  const feed = makeProjectionFeed(reloaded.state, active, Transcript.empty(active.id, active.prompt))
+  const patched = feed.apply({
+    cursor: "answer",
+    sequence: 9,
+    type: "model.output.completed",
+    createdAt: 9,
+    text: "live answer",
   })
 
   expect(reloaded.discarded).toBeUndefined()
@@ -1221,7 +1592,7 @@ it("seeds the in-flight turn so an empty reload still paints and keeps taking li
 })
 
 it("keeps live child patches rendering after a mid-turn selection reload", () => {
-  const running = entries("parent", 2, [
+  const parentEvents: ReadonlyArray<Transcript.SourceEvent> = [
     {
       cursor: "agent",
       sequence: 0,
@@ -1236,7 +1607,21 @@ it("keeps live child patches rendering after a mid-turn selection reload", () =>
       createdAt: 5,
       data: { tool_call_id: "agent", child_execution_id: "execution:parent:child:agent" },
     },
-  ]).map((entry) => Object.assign({}, entry, { turn: Object.assign({}, entry.turn, { status: "running" as const }) }))
+  ]
+  const running = entries("parent", 2, parentEvents).map(asRunningEntry)
+  const turn = running[0]!.turn
+  const childId = "parent:child:agent"
+  const childReadEvent: Transcript.SourceEvent = {
+    cursor: "child-read",
+    sequence: 0,
+    type: "tool.call.requested",
+    createdAt: 6,
+    data: { tool_call_id: "read", tool_name: "read", input: { path: "src/a.ts" } },
+  }
+  const parent = Transcript.project(turn.id, turn.prompt, parentEvents)
+  let childProjection = Transcript.applyEvent(Transcript.empty(childId, ""), childReadEvent)
+  const nested = () =>
+    Transcript.withNestedProjections(parent, [{ parentId: `${turn.id}:agent`, projection: childProjection }])
   const selected = InteractiveController.update(initialState(), {
     _tag: "SelectionLoaded",
     selectionEpoch: 1,
@@ -1247,24 +1632,10 @@ it("keeps live child patches rendering after a mid-turn selection reload", () =>
     entries: running,
     hasOlder: false,
     threadCostUsd: 0,
-    activeTurn: running[0]!.turn,
+    activeTurn: turn,
   })
-  const child = InteractiveController.update(selected.state, {
-    _tag: "TranscriptPatched",
-    selectionEpoch: 1,
-    threadId: thread.id,
-    turnId: Turn.TurnId.make("parent:child:agent"),
-    event: {
-      executionId: "execution:parent:child:agent",
-      cursor: "child-read",
-      sequence: 0,
-      type: "tool.call.requested",
-      createdAt: 6,
-      data: { tool_call_id: "read", tool_name: "read", input: { path: "src/a.ts" } },
-    },
-    revision: 0,
-  })
-  const reloaded = InteractiveController.update(child.state, {
+  const firstFeed = makeProjectionFeed(selected.state, turn, nested())
+  const reloaded = InteractiveController.update(firstFeed.state, {
     _tag: "SelectionLoaded",
     selectionEpoch: 2,
     activitySequence: 0,
@@ -1274,29 +1645,30 @@ it("keeps live child patches rendering after a mid-turn selection reload", () =>
     entries: running,
     hasOlder: false,
     threadCostUsd: 0,
-    activeTurn: running[0]!.turn,
+    activeTurn: turn,
   })
-  const resumed = InteractiveController.update(reloaded.state, {
-    _tag: "TranscriptPatched",
-    selectionEpoch: 2,
-    threadId: thread.id,
-    turnId: Turn.TurnId.make("parent:child:agent"),
-    event: {
-      executionId: "execution:parent:child:agent",
-      cursor: "child-write",
-      sequence: 1,
-      type: "tool.call.requested",
-      createdAt: 7,
-      data: { tool_call_id: "write", tool_name: "write", input: { path: "src/b.ts" } },
-    },
-    revision: 1,
+  const secondFeed = makeProjectionFeed(reloaded.state, turn, nested())
+  const childWriteEvent: Transcript.SourceEvent = {
+    cursor: "child-write",
+    sequence: 1,
+    type: "tool.call.requested",
+    createdAt: 7,
+    data: { tool_call_id: "write", tool_name: "write", input: { path: "src/b.ts" } },
+  }
+  childProjection = Transcript.applyEvent(childProjection, childWriteEvent)
+  const resumed = secondFeed.apply(childWriteEvent, {
+    executionId: `execution:${childId}`,
+    projection: nested(),
   })
 
-  expect(child.state.model.blocks).toContainEqual(expect.objectContaining({ id: "parent:child:agent:read" }))
-  expect(reloaded.state.model.blocks).toContainEqual(expect.objectContaining({ id: "parent:agent" }))
-  expect(reloaded.state.model.items.length).toBeGreaterThan(0)
-  expect(resumed.state.model.blocks).toContainEqual(expect.objectContaining({ id: "parent:child:agent:write" }))
-  expect(resumed.unattached ?? []).not.toContain("parent:child:agent")
+  expect(firstFeed.state.model.blocks).toContainEqual(
+    expect.objectContaining({ id: Transcript.scopedIdentity(childId, "read") }),
+  )
+  expect(secondFeed.state.model.blocks).toContainEqual(expect.objectContaining({ id: "parent:agent" }))
+  expect(secondFeed.state.model.items.length).toBeGreaterThan(0)
+  expect(resumed.state.model.blocks).toContainEqual(
+    expect.objectContaining({ id: Transcript.scopedIdentity(childId, "write") }),
+  )
 })
 
 it("keeps one of five status labels from submit until the turn completes", () => {
@@ -1312,6 +1684,8 @@ it("keeps one of five status labels from submit until the turn completes", () =>
     replayTurns: new Map([[turn.id, turn]]),
     entries: entries(turn.id, turn.createdAt),
   }
+  const feed = makeProjectionFeed(state, turn, Transcript.empty(turn.id, turn.prompt))
+  state = feed.state
   const labels = ["Sending", "Waiting", "Thinking 2 tok", "Streaming 2 tok", "Running 1 tool", "Running 2 tools"]
   const expectStatus = (expected: string) => {
     const label = ViewState.formatActivity(state.model.activity)
@@ -1319,21 +1693,13 @@ it("keeps one of five status labels from submit until the turn completes", () =>
     expect(labels).toContain(label)
   }
   const patch = (sequence: number, type: string, text?: string, data?: Readonly<Record<string, unknown>>) => {
-    state = InteractiveController.update(state, {
-      _tag: "TranscriptPatched",
-      selectionEpoch: 1,
-      threadId: thread.id,
-      turnId: Turn.TurnId.make("active"),
-      event: {
-        executionId: "execution:active",
-        cursor: `event-${sequence}`,
-        sequence,
-        type,
-        createdAt: sequence,
-        ...(text === undefined ? {} : { text }),
-        ...(data === undefined ? {} : { data }),
-      },
-      revision: sequence,
+    state = feed.apply({
+      cursor: `event-${sequence}`,
+      sequence,
+      type,
+      createdAt: sequence,
+      ...(text === undefined ? {} : { text }),
+      ...(data === undefined ? {} : { data }),
     }).state
   }
 
@@ -1367,12 +1733,18 @@ it("keeps one of five status labels from submit until the turn completes", () =>
   patch(9, "model.output.completed", "abcdefgh")
   expectStatus("Waiting")
   patch(10, "execution.completed")
+  expectStatus("Waiting")
+  expect(state.model.busy).toBe(true)
+  state = feed.stop("completed").state
   expect(ViewState.formatActivity(state.model.activity)).toBeUndefined()
   expect(state.model.busy).toBe(false)
 })
 
 it("keeps 200ms tool lifecycle events in distinct TUI frames", () => {
-  type TranscriptPatched = Extract<Operation.InteractiveEvent, { readonly _tag: "TranscriptPatched" }>
+  type ProjectionPatchedEvent = Extract<Operation.InteractiveEvent, { readonly _tag: "TranscriptProjectionPatched" }>
+  type ProjectionPatched = ProjectionPatchedEvent & {
+    readonly origin: Extract<ProjectionPatchedEvent["origin"], { readonly _tag: "Event" }>
+  }
   const turn = { ...entries("timed", 2)[0]!.turn, status: "running" as const }
   let state: InteractiveController.State = {
     ...initialState(),
@@ -1387,15 +1759,16 @@ it("keeps 200ms tool lifecycle events in distinct TUI frames", () => {
     replayTurns: new Map([[turn.id, turn]]),
     entries: entries(turn.id, turn.createdAt),
   }
+  state = startProjection(state, turn, Transcript.empty(turn.id, turn.prompt)).state
   let now = 0
   const scheduled: Array<{ readonly at: number; readonly flush: () => void }> = []
   const applied: Array<{ readonly at: number; readonly type: string; readonly activity: string | undefined }> = []
-  const batcher = InteractiveController.makeFeedFrameBatcher<TranscriptPatched>({
+  const batcher = InteractiveController.makeFeedFrameBatcher<ProjectionPatched>({
     schedule: (flush) => scheduled.push({ at: now + 16, flush }),
     apply: (events) => {
       for (const event of events) {
         state = InteractiveController.update(state, event).state
-        applied.push({ at: now, type: event.event.type, activity: ViewState.formatActivity(state.model.activity) })
+        applied.push({ at: now, type: event.origin.type, activity: ViewState.formatActivity(state.model.activity) })
       }
     },
     render: () => {},
@@ -1408,17 +1781,14 @@ it("keeps 200ms tool lifecycle events in distinct TUI frames", () => {
     }
     now = target
   }
+  let projection = Transcript.empty(turn.id, turn.prompt)
+  let patchRevision = 0
   const event = (
     sequence: number,
     type: "tool.call.requested" | "tool.result.received",
     callId: string,
-  ): TranscriptPatched => ({
-    _tag: "TranscriptPatched",
-    selectionEpoch: 1,
-    threadId: thread.id,
-    turnId: turn.id,
-    event: {
-      executionId: `execution:${turn.id}`,
+  ): ProjectionPatched => {
+    const source: Transcript.SourceEvent = {
       cursor: `timed-${sequence}`,
       sequence,
       type,
@@ -1427,9 +1797,25 @@ it("keeps 200ms tool lifecycle events in distinct TUI frames", () => {
         type === "tool.call.requested"
           ? { tool_call_id: callId, tool_name: "read", input: { path: `${callId}.ts` } }
           : { tool_call_id: callId, output: callId },
-    },
-    revision: sequence,
-  })
+    }
+    const next = Transcript.applyEvent(projection, source)
+    const baseRevision = patchRevision
+    patchRevision += 1
+    const patched: ProjectionPatched = {
+      _tag: "TranscriptProjectionPatched",
+      selectionEpoch: 1,
+      threadId: thread.id,
+      rootTurnId: turn.id,
+      streamId: `stream:${turn.id}`,
+      baseRevision,
+      patchRevision,
+      origin: projectionOrigin(source, `execution:${turn.id}`),
+      state: visibleState(next),
+      delta: unitDelta(projection, next),
+    }
+    projection = next
+    return patched
+  }
 
   batcher.offer(event(0, "tool.call.requested", "first"))
   batcher.offer(event(1, "tool.call.requested", "second"))
@@ -1565,32 +1951,21 @@ it("shows the session total and updates it when child usage arrives", () => {
     globalCostUsd: 10,
   })
   const child = InteractiveController.update(page.state, {
-    _tag: "TranscriptPatched",
+    _tag: "ThreadUsageUpdated",
     selectionEpoch: 1,
     threadId: thread.id,
-    turnId: Turn.TurnId.make("parent:child:worker"),
-    rootTurnId: Turn.TurnId.make("parent"),
-    rootTurnCostUsd: 0.75,
-    threadCostUsd: 0.75,
-    globalCostUsd: 10.25,
-    event: {
-      executionId: "execution:parent:child:worker",
-      cursor: "child-usage",
-      sequence: 0,
-      type: "model.usage.reported",
-      createdAt: 3,
-      data: { cost_usd: 0.25 },
-    },
-    revision: 0,
+    revision: 1,
+    cost: { _tag: "Available", usd: 0.75, unpricedAttempts: 0 },
+    tokens: { _tag: "Unavailable" },
+    time: { _tag: "Unavailable" },
   })
 
   expect(page.state.model.costUsd).toBe(0.5)
   expect(child.state.model.costUsd).toBe(0.75)
   expect(child.state.threadCostUsd).toBe(0.75)
-  expect(child.state.entries.find((entry) => entry.turn.id === "parent")?.projectionCostUsd).toBe(0.75)
 })
 
-it("applies a late cost aggregate without lowering the semantic revision", () => {
+it("applies a usage aggregate without lowering the semantic projection revision", () => {
   const page = InteractiveController.update(initialState(), {
     _tag: "SelectionLoaded",
     selectionEpoch: 1,
@@ -1604,19 +1979,13 @@ it("applies a late cost aggregate without lowering the semantic revision", () =>
   })
   const current = { ...page.state, revisions: new Map([["parent", 9]]) }
   const late = InteractiveController.update(current, {
-    _tag: "TranscriptPatched",
+    _tag: "ThreadUsageUpdated",
     selectionEpoch: 1,
     threadId: thread.id,
-    turnId: Turn.TurnId.make("parent"),
-    threadCostUsd: 0.75,
-    event: {
-      executionId: "execution:parent",
-      cursor: "late-cost",
-      sequence: 2,
-      type: "model.attempt.completed",
-      createdAt: 3,
-    },
-    revision: 2,
+    revision: 1,
+    cost: { _tag: "Available", usd: 0.75, unpricedAttempts: 0 },
+    tokens: { _tag: "Unavailable" },
+    time: { _tag: "Unavailable" },
   })
 
   expect(late.state.model.costUsd).toBe(0.75)
@@ -1625,6 +1994,8 @@ it("applies a late cost aggregate without lowering the semantic revision", () =>
 })
 
 it("clears working state when the semantic event stream reaches a terminal event", () => {
+  const persisted = entries("new", 2)
+  const activeTurn = { ...persisted[0]!.turn, status: "running" as const }
   const page = InteractiveController.update(initialState(), {
     _tag: "SelectionLoaded",
     selectionEpoch: 1,
@@ -1632,30 +2003,14 @@ it("clears working state when the semantic event stream reaches a terminal event
     queueRevision: 0,
     queue: [],
     thread,
-    entries: entries("new", 2),
+    entries: persisted,
     hasOlder: false,
     threadCostUsd: 0,
+    activeTurn,
   })
-  const completed = InteractiveController.update(
-    {
-      ...page.state,
-      model: { ...page.state.model, activeTurnId: "new", busy: true, activity: { _tag: "Sending" } },
-    },
-    {
-      _tag: "TranscriptPatched",
-      selectionEpoch: 1,
-      threadId: thread.id,
-      turnId: Turn.TurnId.make("new"),
-      event: {
-        executionId: "execution:new",
-        cursor: "terminal",
-        sequence: 0,
-        type: "execution.completed",
-        createdAt: 3,
-      },
-      revision: 0,
-    },
-  )
+  const feed = makeProjectionFeed(page.state, activeTurn, Transcript.empty(activeTurn.id, activeTurn.prompt))
+  feed.apply({ cursor: "completed", sequence: 1, type: "execution.completed", createdAt: 3 })
+  const completed = feed.stop("completed")
 
   expect(completed.state.model).toMatchObject({ busy: false, activity: undefined, activeTurnId: undefined })
 })
@@ -1683,20 +2038,26 @@ it("keeps the newest logical selection when delayed A to B to A work arrives", (
   const b2 = load(a1.state, threadB, 2, [])
   const a3 = load(b2.state, thread, 3, entries("a-3", 3))
   const delayedA1 = load(a3.state, thread, 1, entries("stale-a", 4))
-  const delayedPatch = InteractiveController.update(delayedA1.state, {
-    _tag: "TranscriptPatched",
-    selectionEpoch: 1,
-    threadId: thread.id,
-    turnId: Turn.TurnId.make("a-1"),
-    event: {
-      executionId: "execution:a-1",
+  const staleTurn = entries("a-1", 1)[0]!.turn
+  const staleProjection = Transcript.project(staleTurn.id, staleTurn.prompt, [
+    {
       cursor: "stale",
       sequence: 9,
       type: "model.output.completed",
       createdAt: 9,
       text: "stale",
     },
-    revision: 9,
+  ])
+  const delayedPatch = InteractiveController.update(delayedA1.state, {
+    _tag: "TranscriptProjectionStarted",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    rootTurnId: staleTurn.id,
+    turn: staleTurn,
+    streamId: "stream:a-1",
+    patchRevision: 0,
+    state: visibleState(staleProjection),
+    units: staleProjection.units,
   })
 
   expect(delayedA1.state).toBe(a3.state)
@@ -1770,11 +2131,13 @@ it("removes a promoted turn and exits queue edit mode synchronously", () => {
 })
 
 it("eagerly consumes more than one frame of events while bounding reducer work per render frame", () => {
-  type TranscriptPatched = Extract<Operation.InteractiveEvent, { readonly _tag: "TranscriptPatched" }>
+  type ProjectionPatched = Extract<Operation.InteractiveEvent, { readonly _tag: "TranscriptProjectionPatched" }>
   const scheduled: Array<() => void> = []
   let received = 0
   let applied = 0
   let renders = 0
+  const persisted = entries("stream", 2)
+  const turn = { ...persisted[0]!.turn, status: "running" as const }
   let state = InteractiveController.update(initialState(), {
     _tag: "SelectionLoaded",
     selectionEpoch: 1,
@@ -1782,26 +2145,38 @@ it("eagerly consumes more than one frame of events while bounding reducer work p
     queueRevision: 0,
     queue: [],
     thread,
-    entries: entries("stream", 2),
+    entries: persisted,
     hasOlder: false,
     threadCostUsd: 0,
+    activeTurn: turn,
   }).state
-  const events: ReadonlyArray<TranscriptPatched> = Array.from({ length: 257 }, (_, index) => ({
-    _tag: "TranscriptPatched" as const,
-    selectionEpoch: 1,
-    threadId: thread.id,
-    turnId: Turn.TurnId.make("stream"),
-    event: {
-      executionId: "execution:stream",
+  let projection = Transcript.empty(turn.id, turn.prompt)
+  state = startProjection(state, turn, projection).state
+  const events: ReadonlyArray<ProjectionPatched> = Array.from({ length: 257 }, (_, index) => {
+    const source: Transcript.SourceEvent = {
       cursor: `chunk-${index}`,
       sequence: index,
       type: "model.output.delta",
       createdAt: index,
       text: index === 256 ? "FINAL-CHUNK" : "x",
-    },
-    revision: index,
-  }))
-  const batcher = InteractiveController.makeFeedFrameBatcher<TranscriptPatched>({
+    }
+    const next = Transcript.applyEvent(projection, source)
+    const event: ProjectionPatched = {
+      _tag: "TranscriptProjectionPatched",
+      selectionEpoch: 1,
+      threadId: thread.id,
+      rootTurnId: turn.id,
+      streamId: `stream:${turn.id}`,
+      baseRevision: index,
+      patchRevision: index + 1,
+      origin: projectionOrigin(source, `execution:${turn.id}`),
+      state: visibleState(next),
+      delta: unitDelta(projection, next),
+    }
+    projection = next
+    return event
+  })
+  const batcher = InteractiveController.makeFeedFrameBatcher<ProjectionPatched>({
     schedule: (flush) => scheduled.push(flush),
     apply: (batch) => {
       for (const event of batch) {
@@ -1813,7 +2188,7 @@ it("eagerly consumes more than one frame of events while bounding reducer work p
       renders += 1
     },
   })
-  const consume = (dispatch: (event: TranscriptPatched) => void) => {
+  const consume = (dispatch: (event: ProjectionPatched) => void) => {
     for (const event of events) {
       received += 1
       dispatch(event)
@@ -1837,11 +2212,10 @@ it("eagerly consumes more than one frame of events while bounding reducer work p
   expect(scheduled).toHaveLength(1)
 })
 
-it("keeps non-urgent lifecycle events behind earlier child events", () => {
+it("preserves feed order across lanes and batch boundaries", () => {
   type FeedEvent = {
     readonly id: string
     readonly lane: "root" | "child"
-    readonly urgent: boolean
   }
   const scheduled: Array<() => void> = []
   const applied: Array<string> = []
@@ -1849,12 +2223,10 @@ it("keeps non-urgent lifecycle events behind earlier child events", () => {
     schedule: (flush) => scheduled.push(flush),
     apply: (events) => applied.push(...events.map((event) => event.id)),
     render: () => undefined,
-    lane: (event) => event.lane,
-    urgent: (event) => event.urgent,
   })
-  for (let index = 0; index < 300; index += 1) batcher.offer({ id: `child-${index}`, lane: "child", urgent: false })
-  batcher.offer({ id: "root-progress", lane: "root", urgent: false })
-  batcher.offer({ id: "root-result", lane: "root", urgent: false })
+  for (let index = 0; index < 300; index += 1) batcher.offer({ id: `child-${index}`, lane: "child" })
+  batcher.offer({ id: "root-progress", lane: "root" })
+  batcher.offer({ id: "root-result", lane: "root" })
 
   scheduled.shift()?.()
 
@@ -1866,55 +2238,6 @@ it("keeps non-urgent lifecycle events behind earlier child events", () => {
     "root-progress",
     "root-result",
   ])
-})
-
-it("promotes an urgent request with its same-lane predecessors", () => {
-  type FeedEvent = {
-    readonly id: string
-    readonly lane: "root" | "child"
-    readonly urgent: boolean
-  }
-  const scheduled: Array<() => void> = []
-  const applied: Array<string> = []
-  const batcher = InteractiveController.makeFeedFrameBatcher<FeedEvent>({
-    schedule: (flush) => scheduled.push(flush),
-    apply: (events) => applied.push(...events.map((event) => event.id)),
-    render: () => undefined,
-    lane: (event) => event.lane,
-    urgent: (event) => event.urgent,
-  })
-  for (let index = 0; index < 300; index += 1) batcher.offer({ id: `child-${index}`, lane: "child", urgent: false })
-  batcher.offer({ id: "root-progress", lane: "root", urgent: false })
-  batcher.offer({ id: "root-approval", lane: "root", urgent: true })
-
-  scheduled.shift()?.()
-
-  expect(applied).toHaveLength(256)
-  expect(applied.at(-2)).toBe("root-progress")
-  expect(applied.at(-1)).toBe("root-approval")
-  expect(applied.slice(0, -2)).toEqual(Array.from({ length: 254 }, (_, index) => `child-${index}`))
-  while (scheduled.length > 0) scheduled.shift()?.()
-  expect(applied.filter((id) => id.startsWith("child-"))).toEqual(
-    Array.from({ length: 300 }, (_, index) => `child-${index}`),
-  )
-})
-
-it("only treats user-blocking requests as urgent feed events", () => {
-  const patched = (type: string): Operation.InteractiveEvent => ({
-    _tag: "TranscriptPatched",
-    selectionEpoch: 1,
-    threadId: thread.id,
-    turnId: Turn.TurnId.make("turn"),
-    event: { executionId: "execution:turn", cursor: type, sequence: 1, type, createdAt: 1 },
-    revision: 1,
-  })
-
-  expect(InteractiveController.isUrgentFeedEvent(patched("tool.approval.requested"))).toBe(true)
-  expect(InteractiveController.isUrgentFeedEvent(patched("permission.ask.requested"))).toBe(true)
-  expect(InteractiveController.isUrgentFeedEvent(patched("tool.result.received"))).toBe(false)
-  expect(InteractiveController.isUrgentFeedEvent(patched("execution.completed"))).toBe(false)
-  expect(InteractiveController.isUrgentFeedEvent(patched("execution.failed"))).toBe(false)
-  expect(InteractiveController.isUrgentFeedEvent(patched("execution.cancelled"))).toBe(false)
 })
 
 it("keeps bidirectional transcript navigation within the semantic window budget", () => {

@@ -92,8 +92,6 @@ test("a delegation returns a running handle and await_subagents collects the rep
         additionalRegistrations: [oracle.registration],
         selection: main.selection,
         toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
-        toolNeedsApproval: () => false,
-        permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
       })
       const backendContext = yield* Layer.build(backendLayer)
       return yield* Effect.gen(function* () {
@@ -102,7 +100,6 @@ test("a delegation returns a running handle and await_subagents collects the rep
           threadId: "thread-join",
           turnId: "turn-join",
           prompt: "Ask the Oracle to investigate the boundary.",
-          startedAt: 1,
           executionRoute: {
             mode: "test",
             main: executionModelRoute("main", main.selection),
@@ -174,8 +171,6 @@ test("a silent subagent is collected as a no-report verdict", () => {
         additionalRegistrations: [oracle.registration],
         selection: main.selection,
         toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
-        toolNeedsApproval: () => false,
-        permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
       })
       const backendContext = yield* Layer.build(backendLayer)
       return yield* Effect.gen(function* () {
@@ -184,7 +179,6 @@ test("a silent subagent is collected as a no-report verdict", () => {
           threadId: "thread-join-silent",
           turnId: "turn-join-silent",
           prompt: "Ask the Oracle to say nothing.",
-          startedAt: 1,
           executionRoute: {
             mode: "test",
             main: executionModelRoute("main", main.selection),
@@ -252,8 +246,6 @@ test("one root batch can start more than four delegations", () => {
         additionalRegistrations: [child.registration],
         selection: main.selection,
         toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
-        toolNeedsApproval: () => false,
-        permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
       })
       const backendContext = yield* Layer.build(backendLayer)
       return yield* Effect.gen(function* () {
@@ -262,7 +254,6 @@ test("one root batch can start more than four delegations", () => {
           threadId: "thread-budget",
           turnId: "turn-budget",
           prompt: "Explore six things at once.",
-          startedAt: 1,
           executionRoute: {
             mode: "test",
             main: executionModelRoute("main", main.selection),
@@ -337,8 +328,6 @@ test("collecting one batch allows a later delegation", () => {
         additionalRegistrations: [child.registration],
         selection: main.selection,
         toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
-        toolNeedsApproval: () => false,
-        permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
       })
       const backendContext = yield* Layer.build(backendLayer)
       return yield* Effect.gen(function* () {
@@ -347,7 +336,6 @@ test("collecting one batch allows a later delegation", () => {
           threadId: "thread-budget-reuse",
           turnId: "turn-budget-reuse",
           prompt: "Explore four things, collect them, then explore once more.",
-          startedAt: 1,
           executionRoute: {
             mode: "test",
             main: executionModelRoute("main", main.selection),
@@ -430,8 +418,6 @@ test("await_subagents suspends on an open child and resumes when the child termi
         additionalRegistrations: [childRegistration],
         selection: main.selection,
         toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
-        toolNeedsApproval: () => false,
-        permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
       })
       const backendContext = yield* Layer.build(backendLayer)
       return yield* Effect.gen(function* () {
@@ -440,7 +426,6 @@ test("await_subagents suspends on an open child and resumes when the child termi
           threadId: "thread-join-suspend",
           turnId: "turn-join-suspend",
           prompt: "Ask the Oracle to investigate slowly.",
-          startedAt: 1,
           executionRoute: {
             mode: "test",
             main: executionModelRoute("main", main.selection),
@@ -537,8 +522,6 @@ test("a parent that answers without collecting its subagents cancels them", () =
         additionalRegistrations: [childRegistration],
         selection: main.selection,
         toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
-        toolNeedsApproval: () => false,
-        permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
       })
       const backendContext = yield* Layer.build(backendLayer)
       return yield* Effect.gen(function* () {
@@ -547,7 +530,6 @@ test("a parent that answers without collecting its subagents cancels them", () =
           threadId: "thread-join-abandon",
           turnId: "turn-join-abandon",
           prompt: "Ask the Oracle to investigate forever.",
-          startedAt: 1,
           executionRoute: {
             mode: "test",
             main: executionModelRoute("main", main.selection),
@@ -625,8 +607,6 @@ test("delegations issued in separate model cycles run at the same time", () => {
         additionalRegistrations: [childRegistration],
         selection: main.selection,
         toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
-        toolNeedsApproval: () => false,
-        permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
       })
       const backendContext = yield* Layer.build(backendLayer)
       return yield* Effect.gen(function* () {
@@ -635,7 +615,6 @@ test("delegations issued in separate model cycles run at the same time", () => {
           threadId: "thread-join-parallel",
           turnId: "turn-join-parallel",
           prompt: "Explore alpha and beta.",
-          startedAt: 1,
           executionRoute: {
             mode: "test",
             main: executionModelRoute("main", main.selection),

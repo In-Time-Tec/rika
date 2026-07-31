@@ -1,20 +1,7 @@
 import { Function, Schema } from "effect"
 
-export const Permission = Schema.Literals(["allow", "ask"])
-export type Permission = typeof Permission.Type
-
 export const Idempotency = Schema.Literals(["safe", "unsafe"])
 export type Idempotency = typeof Idempotency.Type
-
-export const ProductPermission = Schema.Literals(["thread.read", "thread.coordinate", "thread.control"])
-export type ProductPermission = typeof ProductPermission.Type
-
-export const PermissionRule = Schema.Struct({
-  actions: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
-  productPermission: ProductPermission,
-  idempotency: Idempotency,
-})
-export type PermissionRule = typeof PermissionRule.Type
 
 const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0))
 
@@ -25,7 +12,7 @@ export const Presentation = Schema.Struct({
   completeLabel: Schema.String,
   failedLabel: Schema.optionalKey(Schema.String),
   rowDisplay: Schema.optionalKey(Schema.Literal("continuation")),
-  outputDisplay: Schema.optionalKey(Schema.Literals(["hidden", "expandable"])),
+  outputDisplay: Schema.optionalKey(Schema.Literals(["hidden", "expandable", "inline"])),
   counter: Schema.optionalKey(
     Schema.Literals([
       "file",
@@ -45,9 +32,6 @@ export const Presentation = Schema.Struct({
 export type Presentation = typeof Presentation.Type
 
 export const Policy = Schema.Struct({
-  permission: Permission,
-  productPermission: Schema.optionalKey(ProductPermission),
-  permissionRules: Schema.optionalKey(Schema.Array(PermissionRule).check(Schema.isMinLength(1))),
   idempotency: Idempotency,
   timeoutMillis: PositiveInt,
   outputLimit: PositiveInt,
@@ -66,28 +50,11 @@ export interface Registration {
 }
 
 export const allow: {
-  (
-    idempotency: Idempotency,
-    timeoutMillis: number,
-    outputLimit: number,
-    presentation: Presentation,
-    productPermission?: ProductPermission,
-    permissionRules?: ReadonlyArray<PermissionRule>,
-  ): Policy
+  (idempotency: Idempotency, timeoutMillis: number, outputLimit: number, presentation: Presentation): Policy
   (timeoutMillis: number, outputLimit: number, presentation: Presentation): (idempotency: Idempotency) => Policy
 } = Function.dual(
   (args) => args.length >= 4,
-  (
-    idempotency: Idempotency,
-    timeoutMillis: number,
-    outputLimit: number,
-    presentation: Presentation,
-    productPermission?: ProductPermission,
-    permissionRules?: ReadonlyArray<PermissionRule>,
-  ): Policy => ({
-    permission: "allow",
-    ...(productPermission === undefined ? {} : { productPermission }),
-    ...(permissionRules === undefined ? {} : { permissionRules }),
+  (idempotency: Idempotency, timeoutMillis: number, outputLimit: number, presentation: Presentation): Policy => ({
     idempotency,
     timeoutMillis,
     outputLimit,

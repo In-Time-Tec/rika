@@ -4,23 +4,34 @@ import * as Turn from "@rika/persistence/turn"
 import * as InteractiveFeedOverflow from "../src/interactive-feed-overflow"
 
 describe("interactive feed overflow", () => {
+  const turn: Turn.Turn = {
+    _tag: "AgentExecution",
+    id: Turn.TurnId.make("turn"),
+    threadId: Thread.ThreadId.make("thread"),
+    prompt: "prompt",
+    status: "running",
+    stopIntent: "none",
+    executionRoute: Turn.testExecutionRoute(),
+    author: { _tag: "Human" },
+    lineage: { _tag: "Original" },
+    createdAt: 0,
+    updatedAt: 0,
+  }
+
   it("collapses repeated transcript activity into one ordered resync", () => {
     const state = InteractiveFeedOverflow.make()
     for (let index = 0; index < 2; index += 1)
       InteractiveFeedOverflow.remember(state, {
-        _tag: "TranscriptPatched",
+        _tag: "TranscriptProjectionPatched",
         selectionEpoch: 7,
-        threadId: Thread.ThreadId.make("thread"),
-        turnId: Turn.TurnId.make("turn"),
-        event: {
-          executionId: "execution:turn",
-          cursor: String(index),
-          sequence: index,
-          type: "model.output.delta",
-          createdAt: index,
-          text: "x",
-        },
-        revision: index,
+        threadId: turn.threadId,
+        rootTurnId: turn.id,
+        streamId: "stream",
+        baseRevision: index,
+        patchRevision: index + 1,
+        origin: { _tag: "Discovery", executionId: "execution:turn" },
+        state: { revision: index, modelPhase: 0 },
+        delta: { upsert: [], remove: [] },
       })
 
     expect(state.criticalOverflowed).toBe(false)
@@ -39,19 +50,16 @@ describe("interactive feed overflow", () => {
     const threadIds = ["thread-a", "thread-b"]
     for (let index = 0; index < InteractiveFeedOverflow.capacity * 4; index += 1)
       InteractiveFeedOverflow.remember(state, {
-        _tag: "TranscriptPatched",
+        _tag: "TranscriptProjectionPatched",
         selectionEpoch: 3,
         threadId: Thread.ThreadId.make(threadIds[index % threadIds.length]!),
-        turnId: Turn.TurnId.make("turn"),
-        event: {
-          executionId: "execution:turn",
-          cursor: String(index),
-          sequence: index,
-          type: "model.output.delta",
-          createdAt: index,
-          text: "x",
-        },
-        revision: index,
+        rootTurnId: turn.id,
+        streamId: "stream",
+        baseRevision: index,
+        patchRevision: index + 1,
+        origin: { _tag: "Discovery", executionId: "execution:turn" },
+        state: { revision: index, modelPhase: 0 },
+        delta: { upsert: [], remove: [] },
       })
 
     expect(state.criticalOverflowed).toBe(false)
@@ -103,14 +111,18 @@ describe("interactive feed overflow", () => {
     ])
   })
 
-  it("recovers an overflowed replacement as an authoritative transcript resync", () => {
+  it("recovers an overflowed projection snapshot as an authoritative transcript resync", () => {
     const state = InteractiveFeedOverflow.make()
     InteractiveFeedOverflow.remember(state, {
-      _tag: "TranscriptReplaced",
+      _tag: "TranscriptProjectionStarted",
       selectionEpoch: 7,
-      threadId: Thread.ThreadId.make("thread"),
-      entries: [],
-      hasOlder: false,
+      threadId: turn.threadId,
+      rootTurnId: turn.id,
+      turn,
+      streamId: "stream",
+      patchRevision: 0,
+      state: { revision: 0, modelPhase: 0 },
+      units: [],
     })
 
     expect(InteractiveFeedOverflow.events(state, 7, "bounded")).toEqual([
@@ -127,10 +139,9 @@ describe("interactive feed overflow", () => {
     const state = InteractiveFeedOverflow.make()
     for (let index = 0; index < InteractiveFeedOverflow.capacity + 1; index += 1)
       InteractiveFeedOverflow.remember(state, {
-        _tag: "ShellCompleted",
-        command: String(index),
-        text: String(index),
-        incognito: true,
+        _tag: "ExecutionFailed",
+        selectionEpoch: 0,
+        message: String(index),
       })
 
     expect(state.criticalOverflowed).toBe(true)

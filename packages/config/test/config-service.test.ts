@@ -336,7 +336,6 @@ describe("ConfigService", () => {
     Effect.gen(function* () {
       const config = yield* ConfigService.effective()
       expect(config.settings.keymap).toMatchObject({ mode: "alt+m", submit: "ctrl+enter", newline: "alt+enter" })
-      expect(config.settings.permissions).toEqual({ shell: "deny" })
       expect(Object.keys(config.settings.mcp).toSorted()).toEqual(["global", "shared", "workspace"])
       expect(config.settings.mcp.shared).toMatchObject({ command: "workspace-shared" })
       expect(config.settings.notifications).toEqual({ enabled: false, command: "workspace-notify" })
@@ -347,7 +346,6 @@ describe("ConfigService", () => {
         ConfigService.memoryLayer({
           global: {
             keymap: { mode: "alt+m", submit: "alt+enter" },
-            permissions: { read: "deny", shell: "ask" },
             mcp: {
               global: { transport: "command", command: "global", args: [], environment: {}, enabled: true },
               shared: { transport: "command", command: "global-shared", args: [], environment: {}, enabled: true },
@@ -358,7 +356,6 @@ describe("ConfigService", () => {
           },
           workspace: {
             keymap: { submit: "ctrl+enter", newline: "alt+enter" },
-            permissions: { write: "ask", shell: "deny" },
             mcp: {
               workspace: { transport: "command", command: "workspace", args: [], environment: {}, enabled: true },
               shared: { transport: "command", command: "workspace-shared", args: [], environment: {}, enabled: true },

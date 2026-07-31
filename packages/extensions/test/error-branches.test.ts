@@ -1,7 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
 import { Crypto, Effect, FileSystem, Layer, PlatformError } from "effect"
-import { McpConfig, McpRuntime, PluginDigest, PluginLoader, PluginRegistry, PluginTrust, SkillRegistry } from "../src"
+import { McpConfig, McpRuntime, PluginLoader, PluginRegistry, SkillRegistry } from "../src"
 
 const document = (name: string) => `---\nname: ${name}\ndescription: ${name}\n---\nbody`
 
@@ -161,15 +161,11 @@ it.layer(BunServices.layer)((test) => {
   })
 
   test.effect("isolates plugin import, contract, and registration failures", () => {
-    const layers = Layer.mergeAll(PluginTrust.memoryLayer(), PluginRegistry.memoryLayer, BunServices.layer)
+    const layers = Layer.mergeAll(PluginRegistry.memoryLayer, BunServices.layer)
     return Effect.gen(function* () {
       const context = yield* Layer.build(layers)
       yield* Effect.gen(function* () {
-        const trust = yield* PluginTrust.Service
-        for (const id of ["import", "contract", "register"]) {
-          yield* trust.approve("workspace", id, yield* PluginDigest.source(id))
-        }
-        const generation = yield* PluginLoader.reload("workspace", [
+        const generation = yield* PluginLoader.reload([
           pluginSource("import", Effect.fail(PluginLoader.LoadError.make({ message: "read/import failed" }))),
           pluginSource("contract", Effect.succeed({ apiVersion: 1, id: "wrong", register: () => {} })),
           pluginSource(

@@ -11,6 +11,7 @@ import { ThreadTools, ToolInvocation } from "@rika/tools"
 import { Context, Effect, Layer, Schema, Stream } from "effect"
 import { ThreadQuery, ThreadToolHandlers } from "../src"
 import { provideLayer } from "./layer"
+import { delegationUnit, storeProjection } from "./transcript-repository-fixture"
 
 const workspace = "/work/acme"
 const invocation = ToolInvocation.ToolInvocation.of({
@@ -33,6 +34,7 @@ const storedThread: Thread.Thread = {
   updatedAt: 2,
 }
 const storedTurn: Turn.Turn = {
+  _tag: "AgentExecution",
   id: Turn.TurnId.make("turn-1"),
   threadId: storedThread.id,
   prompt: "fix auth",
@@ -44,6 +46,11 @@ const storedTurn: Turn.Turn = {
   createdAt: 1,
   updatedAt: 2,
 }
+const projection = (units: ReadonlyArray<Transcript.Unit>): Transcript.Projection => ({
+  units,
+  revision: units.reduce((maximum, unit) => Math.max(maximum, unit.revision), -1),
+  modelPhase: 0,
+})
 const relatedThread: Thread.Thread = {
   ...storedThread,
   id: Thread.ThreadId.make("two"),
@@ -142,7 +149,7 @@ describe("ThreadQuery", () => {
     Effect.gen(function* () {
       const query = yield* ThreadQuery.Service
       const found = yield* query.find({ query: "states" })
-      expect(found.threads.map(({ state }) => state)).toEqual(["awaiting-approval", "running", "queued", "error"])
+      expect(found.threads.map(({ state }) => state)).toEqual(["running", "running", "queued", "error"])
     }).pipe(provideLayer(queryLayer)),
   )
 
@@ -263,60 +270,143 @@ describe("ThreadQuery", () => {
     }).pipe(provideLayer(queryLayer)),
   )
 
-  it.effect("returns schema-valid subtree continuations that advance through oversized nested output", () =>
+  it.effect("reads a standalone ChildAgent subtree through the same child selector as delegated tools", () =>
     Effect.gen(function* () {
       const transcripts = yield* TranscriptRepository.Service
-      const child = (id: string, parentId: string | undefined, sequence: number): Transcript.Unit => ({
-        key: `child:${id}`,
+      const childAgent: Transcript.Unit = {
+        key: "child-agent:reviewer",
         turnId: storedTurn.id,
-        ...(parentId === undefined ? {} : { parentId }),
-        order: { sequence, part: 0 },
-        revision: sequence,
+        order: Transcript.unitOrder("child-agent:reviewer", 1),
+        revision: 1,
         content: {
           _tag: "Block",
           block: {
             _tag: "ChildAgent",
-            id,
-            name: id,
-            summary: `${id}:${"x".repeat(12_000)}`,
+            id: "reviewer-execution",
+            name: "Reviewer",
+            summary: "Reviewed the implementation",
             status: "complete",
             activity: [],
           },
         },
+      }
+      yield* storeProjection(transcripts, storedTurn, {
+        units: [Transcript.empty(storedTurn.id, storedTurn.prompt).units[0]!, childAgent],
+        revision: 1,
+        modelPhase: 0,
       })
-      const entry = (id: string, parentId: string, sequence: number): Transcript.Unit => ({
+
+      const query = yield* ThreadQuery.Service
+      const result = yield* query.readStructured({
+        threadId: storedThread.id,
+        selector: { _tag: "subtree", childExecutionId: "reviewer-execution" },
+      })
+
+      expect(result.omissions).toEqual([])
+      expect(result.items).toMatchObject([
+        {
+          messages: [
+            {
+              role: "child",
+              childExecutionId: "reviewer-execution",
+              text: "Reviewed the implementation",
+            },
+          ],
+        },
+      ])
+    }).pipe(provideLayer(queryLayer)),
+  )
+
+  it.effect("returns schema-valid subtree continuations that advance through oversized nested output", () =>
+    Effect.gen(function* () {
+      const transcripts = yield* TranscriptRepository.Service
+      const entry = (executionId: string, id: string, sequence: number): Transcript.Unit => ({
         key: `entry:${id}`,
-        turnId: storedTurn.id,
-        parentId,
-        order: { sequence, part: 0 },
+        turnId: executionId,
+        order: Transcript.unitOrder(`entry:${id}`, sequence),
         revision: sequence,
         content: { _tag: "Entry", role: "assistant", text: `${id}:${"y".repeat(12_000)}` },
       })
-      const units = [
-        child("root-agent", undefined, 1),
-        child("nested-one", "root-agent", 2),
-        child("nested-two", "nested-one", 3),
-        child("nested-three", "nested-two", 4),
-        child("nested-four", "nested-three", 5),
-        entry("deep-answer", "nested-four", 6),
-        entry("second-answer", "root-agent", 7),
-        child("sibling-agent", undefined, 8),
-        entry("sibling-answer", "sibling-agent", 9),
+      const child = (executionId: string, id: string, sequence: number): Transcript.Unit => {
+        const unit = delegationUnit(executionId, `${id}-call`, id, sequence)
+        if (unit.content._tag !== "Block" || unit.content.block._tag !== "ToolCall")
+          throw new TypeError(`Delegation ${id} did not project a tool block`)
+        return {
+          ...unit,
+          content: {
+            _tag: "Block",
+            block: { ...unit.content.block, status: "complete", output: `${id}:${"x".repeat(12_000)}` },
+          },
+        }
+      }
+      const rootAgent = child(storedTurn.id, "root-agent", 1)
+      const nestedOne = child("root-agent", "nested-one", 2)
+      const nestedTwo = child("nested-one", "nested-two", 2)
+      const nestedThree = child("nested-two", "nested-three", 2)
+      const nestedFour = child("nested-three", "nested-four", 2)
+      const siblingAgent = child(storedTurn.id, "sibling-agent", 8)
+      const root = projection([
+        Transcript.empty(storedTurn.id, storedTurn.prompt).units[0]!,
+        rootAgent,
+        siblingAgent,
         ...Array.from(
           { length: 201 },
           (_, index): Transcript.Unit => ({
             key: `newer:${index}`,
             turnId: storedTurn.id,
-            order: { sequence: index + 10, part: 0 },
+            order: Transcript.unitOrder(`newer:${index}`, index + 10),
             revision: index + 10,
             content: { _tag: "Entry", role: "assistant", text: `unrelated-${index}` },
           }),
         ),
-      ]
-      yield* transcripts.replace(storedTurn, {
-        units,
+      ])
+      const nested = Transcript.withNestedProjections(root, [
+        {
+          parentId:
+            rootAgent.content._tag === "Block" && rootAgent.content.block._tag === "ToolCall"
+              ? rootAgent.content.block.id
+              : "",
+          projection: projection([entry("root-agent", "second-answer", 1), nestedOne]),
+        },
+        {
+          parentId:
+            nestedOne.content._tag === "Block" && nestedOne.content.block._tag === "ToolCall"
+              ? nestedOne.content.block.id
+              : "",
+          projection: projection([nestedTwo]),
+        },
+        {
+          parentId:
+            nestedTwo.content._tag === "Block" && nestedTwo.content.block._tag === "ToolCall"
+              ? nestedTwo.content.block.id
+              : "",
+          projection: projection([nestedThree]),
+        },
+        {
+          parentId:
+            nestedThree.content._tag === "Block" && nestedThree.content.block._tag === "ToolCall"
+              ? nestedThree.content.block.id
+              : "",
+          projection: projection([nestedFour]),
+        },
+        {
+          parentId:
+            nestedFour.content._tag === "Block" && nestedFour.content.block._tag === "ToolCall"
+              ? nestedFour.content.block.id
+              : "",
+          projection: projection([entry("nested-four", "deep-answer", 1)]),
+        },
+        {
+          parentId:
+            siblingAgent.content._tag === "Block" && siblingAgent.content.block._tag === "ToolCall"
+              ? siblingAgent.content.block.id
+              : "",
+          projection: projection([entry("sibling-agent", "sibling-answer", 1)]),
+        },
+      ])
+      yield* storeProjection(transcripts, storedTurn, {
+        ...nested,
         revision: 210,
-        modelPhase: 0,
       })
 
       const query = yield* ThreadQuery.Service
@@ -373,7 +463,7 @@ describe("ThreadQuery", () => {
         const next = yield* read(nextInput.selection).pipe(Effect.flatMap(Schema.decodeUnknownEffect(Page)))
         expect(next.items).not.toEqual(pages.at(-1)?.items)
         pages.push(next)
-        if (pages.length > units.length + 1) return yield* Effect.die("subtree continuation did not terminate")
+        if (pages.length > nested.units.length + 1) return yield* Effect.die("subtree continuation did not terminate")
       }
 
       const rendered = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(pages)

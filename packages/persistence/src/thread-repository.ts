@@ -80,8 +80,9 @@ const decode = (row: unknown) =>
     const value = yield* Schema.decodeUnknownEffect(Row)(row)
     const labels = yield* Schema.decodeUnknownEffect(LabelsJson)(value.labels_json)
     const lineage = yield* Schema.decodeUnknownEffect(LineageJson)(value.lineage_json)
+    const id = yield* Schema.decodeUnknownEffect(ThreadId)(value.id)
     return {
-      id: ThreadId.make(value.id),
+      id,
       workspace: value.workspace,
       title: value.title,
       labels,

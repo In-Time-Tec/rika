@@ -1,11 +1,13 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/persistence/repository"
 import * as Thread from "@rika/persistence/thread"
+import * as TranscriptRepository from "@rika/persistence/transcript-repository"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import { Effect, Layer, Ref } from "effect"
 import { TestConsole } from "effect/testing"
+import * as ExecutionIngest from "../src/execution-ingest"
 import { Operation } from "../src/index"
 import { provideLayer } from "./layer"
 
@@ -28,9 +30,6 @@ const backend = ExecutionBackend.Service.of({
   cancel: () => Effect.die("unused"),
   inspect: () => Effect.void.pipe(Effect.as(undefined)),
   steer: () => Effect.die("unused"),
-  listApprovals: () => Effect.succeed([]),
-  resolveToolApproval: () => Effect.die("unused"),
-  resolvePermission: () => Effect.die("unused"),
   resolveInvocationSource: () => Effect.die("unused"),
 })
 
@@ -64,18 +63,21 @@ describe("Operation thread actions", () => {
         "cancelled",
       ]
       const turns = yield* TurnRepository.makeMemory(
-        statuses.map((status, index) => ({
-          id: Turn.TurnId.make(status),
-          threadId: alpha.id,
-          stopIntent: "none" as const,
-          prompt: `${status} prompt`,
-          author: { _tag: "Human" },
-          lineage: { _tag: "Original" },
-          executionRoute: Turn.testExecutionRoute(),
-          status,
-          createdAt: index + 1,
-          updatedAt: index + 1,
-        })),
+        statuses.map(
+          (status, index): Turn.AgentExecutionTurn => ({
+            _tag: "AgentExecution",
+            id: Turn.TurnId.make(status),
+            threadId: alpha.id,
+            stopIntent: "none" as const,
+            prompt: `${status} prompt`,
+            author: { _tag: "Human" },
+            lineage: { _tag: "Original" },
+            executionRoute: Turn.testExecutionRoute(),
+            status,
+            createdAt: index + 1,
+            updatedAt: index + 1,
+          }),
+        ),
       )
       const layer = Layer.merge(
         TestConsole.layer,
@@ -150,6 +152,7 @@ describe("Operation thread actions", () => {
       const repository = yield* ThreadRepository.makeMemory([labeled, plain])
       const turns = yield* TurnRepository.makeMemory([
         {
+          _tag: "AgentExecution",
           id: Turn.TurnId.make("one"),
           threadId: labeled.id,
           prompt: "one",
@@ -163,6 +166,7 @@ describe("Operation thread actions", () => {
           lastCursor: "a",
         },
         {
+          _tag: "AgentExecution",
           id: Turn.TurnId.make("two"),
           threadId: labeled.id,
           prompt: "two",
@@ -208,6 +212,144 @@ describe("Operation thread actions", () => {
       ])
       expect(yield* repository.get(Thread.ThreadId.make("bounded"))).toMatchObject({ labels: ["copy-me"] })
       expect(yield* repository.get(Thread.ThreadId.make("empty"))).toMatchObject({ labels: [] })
+    }),
+  )
+
+  it.effect("forks terminal recorded shells with their canonical transcript and no Relay execution", () =>
+    Effect.gen(function* () {
+      const source = thread("shell-source")
+      const repository = yield* ThreadRepository.makeMemory([source])
+      const turns = yield* TurnRepository.makeMemory([
+        {
+          _tag: "AgentExecution",
+          id: Turn.TurnId.make("source-agent"),
+          threadId: source.id,
+          prompt: "agent history",
+          author: { _tag: "Human" },
+          lineage: { _tag: "Original" },
+          executionRoute: Turn.testExecutionRoute(),
+          status: "completed",
+          stopIntent: "none",
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      ])
+      const transcripts = yield* TranscriptRepository.makeMemory({ turns })
+      yield* transcripts.copyRecordedShell(
+        {
+          _tag: "RecordedShell",
+          id: Turn.TurnId.make("source-shell"),
+          threadId: source.id,
+          prompt: "$ printf copied",
+          command: "printf copied",
+          author: { _tag: "Human" },
+          lineage: { _tag: "Original" },
+          status: "completed",
+          stopIntent: "none",
+          createdAt: 3,
+          updatedAt: 4,
+          result: { text: "copied", truncated: false, exitCode: 0 },
+        },
+        ExecutionIngest.projectionVersion,
+      )
+      const inspected = yield* Ref.make<ReadonlyArray<string>>([])
+      const forkBackend = ExecutionBackend.Service.of({
+        ...backend,
+        inspect: (turnId) => Ref.update(inspected, (ids) => [...ids, turnId]).pipe(Effect.as(undefined)),
+      })
+      const turnIds = yield* Ref.make<ReadonlyArray<string>>(["fork-agent", "fork-shell"])
+      const layer = Operation.productLayer({
+        repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
+        turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+        transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
+        backendLayer: Layer.succeed(ExecutionBackend.Service, forkBackend),
+        defaultWorkspace: "/work",
+        makeThreadId: Effect.succeed(Thread.ThreadId.make("shell-fork")),
+        makeTurnId: Ref.modify(turnIds, (ids) => [Turn.TurnId.make(ids[0] ?? "missing"), ids.slice(1)] as const),
+      })
+
+      yield* Effect.gen(function* () {
+        const operation = yield* Operation.Service
+        yield* operation.run({ _tag: "Thread", action: "fork", threadId: source.id })
+      }).pipe(provideLayer(layer))
+
+      const forked = yield* turns.list(Thread.ThreadId.make("shell-fork"))
+      expect(forked).toMatchObject([
+        { _tag: "AgentExecution", id: "fork-agent", prompt: "agent history", status: "completed" },
+        {
+          _tag: "RecordedShell",
+          id: "fork-shell",
+          prompt: "$ printf copied",
+          command: "printf copied",
+          status: "completed",
+          result: { text: "copied", truncated: false, exitCode: 0 },
+        },
+      ])
+      expect(yield* transcripts.get(Turn.TurnId.make("fork-shell"))).toMatchObject({
+        turn: { _tag: "RecordedShell", id: "fork-shell", status: "completed" },
+        revision: 1,
+        checkpointGeneration: 0,
+        units: [
+          {
+            revision: 1,
+            content: {
+              _tag: "Block",
+              block: { _tag: "ToolCall", detail: "printf copied", output: "copied", status: "complete" },
+            },
+          },
+        ],
+        executionCheckpoints: [],
+        projectionVersion: ExecutionIngest.projectionVersion,
+      })
+      expect(yield* Ref.get(inspected)).toEqual(["source-agent"])
+    }),
+  )
+
+  it.effect("rejects a running recorded shell before creating a fork", () =>
+    Effect.gen(function* () {
+      const source = thread("running-shell-source")
+      const repository = yield* ThreadRepository.makeMemory([source])
+      const turns = yield* TurnRepository.makeMemory()
+      const transcripts = yield* TranscriptRepository.makeMemory({ turns })
+      yield* transcripts.createRecordedShell(
+        {
+          _tag: "RecordedShell",
+          id: Turn.TurnId.make("running-shell"),
+          threadId: source.id,
+          prompt: "$ sleep 10",
+          command: "sleep 10",
+          author: { _tag: "Human" },
+          lineage: { _tag: "Original" },
+          status: "running",
+          stopIntent: "none",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        ExecutionIngest.projectionVersion,
+      )
+      const layer = Operation.productLayer({
+        repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
+        turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+        transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
+        backendLayer: Layer.succeed(
+          ExecutionBackend.Service,
+          ExecutionBackend.Service.of({ ...backend, inspect: () => Effect.die("recorded shell reached Relay") }),
+        ),
+        defaultWorkspace: "/work",
+        makeThreadId: Effect.succeed(Thread.ThreadId.make("forbidden-shell-fork")),
+        makeTurnId: Effect.die("fork turn id must not be allocated"),
+      })
+
+      const result = yield* Effect.gen(function* () {
+        const operation = yield* Operation.Service
+        return yield* Effect.result(operation.run({ _tag: "Thread", action: "fork", threadId: source.id }))
+      }).pipe(provideLayer(layer))
+
+      expect(result._tag).toBe("Failure")
+      expect(yield* repository.get(Thread.ThreadId.make("forbidden-shell-fork"))).toBeUndefined()
+      expect(yield* turns.list(source.id)).toMatchObject([
+        { _tag: "RecordedShell", id: "running-shell", status: "running" },
+      ])
     }),
   )
 })

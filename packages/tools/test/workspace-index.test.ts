@@ -52,6 +52,9 @@ test("indexes workspace files and follows watcher updates without escaping the w
           expect(secondPage.items).toHaveLength(2)
           expect(new Set([...firstPage.items, ...secondPage.items].map((item) => item.relativePath)).size).toBe(3)
           expect(plain).toHaveProperty("nextCursor")
+          expect(plain.items.some((item) => item.relativePath.includes("escaped"))).toBe(false)
+          expect(globbed.items.some((item) => item.relativePath.includes("external"))).toBe(false)
+          expect(fuzzy.items.some((item) => item.relativePath.includes("external"))).toBe(false)
 
           yield* fileSystem.writeFileString(`${workspace}/src/created.ts`, "created after scan")
           let created = false

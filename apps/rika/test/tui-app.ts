@@ -7,6 +7,7 @@ import * as Database from "@rika/persistence/database"
 import * as ThreadRepository from "@rika/persistence/repository"
 import * as Thread from "@rika/persistence/thread"
 import * as TranscriptRepository from "@rika/persistence/transcript-repository"
+import * as TranscriptRepositoryTest from "@rika/persistence/transcript-repository-test"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as UsageRepository from "@rika/persistence/usage-repository"
@@ -53,8 +54,6 @@ export interface TuiAppOptions {
   readonly root?: string
   readonly initialThreadId?: string
   readonly idStart?: number
-  readonly shellPermission?: "allow" | "ask" | "deny"
-  readonly toolNeedsApproval?: (name: string) => boolean
   readonly workspaceFiles?: Readonly<Record<string, string>>
   readonly width?: number
   readonly height?: number
@@ -64,12 +63,10 @@ export interface TuiAppOptions {
 export const makeProjectionsLegacy = Effect.fn("TuiApp.makeProjectionsLegacy")(function* (root: string) {
   const path = yield* Path.Path
   const database = Database.layer(path.join(root, "rika.db"))
-  const context = yield* Layer.build(
-    Layer.mergeAll(ThreadRepository.layer, TurnRepository.layer, TranscriptRepository.layer).pipe(
-      Layer.provide(database),
-      Layer.provide(BunServices.layer),
-    ),
+  const repositories = Layer.mergeAll(ThreadRepository.layer, TurnRepository.layer, TranscriptRepository.layer).pipe(
+    Layer.provide(database),
   )
+  const context = yield* Layer.build(Layer.merge(repositories, database).pipe(Layer.provide(BunServices.layer)))
   const transcripts = Context.get(context, TranscriptRepository.Service)
   const turns = Context.get(context, TurnRepository.Service)
   const aged: Array<string> = []
@@ -78,20 +75,7 @@ export const makeProjectionsLegacy = Effect.fn("TuiApp.makeProjectionsLegacy")(f
       const projection = yield* transcripts.get(turn.id)
       if (projection === undefined) continue
       aged.push(String(turn.id))
-      yield* transcripts.replace(
-        turn,
-        {
-          units: projection.units,
-          revision: projection.revision,
-          modelPhase: projection.modelPhase,
-          ...(projection.oldestCursor === undefined ? {} : { oldestCursor: projection.oldestCursor }),
-          ...(projection.checkpointCursor === undefined ? {} : { checkpointCursor: projection.checkpointCursor }),
-          ...(projection.costUsd === undefined ? {} : { costUsd: projection.costUsd }),
-          ...(projection.usageCursors === undefined ? {} : { usageCursors: projection.usageCursors }),
-          ...(projection.pricingVersion === undefined ? {} : { pricingVersion: projection.pricingVersion }),
-        },
-        { projectionVersion: TranscriptRepository.legacyProjectionVersion, consumed: {} },
-      )
+      yield* TranscriptRepositoryTest.invalidateProjection(turn.id).pipe(Effect.provide(context))
     }
   return aged
 })
@@ -110,6 +94,7 @@ export interface TuiApp {
   readonly spans: () => CapturedSpans
   readonly waitFrame: (marker: string, timeoutMillis?: number) => Effect.Effect<string>
   readonly waitFrameMatch: (predicate: (frame: string) => boolean, timeoutMillis?: number) => Effect.Effect<string>
+  readonly waitCost: Effect.Effect<string>
   readonly waitGone: (marker: string, timeoutMillis?: number) => Effect.Effect<string>
   readonly waitTerminalTitle: (predicate: (title: string) => boolean, timeoutMillis?: number) => Effect.Effect<string>
   readonly settled: Effect.Effect<string>
@@ -189,8 +174,6 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
     selection: fixture.selection,
     modelVariantPolicy: "fixed-selection",
     toolRuntimeLayer: toolRuntimeLayer(workspace),
-    toolNeedsApproval: options.toolNeedsApproval ?? (() => false),
-    permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
   }).pipe(Layer.provide(BunServices.layer), Layer.orDie)
   const held = options.holdExecutionFollows
   const backendLayer =
@@ -240,7 +223,6 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
     backendLayer,
     toolRuntimeLayer,
     defaultWorkspace: workspace,
-    shellPermission: options.shellPermission ?? "allow",
     makeThreadId: Effect.sync(() => Thread.ThreadId.make(`tui-thread-${nextThread++}`)),
     makeTurnId: Effect.sync(() => Turn.TurnId.make(`tui-turn-${nextTurn++}`)),
     resolveExecutionRoute: (mode) =>
@@ -272,6 +254,9 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
         ephemeral: false,
       })
       .pipe(Effect.orDie),
+  )
+  yield* Effect.addFinalizer(() =>
+    Fiber.interrupt(operationFiber).pipe(Effect.andThen(Fiber.await(operationFiber)), Effect.asVoid),
   )
   const frame = () => setup.captureCharFrame()
   const waitFor = (predicate: (frame: string) => boolean, timeoutMillis: number) =>
@@ -322,6 +307,7 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
     spans: () => setup.captureSpans(),
     waitFrame: (marker, timeoutMillis = 60_000) => waitFor((captured) => captured.includes(marker), timeoutMillis),
     waitFrameMatch: (predicate, timeoutMillis = 60_000) => waitFor(predicate, timeoutMillis),
+    waitCost: waitFor((captured) => /\$[0-9]/u.test(captured), 60_000),
     waitGone: (marker, timeoutMillis = 60_000) => waitFor((captured) => !captured.includes(marker), timeoutMillis),
     waitTerminalTitle: (predicate, timeoutMillis = 60_000) => waitTerminalTitle(predicate, timeoutMillis),
     settled,

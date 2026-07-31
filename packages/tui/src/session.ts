@@ -1,5 +1,5 @@
 import { Function } from "effect"
-import type { Mode, PermissionDecision, PromptPart } from "./view-state"
+import type { Mode, PromptPart } from "./view-state"
 
 export interface ModelTuning {
   readonly fastMode?: boolean
@@ -21,12 +21,6 @@ export type Action =
   | { readonly _tag: "InterruptAndSend"; readonly prompt: string }
   | { readonly _tag: "Cancel" }
   | { readonly _tag: "Quit" }
-  | {
-      readonly _tag: "DecidePermission"
-      readonly id: string
-      readonly kind: "permission" | "tool-approval"
-      readonly decision: PermissionDecision
-    }
   | { readonly _tag: "SelectThread"; readonly id: string }
 
 export interface Adapter {
@@ -44,7 +38,6 @@ export interface Adapter {
   readonly steer?: (prompt: string, turnId?: string) => void
   readonly interruptAndSend?: (prompt: string) => void
   readonly cancel?: () => void
-  readonly decidePermission?: (id: string, kind: "permission" | "tool-approval", decision: PermissionDecision) => void
   readonly selectThread?: (id: string) => void
 }
 
@@ -77,9 +70,6 @@ export const execute: {
     case "Quit":
       adapter.quit()
       return true
-    case "DecidePermission":
-      adapter.decidePermission?.(action.id, action.kind, action.decision)
-      return adapter.decidePermission !== undefined
     case "SelectThread":
       adapter.selectThread?.(action.id)
       return adapter.selectThread !== undefined

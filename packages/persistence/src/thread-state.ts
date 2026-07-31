@@ -1,11 +1,10 @@
 import { Schema } from "effect"
 
-export const ThreadState = Schema.Literals(["idle", "error", "queued", "running", "awaiting-approval"])
+export const ThreadState = Schema.Literals(["idle", "error", "queued", "running"])
 export type ThreadState = typeof ThreadState.Type
 
 const ranked = [
-  { rank: 3, state: "awaiting-approval", statuses: ["waiting"] },
-  { rank: 2, state: "running", statuses: ["accepted", "running"] },
+  { rank: 2, state: "running", statuses: ["accepted", "running", "waiting"] },
   { rank: 1, state: "queued", statuses: ["queued"] },
 ] as const satisfies ReadonlyArray<{
   readonly rank: number

@@ -41,9 +41,6 @@ const backend = ExecutionBackend.Service.of({
   cancel: (turnId) => Effect.succeed({ turnId, status: "cancelled", events: [] }),
   inspect: () => Effect.die("unused"),
   steer: () => Effect.die("unused"),
-  listApprovals: () => Effect.die("unused"),
-  resolveToolApproval: () => Effect.die("unused"),
-  resolvePermission: () => Effect.die("unused"),
   resolveInvocationSource: () => Effect.die("unused"),
 })
 

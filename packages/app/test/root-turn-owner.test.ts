@@ -8,6 +8,7 @@ import * as RootTurnOwner from "../src/root-turn-owner"
 
 const threadId = Thread.ThreadId.make("thread")
 const turn = (id: string, status: Turn.Status, createdAt = 0): Turn.Turn => ({
+  _tag: "AgentExecution",
   id: Turn.TurnId.make(id),
   threadId,
   prompt: id,
@@ -74,7 +75,6 @@ it.effect("rejects terminal claims and centralizes root start and follow", () =>
       threadId,
       turnId: Turn.TurnId.make("new"),
       prompt: "prompt",
-      startedAt: 0,
       executionRoute: Turn.testExecutionRoute("medium"),
     })
     yield* owner.follow(Turn.TurnId.make("new"), { cursor: "cursor", sequence: 1 }, undefined, undefined, undefined)

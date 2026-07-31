@@ -101,15 +101,8 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
       const sourceTurnId = Turn.TurnId.make(source.rootTurnId)
       const sourceThreadId = Thread.ThreadId.make(source.threadId)
       const sourceTurn = yield* turns.get(sourceTurnId)
-      if (sourceTurn === undefined || sourceTurn.threadId !== sourceThreadId)
+      if (sourceTurn === undefined || !Turn.isAgentExecution(sourceTurn) || sourceTurn.threadId !== sourceThreadId)
         return yield* Effect.fail({ _tag: "InvocationAuthorityUnavailable" } as const)
-      if (source.callerProfile !== "Root" && source.callerProfile !== "Task")
-        return yield* Effect.fail({ _tag: "InvocationAuthorityDenied" } as const)
-      const granted = new Set(
-        source.permissions.filter((permission) => permission.value === true).map((permission) => permission.name),
-      )
-      const requirePermission = (name: "thread.read" | "thread.coordinate" | "thread.control") =>
-        granted.has(name) ? Effect.void : Effect.fail({ _tag: "InvocationPermissionDenied" } as const)
       const id = options.id ?? randomUUID
       const invocationInput = (input: unknown) => ({
         invocationDigest: invocation.idempotencyKeyDigest,
@@ -128,7 +121,6 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
           : Effect.void
       const createThread = (input: typeof ThreadTools.CreateThreadInput.Type) =>
         Effect.gen(function* () {
-          yield* requirePermission("thread.coordinate")
           const resultDelivery = delivery(input.resultDelivery)
           const accepted = yield* interactions.createThread({
             ...invocationInput(input),
@@ -152,11 +144,6 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
         })
       const interact = (input: typeof ThreadTools.ThreadInteractInput.Type) =>
         Effect.gen(function* () {
-          let permission: "thread.read" | "thread.coordinate" | "thread.control" = "thread.read"
-          if (input.action === "message") permission = "thread.coordinate"
-          if (input.action === "steer" || input.action === "cancel" || input.action === "stop")
-            permission = "thread.control"
-          yield* requirePermission(permission)
           if ((input.action === "message" || input.action === "steer") && input.message === undefined)
             return yield* Effect.fail({ _tag: "ThreadInteractMessageRequired" } as const)
           const messageText = input.message ?? ""
@@ -233,10 +220,10 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
           else control = interactions.bindStop(controlInput)
           const bound = yield* control
           if (input.action === "steer" && bound.targetTurnId !== undefined)
-            yield* backend.steer(bound.targetTurnId, messageText, invocation.idempotencyKeyDigest, invocation.createdAt)
+            yield* backend.steer(bound.targetTurnId, messageText, invocation.idempotencyKeyDigest)
           if (input.action !== "steer" && bound.targetTurnId !== undefined) {
             const cancelledBeforeStart = yield* turns.cancelAccepted(bound.targetTurnId, invocation.createdAt)
-            if (!cancelledBeforeStart) yield* backend.cancel(bound.targetTurnId, invocation.createdAt)
+            if (!cancelledBeforeStart) yield* backend.cancel(bound.targetTurnId)
           }
           return {
             schemaVersion: 2 as const,
@@ -249,7 +236,6 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
         })
       const waitForThreads = (input: typeof ThreadTools.WaitForThreadsInput.Type) =>
         Effect.gen(function* () {
-          yield* requirePermission("thread.read")
           const inspectTargets = Effect.forEach(input.targets, (target) =>
             Effect.gen(function* () {
               const turnId = Turn.TurnId.make(target.turnId)
@@ -268,16 +254,19 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
               const resultRoute = yield* interactions.getResultRoute(turnId)
               if (resultRoute === undefined)
                 return yield* Effect.fail({ _tag: "ThreadResultRouteUnavailable" } as const)
-              const readiness = yield* interactions.getReadiness(turnId)
-              const output = readiness?._tag === "TerminalReady" ? readiness.output : undefined
+              const rootResult = yield* interactions.getRootResult(turnId)
               let text = "Waiting"
               let pending = true
-              if (readiness?._tag === "TerminalReady") {
-                text = output ?? turn.status
+              if (rootResult?.status === "completed") {
+                text = rootResult.output
                 pending = false
-              } else if (readiness?._tag === "CancelledBeforeStartReady") text = "cancelled"
-              else if (turn.status === "waiting") text = "awaiting-approval"
-              if (readiness?._tag === "CancelledBeforeStartReady") pending = false
+              } else if (rootResult?.status === "failed") {
+                text = rootResult.reason ?? "failed"
+                pending = false
+              } else if (rootResult?.status === "cancelled") {
+                text = rootResult.reason ?? "cancelled"
+                pending = false
+              }
               const truncated = text.length > 3_000
               return {
                 pending,

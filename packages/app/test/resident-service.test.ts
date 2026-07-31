@@ -271,7 +271,7 @@ describe("resident service protocol", () => {
       { _tag: "Steer", text: "steer" },
       { _tag: "InterruptAndSend", prompt: "replace" },
       { _tag: "Cancel" },
-      { _tag: "ResolvePermission", waitId: "wait", kind: "permission", decision: "always" },
+      { _tag: "Quit" },
       { _tag: "NewThread" },
       { _tag: "SelectThread", threadId: "thread", selectionEpoch: 3 },
       { _tag: "ReadQueue", threadId: "thread" },
@@ -279,18 +279,17 @@ describe("resident service protocol", () => {
         _tag: "LoadOlder",
         threadId: "thread",
         selectionEpoch: 3,
-        before: { createdAt: 1, turnId: "turn", sequence: 0, part: 0, key: "turn:user" },
+        before: { createdAt: 1, turnId: "turn", orderKey: "turn:user" },
         loadedKeys: [],
       },
       {
         _tag: "LoadNewer",
         threadId: "thread",
         selectionEpoch: 3,
-        after: { createdAt: 1, turnId: "turn", sequence: 1, part: 0, key: "key" },
+        after: { createdAt: 1, turnId: "turn", orderKey: "key" },
       },
       { _tag: "PreviewThread", threadId: "thread" },
       { _tag: "ReopenThread", selectionEpoch: 4 },
-      { _tag: "Replay", turnId: "turn", afterCursor: "cursor" },
     ]
     for (const [index, command] of commands.entries()) {
       const input = {

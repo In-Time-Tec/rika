@@ -4,14 +4,11 @@ import * as ThreadTools from "./thread-tools"
 import * as Runtime from "./tool-runtime"
 import * as ToolPolicy from "./tool-policy"
 
-export { Idempotency, Permission, Presentation, ProductPermission } from "./tool-policy"
+export { Idempotency, Presentation } from "./tool-policy"
 
 export const Definition = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
-  permission: ToolPolicy.Permission,
-  productPermission: Schema.optionalKey(ToolPolicy.ProductPermission),
-  permissionRules: Schema.optionalKey(Schema.Array(ToolPolicy.PermissionRule)),
   idempotency: ToolPolicy.Idempotency,
   timeoutMillis: Schema.Int.check(Schema.isGreaterThan(0)),
   outputLimit: Schema.Int.check(Schema.isGreaterThan(0)),

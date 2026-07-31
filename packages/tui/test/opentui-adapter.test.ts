@@ -1,8 +1,10 @@
 import { CliRenderEvents, Renderable, RendererControlState } from "@opentui/core"
 import { createTestRenderer, ManualClock } from "@opentui/core/testing"
+import * as Transcript from "@rika/transcript"
 import { expect, test } from "vitest"
 import { Data, Effect } from "effect"
 import stringWidth from "string-width"
+import { TranscriptPresenter } from "../src"
 import {
   Surface,
   boundedTranscriptModel,
@@ -2258,6 +2260,39 @@ test("updates an existing streaming transcript header when it becomes expandable
         yield* openTui(() => setup.flush())
         expect(model.expandedRowKeys).toContain("tool-child:streaming")
         expect(setup.renderer.getSelection()).toBeNull()
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
+test("shows recorded shell output when the same transcript unit settles", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      const id = "recorded-shell-turn"
+      const running = Transcript.recordedShellProjection({ id, command: "printf done", status: "running" })
+      let model = TranscriptPresenter.applyRootUnits(initial("/work", "high"), id, running.units)
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      try {
+        surface.update(model)
+        yield* openTui(() => setup.flush())
+        expect(setup.captureCharFrame()).not.toContain("RECORDED_SHELL_OUTPUT")
+
+        const settled = Transcript.settleRecordedShellProjection(running, {
+          id,
+          command: "printf done",
+          status: "completed",
+          result: { text: "RECORDED_SHELL_OUTPUT", truncated: false, exitCode: 0 },
+        })
+        model = TranscriptPresenter.applyTurnDelta(model, id, { upsert: settled.units, remove: [] })
+        surface.update(model)
+        yield* openTui(() => setup.flush())
+
+        const frame = setup.captureCharFrame()
+        expect(frame.match(/RECORDED_SHELL_OUTPUT/gu)).toHaveLength(1)
+        expect(model.expandedRowKeys).toEqual([])
       } finally {
         surface.destroy()
         setup.renderer.destroy()

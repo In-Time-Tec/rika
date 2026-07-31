@@ -528,25 +528,6 @@ describe("ViewState", () => {
     expect(repeated).toBe(cancelled)
   })
 
-  test("settles pending tool approvals when their turn is cancelled", () => {
-    const running: ViewState.Model = {
-      ...ViewState.initial("/work"),
-      busy: true,
-      activeTurnId: "turn",
-      blocks: [
-        readCall("read", "src/a.ts"),
-        { _tag: "Permission", id: "approval", kind: "tool-approval", title: "Read", detail: "{}", status: "pending" },
-      ],
-    }
-
-    const cancelled = ViewState.update(running, { _tag: "ExecutionCancelled", turnId: "turn" })
-
-    expect(cancelled.blocks).toMatchObject([
-      { id: "read", status: "cancelled" },
-      { id: "approval", status: "denied" },
-    ])
-  })
-
   test("submitting while a turn is active stays an ordinary submission", () => {
     const busy: ViewState.Model = {
       ...ViewState.initial("/work"),
@@ -887,11 +868,7 @@ describe("ViewState", () => {
       block: { _tag: "ToolResult", id: "1", output: "ok", failed: false },
     })
     model = ViewState.update(model, { _tag: "BlockAdded", block: { _tag: "Diff", path: "a.ts", patch: "+hello" } })
-    model = ViewState.update(model, {
-      _tag: "BlockAdded",
-      block: { _tag: "Permission", id: "2", kind: "tool-approval", title: "Write", detail: "a.ts", status: "pending" },
-    })
-    expect(model.blocks).toHaveLength(5)
+    expect(model.blocks).toHaveLength(4)
     expect(model.blocks[0]).toMatchObject({ _tag: "Reasoning", text: "checking files" })
   })
 
@@ -989,22 +966,6 @@ describe("ViewState", () => {
     })
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "/", sequence: "?", shift: true }) })
     expect(model).toMatchObject({ shortcutsOpen: false, palette: { open: true, query: "?" }, input: "" })
-
-    model = {
-      ...ViewState.initial("/work"),
-      blocks: [
-        {
-          _tag: "Permission",
-          id: "permission",
-          kind: "tool-approval",
-          status: "pending",
-          title: "Run command",
-          detail: "bun test",
-        },
-      ],
-    } as ViewState.Model
-    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "/", sequence: "?", shift: true }) })
-    expect(model).toMatchObject({ shortcutsOpen: false, input: "" })
   })
 
   test("keeps an empty palette open with a valid selection and no action", () => {
@@ -1053,43 +1014,6 @@ describe("ViewState", () => {
     const model = ViewState.update(ViewState.initial("/work"), { _tag: "ChangedFilesReplaced", files })
 
     expect(ViewState.update(model, { _tag: "ChangedFilesReplaced", files: [...files] })).toBe(model)
-  })
-
-  test("selects permission decisions and executes the pending choice from keys", () => {
-    let model = ViewState.update(ViewState.initial("/work"), {
-      _tag: "BlockAdded",
-      block: { _tag: "Permission", id: "p", kind: "tool-approval", title: "Write", detail: "a.ts", status: "pending" },
-    })
-    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "right" }) })
-    expect(model.permissionSelection).toBe(1)
-    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
-    expect(model.pendingAction).toEqual({
-      _tag: "DecidePermission",
-      id: "p",
-      kind: "tool-approval",
-      decision: "always",
-    })
-    expect(model.blocks[0]).toMatchObject({ status: "approved" })
-  })
-
-  test("cancels only the matching permission and clears its stale action", () => {
-    let model = ViewState.update(ViewState.initial("/work"), {
-      _tag: "BlockAdded",
-      block: { _tag: "Permission", id: "old", kind: "permission", title: "Old", detail: "old", status: "pending" },
-    })
-    model = ViewState.update(model, {
-      _tag: "BlockAdded",
-      block: { _tag: "Permission", id: "new", kind: "permission", title: "New", detail: "new", status: "pending" },
-    })
-    model = ViewState.update(model, { _tag: "PermissionDecisionSelected", id: "old" })
-    model = ViewState.update(model, { _tag: "PermissionCancelled", id: "old" })
-
-    expect(model.blocks).toMatchObject([
-      { id: "old", status: "denied" },
-      { id: "new", status: "pending" },
-    ])
-    expect(model.pendingAction).toBeUndefined()
-    expect(model.permissionSelection).toBe(0)
   })
 
   test("moves up into queued turns and down or Escape back to the composer", () => {
@@ -1333,7 +1257,7 @@ describe("ViewState", () => {
     expect(model).toMatchObject({ detailSelection: undefined, expandedRowKeys: [parent, child] })
   })
 
-  test("navigates threads, selects permissions, and deduplicates replay", () => {
+  test("navigates threads and deduplicates replay", () => {
     let model = ViewState.update(ViewState.initial("/work"), {
       _tag: "ThreadsReplaced",
       threads: [thread({ id: "a", title: "First" }), thread({ id: "b", title: "Second", unread: true })],
@@ -1341,13 +1265,6 @@ describe("ViewState", () => {
     model = ViewState.update(model, { _tag: "ThreadSidebarSelectionMoved", offset: 1 })
     model = ViewState.update(model, { _tag: "ThreadSidebarSelectionConfirmed" })
     expect(model.pendingAction).toEqual({ _tag: "SelectThread", id: "b" })
-    model = {
-      ...model,
-      blocks: [{ _tag: "Permission", id: "p", kind: "permission", title: "P", detail: "d", status: "pending" }],
-    }
-    model = ViewState.update(model, { _tag: "PermissionSelectionMoved", offset: -1 })
-    model = ViewState.update(model, { _tag: "PermissionDecisionSelected", id: "p" })
-    expect(model.pendingAction).toEqual({ _tag: "DecidePermission", id: "p", kind: "permission", decision: "deny" })
     const event = {
       id: "stable",
       cursor: "42",
@@ -1577,7 +1494,7 @@ describe("ViewState", () => {
     ).toMatchObject({ _tag: "InterruptAndSend" })
   })
 
-  test("covers palette navigation, actions, mode wrapping, history boundaries, and explicit permission", () => {
+  test("covers palette navigation, actions, mode wrapping, and history boundaries", () => {
     let model = ViewState.initial("/work", "low")
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "m", ctrl: true }) })
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
@@ -1592,21 +1509,6 @@ describe("ViewState", () => {
     for (const c of "mode") model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: c, sequence: c }) })
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
     expect(model.modePicker.open).toBe(true)
-    model = {
-      ...model,
-      blocks: [{ _tag: "Permission", id: "p", kind: "permission", title: "P", detail: "d", status: "pending" }],
-    }
-    model = ViewState.update(model, { _tag: "PermissionDecisionSelected", id: "p", decision: "allow" })
-    expect(model.pendingAction).toMatchObject({ decision: "allow" })
-    model = {
-      ...model,
-      blocks: [
-        { _tag: "Permission", id: "p", kind: "permission", title: "P", detail: "d", status: "pending" },
-        { _tag: "Notification", title: "queued", detail: "x" },
-      ],
-    }
-    model = ViewState.update(model, { _tag: "PermissionDecisionSelected", id: "p", decision: "deny" })
-    expect(model.blocks[0]).toMatchObject({ status: "denied" })
     const empty = ViewState.initial("/work")
     expect(ViewState.update(empty, { _tag: "KeyPressed", key: key({ name: "up" }) })).toBe(empty)
     expect(ViewState.inputRows({ ...empty, input: "\n".repeat(12) })).toBe(8)
@@ -1639,7 +1541,7 @@ describe("ViewState", () => {
     expect(ViewState.inputRows(ViewState.initial("/work"))).toBe(1)
   })
 
-  test("blocks Enter submission while overlays or pending permissions are active", () => {
+  test("blocks Enter submission while overlays are active", () => {
     const base = { ...ViewState.initial("/work"), input: "look at ", cursor: 8 }
     expect(ViewState.canSubmit(base)).toBe(true)
     expect(ViewState.canSubmit({ ...base, filePicker: { ...base.filePicker, open: true } })).toBe(false)
@@ -1648,11 +1550,6 @@ describe("ViewState", () => {
     expect(ViewState.canSubmit({ ...base, threadSwitcher: { ...base.threadSwitcher, open: true } })).toBe(false)
     expect(ViewState.canSubmit({ ...base, shortcutsOpen: true })).toBe(false)
     expect(ViewState.canSubmit({ ...base, input: "multi\\", cursor: 6 })).toBe(false)
-    const withPermission = ViewState.update(base, {
-      _tag: "BlockAdded",
-      block: { _tag: "Permission", id: "p1", kind: "permission", title: "Run shell", detail: "ls", status: "pending" },
-    })
-    expect(ViewState.canSubmit(withPermission)).toBe(false)
   })
 
   test("selecting a file mention inserts it without clearing the composer", () => {

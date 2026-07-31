@@ -15,12 +15,10 @@ it.effect("exports every extension namespace from the package entrypoint", () =>
       "McpConfig",
       "McpOAuth",
       "McpRuntime",
-      "McpTrust",
       "PluginApi",
       "PluginDigest",
       "PluginLoader",
       "PluginRegistry",
-      "PluginTrust",
       "SkillRegistry",
     ])
   }),
@@ -163,43 +161,6 @@ it.effect("covers live MCP transport construction failures for local and remote 
   })
 })
 
-it.effect("exercises MCP trust defaults and test trust state", () => {
-  const record: Extensions.McpTrust.Record = {
-    workspaceIdentity: "w",
-    server: "s",
-    command: "c",
-    args: [],
-    environmentNameFingerprint: "e",
-    effectiveCwd: "/",
-    sourceDigest: "d",
-    fingerprint: "f",
-  }
-  return Effect.gen(function* () {
-    const result = yield* provideLayer(
-      Effect.gen(function* () {
-        const trust = yield* Extensions.McpTrust.Service
-        const before = yield* trust.isTrusted(record)
-        yield* trust.approve(record)
-        const after = yield* trust.isTrusted(record)
-        const create = yield* Effect.flip(
-          trust.create("w", "/", {
-            kind: "local",
-            name: "s",
-            command: "c",
-            args: [],
-            environment: {},
-            source: "workspace",
-            sourceDigest: "d",
-          }),
-        )
-        return { before, after, create }
-      }),
-      Extensions.McpTrust.testLayer(["already"]),
-    )
-    expect([result.before, result.after, result.create.operation]).toEqual([false, true, "create"])
-  })
-})
-
 it.effect("covers digest canonical forms and execution extension empty, resume, and fingerprint paths", () =>
   Effect.gen(function* () {
     const array = yield* Extensions.PluginDigest.configuration([null, true, 1, "x", { b: 2, a: 1 }])
@@ -278,44 +239,5 @@ it.effect("maps cryptographic digest failures", () => {
     expect(digest._tag).toBe("@rika/extensions/PluginDigestError")
     const config = yield* Effect.flip(Extensions.McpConfig.compose({ workspace: "{}" }))
     expect(config._tag).toBe("@rika/extensions/McpConfigError")
-    const trust = yield* Extensions.McpTrust.Service
-    const error = yield* Effect.flip(
-      trust.create("workspace", "/workspace", {
-        kind: "local",
-        name: "server",
-        command: "command",
-        args: [],
-        environment: {},
-        source: "workspace",
-        sourceDigest: "source",
-      }),
-    )
-    expect(error.operation).toBe("fingerprint")
-  }).pipe(
-    provideLayer(
-      Layer.mergeAll(
-        Extensions.McpTrust.layer.pipe(Layer.provide(Layer.merge(BunServices.layer, cryptoLayer))),
-        BunServices.layer,
-        cryptoLayer,
-      ),
-    ),
-  )
+  }).pipe(provideLayer(Layer.mergeAll(BunServices.layer, cryptoLayer)))
 })
-
-it.effect("uses the workspace root for MCP commands without a configured cwd", () =>
-  Effect.gen(function* () {
-    const trust = yield* Extensions.McpTrust.Service
-    const record = yield* trust.create("workspace", "/workspace", {
-      kind: "local",
-      name: "server",
-      command: "command",
-      args: [],
-      environment: {},
-      source: "workspace",
-      sourceDigest: "source",
-    })
-    expect(record.effectiveCwd).toBe("/workspace")
-  }).pipe(
-    provideLayer(Layer.merge(Extensions.McpTrust.layer.pipe(Layer.provide(BunServices.layer)), BunServices.layer)),
-  ),
-)

@@ -1,13 +1,15 @@
 import { Schema } from "effect"
 
-export const ThreadId = Schema.String.pipe(Schema.brand("RikaThreadId"))
+export const ThreadId = Schema.String.check(Schema.isPattern(/^[\x21-\x7e]+$/)).pipe(Schema.brand("RikaThreadId"))
 export type ThreadId = typeof ThreadId.Type
 
 export const ThreadLineage = Schema.Union([
   Schema.TaggedStruct("Original", {}),
   Schema.TaggedStruct("Fork", {
     sourceThreadId: ThreadId,
-    sourceTurnId: Schema.optionalKey(Schema.String.pipe(Schema.brand("RikaTurnId"))),
+    sourceTurnId: Schema.optionalKey(
+      Schema.String.check(Schema.isPattern(/^[\x21-\x7e]+$/)).pipe(Schema.brand("RikaTurnId")),
+    ),
   }),
 ])
 export type ThreadLineage = typeof ThreadLineage.Type

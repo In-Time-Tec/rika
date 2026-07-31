@@ -1,6 +1,7 @@
 import * as BunSocket from "@effect/platform-bun/BunSocket"
 import * as Operation from "@rika/app/operation-contract"
 import * as ResidentService from "@rika/app/resident-service"
+import * as Thread from "@rika/persistence/thread"
 import {
   Cause,
   Clock,
@@ -48,17 +49,22 @@ const tracedEventTypes = new Set([
 ])
 
 const traceInteractiveEvent = (name: string, seenDeltas: Set<string>, event: Operation.InteractiveEvent) => {
-  if (event._tag !== "TranscriptPatched" || !tracedEventTypes.has(event.event.type)) return Effect.void
-  const delta = event.event.type.endsWith(".delta")
-  const key = `${event.turnId}:${event.event.type}`
+  if (
+    event._tag !== "TranscriptProjectionPatched" ||
+    event.origin._tag !== "Event" ||
+    !tracedEventTypes.has(event.origin.type)
+  )
+    return Effect.void
+  const delta = event.origin.type.endsWith(".delta")
+  const key = `${event.rootTurnId}:${event.origin.type}`
   if (delta && seenDeltas.has(key)) return Effect.void
   if (delta) seenDeltas.add(key)
   return Effect.logInfo(name).pipe(
     Effect.annotateLogs({
-      "rika.event.cursor": event.event.cursor,
-      "rika.event.type": event.event.type,
+      "rika.event.cursor": event.origin.cursor,
+      "rika.event.type": event.origin.type,
       "rika.thread.id": String(event.threadId),
-      "rika.turn.id": String(event.turnId),
+      "rika.turn.id": String(event.rootTurnId),
     }),
   )
 }
@@ -495,7 +501,13 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                         ...(promptParts === undefined ? {} : { promptParts }),
                         ...(modelTuning === undefined ? {} : { modelTuning }),
                       }),
-                    shell: (command, incognito) => invoke({ _tag: "Shell", command, incognito }),
+                    shell: (threadId, command, incognito) =>
+                      invoke({
+                        _tag: "Shell",
+                        ...(threadId === undefined ? {} : { threadId }),
+                        command,
+                        incognito,
+                      }),
                     editQueued: (turnId, prompt) => invoke({ _tag: "EditQueued", turnId, prompt }),
                     dequeue: (turnId) => invoke({ _tag: "Dequeue", turnId }),
                     steerQueued: (turnId, text) => invoke({ _tag: "SteerQueued", turnId, text }),
@@ -504,8 +516,6 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                     cancel: invoke({ _tag: "Cancel" }),
                     quit: invoke({ _tag: "Quit" }),
                     newThread: invoke({ _tag: "NewThread" }),
-                    resolvePermission: (waitId, kind, decision) =>
-                      invoke({ _tag: "ResolvePermission", waitId, kind, decision }),
                     selectThread: (threadId, selectionEpoch) =>
                       invoke({ _tag: "SelectThread", threadId, selectionEpoch }),
                     readQueue: (threadId) => invoke({ _tag: "ReadQueue", threadId }),
@@ -515,12 +525,6 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                       invoke({ _tag: "LoadNewer", threadId, selectionEpoch, after }),
                     previewThread: (threadId) => invoke({ _tag: "PreviewThread", threadId }),
                     reopenThread: (selectionEpoch) => invoke({ _tag: "ReopenThread", selectionEpoch }),
-                    replay: (turnId, afterCursor) =>
-                      invoke({
-                        _tag: "Replay",
-                        turnId,
-                        ...(afterCursor === undefined ? {} : { afterCursor }),
-                      }),
                   }
                   if (request.interactiveStarted !== undefined)
                     yield* Deferred.succeed(request.interactiveStarted, {
@@ -1056,7 +1060,16 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                 }),
               submit: (prompt, mode, parts, tuning) =>
                 mutation((session) => session.submit(prompt, mode, parts, tuning)),
-              shell: (command, incognito) => mutation((session) => session.shell(command, incognito)),
+              shell: (threadId, command, incognito) =>
+                Effect.gen(function* () {
+                  const launchSelection = yield* Ref.get(selected)
+                  const launchThreadId =
+                    threadId ??
+                    (launchSelection !== undefined && launchSelection._tag === "thread"
+                      ? Thread.ThreadId.make(launchSelection.threadId)
+                      : undefined)
+                  yield* mutation((session) => session.shell(launchThreadId, command, incognito))
+                }),
               editQueued: (turnId, prompt) => mutation((session) => session.editQueued(turnId, prompt)),
               dequeue: (turnId) => mutation((session) => session.dequeue(turnId)),
               steerQueued: (turnId, text) => mutation((session) => session.steerQueued(turnId, text)),
@@ -1068,8 +1081,6 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                 Effect.andThen(Ref.set(selected, { _tag: "latest" as const })),
                 Effect.andThen(mutation((session) => session.newThread)),
               ),
-              resolvePermission: (waitId, kind, decision) =>
-                mutation((session) => session.resolvePermission(waitId, kind, decision)),
               selectThread: (threadId, selectionEpoch) =>
                 Effect.gen(function* () {
                   const epoch = yield* nextWireEpoch(selectionEpoch)
@@ -1088,7 +1099,6 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                   yield* Ref.set(selected, { _tag: "latest" as const })
                   yield* retryRead((session) => session.reopenThread(epoch))
                 }),
-              replay: (turnId, afterCursor) => retryRead((session) => session.replay(turnId, afterCursor)),
             }
             const publish = (session: Operation.InteractiveSession, first: boolean) =>
               Effect.gen(function* () {

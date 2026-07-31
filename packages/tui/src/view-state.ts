@@ -156,13 +156,12 @@ export interface ThreadItem {
   readonly workspace: string
   readonly pinned: boolean
   readonly archived: boolean
-  readonly status: "idle" | "error" | "queued" | "running" | "awaiting-approval"
+  readonly status: "idle" | "error" | "queued" | "running"
   readonly unread: boolean
   readonly lastActivityAt: number
   readonly editTotals?: { readonly added: number; readonly modified: number; readonly removed: number }
 }
 
-export type PermissionDecision = "allow" | "always" | "deny"
 export type PromptPart =
   | { readonly type: "text"; readonly text: string; readonly pasted?: boolean }
   | { readonly type: "image"; readonly path: string }
@@ -238,7 +237,6 @@ const cancelTranscriptBlocks = (blocks: ReadonlyArray<TranscriptBlock>): Readonl
   blocks.map((block) => {
     if ((block._tag === "ToolCall" || block._tag === "ChildAgent") && block.status === "running")
       return { ...block, status: "cancelled" as const }
-    if (block._tag === "Permission" && block.status === "pending") return { ...block, status: "denied" as const }
     return block
   })
 
@@ -261,14 +259,18 @@ export type TranscriptItem =
       readonly index: number
       readonly id?: string
       readonly turnId?: string
+      readonly rootTurnId?: string
       readonly parentId?: string
+      readonly order?: Transcript.UnitOrder
     }
   | {
       readonly _tag: "Block"
       readonly index: number
       readonly id?: string
       readonly turnId?: string
+      readonly rootTurnId?: string
       readonly parentId?: string
+      readonly order?: Transcript.UnitOrder
     }
 
 export interface PaletteState {
@@ -489,7 +491,6 @@ export const Model = Schema.Struct({
   threads: Schema.Array(Schema.Unknown),
   workspaceFilesOpen: Schema.Boolean,
   threadSidebar: ThreadSidebarStateSchema,
-  permissionSelection: Schema.Finite,
   queueSelection: Schema.optional(Schema.String),
   queue: Schema.Array(QueueItem),
   queueThreadId: Schema.optional(Schema.String),
@@ -501,7 +502,6 @@ export const Model = Schema.Struct({
   seenEventIds: Schema.Array(Schema.String),
   seenExecutionEventKeys: Schema.Array(Schema.String),
   childExecutionOutcomes: Schema.Record(Schema.String, Schema.Unknown),
-  pendingChildApprovalOwners: Schema.Record(Schema.String, Schema.String),
   activeTurnId: Schema.optional(Schema.String),
   eventCursor: Schema.optional(Schema.String),
   currentThreadId: Schema.optional(Schema.String),
@@ -571,9 +571,6 @@ export type Message =
   | { readonly _tag: "ThreadSidebarSelectionMoved"; readonly offset: number }
   | { readonly _tag: "ThreadSidebarSelectionConfirmed"; readonly index?: number }
   | { readonly _tag: "ThreadPreviewScrolled"; readonly offset: number }
-  | { readonly _tag: "PermissionSelectionMoved"; readonly offset: number }
-  | { readonly _tag: "PermissionDecisionSelected"; readonly id: string; readonly decision?: PermissionDecision }
-  | { readonly _tag: "PermissionCancelled"; readonly id: string }
   | { readonly _tag: "EventReplayed"; readonly event: UiEvent }
   | { readonly _tag: "DetailMoved"; readonly offset: number }
   | { readonly _tag: "DetailToggled"; readonly id?: string }
@@ -753,14 +750,12 @@ export const initial: {
     threads: [],
     workspaceFilesOpen: false,
     threadSidebar: { open: false, focused: false, selected: 0, scrollTop: 0 },
-    permissionSelection: 0,
     queueSelection: undefined,
     queue: [],
     expandedRowKeys: [],
     seenEventIds: [],
     seenExecutionEventKeys: [],
     childExecutionOutcomes: {},
-    pendingChildApprovalOwners: {},
     activeTurnId: undefined,
     fastMode: false,
     changedFilesOpen: false,
@@ -1099,11 +1094,7 @@ export const canSubmit = (model: Model): boolean =>
   !model.modePicker.open &&
   !model.filePicker.open &&
   !model.shortcutsOpen &&
-  !(model.cursor > 0 && model.input[model.cursor - 1] === "\\") &&
-  model.blocks.every((block) => {
-    const candidate = block as TranscriptBlock
-    return candidate._tag !== "Permission" || candidate.status !== "pending"
-  })
+  !(model.cursor > 0 && model.input[model.cursor - 1] === "\\")
 
 export const update: {
   (model: Model, message: Message): Model
@@ -1219,48 +1210,6 @@ export const update: {
           previewScroll: Math.max(0, model.threadSwitcher.previewScroll + message.offset),
         },
       }
-    case "PermissionSelectionMoved":
-      return { ...model, permissionSelection: (model.permissionSelection + message.offset + 3) % 3 }
-    case "PermissionDecisionSelected": {
-      const decisions = ["allow", "always", "deny"] as const
-      const decision = message.decision ?? decisions[model.permissionSelection]!
-      const permission = (model.blocks as ReadonlyArray<TranscriptBlock>).find(
-        (block): block is Extract<TranscriptBlock, { _tag: "Permission" }> =>
-          block._tag === "Permission" && block.id === message.id,
-      )
-      if (permission?.kind === undefined || permission.status !== "pending") return model
-      return {
-        ...model,
-        blocks: model.blocks.map((block) =>
-          (block as TranscriptBlock)._tag === "Permission" &&
-          (block as Extract<TranscriptBlock, { _tag: "Permission" }>).id === message.id
-            ? {
-                ...(block as Extract<TranscriptBlock, { _tag: "Permission" }>),
-                status: decision === "deny" ? ("denied" as const) : ("approved" as const),
-              }
-            : block,
-        ),
-        permissionSelection: 0,
-        pendingAction: { _tag: "DecidePermission", id: message.id, kind: permission.kind, decision },
-      }
-    }
-    case "PermissionCancelled": {
-      const pendingAction = model.pendingAction as { readonly _tag?: string; readonly id?: string } | undefined
-      return {
-        ...model,
-        blocks: model.blocks.map((block) =>
-          (block as TranscriptBlock)._tag === "Permission" &&
-          (block as Extract<TranscriptBlock, { _tag: "Permission" }>).id === message.id
-            ? { ...(block as Extract<TranscriptBlock, { _tag: "Permission" }>), status: "denied" as const }
-            : block,
-        ),
-        permissionSelection: 0,
-        pendingAction:
-          pendingAction?._tag === "DecidePermission" && pendingAction.id === message.id
-            ? undefined
-            : model.pendingAction,
-      }
-    }
     case "EventReplayed":
       if (model.seenEventIds.includes(message.event.id)) return model
       {
@@ -1306,18 +1255,6 @@ export const update: {
             })
             blocks.push(incoming)
           }
-        } else if (incoming._tag === "Permission") {
-          const index = blocks.findIndex((candidate) => candidate._tag === "Permission" && candidate.id === incoming.id)
-          if (index >= 0) blocks[index] = { ...(blocks[index] as typeof incoming), ...incoming }
-          else {
-            items.push({
-              _tag: "Block",
-              index: blocks.length,
-              id: message.event.id,
-              ...(message.event.turnId === undefined ? {} : { turnId: message.event.turnId }),
-            })
-            blocks.push(incoming)
-          }
         } else {
           items.push({
             _tag: "Block",
@@ -1329,7 +1266,7 @@ export const update: {
         }
         const activityForIncomingBlock = (): Activity => {
           if (incoming._tag === "ToolCall") return runningToolsActivity({ ...model, blocks, items })
-          if (incoming._tag === "ToolResult" || incoming._tag === "Permission") return { _tag: "Waiting" }
+          if (incoming._tag === "ToolResult") return { _tag: "Waiting" }
           if (incoming._tag === "Compaction") {
             return incoming.status === "running" ? { _tag: "Compacting" } : { _tag: "Waiting" }
           }
@@ -1505,7 +1442,7 @@ export const update: {
       const items = [...model.items, { _tag: "Block" as const, index: model.blocks.length }]
       const activityForAddedBlock = (): Activity => {
         if (message.block._tag === "ToolCall") return runningToolsActivity({ ...model, blocks, items })
-        if (message.block._tag === "ToolResult" || message.block._tag === "Permission") return { _tag: "Waiting" }
+        if (message.block._tag === "ToolResult") return { _tag: "Waiting" }
         if (message.block._tag === "Compaction") {
           return message.block.status === "running" ? { _tag: "Compacting" } : { _tag: "Waiting" }
         }
@@ -1676,7 +1613,6 @@ export const update: {
           submittedDrafts: taken.rest,
           pendingSteering: settleSteering(model, turnId).pendingSteering,
           blocks: cancelTranscriptBlocks(model.blocks as ReadonlyArray<TranscriptBlock>),
-          permissionSelection: 0,
           cancelPending: model.activeTurnId === turnId ? false : model.cancelPending,
           busy: model.activeTurnId === turnId ? false : model.busy,
           activity: model.activeTurnId === turnId ? undefined : model.activity,
@@ -1695,7 +1631,6 @@ export const update: {
           ? {}
           : { input: cancelSettled.restoredInput, cursor: cancelSettled.restoredInput.length }),
         blocks: cancelTranscriptBlocks(model.blocks as ReadonlyArray<TranscriptBlock>),
-        permissionSelection: 0,
         busy: false,
         activity: undefined,
         activeTurnId: undefined,
@@ -1993,17 +1928,7 @@ export const update: {
           shortcutsOpen: false,
         }
       }
-      if (
-        key.ctrl &&
-        key.name === "c" &&
-        !model.cancelPending &&
-        (model.busy ||
-          model.blocks.some(
-            (block) =>
-              (block as TranscriptBlock)._tag === "Permission" &&
-              (block as Extract<TranscriptBlock, { _tag: "Permission" }>).status === "pending",
-          ))
-      )
+      if (key.ctrl && key.name === "c" && !model.cancelPending && model.busy)
         return { ...model, activity: { _tag: "Waiting" }, cancelPending: model.busy, pendingAction: { _tag: "Cancel" } }
       if (key.ctrl && key.name === "s" && model.busy && !model.cancelPending && model.input.length > 0) {
         const steerText = expandPastedText(model.input, model.pastedText)
@@ -2166,18 +2091,6 @@ export const update: {
               key.sequence,
             )
           : { ...model, filePicker: { ...model.filePicker, selected } }
-      }
-      const permission = model.blocks.findLast((block) => {
-        const candidate = block as TranscriptBlock
-        return candidate._tag === "Permission" && candidate.status === "pending"
-      }) as Extract<TranscriptBlock, { _tag: "Permission" }> | undefined
-      if (permission !== undefined) {
-        if (key.name === "left" || key.name === "up")
-          return update(model, { _tag: "PermissionSelectionMoved", offset: -1 })
-        if (key.name === "right" || key.name === "down" || key.name === "tab")
-          return update(model, { _tag: "PermissionSelectionMoved", offset: 1 })
-        if (key.name === "return") return update(model, { _tag: "PermissionDecisionSelected", id: permission.id })
-        if (questionKey(key)) return model
       }
       if (questionKey(key) && model.input.length === 0) {
         const trigger = model.cursor

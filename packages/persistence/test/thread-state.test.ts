@@ -8,9 +8,10 @@ const viaRank = (statuses: ReadonlyArray<string>) =>
   })
 
 describe("thread state", () => {
-  it("surfaces an approval prompt ahead of running work", () => {
-    expect(threadState(["running", "waiting"])).toBe("awaiting-approval")
-    expect(threadState(["waiting", "running"])).toBe("awaiting-approval")
+  it("reports a durable execution wait as active work", () => {
+    expect(threadState(["waiting"])).toBe("running")
+    expect(threadState(["running", "waiting"])).toBe("running")
+    expect(threadState(["waiting", "running"])).toBe("running")
   })
 
   it("reports an error only once nothing is active", () => {
@@ -39,8 +40,7 @@ describe("thread state", () => {
 
   it("builds the SQL ladder from the same table", () => {
     const sql = rankCase("turn.status")
-    expect(sql).toContain("WHEN turn.status IN ('waiting') THEN 3")
-    expect(sql).toContain("WHEN turn.status IN ('accepted', 'running') THEN 2")
+    expect(sql).toContain("WHEN turn.status IN ('accepted', 'running', 'waiting') THEN 2")
     expect(sql).toContain("WHEN turn.status IN ('queued') THEN 1")
     expect(sql.endsWith("ELSE 0 END")).toBe(true)
   })

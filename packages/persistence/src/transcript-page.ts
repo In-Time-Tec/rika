@@ -21,15 +21,11 @@ export const EntrySchema = Schema.Struct({
 export interface PageCursor {
   readonly createdAt: number
   readonly turnId: TurnId
-  readonly sequence: number
-  readonly part: number
-  readonly key: string
+  readonly orderKey: string
 }
 
 export const PageCursor = Schema.Struct({
   createdAt: Schema.Finite,
   turnId: TurnId,
-  sequence: Schema.Finite,
-  part: Schema.Finite,
-  key: Schema.String,
+  orderKey: Schema.NonEmptyString,
 })

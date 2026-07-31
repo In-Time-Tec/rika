@@ -16,7 +16,7 @@ const PreviewLimit = PositiveInt.check(Schema.isLessThanOrEqualTo(20))
 const TimeoutSeconds = PositiveInt.check(Schema.isLessThanOrEqualTo(600))
 const Mode = ModeId
 const ResultDelivery = Schema.Literals(["reply", "manual"])
-export const ThreadState = Schema.Literals(["idle", "queued", "running", "awaiting-approval", "error"])
+export const ThreadState = Schema.Literals(["idle", "queued", "running", "error"])
 export type ThreadState = typeof ThreadState.Type
 
 export const findDefaultLimit = 10
@@ -50,9 +50,7 @@ const TurnCursor = Schema.Struct({ createdAt: Schema.Finite, id: NonEmptyString 
 const TranscriptCursor = Schema.Struct({
   createdAt: Schema.Finite,
   turnId: NonEmptyString,
-  sequence: Schema.Finite,
-  part: Schema.Finite,
-  key: Schema.String,
+  orderKey: NonEmptyString,
 })
 const SubtreeCursor = Schema.Union([
   Schema.Struct({
@@ -287,20 +285,19 @@ const registration = (
   idempotency: Policy.Idempotency,
   timeout: number,
   limit: number,
-  permission: Policy.ProductPermission,
   action: string,
   activeLabel: string,
   completeLabel: string,
 ) =>
   Policy.register(
     tool,
-    Policy.allow(
-      idempotency,
-      timeout,
-      limit,
-      { family: "direct", action, activeLabel, completeLabel, counter: "thread" },
-      permission,
-    ),
+    Policy.allow(idempotency, timeout, limit, {
+      family: "direct",
+      action,
+      activeLabel,
+      completeLabel,
+      counter: "thread",
+    }),
   )
 
 export const registrations: ReadonlyArray<Policy.Registration> = [
@@ -324,53 +321,23 @@ export const registrations: ReadonlyArray<Policy.Registration> = [
       counter: "thread",
     }),
   ),
-  registration(
-    findThreadTool,
-    "safe",
-    10_000,
-    40_000,
-    "thread.read",
-    "find-thread",
-    "Finding threads",
-    "Found threads",
-  ),
-  registration(
-    createThreadTool,
-    "unsafe",
-    30_000,
-    40_000,
-    "thread.coordinate",
-    "create-thread",
-    "Creating thread",
-    "Created thread",
-  ),
+  registration(findThreadTool, "safe", 10_000, 40_000, "find-thread", "Finding threads", "Found threads"),
+  registration(createThreadTool, "unsafe", 30_000, 40_000, "create-thread", "Creating thread", "Created thread"),
   Policy.register(
     threadInteractTool,
-    Policy.allow(
-      "unsafe",
-      30_000,
-      40_000,
-      {
-        family: "direct",
-        action: "interact-thread",
-        activeLabel: "Coordinating thread",
-        completeLabel: "Coordinated thread",
-        counter: "thread",
-      },
-      undefined,
-      [
-        { actions: ["status", "preview_messages"], productPermission: "thread.read", idempotency: "safe" },
-        { actions: ["message"], productPermission: "thread.coordinate", idempotency: "unsafe" },
-        { actions: ["steer", "cancel", "stop"], productPermission: "thread.control", idempotency: "unsafe" },
-      ],
-    ),
+    Policy.allow("unsafe", 30_000, 40_000, {
+      family: "direct",
+      action: "interact-thread",
+      activeLabel: "Coordinating thread",
+      completeLabel: "Coordinated thread",
+      counter: "thread",
+    }),
   ),
   registration(
     waitForThreadsTool,
     "safe",
     600_000,
     40_000,
-    "thread.read",
     "wait-threads",
     "Waiting for threads",
     "Waited for threads",

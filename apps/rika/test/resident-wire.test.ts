@@ -285,19 +285,25 @@ describe("resident server message frames", () => {
       feedGeneration: "generation",
       sequence: 1,
       event: {
-        _tag: "TranscriptPatched",
+        _tag: "TranscriptProjectionPatched",
         selectionEpoch: 3,
         threadId: "thread",
-        turnId: "turn",
-        event: {
+        rootTurnId: "turn",
+        streamId: "stream:turn",
+        baseRevision: 0,
+        patchRevision: 1,
+        origin: {
+          _tag: "Event",
           executionId: "execution:turn",
           cursor: "cursor",
           sequence: 1,
           type: "model.output.delta",
           createdAt: 1,
+          transient: true,
           text: "x".repeat(20_000_000),
         },
-        revision: 1,
+        state: { revision: 1, modelPhase: 1 },
+        delta: { upsert: [], remove: [] },
       },
     })
     const decodeFrame = makeServerMessageFrameDecoder()

@@ -1,13 +1,9 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { McpToolSource } from "@batonfx/mcp"
 import { expect, it } from "@effect/vitest"
-import { Effect, Layer } from "effect"
-import { McpConfig, McpRuntime, McpTrust } from "../src"
+import { Effect } from "effect"
+import { McpConfig, McpRuntime } from "../src"
 import { provideLayer } from "./layer"
-
-const local = JSON.stringify({
-  servers: { shell: { command: "runner", args: ["--mcp"], env: { TOKEN: "secret", HOME: "/home" }, cwd: "tools" } },
-})
 
 it.effect("skill MCP configuration is composed only from activated skill resources", () =>
   Effect.gen(function* () {
@@ -33,23 +29,6 @@ it.effect("skill MCP configuration is composed only from activated skill resourc
       },
     ])
   }).pipe(provideLayer(BunServices.layer)),
-)
-
-it.effect("trust fingerprints include names and configuration but never environment values", () =>
-  Effect.gen(function* () {
-    const [server] = yield* McpConfig.compose({ workspace: local })
-    if (server === undefined || server.kind !== "local") return yield* Effect.die("Expected local server")
-    const trust = yield* McpTrust.Service
-    const record = yield* trust.create("workspace-id", "/workspace", server)
-    const before = yield* trust.isTrusted(record)
-    yield* trust.approve(record)
-    const after = yield* trust.isTrusted(record)
-    expect(before).toBe(false)
-    expect(after).toBe(true)
-    expect(record.effectiveCwd).toBe("/workspace/tools")
-    expect(Object.values(record).join(" ")).not.toContain("secret")
-    expect(record.environmentNameFingerprint).toHaveLength(64)
-  }).pipe(provideLayer(Layer.merge(McpTrust.layer.pipe(Layer.provide(BunServices.layer)), BunServices.layer))),
 )
 
 it.effect("runtime discovers and calls through a deterministic Baton MCP tool source", () => {

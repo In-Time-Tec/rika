@@ -16,7 +16,6 @@ export const workspacePaths = (workspace: string) => ({
 export const globalPaths = (home: string) => ({
   settings: under(home, globalDirectory, "settings.json"),
   skills: under(home, globalDirectory, "skills"),
-  mcpTrust: under(home, globalDirectory, "mcp-trust.json"),
   mcpOAuth: under(home, globalDirectory, "mcp-oauth.json"),
   extensionRoot: under(home, globalDirectory, "extensions"),
 })

@@ -44,13 +44,11 @@ test(
             "tool-group-states",
             "cancelled-subagent",
             "queued-turn",
-            "permission",
             "sidebar",
             "thread-switcher",
             "thread-switcher-stacked",
             "narrow-mode-overlay",
             "narrow-palette-overlay",
-            "narrow-permission",
           ]
           for (const scenario of evidenceScenarios) {
             expect(names).toContain(`${scenario}.frame.txt`)
@@ -61,7 +59,7 @@ test(
           expect(yield* fileSystem.readFileString(path.join(actual, "cancelled-subagent.frame.txt"))).toContain(
             "⊘ Subagent cancelled ▾\n │   Wait then run the checks\n │   ├ $ sleep 60 (cancelled)\n │   │\n │   │\n │   ╰   The subagent was cancelled.",
           )
-          const colorScenarios = ["mode-picker", "permission", "diff-complex", "tool-group-states"]
+          const colorScenarios = ["mode-picker", "diff-complex", "tool-group-states"]
           const colorStyles = yield* Effect.forEach(colorScenarios, (scenario) =>
             fileSystem.readFileString(path.join(actual, `${scenario}.styles.json`)),
           )

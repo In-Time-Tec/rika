@@ -7,7 +7,6 @@ export type ModeId = Modes.ModeId
 export type Role = "main" | "oracle"
 export type AgentId = "librarian" | "painter" | "review" | "readThread" | "surgeon" | "task"
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max"
-export type PermissionDecision = "allow" | "ask" | "deny"
 export type LogLevel = "debug" | "info" | "warning" | "error"
 
 export const providerDefaults = {
@@ -150,7 +149,6 @@ export interface Settings {
   readonly agents: Partial<Readonly<Record<AgentId, RoleRouteInput>>>
   readonly compaction: { readonly summaryModel: RoleRoute }
   readonly keymap: Readonly<Record<string, string>>
-  readonly permissions: Readonly<Record<string, PermissionDecision>>
   readonly extensionRoots: ReadonlyArray<string>
   readonly mcp: Readonly<Record<string, McpDefinition>>
   readonly notifications: { readonly enabled: boolean; readonly command?: string }
@@ -165,7 +163,6 @@ export interface SettingsInput {
   readonly modelAliases?: Readonly<Record<string, ModelAliasInput>>
   readonly modelRoutes?: ModelRoutesInput
   readonly keymap?: Readonly<Record<string, string>>
-  readonly permissions?: Readonly<Record<string, PermissionDecision>>
   readonly extensionRoots?: ReadonlyArray<string>
   readonly mcp?: Readonly<Record<string, McpDefinition>>
   readonly notifications?: Partial<Settings["notifications"]>
@@ -370,7 +367,6 @@ export const decodeSettingsInput: {
     "modelAliases",
     "modelRoutes",
     "keymap",
-    "permissions",
     "extensionRoots",
     "mcp",
     "notifications",
@@ -622,13 +618,6 @@ export const decodeSettingsInput: {
     if (value.modelRoutes.compaction !== undefined) roleRoute("Model route compaction", value.modelRoutes.compaction)
   }
   if (value.keymap !== undefined) stringMap(path, "Keymap", value.keymap)
-  if (value.permissions !== undefined) {
-    const permissions = stringMap(path, "Permissions", value.permissions)
-    if (
-      Object.values(permissions).some((decision) => decision !== "allow" && decision !== "ask" && decision !== "deny")
-    )
-      throw ConfigFileError.make({ path, message: "Permission values must be allow, ask, or deny" })
-  }
   if (
     value.extensionRoots !== undefined &&
     (!Array.isArray(value.extensionRoots) || value.extensionRoots.some((root) => typeof root !== "string"))
@@ -709,7 +698,6 @@ export const defaults: Settings = {
   agents: {},
   compaction: { summaryModel: { alias: "sol", effort: "xhigh" } },
   keymap: { mode: "ctrl+s", palette: "ctrl+p", submit: "enter", newline: "shift+enter", interrupt: "escape" },
-  permissions: { shell: "allow" },
   extensionRoots: [`~/${Paths.globalDirectory}/extensions`, `${Paths.workspaceDirectory}/extensions`],
   mcp: {},
   notifications: { enabled: true },

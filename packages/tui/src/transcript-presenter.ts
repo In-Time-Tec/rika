@@ -6,6 +6,8 @@ export {
 } from "./transcript-presenter/attachment"
 export {
   projectChildUnits as applyChildUnits,
+  projectUnitDelta as applyTurnDelta,
+  projectRootUnits as applyRootUnits,
   projectUnits as applyTurnUnits,
   type Event,
 } from "./transcript-presenter/projection"

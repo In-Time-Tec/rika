@@ -31,7 +31,7 @@ import {
   persistedModelRoutesForStartup,
   persistedTitleModelRoutesForStartup,
   withPinnedRouteRegistration,
-} from "../src/resident-main"
+} from "../src/resident-product"
 import { withClientWorkspace } from "../src/interactive-main"
 import * as BedrockAuthRefresh from "../src/bedrock-auth-refresh"
 import { modelRoutePlan, Service as ModelProviderRuntime } from "../src/model-provider-runtime"
@@ -94,9 +94,6 @@ const recordingBackend = (starts: Array<ExecutionBackend.StartInput>, registrati
     replay: () => Effect.die("unused"),
     steer: () => Effect.die("unused"),
     cancel: () => Effect.die("unused"),
-    listApprovals: () => Effect.succeed([]),
-    resolveToolApproval: () => Effect.die("unused"),
-    resolvePermission: () => Effect.die("unused"),
   })
 
 class RouteOperationError extends Schema.TaggedErrorClass<RouteOperationError>()("OperationError", {
@@ -436,13 +433,6 @@ test("sends each client's workspace to the resident service", () => {
     runId: "delivery-1",
     clientWorkspace: "/client-workflow",
   })
-  expect(withClientWorkspace({ _tag: "Mcp", action: "approve", name: "server" }, "/client-e")).toEqual({
-    _tag: "Mcp",
-    action: "approve",
-    name: "server",
-    workspace: "/client-e",
-    clientWorkspace: "/client-e",
-  })
 })
 
 test("isolates a stale persisted route while healthy routes keep starting", () =>
@@ -476,7 +466,6 @@ test("isolates a stale persisted route while healthy routes keep starting", () =
           threadId: "thread",
           turnId: "healthy-turn",
           prompt: "healthy",
-          startedAt: 1,
           executionRoute: {
             mode: route.mode,
             main: healthy,
@@ -584,7 +573,6 @@ test("builds the configured backend with duplicate persisted routes and one unav
               threadId: "stale-thread",
               turnId: "stale-startup-turn",
               prompt: "stale",
-              startedAt: 1,
               executionRoute: {
                 mode: "medium",
                 main: stale,
@@ -646,7 +634,6 @@ test("resolves a legacy unavailable route to the current default when it starts"
         threadId: "legacy-thread",
         turnId: "legacy-turn",
         prompt: "backfilled",
-        startedAt: 1,
         executionRoute: legacy,
       })
       expect(starts).toHaveLength(1)
@@ -680,7 +667,6 @@ test("re-registers a cloned active route when interrupt-and-send starts it", () 
         threadId: "interrupt-thread",
         turnId: "interrupt-successor",
         prompt: "continue",
-        startedAt: 1,
         executionRoute: cloned,
       })
       expect(starts).toHaveLength(1)
@@ -691,9 +677,10 @@ test("re-registers a cloned active route when interrupt-and-send starts it", () 
 
 test("restores every pinned role from a nonterminal turn into the restart registration set", () => {
   const route = executionRoutePin(ConfigContract.defaults, "high")
-  const owner: Turn.Turn = {
+  const owner: Turn.AgentExecutionTurn = {
+    _tag: "AgentExecution",
     id: Turn.TurnId.make("review-owner"),
-    threadId: "review-thread" as Turn.Turn["threadId"],
+    threadId: "review-thread" as Turn.AgentExecutionTurn["threadId"],
     prompt: "Review workspace changes",
     author: { _tag: "Human" },
     lineage: { _tag: "Original" },
@@ -714,7 +701,7 @@ test("restores every pinned role from a nonterminal turn into the restart regist
     route.title!.registrationKey,
     route.compactionSummary!.registrationKey,
   ])
-  const titleOwner: Turn.Turn = {
+  const titleOwner: Turn.AgentExecutionTurn = {
     ...owner,
     id: Turn.TurnId.make("completed-title-owner"),
     status: "completed",

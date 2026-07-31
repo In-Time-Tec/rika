@@ -69,7 +69,12 @@ const main = Effect.gen(function* () {
   const workflowHandlers = WorkflowDefinitionHost.layer({
     child: (executionId, operation, context) =>
       execute(`child:${executionId}:${operation.id}`, context.idempotency_key).pipe(Effect.mapError(workflowError)),
-    approval: (_executionId, operation) => Effect.succeed({ approved: true, prompt: operation.prompt }),
+    approval: () =>
+      Effect.fail(
+        WorkflowDefinitionHost.HandlerError.make({
+          message: "Unexpected Relay approval operation in a Rika dynamic workflow fixture",
+        }),
+      ),
     timer: (_executionId, operation) => Effect.sleep(`${operation.duration_ms} millis`),
     branch: () => Effect.succeed(true),
     structuredCompletion: (_schema, value) => Effect.succeed(value ?? null),

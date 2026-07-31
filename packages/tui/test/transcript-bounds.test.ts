@@ -52,7 +52,6 @@ const blocks: ReadonlyArray<TranscriptBlock> = [
   },
   { _tag: "Notification", title: "Notice", detail: longText },
   { _tag: "Compaction", summary: longText, checkpoint: "42" },
-  { _tag: "Permission", id: "p", kind: "tool-approval", title: "Write", detail: longText, status: "pending" },
   { _tag: "Diff", path: "packages/providers/README.md", patch: longDiff },
   toolCall("shell-1", {
     presentation: { family: "shell", action: "command", activeLabel: "Running", completeLabel: "Ran" },

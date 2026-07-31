@@ -22,7 +22,8 @@ const sourceThread: Thread.Thread = {
   createdAt: 1,
   updatedAt: 1,
 }
-const sourceTurn: Turn.Turn = {
+const sourceTurn: Turn.AgentExecutionTurn = {
+  _tag: "AgentExecution",
   id: sourceTurnId,
   threadId: sourceThreadId,
   prompt: "source",
@@ -34,7 +35,7 @@ const sourceTurn: Turn.Turn = {
   createdAt: 1,
   updatedAt: 1,
 }
-const sourceQueuedTurn: Turn.Turn = {
+const sourceQueuedTurn: Turn.AgentExecutionTurn = {
   ...sourceTurn,
   id: Turn.TurnId.make("source-queued"),
   prompt: "already queued",
@@ -126,7 +127,7 @@ const exercise = (repository: Repository.Interface) =>
         turnId: Turn.TurnId.make("queued"),
         prompt: "next",
         executionRoute: route,
-        resultDelivery: "manual",
+        resultDelivery: "reply",
         threadCreationDepth: 1,
       })
       .pipe(
@@ -148,9 +149,9 @@ const exercise = (repository: Repository.Interface) =>
       )
     const stoppedAgain = yield* repository.bindStop({ ...invocation("stop", "stop", 99), targetThreadId })
     const ready = yield* repository
-      .markResultReady({
+      .settleResult({
         targetTurnId,
-        readiness: { _tag: "TerminalReady", cursor: "cursor", sequence: 4, output: "done" },
+        result: { status: "completed", cursor: "cursor", sequence: 4, output: "done" },
         now: 5,
       })
       .pipe(Effect.mapError((cause) => Repository.RepositoryError.make({ message: `ready: ${cause.message}` })))
@@ -158,7 +159,6 @@ const exercise = (repository: Repository.Interface) =>
       repository.deliverResult({
         targetTurnId,
         deliveredTurnId: Turn.TurnId.make("reply"),
-        prompt: "done",
         queueCapacity: 1,
         now: 6,
       }),
@@ -169,14 +169,12 @@ const exercise = (repository: Repository.Interface) =>
         repository.deliverResult({
           targetTurnId,
           deliveredTurnId: Turn.TurnId.make("reply"),
-          prompt: "done",
           queueCapacity: 2,
           now: 6,
         }),
         repository.deliverResult({
           targetTurnId,
           deliveredTurnId: Turn.TurnId.make("reply"),
-          prompt: "done",
           queueCapacity: 2,
           now: 6,
         }),
@@ -190,15 +188,22 @@ const exercise = (repository: Repository.Interface) =>
     const deliveredAgain = yield* repository.deliverResult({
       targetTurnId,
       deliveredTurnId: Turn.TurnId.make("other"),
-      prompt: "other",
       queueCapacity: 2,
       now: 7,
     })
-    const manualReady = yield* repository.markResultReady({
+    const manualCancelled = yield* repository.settleResult({
       targetTurnId: Turn.TurnId.make("queued"),
-      readiness: { _tag: "CancelledBeforeStartReady" },
+      result: { status: "cancelled" },
       now: 8,
     })
+    const cancelledDelivery = yield* Effect.result(
+      repository.deliverResult({
+        targetTurnId: Turn.TurnId.make("queued"),
+        deliveredTurnId: Turn.TurnId.make("cancelled-reply"),
+        queueCapacity: 2,
+        now: 9,
+      }),
+    )
     return {
       created,
       duplicate,
@@ -214,8 +219,9 @@ const exercise = (repository: Repository.Interface) =>
       delivered,
       concurrentDelivery,
       deliveredAgain,
-      manualReady,
-      readiness: yield* repository.getReadiness(targetTurnId),
+      manualCancelled,
+      cancelledDelivery: cancelledDelivery._tag,
+      result: yield* repository.getRootResult(targetTurnId),
       undelivered: yield* repository.listUndeliveredResults(),
       sourceRelationships: yield* repository.listRelationships(sourceThreadId, 1),
       targetRelationships: yield* repository.listRelationships(targetThreadId, 2),
@@ -277,8 +283,9 @@ describe("thread interaction repository", () => {
           delivered: { delivery: "delivered", deliveredTurnId: "reply" },
           concurrentDelivery: { delivery: "delivered", deliveredTurnId: "reply" },
           deliveredAgain: { delivery: "delivered", deliveredTurnId: "reply" },
-          manualReady: { targetTurnId: "queued", kind: "manual", delivery: "ready" },
-          readiness: { _tag: "TerminalReady", cursor: "cursor", sequence: 4, output: "done" },
+          manualCancelled: { targetTurnId: "queued", kind: "reply", delivery: "cancelled" },
+          cancelledDelivery: "Failure",
+          result: { status: "completed", cursor: "cursor", sequence: 4, output: "done" },
           undelivered: [],
           sourceRelationships: [{ kind: "reply", sourceThreadId: "target", targetThreadId: "source" }],
           targetRelationships: [
