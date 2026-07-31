@@ -16,7 +16,7 @@ import {
   serverProof,
   validateHandshake,
   verifyServerProof,
-} from "../src/resident-service"
+} from "../src/resident/resident-service"
 
 describe("resident service protocol", () => {
   it("supersedes only an idle resident for a launching client", () => {

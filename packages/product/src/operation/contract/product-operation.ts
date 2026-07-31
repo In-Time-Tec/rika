@@ -1,0 +1,21 @@
+export * from "./product-operation-service"
+import * as ExecutionIngestModule from "../../execution/ingest/execution-ingest-service"
+
+export import ExecutionIngest = ExecutionIngestModule
+
+export * as Operation from "../dispatch/product-operation-dispatch"
+export * as ContextFileSystem from "../../context/context-file-system"
+export * as ContextUsage from "../../context/context-usage"
+export * as ConfigOperations from "../dispatch/configuration-operation-dispatch"
+export * as ContextMentions from "../../context/context-mention-parser"
+export * as ExtensionOperations from "../dispatch/extension-operation-dispatch"
+export * as FileMentions from "../../context/file-mention-parser"
+export * as ResolvedContext from "../../context/context-resolution-service"
+export * as ThreadQuery from "../../thread/query/thread-query-service"
+export * as UsageCost from "../../usage/usage-projection"
+export * as ThreadToolHandlers from "../../thread/tool/thread-tool-action"
+export * as ThreadToolService from "../../thread/tool/thread-tool-service"
+export * as ProductAgent from "../../agent/product-agent-service"
+export * as Workflow from "../../workflow/workflow-service"
+export * as ResidentService from "../../resident/resident-service"
+export * as OpenAiAuth from "../../authentication/openai-auth-service"

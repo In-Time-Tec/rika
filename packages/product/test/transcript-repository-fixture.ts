@@ -6,7 +6,7 @@ import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Function } from "effect"
-import { projectionVersion } from "../src/execution-ingest"
+import { projectionVersion } from "../src/execution/ingest/execution-ingest-service"
 
 export interface StoreProjectionOptions {
   readonly executionCheckpoints?: ReadonlyArray<TranscriptRepository.ExecutionCheckpoint>

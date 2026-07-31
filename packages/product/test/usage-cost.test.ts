@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import type * as ExecutionBackend from "@rika/product/execution-service"
 import { Duration, Result } from "effect"
-import * as StrictUsageCost from "../src/usage-cost"
+import * as StrictUsageCost from "../src/usage/usage-projection"
 
 const unwrap = <A>(result: Result.Result<A, StrictUsageCost.ProjectionFailure>): A => {
   if (Result.isFailure(result)) throw result.failure

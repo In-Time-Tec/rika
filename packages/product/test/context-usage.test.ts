@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import * as ContextUsage from "../src/context-usage"
+import * as ContextUsage from "../src/context/context-usage"
 
 const thresholds = {
   contextWindow: 100,

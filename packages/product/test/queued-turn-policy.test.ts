@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
-import { queuedTurnPromoteMaxAgeMs, staleQueuedTurns, staleQueuedTurnsError } from "../src/queued-turn-policy"
+import { queuedTurnPromoteMaxAgeMs, staleQueuedTurns, staleQueuedTurnsError } from "../src/thread/queue/pending-turn-policy"
 
 const queued = (id: string, createdAt: number): Turn.AgentExecutionTurn => ({
   _tag: "AgentExecution",

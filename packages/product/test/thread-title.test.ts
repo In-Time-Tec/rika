@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { clampThreadTitle, threadTitleLimit } from "../src/thread-title"
+import { clampThreadTitle, threadTitleLimit } from "../src/thread/query/thread-title-policy"
 
 describe("thread titles", () => {
   it("caps every surface at the same limit", () => {

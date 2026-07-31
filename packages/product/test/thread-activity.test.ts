@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Thread from "@rika/product/thread-record"
-import * as ThreadActivity from "../src/thread-activity"
+import * as ThreadActivity from "../src/thread/query/thread-activity"
 
 const event = (overrides: Partial<import("@rika/product/execution-service").Event> = {}) => ({
   executionId: "execution:turn-a",

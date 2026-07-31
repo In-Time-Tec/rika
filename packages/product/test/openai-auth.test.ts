@@ -35,7 +35,7 @@ import {
   StoreError,
   TokenResponse,
   layer,
-} from "../src/openai-auth"
+} from "../src/authentication/openai-auth-service"
 
 const digest = (_algorithm: string, data: Uint8Array) =>
   Effect.promise(() => globalThis.crypto.subtle.digest("SHA-256", data).then((value) => new Uint8Array(value)))
@@ -75,7 +75,7 @@ const tokens = (account?: string, user?: string) => ({
   expires_in: 3600,
 })
 
-type Disk = Schema.Schema.Type<typeof import("../src/openai-auth").CredentialDisk>
+type Disk = Schema.Schema.Type<typeof import("../src/authentication/openai-auth-service").CredentialDisk>
 const disk = (overrides: Partial<Disk> = {}): Disk => ({
   formatVersion: credentialFormatVersion,
   accessToken: jwt(),
