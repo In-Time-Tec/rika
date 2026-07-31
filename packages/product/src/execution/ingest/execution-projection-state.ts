@@ -4,7 +4,7 @@ import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Function } from "effect"
 import type { ProjectionOrigin, VisibleState } from "./execution-projection-contract"
-import type { Attachment, ProjectionDelta, ProjectionNode, VisibleDelta } from "./execution-projection-types"
+import type { Attachment, ProjectionNode, VisibleDelta } from "./execution-projection-types"
 
 export const visibleState = (fold: TranscriptProjection.ProjectionFold): VisibleState => {
   const state = TranscriptProjection.Fold.snapshotFoldState(fold)

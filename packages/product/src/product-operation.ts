@@ -19,13 +19,36 @@ import * as ThreadQuery from "./thread/query/thread-query-service"
 import * as ThreadToolAction from "./thread/tool/thread-tool-action"
 import { executeInteractiveCommand } from "./operation/interactive/interactive-command"
 import * as ProductAgentContract from "./agent/product-agent-service"
+import * as ContextFileSystemModule from "./context/context-file-system"
+import * as ContextUsageModule from "./context/context-usage"
+import * as ConfigurationOperations from "./operation/dispatch/configuration-operation-dispatch"
+import * as ContextMentionsModule from "./context/context-mention-parser"
+import * as ExtensionOperationsModule from "./operation/dispatch/extension-operation-dispatch"
+import * as FileMentionsModule from "./context/file-mention-parser"
+import * as UsageCostModule from "./usage/usage-projection"
+import * as ThreadToolServiceModule from "./thread/tool/thread-tool-service"
+import * as WorkflowModule from "./workflow/workflow-service"
+import * as ResidentServiceModule from "./resident/resident-service"
+import * as OpenAiAuthModule from "./authentication/openai-auth-service"
 import * as Coordination from "./operation/dispatch/execution-operation-coordination"
 import { OperationUnavailable as Unavailable } from "./operation/contract/product-operation-service"
 import type { Input as ResolvedInput } from "./context/resolved-context"
 
 export { ExecutionIngest, ThreadQuery }
+export const ContextFileSystem = ContextFileSystemModule
+export const ContextUsage = ContextUsageModule
+export const ConfigOperations = ConfigurationOperations
+export const ContextMentions = ContextMentionsModule
+export const ExtensionOperations = ExtensionOperationsModule
+export const FileMentions = FileMentionsModule
+export const UsageCost = UsageCostModule
+export const ThreadToolService = ThreadToolServiceModule
+export const Workflow = WorkflowModule
+export const ResidentService = ResidentServiceModule
+export const OpenAiAuth = OpenAiAuthModule
 export namespace ResolvedContext {
   export const Service = ResolvedContextModule.Service
+  export const layer = ResolvedContextModule.layer
   export const testLayer = ResolvedContextModule.testLayer
   export type Input = ResolvedInput
 }
@@ -75,7 +98,9 @@ export namespace Operation {
   export const rootExecutionEvents = Coordination.rootExecutionEvents
 }
 export namespace ProductAgent {
+  export const Profile = ProductAgentContract.Profile
   export const Service = ProductAgentContract.Service
+  export const layer = ProductAgentContract.layer
   export type Interface = ProductAgentContract.Interface
 }
 export const ThreadToolHandlers = {

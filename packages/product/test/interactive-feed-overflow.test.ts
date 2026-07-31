@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
-import * as InteractiveFeedOverflow from "../src/interactive-feed-overflow"
+import * as InteractiveFeedOverflow from "../src/operation/interactive/interactive-feed-overflow"
 
 describe("interactive feed overflow", () => {
   const turn: Turn.Turn = {

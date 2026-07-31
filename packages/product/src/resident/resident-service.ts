@@ -23,7 +23,6 @@ import { Input } from "../operation/contract/product-operation"
 import { InteractiveCommand } from "../operation/interactive/interactive-command"
 import { InteractiveEventSchema } from "../operation/interactive/interactive-event"
 import { OperationUnavailable } from "../operation/contract/product-operation-service"
-import type { InteractiveEvent } from "../operation/interactive/interactive-event"
 import type { InteractiveSession } from "../operation/interactive/interactive-session"
 import type { Interface as OperationInterface } from "../operation/contract/product-operation-service"
 
