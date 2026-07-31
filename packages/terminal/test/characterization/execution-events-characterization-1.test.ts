@@ -10,9 +10,9 @@ import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event
 
 import { expect, it } from "vitest"
 
-import { ExecutionEvents, ViewState } from "../../src/state/model/terminal-state"
+import { ExecutionEvents, ViewState, type Model, type ThreadItem, update } from "../../src/state/model/terminal-state"
 
-import { renderTranscriptStyled } from "../../src/adapter"
+import { renderTranscriptStyled } from "../../src/opentui/surface/opentui-surface"
 
 import {
   unitId as transcriptUnitId,

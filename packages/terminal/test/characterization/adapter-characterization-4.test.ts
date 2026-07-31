@@ -294,13 +294,33 @@ vi.mock("@opentui/core", () => ({
   stripAnsiSequences: (text: string) => text,
 }))
 
-import { buildTranscript, create } from "../../src/adapter"
+import { buildTranscript, create, renderTranscriptStyled } from "../../src/opentui/surface/opentui-surface"
 
-import { initial, ready } from "../../src/state/model/terminal-state"
+import { initial, ready, type Model, type ThreadItem, update } from "../../src/state/model/terminal-state"
 
 const handlers = () => ({ key: vi.fn(), resize: vi.fn() })
 
 const nonEmptyLines = (text: string) => text.split("\n").filter((line) => line.length > 0)
+
+const subagentToolBlock = {
+  _tag: "ToolCall" as const,
+  id: "agent",
+  name: "task",
+  input: JSON.stringify({ prompt: "Inspect" }),
+  status: "complete" as const,
+  presentation: {
+    family: "agent" as const,
+    action: "task" as const,
+    activeLabel: "Subagent working",
+    completeLabel: "Subagent finished",
+  },
+  detail: "Inspect",
+  output: "done",
+  files: [],
+}
+
+const renderedText = (changes: Partial<Model>): string =>
+  renderTranscriptStyled({ ...initial("/workspace", "medium"), ...changes }).chunks.map((chunk) => chunk.text).join("")
 
 const model = (changes: Partial<Model> = {}): Model => ({ ...initial("/workspace", "medium"), ...changes })
 

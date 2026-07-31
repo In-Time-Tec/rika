@@ -10,9 +10,9 @@ import { Data, Effect } from "effect"
 
 import stringWidth from "string-width"
 
-import { TranscriptPresenter } from "../../src/state/model/terminal-state"
+import { TranscriptPresenter, type Model, type ThreadItem } from "../../src/state/model/terminal-state"
 
-import { Surface, maxMountedTranscriptEntries } from "../../src/adapter"
+import { Surface, maxMountedTranscriptEntries } from "../../src/opentui/surface/opentui-surface"
 
 import { initial, loading, ready, replaceQueue, update } from "../../src/state/model/terminal-state"
 

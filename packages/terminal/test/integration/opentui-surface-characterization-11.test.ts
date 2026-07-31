@@ -8,9 +8,17 @@ import { Data, Effect } from "effect"
 
 import stringWidth from "string-width"
 
-import { Surface, maxMountedTranscriptEntries } from "../../src/adapter"
+import { Surface, maxMountedTranscriptEntries } from "../../src/opentui/surface/opentui-surface"
 
-import { initial, loading, ready, replaceQueue, update } from "../../src/state/model/terminal-state"
+import {
+  initial,
+  loading,
+  ready,
+  replaceQueue,
+  type Model,
+  type ThreadItem,
+  update,
+} from "../../src/state/model/terminal-state"
 
 class OpenTuiError extends Data.TaggedError("OpenTuiError")<{ readonly cause: unknown }> {}
 
@@ -622,11 +630,13 @@ test("loads the workspace file tree with Opt+T and keeps it separate from change
       const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 24 }))
       let model = update(initial("/work", "high"), {
         _tag: "FilesReplaced",
-        files: ["apps/rika/src/main.ts", "packages/terminal/src/adapter.ts", "README.md"],
+        files: ["apps/rika/src/main.ts", "packages/terminal/src/opentui/surface/opentui-surface.ts", "README.md"],
       })
       model = update(model, {
         _tag: "ChangedFilesReplaced",
-        files: [{ path: "packages/terminal/src/adapter.ts", status: "M", added: 4, removed: 1 }],
+        files: [
+          { path: "packages/terminal/src/opentui/surface/opentui-surface.ts", status: "M", added: 4, removed: 1 },
+        ],
       })
       const surface = new Surface(setup.renderer, {
         key: (key) => {

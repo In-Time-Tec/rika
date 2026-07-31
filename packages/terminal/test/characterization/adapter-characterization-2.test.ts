@@ -289,9 +289,15 @@ vi.mock("@opentui/core", () => ({
   stripAnsiSequences: (text: string) => text,
 }))
 
-import { buildTranscript, create, renderBlock, renderSidebar, renderTranscriptStyled } from "../../src/adapter"
+import {
+  buildTranscript,
+  create,
+  renderBlock,
+  renderSidebar,
+  renderTranscriptStyled,
+} from "../../src/opentui/surface/opentui-surface"
 
-import { initial } from "../../src/state/model/terminal-state"
+import { initial, type Model, type ThreadItem, update } from "../../src/state/model/terminal-state"
 
 import { colors } from "../../src/presentation/terminal/terminal-theme"
 

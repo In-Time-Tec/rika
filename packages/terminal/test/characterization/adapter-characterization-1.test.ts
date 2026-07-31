@@ -310,9 +310,9 @@ import {
   previewBoxRows,
   renderChangedFiles,
   renderTranscriptStyled,
-} from "../../src/adapter"
+} from "../../src/opentui/surface/opentui-surface"
 
-import { initial, ready, update } from "../../src/state/model/terminal-state"
+import { initial, ready, type Model, type ThreadItem, update } from "../../src/state/model/terminal-state"
 
 const handlers = () => ({ key: vi.fn(), resize: vi.fn() })
 

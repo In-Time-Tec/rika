@@ -4,9 +4,9 @@ import { it } from "@effect/vitest"
 
 import { Duration, Effect } from "effect"
 
-import { Keys, Palette, ViewState } from "../../src/state/model/terminal-state"
+import { Keys, Palette, ViewState, type Model, type ThreadItem, update } from "../../src/state/model/terminal-state"
 
-import * as Adapter from "../../src/adapter"
+import * as Adapter from "../../src/opentui/surface/opentui-surface"
 
 const key = (input: Partial<Keys.Key> & Pick<Keys.Key, "name">): Keys.Key => ({
   name: input.name,

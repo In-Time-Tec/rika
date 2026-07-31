@@ -294,9 +294,9 @@ vi.mock("@opentui/core", () => ({
   stripAnsiSequences: (text: string) => text,
 }))
 
-import { Surface, create, renderTranscriptStyled } from "../../src/adapter"
+import { Surface, create, renderTranscriptStyled } from "../../src/opentui/surface/opentui-surface"
 
-import { initial } from "../../src/state/model/terminal-state"
+import { initial, type Mode, type Model, type ThreadItem, update } from "../../src/state/model/terminal-state"
 
 const handlers = () => ({ key: vi.fn(), resize: vi.fn() })
 

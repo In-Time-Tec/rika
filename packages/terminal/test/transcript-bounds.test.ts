@@ -1,12 +1,12 @@
 import stringWidth from "string-width"
 import { describe, expect, test } from "vitest"
-import { buildTranscript, transcriptWrapWidth } from "../src/adapter"
+import { buildTranscript, transcriptWrapWidth } from "../src/opentui/surface/opentui-surface"
 import {
   expandableRowIds,
   rows as transcriptUnits,
   unitId,
 } from "../src/presentation/transcript/terminal-transcript-presentation"
-import { initial, type Model, type TranscriptBlock } from "../src/state/model/terminal-state"
+import { initial, type Model, type TranscriptBlock , type ThreadItem, update} from "../src/state/model/terminal-state"
 
 const longText =
   "Expected UnknownResponseStreamEvent, got " +
@@ -43,7 +43,7 @@ const toolCall = (id: string, changes: Partial<Extract<TranscriptBlock, { _tag: 
     ...changes,
   }) as TranscriptBlock
 
-const nestedCommand = `git show --format=fuller ${"a".repeat(180)} -- packages/terminal/src/adapter.ts packages/terminal/test/transcript-bounds.test.ts`
+const nestedCommand = `git show --format=fuller ${"a".repeat(180)} -- packages/terminal/src/opentui/surface/opentui-surface.ts packages/terminal/test/transcript-bounds.test.ts`
 
 const blocks: ReadonlyArray<TranscriptBlock> = [
   { _tag: "Reasoning", text: `${longText} ${longText}` },

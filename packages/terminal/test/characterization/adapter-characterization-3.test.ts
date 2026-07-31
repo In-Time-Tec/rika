@@ -294,15 +294,52 @@ vi.mock("@opentui/core", () => ({
 
 import stringWidth from "string-width"
 
-import { buildTranscript, create } from "../../src/adapter"
+import { buildTranscript, create, renderTranscriptStyled } from "../../src/opentui/surface/opentui-surface"
 
-import { initial } from "../../src/state/model/terminal-state"
+import { initial, type Model, type ThreadItem, update } from "../../src/state/model/terminal-state"
 
 import { colors } from "../../src/presentation/terminal/terminal-theme"
 
 const _handlers = () => ({ key: vi.fn(), resize: vi.fn() })
 
 const nonEmptyLines = (text: string) => text.split("\n").filter((line) => line.length > 0)
+
+const subagentToolBlock = {
+  _tag: "ToolCall" as const,
+  id: "agent",
+  name: "task",
+  input: JSON.stringify({ prompt: "Inspect the repository" }),
+  status: "complete" as const,
+  presentation: {
+    family: "agent" as const,
+    action: "task" as const,
+    activeLabel: "Subagent working",
+    completeLabel: "Subagent finished",
+  },
+  detail: "Inspect the repository",
+  output: "Inspect complete",
+  files: [],
+}
+
+const editToolBlock = {
+  _tag: "ToolCall" as const,
+  id: "patch",
+  name: "edit",
+  input: JSON.stringify({ path: "src/a.ts", patch: "@@\n-old\n+new" }),
+  status: "complete" as const,
+  presentation: {
+    family: "direct" as const,
+    action: "edit" as const,
+    activeLabel: "Editing",
+    completeLabel: "Edited",
+  },
+  detail: "src/a.ts",
+  output: "@@\n-old\n+new",
+  files: [],
+}
+
+const renderedText = (changes: Partial<Model>): string =>
+  renderTranscriptStyled({ ...initial("/workspace", "medium"), ...changes }).chunks.map((chunk) => chunk.text).join("")
 
 const model = (changes: Partial<Model> = {}): Model => ({ ...initial("/workspace", "medium"), ...changes })
 
