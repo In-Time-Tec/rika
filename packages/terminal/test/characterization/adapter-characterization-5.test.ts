@@ -296,7 +296,7 @@ vi.mock("@opentui/core", () => ({
 
 import { Surface, create, renderTranscriptStyled } from "../../src/opentui/surface/opentui-surface"
 
-import { initial, type Mode, type Model, type ThreadItem, update } from "../../src/state/model/terminal-state"
+import { initial, type Mode, type Model, type ThreadItem } from "../../src/state/model/terminal-state"
 
 const handlers = () => ({ key: vi.fn(), resize: vi.fn() })
 

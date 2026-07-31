@@ -2,7 +2,7 @@ import { expect, test } from "vitest"
 
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 
-import { Keys, ViewState, type Model, type ThreadItem, update } from "../../src/state/model/terminal-state"
+import { Keys, ViewState } from "../../src/state/model/terminal-state"
 
 const key = (input: Partial<Keys.Key> & Pick<Keys.Key, "name">): Keys.Key => ({
   name: input.name,

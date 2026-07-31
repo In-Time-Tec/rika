@@ -6,29 +6,14 @@ import { expect, test } from "vitest"
 
 import { Data, Effect } from "effect"
 
-import stringWidth from "string-width"
-
 import { Surface, maxMountedTranscriptEntries } from "../../src/opentui/surface/opentui-surface"
 
-import {
-  initial,
-  loading,
-  ready,
-  replaceQueue,
-  type Model,
-  type ThreadItem,
-  update,
-} from "../../src/state/model/terminal-state"
+import { initial, ready, type Model, update } from "../../src/state/model/terminal-state"
 
 class OpenTuiError extends Data.TaggedError("OpenTuiError")<{ readonly cause: unknown }> {}
 
 const openTui = <A>(operation: () => Promise<A>) =>
   Effect.tryPromise({ try: operation, catch: (cause) => new OpenTuiError({ cause }) })
-
-const insertText = (model: Model, text: string) => update(model, { _tag: "Pasted", text })
-
-const styledTextValue = (value: { readonly chunks: ReadonlyArray<{ readonly text: string }> } | string) =>
-  typeof value === "string" ? value : value.chunks.map((chunk) => chunk.text).join("")
 
 const _streamingShell = (id: string, output?: string) => ({
   _tag: "ToolCall" as const,
@@ -45,16 +30,6 @@ const _streamingShell = (id: string, output?: string) => ({
   detail: `printf ${id}`,
   ...(output === undefined ? {} : { output }),
   files: [],
-})
-
-const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
-  workspace: "/work",
-  pinned: false,
-  archived: false,
-  status: "idle",
-  unread: false,
-  lastActivityAt: 0,
-  ...input,
 })
 
 for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {

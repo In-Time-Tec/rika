@@ -6,7 +6,7 @@ import {
   rows as transcriptUnits,
   unitId,
 } from "../src/presentation/transcript/terminal-transcript-presentation"
-import { initial, type Model, type TranscriptBlock, type ThreadItem, update } from "../src/state/model/terminal-state"
+import { initial, type Model, type TranscriptBlock } from "../src/state/model/terminal-state"
 
 const longText =
   "Expected UnknownResponseStreamEvent, got " +

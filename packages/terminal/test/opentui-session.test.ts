@@ -1,13 +1,6 @@
 import { expect, test } from "vitest"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import {
-  ExecutionEvents,
-  Session,
-  ViewState,
-  type Model,
-  type ThreadItem,
-  update,
-} from "../src/state/model/terminal-state"
+import { ExecutionEvents, Session, ViewState } from "../src/state/model/terminal-state"
 
 test("routes session actions only through available adapter callbacks", () => {
   const calls: Array<string> = []

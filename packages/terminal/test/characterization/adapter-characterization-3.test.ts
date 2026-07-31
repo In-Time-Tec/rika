@@ -296,7 +296,7 @@ import stringWidth from "string-width"
 
 import { buildTranscript, create, renderTranscriptStyled } from "../../src/opentui/surface/opentui-surface"
 
-import { initial, type Model, type ThreadItem, update } from "../../src/state/model/terminal-state"
+import { initial, type Model, type ThreadItem } from "../../src/state/model/terminal-state"
 
 import { colors } from "../../src/presentation/terminal/terminal-theme"
 

@@ -1,52 +1,7 @@
 import { Function } from "effect"
-import { modeIds } from "@rika/configuration/behavior-mode"
-import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import { filter, type PaletteAction } from "../../presentation/terminal/command-palette"
 import type { Key } from "../../presentation/terminal/terminal-keymap"
-import { isPrintable } from "../../presentation/terminal/terminal-keymap"
-import {
-  expandableRowIds,
-  rows as transcriptUnits,
-  unitId as transcriptUnitId,
-} from "../../presentation/transcript/terminal-transcript-presentation"
 import type { Message } from "../model/terminal-message"
-import type {
-  Model,
-  TranscriptBlock,
-  TranscriptItem,
-  ThreadItem,
-  QueueItem,
-  ModeRoutes,
-  ChangedFile,
-} from "../model/terminal-state"
-import { idle, loading, ready, readyOr } from "../model/terminal-loadable-state"
-import { runningToolsActivity, streamActivity, type Activity } from "../model/terminal-activity-state"
-import {
-  classifyPrompt,
-  displayInput,
-  expandPastedText,
-  type ComposerAttachment,
-  type PromptPart,
-} from "../model/terminal-composer-state"
-import {
-  filteredFiles,
-  filteredThreads,
-  selectedThreadMetadata,
-  renameThread,
-} from "../model/terminal-thread-navigation"
-import { composerHeight, clampSidebarWidth, wrappedRowCount, composerHeightLimit } from "../model/terminal-layout-state"
-import {
-  bindSubmittedDraft,
-  dropSubmittedDrafts,
-  settleSteering,
-  takeSubmittedDraft,
-  validQueueSelection,
-} from "../model/terminal-queue-state"
-import {
-  isDeliveredDelegationOutput,
-  isFailedDelegationOutput,
-  isSucceededDelegationOutput,
-} from "../../presentation/transcript/transcript-row"
+import type { Model, TranscriptBlock, ChangedFile, ComposerAttachment } from "../model/terminal-state"
 import { reduceData } from "./terminal-data-reducer"
 import { reduceExecution } from "./terminal-execution-reducer"
 import { reduceOverlay } from "./terminal-overlay-reducer"

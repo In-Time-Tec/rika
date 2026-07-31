@@ -1,73 +1,15 @@
-import { Function } from "effect"
 import type { Message } from "../model/terminal-message"
-import type {
-  Model,
-  TranscriptBlock,
-  TranscriptItem,
-  ThreadItem,
-  QueueItem,
-  ChangedFile,
-} from "../model/terminal-state"
-import { idle, loading, ready, readyOr } from "../model/terminal-loadable-state"
-import { runningToolsActivity, streamActivity, type Activity } from "../model/terminal-activity-state"
-import {
-  classifyPrompt,
-  expandPastedText,
-  type ComposerAttachment,
-  type PromptPart,
-} from "../model/terminal-composer-state"
-import {
-  filteredFiles,
-  filteredThreads,
-  selectedThreadMetadata,
-  renameThread,
-} from "../model/terminal-thread-navigation"
-import { composerHeight, clampSidebarWidth, wrappedRowCount, composerHeightLimit } from "../model/terminal-layout-state"
-import {
-  bindSubmittedDraft,
-  dropSubmittedDrafts,
-  settleSteering,
-  takeSubmittedDraft,
-  validQueueSelection,
-} from "../model/terminal-queue-state"
-import { filter, type PaletteAction } from "../../presentation/terminal/command-palette"
-import { isPrintable, type Key } from "../../presentation/terminal/terminal-keymap"
-import {
-  expandableRowIds,
-  rows as transcriptUnits,
-  unitId as transcriptUnitId,
-} from "../../presentation/transcript/terminal-transcript-presentation"
-import {
-  isDeliveredDelegationOutput,
-  isFailedDelegationOutput,
-  isSucceededDelegationOutput,
-} from "../../presentation/transcript/transcript-row"
-import { context } from "./terminal-state-reducer"
+import type { Model, QueueItem } from "../model/terminal-state"
+import { classifyPrompt, expandPastedText } from "../model/terminal-composer-state"
+import { bindSubmittedDraft, validQueueSelection } from "../model/terminal-queue-state"
+import { composerHeightLimit, clampSidebarWidth } from "../model/terminal-layout-state"
+import { runningToolsActivity, type Activity } from "../model/terminal-activity-state"
 
 export const reduceExecution = (
   model: Model,
   message: Message,
-  reduce: (model: Model, message: Message) => Model,
+  _reduce: (model: Model, message: Message) => Model,
 ): Model | undefined => {
-  const update = reduce
-  const {
-    sameChangedFiles,
-    cancelTranscriptBlocks,
-    insert,
-    erase,
-    lastCharacterLength,
-    fileMention,
-    questionKey,
-    composerContext,
-    continueShortcutsAfterEdit,
-    insertWhileShortcutsOpen,
-    pastedImagePath,
-    pastedMention,
-    insertPaste,
-    insertImage,
-    removeImage,
-    expandPastedTextAttachment,
-  } = context
   switch (message._tag) {
     case "Resized":
       return {

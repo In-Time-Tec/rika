@@ -1,7 +1,7 @@
 import { partialInputRecord } from "@rika/transcript/partial-tool-input"
 import { Function, Option, Schema } from "effect"
 import { escapeControlCharacters } from "../terminal/terminal-format"
-import type { Model, TranscriptBlock, TranscriptItem } from "../../state/model/terminal-state"
+import type { Model, TranscriptBlock } from "../../state/model/terminal-state"
 
 export type ToolGroupKind = "explore" | "edit" | "shell" | "other"
 
@@ -188,5 +188,3 @@ export const toolKind: {
   (family: ToolFamily | undefined): (rawName: string) => ToolKind
   (rawName: string, family: ToolFamily | undefined): ToolKind
 } = Function.dual(2, toolKindImpl)
-
-const groupOf = (kind: ToolKind): ToolGroupKind => (kind === "read" || kind === "search" ? "explore" : kind)

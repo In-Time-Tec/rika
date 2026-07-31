@@ -1,5 +1,5 @@
 import { Function } from "effect"
-import type { Model, QueueChange, QueueItem, ThreadItem } from "./terminal-state"
+import type { Model, QueueChange, QueueItem } from "./terminal-state"
 import type { ComposerDraft } from "./terminal-composer-state"
 
 interface SubmittedDraft extends ComposerDraft {

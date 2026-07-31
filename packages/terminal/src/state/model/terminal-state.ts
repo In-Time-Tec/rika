@@ -13,13 +13,12 @@ import {
 } from "./terminal-loadable-state"
 import { Activity } from "./terminal-activity-state"
 import { UsageDisplay, UsageTime } from "./terminal-usage-state"
-import type { ComposerAttachment, ComposerDraft, PendingSteering, PromptPart } from "./terminal-composer-state"
 import * as ActivityState from "./terminal-activity-state"
 import * as ComposerState from "./terminal-composer-state"
 import * as LayoutState from "./terminal-layout-state"
 import * as QueueState from "./terminal-queue-state"
 import * as ThreadNavigation from "./terminal-thread-navigation"
-import { update } from "../reducer/terminal-state-reducer"
+import { update as reduceState } from "../reducer/terminal-state-reducer"
 export { update } from "../reducer/terminal-state-reducer"
 import * as KeysModule from "../../presentation/terminal/terminal-keymap"
 import * as PaletteModule from "../../presentation/terminal/command-palette"
@@ -45,9 +44,9 @@ export const Entry = Schema.Struct({
 })
 export type Entry = typeof Entry.Type
 
-export type TranscriptBlock = TranscriptPresentationModel.Block
+type TranscriptBlockModel = TranscriptPresentationModel.Block
 
-export interface ThreadItem {
+interface ThreadItemModel {
   readonly id: string
   readonly title: string
   readonly workspace: string
@@ -59,7 +58,7 @@ export interface ThreadItem {
   readonly editTotals?: { readonly added: number; readonly modified: number; readonly removed: number }
 }
 
-export type TranscriptItem =
+type TranscriptItemModel =
   | {
       readonly _tag: "Entry"
       readonly index: number
@@ -288,7 +287,7 @@ export const Model = Schema.Struct({
 })
 export type Model = typeof Model.Type
 
-export const initial: {
+const initialImpl: {
   (workspace: string, mode?: Mode): Model
   (mode?: Mode): (workspace: string) => Model
 } = Function.dual(
@@ -348,38 +347,73 @@ export const withModeRoutes: {
   (model: Model, routes: ModeRoutes): Model
 } = Function.dual(2, (model: Model, routes: ModeRoutes): Model => ({ ...model, modeRoutes: routes }))
 
-export const nextMode = (mode: Mode): Mode => modeIds[(modeIds.indexOf(mode) + 1) % modeIds.length]!
-export const nextUsageDisplay = (display: UsageDisplay | undefined): UsageDisplay =>
-  display === undefined || display === "cost" ? "tokens" : display === "tokens" ? "time" : "cost"
-export const isThreadBusy = (status: ThreadItem["status"]): boolean => status !== "idle" && status !== "error"
+const nextModeImpl = (mode: Mode): Mode => modeIds[(modeIds.indexOf(mode) + 1) % modeIds.length]!
+const nextUsageDisplayImpl = (display: UsageDisplay | undefined): UsageDisplay => {
+  if (display === undefined || display === "cost") return "tokens"
+  if (display === "tokens") return "time"
+  return "cost"
+}
+export const isThreadBusy = (status: ThreadItemModel["status"]): boolean => status !== "idle" && status !== "error"
 export const formatActiveTime = ActivityState.formatActiveTime
-export const activeTimeAt = ActivityState.activeTimeAt
+const activeTimeAtImpl = ActivityState.activeTimeAt
 export const activeTimeIcon = ActivityState.activeTimeIcon
-export const formatActivity = ActivityState.formatActivity
-export const replaceQueue = QueueState.replaceQueue
-export const resetQueue = QueueState.resetQueue
-export const applyQueueDelta = QueueState.applyQueueDelta
-export const replaceTurnPrompt = QueueState.replaceTurnPrompt
-export const composerHeight = LayoutState.composerHeight
-export const contentColumnWidth = LayoutState.contentColumnWidth
-export const boundedThreadSidebarWidth = LayoutState.boundedThreadSidebarWidth
-export const fileSidebarLayoutWidth = LayoutState.fileSidebarLayoutWidth
-export const isNarrow = LayoutState.isNarrow
-export const queueContentWidth = LayoutState.queueContentWidth
-export const wrappedRowCount = LayoutState.wrappedRowCount
-export const threadSidebarLayoutWidth = LayoutState.threadSidebarLayoutWidth
-export const inputRows = LayoutState.inputRows
-export const filteredFiles = ThreadNavigation.filteredFiles
-export const filteredThreads = ThreadNavigation.filteredThreads
-export const selectedThreadMetadata = ThreadNavigation.selectedThreadMetadata
-export const displayInput = ComposerState.displayInput
-export const expandPastedText = ComposerState.expandPastedText
-export const promptParts = ComposerState.promptParts
-export const pastedTextTokenAt = ComposerState.pastedTextTokenAt
+const formatActivityImpl = ActivityState.formatActivity
+const replaceQueueImpl = QueueState.replaceQueue
+const resetQueueImpl = QueueState.resetQueue
+const applyQueueDeltaImpl = QueueState.applyQueueDelta
+const replaceTurnPromptImpl = QueueState.replaceTurnPrompt
+const composerHeightImpl = LayoutState.composerHeight
+const contentColumnWidthImpl = LayoutState.contentColumnWidth
+const boundedThreadSidebarWidthImpl = LayoutState.boundedThreadSidebarWidth
+const fileSidebarLayoutWidthImpl = LayoutState.fileSidebarLayoutWidth
+const isNarrowImpl = LayoutState.isNarrow
+const queueContentWidthImpl = LayoutState.queueContentWidth
+const wrappedRowCountImpl = LayoutState.wrappedRowCount
+const threadSidebarLayoutWidthImpl = LayoutState.threadSidebarLayoutWidth
+const inputRowsImpl = LayoutState.inputRows
+const filteredFilesImpl = ThreadNavigation.filteredFiles
+const filteredThreadsImpl = ThreadNavigation.filteredThreads
+const selectedThreadMetadataImpl = ThreadNavigation.selectedThreadMetadata
+const displayInputImpl = ComposerState.displayInput
+const expandPastedTextImpl = ComposerState.expandPastedText
+const promptPartsImpl = ComposerState.promptParts
+const pastedTextTokenAtImpl = ComposerState.pastedTextTokenAt
 
-const initialModel = initial
-const updateModel = update
-export namespace ViewState {
+const initialModel = initialImpl
+const updateModel = reduceState
+
+export { initialImpl as initial }
+export { nextModeImpl as nextMode }
+export { nextUsageDisplayImpl as nextUsageDisplay }
+export { activeTimeAtImpl as activeTimeAt }
+export { formatActivityImpl as formatActivity }
+export { replaceQueueImpl as replaceQueue }
+export { resetQueueImpl as resetQueue }
+export { applyQueueDeltaImpl as applyQueueDelta }
+export { replaceTurnPromptImpl as replaceTurnPrompt }
+export { composerHeightImpl as composerHeight }
+export { contentColumnWidthImpl as contentColumnWidth }
+export { boundedThreadSidebarWidthImpl as boundedThreadSidebarWidth }
+export { fileSidebarLayoutWidthImpl as fileSidebarLayoutWidth }
+export { isNarrowImpl as isNarrow }
+export { queueContentWidthImpl as queueContentWidth }
+export { wrappedRowCountImpl as wrappedRowCount }
+export { threadSidebarLayoutWidthImpl as threadSidebarLayoutWidth }
+export { inputRowsImpl as inputRows }
+export { filteredFilesImpl as filteredFiles }
+export { filteredThreadsImpl as filteredThreads }
+export { selectedThreadMetadataImpl as selectedThreadMetadata }
+export { displayInputImpl as displayInput }
+export { expandPastedTextImpl as expandPastedText }
+export { promptPartsImpl as promptParts }
+export { pastedTextTokenAtImpl as pastedTextTokenAt }
+
+export type {
+  TranscriptBlockModel as TranscriptBlock,
+  TranscriptItemModel as TranscriptItem,
+  ThreadItemModel as ThreadItem,
+}
+namespace ViewStateExports {
   export type Model = typeof Model.Type
   export type Mode = typeof Mode.Type
   export type Entry = typeof Entry.Type
@@ -396,8 +430,11 @@ export namespace ViewState {
   export const applyQueueDelta = QueueState.applyQueueDelta
   export const replaceTurnPrompt = QueueState.replaceTurnPrompt
   export const nextMode = (mode: Mode): Mode => modeIds[(modeIds.indexOf(mode) + 1) % modeIds.length]!
-  export const nextUsageDisplay = (display: UsageDisplay | undefined): UsageDisplay =>
-    display === undefined || display === "cost" ? "tokens" : display === "tokens" ? "time" : "cost"
+  export const nextUsageDisplay = (display: UsageDisplay | undefined): UsageDisplay => {
+    if (display === undefined || display === "cost") return "tokens"
+    if (display === "tokens") return "time"
+    return "cost"
+  }
   export const activeTimeAt = ActivityState.activeTimeAt
   export const formatActivity = ActivityState.formatActivity
   export const formatActivityCounter = ActivityState.formatActivityCounter
@@ -475,3 +512,5 @@ export namespace Session {
   export type Adapter = SessionModule.Adapter
   export const execute = SessionModule.execute
 }
+
+export { ViewStateExports as ViewState }

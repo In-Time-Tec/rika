@@ -1,4 +1,3 @@
-import * as TranscriptPresentationModel from "@rika/transcript/transcript-presentation-model"
 import { Duration, Function, Schema } from "effect"
 import { formatTokens, plural } from "../../presentation/terminal/terminal-format"
 import type { Model, TranscriptBlock, TranscriptItem } from "./terminal-state"
