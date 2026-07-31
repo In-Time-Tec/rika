@@ -7520,6 +7520,14 @@
     },
     {
       "from": "packages/configuration/src/settings/configuration-merge.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/configuration/src/settings/configuration-merge.ts",
       "to": "packages/configuration/src/model-routing/model-preset.ts",
       "specifier": "../model-routing/model-preset",
       "kind": "import",

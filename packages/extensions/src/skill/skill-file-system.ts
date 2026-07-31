@@ -9,7 +9,7 @@ export interface FileSystemInterface {
 }
 
 export class SkillFileSystem extends Context.Service<SkillFileSystem, FileSystemInterface>()(
-  "@rika/extensions/skill-file-system/SkillFileSystem",
+  "@rika/extensions/skill/skill-file-system/SkillFileSystem",
 ) {}
 
 export const fileSystemLayer = Layer.effect(

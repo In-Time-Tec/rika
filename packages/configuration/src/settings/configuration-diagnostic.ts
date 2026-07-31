@@ -10,11 +10,15 @@ export interface ConfigurationDiagnostic {
 
 export type Diagnostic = ConfigurationDiagnostic
 
-export const configurationDiagnostics = (
-  global: SettingsInput,
-  workspace: SettingsInput,
-  environment: ConfigurationEnvironment,
-): ReadonlyArray<ConfigurationDiagnostic> => {
+export const configurationDiagnostics = ({
+  global,
+  workspace,
+  environment,
+}: {
+  readonly global: SettingsInput
+  readonly workspace: SettingsInput
+  readonly environment: ConfigurationEnvironment
+}): ReadonlyArray<ConfigurationDiagnostic> => {
   const entries: Array<ConfigurationDiagnostic> = []
   const record = (input: SettingsInput, source: "global" | "workspace") => {
     for (const path of Object.keys(input).toSorted()) entries.push({ path, source, message: `${source} value applied` })

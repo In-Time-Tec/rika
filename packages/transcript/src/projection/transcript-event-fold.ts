@@ -54,20 +54,21 @@ const applyKnownEvent = (value: OwnedFold, change: MutableMutation, event: Sourc
     advanceModelPhase(value, change, turnId)
     return
   }
-  if (event.type === "model.output.delta") return applyAssistant(value, change, turnId, event, false)
-  if (event.type === "model.output.completed") return applyAssistant(value, change, turnId, event, true)
-  if (event.type === "model.cycle.completed") return applyAssistant(value, change, turnId, event, true)
-  if (event.type === "model.reasoning.completed") return applyReasoning(value, change, turnId, event, true)
-  if (event.type.includes("reasoning")) return applyReasoning(value, change, turnId, event, false)
-  if (event.type === "model.toolcall.delta") return applyToolDelta(value, change, turnId, event)
+  if (event.type === "model.output.delta") return applyAssistant({ value, change, turnId, event, complete: false })
+  if (event.type === "model.output.completed") return applyAssistant({ value, change, turnId, event, complete: true })
+  if (event.type === "model.cycle.completed") return applyAssistant({ value, change, turnId, event, complete: true })
+  if (event.type === "model.reasoning.completed")
+    return applyReasoning({ value, change, turnId, event, complete: true })
+  if (event.type.includes("reasoning")) return applyReasoning({ value, change, turnId, event, complete: false })
+  if (event.type === "model.toolcall.delta") return applyToolDelta({ value, change, turnId, event })
   if (event.type === "tool.call.requested") {
-    applyToolRequested(value, change, turnId, event)
+    applyToolRequested({ value, change, turnId, event })
     advanceModelPhase(value, change, turnId)
     return
   }
-  if (event.type === "tool.result.received") return applyToolResult(value, change, turnId, event)
+  if (event.type === "tool.result.received") return applyToolResult({ value, change, turnId, event })
   if (event.type === "steering.delivered") return applySteeringDelivered(value, change, turnId, event)
-  if (event.type === "model.usage.reported") return applyUsage(value, change, event)
+  if (event.type === "model.usage.reported") return applyUsage({ value, change, event })
   if (event.type === "model.attempt.failed" || event.type === "model.call.failed") {
     if (!isTruncatedStream(event)) return
     const block: Block = {
@@ -131,10 +132,10 @@ const applyKnownEvent = (value: OwnedFold, change: MutableMutation, event: Sourc
     return
   }
   if (event.type.startsWith("child_run.") || event.type.startsWith("child_fan_out.member."))
-    return applyChild(value, change, turnId, event)
-  const block = genericBlock(turnId, event)
+    return applyChild({ value, change, turnId, event })
+  const block = genericBlock({ turnId, event })
   if (block === undefined) return
-  const key = genericKey(turnId, event, block)
+  const key = genericKey({ turnId, event, block })
   const previous = value.units.get(key)
   const previousCompaction =
     previous !== undefined && previous.content._tag === "Block" && previous.content.block._tag === "Compaction"
@@ -171,16 +172,18 @@ const transientIndex = (event: SourceEvent): number =>
   typeof event.data?.transient_index === "number" ? event.data.transient_index : -1
 
 const transientUnitKey = (value: OwnedFold, event: SourceEvent): string | undefined => {
-  if (event.type === "model.output.delta") return assistantKey(value.turnId, value.state.modelPhase)
-  if (event.type === "model.reasoning.delta") return reasoningKey(value.turnId, value.state.modelPhase)
+  if (event.type === "model.output.delta") return assistantKey({ turnId: value.turnId, phase: value.state.modelPhase })
+  if (event.type === "model.reasoning.delta")
+    return reasoningKey({ turnId: value.turnId, phase: value.state.modelPhase })
   if (event.type === "model.toolcall.delta") return toolKey(value.turnId, rawToolId(event))
   return undefined
 }
 
 const durableResolutionKey = (value: OwnedFold, event: SourceEvent): string | undefined => {
   if (event.type === "model.output.completed" || event.type === "model.cycle.completed")
-    return assistantKey(value.turnId, value.state.modelPhase)
-  if (event.type === "model.reasoning.completed") return reasoningKey(value.turnId, value.state.modelPhase)
+    return assistantKey({ turnId: value.turnId, phase: value.state.modelPhase })
+  if (event.type === "model.reasoning.completed")
+    return reasoningKey({ turnId: value.turnId, phase: value.state.modelPhase })
   if (event.type === "tool.call.requested") return toolKey(value.turnId, rawToolId(event))
   return undefined
 }
@@ -248,7 +251,7 @@ const applyFoldEvent: {
     return result(change)
   }
   if (event.sequence <= value.state.revision) {
-    if (event.type === "model.usage.reported") applyUsage(value, change, event)
+    if (event.type === "model.usage.reported") applyUsage({ value, change, event })
     return result(change)
   }
   const unresolved = requiresResolvedTransients(event) ? blockingTransientKeys(value, event) : []

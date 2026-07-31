@@ -5,7 +5,13 @@ import { foldState } from "./transcript-fold-state"
 const { encodeInput, sourcePayload, string } = foldState
 import { identityKey, scopedIdentity } from "../ordering/transcript-unit-identity"
 
-const genericBlock = (turnId: string, event: SourceEvent): Block | undefined => {
+const genericBlock = ({
+  turnId,
+  event,
+}: {
+  readonly turnId: string
+  readonly event: SourceEvent
+}): Block | undefined => {
   const value = sourcePayload(event)
   if (event.type.startsWith("permission.ask.") || event.type.startsWith("tool.approval.")) return undefined
   if (event.type.includes("diff"))
@@ -79,12 +85,20 @@ const genericBlock = (turnId: string, event: SourceEvent): Block | undefined => 
     const id = scopedIdentity(turnId, string(value.callId ?? value.call_id ?? value.id, event.cursor))
     const name = string(value.name ?? value.tool, "tool")
     const input = encodeInput(value.input ?? value)
-    return toolBlock(id, name, input)
+    return toolBlock({ id, name, input, previous: undefined })
   }
   return undefined
 }
 
-const genericKey = (turnId: string, event: SourceEvent, block: Block): string => {
+const genericKey = ({
+  turnId,
+  event,
+  block,
+}: {
+  readonly turnId: string
+  readonly event: SourceEvent
+  readonly block: Block
+}): string => {
   const value = sourcePayload(event)
   switch (block._tag) {
     case "Diff":

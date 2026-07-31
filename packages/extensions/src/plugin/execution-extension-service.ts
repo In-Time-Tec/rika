@@ -29,7 +29,7 @@ export interface ExecutionExtensionInterface {
 export class ExecutionExtensionService extends Context.Service<
   ExecutionExtensionService,
   ExecutionExtensionInterface
->()("@rika/extensions/execution-extension-service/ExecutionExtensionService") {}
+>()("@rika/extensions/plugin/execution-extension-service/ExecutionExtensionService") {}
 
 export const layer = Layer.effect(
   ExecutionExtensionService,

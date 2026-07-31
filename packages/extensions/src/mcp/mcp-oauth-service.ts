@@ -22,7 +22,7 @@ export interface McpOAuthServiceInterface {
 }
 
 export class McpOAuthService extends Context.Service<McpOAuthService, McpOAuthServiceInterface>()(
-  "@rika/extensions/mcp-oauth-service/McpOAuthService",
+  "@rika/extensions/mcp/mcp-oauth-service/McpOAuthService",
 ) {}
 
 const redirectUrl = "http://127.0.0.1:17839/oauth/callback"

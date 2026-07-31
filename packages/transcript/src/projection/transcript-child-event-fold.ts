@@ -32,7 +32,17 @@ const childStatus = (
   return "running"
 }
 
-const applyChild = (value: OwnedFold, change: MutableMutation, turnId: string, event: SourceEvent): void => {
+const applyChild = ({
+  value,
+  change,
+  turnId,
+  event,
+}: {
+  readonly value: OwnedFold
+  readonly change: MutableMutation
+  readonly turnId: string
+  readonly event: SourceEvent
+}): void => {
   const outer = sourcePayload(event)
   const payload = Object.keys(record(outer.member)).length > 0 ? record(outer.member) : outer
   const childId = string(

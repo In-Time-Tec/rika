@@ -120,7 +120,17 @@ const inputFiles = (id: string, name: string, inputText: string): ReadonlyArray<
   ]
 }
 
-const toolBlock = (id: string, name: string, input: string, previous?: Extract<Block, { _tag: "ToolCall" }>) => ({
+const toolBlock = ({
+  id,
+  name,
+  input,
+  previous,
+}: {
+  readonly id: string
+  readonly name: string
+  readonly input: string
+  readonly previous: Extract<Block, { _tag: "ToolCall" }> | undefined
+}) => ({
   _tag: "ToolCall" as const,
   id,
   name,
@@ -171,7 +181,17 @@ const processResult = (output: unknown): ToolProcess | undefined => {
   return Object.keys(process).length === 0 ? undefined : process
 }
 
-const applyToolDelta = (value: OwnedFold, change: MutableMutation, turnId: string, event: SourceEvent): void => {
+const applyToolDelta = ({
+  value,
+  change,
+  turnId,
+  event,
+}: {
+  readonly value: OwnedFold
+  readonly change: MutableMutation
+  readonly turnId: string
+  readonly event: SourceEvent
+}): void => {
   const payload = callPayload(event)
   const rawId = rawToolId(event)
   const id = scopedIdentity(turnId, rawId)
@@ -179,7 +199,7 @@ const applyToolDelta = (value: OwnedFold, change: MutableMutation, turnId: strin
   const delta = string(payload.delta ?? event.text)
   const input = `${previous?.input ?? ""}${delta}`
   const name = string(payload.tool_name ?? payload.name, previous?.name ?? "tool")
-  const block = toolBlock(id, name, input, previous)
+  const block = toolBlock({ id, name, input, previous })
   upsertUnit(
     value,
     change,
@@ -190,14 +210,24 @@ const applyToolDelta = (value: OwnedFold, change: MutableMutation, turnId: strin
   )
 }
 
-const applyToolRequested = (value: OwnedFold, change: MutableMutation, turnId: string, event: SourceEvent): void => {
+const applyToolRequested = ({
+  value,
+  change,
+  turnId,
+  event,
+}: {
+  readonly value: OwnedFold
+  readonly change: MutableMutation
+  readonly turnId: string
+  readonly event: SourceEvent
+}): void => {
   const payload = callPayload(event)
   const rawId = rawToolId(event)
   const id = scopedIdentity(turnId, rawId)
   const previous = toolAt(value, id)
   const name = string(payload.tool_name ?? payload.name, previous?.name ?? "tool")
   const input = encodeInput(payload.input)
-  const base = toolBlock(id, name, input, previous)
+  const base = toolBlock({ id, name, input, previous })
   const processId =
     base.presentation.rowDisplay === "continuation"
       ? inputString(inputRecord(input), ["processId", "process_id"])
@@ -226,7 +256,17 @@ const applyToolRequested = (value: OwnedFold, change: MutableMutation, turnId: s
   )
 }
 
-const applyToolResult = (value: OwnedFold, change: MutableMutation, turnId: string, event: SourceEvent): void => {
+const applyToolResult = ({
+  value,
+  change,
+  turnId,
+  event,
+}: {
+  readonly value: OwnedFold
+  readonly change: MutableMutation
+  readonly turnId: string
+  readonly event: SourceEvent
+}): void => {
   const payload = resultPayload(event)
   const rawId = rawToolId(event)
   const id = scopedIdentity(turnId, rawId)

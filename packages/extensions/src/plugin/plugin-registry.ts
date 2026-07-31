@@ -25,7 +25,7 @@ export interface PluginRegistryInterface {
 }
 
 export class PluginRegistryService extends Context.Service<PluginRegistryService, PluginRegistryInterface>()(
-  "@rika/extensions/plugin-registry/PluginRegistryService",
+  "@rika/extensions/plugin/plugin-registry/PluginRegistryService",
 ) {}
 
 export const memoryLayer = Layer.sync(PluginRegistryService, () => {

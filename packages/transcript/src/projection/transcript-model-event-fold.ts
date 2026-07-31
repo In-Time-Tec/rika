@@ -5,7 +5,15 @@ import { foldState } from "./transcript-fold-state"
 const { makeUnit, setState, sourcePayload, string, upsertUnit } = foldState
 import { identityKey } from "../ordering/transcript-unit-identity"
 
-const applyUsage = (value: OwnedFold, change: MutableMutation, event: SourceEvent): void => {
+const applyUsage = ({
+  value,
+  change,
+  event,
+}: {
+  readonly value: OwnedFold
+  readonly change: MutableMutation
+  readonly event: SourceEvent
+}): void => {
   const identity = event.cursor
   if (value.usageCursorSet.has(identity)) return
   value.usageCursorSet.add(identity)
@@ -13,19 +21,27 @@ const applyUsage = (value: OwnedFold, change: MutableMutation, event: SourceEven
   change.stateChanged = true
 }
 
-const assistantKey = (turnId: string, phase: number): string => identityKey("assistant", turnId, Math.max(0, phase))
-const reasoningKey = (turnId: string, phase: number): string => identityKey("reasoning", turnId, Math.max(0, phase))
+const assistantKey = ({ turnId, phase }: { readonly turnId: string; readonly phase: number }): string =>
+  identityKey("assistant", turnId, Math.max(0, phase))
+const reasoningKey = ({ turnId, phase }: { readonly turnId: string; readonly phase: number }): string =>
+  identityKey("reasoning", turnId, Math.max(0, phase))
 
 const assistantText = (event: SourceEvent): string => event.text ?? string(sourcePayload(event).text)
 
-const applyAssistant = (
-  value: OwnedFold,
-  change: MutableMutation,
-  turnId: string,
-  event: SourceEvent,
-  complete: boolean,
-): void => {
-  const key = assistantKey(turnId, value.state.modelPhase)
+const applyAssistant = ({
+  value,
+  change,
+  turnId,
+  event,
+  complete,
+}: {
+  readonly value: OwnedFold
+  readonly change: MutableMutation
+  readonly turnId: string
+  readonly event: SourceEvent
+  readonly complete: boolean
+}): void => {
+  const key = assistantKey({ turnId, phase: value.state.modelPhase })
   const current = value.units.get(key)
   const text = assistantText(event)
   const finish = (): void => {
@@ -63,14 +79,20 @@ const applyAssistant = (
   finish()
 }
 
-const applyReasoning = (
-  value: OwnedFold,
-  change: MutableMutation,
-  turnId: string,
-  event: SourceEvent,
-  complete: boolean,
-): void => {
-  const key = reasoningKey(turnId, value.state.modelPhase)
+const applyReasoning = ({
+  value,
+  change,
+  turnId,
+  event,
+  complete,
+}: {
+  readonly value: OwnedFold
+  readonly change: MutableMutation
+  readonly turnId: string
+  readonly event: SourceEvent
+  readonly complete: boolean
+}): void => {
+  const key = reasoningKey({ turnId, phase: value.state.modelPhase })
   const current = value.units.get(key)
   const previous =
     current?.content._tag === "Block" && current.content.block._tag === "Reasoning" ? current.content.block.text : ""

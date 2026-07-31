@@ -9,7 +9,7 @@ export interface ConfigurationServiceShape {
 }
 
 export class ConfigurationService extends Context.Service<ConfigurationService, ConfigurationServiceShape>()(
-  "@rika/configuration/configuration-service/ConfigurationService",
+  "@rika/configuration/settings/configuration-service/ConfigurationService",
 ) {}
 
 export interface WebProviderDescriptor {
@@ -47,9 +47,9 @@ export const memoryConfigurationLayer = (
     ConfigurationService,
     ConfigurationService.of({
       effective: Effect.succeed({
-        settings: withWebSearchConfiguration(mergeConfigurationSettings(global, workspace), webSearchCredentials),
+        settings: withWebSearchConfiguration(mergeConfigurationSettings({ global, workspace }), webSearchCredentials),
         environment,
-        diagnostics: configurationDiagnostics(global, workspace, environment),
+        diagnostics: configurationDiagnostics({ global, workspace, environment }),
       }),
     }),
   )
@@ -67,7 +67,7 @@ export const liveConfigurationLayer = (options: {
     Effect.gen(function* () {
       const global = options.global ?? {}
       const workspace = options.workspace ?? {}
-      const settings = mergeConfigurationSettings(global, workspace)
+      const settings = mergeConfigurationSettings({ global, workspace })
       const configuredWebSearch = { ...global.webSearch?.providers, ...workspace.webSearch?.providers }
       const installedProviderIds = new Set(options.webProviders.map((provider) => provider.id))
       const unsupportedProviderIds = Object.keys(configuredWebSearch).filter((id) => !installedProviderIds.has(id))
@@ -121,7 +121,7 @@ export const liveConfigurationLayer = (options: {
         effective: Effect.succeed({
           settings: withWebSearchConfiguration(settings, webSearchCredentials),
           environment: completeEnvironment,
-          diagnostics: configurationDiagnostics(global, workspace, completeEnvironment),
+          diagnostics: configurationDiagnostics({ global, workspace, environment: completeEnvironment }),
         }),
       })
     }),

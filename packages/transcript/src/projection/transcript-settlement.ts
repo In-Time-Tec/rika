@@ -85,7 +85,7 @@ const settleChildInto = (
 
 const advanceModelPhase = (value: OwnedFold, change: MutableMutation, turnId: string): void => {
   const phase = Math.max(0, value.state.modelPhase)
-  if (value.units.has(assistantKey(turnId, phase)) || value.units.has(reasoningKey(turnId, phase)))
+  if (value.units.has(assistantKey({ turnId, phase })) || value.units.has(reasoningKey({ turnId, phase })))
     setState(value, change, "modelPhase", phase + 1)
 }
 

@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import { presetForBase, type PresetId, presets, defaults as modelDefaults } from "../model-routing/model-preset"
 import { isStreamingOnlyBaseUrl } from "../model-routing/model-route"
 import type { ModelRoute } from "../model-routing/model-route"
@@ -45,13 +46,19 @@ const roleRoute = (configured: ModelRoute.RoleRoute, override: string | RoleRout
   }
 }
 
-export const mergeConfigurationSettings = (global: SettingsInput, workspace: SettingsInput): ConfigurationSettings => {
+export const mergeConfigurationSettings = ({
+  global,
+  workspace,
+}: {
+  readonly global: SettingsInput
+  readonly workspace: SettingsInput
+}): ConfigurationSettings => {
   const webSearchProviders = { ...global.webSearch?.providers, ...workspace.webSearch?.providers }
   const provider = (id: ModelRoute.ProviderId): ModelRoute.ProviderConnection => {
     const builtIn = settingsDefaults.providers[id]
     const override = workspace.providers?.[id] ?? global.providers?.[id]
     if (builtIn.protocol === "amazon-bedrock") {
-      const bedrock = override && "authMode" in override ? override : undefined
+      const bedrock = override !== undefined && "authMode" in override ? override : undefined
       return {
         protocol: "amazon-bedrock",
         authMode: bedrock?.authMode === "bearer" ? "bearer" : "default",
@@ -61,7 +68,7 @@ export const mergeConfigurationSettings = (global: SettingsInput, workspace: Set
         ...(bedrock?.authRefresh === undefined ? {} : { authRefresh: bedrock.authRefresh }),
       }
     }
-    const httpOverride = override && !("authMode" in override) ? override : undefined
+    const httpOverride = override !== undefined && !("authMode" in override) ? override : undefined
     const baseUrl = httpOverride?.baseUrl ?? builtIn.baseUrl
     const streamingOnly =
       httpOverride?.streamingOnly ?? builtIn.streamingOnly ?? (isStreamingOnlyBaseUrl(baseUrl) ? true : undefined)
@@ -135,7 +142,7 @@ export const mergeConfigurationSettings = (global: SettingsInput, workspace: Set
   return merged
 }
 
-export const withWebSearchConfiguration = (
+const withWebSearchConfigurationImpl = (
   settings: ConfigurationSettings,
   credentials: Readonly<Record<string, unknown>>,
 ): ConfigurationSettings => ({
@@ -144,3 +151,8 @@ export const withWebSearchConfiguration = (
     providers: Object.fromEntries(Object.keys(credentials).map((id) => [id, { configured: true as const }])),
   },
 })
+
+export const withWebSearchConfiguration: {
+  (settings: ConfigurationSettings, credentials: Readonly<Record<string, unknown>>): ConfigurationSettings
+  (credentials: Readonly<Record<string, unknown>>): (settings: ConfigurationSettings) => ConfigurationSettings
+} = Function.dual(2, withWebSearchConfigurationImpl)

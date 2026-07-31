@@ -21,7 +21,7 @@ export interface HostInterface {
   ) => Effect.Effect<Effect.Effect<string, McpOAuthHostError>, McpOAuthHostError, Scope.Scope>
 }
 
-export class Host extends Context.Service<Host, HostInterface>()("@rika/extensions/mcp-oauth-store/Host") {}
+export class Host extends Context.Service<Host, HostInterface>()("@rika/extensions/mcp/mcp-oauth-store/Host") {}
 
 export const hostTestLayer = (implementation: HostInterface) => Layer.succeed(Host, Host.of(implementation))
 

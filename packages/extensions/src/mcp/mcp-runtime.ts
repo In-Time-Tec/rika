@@ -13,7 +13,7 @@ export interface McpRuntimeInterface {
 }
 
 export class McpRuntimeService extends Context.Service<McpRuntimeService, McpRuntimeInterface>()(
-  "@rika/extensions/mcp-runtime/McpRuntimeService",
+  "@rika/extensions/mcp/mcp-runtime/McpRuntimeService",
 ) {}
 
 export const layerWithStore = Layer.effect(
