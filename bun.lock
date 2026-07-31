@@ -224,6 +224,7 @@
         "@effect/platform-bun": "catalog:",
         "dependency-cruiser": "catalog:",
         "effect": "catalog:",
+        "prettier": "catalog:",
       },
       "devDependencies": {
         "@rika/app": "workspace:*",

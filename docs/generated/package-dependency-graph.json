@@ -388,5 +388,7 @@
       "dependencySection": "dependencies"
     }
   ],
-  "violations": []
+  "violations": [
+    "packages/persistence/test/product-migration-oracle-v27.test.ts: unresolved internal or asset import ./fixtures/product-migration-oracle-v27.fixture.json"
+  ]
 }

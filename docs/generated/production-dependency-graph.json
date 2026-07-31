@@ -569,6 +569,14 @@
       "package": "effect"
     },
     {
+      "id": "external:effect/Config",
+      "workspace": "root",
+      "kind": "external",
+      "production": true,
+      "publicExports": [],
+      "package": "effect"
+    },
+    {
       "id": "external:effect/FileSystem",
       "workspace": "root",
       "kind": "external",
@@ -8865,6 +8873,22 @@
     },
     {
       "from": "packages/tools/src/workspace-index.ts",
+      "to": "external:effect/unstable/process",
+      "specifier": "effect/unstable/process",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/tools/src/workspace-index.ts",
+      "to": "external:effect/unstable/process/ChildProcessSpawner",
+      "specifier": "effect/unstable/process/ChildProcessSpawner",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/tools/src/workspace-index.ts",
       "to": "packages/tools/src/workspace-boundary.ts",
       "specifier": "./workspace-boundary",
       "kind": "import",
@@ -10066,7 +10090,7 @@
     {
       "from": "scripts/bench/fold-persistence.ts",
       "to": "packages/persistence/src/product-database.ts",
-      "specifier": "@rika/persistence/database",
+      "specifier": "../../packages/persistence/src/product-database",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10074,7 +10098,7 @@
     {
       "from": "scripts/bench/fold-persistence.ts",
       "to": "packages/persistence/src/thread-repository.ts",
-      "specifier": "@rika/persistence/repository",
+      "specifier": "../../packages/persistence/src/thread-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10082,7 +10106,7 @@
     {
       "from": "scripts/bench/fold-persistence.ts",
       "to": "packages/persistence/src/thread-schema.ts",
-      "specifier": "@rika/persistence/thread",
+      "specifier": "../../packages/persistence/src/thread-schema",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10090,7 +10114,7 @@
     {
       "from": "scripts/bench/fold-persistence.ts",
       "to": "packages/persistence/src/transcript-repository.ts",
-      "specifier": "@rika/persistence/transcript-repository",
+      "specifier": "../../packages/persistence/src/transcript-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10098,7 +10122,7 @@
     {
       "from": "scripts/bench/fold-persistence.ts",
       "to": "packages/persistence/src/turn-repository.ts",
-      "specifier": "@rika/persistence/turn-repository",
+      "specifier": "../../packages/persistence/src/turn-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10106,7 +10130,7 @@
     {
       "from": "scripts/bench/fold-persistence.ts",
       "to": "packages/persistence/src/turn-schema.ts",
-      "specifier": "@rika/persistence/turn",
+      "specifier": "../../packages/persistence/src/turn-schema",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10114,7 +10138,7 @@
     {
       "from": "scripts/bench/fold-persistence.ts",
       "to": "packages/transcript/src/index.ts",
-      "specifier": "@rika/transcript",
+      "specifier": "../../packages/transcript/src/index",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10193,6 +10217,14 @@
     },
     {
       "from": "scripts/bench/seed-populated-root.ts",
+      "to": "external:@effect/platform-bun/BunRuntime",
+      "specifier": "@effect/platform-bun/BunRuntime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/bench/seed-populated-root.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -10209,8 +10241,24 @@
     },
     {
       "from": "scripts/bench/seed-populated-root.ts",
+      "to": "external:effect/Config",
+      "specifier": "effect/Config",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/bench/seed-populated-root.ts",
+      "to": "external:effect/PlatformError",
+      "specifier": "effect/PlatformError",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/bench/seed-populated-root.ts",
       "to": "packages/persistence/src/product-database.ts",
-      "specifier": "@rika/persistence/database",
+      "specifier": "../../packages/persistence/src/product-database",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10218,7 +10266,7 @@
     {
       "from": "scripts/bench/seed-populated-root.ts",
       "to": "packages/persistence/src/thread-repository.ts",
-      "specifier": "@rika/persistence/repository",
+      "specifier": "../../packages/persistence/src/thread-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10226,7 +10274,7 @@
     {
       "from": "scripts/bench/seed-populated-root.ts",
       "to": "packages/persistence/src/thread-schema.ts",
-      "specifier": "@rika/persistence/thread",
+      "specifier": "../../packages/persistence/src/thread-schema",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10234,7 +10282,7 @@
     {
       "from": "scripts/bench/seed-populated-root.ts",
       "to": "packages/persistence/src/turn-repository.ts",
-      "specifier": "@rika/persistence/turn-repository",
+      "specifier": "../../packages/persistence/src/turn-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10242,7 +10290,7 @@
     {
       "from": "scripts/bench/seed-populated-root.ts",
       "to": "packages/persistence/src/turn-schema.ts",
-      "specifier": "@rika/persistence/turn",
+      "specifier": "../../packages/persistence/src/turn-schema",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10259,6 +10307,14 @@
       "from": "scripts/bench/warm-populated-resident.ts",
       "to": "external:@effect/platform-bun/BunCrypto",
       "specifier": "@effect/platform-bun/BunCrypto",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/bench/warm-populated-resident.ts",
+      "to": "external:@effect/platform-bun/BunRuntime",
+      "specifier": "@effect/platform-bun/BunRuntime",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10282,7 +10338,7 @@
     {
       "from": "scripts/bench/warm-populated-resident.ts",
       "to": "packages/app/src/resident-service.ts",
-      "specifier": "@rika/app/resident-service",
+      "specifier": "../../packages/app/src/resident-service",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10776,5 +10832,7 @@
       "production": true
     }
   ],
-  "violations": []
+  "violations": [
+    "packages/persistence/test/product-migration-oracle-v27.test.ts: unresolved internal or asset import ./fixtures/product-migration-oracle-v27.fixture.json"
+  ]
 }

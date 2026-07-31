@@ -677,6 +677,14 @@
       "package": "effect"
     },
     {
+      "id": "external:effect/Config",
+      "workspace": "root",
+      "kind": "external",
+      "production": true,
+      "publicExports": [],
+      "package": "effect"
+    },
+    {
       "id": "external:effect/FileSystem",
       "workspace": "root",
       "kind": "external",
@@ -1435,6 +1443,16 @@
     {
       "id": "packages/persistence/test/product-database.test.ts",
       "path": "packages/persistence/test/product-database.test.ts",
+      "workspace": "@rika/persistence",
+      "package": "@rika/persistence",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/persistence/test/product-migration-oracle-v27.test.ts",
+      "path": "packages/persistence/test/product-migration-oracle-v27.test.ts",
       "workspace": "@rika/persistence",
       "package": "@rika/persistence",
       "kind": "source",
@@ -4312,6 +4330,54 @@
       "production": false
     },
     {
+      "from": "packages/persistence/test/product-migration-oracle-v27.test.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/persistence/test/product-migration-oracle-v27.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/persistence/test/product-migration-oracle-v27.test.ts",
+      "to": "external:bun:sqlite",
+      "specifier": "bun:sqlite",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/persistence/test/product-migration-oracle-v27.test.ts",
+      "to": "external:crypto",
+      "specifier": "crypto",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/persistence/test/product-migration-oracle-v27.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/persistence/test/product-migration-oracle-v27.test.ts",
+      "to": "external:effect/unstable/sql/SqlClient",
+      "specifier": "effect/unstable/sql/SqlClient",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/persistence/test/recorded-shell-repository.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
@@ -6152,5 +6218,7 @@
       "production": false
     }
   ],
-  "violations": []
+  "violations": [
+    "packages/persistence/test/product-migration-oracle-v27.test.ts: unresolved internal or asset import ./fixtures/product-migration-oracle-v27.fixture.json"
+  ]
 }
