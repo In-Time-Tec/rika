@@ -1,21 +1,24 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
-import { ExecutionExtensions, PluginApi, PluginLoader, PluginRegistry } from "@rika/extensions/plugin-contract"
-import { provideLayer } from "./layer"
+import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"
+import * as PluginContract from "@rika/extensions/plugin-contract"
+import * as PluginLoader from "../../src/plugin/plugin-loader"
+import * as PluginRegistry from "@rika/extensions/plugin-registry"
+import { provideLayer } from "../support/extension-test-layer"
 
-const tool = (description: string): PluginApi.Tool => ({
+const tool = (description: string): PluginContract.Tool => ({
   name: "inspect",
   description,
   inputSchema: { type: "object", properties: { path: { type: "string" } } },
   execute: Effect.fn("Fixture.inspect")((input) => Effect.succeed(input)),
 })
 
-const source = (id: string, content: string, register: PluginApi.PluginV1["register"]): PluginLoader.Source => ({
+const source = (id: string, content: string, register: PluginContract.PluginV1["register"]): PluginLoader.Source => ({
   id,
   content,
   configuration: { enabled: true },
-  load: Effect.succeed(Object.freeze({ apiVersion: PluginApi.v1.apiVersion, id, register })),
+  load: Effect.succeed(Object.freeze({ apiVersion: PluginContract.v1.apiVersion, id, register })),
 })
 
 const layers = Layer.mergeAll(PluginRegistry.memoryLayer, BunServices.layer)
@@ -43,7 +46,7 @@ it.effect("v1 plugins register typed capabilities with duplicate diagnostics and
 it.effect("isolates failures and retains pinned generations across reload", () =>
   Effect.gen(function* () {
     const old = yield* PluginLoader.reload([source("good", "old", (api) => api.tool(tool("old")))])
-    const unavailable = yield* Effect.flip((yield* PluginRegistry.Service).pinned("missing"))
+    const unavailable = yield* Effect.flip((yield* PluginRegistry.PluginRegistryService).pinned("missing"))
     const current = yield* PluginLoader.reload([
       source("good", "new", (api) => api.tool(tool("new"))),
       {
@@ -51,7 +54,7 @@ it.effect("isolates failures and retains pinned generations across reload", () =
         load: Effect.fail(PluginLoader.LoadError.make({ message: "boom" })),
       },
     ])
-    const pinned = yield* (yield* PluginRegistry.Service).pinned(old.id)
+    const pinned = yield* (yield* PluginRegistry.PluginRegistryService).pinned(old.id)
     expect(current.id).not.toBe(old.id)
     expect(pinned.tools.get("inspect")?.description).toBe("old")
     expect(unavailable._tag).toBe("@rika/extensions/PluginGenerationUnavailable")
@@ -62,9 +65,9 @@ it.effect("isolates failures and retains pinned generations across reload", () =
 it.effect("pins every execution extension digest and fails typed when its generation is unavailable", () =>
   Effect.gen(function* () {
     const generation = yield* PluginLoader.reload([source("pinned", "pinned", () => {})])
-    const extensions = yield* ExecutionExtensions.Service
+    const extensions = yield* ExecutionExtensions.ExecutionExtensionService
     const activated = yield* extensions.future("mcp-fingerprint", "context-digest")
-    const missingRegistry = yield* PluginRegistry.Service
+    const missingRegistry = yield* PluginRegistry.PluginRegistryService
     const unavailable = yield* Effect.flip(missingRegistry.pinned("unavailable"))
     expect(activated.pin).toEqual({
       generation: generation.id,

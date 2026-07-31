@@ -1,8 +1,9 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, test } from "vitest"
 import { Effect, FileSystem, Layer } from "effect"
-import { SkillRegistry } from "@rika/extensions/plugin-contract"
-import { provideLayer } from "./layer"
+import * as SkillRegistry from "@rika/extensions/skill-registry"
+import * as SkillFileSystem from "../../src/skill/skill-file-system"
+import { provideLayer } from "../support/extension-test-layer"
 
 const document = (name: string, description: string, body: string) =>
   `---\nname: ${name}\ndescription: ${description}\n---\n${body}`
@@ -28,7 +29,7 @@ test("workspace skills override global skills and activation lazily loads contai
       const selected = yield* registry.source.get("review")
       const activated = yield* registry.activate("review")
       return { registry, selected, activated }
-    }).pipe(provideLayer(SkillRegistry.fileSystemLayer)),
+    }).pipe(provideLayer(SkillFileSystem.fileSystemLayer)),
   )
   return Effect.runPromise(
     Effect.gen(function* () {
@@ -64,7 +65,7 @@ test("rejects a resource symlink that escapes the selected skill directory", () 
         const error = yield* Effect.flip(registry.activate("review"))
         expect(error.operation).toBe("activate")
         expect(error.message).toBe("Resource path escapes skill directory")
-      }).pipe(provideLayer(SkillRegistry.fileSystemLayer)),
+      }).pipe(provideLayer(SkillFileSystem.fileSystemLayer)),
     ).pipe(provideLayer(BunServices.layer)),
   ))
 
@@ -85,7 +86,7 @@ test("rejects a manifest symlink that escapes the selected skill directory", () 
         const error = yield* Effect.flip(registry.activate("review"))
         expect(error.operation).toBe("activate")
         expect(error.message).toBe("Skill manifest escapes skill directory")
-      }).pipe(provideLayer(SkillRegistry.fileSystemLayer)),
+      }).pipe(provideLayer(SkillFileSystem.fileSystemLayer)),
     ).pipe(provideLayer(BunServices.layer)),
   ))
 
@@ -98,7 +99,7 @@ test("returns a typed error for missing activation", () =>
     }).pipe(
       provideLayer(
         Layer.merge(
-          SkillRegistry.fileSystemTestLayer({}, {}).pipe(Layer.provide(BunServices.layer)),
+          SkillFileSystem.fileSystemTestLayer({}, {}).pipe(Layer.provide(BunServices.layer)),
           BunServices.layer,
         ),
       ),

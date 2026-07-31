@@ -1,5 +1,5 @@
 import { Effect, Exit, Schema } from "effect"
-import type { AgentProfile, Json, Mode, PluginV1, Registrar, Tool, UiAction } from "./plugin-api"
+import type { AgentProfile, Json, Mode, PluginV1, Registrar, Tool, UiAction } from "./plugin-contract"
 import * as PluginDigest from "./plugin-digest"
 import type { Generation } from "./plugin-registry"
 import * as PluginRegistry from "./plugin-registry"
@@ -16,7 +16,7 @@ export class LoadError extends Schema.TaggedErrorClass<LoadError>()("@rika/exten
 }) {}
 
 export const reload = Effect.fn("PluginLoader.reload")(function* (sources: ReadonlyArray<Source>) {
-  const registry = yield* PluginRegistry.Service
+  const registry = yield* PluginRegistry.PluginRegistryService
   const tools = new Map<string, Tool>()
   const modes = new Map<string, Mode>()
   const profiles = new Map<string, AgentProfile>()

@@ -2,8 +2,9 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { McpToolSource } from "@batonfx/mcp"
 import { expect, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { McpConfig, McpRuntime } from "@rika/extensions/plugin-contract"
-import { provideLayer } from "./layer"
+import * as McpConfig from "@rika/extensions/mcp-configuration"
+import * as McpRuntime from "@rika/extensions/mcp-runtime"
+import { provideLayer } from "../support/extension-test-layer"
 
 it.effect("skill MCP configuration is composed only from activated skill resources", () =>
   Effect.gen(function* () {

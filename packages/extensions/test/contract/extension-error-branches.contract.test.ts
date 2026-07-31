@@ -1,7 +1,12 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
 import { Crypto, Effect, FileSystem, Layer, PlatformError } from "effect"
-import { McpConfig, McpRuntime, PluginLoader, PluginRegistry, SkillRegistry } from "@rika/extensions/plugin-contract"
+import * as McpConfig from "@rika/extensions/mcp-configuration"
+import * as McpRuntime from "@rika/extensions/mcp-runtime"
+import * as PluginLoader from "../../src/plugin/plugin-loader"
+import * as PluginRegistry from "@rika/extensions/plugin-registry"
+import * as SkillRegistry from "@rika/extensions/skill-registry"
+import * as SkillFileSystem from "../../src/skill/skill-file-system"
 
 const document = (name: string) => `---\nname: ${name}\ndescription: ${name}\n---\nbody`
 
@@ -15,10 +20,10 @@ const pluginSource = (id: string, load: PluginLoader.Source["load"]): PluginLoad
   load,
 })
 
-const skillLayer = (operation: keyof SkillRegistry.FileSystemInterface) =>
+const skillLayer = (operation: keyof SkillFileSystem.FileSystemInterface) =>
   Layer.succeed(
-    SkillRegistry.SkillFileSystem,
-    SkillRegistry.SkillFileSystem.of({
+    SkillFileSystem.SkillFileSystem,
+    SkillFileSystem.SkillFileSystem.of({
       exists: () => (operation === "exists" ? Effect.fail(platformFailure("exists")) : Effect.succeed(true)),
       readDirectory: () =>
         operation === "readDirectory"
@@ -70,7 +75,7 @@ it.layer(BunServices.layer)((test) => {
       const activate = (entries: ReadonlyArray<string>) =>
         Effect.gen(function* () {
           const context = yield* Layer.build(
-            SkillRegistry.fileSystemTestLayer(files, {
+            SkillFileSystem.fileSystemTestLayer(files, {
               [globalRoot]: ["test/SKILL.md"],
               [workspaceRoot]: [],
               [`${globalRoot}/test`]: entries,
@@ -90,9 +95,9 @@ it.layer(BunServices.layer)((test) => {
 
   test.effect("exercises missing test filesystem entries", () =>
     Effect.gen(function* () {
-      const context = yield* Layer.build(SkillRegistry.fileSystemTestLayer({}, {}))
+      const context = yield* Layer.build(SkillFileSystem.fileSystemTestLayer({}, {}))
       yield* Effect.gen(function* () {
-        const fileSystem = yield* SkillRegistry.SkillFileSystem
+        const fileSystem = yield* SkillFileSystem.SkillFileSystem
         expect((yield* Effect.exit(fileSystem.readDirectory("/missing")))._tag).toBe("Failure")
         expect((yield* Effect.exit(fileSystem.readFileString("/missing")))._tag).toBe("Failure")
         expect(yield* fileSystem.exists("/missing")).toBe(false)
@@ -110,7 +115,7 @@ it.layer(BunServices.layer)((test) => {
       const manifest = `${globalRoot}/test/SKILL.md`
       yield* fileSystem.makeDirectory(`${globalRoot}/test`, { recursive: true })
       yield* fileSystem.writeFileString(manifest, document("test"))
-      const context = yield* Layer.build(SkillRegistry.fileSystemLayer)
+      const context = yield* Layer.build(SkillFileSystem.fileSystemLayer)
       const registry = yield* SkillRegistry.discover({ globalRoot, workspaceRoot }).pipe(Effect.provide(context))
       yield* fileSystem.remove(manifest)
       expect((yield* Effect.flip(registry.activate("test"))).operation).toBe("activate")
@@ -119,7 +124,7 @@ it.layer(BunServices.layer)((test) => {
         Crypto.Crypto,
         Crypto.make({ randomBytes: (size) => new Uint8Array(size), digest: () => Effect.fail(failure) }),
       )
-      const digestContext = yield* Layer.build(Layer.merge(SkillRegistry.fileSystemTestLayer({}, {}), cryptoLayer))
+      const digestContext = yield* Layer.build(Layer.merge(SkillFileSystem.fileSystemTestLayer({}, {}), cryptoLayer))
       const digestError = yield* Effect.flip(
         SkillRegistry.discover({ globalRoot: "/global", workspaceRoot: "/workspace" }).pipe(
           Effect.provide(digestContext),

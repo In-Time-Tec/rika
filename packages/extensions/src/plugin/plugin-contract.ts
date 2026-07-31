@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect } from "effect"
 
 export type Json = null | boolean | number | string | ReadonlyArray<Json> | { readonly [key: string]: Json }
 
@@ -39,10 +39,5 @@ export interface PluginV1 {
   readonly id: string
   readonly register: (registrar: Registrar) => void
 }
-
-export class ContractError extends Schema.TaggedErrorClass<ContractError>()("@rika/extensions/PluginContractError", {
-  plugin: Schema.String,
-  message: Schema.String,
-}) {}
 
 export const v1 = Object.freeze({ apiVersion: 1 as const })

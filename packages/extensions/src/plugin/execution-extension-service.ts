@@ -21,18 +21,21 @@ export class NoGeneration extends Schema.TaggedErrorClass<NoGeneration>()(
   {},
 ) {}
 
-export interface Interface {
+export interface ExecutionExtensionInterface {
   readonly future: (mcpFingerprint: string, resolvedContextDigest: string) => Effect.Effect<Activated, NoGeneration>
   readonly resume: (pin: Pin) => Effect.Effect<Activated, PluginRegistry.GenerationUnavailable>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/extensions/execution-extensions/Service") {}
+export class ExecutionExtensionService extends Context.Service<
+  ExecutionExtensionService,
+  ExecutionExtensionInterface
+>()("@rika/extensions/execution-extension-service/ExecutionExtensionService") {}
 
 export const layer = Layer.effect(
-  Service,
+  ExecutionExtensionService,
   Effect.gen(function* () {
-    const registry = yield* PluginRegistry.Service
-    return Service.of({
+    const registry = yield* PluginRegistry.PluginRegistryService
+    return ExecutionExtensionService.of({
       future: Effect.fn("ExecutionExtensions.future")(function* (mcpFingerprint, resolvedContextDigest) {
         const current = yield* registry.current
         if (Option.isNone(current)) return yield* NoGeneration.make()

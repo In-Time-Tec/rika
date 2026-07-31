@@ -1,6 +1,6 @@
 import { McpToolSource, OAuth } from "@batonfx/mcp"
 import { Context, Crypto, Effect, Layer, Schema, Scope } from "effect"
-import type { Server } from "./mcp-config"
+import type { Server } from "./mcp-configuration"
 
 export class Diagnostic extends Schema.TaggedErrorClass<Diagnostic>()("@rika/extensions/McpDiagnostic", {
   server: Schema.String,
@@ -8,18 +8,20 @@ export class Diagnostic extends Schema.TaggedErrorClass<Diagnostic>()("@rika/ext
   message: Schema.String,
 }) {}
 
-export interface Interface {
+export interface McpRuntimeInterface {
   readonly connect: (server: Server) => Effect.Effect<McpToolSource.Interface, Diagnostic, Scope.Scope>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/extensions/mcp-runtime/Service") {}
+export class McpRuntimeService extends Context.Service<McpRuntimeService, McpRuntimeInterface>()(
+  "@rika/extensions/mcp-runtime/McpRuntimeService",
+) {}
 
 export const layerWithStore = Layer.effect(
-  Service,
+  McpRuntimeService,
   Effect.gen(function* () {
     const store = yield* OAuth.TokenStore
     const crypto = yield* Crypto.Crypto
-    return Service.of({
+    return McpRuntimeService.of({
       connect: Effect.fn("McpRuntime.connect")(function* (server: Server) {
         const oauth =
           server.kind === "remote"
@@ -61,10 +63,11 @@ export const layerWithStore = Layer.effect(
 
 export const layer = layerWithStore.pipe(Layer.provide(OAuth.layerTokenStoreMemory))
 
-export const testLayer = (connect: Interface["connect"]) => Layer.succeed(Service, Service.of({ connect }))
+export const testLayer = (connect: McpRuntimeInterface["connect"]) =>
+  Layer.succeed(McpRuntimeService, McpRuntimeService.of({ connect }))
 
 export const discover = Effect.fn("McpRuntime.discover")(function* (server: Server) {
-  const runtime = yield* Service
+  const runtime = yield* McpRuntimeService
   const source = yield* runtime.connect(server)
   return yield* source.tools.pipe(
     Effect.map((tools) => tools.toSorted((left, right) => left.name.localeCompare(right.name))),
@@ -77,7 +80,7 @@ export const call = Effect.fn("McpRuntime.call")(function* (
   tool: string,
   input: McpToolSource.JsonValue,
 ) {
-  const runtime = yield* Service
+  const runtime = yield* McpRuntimeService
   const source = yield* runtime.connect(server)
   return yield* source
     .callTool(tool, input)

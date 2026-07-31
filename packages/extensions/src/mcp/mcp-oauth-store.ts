@@ -1,37 +1,27 @@
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
 import { OAuth } from "@batonfx/mcp"
-import {
-  Context,
-  Crypto,
-  Deferred,
-  Effect,
-  FileSystem,
-  Function,
-  Layer,
-  Option,
-  Path,
-  Redacted,
-  Schema,
-  Scope,
-} from "effect"
+import { Context, Deferred, Effect, FileSystem, Function, Layer, Option, Path, Redacted, Schema, Scope } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
-export class Error extends Schema.TaggedErrorClass<Error>()("@rika/extensions/McpOAuthError", {
-  server: Schema.String,
-  operation: Schema.String,
-  message: Schema.String,
-}) {}
+export class McpOAuthHostError extends Schema.TaggedErrorClass<McpOAuthHostError>()(
+  "@rika/extensions/McpOAuthHostError",
+  {
+    server: Schema.String,
+    operation: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
 export interface HostInterface {
-  readonly open: (url: string) => Effect.Effect<void, Error>
+  readonly open: (url: string) => Effect.Effect<void, McpOAuthHostError>
   readonly callback: (
     redirectUrl: string,
     expectedState: string,
-  ) => Effect.Effect<Effect.Effect<string, Error>, Error, Scope.Scope>
+  ) => Effect.Effect<Effect.Effect<string, McpOAuthHostError>, McpOAuthHostError, Scope.Scope>
 }
 
-export class Host extends Context.Service<Host, HostInterface>()("@rika/extensions/mcp-oauth/Host") {}
+export class Host extends Context.Service<Host, HostInterface>()("@rika/extensions/mcp-oauth-store/Host") {}
 
 export const hostTestLayer = (implementation: HostInterface) => Layer.succeed(Host, Host.of(implementation))
 
@@ -68,7 +58,7 @@ export const hostLayer = Layer.effect(
               .spawn(ChildProcess.make(command, args, { stdout: "ignore", stderr: "ignore" }))
               .pipe(
                 Effect.mapError(() =>
-                  Error.make({
+                  McpOAuthHostError.make({
                     server: "system-browser",
                     operation: "open-browser",
                     message: "Unable to open the system browser",
@@ -77,7 +67,7 @@ export const hostLayer = Layer.effect(
               )
             const exitCode = yield* child.exitCode.pipe(
               Effect.mapError(() =>
-                Error.make({
+                McpOAuthHostError.make({
                   server: "system-browser",
                   operation: "open-browser",
                   message: "Unable to open the system browser",
@@ -85,7 +75,7 @@ export const hostLayer = Layer.effect(
               ),
             )
             if (exitCode !== 0)
-              return yield* Error.make({
+              return yield* McpOAuthHostError.make({
                 server: "system-browser",
                 operation: "open-browser",
                 message: "Unable to open the system browser",
@@ -98,7 +88,11 @@ export const hostLayer = Layer.effect(
           const target = yield* Effect.try({
             try: () => new URL(redirectUrl),
             catch: () =>
-              Error.make({ server: redirectUrl, operation: "callback", message: "Unable to bind the OAuth callback" }),
+              McpOAuthHostError.make({
+                server: redirectUrl,
+                operation: "callback",
+                message: "Unable to bind the OAuth callback",
+              }),
           })
           const completed = yield* Deferred.make<string>()
           const server = yield* BunHttpServer.make({
@@ -107,7 +101,7 @@ export const hostLayer = Layer.effect(
           }).pipe(
             Effect.catchCause(() =>
               Effect.fail(
-                Error.make({
+                McpOAuthHostError.make({
                   server: redirectUrl,
                   operation: "callback",
                   message: "Unable to bind the OAuth callback",
@@ -132,6 +126,9 @@ export const hostLayer = Layer.effect(
   }),
 )
 
+const tokenStoreFailure = (server: string, operation: string) =>
+  OAuth.OAuthProviderError.make({ server, operation, message: `OAuth token ${operation} failed` })
+
 export const tokenStoreLayer = (
   filename: string,
 ): Layer.Layer<OAuth.TokenStore, never, FileSystem.FileSystem | Path.Path> =>
@@ -152,15 +149,13 @@ export const tokenStoreLayer = (
           ),
         ),
       )
-      const failure = (server: string, operation: string) =>
-        OAuth.OAuthProviderError.make({ server, operation, message: `OAuth token ${operation} failed` })
       return OAuth.TokenStore.of({
         load: Effect.fn("McpOAuthTokenStore.load")((server) =>
           read().pipe(
             Effect.map((values) =>
               values[server] === undefined ? Option.none() : Option.some(Redacted.make(values[server])),
             ),
-            Effect.mapError(() => failure(server, "load")),
+            Effect.mapError(() => tokenStoreFailure(server, "load")),
           ),
         ),
         save: Effect.fn("McpOAuthTokenStore.save")((server, tokens) =>
@@ -180,7 +175,7 @@ export const tokenStoreLayer = (
                 Effect.andThen(fileSystem.chmod(filename, 0o600)),
               ),
             ),
-            Effect.mapError(() => failure(server, "save")),
+            Effect.mapError(() => tokenStoreFailure(server, "save")),
           ),
         ),
         remove: Effect.fn("McpOAuthTokenStore.remove")((server) =>
@@ -200,109 +195,9 @@ export const tokenStoreLayer = (
                   Effect.andThen(fileSystem.chmod(filename, 0o600)),
                 )
             }),
-            Effect.mapError(() => failure(server, "remove")),
+            Effect.mapError(() => tokenStoreFailure(server, "remove")),
           ),
         ),
       })
     }),
   )
-
-export interface Interface {
-  readonly login: (server: string, url: string) => Effect.Effect<void, Error>
-  readonly logout: (server: string, url: string) => Effect.Effect<void, Error>
-  readonly status: (server: string, url: string) => Effect.Effect<"authenticated" | "unauthenticated", Error>
-}
-
-export class Service extends Context.Service<Service, Interface>()("@rika/extensions/mcp-oauth/Service") {}
-
-const redirectUrl = "http://127.0.0.1:17839/oauth/callback"
-
-export interface OAuthClient {
-  readonly authorize: Effect.Effect<OAuth.Authorization, OAuth.OAuthProviderError>
-  readonly callback: (url: string) => Effect.Effect<void, OAuthClientError>
-  readonly clear: Effect.Effect<void, OAuth.OAuthProviderError>
-}
-
-export type OAuthClientError = OAuth.OAuthDenied | OAuth.OAuthExpired | OAuth.OAuthProviderError
-
-const service = (
-  oauth: (server: string, url: string) => Effect.Effect<OAuthClient>,
-): Effect.Effect<Interface, never, Host | OAuth.TokenStore> =>
-  Effect.gen(function* () {
-    const host = yield* Host
-    const store = yield* OAuth.TokenStore
-    const map = (server: string, operation: string) =>
-      Effect.mapError((cause: unknown) => {
-        let detail = `OAuth ${operation} failed`
-        if (typeof cause === "object" && cause !== null && "_tag" in cause) {
-          if (cause._tag === "@batonfx/mcp/OAuthExpired") detail = "OAuth callback state is invalid or expired"
-          else if (cause._tag === "@batonfx/mcp/OAuthDenied") detail = "OAuth authorization was denied"
-          else if (
-            cause._tag === "@batonfx/mcp/OAuthProviderError" &&
-            "operation" in cause &&
-            typeof cause.operation === "string"
-          )
-            detail = `OAuth ${cause.operation} failed`
-        }
-        return Error.make({ server, operation, message: detail })
-      })
-    return Service.of({
-      login: Effect.fn("McpOAuth.login")((server, url) =>
-        Effect.scoped(
-          Effect.gen(function* () {
-            const client = yield* oauth(server, url).pipe(map(server, "login"))
-            const authorization = yield* client.authorize.pipe(map(server, "login"))
-            const callback = yield* host.callback(redirectUrl, authorization.state)
-            yield* host.open(authorization.url)
-            yield* client.callback(yield* callback).pipe(map(server, "login"))
-          }),
-        ),
-      ),
-      logout: Effect.fn("McpOAuth.logout")(function* (server, url) {
-        const client = yield* oauth(server, url).pipe(map(server, "logout"))
-        yield* client.clear.pipe(map(server, "logout"))
-      }),
-      status: Effect.fn("McpOAuth.status")((server, url) =>
-        store.load(url).pipe(
-          Effect.map((value) => (Option.isSome(value) ? ("authenticated" as const) : ("unauthenticated" as const))),
-          map(server, "status"),
-        ),
-      ),
-    })
-  })
-
-export const layerWithClient = (
-  oauth: (server: string, url: string) => Effect.Effect<OAuthClient>,
-): Layer.Layer<Service, never, Host | OAuth.TokenStore> => Layer.effect(Service, service(oauth))
-
-export const layer: Layer.Layer<Service, never, Crypto.Crypto | Host | OAuth.TokenStore> = Layer.effect(
-  Service,
-  Effect.gen(function* () {
-    const store = yield* OAuth.TokenStore
-    const crypto = yield* Crypto.Crypto
-    const oauth = (_server: string, url: string) =>
-      Effect.scoped(
-        Layer.build(
-          OAuth.layer({
-            serverUrl: url,
-            redirectUrl,
-            clientMetadata: { redirect_uris: [redirectUrl], client_name: "Rika" },
-          }),
-        ),
-      ).pipe(
-        Effect.map((context) => {
-          const client = Context.get(context, OAuth.OAuth)
-          return {
-            authorize: client.authorize,
-            callback: client.callback,
-            clear: client.clear,
-          }
-        }),
-        Effect.provideService(OAuth.TokenStore, store),
-        Effect.provideService(Crypto.Crypto, crypto),
-      )
-    return yield* service(oauth)
-  }),
-)
-
-export const testLayer = (implementation: Interface) => Layer.succeed(Service, Service.of(implementation))

@@ -5,14 +5,14 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./execution-extension-service": "./src/execution-extensions.ts",
-    "./mcp-configuration": "./src/mcp-config.ts",
-    "./mcp-oauth-service": "./src/mcp-oauth.ts",
-    "./mcp-runtime": "./src/mcp-runtime.ts",
-    "./plugin-contract": "./src/plugin-contract.ts",
-    "./plugin-digest": "./src/plugin-digest.ts",
-    "./plugin-registry": "./src/plugin-registry.ts",
-    "./skill-registry": "./src/skill-registry.ts"
+    "./execution-extension-service": "./src/plugin/execution-extension-service.ts",
+    "./mcp-configuration": "./src/mcp/mcp-configuration.ts",
+    "./mcp-oauth-service": "./src/mcp/mcp-oauth-service.ts",
+    "./mcp-runtime": "./src/mcp/mcp-runtime.ts",
+    "./plugin-contract": "./src/plugin/plugin-contract.ts",
+    "./plugin-digest": "./src/plugin/plugin-digest.ts",
+    "./plugin-registry": "./src/plugin/plugin-registry.ts",
+    "./skill-registry": "./src/skill/skill-registry.ts"
   },
   "dependencies": {
     "@batonfx/core": "catalog:",

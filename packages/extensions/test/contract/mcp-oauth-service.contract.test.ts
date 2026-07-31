@@ -5,8 +5,9 @@ import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, FileSystem, Layer, Option, Redacted, Ref } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { McpOAuth } from "@rika/extensions/plugin-contract"
-import { provideLayer } from "./layer"
+import * as McpOAuth from "../../src/mcp/mcp-oauth-service"
+import * as McpOAuthStore from "../../src/mcp/mcp-oauth-store"
+import { provideLayer } from "../support/extension-test-layer"
 
 const spawnerLayer = (exitCode: Ref.Ref<number>) =>
   Layer.effect(
@@ -28,8 +29,8 @@ describe("McpOAuth", () => {
   it.effect("opens the browser and maps command failures", () =>
     Effect.gen(function* () {
       const exitCode = yield* Ref.make(0)
-      const context = yield* Layer.build(McpOAuth.hostLayer.pipe(Layer.provide(spawnerLayer(exitCode))))
-      const host = Context.get(context, McpOAuth.Host)
+      const context = yield* Layer.build(McpOAuthStore.hostLayer.pipe(Layer.provide(spawnerLayer(exitCode))))
+      const host = Context.get(context, McpOAuthStore.Host)
       yield* host.open("https://example.test/authorize")
       yield* Ref.set(exitCode, 1)
       const error = yield* Effect.flip(host.open("https://example.test/authorize?state=browser-secret"))
@@ -43,7 +44,7 @@ describe("McpOAuth", () => {
   it("selects the browser command for every supported platform", () => {
     expect(
       (["darwin", "win32", "linux"] as const).map((platform) =>
-        McpOAuth.browserCommand(platform, "https://example.test/authorize"),
+        McpOAuthStore.browserCommand(platform, "https://example.test/authorize"),
       ),
     ).toEqual([
       { command: "open", args: ["https://example.test/authorize"] },
@@ -58,7 +59,7 @@ describe("McpOAuth", () => {
         const fs = yield* FileSystem.FileSystem
         const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-oauth-" })
         const filename = `${root}/nested/tokens.json`
-        const context = yield* Layer.build(McpOAuth.tokenStoreLayer(filename))
+        const context = yield* Layer.build(McpOAuthStore.tokenStoreLayer(filename))
         yield* Effect.gen(function* () {
           const store = yield* OAuth.TokenStore
           expect(Option.isNone(yield* store.load("one"))).toBe(true)
@@ -81,7 +82,7 @@ describe("McpOAuth", () => {
         const fs = yield* FileSystem.FileSystem
         const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-oauth-errors-" })
         const filename = `${root}/tokens.json`
-        const context = yield* Layer.build(McpOAuth.tokenStoreLayer(filename))
+        const context = yield* Layer.build(McpOAuthStore.tokenStoreLayer(filename))
         const run = <A, E>(effect: Effect.Effect<A, E, OAuth.TokenStore>) => effect.pipe(Effect.provide(context))
         yield* fs.writeFileString(filename, '{"access_token":"storage-secret"')
         yield* fs.chmod(filename, 0o644)
@@ -103,8 +104,8 @@ describe("McpOAuth", () => {
   it.layer(Layer.merge(FetchHttpClient.layer, BunServices.layer))((test) => {
     test.effect("hosts the real callback path, rejects other paths, and maps bind errors", () =>
       Effect.gen(function* () {
-        const context = yield* Layer.build(McpOAuth.hostLayer)
-        const host = Context.get(context, McpOAuth.Host)
+        const context = yield* Layer.build(McpOAuthStore.hostLayer)
+        const host = Context.get(context, McpOAuthStore.Host)
         yield* Effect.scoped(
           Effect.gen(function* () {
             const callback = yield* host.callback("http://127.0.0.1:17839/oauth/callback", "state")
@@ -134,8 +135,11 @@ describe("McpOAuth", () => {
 
   it.effect("reports status, logout, and host failures through the service boundary", () => {
     const store = OAuth.layerTokenStoreMemory
-    const host = McpOAuth.hostTestLayer({
-      open: () => Effect.fail(McpOAuth.Error.make({ server: "browser", operation: "open-browser", message: "denied" })),
+    const host = McpOAuthStore.hostTestLayer({
+      open: () =>
+        Effect.fail(
+          McpOAuthStore.McpOAuthHostError.make({ server: "browser", operation: "open-browser", message: "denied" }),
+        ),
       callback: () => Effect.succeed(Effect.succeed("unused")),
     })
     const serviceLayer = Layer.merge(
@@ -147,7 +151,7 @@ describe("McpOAuth", () => {
       yield* Effect.gen(function* () {
         const tokenStore = yield* OAuth.TokenStore
         yield* tokenStore.save("https://unused.test", Redacted.make("token"))
-        const service = yield* McpOAuth.Service
+        const service = yield* McpOAuth.McpOAuthService
         expect(yield* service.status("server", "https://unused.test")).toBe("authenticated")
         yield* service.logout("server", "https://unused.test")
         expect(yield* service.status("server", "https://unused.test")).toBe("unauthenticated")
@@ -168,14 +172,14 @@ describe("McpOAuth", () => {
       }),
     )
     const serviceLayer = McpOAuth.layer.pipe(
-      Layer.provide(McpOAuth.hostTestLayer({ open: () => Effect.void, callback: () => Effect.never })),
+      Layer.provide(McpOAuthStore.hostTestLayer({ open: () => Effect.void, callback: () => Effect.never })),
       Layer.provide(store),
       Layer.provide(BunServices.layer),
     )
     return Effect.gen(function* () {
       const context = yield* Layer.build(serviceLayer)
       yield* Effect.gen(function* () {
-        const service = yield* McpOAuth.Service
+        const service = yield* McpOAuth.McpOAuthService
         const error = yield* Effect.flip(service.status("server", "https://example.test"))
         expect(error.message).toBe("OAuth status failed")
       }).pipe(Effect.provide(context))
@@ -185,7 +189,7 @@ describe("McpOAuth", () => {
   it.effect("binds before opening, forwards only the bound state, and redacts provider failures", () =>
     Effect.gen(function* () {
       const events = yield* Ref.make<Array<string>>([])
-      const host = McpOAuth.hostTestLayer({
+      const host = McpOAuthStore.hostTestLayer({
         callback: (_url, state) =>
           Ref.update(events, (values) => [...values, `bound:${state}`]).pipe(
             Effect.as(Effect.succeed(`http://127.0.0.1:17839/oauth/callback?code=ok&state=${state}`)),
@@ -206,7 +210,7 @@ describe("McpOAuth", () => {
         Layer.provide(OAuth.layerTokenStoreMemory),
       )
       yield* provideLayer(
-        Effect.flatMap(McpOAuth.Service, (service) => service.login("server", "https://provider.test/mcp")),
+        Effect.flatMap(McpOAuth.McpOAuthService, (service) => service.login("server", "https://provider.test/mcp")),
         layer,
       )
       expect(yield* Ref.get(events)).toEqual([
@@ -219,7 +223,7 @@ describe("McpOAuth", () => {
 
   it.effect("distinguishes provider denial and exchange failures without exposing provider details", () => {
     const tokenStore = OAuth.layerTokenStoreMemory
-    const host = McpOAuth.hostTestLayer({
+    const host = McpOAuthStore.hostTestLayer({
       callback: (_url, state) => Effect.succeed(Effect.succeed(`http://localhost/?code=x&state=${state}`)),
       open: () => Effect.void,
     })
@@ -234,7 +238,7 @@ describe("McpOAuth", () => {
     return Effect.gen(function* () {
       const denied = yield* Effect.flip(
         provideLayer(
-          Effect.flatMap(McpOAuth.Service, (service) => service.login("server", "https://provider.test/mcp")),
+          Effect.flatMap(McpOAuth.McpOAuthService, (service) => service.login("server", "https://provider.test/mcp")),
           failure(OAuth.OAuthDenied.make({ reason: "provider-secret" })),
         ),
       )
@@ -242,7 +246,7 @@ describe("McpOAuth", () => {
       expect(denied.message).not.toContain("provider-secret")
       const exchange = yield* Effect.flip(
         provideLayer(
-          Effect.flatMap(McpOAuth.Service, (service) => service.login("server", "https://provider.test/mcp")),
+          Effect.flatMap(McpOAuth.McpOAuthService, (service) => service.login("server", "https://provider.test/mcp")),
           failure(
             OAuth.OAuthProviderError.make({
               server: "https://provider.test/mcp",

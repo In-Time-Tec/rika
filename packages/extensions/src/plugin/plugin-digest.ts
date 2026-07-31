@@ -1,5 +1,5 @@
 import { Crypto, Effect, Encoding, Schema } from "effect"
-import type { Json, Tool } from "./plugin-api"
+import type { Json, Tool } from "./plugin-contract"
 
 export class DigestError extends Schema.TaggedErrorClass<DigestError>()("@rika/extensions/PluginDigestError", {
   message: Schema.String,

@@ -1,5 +1,5 @@
 import { Context, Effect, Layer, Option, Schema } from "effect"
-import type { AgentProfile, Mode, Tool, UiAction } from "./plugin-api"
+import type { AgentProfile, Mode, Tool, UiAction } from "./plugin-contract"
 
 export interface Generation {
   readonly id: string
@@ -18,18 +18,20 @@ export class GenerationUnavailable extends Schema.TaggedErrorClass<GenerationUna
   { generation: Schema.String },
 ) {}
 
-export interface Interface {
+export interface PluginRegistryInterface {
   readonly publish: (generation: Generation) => Effect.Effect<void>
   readonly current: Effect.Effect<Option.Option<Generation>>
   readonly pinned: (id: string) => Effect.Effect<Generation, GenerationUnavailable>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/extensions/plugin-registry/Service") {}
+export class PluginRegistryService extends Context.Service<PluginRegistryService, PluginRegistryInterface>()(
+  "@rika/extensions/plugin-registry/PluginRegistryService",
+) {}
 
-export const memoryLayer = Layer.sync(Service, () => {
+export const memoryLayer = Layer.sync(PluginRegistryService, () => {
   const generations = new Map<string, Generation>()
   let current: Generation | undefined
-  return Service.of({
+  return PluginRegistryService.of({
     publish: (generation) =>
       Effect.sync(() => void (generations.set(generation.id, generation), (current = generation))),
     current: Effect.sync(() => (current === undefined ? Option.none() : Option.some(current))),

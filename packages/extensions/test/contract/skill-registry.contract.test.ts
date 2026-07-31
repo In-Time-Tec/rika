@@ -1,8 +1,9 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer } from "effect"
-import { SkillRegistry } from "@rika/extensions/plugin-contract"
-import { provideLayer } from "./layer"
+import * as SkillRegistry from "@rika/extensions/skill-registry"
+import * as SkillFileSystem from "../../src/skill/skill-file-system"
+import { provideLayer } from "../support/extension-test-layer"
 
 const document = (name: string, description: string, body: string) =>
   `---\nname: ${name}\ndescription: ${description}\n---\n${body}`
@@ -46,7 +47,7 @@ it("discovers overrides and activates sorted files while ignoring directories an
           expect(empty).toEqual({ body: "empty body", resources: [] })
           expect(registry.digest).toHaveLength(64)
         }),
-        Layer.merge(SkillRegistry.fileSystemLayer.pipe(Layer.provide(BunServices.layer)), BunServices.layer),
+        Layer.merge(SkillFileSystem.fileSystemLayer.pipe(Layer.provide(BunServices.layer)), BunServices.layer),
       ),
     ),
   ))
@@ -60,7 +61,7 @@ it("returns a typed missing activation error through the test filesystem", () =>
           return yield* Effect.flip(registry.activate("missing"))
         }),
         Layer.merge(
-          SkillRegistry.fileSystemTestLayer({}, {}).pipe(Layer.provide(BunServices.layer)),
+          SkillFileSystem.fileSystemTestLayer({}, {}).pipe(Layer.provide(BunServices.layer)),
           BunServices.layer,
         ),
       )
@@ -86,7 +87,7 @@ it("fails when a discovered skill directory is deleted before activation", () =>
           expect(error.message).toBe("Skill directory was deleted")
         }),
         Layer.merge(
-          SkillRegistry.fileSystemTestLayer({}, {}).pipe(Layer.provide(BunServices.layer)),
+          SkillFileSystem.fileSystemTestLayer({}, {}).pipe(Layer.provide(BunServices.layer)),
           BunServices.layer,
         ),
       ),
