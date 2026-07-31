@@ -95,7 +95,7 @@ describe("Logging", () => {
                   "rika.execution.id": "execution-42",
                   "rika.failure.category": "invalid_input",
                   "rika.failure.interrupted": false,
-                  "rika.failure.kind": "InvalidInput",
+                  "rika.failure.kind": secrets[6],
                   "rika.failure.outcome": "known",
                   "rika.tool.call.id": "call-7",
                   "rika.tool.deadline.ms": 10_000,
@@ -115,12 +115,11 @@ describe("Logging", () => {
         for (const secret of secrets) assert.notInclude(content, secret)
         const record = yield* decodeRecord(content.trim())
         assert.strictEqual(record.message, "diagnostic.unstructured")
-        assert.strictEqual(record.detail, "usage repository refused an incomplete tree 14")
+        assert.strictEqual(record.detail, undefined)
         assert.deepStrictEqual(record.annotations, {
           "rika.execution.id": "execution-42",
           "rika.failure.category": "invalid_input",
           "rika.failure.interrupted": false,
-          "rika.failure.kind": "InvalidInput",
           "rika.failure.outcome": "known",
           "rika.tool.call.id": "call-7",
           "rika.tool.deadline.ms": 10_000,
@@ -133,60 +132,35 @@ describe("Logging", () => {
       }),
     )
 
-    test.effect("keeps message text as bounded detail beside the operation name", () =>
+    test.effect("omits arbitrary message values, objects, and failure causes", () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
-        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-detail-" })
-        const overflowing = "d".repeat(2_500)
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-private-values-" })
+        const secret = "cause-secret-f839"
+        const cyclic: Record<string, unknown> = { value: secret }
+        cyclic.self = cyclic
         yield* Effect.scoped(
           Effect.flatMap(
             Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })),
             (logging) =>
               Effect.all([
-                Effect.logWarning("usage repository refused an incomplete tree", 14),
-                Effect.logInfo("execution.follow.started", "resumed from checkpoint"),
-                Effect.logInfo("execution.follow.completed"),
-                Effect.logError(overflowing),
+                Effect.logWarning("usage repository refused an incomplete tree", cyclic),
+                Effect.logInfo("execution.follow.started", cyclic),
+                Effect.logWarning("usage-cost.read.failed", Cause.fail(secret)),
               ]).pipe(Effect.provide(logging)),
           ),
         )
-        const { records } = yield* writtenRecords(root)
+        const { content, records } = yield* writtenRecords(root)
+        assert.notInclude(content, secret)
+        assert.notInclude(content, "[object Object]")
         assert.deepStrictEqual(
           records.map((record) => record.message),
-          [
-            "diagnostic.unstructured",
-            "execution.follow.started",
-            "execution.follow.completed",
-            "diagnostic.unstructured",
-          ],
+          ["diagnostic.unstructured", "execution.follow.started", "diagnostic.unstructured"],
         )
-        assert.strictEqual(records[0]?.detail, "usage repository refused an incomplete tree 14")
-        assert.strictEqual(records[1]?.detail, "resumed from checkpoint")
-        assert.strictEqual(records[2]?.detail, undefined)
-        assert.strictEqual(records[3]?.detail?.length, 2_000)
-      }),
-    )
-
-    test.effect("keeps the failure cause as a bounded rendering", () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-cause-" })
-        const overflowing = "c".repeat(6_000)
-        yield* Effect.scoped(
-          Effect.flatMap(
-            Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })),
-            (logging) =>
-              Effect.all([
-                Effect.logWarning("usage-cost.read.failed", Cause.fail("UsageRepositoryError: incomplete usage tree")),
-                Effect.logWarning("usage-cost.read.failed", Cause.fail(overflowing)),
-                Effect.logInfo("execution.follow.started"),
-              ]).pipe(Effect.provide(logging)),
-          ),
-        )
-        const { records } = yield* writtenRecords(root)
-        assert.include(records[0]?.cause ?? "", "UsageRepositoryError: incomplete usage tree")
-        assert.strictEqual(records[1]?.cause?.length, 4_000)
-        assert.strictEqual(records[2]?.cause, undefined)
+        for (const record of records) {
+          assert.strictEqual(record.detail, undefined)
+          assert.strictEqual(record.cause, undefined)
+        }
       }),
     )
 
@@ -214,12 +188,10 @@ describe("Logging", () => {
         )
         const { content, records } = yield* writtenRecords(root)
         assert.deepStrictEqual(records[0]?.annotations, {
-          "rika.failure.cause": "UsageRepositoryError",
           "rika.follow.cursor": "cursor-42",
           "rika.follow.reason": "thread-open",
           "rika.follow.scope": "tree",
           "rika.reconnect.attempt": 3,
-          "rika.reconnect.message": "relay stream closed",
         })
         assert.notInclude(content, "dropped-annotation-a41c")
       }),

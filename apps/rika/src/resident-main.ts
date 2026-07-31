@@ -7,7 +7,20 @@ import * as ResidentService from "@rika/app/resident-service"
 import { ConfigContract, ConfigService } from "@rika/config"
 import { globalPaths, workspacePaths } from "@rika/config/paths"
 import { FetchHttpClient } from "effect/unstable/http"
-import { Cause, Clock, Config, Context, Effect, FileSystem, Layer, Path, Ref, References, Schema } from "effect"
+import {
+  Cause,
+  Clock,
+  Config,
+  Context,
+  Deferred,
+  Effect,
+  FileSystem,
+  Layer,
+  Path,
+  Ref,
+  References,
+  Schema,
+} from "effect"
 import { createHash } from "node:crypto"
 import * as Logging from "./logging"
 import { serve as serveResident } from "./resident-host-transport"
@@ -118,40 +131,59 @@ const start = () => {
       Effect.flatMap((scope) =>
         Effect.gen(function* () {
           const productLoaded = yield* Ref.make(false)
-          const loadProduct = yield* Effect.cached(
-            Clock.currentTimeMillis.pipe(
-              Effect.flatMap((startedAt) =>
-                Effect.gen(function* () {
-                  const product = yield* Effect.tryPromise({
-                    try: () => import("./resident-product"),
-                    catch: (cause) =>
-                      Operation.OperationUnavailable.make({
-                        operation: "ResidentProduct",
-                        message: String(cause),
-                      }),
-                  })
-                  const authOperations = product.createAuthOperations(authOptions)
-                  return yield* Layer.buildWithScope(
-                    product
-                      .createOperationLayer({ ...productOptions, authOperations }, interactive)
-                      .pipe(Layer.provide(Layer.mergeAll(BunServices.layer, BunCrypto.layer, FetchHttpClient.layer))),
-                    scope,
-                  ).pipe(
-                    Effect.map((context) => Context.get(context, Operation.Service)),
-                    Effect.tap(() => Ref.set(productLoaded, true)),
-                    Effect.tap(() =>
-                      Clock.currentTimeMillis.pipe(
-                        Effect.flatMap((completedAt) =>
-                          Effect.logInfo("resident.product.loaded").pipe(
-                            Effect.annotateLogs("rika.duration.ms", completedAt - startedAt),
-                          ),
+          const productRequested = yield* Deferred.make<void>()
+          const productReady = yield* Deferred.make<Operation.Interface, Operation.OperationUnavailable>()
+          const buildProduct = Clock.currentTimeMillis.pipe(
+            Effect.flatMap((startedAt) =>
+              Effect.gen(function* () {
+                const product = yield* Effect.tryPromise({
+                  try: () => import("./resident-product"),
+                  catch: (cause) =>
+                    Operation.OperationUnavailable.make({
+                      operation: "ResidentProduct",
+                      message: String(cause),
+                    }),
+                })
+                const authOperations = product.createAuthOperations(authOptions)
+                return yield* Layer.buildWithScope(
+                  product
+                    .createOperationLayer({ ...productOptions, authOperations }, interactive)
+                    .pipe(Layer.provide(Layer.mergeAll(BunServices.layer, BunCrypto.layer, FetchHttpClient.layer))),
+                  scope,
+                ).pipe(
+                  Effect.map((context) => Context.get(context, Operation.Service)),
+                  Effect.tap(() => Ref.set(productLoaded, true)),
+                  Effect.tap(() =>
+                    Clock.currentTimeMillis.pipe(
+                      Effect.flatMap((completedAt) =>
+                        Effect.logInfo("resident.product.loaded").pipe(
+                          Effect.annotateLogs("rika.duration.ms", completedAt - startedAt),
                         ),
                       ),
                     ),
-                  )
-                }),
-              ),
+                  ),
+                )
+              }),
             ),
+            Effect.mapError((cause) =>
+              Schema.is(Operation.OperationUnavailable)(cause)
+                ? cause
+                : Operation.OperationUnavailable.make({
+                    operation: "ResidentProduct",
+                    message: String(cause),
+                  }),
+            ),
+          )
+          yield* Effect.forkIn(
+            Deferred.await(productRequested).pipe(
+              Effect.andThen(Deferred.complete(productReady, buildProduct)),
+              Effect.asVoid,
+              Effect.provideService(References.CurrentLogAnnotations, {}),
+            ),
+            scope,
+          )
+          const loadProduct = Deferred.succeed(productRequested, undefined).pipe(
+            Effect.andThen(Deferred.await(productReady)),
           )
           return Operation.Service.of({
             hasActiveExecutionWork: Ref.get(productLoaded).pipe(

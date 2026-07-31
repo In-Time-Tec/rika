@@ -1268,7 +1268,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
                     "rika.thread.id": String(pipeline.threadId),
                     "rika.turn.id": String(pipeline.turnId),
                     "rika.execution.id": node.executionId,
-                    "rika.failure.cause": message,
+                    "rika.failure.kind": "ExecutionIngestFollowFailure",
                   }),
                 )
               }),
@@ -1349,7 +1349,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
                     "rika.turn.id": failure.turnId,
                     "rika.execution.id": failure.executionId,
                     "rika.ingest.reason": failure.reason,
-                    "rika.failure.cause": failure.message,
+                    "rika.failure.kind": failure._tag,
                   }),
                 )
           return logged.pipe(Effect.andThen(Scope.close(pipelineScope, Exit.void)))
@@ -1570,7 +1570,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
                   Effect.annotateLogs({
                     "rika.thread.id": String(root.threadId),
                     "rika.turn.id": String(root.turnId),
-                    "rika.failure.cause": Cause.pretty(cause),
+                    "rika.failure.kind": "ProjectionRecoveryFailure",
                   }),
                 )
               }),
