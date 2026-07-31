@@ -3,18 +3,9 @@ import type { Block } from "../schema/transcript-presentation-model"
 import type { SourceEvent } from "../schema/transcript-source-event"
 import type { MutableMutation, OwnedFold } from "./transcript-fold-state"
 import { foldState } from "./transcript-fold-state"
-const {
-  childBlockFrom,
-  enumerateKeys,
-  linkedToolFor,
-  makeUnit,
-  record,
-  removeUnit,
-  sourcePayload,
-  string,
-  updateTool,
-  upsertUnit,
-} = foldState
+import { mutationOperations } from "./transcript-fold-mutation"
+const { linkedToolFor, removeUnit, updateTool, upsertUnit } = mutationOperations
+const { childBlockFrom, enumerateKeys, makeUnit, record, sourcePayload, string } = foldState
 import { identityKey } from "../ordering/transcript-unit-identity"
 
 import { executionKey } from "../ordering/child-parent-correlation"

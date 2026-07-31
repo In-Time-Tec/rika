@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { defaults } from "../settings/configuration-defaults"
-import { dataPaths, executionEventHistoryFor } from "./profile-data-paths"
+import { dataPaths, executionEventHistoryFor, resolveProfileDataPaths } from "./profile-data-paths"
 import { globalDirectory, globalPaths, workspaceDirectory, workspacePaths } from "./configuration-paths"
 
 describe("on-disk layout", () => {
@@ -31,6 +31,28 @@ describe("on-disk layout", () => {
     )
     expect(executionEventHistoryFor("/execution.db")).toBe("/execution-event-history")
     expect(executionEventHistoryFor("execution.db")).toBe("./execution-event-history")
+  })
+
+  it("resolves host roots and explicit database precedence through one owner", () => {
+    expect(
+      resolveProfileDataPaths({
+        home: "/home/ada",
+        hostDataRoot: "/host/data",
+        productDatabase: "/explicit/product.db",
+        executionDatabase: "/explicit/execution.db",
+      }),
+    ).toEqual({ dataRoot: "/host/data", database: "/host/data/rika.db", executionDatabase: "/host/data/execution.db" })
+    expect(
+      resolveProfileDataPaths({
+        home: "/home/ada",
+        productDatabase: "/explicit/product.db",
+        executionDatabase: "/explicit/execution.db",
+      }),
+    ).toEqual({
+      dataRoot: "/home/ada/.rika",
+      database: "/explicit/product.db",
+      executionDatabase: "/explicit/execution.db",
+    })
   })
 
   it("keeps the shipped extension roots on the same layout", () => {

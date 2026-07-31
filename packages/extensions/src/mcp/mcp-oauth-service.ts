@@ -13,6 +13,7 @@ import {
   Option,
   Path,
   Redacted,
+  Ref,
   Schema,
   Scope,
 } from "effect"
@@ -28,6 +29,11 @@ export interface OAuthClient {
   readonly clear: Effect.Effect<void, OAuth.OAuthProviderError>
 }
 
+interface PreparedCallback {
+  readonly redirectUrl: string
+  readonly wait: (expectedState: string) => Effect.Effect<string, McpOAuthHostError>
+}
+
 export type OAuthClientError = OAuth.OAuthDenied | OAuth.OAuthExpired | OAuth.OAuthProviderError
 
 interface McpOAuthServiceInterface {
@@ -40,10 +46,10 @@ export class McpOAuthService extends Context.Service<McpOAuthService, McpOAuthSe
   "@rika/extensions/mcp/mcp-oauth-service/McpOAuthService",
 ) {}
 
-const redirectUrl = "http://127.0.0.1:17839/oauth/callback"
+const callbackPath = "/oauth/callback"
 
 const service = (
-  oauth: (server: string, url: string) => Effect.Effect<OAuthClient>,
+  oauth: (server: string, url: string, redirectUrl: string) => Effect.Effect<OAuthClient>,
 ): Effect.Effect<McpOAuthServiceInterface, never, Host | OAuth.TokenStore> =>
   Effect.gen(function* () {
     const host = yield* Host
@@ -67,17 +73,17 @@ const service = (
       login: Effect.fn("McpOAuthService.login")((server, url) =>
         Effect.scoped(
           Effect.gen(function* () {
-            const client = yield* oauth(server, url).pipe(map(server, "login"))
+            const prepared = yield* host.prepareCallback(callbackPath).pipe(map(server, "login"))
+            const client = yield* oauth(server, url, prepared.redirectUrl).pipe(map(server, "login"))
             const authorization = yield* client.authorize.pipe(map(server, "login"))
-            const callback = yield* host.callback(redirectUrl, authorization.state).pipe(map(server, "login"))
             yield* host.open(authorization.url).pipe(map(server, "login"))
-            const callbackUrl = yield* callback.pipe(map(server, "login"))
+            const callbackUrl = yield* prepared.wait(authorization.state).pipe(map(server, "login"))
             yield* client.callback(callbackUrl).pipe(map(server, "login"))
           }),
         ),
       ),
       logout: Effect.fn("McpOAuthService.logout")(function* (server, url) {
-        const client = yield* oauth(server, url).pipe(map(server, "logout"))
+        const client = yield* oauth(server, url, "http://127.0.0.1").pipe(map(server, "logout"))
         yield* client.clear.pipe(map(server, "logout"))
       }),
       status: Effect.fn("McpOAuthService.status")((server, url) =>
@@ -90,7 +96,7 @@ const service = (
   })
 
 export const layerWithClient = (
-  oauth: (server: string, url: string) => Effect.Effect<OAuthClient>,
+  oauth: (server: string, url: string, redirectUrl: string) => Effect.Effect<OAuthClient>,
 ): Layer.Layer<McpOAuthService, never, Host | OAuth.TokenStore> => Layer.effect(McpOAuthService, service(oauth))
 
 export const layer: Layer.Layer<McpOAuthService, never, Crypto.Crypto | Host | OAuth.TokenStore> = Layer.effect(
@@ -98,7 +104,7 @@ export const layer: Layer.Layer<McpOAuthService, never, Crypto.Crypto | Host | O
   Effect.gen(function* () {
     const store = yield* OAuth.TokenStore
     const crypto = yield* Crypto.Crypto
-    const oauth = (_server: string, url: string) =>
+    const oauth = (_server: string, url: string, redirectUrl: string) =>
       Effect.scoped(
         Layer.build(
           OAuth.layer({
@@ -131,13 +137,10 @@ class McpOAuthHostError extends Schema.TaggedErrorClass<McpOAuthHostError>()("@r
 
 interface HostInterface {
   readonly open: (url: string) => Effect.Effect<void, McpOAuthHostError>
-  readonly callback: (
-    redirectUrl: string,
-    expectedState: string,
-  ) => Effect.Effect<Effect.Effect<string, McpOAuthHostError>, McpOAuthHostError, Scope.Scope>
+  readonly prepareCallback: (path: string) => Effect.Effect<PreparedCallback, McpOAuthHostError, Scope.Scope>
 }
 
-class Host extends Context.Service<Host, HostInterface>()("@rika/extensions/mcp/mcp-oauth-service/Host") {}
+export class Host extends Context.Service<Host, HostInterface>()("@rika/extensions/mcp/mcp-oauth-service/Host") {}
 
 const hostTestLayer = (implementation: HostInterface) => Layer.succeed(Host, Host.of(implementation))
 
@@ -161,7 +164,7 @@ const browserCommand: {
   (platform: NodeJS.Platform, url: string): BrowserCommand
 } = Function.dual(2, browserCommandImpl)
 
-const hostLayer = Layer.effect(
+const hostLayer: Layer.Layer<Host, never, ChildProcessSpawner.ChildProcessSpawner> = Layer.effect(
   Host,
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -199,44 +202,60 @@ const hostLayer = Layer.effect(
           }),
         ),
       ),
-      callback: Effect.fn("McpOAuthHost.callback")((callbackUrl, expectedState) =>
+      prepareCallback: Effect.fn("McpOAuthHost.prepareCallback")((path) =>
         Effect.gen(function* () {
-          const target = yield* Effect.try({
-            try: () => new URL(callbackUrl),
-            catch: () =>
-              McpOAuthHostError.make({
-                server: callbackUrl,
-                operation: "callback",
-                message: "Unable to bind the OAuth callback",
-              }),
-          })
           const completed = yield* Deferred.make<string>()
-          const server = yield* BunHttpServer.make({
-            hostname: target.hostname,
-            port: Number(target.port),
-          }).pipe(
+          const expected = yield* Ref.make<string | undefined>(undefined)
+          const server = yield* BunHttpServer.make({ hostname: "127.0.0.1", port: 0 }).pipe(
             Effect.catchCause(() =>
               Effect.fail(
                 McpOAuthHostError.make({
-                  server: callbackUrl,
+                  server: path,
                   operation: "callback",
                   message: "Unable to bind the OAuth callback",
                 }),
               ),
             ),
           )
+          const address = server.address
+          if (address._tag !== "TcpAddress")
+            return yield* McpOAuthHostError.make({
+              server: path,
+              operation: "callback",
+              message: "Unable to bind the OAuth callback",
+            })
+          const target = new URL(`http://127.0.0.1:${address.port}${path}`)
           const app = Effect.gen(function* () {
             const request = yield* HttpServerRequest.HttpServerRequest
             const url = new URL(request.url, target)
             if (url.pathname !== target.pathname) return HttpServerResponse.text("Not found", { status: 404 })
-            if (url.searchParams.get("state") !== expectedState)
+            const expectedState = yield* Ref.get(expected)
+            if (expectedState === undefined || url.searchParams.get("state") !== expectedState)
               return HttpServerResponse.text("Invalid OAuth callback state.", { status: 400 })
             yield* Deferred.succeed(completed, url.toString())
             return HttpServerResponse.text("Authentication complete. You may close this window.")
           })
           yield* server.serve(app)
-          return completed
-        }).pipe(Effect.map(Deferred.await)),
+          return {
+            redirectUrl: target.toString(),
+            wait: (expectedState: string) =>
+              Ref.set(expected, expectedState).pipe(
+                Effect.andThen(Deferred.await(completed)),
+                Effect.flatMap((value) => {
+                  const url = new URL(value)
+                  return url.searchParams.get("state") === expectedState
+                    ? Effect.succeed(value)
+                    : Effect.fail(
+                        McpOAuthHostError.make({
+                          server: target.toString(),
+                          operation: "callback",
+                          message: "Invalid OAuth callback state",
+                        }),
+                      )
+                }),
+              ),
+          } satisfies PreparedCallback
+        }),
       ),
     })
   }),

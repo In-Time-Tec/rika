@@ -27,7 +27,7 @@ import * as Logging from "./logging"
 import { layer as residentLayer } from "./resident-client-transport"
 import * as ResidentProcessStartup from "./resident-process-startup"
 import * as DataRoot from "@rika/configuration/canonical-data-root"
-import { dataPaths } from "@rika/configuration/profile-data-paths"
+import { resolveProfileDataPaths } from "@rika/configuration/profile-data-paths"
 
 const encodeLaunchArguments = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)))
 
@@ -161,11 +161,12 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
           interactiveClientLaunch = clientSigintMode(input) === "child"
           return yield* Effect.gen(function* () {
             const home = yield* Config.string("HOME").pipe(Config.withDefault(process.cwd()))
-            const database = yield* Config.string("RIKA_DATABASE").pipe(Config.withDefault(dataPaths(home).database))
-            const executionDatabase = yield* Config.string("RIKA_EXECUTION_DATABASE").pipe(
-              Config.withDefault(dataPaths(home).executionDatabase),
-            )
-            const dataRoot = yield* DataRoot.canonicalDataRoot(database, executionDatabase)
+            const paths = resolveProfileDataPaths({
+              home,
+              productDatabase: Option.getOrUndefined(yield* Config.option(Config.string("RIKA_DATABASE"))),
+              executionDatabase: Option.getOrUndefined(yield* Config.option(Config.string("RIKA_EXECUTION_DATABASE"))),
+            })
+            const dataRoot = yield* DataRoot.canonicalDataRoot(paths.database, paths.executionDatabase)
             const forwardedArguments = argv ?? (yield* stdio.args)
             return yield* Effect.scoped(
               Effect.gen(function* () {

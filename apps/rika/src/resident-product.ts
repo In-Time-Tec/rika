@@ -878,7 +878,7 @@ const createExtensionLayerImpl = (home: string, workspace: string) => {
       configPath: workspaceLayout.mcpConfig,
       generationsPath: workspaceLayout.extensionGenerations,
     }),
-    SkillRegistry.fileSystemLayer,
+    SkillRegistry.layer,
     McpOAuthService.layer.pipe(
       Layer.provide(McpOAuthService.OAuthHost.hostLayer),
       Layer.provide(McpOAuthService.OAuthHost.tokenStoreLayer(globalLayout.mcpOAuth)),
@@ -1305,7 +1305,6 @@ const createOperationLayerImpl = (
           layer: extensionLayer as Layer.Layer<
             | ExtensionOperations.Service
             | McpOAuthService.McpOAuthService
-            | SkillRegistry.SkillFileSystem
             | FileSystem.FileSystem
             | Path.Path
             | Crypto.Crypto,

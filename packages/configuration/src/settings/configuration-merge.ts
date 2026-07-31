@@ -35,6 +35,12 @@ const assertPainterSupportsMedia = (settings: ConfigurationSettings) => {
     })
 }
 
+const isBedrockOverride = (
+  value: ModelRoute.ProviderOverride | undefined,
+): value is Omit<ModelRoute.AmazonBedrockProviderConnection, "protocol"> =>
+  value !== undefined &&
+  ("authMode" in value || "region" in value || "profile" in value || "endpoint" in value || "authRefresh" in value)
+
 const roleRoute = (configured: ModelRoute.RoleRoute, override: string | RoleRouteInput | undefined) => {
   if (override === undefined) return configured
   if (typeof override === "string") return { ...configured, alias: override }
@@ -56,9 +62,16 @@ export const mergeConfigurationSettings = ({
   const webSearchProviders = { ...global.webSearch?.providers, ...workspace.webSearch?.providers }
   const provider = (id: ModelRoute.ProviderId): ModelRoute.ProviderConnection => {
     const builtIn = settingsDefaults.providers[id]
-    const override = workspace.providers?.[id] ?? global.providers?.[id]
+    const globalOverride = global.providers?.[id]
+    const workspaceOverride = workspace.providers?.[id]
+    const override = workspaceOverride ?? globalOverride
     if (builtIn.protocol === "amazon-bedrock") {
-      const bedrock = override !== undefined && "authMode" in override ? override : undefined
+      const globalBedrock = isBedrockOverride(globalOverride) ? globalOverride : undefined
+      const workspaceBedrock = isBedrockOverride(workspaceOverride) ? workspaceOverride : undefined
+      const bedrock =
+        globalBedrock === undefined && workspaceBedrock === undefined
+          ? undefined
+          : { ...globalBedrock, ...workspaceBedrock }
       return {
         protocol: "amazon-bedrock",
         authMode: bedrock?.authMode === "bearer" ? "bearer" : "default",

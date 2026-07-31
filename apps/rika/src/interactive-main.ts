@@ -8,6 +8,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Operation from "@rika/product/product-operation"
 import * as ResidentService from "@rika/product/resident-service"
 import * as DataRoot from "@rika/configuration/canonical-data-root"
+import { resolveProfileDataPaths } from "@rika/configuration/profile-data-paths"
 import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as Turn from "@rika/product/turn-record"
@@ -1812,19 +1813,14 @@ const start = () => {
   let runtimeRestartRequest: { readonly threadId?: string } | undefined
   const hostDataRoot = environment.hostDataRoot._tag === "Some" ? environment.hostDataRoot.value : undefined
   const home = environment.home._tag === "Some" ? environment.home.value : process.cwd()
-  const defaultDataRoot = `${home}/.rika`
-  let database: string
-  let executionDatabase: string
-  if (hostDataRoot === undefined) {
-    database = environment.database._tag === "Some" ? environment.database.value : `${defaultDataRoot}/rika.db`
-    executionDatabase =
-      environment.executionDatabase._tag === "Some"
-        ? environment.executionDatabase.value
-        : `${defaultDataRoot}/execution.db`
-  } else {
-    database = join(hostDataRoot, "rika.db")
-    executionDatabase = join(hostDataRoot, "execution.db")
-  }
+  const paths = resolveProfileDataPaths({
+    home,
+    hostDataRoot,
+    productDatabase: environment.database._tag === "Some" ? environment.database.value : undefined,
+    executionDatabase: environment.executionDatabase._tag === "Some" ? environment.executionDatabase.value : undefined,
+  })
+  const database = paths.database
+  const executionDatabase = paths.executionDatabase
   const globalLayout = globalPaths(home)
   const workspaceLayout = workspacePaths(process.cwd())
   const globalConfig = globalLayout.settings

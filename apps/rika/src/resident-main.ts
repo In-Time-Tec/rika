@@ -6,18 +6,14 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Operation from "@rika/product/product-operation"
 import * as ResidentService from "@rika/product/resident-service"
 import { globalPaths, workspacePaths } from "@rika/configuration/configuration-paths"
+import { resolveProfileDataPaths } from "@rika/configuration/profile-data-paths"
 import { FetchHttpClient } from "effect/unstable/http"
-import { Cause, Clock, Config, Context, Effect, FileSystem, Layer, Path, Ref, References, Schema } from "effect"
+import { Cause, Clock, Config, Context, Effect, FileSystem, Layer, Ref, References, Schema } from "effect"
 import { createHash } from "node:crypto"
 import * as Logging from "./logging"
 import { serve as serveResident } from "./resident-host-transport"
 import * as ResidentProcessStartup from "./resident-process-startup"
 import { version } from "./version"
-
-const pathService = Effect.runSync(Effect.scoped(Layer.build(Path.layer))).pipe((context) =>
-  Context.get(context, Path.Path),
-)
-const join = pathService.join
 
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -80,19 +76,14 @@ const start = () => {
   )
   const hostDataRoot = environment.hostDataRoot._tag === "Some" ? environment.hostDataRoot.value : undefined
   const home = environment.home._tag === "Some" ? environment.home.value : process.cwd()
-  const defaultDataRoot = `${home}/.rika`
-  let database: string
-  let executionDatabase: string
-  if (hostDataRoot === undefined) {
-    database = environment.database._tag === "Some" ? environment.database.value : `${defaultDataRoot}/rika.db`
-    executionDatabase =
-      environment.executionDatabase._tag === "Some"
-        ? environment.executionDatabase.value
-        : `${defaultDataRoot}/execution.db`
-  } else {
-    database = join(hostDataRoot, "rika.db")
-    executionDatabase = join(hostDataRoot, "execution.db")
-  }
+  const paths = resolveProfileDataPaths({
+    home,
+    hostDataRoot,
+    productDatabase: environment.database._tag === "Some" ? environment.database.value : undefined,
+    executionDatabase: environment.executionDatabase._tag === "Some" ? environment.executionDatabase.value : undefined,
+  })
+  const database = paths.database
+  const executionDatabase = paths.executionDatabase
   const globalLayout = globalPaths(home)
   const workspaceLayout = workspacePaths(process.cwd())
   const globalConfig = globalLayout.settings
@@ -323,7 +314,7 @@ const start = () => {
           provideLayerScoped(Layer.mergeAll(BunServices.layer, BunCrypto.layer, FetchHttpClient.layer)),
         )
   const removeSigintIsolation = installResidentSigintIsolation()
-  const fiber = Effect.runFork(observedProgram("resident", hostDataRoot ?? defaultDataRoot, hostProgram))
+  const fiber = Effect.runFork(observedProgram("resident", paths.dataRoot, hostProgram))
   fiber.addObserver((exit) => {
     removeSigintIsolation()
     process.exit(exit._tag === "Success" ? 0 : 1)

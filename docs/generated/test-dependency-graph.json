@@ -1181,6 +1181,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/configuration/src/settings/configuration-service-routing.test.ts",
+      "path": "packages/configuration/src/settings/configuration-service-routing.test.ts",
+      "workspace": "@rika/configuration",
+      "package": "@rika/configuration",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/configuration/src/settings/configuration-service.test.ts",
       "path": "packages/configuration/src/settings/configuration-service.test.ts",
       "workspace": "@rika/configuration",
@@ -4192,6 +4202,22 @@
       "production": false
     },
     {
+      "from": "packages/configuration/src/settings/configuration-service-routing.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/configuration/src/settings/configuration-service-routing.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/configuration/src/settings/configuration-service.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -4283,14 +4309,6 @@
       "from": "packages/extensions/test/contract/mcp-oauth-service.contract.test.ts",
       "to": "external:@batonfx/mcp",
       "specifier": "@batonfx/mcp",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/extensions/test/contract/mcp-oauth-service.contract.test.ts",
-      "to": "external:@effect/platform-bun/BunHttpServer",
-      "specifier": "@effect/platform-bun/BunHttpServer",
       "kind": "import",
       "relationship": "test",
       "production": false

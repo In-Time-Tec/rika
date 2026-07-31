@@ -20,22 +20,19 @@ const {
   settleRunningInto,
 } = settlementOperations
 import { foldState } from "./transcript-fold-state"
+import { mutationOperations } from "./transcript-fold-mutation"
+const { mutation, removeUnit, result, setState, upsertUnit, linkedToolUnitFor } = mutationOperations
 const {
   addIndex,
   firstIndexedUnit,
   isTransientEvent,
-  linkedToolUnitFor,
   makeProjectionFold,
   restoreProjectionFold,
   makeUnit,
-  mutation,
   owner,
   rawToolId,
   record,
   removeIndex,
-  removeUnit,
-  result,
-  setState,
   snapshotFoldState,
   snapshotFoldProjection,
   foldUnit,
@@ -43,7 +40,6 @@ const {
   sourcePayload,
   string,
   toolKey,
-  upsertUnit,
 } = foldState
 import type { FoldMutation, MutableMutation, OwnedFold, ProjectionFold } from "./transcript-fold-state"
 

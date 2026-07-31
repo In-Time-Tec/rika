@@ -8,20 +8,10 @@ import type { Unit } from "../schema/transcript-unit"
 import type { MutableMutation, OwnedFold } from "./transcript-fold-state"
 import { assistantKey, reasoningKey } from "./transcript-model-event-fold"
 import { foldState } from "./transcript-fold-state"
-const {
-  childBlockFrom,
-  enumerateKeys,
-  firstIndexedUnit,
-  isRootUnit,
-  linkedToolUnitFor,
-  makeUnit,
-  record,
-  setState,
-  sourcePayload,
-  toolBlockFrom,
-  updateTool,
-  upsertUnit,
-} = foldState
+import { mutationOperations } from "./transcript-fold-mutation"
+const { linkedToolUnitFor, mutation: makeMutation, result, setState, updateTool, upsertUnit } = mutationOperations
+const { childBlockFrom, enumerateKeys, firstIndexedUnit, isRootUnit, makeUnit, record, sourcePayload, toolBlockFrom } =
+  foldState
 
 const settledBlock = (block: Block, status: "failed" | "cancelled"): Block | undefined => {
   if (block._tag === "ToolCall" && block.status === "running") return { ...block, status }
@@ -187,8 +177,7 @@ export const settlementOperations = {
 }
 
 import { Function } from "effect"
-const { mutation: makeMutation, owner, restoreProjectionFold, result } = foldState
-const { snapshotFoldProjection } = foldState
+const { owner, restoreProjectionFold, snapshotFoldProjection } = foldState
 import type { FoldMutation } from "./transcript-fold-state"
 
 const projectionChanged = (mutation: FoldMutation): boolean =>

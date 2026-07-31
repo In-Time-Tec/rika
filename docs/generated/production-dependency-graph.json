@@ -1415,6 +1415,15 @@
       "publicExports": []
     },
     {
+      "id": "packages/coding-tools/src/runtime/coding-tool-runtime-layer.ts",
+      "path": "packages/coding-tools/src/runtime/coding-tool-runtime-layer.ts",
+      "workspace": "@rika/coding-tools",
+      "package": "@rika/coding-tools",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/coding-tools/src/runtime/coding-tool-runtime-services.ts",
       "path": "packages/coding-tools/src/runtime/coding-tool-runtime-services.ts",
       "workspace": "@rika/coding-tools",
@@ -3189,6 +3198,15 @@
       "publicExports": []
     },
     {
+      "id": "packages/transcript/src/projection/transcript-fold-mutation.ts",
+      "path": "packages/transcript/src/projection/transcript-fold-mutation.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/transcript/src/projection/transcript-fold-state.ts",
       "path": "packages/transcript/src/projection/transcript-fold-state.ts",
       "workspace": "@rika/transcript",
@@ -3765,6 +3783,14 @@
       "production": true
     },
     {
+      "from": "apps/rika/src/commands/diagnostics.ts",
+      "to": "packages/configuration/src/path-resolution/profile-data-paths.ts",
+      "specifier": "@rika/configuration/profile-data-paths",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "apps/rika/src/commands/extensions.ts",
       "to": "apps/rika/src/commands/shared.ts",
       "specifier": "./shared",
@@ -4184,6 +4210,14 @@
       "from": "apps/rika/src/interactive-main.ts",
       "to": "packages/configuration/src/path-resolution/configuration-paths.ts",
       "specifier": "@rika/configuration/configuration-paths",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive-main.ts",
+      "to": "packages/configuration/src/path-resolution/profile-data-paths.ts",
+      "specifier": "@rika/configuration/profile-data-paths",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -4728,6 +4762,14 @@
       "from": "apps/rika/src/resident-main.ts",
       "to": "packages/configuration/src/path-resolution/configuration-paths.ts",
       "specifier": "@rika/configuration/configuration-paths",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident-main.ts",
+      "to": "packages/configuration/src/path-resolution/profile-data-paths.ts",
+      "specifier": "@rika/configuration/profile-data-paths",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -6123,14 +6165,6 @@
     },
     {
       "from": "packages/coding-tools/src/media/view-media-tool.ts",
-      "to": "packages/coding-tools/src/media/media-view-service.ts",
-      "specifier": "../media/media-view-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/media/view-media-tool.ts",
       "to": "packages/coding-tools/src/policy/coding-tool-policy.ts",
       "specifier": "../policy/coding-tool-policy",
       "kind": "import",
@@ -6378,6 +6412,110 @@
       "production": true
     },
     {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-layer.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-layer.ts",
+      "to": "packages/coding-tools/src/media/media-view-service.ts",
+      "specifier": "../media/media-view-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-layer.ts",
+      "to": "packages/coding-tools/src/policy/coding-tool-policy.ts",
+      "specifier": "../policy/coding-tool-policy",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-layer.ts",
+      "to": "packages/coding-tools/src/policy/local-safety-policy.ts",
+      "specifier": "../policy/local-safety-policy",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-layer.ts",
+      "to": "packages/coding-tools/src/process/shell-process-registry.ts",
+      "specifier": "../process/shell-process-registry",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-layer.ts",
+      "to": "packages/coding-tools/src/runtime/coding-tool-result.ts",
+      "specifier": "./coding-tool-result",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-layer.ts",
+      "to": "packages/coding-tools/src/runtime/coding-tool-runtime-filesystem.ts",
+      "specifier": "./coding-tool-runtime-filesystem",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-layer.ts",
+      "to": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
+      "specifier": "./coding-tool-runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-layer.ts",
+      "to": "packages/coding-tools/src/web-research/read-web-page-service.ts",
+      "specifier": "../web-research/read-web-page-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-layer.ts",
+      "to": "packages/coding-tools/src/web-research/web-search-service.ts",
+      "specifier": "../web-research/web-search-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-layer.ts",
+      "to": "packages/coding-tools/src/workspace/local-path.ts",
+      "specifier": "../workspace/local-path",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-layer.ts",
+      "to": "packages/coding-tools/src/workspace/unified-diff.ts",
+      "specifier": "../workspace/unified-diff",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime-layer.ts",
+      "to": "packages/coding-tools/src/workspace/workspace-file-search.ts",
+      "specifier": "../workspace/workspace-file-search",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/coding-tools/src/runtime/coding-tool-runtime-services.ts",
       "to": "packages/coding-tools/src/media/view-media-tool.ts",
       "specifier": "../media/view-media-tool",
@@ -6571,24 +6709,8 @@
     },
     {
       "from": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
-      "to": "packages/coding-tools/src/media/media-view-service.ts",
-      "specifier": "../media/media-view-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
       "to": "packages/coding-tools/src/policy/coding-tool-policy.ts",
       "specifier": "../policy/coding-tool-policy",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
-      "to": "packages/coding-tools/src/policy/local-safety-policy.ts",
-      "specifier": "../policy/local-safety-policy",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -6627,6 +6749,14 @@
     },
     {
       "from": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
+      "to": "packages/coding-tools/src/runtime/coding-tool-runtime-layer.ts",
+      "specifier": "./coding-tool-runtime-layer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
       "to": "packages/coding-tools/src/web-research/read-web-page-service.ts",
       "specifier": "../web-research/read-web-page-service",
       "kind": "import",
@@ -6637,30 +6767,6 @@
       "from": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
       "to": "packages/coding-tools/src/web-research/web-search-errors.ts",
       "specifier": "../web-research/web-search-errors",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
-      "to": "packages/coding-tools/src/web-research/web-search-service.ts",
-      "specifier": "../web-research/web-search-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
-      "to": "packages/coding-tools/src/workspace/local-path.ts",
-      "specifier": "../workspace/local-path",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
-      "to": "packages/coding-tools/src/workspace/unified-diff.ts",
-      "specifier": "../workspace/unified-diff",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -6765,14 +6871,6 @@
       "from": "packages/coding-tools/src/web-research/read-web-page-tool.ts",
       "to": "packages/coding-tools/src/runtime/coding-tool-result.ts",
       "specifier": "../runtime/coding-tool-result",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/coding-tools/src/web-research/read-web-page-tool.ts",
-      "to": "packages/coding-tools/src/web-research/read-web-page-service.ts",
-      "specifier": "../web-research/read-web-page-service",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -7805,6 +7903,14 @@
       "from": "packages/extensions/src/mcp/mcp-runtime.ts",
       "to": "packages/extensions/src/mcp/mcp-configuration.ts",
       "specifier": "./mcp-configuration",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/extensions/src/mcp/mcp-runtime.ts",
+      "to": "packages/extensions/src/mcp/mcp-oauth-service.ts",
+      "specifier": "./mcp-oauth-service",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -13499,6 +13605,14 @@
     },
     {
       "from": "packages/transcript/src/projection/transcript-child-event-fold.ts",
+      "to": "packages/transcript/src/projection/transcript-fold-mutation.ts",
+      "specifier": "./transcript-fold-mutation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/projection/transcript-child-event-fold.ts",
       "to": "packages/transcript/src/projection/transcript-fold-state.ts",
       "specifier": "./transcript-fold-state",
       "kind": "import",
@@ -13549,6 +13663,14 @@
       "from": "packages/transcript/src/projection/transcript-event-fold.ts",
       "to": "packages/transcript/src/projection/transcript-child-event-fold.ts",
       "specifier": "./transcript-child-event-fold",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/projection/transcript-event-fold.ts",
+      "to": "packages/transcript/src/projection/transcript-fold-mutation.ts",
+      "specifier": "./transcript-fold-mutation",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -13611,6 +13733,46 @@
     },
     {
       "from": "packages/transcript/src/projection/transcript-event-fold.ts",
+      "to": "packages/transcript/src/schema/transcript-unit.ts",
+      "specifier": "../schema/transcript-unit",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/projection/transcript-fold-mutation.ts",
+      "to": "packages/transcript/src/ordering/child-parent-correlation.ts",
+      "specifier": "../ordering/child-parent-correlation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/projection/transcript-fold-mutation.ts",
+      "to": "packages/transcript/src/ordering/transcript-unit-identity.ts",
+      "specifier": "../ordering/transcript-unit-identity",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/projection/transcript-fold-mutation.ts",
+      "to": "packages/transcript/src/projection/transcript-fold-state.ts",
+      "specifier": "./transcript-fold-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/projection/transcript-fold-mutation.ts",
+      "to": "packages/transcript/src/schema/transcript-presentation-model.ts",
+      "specifier": "../schema/transcript-presentation-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/projection/transcript-fold-mutation.ts",
       "to": "packages/transcript/src/schema/transcript-unit.ts",
       "specifier": "../schema/transcript-unit",
       "kind": "import",
@@ -13725,6 +13887,14 @@
       "from": "packages/transcript/src/projection/transcript-model-event-fold.ts",
       "to": "packages/transcript/src/ordering/transcript-unit-identity.ts",
       "specifier": "../ordering/transcript-unit-identity",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/projection/transcript-model-event-fold.ts",
+      "to": "packages/transcript/src/projection/transcript-fold-mutation.ts",
+      "specifier": "./transcript-fold-mutation",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -13843,6 +14013,14 @@
     },
     {
       "from": "packages/transcript/src/projection/transcript-settlement.ts",
+      "to": "packages/transcript/src/projection/transcript-fold-mutation.ts",
+      "specifier": "./transcript-fold-mutation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/projection/transcript-settlement.ts",
       "to": "packages/transcript/src/projection/transcript-fold-state.ts",
       "specifier": "./transcript-fold-state",
       "kind": "import",
@@ -13917,6 +14095,14 @@
       "from": "packages/transcript/src/projection/transcript-tool-event-fold.ts",
       "to": "packages/transcript/src/projection/partial-tool-input.ts",
       "specifier": "./partial-tool-input",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/projection/transcript-tool-event-fold.ts",
+      "to": "packages/transcript/src/projection/transcript-fold-mutation.ts",
+      "specifier": "./transcript-fold-mutation",
       "kind": "import",
       "relationship": "runtime",
       "production": true

@@ -1,7 +1,6 @@
 import { Schema } from "effect"
 import { Tool } from "effect/unstable/ai"
 import * as Policy from "../policy/coding-tool-policy"
-import { Service } from "../web-research/read-web-page-service"
 import { Result, ToolFailure } from "../runtime/coding-tool-result"
 export const Request = Schema.Struct({
   _tag: Schema.tag("ReadWebPage"),
@@ -33,4 +32,3 @@ export const registration = Policy.register(
     counter: "web page",
   }),
 )
-export { Service }

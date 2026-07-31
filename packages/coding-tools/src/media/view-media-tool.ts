@@ -1,7 +1,6 @@
 import { Schema } from "effect"
 import { Tool } from "effect/unstable/ai"
 import * as Policy from "../policy/coding-tool-policy"
-import * as MediaView from "../media/media-view-service"
 import { Result, ToolFailure } from "../runtime/coding-tool-result"
 export const Request = Schema.Struct({ _tag: Schema.tag("ViewMedia"), path: Schema.String })
 export const tool = Tool.make("view_media", {
@@ -21,4 +20,3 @@ export const registration = Policy.register(
     counter: "media file",
   }),
 )
-export { MediaView }

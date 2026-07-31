@@ -2,7 +2,9 @@ import type { Block } from "../schema/transcript-presentation-model"
 import type { SourceEvent } from "../schema/transcript-source-event"
 import type { MutableMutation, OwnedFold } from "./transcript-fold-state"
 import { foldState } from "./transcript-fold-state"
-const { makeUnit, setState, sourcePayload, string, upsertUnit } = foldState
+import { mutationOperations } from "./transcript-fold-mutation"
+const { setState, upsertUnit } = mutationOperations
+const { makeUnit, sourcePayload, string } = foldState
 import { identityKey } from "../ordering/transcript-unit-identity"
 
 const applyUsage = ({

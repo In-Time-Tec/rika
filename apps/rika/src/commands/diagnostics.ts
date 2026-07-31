@@ -2,21 +2,19 @@ import { Config, Console, Effect, Option, Path } from "effect"
 import { Argument, Command } from "effect/unstable/cli"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import * as DataRoot from "@rika/configuration/canonical-data-root"
+import { resolveProfileDataPaths } from "@rika/configuration/profile-data-paths"
 import * as Logging from "../logging"
 
 const dataRoot = Effect.fn("DiagnosticsCommand.dataRoot")(function* () {
-  const path = yield* Path.Path
   const home = yield* Config.option(Config.string("HOME"))
   const productDatabase = yield* Config.option(Config.string("RIKA_DATABASE"))
   const executionDatabase = yield* Config.option(Config.string("RIKA_EXECUTION_DATABASE"))
-  const root = path.resolve(
-    Option.getOrElse(home, () => "."),
-    ".rika",
-  )
-  return yield* DataRoot.canonicalDataRoot(
-    Option.getOrElse(productDatabase, () => path.join(root, "rika.db")),
-    Option.getOrElse(executionDatabase, () => path.join(root, "execution.db")),
-  )
+  const paths = resolveProfileDataPaths({
+    home: Option.getOrElse(home, () => "."),
+    productDatabase: Option.getOrUndefined(productDatabase),
+    executionDatabase: Option.getOrUndefined(executionDatabase),
+  })
+  return yield* DataRoot.canonicalDataRoot(paths.database, paths.executionDatabase)
 })
 
 const pathCommand = Command.make("path", {}, () =>

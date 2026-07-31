@@ -449,8 +449,7 @@ export interface ProductLayerOptions<
       | import("@rika/extensions/mcp-oauth-service").McpOAuthService
       | import("effect").FileSystem.FileSystem
       | import("effect").Path.Path
-      | import("effect").Crypto.Crypto
-      | import("@rika/extensions/skill-registry").SkillFileSystem,
+      | import("effect").Crypto.Crypto,
       OperationError
     >
   }

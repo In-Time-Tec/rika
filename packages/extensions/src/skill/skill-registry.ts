@@ -1,8 +1,21 @@
 import { SkillSource } from "@batonfx/core"
 import { SkillLoader } from "@batonfx/skills"
-import { Crypto, Effect, Encoding, FileSystem, Path, Schema } from "effect"
+import { Crypto, Effect, Encoding, FileSystem, Layer, Path, Schema } from "effect"
 import { SkillFileSystem } from "./skill-file-system"
-export { SkillFileSystem, fileSystemLayer } from "./skill-file-system"
+
+export const layer = Layer.effect(
+  SkillFileSystem,
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem
+    return SkillFileSystem.of({
+      exists: (path) => fileSystem.exists(path),
+      readDirectory: (path) => fileSystem.readDirectory(path, { recursive: true }),
+      readFileString: (path) => fileSystem.readFileString(path),
+      isFile: (path) => fileSystem.stat(path).pipe(Effect.map((info) => info.type === "File")),
+      realPath: (path) => fileSystem.realPath(path),
+    })
+  }),
+)
 
 export interface Options {
   readonly globalRoot: string
@@ -45,7 +58,7 @@ const contained = (path: Path.Path, root: string, candidate: string): boolean =>
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))
 }
 
-export const discover = (
+const discoverImplementation = (
   options: Options,
 ): Effect.Effect<Discovered, SkillRegistryError, FileSystem.FileSystem | Path.Path | Crypto.Crypto | SkillFileSystem> =>
   Effect.gen(function* () {
@@ -125,3 +138,8 @@ export const discover = (
       activate,
     }
   })
+
+export function discover(options: Options): Effect.Effect<Discovered, SkillRegistryError>
+export function discover(options: Options) {
+  return discoverImplementation(options)
+}

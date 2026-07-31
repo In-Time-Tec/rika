@@ -9,6 +9,8 @@ import type { Unit } from "../schema/transcript-unit"
 import type { SourceEvent } from "../schema/transcript-source-event"
 import type { OwnedFold, MutableMutation } from "./transcript-fold-state"
 import { foldState } from "./transcript-fold-state"
+import { mutationOperations } from "./transcript-fold-mutation"
+const { toolAt, updateTool, upsertUnit, unifiedFiles } = mutationOperations
 const {
   callPayload,
   encodeInput,
@@ -18,12 +20,8 @@ const {
   record,
   resultPayload,
   string,
-  toolAt,
   toolBlockFrom,
   toolKey,
-  unifiedFiles,
-  updateTool,
-  upsertUnit,
   makeUnit,
 } = foldState
 import { identityKey, scopedIdentity } from "../ordering/transcript-unit-identity"

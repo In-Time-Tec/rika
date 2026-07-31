@@ -41,7 +41,7 @@ export namespace ModelRoute {
     readonly promptCaching?: boolean
   }
 
-  export type ProviderOverride = HttpProviderOverride | Omit<AmazonBedrockProviderConnection, "protocol">
+  export type ProviderOverride = HttpProviderOverride | Partial<Omit<AmazonBedrockProviderConnection, "protocol">>
 
   export interface ModelVariant {
     readonly options: Readonly<Record<string, unknown>>

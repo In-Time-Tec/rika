@@ -72,11 +72,7 @@ describe("ExtensionOperations", () => {
         expect(logs[2]).toContain("unauthenticated")
         expect(logs[4]).toContain('"enabled":false')
         expect(logs.at(-1)).toContain('"generation":1')
-      }).pipe(
-        provideLayer(
-          Layer.merge(BunServices.layer, SkillRegistry.fileSystemLayer.pipe(Layer.provide(BunServices.layer))),
-        ),
-      ),
+      }).pipe(provideLayer(Layer.merge(BunServices.layer, SkillRegistry.layer.pipe(Layer.provide(BunServices.layer))))),
     ),
   )
 
@@ -110,11 +106,7 @@ describe("ExtensionOperations", () => {
         expect(yield* fs.readFileString(`${clientWorkspace}/.rika/mcp.json`)).toContain('"client"')
         expect(yield* fs.readFileString(`${clientWorkspace}/.rika/extensions.json`)).toContain('"client"')
         expect(yield* fs.exists(options.configPath)).toBe(false)
-      }).pipe(
-        provideLayer(
-          Layer.merge(BunServices.layer, SkillRegistry.fileSystemLayer.pipe(Layer.provide(BunServices.layer))),
-        ),
-      ),
+      }).pipe(provideLayer(Layer.merge(BunServices.layer, SkillRegistry.layer.pipe(Layer.provide(BunServices.layer))))),
     ),
   )
 
@@ -175,11 +167,7 @@ describe("ExtensionOperations", () => {
         expect(yield* fs.readFileString(existing)).toContain("existing")
         expect(escaped.message).toContain("outside the Workspace skill directory")
         expect(yield* fs.readFileString(outside)).toBe("keep")
-      }).pipe(
-        provideLayer(
-          Layer.merge(BunServices.layer, SkillRegistry.fileSystemLayer.pipe(Layer.provide(BunServices.layer))),
-        ),
-      ),
+      }).pipe(provideLayer(Layer.merge(BunServices.layer, SkillRegistry.layer.pipe(Layer.provide(BunServices.layer))))),
     ),
   )
 
@@ -210,11 +198,7 @@ describe("ExtensionOperations", () => {
         expect((yield* Effect.flip(run({ _tag: "Extension", action: "create-skill", name: "x" }))).message).toContain(
           "outside",
         )
-      }).pipe(
-        provideLayer(
-          Layer.merge(BunServices.layer, SkillRegistry.fileSystemLayer.pipe(Layer.provide(BunServices.layer))),
-        ),
-      ),
+      }).pipe(provideLayer(Layer.merge(BunServices.layer, SkillRegistry.layer.pipe(Layer.provide(BunServices.layer))))),
     ),
   )
 
@@ -260,11 +244,7 @@ describe("ExtensionOperations", () => {
           )
         }).pipe(provideLayer(Layer.merge(ExtensionOperations.layer(options), oauthLayer)))
         yield* program
-      }).pipe(
-        provideLayer(
-          Layer.merge(BunServices.layer, SkillRegistry.fileSystemLayer.pipe(Layer.provide(BunServices.layer))),
-        ),
-      ),
+      }).pipe(provideLayer(Layer.merge(BunServices.layer, SkillRegistry.layer.pipe(Layer.provide(BunServices.layer))))),
     ),
   )
 
@@ -293,11 +273,7 @@ describe("ExtensionOperations", () => {
           readonly servers: Readonly<Record<string, unknown>>
         }
         expect(Object.keys(document.servers).toSorted()).toEqual(names.toSorted())
-      }).pipe(
-        provideLayer(
-          Layer.merge(BunServices.layer, SkillRegistry.fileSystemLayer.pipe(Layer.provide(BunServices.layer))),
-        ),
-      ),
+      }).pipe(provideLayer(Layer.merge(BunServices.layer, SkillRegistry.layer.pipe(Layer.provide(BunServices.layer))))),
     ),
   )
 
@@ -323,11 +299,7 @@ describe("ExtensionOperations", () => {
         yield* run({ _tag: "Extension", action: "rollback", name: "plug" })
         expect(yield* fs.readFileString(options.configPath)).toBe('{"servers":"invalid","disabled":["remote"]}')
         expect(yield* fs.readFileString(options.generationsPath)).toContain('"generation": 2')
-      }).pipe(
-        provideLayer(
-          Layer.merge(BunServices.layer, SkillRegistry.fileSystemLayer.pipe(Layer.provide(BunServices.layer))),
-        ),
-      ),
+      }).pipe(provideLayer(Layer.merge(BunServices.layer, SkillRegistry.layer.pipe(Layer.provide(BunServices.layer))))),
     ),
   )
 
@@ -362,11 +334,7 @@ describe("ExtensionOperations", () => {
           },
         })
         expect(yield* fs.exists(`${options.generationsPath}.lock`)).toBe(false)
-      }).pipe(
-        provideLayer(
-          Layer.merge(BunServices.layer, SkillRegistry.fileSystemLayer.pipe(Layer.provide(BunServices.layer))),
-        ),
-      ),
+      }).pipe(provideLayer(Layer.merge(BunServices.layer, SkillRegistry.layer.pipe(Layer.provide(BunServices.layer))))),
     ),
   )
 
@@ -401,11 +369,7 @@ describe("ExtensionOperations", () => {
           expect(yield* fs.readFileString(options.generationsPath)).toBe(invalid)
           expect(yield* fs.exists(`${options.generationsPath}.lock`)).toBe(false)
         }
-      }).pipe(
-        provideLayer(
-          Layer.merge(BunServices.layer, SkillRegistry.fileSystemLayer.pipe(Layer.provide(BunServices.layer))),
-        ),
-      ),
+      }).pipe(provideLayer(Layer.merge(BunServices.layer, SkillRegistry.layer.pipe(Layer.provide(BunServices.layer))))),
     ),
   )
 
@@ -437,11 +401,7 @@ describe("ExtensionOperations", () => {
           true,
         )
         expect(yield* fs.exists(`${options.generationsPath}.lock`)).toBe(false)
-      }).pipe(
-        provideLayer(
-          Layer.merge(BunServices.layer, SkillRegistry.fileSystemLayer.pipe(Layer.provide(BunServices.layer))),
-        ),
-      ),
+      }).pipe(provideLayer(Layer.merge(BunServices.layer, SkillRegistry.layer.pipe(Layer.provide(BunServices.layer))))),
     ),
   )
 })

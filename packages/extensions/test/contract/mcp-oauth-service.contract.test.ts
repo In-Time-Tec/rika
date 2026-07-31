@@ -1,8 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
 import { OAuth } from "@batonfx/mcp"
 import { describe, expect, it } from "@effect/vitest"
-import { Context, Effect, FileSystem, Layer, Option, Redacted, Ref } from "effect"
+import { Context, Effect, FileSystem, Fiber, Layer, Option, Redacted, Ref } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import * as McpOAuth from "../../src/mcp/mcp-oauth-service"
@@ -101,33 +100,38 @@ describe("McpOAuth", () => {
   })
 
   it.layer(Layer.merge(FetchHttpClient.layer, BunServices.layer))((test) => {
-    test.effect("hosts the real callback path, rejects other paths, and maps bind errors", () =>
+    test.effect("binds concurrent real callbacks on distinct loopback ports with state and path checks", () =>
       Effect.gen(function* () {
         const context = yield* Layer.build(McpOAuth.OAuthHost.hostLayer)
         const host = Context.get(context, McpOAuth.OAuthHost.Host)
         yield* Effect.scoped(
           Effect.gen(function* () {
-            const callback = yield* host.callback("http://127.0.0.1:17839/oauth/callback", "state")
+            const first = yield* host.prepareCallback!("/oauth/callback")
+            const second = yield* host.prepareCallback!("/oauth/callback")
+            expect(first.redirectUrl).not.toBe(second.redirectUrl)
             const client = yield* HttpClient.HttpClient
-            expect((yield* client.execute(HttpClientRequest.get("http://127.0.0.1:17839/wrong"))).status).toBe(404)
+            const firstUrl = new URL(first.redirectUrl)
+            const secondUrl = new URL(second.redirectUrl)
+            expect((yield* client.execute(HttpClientRequest.get(`${firstUrl.origin}/wrong`))).status).toBe(404)
+            const firstWait = yield* Effect.forkChild(first.wait("first-state"))
+            const secondWait = yield* Effect.forkChild(second.wait("second-state"))
             expect(
-              (yield* client.execute(
-                HttpClientRequest.get("http://127.0.0.1:17839/oauth/callback?code=wrong&state=attacker"),
-              )).status,
+              (yield* client.execute(HttpClientRequest.get(`${first.redirectUrl}?code=wrong&state=attacker`))).status,
             ).toBe(400)
-            const response = yield* client.execute(
-              HttpClientRequest.get("http://127.0.0.1:17839/oauth/callback?code=ok&state=state"),
+            const responses = yield* Effect.all(
+              [
+                client.execute(HttpClientRequest.get(`${first.redirectUrl}?code=one&state=first-state`)),
+                client.execute(HttpClientRequest.get(`${second.redirectUrl}?code=two&state=second-state`)),
+              ],
+              { concurrency: 2 },
             )
-            expect(yield* response.text).toContain("Authentication complete")
-            expect(yield* callback).toContain("code=ok")
+            expect(yield* responses[0].text).toContain("Authentication complete")
+            expect(yield* responses[1].text).toContain("Authentication complete")
+            expect(yield* Fiber.join(firstWait)).toContain("code=one")
+            expect(yield* Fiber.join(secondWait)).toContain("code=two")
+            expect(firstUrl.port).not.toBe(secondUrl.port)
           }),
         )
-        yield* BunHttpServer.make({ hostname: "127.0.0.1", port: 17839 })
-        const result = yield* Effect.result(host.callback("http://127.0.0.1:17839/oauth/callback", "state"))
-        if (result._tag === "Success") return yield* Effect.die("Expected callback binding to fail")
-        const error = result.failure
-        expect(error.operation).toBe("callback")
-        expect(error.message).not.toContain("secret")
       }),
     )
   })
@@ -143,7 +147,8 @@ describe("McpOAuth", () => {
             message: "denied",
           }),
         ),
-      callback: () => Effect.succeed(Effect.succeed("unused")),
+      prepareCallback: () =>
+        Effect.succeed({ redirectUrl: "http://127.0.0.1:1/oauth/callback", wait: () => Effect.succeed("unused") }),
     })
     const serviceLayer = Layer.merge(
       McpOAuth.layer.pipe(Layer.provide(host), Layer.provide(store), Layer.provide(BunServices.layer)),
@@ -175,7 +180,12 @@ describe("McpOAuth", () => {
       }),
     )
     const serviceLayer = McpOAuth.layer.pipe(
-      Layer.provide(McpOAuth.OAuthHost.hostTestLayer({ open: () => Effect.void, callback: () => Effect.never })),
+      Layer.provide(
+        McpOAuth.OAuthHost.hostTestLayer({
+          open: () => Effect.void,
+          prepareCallback: () => Effect.never,
+        }),
+      ),
       Layer.provide(store),
       Layer.provide(BunServices.layer),
     )
@@ -193,9 +203,12 @@ describe("McpOAuth", () => {
     Effect.gen(function* () {
       const events = yield* Ref.make<Array<string>>([])
       const host = McpOAuth.OAuthHost.hostTestLayer({
-        callback: (_url, state) =>
-          Ref.update(events, (values) => [...values, `bound:${state}`]).pipe(
-            Effect.as(Effect.succeed(`http://127.0.0.1:17839/oauth/callback?code=ok&state=${state}`)),
+        prepareCallback: () =>
+          Ref.update(events, (values) => [...values, "bound:expected-state"]).pipe(
+            Effect.as({
+              redirectUrl: "http://127.0.0.1:1/oauth/callback",
+              wait: (state: string) => Effect.succeed(`http://127.0.0.1:1/oauth/callback?code=ok&state=${state}`),
+            }),
           ),
         open: (url) => Ref.update(events, (values) => [...values, `opened:${url}`]),
       })
@@ -227,7 +240,11 @@ describe("McpOAuth", () => {
   it.effect("distinguishes provider denial and exchange failures without exposing provider details", () => {
     const tokenStore = OAuth.layerTokenStoreMemory
     const host = McpOAuth.OAuthHost.hostTestLayer({
-      callback: (_url, state) => Effect.succeed(Effect.succeed(`http://localhost/?code=x&state=${state}`)),
+      prepareCallback: () =>
+        Effect.succeed({
+          redirectUrl: "http://127.0.0.1:1/oauth/callback",
+          wait: (state: string) => Effect.succeed(`http://localhost/?code=x&state=${state}`),
+        }),
       open: () => Effect.void,
     })
     const failure = (cause: McpOAuth.OAuthClientError) =>
