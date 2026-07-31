@@ -26,7 +26,7 @@ export const storedThread: Fixtures.Thread.Thread = {
   createdAt: 1,
   updatedAt: 2,
 }
-export const storedTurn: Fixtures.Turn.Turn = {
+export const storedTurn: Fixtures.Turn.AgentExecutionTurn = {
   _tag: "AgentExecution",
   id: Fixtures.Turn.TurnId.make("turn-1"),
   threadId: storedThread.id,

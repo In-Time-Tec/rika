@@ -12,7 +12,7 @@ import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { expect } from "@effect/vitest"
-import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Schema } from "effect"
+import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Schema, Scope } from "effect"
 import {
   ExecutionIngest,
   executeInteractiveCommand,
@@ -65,15 +65,24 @@ export const providerCostEvent = (
   data: { model_attempt_id: `${cursor}-attempt`, cost: { amount, currency: "USD" } },
 })
 
-export const interactiveLayer = (
+export const interactiveLayer: (
   repository: ThreadRepository.Interface,
   turns: TurnContract.Interface,
   backend: ExecutionBackend.Interface,
   registration: Deferred.Deferred<Operation.InteractiveSession>,
-  makeThreadId: Effect.Effect<Thread.ThreadId> = Effect.die("unused"),
-  makeTurnId: Effect.Effect<Turn.TurnId> = Effect.die("unused"),
+  makeThreadId?: Effect.Effect<Thread.ThreadId>,
+  makeTurnId?: Effect.Effect<Turn.TurnId>,
   transcripts?: TranscriptRepository.Interface,
   usage?: UsageRepository.Interface,
+) => Layer.Layer<Operation.Service, object, never> = (
+  repository,
+  turns,
+  backend,
+  registration,
+  makeThreadId = Effect.die("unused"),
+  makeTurnId = Effect.die("unused"),
+  transcripts,
+  usage,
 ) =>
   Operation.productLayer({
     repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
@@ -114,7 +123,7 @@ export const terminalTransitionScenario = (
   inspectedStatus: "failed" | "cancelled",
   pagedHistory: boolean,
   oversizedProjection: boolean = false,
-) =>
+): Effect.Effect<void, object, Scope.Scope> =>
   Effect.scoped(
     Effect.gen(function* () {
       const selected = thread(`terminal-${inspectedStatus}-${pagedHistory ? "paged" : "single"}`)

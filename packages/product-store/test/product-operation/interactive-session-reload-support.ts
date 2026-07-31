@@ -1,4 +1,6 @@
-import { Context, Deferred, Effect, Fiber, Layer, Ref, Schema } from "effect"
+import { Context, Deferred, Effect, Fiber, Layer, Ref, Schema, Scope } from "effect"
+import * as TranscriptRepositoryContract from "@rika/product/transcript-repository"
+import * as TurnContract from "@rika/product/turn-repository"
 import {
   RuntimeFixtures,
   TranscriptFixtures,
@@ -96,147 +98,156 @@ export const subagentChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend
   { executionId: subagentChildId, cursor: "childdone~a4", sequence: 4, type: "execution.completed", createdAt: 4 },
 ])
 
-export const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagentReloadHarness")(
-  function* (options: {
-    readonly storedTree: TranscriptFixtures.TranscriptProjectionModel.Projection
-    readonly turnLastCursor: string
-    readonly childReplayEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>
-    readonly consumed?: Readonly<
-      Record<
-        string,
-        { readonly cursor: string; readonly sequence: number; readonly status?: "completed" | "failed" | "cancelled" }
-      >
+export interface SubagentReloadHarness {
+  readonly session: Operation.InteractiveSession
+  readonly subagentThread: RuntimeFixtures.Thread.Thread
+  readonly transcripts: TranscriptRepositoryContract.Interface
+  readonly turns: TurnContract.Interface
+}
+
+type SubagentReloadOptions = {
+  readonly storedTree: TranscriptFixtures.TranscriptProjectionModel.Projection
+  readonly turnLastCursor: string
+  readonly childReplayEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>
+  readonly consumed?: Readonly<
+    Record<
+      string,
+      { readonly cursor: string; readonly sequence: number; readonly status?: "completed" | "failed" | "cancelled" }
     >
-    readonly turnStatus?: RuntimeFixtures.Turn.Status
-    readonly followed?: Ref.Ref<ReadonlyArray<string>>
-    readonly inspection?: (executionId: string) => RuntimeFixtures.ExecutionBackend.Inspection | undefined
-    readonly replayEvents?: (executionId: string) => ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>
-    readonly pageEvents?: (executionId: string, after: string | undefined) => RuntimeFixtures.ExecutionBackend.EventPage
-    readonly projectionVersion?: number
-  }) {
-    const subagentThread = thread("subagent-thread", 1)
-    const doneTurn: RuntimeFixtures.Turn.AgentExecutionTurn = {
-      _tag: "AgentExecution",
-      id: RuntimeFixtures.Turn.TurnId.make("done"),
-      threadId: subagentThread.id,
-      prompt: "delegate",
-      stopIntent: "none",
-      author: { _tag: "Human" },
-      lineage: { _tag: "Original" },
-      executionRoute: executionRoute(),
+  >
+  readonly turnStatus?: RuntimeFixtures.Turn.Status
+  readonly followed?: Ref.Ref<ReadonlyArray<string>>
+  readonly inspection?: (executionId: string) => RuntimeFixtures.ExecutionBackend.Inspection | undefined
+  readonly replayEvents?: (executionId: string) => ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>
+  readonly pageEvents?: (executionId: string, after: string | undefined) => RuntimeFixtures.ExecutionBackend.EventPage
+  readonly projectionVersion?: number
+}
+
+export const makeSubagentReloadHarness: (
+  options: SubagentReloadOptions,
+) => Effect.Effect<SubagentReloadHarness, object, Scope.Scope> = Effect.fn(
+  "InteractiveSessionTest.makeSubagentReloadHarness",
+)(function* (options) {
+  const subagentThread = thread("subagent-thread", 1)
+  const doneTurn: RuntimeFixtures.Turn.AgentExecutionTurn = {
+    _tag: "AgentExecution",
+    id: RuntimeFixtures.Turn.TurnId.make("done"),
+    threadId: subagentThread.id,
+    prompt: "delegate",
+    stopIntent: "none",
+    author: { _tag: "Human" },
+    lineage: { _tag: "Original" },
+    executionRoute: executionRoute(),
+    status: options.turnStatus ?? "completed",
+    createdAt: 1,
+    updatedAt: 1,
+    lastCursor: options.turnLastCursor,
+  }
+  const repositories = yield* RuntimeFixtures.ThreadRepository.makeMemory([subagentThread])
+  const turns = yield* RuntimeFixtures.TurnRepository.makeMemory([doneTurn])
+  const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+  const transcripts =
+    options.projectionVersion === RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion
+      ? yield* RuntimeFixtures.TranscriptRepository.makeMemory({
+          initial: [invalidatedProjection(doneTurn, options.storedTree.revision)],
+          turns,
+        })
+      : yield* RuntimeFixtures.TranscriptRepository.makeMemory({ turns })
+  if (options.projectionVersion !== RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion)
+    yield* storeProjection(transcripts, doneTurn, options.storedTree, {
+      ...(options.consumed === undefined ? {} : { consumed: options.consumed }),
+      ...(options.projectionVersion === undefined ? {} : { projectionVersion: options.projectionVersion }),
+    })
+  const inspection = (turnId: string): RuntimeFixtures.ExecutionBackend.Inspection | undefined => {
+    if (options.inspection !== undefined) return options.inspection(turnId)
+    if (turnId !== "done") return { turnId, status: "completed", waits: [], pendingTools: [], children: [] }
+    return {
+      turnId,
       status: options.turnStatus ?? "completed",
-      createdAt: 1,
-      updatedAt: 1,
-      lastCursor: options.turnLastCursor,
+      lastCursor: "done-final",
+      waits: [],
+      pendingTools: [],
+      children: [{ executionId: subagentChildId, status: "completed" }],
     }
-    const repositories = yield* RuntimeFixtures.ThreadRepository.makeMemory([subagentThread])
-    const turns = yield* RuntimeFixtures.TurnRepository.makeMemory([doneTurn])
-    const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
-    const transcripts =
-      options.projectionVersion === RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion
-        ? yield* RuntimeFixtures.TranscriptRepository.makeMemory({
-            initial: [invalidatedProjection(doneTurn, options.storedTree.revision)],
-            turns,
-          })
-        : yield* RuntimeFixtures.TranscriptRepository.makeMemory({ turns })
-    if (options.projectionVersion !== RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion)
-      yield* storeProjection(transcripts, doneTurn, options.storedTree, {
-        ...(options.consumed === undefined ? {} : { consumed: options.consumed }),
-        ...(options.projectionVersion === undefined ? {} : { projectionVersion: options.projectionVersion }),
-      })
-    const inspection = (turnId: string): RuntimeFixtures.ExecutionBackend.Inspection | undefined => {
-      if (options.inspection !== undefined) return options.inspection(turnId)
-      if (turnId !== "done") return { turnId, status: "completed", waits: [], pendingTools: [], children: [] }
-      return {
-        turnId,
-        status: options.turnStatus ?? "completed",
-        lastCursor: "done-final",
-        waits: [],
-        pendingTools: [],
-        children: [{ executionId: subagentChildId, status: "completed" }],
-      }
-    }
-    const eventsFor = (turnId: string): ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> => {
-      const replay = options.replayEvents?.(turnId)
-      if (replay !== undefined)
-        return completeServerTimeline(replay).map((event) => Object.assign({}, event, { executionId: turnId }))
-      if (turnId === "done")
-        return completeServerTimeline(subagentRootEvents).map((event) =>
-          Object.assign({}, event, { executionId: turnId }),
-        )
-      if (turnId === subagentChildId)
-        return completeServerTimeline(options.childReplayEvents).map((event) =>
-          Object.assign({}, event, { executionId: turnId }),
-        )
-      return []
-    }
-    const backend = RuntimeFixtures.ExecutionBackend.Service.of({
-      invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
-      createFanOut: () => Effect.die("unused"),
-      inspectFanOut: () => Effect.die("unused"),
-      cancelFanOut: () => Effect.die("unused"),
-      registerWorkflows: () => Effect.die("unused"),
-      startWorkflow: () => Effect.die("unused"),
-      inspectWorkflow: () => Effect.die("unused"),
-      cancelWorkflow: () => Effect.die("unused"),
-      start: () => Effect.die("unused"),
-      inspect: (turnId) => Effect.succeed(inspection(turnId)),
-      follow: (turnId, cursor, onEvent) => {
-        const after = typeof cursor === "string" ? cursor : cursor?.cursor
-        const all = eventsFor(turnId)
-        const boundary = after === undefined ? -1 : all.findIndex((event) => event.cursor === after)
-        const events = all.slice(boundary + 1)
-        const inspected = inspection(turnId)
-        return (
-          options.followed === undefined
-            ? Effect.void
-            : Ref.update(options.followed, (followed) => [...followed, turnId])
-        ).pipe(
-          Effect.andThen(
-            inspected === undefined
-              ? RuntimeFixtures.ExecutionBackend.BackendError.make({ message: `ExecutionNotFound ${turnId}` })
-              : Effect.void,
-          ),
-          Effect.tap(() => Effect.sync(() => events.forEach((event) => onEvent?.(event)))),
-          Effect.as({ turnId, status: inspected?.status ?? ("completed" as const), events }),
-        )
-      },
-      steer: () => Effect.die("unused"),
-      cancel: () => Effect.die("unused"),
-      replay: (turnId) => Effect.succeed({ turnId, status: "completed" as const, events: eventsFor(turnId) }),
-      pageEvents: (turnId, _direction, cursor) =>
-        Effect.sync(() => {
-          if (options.pageEvents !== undefined) return options.pageEvents(turnId, cursor)
-          const events = eventsFor(turnId)
-          const boundary = cursor === undefined ? -1 : events.findIndex((event) => event.cursor === cursor)
-          return {
-            events: events.slice(boundary + 1),
-            hasMore: false,
-            ...(events.at(-1) === undefined ? {} : { newestCursor: events.at(-1)!.cursor }),
-          }
-        }),
-      resolveInvocationSource: () => Effect.die("unused"),
-    })
-    const layer = productLayer({
-      repositoryLayer: Layer.succeed(RuntimeFixtures.ThreadRepository.Service, repositories),
-      turnRepositoryLayer: Layer.succeed(RuntimeFixtures.TurnRepository.Service, turns),
-      transcriptRepositoryLayer: Layer.succeed(RuntimeFixtures.TranscriptRepository.Service, transcripts),
-      backendLayer: Layer.succeed(RuntimeFixtures.ExecutionBackend.Service, backend),
-      defaultWorkspace: "/work",
-      makeThreadId: Effect.die("unused"),
-      makeTurnId: Effect.die("unused"),
-      interactive: (_, session) =>
-        Ref.update(sessions, (values) => [...values, session]).pipe(Effect.andThen(Effect.never)),
-    })
-    const context = yield* Layer.build(layer)
-    const operation = Context.get(context, Operation.Service)
-    yield* Effect.forkChild(operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }))
-    yield* waitForSessions(sessions)
-    const session = (yield* Ref.get(sessions))[0]
-    if (session === undefined) return yield* Effect.die("Missing interactive session")
-    return { session, subagentThread, transcripts, turns }
-  },
-)
+  }
+  const eventsFor = (turnId: string): ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> => {
+    const replay = options.replayEvents?.(turnId)
+    if (replay !== undefined)
+      return completeServerTimeline(replay).map((event) => Object.assign({}, event, { executionId: turnId }))
+    if (turnId === "done")
+      return completeServerTimeline(subagentRootEvents).map((event) =>
+        Object.assign({}, event, { executionId: turnId }),
+      )
+    if (turnId === subagentChildId)
+      return completeServerTimeline(options.childReplayEvents).map((event) =>
+        Object.assign({}, event, { executionId: turnId }),
+      )
+    return []
+  }
+  const backend = RuntimeFixtures.ExecutionBackend.Service.of({
+    invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
+    createFanOut: () => Effect.die("unused"),
+    inspectFanOut: () => Effect.die("unused"),
+    cancelFanOut: () => Effect.die("unused"),
+    registerWorkflows: () => Effect.die("unused"),
+    startWorkflow: () => Effect.die("unused"),
+    inspectWorkflow: () => Effect.die("unused"),
+    cancelWorkflow: () => Effect.die("unused"),
+    start: () => Effect.die("unused"),
+    inspect: (turnId) => Effect.succeed(inspection(turnId)),
+    follow: (turnId, cursor, onEvent) => {
+      const after = typeof cursor === "string" ? cursor : cursor?.cursor
+      const all = eventsFor(turnId)
+      const boundary = after === undefined ? -1 : all.findIndex((event) => event.cursor === after)
+      const events = all.slice(boundary + 1)
+      const inspected = inspection(turnId)
+      return (
+        options.followed === undefined ? Effect.void : Ref.update(options.followed, (followed) => [...followed, turnId])
+      ).pipe(
+        Effect.andThen(
+          inspected === undefined
+            ? RuntimeFixtures.ExecutionBackend.BackendError.make({ message: `ExecutionNotFound ${turnId}` })
+            : Effect.void,
+        ),
+        Effect.tap(() => Effect.sync(() => events.forEach((event) => onEvent?.(event)))),
+        Effect.as({ turnId, status: inspected?.status ?? ("completed" as const), events }),
+      )
+    },
+    steer: () => Effect.die("unused"),
+    cancel: () => Effect.die("unused"),
+    replay: (turnId) => Effect.succeed({ turnId, status: "completed" as const, events: eventsFor(turnId) }),
+    pageEvents: (turnId, _direction, cursor) =>
+      Effect.sync(() => {
+        if (options.pageEvents !== undefined) return options.pageEvents(turnId, cursor)
+        const events = eventsFor(turnId)
+        const boundary = cursor === undefined ? -1 : events.findIndex((event) => event.cursor === cursor)
+        return {
+          events: events.slice(boundary + 1),
+          hasMore: false,
+          ...(events.at(-1) === undefined ? {} : { newestCursor: events.at(-1)!.cursor }),
+        }
+      }),
+    resolveInvocationSource: () => Effect.die("unused"),
+  })
+  const layer = productLayer({
+    repositoryLayer: Layer.succeed(RuntimeFixtures.ThreadRepository.Service, repositories),
+    turnRepositoryLayer: Layer.succeed(RuntimeFixtures.TurnRepository.Service, turns),
+    transcriptRepositoryLayer: Layer.succeed(RuntimeFixtures.TranscriptRepository.Service, transcripts),
+    backendLayer: Layer.succeed(RuntimeFixtures.ExecutionBackend.Service, backend),
+    defaultWorkspace: "/work",
+    makeThreadId: Effect.die("unused"),
+    makeTurnId: Effect.die("unused"),
+    interactive: (_, session) =>
+      Ref.update(sessions, (values) => [...values, session]).pipe(Effect.andThen(Effect.never)),
+  })
+  const context = yield* Layer.build(layer)
+  const operation = Context.get(context, Operation.Service)
+  yield* Effect.forkChild(operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }))
+  yield* waitForSessions(sessions)
+  const session = (yield* Ref.get(sessions))[0]
+  if (session === undefined) return yield* Effect.die("Missing interactive session")
+  return { session, subagentThread, transcripts, turns }
+})
 
 export interface ObservedProjectionStream {
   readonly turn: RuntimeFixtures.Turn.AgentExecutionTurn

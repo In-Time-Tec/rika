@@ -3,6 +3,7 @@ export { Fixtures }
 import { Context, Deferred, Effect, Exit, Layer, Ref, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { ExecutionIngest } from "@rika/product/product-operation"
+import * as TurnContract from "@rika/product/turn-repository"
 import { executionRoute } from "../support/product-test-current-state"
 import { storeProjection } from "../support/product-test-transcript-fixture"
 
@@ -85,7 +86,22 @@ export interface DeltaWrite {
   readonly remove: ReadonlyArray<string>
 }
 
-export const makeHarness = Effect.fn("ExecutionIngestTest.makeHarness")(function* (options: {
+export interface Harness {
+  readonly ingest: ExecutionIngest.Interface
+  readonly transcripts: Fixtures.TranscriptRepository.Interface
+  readonly turns: TurnContract.Interface
+  readonly turn: Fixtures.Turn.AgentExecutionTurn
+  readonly follows: ReadonlyArray<Followed>
+  readonly inspections: ReadonlyArray<string>
+  readonly commits: ReadonlyArray<number>
+  readonly writes: ReadonlyArray<DeltaWrite>
+  readonly usage: import("@rika/product/usage-repository").Interface
+  readonly refolds: ReadonlyArray<ExecutionIngest.Refold>
+  readonly projectionChanges: ReadonlyArray<ExecutionIngest.ProjectionChange>
+  readonly projectionWatch: ExecutionIngest.ProjectionWatch
+}
+
+type MakeHarnessOptions = {
   readonly script: Readonly<Record<string, ScriptEntry>>
   readonly turnStatus?: Fixtures.Turn.Status
   readonly stored?: Fixtures.TranscriptProjectionModel.Projection
@@ -107,7 +123,11 @@ export const makeHarness = Effect.fn("ExecutionIngestTest.makeHarness")(function
   readonly pageHold?: { readonly after: string; readonly open: Deferred.Deferred<void> }
   readonly onFailure?: (failure: ExecutionIngest.Failure) => void
   readonly onCommitted?: (commit: ExecutionIngest.Commit) => void
-}) {
+}
+
+export const makeHarness: (options: MakeHarnessOptions) => Effect.Effect<Harness, object, Scope.Scope> = Effect.fn(
+  "ExecutionIngestTest.makeHarness",
+)(function* (options) {
   const turn = makeTurn(options.turnStatus ?? "completed")
   const turns = yield* Fixtures.TurnRepository.makeMemory([turn])
   const usage = Context.get(yield* Layer.build(Fixtures.UsageRepository.memoryLayer), Fixtures.UsageRepository.Service)
