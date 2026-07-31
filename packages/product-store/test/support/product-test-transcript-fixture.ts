@@ -3,12 +3,15 @@ import * as Turn from "@rika/product/turn-record"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
 import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Function } from "effect"
 import { ExecutionIngest } from "@rika/product/product-operation"
 
 const projectionVersion = ExecutionIngest.projectionVersion
+
+export const withNestedProjections = TranscriptNestedProjection.withNestedProjections
 
 export interface StoreProjectionOptions {
   readonly executionCheckpoints?: ReadonlyArray<TranscriptRepository.ExecutionCheckpoint>
