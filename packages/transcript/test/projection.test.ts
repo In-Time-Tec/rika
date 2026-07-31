@@ -1,5 +1,4 @@
 import { describe, expect, it } from "@effect/vitest"
-import { providers } from "@opencode-ai/models/snapshot"
 import {
   applyEvent,
   childOrder,
@@ -1493,7 +1492,7 @@ describe("Transcript projection", () => {
     )
   })
 
-  it("counts usage cost when the revision was poisoned by higher foreign sequences", () => {
+  it("tracks usage cursors when the revision was poisoned by higher foreign sequences", () => {
     const projection = project("turn-a", "prompt", [
       { cursor: "foreign", sequence: 4526, type: "model.output.delta", createdAt: 0, text: "child text" },
       { ...usage("usage-9", 9), createdAt: 1 },
@@ -1502,45 +1501,22 @@ describe("Transcript projection", () => {
 
     expect(projection.revision).toBe(4526)
     expect(projection.checkpointCursor).toBe("foreign")
-    expect(projection.costUsd).toBeCloseTo(2.5, 10)
+    expect(projection.costUsd).toBeUndefined()
     expect(projection.usageCursors).toEqual(["usage-9", "usage-30"])
   })
 
   it("scopes durable usage identity to the opaque event cursor", () => {
     const projection = project("turn-a", "prompt", [usage("shared", 9), usage("shared", 30), usage("other", 31)])
 
-    expect(projection.costUsd).toBeCloseTo(2.5, 10)
+    expect(projection.costUsd).toBeUndefined()
     expect(projection.usageCursors).toEqual(["shared", "other"])
   })
 
-  it("uses models.dev context tiers at their published threshold", () => {
-    const model = providers.openai!.models["gpt-5.6-sol"]!
-    const tier = model.cost!.tiers![0]!
-    const event = (cursor: string, inputTokens: number): SourceEvent => ({
-      cursor,
-      sequence: 1,
-      type: "model.usage.reported",
-      createdAt: 1,
-      data: {
-        provider: "openai",
-        model: model.id,
-        input_tokens: inputTokens,
-        input_tokens_uncached: inputTokens,
-        input_tokens_cache_read: 0,
-        input_tokens_cache_write: 0,
-        output_tokens: 0,
-      },
-    })
-
-    expect(project("below", "", [event("below", tier.tier.size - 1)]).costUsd).toBeCloseTo(
-      ((tier.tier.size - 1) * model.cost!.input) / 1_000_000,
-      10,
-    )
-    expect(project("at", "", [event("at", tier.tier.size)]).costUsd).toBeCloseTo(
-      (tier.tier.size * tier.input) / 1_000_000,
-      10,
-    )
-    expect(project("at", "", [event("at", tier.tier.size)]).pricingVersion).toBeDefined()
+  it("does not estimate transcript dollars from usage reports", () => {
+    const projection = project("turn-a", "prompt", [usage("usage-1", 1)])
+    expect(projection.costUsd).toBeUndefined()
+    expect(projection.pricingVersion).toBeUndefined()
+    expect(projection.usageCursors).toEqual(["usage-1"])
   })
 
   it("counts duplicate and out-of-order usage events exactly once", () => {
@@ -1548,8 +1524,8 @@ describe("Transcript projection", () => {
     const duplicated = applyEvent(applyEvent(first, usage("usage-5", 5)), usage("usage-5", 2))
     const reordered = applyEvent(duplicated, usage("usage-2", 2))
 
-    expect(duplicated.costUsd).toBeCloseTo(1.25, 10)
-    expect(reordered.costUsd).toBeCloseTo(2.5, 10)
+    expect(duplicated.costUsd).toBeUndefined()
+    expect(reordered.costUsd).toBeUndefined()
     expect(reordered.revision).toBe(5)
     expect(reordered.checkpointCursor).toBe("usage-5")
     expect(reordered.usageCursors).toEqual(["usage-5", "usage-2"])
@@ -1569,18 +1545,18 @@ describe("Transcript projection", () => {
 
     expect(batched.usageCursors).toEqual(cursors)
     expect(incremental.usageCursors).toEqual(cursors)
-    expect(batched.costUsd).toBeCloseTo(3.75, 10)
-    expect(incremental.costUsd).toBeCloseTo(3.75, 10)
+    expect(batched.costUsd).toBeUndefined()
+    expect(incremental.costUsd).toBeUndefined()
     expect(shared.usageCursors).toEqual(["usage-1"])
     expect(left.usageCursors).toEqual(["usage-1", "usage-2"])
     expect(right.usageCursors).toEqual(["usage-1", "usage-3"])
-    expect(right.costUsd).toBeCloseTo(2.5, 10)
+    expect(right.costUsd).toBeUndefined()
     expect(rejoined.usageCursors).toEqual(["usage-1", "usage-2", "usage-3"])
-    expect(rejoined.costUsd).toBeCloseTo(3.75, 10)
+    expect(rejoined.costUsd).toBeUndefined()
     expect(merged.usageCursors).toEqual(["usage-1", "usage-3", "usage-2"])
-    expect(merged.costUsd).toBeCloseTo(3.75, 10)
+    expect(merged.costUsd).toBeUndefined()
     expect(detached.usageCursors).toEqual(["usage-1"])
-    expect(detached.costUsd).toBeCloseTo(1.25, 10)
+    expect(detached.costUsd).toBeUndefined()
   })
 
   it("settles running tool and child blocks at every execution terminal boundary", () => {

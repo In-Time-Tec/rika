@@ -1,7 +1,6 @@
 import { Catalog } from "@rika/tools"
 import { Function, Option, Schema } from "effect"
 import { candidateCallId, childScopeAndCallId, executionKey, type ChildParentCandidate } from "./child-parent"
-import { pricingVersion, usageCostUsd } from "./model-cost"
 import { partialInputRecord } from "./partial-input"
 import type { Block, Content, Projection, ProjectionState, SourceEvent, ToolFile, ToolProcess, Unit } from "./schema"
 import { identityKey, scopedIdentity } from "./unit-identity"
@@ -743,15 +742,9 @@ const processResult = (output: unknown): ToolProcess | undefined => {
 const applyUsage = (value: OwnedFold, change: MutableMutation, event: SourceEvent): void => {
   const identity = event.cursor
   if (value.usageCursorSet.has(identity)) return
-  const cost = usageCostUsd(sourcePayload(event))
-  if (cost === undefined) return
-  const previousCost = value.state.costUsd
-  setState(value, change, "costUsd", (previousCost ?? 0) + cost)
   value.usageCursorSet.add(identity)
   value.usageCursorList.push(identity)
   change.stateChanged = true
-  if (previousCost === undefined || value.state.pricingVersion === pricingVersion)
-    setState(value, change, "pricingVersion", pricingVersion)
 }
 
 const assistantKey = (turnId: string, phase: number): string => identityKey("assistant", turnId, Math.max(0, phase))
@@ -1391,16 +1384,16 @@ const applyKnownEvent = (value: OwnedFold, change: MutableMutation, event: Sourc
     previous !== undefined && previous.content._tag === "Block" && previous.content.block._tag === "Compaction"
       ? previous.content.block
       : undefined
+  const compactionCheckpoint =
+    block._tag === "Compaction" && previousCompaction !== undefined
+      ? (block.checkpoint ?? previousCompaction.checkpoint)
+      : undefined
   const nextBlock =
     block._tag === "Compaction" && previousCompaction !== undefined
       ? {
           ...block,
           summary: block.summary.length > 0 ? block.summary : previousCompaction.summary,
-          ...(block.checkpoint !== undefined
-            ? { checkpoint: block.checkpoint }
-            : previousCompaction.checkpoint !== undefined
-              ? { checkpoint: previousCompaction.checkpoint }
-              : {}),
+          ...(compactionCheckpoint === undefined ? {} : { checkpoint: compactionCheckpoint }),
         }
       : block
   upsertUnit(

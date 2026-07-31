@@ -42,7 +42,7 @@ const exercise = (repository: Usage.Interface) =>
       turnId: "turn-a",
       threadId: "thread",
       revision: 2,
-      projectionVersion: 2,
+      projectionVersion: Usage.projectionVersion,
       costNanoUsd: 150,
       tokens: 15,
       activeMillis: 300,
@@ -56,7 +56,7 @@ const exercise = (repository: Usage.Interface) =>
     expect(yield* repository.readThread("thread")).toMatchObject({
       turns: 2,
       revision: 2,
-      projectionVersion: 2,
+      projectionVersion: Usage.projectionVersion,
       activeMillis: 300,
       sourceComplete: false,
     })

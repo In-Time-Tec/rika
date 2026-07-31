@@ -130,7 +130,7 @@ export type SettlementReason = "attempt-failed" | "settled-without-usage"
 
 export type AttemptPricing =
   | { readonly _tag: "Announced" }
-  | { readonly _tag: "Priced"; readonly usd: number; readonly source: "provider" | "estimate" }
+  | { readonly _tag: "Priced"; readonly usd: number; readonly source: "provider" }
   | { readonly _tag: "Unpriceable"; readonly reason: UnpriceableReason }
 
 export type AttemptTokens =
@@ -145,7 +145,7 @@ export interface AttemptCost {
   readonly tokens: AttemptTokens
 }
 
-export const foldVersion = 5
+export const foldVersion = 6
 
 export const empty: Snapshot = {
   turns: new Map(),
@@ -374,9 +374,7 @@ const isDelivery = (value: unknown): value is DeliveryIdentity =>
 const isPricing = (value: unknown): value is AttemptPricing =>
   isRecord(value) &&
   (value._tag === "Announced" ||
-    (value._tag === "Priced" &&
-      isFiniteNumber(value.usd) &&
-      (value.source === "provider" || value.source === "estimate")) ||
+    (value._tag === "Priced" && isFiniteNumber(value.usd) && value.source === "provider") ||
     (value._tag === "Unpriceable" && isString(value.reason)))
 const isTokens = (value: unknown): value is AttemptTokens =>
   isRecord(value) &&
@@ -614,11 +612,6 @@ export const activeTime: {
   return intervals === undefined ? { _tag: "Unavailable" } : { _tag: "Available", ...unionIntervals(intervals) }
 })
 
-export const eventCostUsd = (event: ExecutionBackend.Event): number | undefined =>
-  event.type === "model.usage.reported"
-    ? Transcript.project("usage", "", [{ ...event, sequence: 0 }]).costUsd
-    : undefined
-
 const stringField = (data: Readonly<Record<string, unknown>> | undefined, name: string) => {
   const value = data?.[name]
   return typeof value === "string" && value.length > 0 ? value : undefined
@@ -659,13 +652,6 @@ const providerPriced = (cost: AttemptPricing, usd: number): AttemptPricing => {
     return { _tag: "Unpriceable", reason: "cost-conflict" }
   if (cost._tag === "Unpriceable" && !revisableCost(cost.reason)) return cost
   return { _tag: "Priced", usd, source: "provider" }
-}
-
-const estimatePriced = (cost: AttemptPricing, usd: number): AttemptPricing => {
-  if (cost._tag === "Priced")
-    return cost.source === "provider" || cost.usd === usd ? cost : { _tag: "Unpriceable", reason: "cost-conflict" }
-  if (cost._tag === "Unpriceable" && !settledWithoutUsage(cost.reason)) return cost
-  return { _tag: "Priced", usd, source: "estimate" }
 }
 
 const unpriceable = (cost: AttemptPricing, reason: UnpriceableReason): AttemptPricing => {
@@ -996,13 +982,8 @@ const applyAttempt = (
   let next = current
   if (event.type === "model.usage.reported") {
     const decoded = Transcript.usageTokens(event.data ?? {})
-    const estimate = eventCostUsd(event)
     next = {
       ...current,
-      cost:
-        estimate === undefined
-          ? unpriceable(current.cost, "usage-unpriceable")
-          : estimatePriced(current.cost, estimate),
       tokens:
         decoded._tag === "Available"
           ? countedTokens(current.tokens, decoded.total)

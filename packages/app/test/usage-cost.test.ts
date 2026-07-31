@@ -598,133 +598,6 @@ describe("UsageCost", () => {
     })
   })
 
-  it("prices uncached input, cache reads, and output from the models.dev snapshot", () => {
-    expect(
-      UsageCost.eventCostUsd(
-        reportedTokens("cached", "gpt-5.6-sol", 10_000, 100, {
-          input_tokens_uncached: 1_000,
-          input_tokens_cache_read: 9_000,
-          input_tokens_cache_write: 0,
-        }),
-      ),
-    ).toBeCloseTo(0.0125, 10)
-    expect(
-      UsageCost.eventCostUsd(
-        reportedTokens("cache-write", "gpt-5.6-sol", 100, 0, {
-          input_tokens_uncached: 0,
-          input_tokens_cache_read: 0,
-          input_tokens_cache_write: 100,
-        }),
-      ),
-    ).toBeCloseTo(0.000625, 10)
-  })
-
-  it("uses the provider-returned model snapshot and falls back to the configured model", () => {
-    expect(
-      UsageCost.eventCostUsd(
-        reportedTokens("snapshot", "gpt-5.6-luna", 100_000, 0, {
-          model_snapshot: "gpt-5.6-sol",
-          input_tokens_uncached: 100_000,
-        }),
-      ),
-    ).toBe(0.5)
-    expect(
-      UsageCost.eventCostUsd(
-        reportedTokens("fallback", "gpt-5.6-luna", 100_000, 0, {
-          model_snapshot: "unknown",
-          input_tokens_uncached: 100_000,
-        }),
-      ),
-    ).toBe(0.1)
-  })
-
-  it("selects provider pricing modes from reported service metadata", () => {
-    expect(
-      UsageCost.eventCostUsd(
-        reportedTokens("priority", "gpt-5.6-sol", 1_000_000, 1_000_000, {
-          service_tier: "priority",
-          input_tokens_uncached: 1_000_000,
-        }),
-      ),
-    ).toBe(70)
-    expect(
-      UsageCost.eventCostUsd(
-        reportedTokens("unknown-tier", "gpt-5.6-sol", 1_000_000, 0, {
-          service_tier: "flex",
-          input_tokens_uncached: 1_000_000,
-        }),
-      ),
-    ).toBeUndefined()
-  })
-
-  it("does not derive missing uncached input from other buckets", () => {
-    expect(
-      UsageCost.eventCostUsd(
-        reportedTokens("derived", "gpt-5.6-terra", 200_000, 0, {
-          input_tokens_uncached: null,
-          input_tokens_cache_read: 180_000,
-          input_tokens_cache_write: 0,
-        }),
-      ),
-    ).toBeUndefined()
-    expect(
-      UsageCost.eventCostUsd(
-        reportedTokens("missing-total", "gpt-5.6-sol", null, 0, {
-          input_tokens_uncached: 100_000,
-          input_tokens_cache_read: 100_000,
-          input_tokens_cache_write: 0,
-        }),
-      ),
-    ).toBeUndefined()
-  })
-
-  it("accepts a null zero cache-write bucket but requires complete token accounting", () => {
-    expect(
-      UsageCost.eventCostUsd(
-        reportedTokens("missing-output", "gpt-5.6-sol", 100, null, {
-          input_tokens_uncached: 100,
-        }),
-      ),
-    ).toBeUndefined()
-    expect(
-      UsageCost.eventCostUsd(
-        reportedTokens("missing-cache-write", "gpt-5.6-sol", 100, 0, {
-          input_tokens_cache_write: null,
-        }),
-      ),
-    ).toBe(0.0005)
-    expect(
-      UsageCost.eventCostUsd(
-        reportedTokens("unaccounted-cache-write", "gpt-5.6-sol", 100, 0, {
-          input_tokens_uncached: 50,
-          input_tokens_cache_write: null,
-        }),
-      ),
-    ).toBeUndefined()
-    expect(
-      UsageCost.eventCostUsd(
-        reportedTokens("reasoning-subset", "gpt-5.6-sol", 0, 100, {
-          input_tokens_uncached: 0,
-          output_tokens_reasoning: 50,
-        }),
-      ),
-    ).toBe(0.003)
-  })
-
-  it("leaves missing and malformed reports unpriced", () => {
-    expect(UsageCost.eventCostUsd(reportedTokens("missing", "test", null, null))).toBeUndefined()
-    expect(UsageCost.eventCostUsd(reportedTokens("unknown-model", "unknown", 1_000, 1_000))).toBeUndefined()
-    expect(
-      UsageCost.eventCostUsd(
-        reportedTokens("inconsistent", "gpt-5.6-sol", 100, 0, {
-          input_tokens_uncached: 80,
-          input_tokens_cache_read: 30,
-          input_tokens_cache_write: 0,
-        }),
-      ),
-    ).toBeUndefined()
-  })
-
   it("counts a durable usage cursor only once across replay and live recovery", () => {
     const event = usage("durable-usage", 2.5)
     const replayed = UsageCost.observe(UsageCost.empty, { threadId: "thread", turnId: "turn", event })
@@ -801,7 +674,7 @@ describe("UsageCost", () => {
     expect(missingAttempt.global.unpricedAttempts === 0).toBe(false)
   })
 
-  it("replaces an attempt estimate with provider USD cost in either arrival order", () => {
+  it("prices only from provider USD while counting usage tokens in either arrival order", () => {
     const report = reportedTokens("report", "gpt-5.6-sol", 10_000, 100, {
       model_attempt_id: "shared-attempt",
       input_tokens_uncached: 1_000,
@@ -820,8 +693,22 @@ describe("UsageCost", () => {
         UsageCost.empty,
       )
       expect(snapshot.global.costUsd).toBe(2.5)
+      expect(snapshot.global.tokens).toBe(10_100)
       expect(snapshot.global.unpricedAttempts === 0).toBe(true)
     }
+  })
+
+  it("does not invent USD from usage tokens when provider cost is absent", () => {
+    const report = reportedTokens("report", "gpt-5.6-sol", 10_000, 100, {
+      model_attempt_id: "attempt",
+      input_tokens_uncached: 1_000,
+      input_tokens_cache_read: 9_000,
+    })
+    const snapshot = UsageCost.observe(UsageCost.empty, { threadId: "thread", turnId: "turn", event: report })
+    expect(snapshot.global.costUsd).toBe(0)
+    expect(snapshot.global.tokens).toBe(10_100)
+    expect(snapshot.global.pricedAttempts).toBe(0)
+    expect(snapshot.global.unpricedAttempts).toBe(0)
   })
 
   it.each([
@@ -841,7 +728,7 @@ describe("UsageCost", () => {
     expect(snapshot.global.unpricedAttempts === 0).toBe(false)
   })
 
-  it("keeps an estimate when completed provider cost is absent", () => {
+  it("leaves cost unpriced when attempt completion omits provider USD", () => {
     const report = reportedTokens("report", "gpt-5.6-sol", 10_000, 100, {
       model_attempt_id: "attempt",
       input_tokens_uncached: 1_000,
@@ -851,13 +738,19 @@ describe("UsageCost", () => {
       ...usage("completed", 0),
       data: { model_call_id: "call", model_attempt_id: "attempt", attempt: 1 },
     }
-    const snapshot = [completed, report].reduce(
+    const open = [completed, report].reduce(
       (current, event) => UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
       UsageCost.empty,
     )
+    const settled = UsageCost.observe(open, {
+      threadId: "thread",
+      turnId: "turn",
+      event: lifecycle("execution", "done", "execution.completed", 2, 9),
+    })
 
-    expect(snapshot.global.costUsd).toBeCloseTo(0.0125, 10)
-    expect(snapshot.global.unpricedAttempts === 0).toBe(true)
+    expect(open.global.costUsd).toBe(0)
+    expect(open.global.tokens).toBe(10_100)
+    expect(settled.global).toMatchObject({ costUsd: 0, tokens: 10_100, unpricedAttempts: 1 })
   })
 
   it("does not estimate nested completed usage and counts it unpriced once it settles", () => {
@@ -905,7 +798,8 @@ describe("UsageCost", () => {
     })
 
     expect(UsageCost.threadTotals(awaiting, "thread")).toMatchObject({ costUsd: 2, unpricedAttempts: 0 })
-    expect(UsageCost.threadTotals(reported, "thread").costUsd).toBeCloseTo(2.0005, 10)
+    expect(UsageCost.threadTotals(reported, "thread").costUsd).toBe(2)
+    expect(UsageCost.threadTotals(reported, "thread").tokens).toBe(100)
     expect(UsageCost.threadTotals(reported, "thread").unpricedAttempts).toBe(0)
   })
 

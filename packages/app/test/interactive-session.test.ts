@@ -821,6 +821,94 @@ describe("InteractiveSession controls", () => {
     }),
   )
 
+  it.effect("quit materializes a durable user transcript before the turn is cancelled", () =>
+    Effect.gen(function* () {
+      const { session, turns, transcripts } = yield* makeHarness()
+      expect(yield* transcripts.get(Turn.TurnId.make("active"))).toBeUndefined()
+      yield* session.quit
+      expect((yield* turns.get(Turn.TurnId.make("active")))?.status).toBe("cancelled")
+      const projection = yield* transcripts.get(Turn.TurnId.make("active"))
+      expect(projection?.units.some((unit) => unit.key === "turn:active:user")).toBe(true)
+    }),
+  )
+
+  it.effect("selects a cancelled turn without durable projection using the prompt seed", () =>
+    Effect.gen(function* () {
+      const { session, turns, transcripts, older } = yield* makeHarness()
+      yield* turns.requestStop(Turn.TurnId.make("active"), 2)
+      yield* turns.setStatus(Turn.TurnId.make("active"), "cancelled", "cancel-cursor", 3)
+      expect(yield* transcripts.get(Turn.TurnId.make("active"))).toBeUndefined()
+      const events: Array<Operation.InteractiveEvent> = []
+      yield* collectEvents(session, events)
+      yield* session.selectThread(older.id, 1)
+      const loaded = yield* awaitSelectionLoaded(events, (event) =>
+        event.entries.some((entry) => entry.unit.key === "turn:active:user"),
+      )
+      expect(loaded.entries.some((entry) => entry.unit.key === "turn:active:user")).toBe(true)
+      expect(loaded.entries.find((entry) => entry.unit.key === "turn:active:user")?.turn.prompt).toBe("active prompt")
+    }),
+  )
+
+  it.effect("quit mid-flight then reopen keeps the user prompt and prices only provider USD", () =>
+    Effect.gen(function* () {
+      const { session, turns, transcripts, older } = yield* makeHarness()
+      yield* session.quit
+      expect((yield* turns.get(Turn.TurnId.make("active")))?.status).toBe("cancelled")
+      expect(
+        (yield* transcripts.get(Turn.TurnId.make("active")))?.units.some((unit) => unit.key === "turn:active:user"),
+      ).toBe(true)
+      const events: Array<Operation.InteractiveEvent> = []
+      yield* collectEvents(session, events)
+      yield* session.selectThread(older.id, 1)
+      const loaded = yield* awaitSelectionLoaded(events, (event) =>
+        event.entries.some((entry) => entry.unit.key === "turn:active:user"),
+      )
+      expect(loaded.entries.find((entry) => entry.unit.key === "turn:active:user")?.turn.prompt).toBe("active prompt")
+      const tokensOnly = UsageCost.observe(UsageCost.empty, {
+        threadId: String(older.id),
+        turnId: "active",
+        event: {
+          executionId: "active",
+          cursor: "usage-only",
+          sequence: 1,
+          type: "model.usage.reported",
+          createdAt: 1,
+          data: {
+            model_attempt_id: "attempt-1",
+            provider: "openai",
+            model: "gpt-5.6-sol",
+            input_tokens: 1_000,
+            input_tokens_uncached: 1_000,
+            input_tokens_cache_read: 0,
+            input_tokens_cache_write: 0,
+            output_tokens: 100,
+          },
+        },
+      })
+      if (Result.isFailure(tokensOnly)) return yield* Effect.die(tokensOnly.failure)
+      expect(tokensOnly.success.global.costUsd).toBe(0)
+      expect(tokensOnly.success.global.tokens).toBe(1_100)
+      const priced = UsageCost.observe(tokensOnly.success, {
+        threadId: String(older.id),
+        turnId: "active",
+        event: {
+          executionId: "active",
+          cursor: "attempt-completed",
+          sequence: 2,
+          type: "model.attempt.completed",
+          createdAt: 2,
+          data: {
+            model_attempt_id: "attempt-1",
+            attempt: 1,
+            cost: { amount: 1.5, currency: "USD" },
+          },
+        },
+      })
+      if (Result.isFailure(priced)) return yield* Effect.die(priced.failure)
+      expect(priced.success.global).toMatchObject({ costUsd: 1.5, tokens: 1_100, unpricedAttempts: 0 })
+    }),
+  )
+
   it.effect("persists interrupt-and-send before cancelling the active turn", () =>
     Effect.gen(function* () {
       const { turns, controls, older } = yield* makeHarness()

@@ -15,7 +15,6 @@
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   },
   "dependencies": {
-    "@opencode-ai/models": "catalog:",
     "@rika/tools": "workspace:*",
     "effect": "catalog:"
   },

@@ -1518,6 +1518,8 @@ export const productLayer = <
         executionIngest.ensure({ threadId, turnId }).pipe(Effect.mapError((failure) => operationError(failure.message)))
       const awaitIngestSettled = (turnId: Turn.TurnId) =>
         executionIngest.settled(turnId).pipe(Effect.mapError((failure) => operationError(failure.message)))
+      const flushIngest = (turnId: Turn.TurnId) =>
+        executionIngest.flush(turnId).pipe(Effect.mapError((failure) => operationError(failure.message)))
       const deliverResultEvents = (
         turnId: Turn.TurnId,
         events: ReadonlyArray<ExecutionBackend.Event>,
@@ -1525,6 +1527,49 @@ export const productLayer = <
       ) => {
         for (const event of undeliveredEvents(events, delivered)) executionIngest.deliver(turnId, event)
       }
+      const stopActiveExecutionWorkWithProjection = Effect.fn("Operation.stopActiveExecutionWorkWithProjection")(
+        function* () {
+          const turns = yield* TurnRepository.Service
+          const backend = yield* ExecutionBackend.Service
+          const running = (yield* turns.listNonterminal).filter((turn) => turn.status !== "queued")
+          for (const turn of running) {
+            yield* ensureIngest(turn.threadId, turn.id)
+            yield* flushIngest(turn.id)
+          }
+          const requestedAt = yield* Clock.currentTimeMillis
+          for (const turn of running) yield* turns.requestStop(turn.id, requestedAt)
+          if (running.length > 0)
+            yield* Effect.logInfo("execution.stop.requested_for_all").pipe(
+              Effect.annotateLogs({ "rika.turn.count": running.length }),
+            )
+          for (const turn of yield* turns.listStopRequested) {
+            const outcome = yield* Effect.result(backend.cancel(turn.id))
+            if (outcome._tag === "Failure") {
+              yield* Effect.logWarning("execution.stop.settle_cancel_failed").pipe(
+                Effect.annotateLogs({
+                  "rika.turn.id": String(turn.id),
+                  "rika.failure.kind": String(outcome.failure),
+                }),
+              )
+              continue
+            }
+            const result = outcome.success
+            deliverResultEvents(turn.id, result.events)
+            yield* turns.setStatus(
+              turn.id,
+              result.status,
+              result.checkpoint?.cursor ?? ThreadActivity.latestCursor(turn.id, result.events) ?? turn.lastCursor,
+              yield* Clock.currentTimeMillis,
+            )
+            yield* Effect.logInfo("execution.stop.settled").pipe(
+              Effect.annotateLogs({ "rika.turn.id": String(turn.id) }),
+            )
+            yield* ensureIngest(turn.threadId, turn.id)
+            yield* flushIngest(turn.id)
+            yield* awaitIngestSettled(turn.id)
+          }
+        },
+      )
       const threadInteractions =
         options.threadInteractionRepositoryLayer === undefined
           ? undefined
@@ -2844,30 +2889,39 @@ export const productLayer = <
             }
             if (turn.status === "queued") continue
             const projection = yield* transcripts.get(turn.id)
+            let entries: ReadonlyArray<TranscriptRepository.Entry>
             if (projection === undefined || projection.projectionVersion < ExecutionIngest.projectionVersion) {
               if (Turn.isRecordedShell(turn))
                 return yield* operationError(`Recorded shell turn ${turn.id} has no current durable transcript`)
               yield* ensureIngest(turn.threadId, turn.id)
-              continue
-            }
-            if (projection.projectionVersion !== ExecutionIngest.projectionVersion)
-              return yield* operationError(
-                `Turn ${turn.id} has unsupported projection version ${projection.projectionVersion}`,
+              if (!Turn.isAgentExecution(turn)) continue
+              const seed = Transcript.empty(turn.id, turn.prompt)
+              entries = seed.units.map((unit) => ({
+                turn,
+                unit,
+                projectionRevision: seed.revision,
+                projectionModelPhase: seed.modelPhase,
+              }))
+            } else {
+              if (projection.projectionVersion !== ExecutionIngest.projectionVersion)
+                return yield* operationError(
+                  `Turn ${turn.id} has unsupported projection version ${projection.projectionVersion}`,
+                )
+              if (projection.units.length === 0)
+                return yield* operationError(`Turn ${turn.id} has an empty current-version transcript`)
+              entries = projection.units.map((unit) =>
+                Object.assign(
+                  {
+                    turn: projection.turn,
+                    unit,
+                    projectionRevision: projection.revision,
+                    projectionModelPhase: projection.modelPhase,
+                  },
+                  projection.costUsd === undefined ? {} : { projectionCostUsd: projection.costUsd },
+                ),
               )
-            if (projection.units.length === 0)
-              return yield* operationError(`Turn ${turn.id} has an empty current-version transcript`)
+            }
             projectedTurns += 1
-            const entries: ReadonlyArray<TranscriptRepository.Entry> = projection.units.map((unit) =>
-              Object.assign(
-                {
-                  turn: projection.turn,
-                  unit,
-                  projectionRevision: projection.revision,
-                  projectionModelPhase: projection.modelPhase,
-                },
-                projection.costUsd === undefined ? {} : { projectionCostUsd: projection.costUsd },
-              ),
-            )
             if (!reduced && entryCount + entries.length <= selectionInitialEntryWindow) {
               window.unshift(entries)
               entryCount += entries.length
@@ -3655,7 +3709,7 @@ export const productLayer = <
               }),
             ),
           ),
-          quit: stopActiveExecutionWork().pipe(
+          quit: stopActiveExecutionWorkWithProjection().pipe(
             Effect.provide(executionDependencies),
             Effect.mapError((failure) =>
               OperationUnavailable.make({ operation: "InteractiveSession.quit", message: String(failure) }),
@@ -3958,7 +4012,7 @@ export const productLayer = <
             OperationUnavailable.make({ operation: "ResidentReplacement", message: String(error) }),
           ),
         ),
-        stopActiveExecutionWork: stopActiveExecutionWork().pipe(
+        stopActiveExecutionWork: stopActiveExecutionWorkWithProjection().pipe(
           Effect.provide(executionDependencies),
           Effect.mapError((error) =>
             OperationUnavailable.make({ operation: "ResidentAbandonment", message: String(error) }),
