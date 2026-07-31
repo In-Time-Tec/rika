@@ -1,7 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Effect, FileSystem, Layer, Path } from "effect"
 import { expect, test } from "vitest"
-import { canonicalDataRoot } from "../src/data-root"
+import { canonicalDataRoot } from "./canonical-data-root"
 
 const withBunServices = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path>) =>
   Effect.runPromise(

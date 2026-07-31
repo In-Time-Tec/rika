@@ -5,17 +5,17 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./behavior-mode": "./src/modes.ts",
-    "./model-catalog": "./src/models.ts",
-    "./model-preset": "./src/models.ts",
-    "./model-route": "./src/models.ts",
-    "./model-route-label": "./src/models.ts",
-    "./model-route-resolution": "./src/models.ts",
-    "./canonical-data-root": "./src/data-root.ts",
-    "./configuration-paths": "./src/paths.ts",
-    "./profile-data-paths": "./src/paths.ts",
-    "./configuration-settings": "./src/configuration-settings.ts",
-    "./configuration-service": "./src/config-service.ts"
+    "./behavior-mode": "./src/model-routing/behavior-mode.ts",
+    "./model-catalog": "./src/model-routing/model-catalog.ts",
+    "./model-preset": "./src/model-routing/model-preset.ts",
+    "./model-route": "./src/model-routing/model-route.ts",
+    "./model-route-label": "./src/model-routing/model-route-label.ts",
+    "./model-route-resolution": "./src/model-routing/model-route-resolution.ts",
+    "./canonical-data-root": "./src/path-resolution/canonical-data-root.ts",
+    "./configuration-paths": "./src/path-resolution/configuration-paths.ts",
+    "./profile-data-paths": "./src/path-resolution/profile-data-paths.ts",
+    "./configuration-settings": "./src/settings/configuration-settings.ts",
+    "./configuration-service": "./src/settings/configuration-service.ts"
   },
   "dependencies": {
     "effect": "catalog:"

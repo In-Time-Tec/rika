@@ -1,13 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { defaults } from "../src/config-contract"
-import {
-  dataPaths,
-  executionEventHistoryFor,
-  globalDirectory,
-  globalPaths,
-  workspaceDirectory,
-  workspacePaths,
-} from "../src/paths"
+import { defaults } from "../settings/configuration-defaults"
+import { dataPaths, executionEventHistoryFor } from "./profile-data-paths"
+import { globalDirectory, globalPaths, workspaceDirectory, workspacePaths } from "./configuration-paths"
 
 describe("on-disk layout", () => {
   it("puts every workspace file under one directory", () => {

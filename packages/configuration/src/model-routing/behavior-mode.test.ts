@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import * as ConfigContract from "../src/config-contract"
-import { ModeId, RouteModeId, modeIds, routeModeIds } from "../src/modes"
+import * as SettingsDefaults from "../settings/configuration-defaults"
+import { ModeId, RouteModeId, modeIds, routeModeIds } from "./behavior-mode"
 
 const members = (schema: { readonly ast: { readonly types?: ReadonlyArray<{ readonly literal?: unknown }> } }) =>
   (schema.ast.types ?? []).map((type) => type.literal)
@@ -16,6 +16,6 @@ describe("modes", () => {
   })
 
   it("ships a default route for every mode", () => {
-    expect(Object.keys(ConfigContract.defaults.modes).toSorted()).toEqual([...modeIds].toSorted())
+    expect(Object.keys(SettingsDefaults.defaults.modes).toSorted()).toEqual([...modeIds].toSorted())
   })
 })

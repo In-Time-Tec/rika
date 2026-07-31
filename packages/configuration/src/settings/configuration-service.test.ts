@@ -1,6 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Context, Effect, Function, Layer, Redacted, Schema } from "effect"
-import { ConfigContract, ConfigService } from "@rika/configuration/configuration-settings"
+import * as SettingsDefaults from "./configuration-defaults"
+import * as ModelResolution from "../model-routing/model-route-resolution"
+import * as ConfigurationService from "./configuration-service"
+
+const ConfigContract = { ...SettingsDefaults, ...ModelResolution }
 
 const webProviders = [
   { id: "parallel", credentialEnvironment: "PARALLEL_API_KEY" },
@@ -24,19 +28,19 @@ const provideLayer: {
 describe("ConfigService", () => {
   it.effect("uses built-in providers and internal model policy when settings omit providers", () =>
     Effect.gen(function* () {
-      const config = yield* ConfigService.effective()
+      const config = yield* ConfigurationService.effectiveConfiguration()
       expect(config.settings.providers).toEqual(ConfigContract.defaults.providers)
       expect(config.settings.models).toBe(ConfigContract.defaults.models)
       expect(config.settings.modes).toBe(ConfigContract.defaults.modes)
       expect(config.settings.compaction).toEqual(ConfigContract.defaults.compaction)
       expect(config.environment.providerCredentials).toEqual({})
       expect(config.environment.webSearchCredentials).toEqual({})
-    }).pipe(provideLayer(ConfigService.memoryLayer())),
+    }).pipe(provideLayer(ConfigurationService.memoryConfigurationLayer())),
   )
 
   it.effect("replaces a global provider override at workspace scope without inheriting its credential", () =>
     Effect.gen(function* () {
-      const config = yield* ConfigService.effective()
+      const config = yield* ConfigurationService.effectiveConfiguration()
       expect(config.settings.providers.openai).toEqual({
         protocol: "openai",
         baseUrl: "https://workspace.models.test/v1",
@@ -64,7 +68,7 @@ describe("ConfigService", () => {
       ).toBe(true)
     }).pipe(
       provideLayer(
-        ConfigService.memoryLayer({
+        ConfigurationService.memoryConfigurationLayer({
           global: {
             providers: { openai: { baseUrl: "https://global.models.test/v1", apiKeyEnv: "GLOBAL_MODEL_API_KEY" } },
           },
@@ -76,7 +80,7 @@ describe("ConfigService", () => {
 
   it.effect("falls back to built-in fields rather than the other scope when a workspace provider replaces global", () =>
     Effect.gen(function* () {
-      const config = yield* ConfigService.effective()
+      const config = yield* ConfigurationService.effectiveConfiguration()
       expect(config.settings.providers).toEqual({
         openai: {
           protocol: "openai",
@@ -92,7 +96,7 @@ describe("ConfigService", () => {
       })
     }).pipe(
       provideLayer(
-        ConfigService.memoryLayer({
+        ConfigurationService.memoryConfigurationLayer({
           global: {
             providers: {
               openai: { baseUrl: "https://global.openai.test/v1", apiKeyEnv: "GLOBAL_OPENAI_KEY" },
@@ -107,7 +111,7 @@ describe("ConfigService", () => {
 
   it.effect("merges custom aliases by name and model routes by leaf while inheriting built-in policy", () =>
     Effect.gen(function* () {
-      const config = yield* ConfigService.effective()
+      const config = yield* ConfigurationService.effectiveConfiguration()
       const alias = config.settings.models["bedrock-terra"]!
       expect(alias.provider).toBe("bedrock")
       expect(alias.candidates).toEqual(["workspace-model"])
@@ -123,7 +127,7 @@ describe("ConfigService", () => {
       })
     }).pipe(
       provideLayer(
-        ConfigService.memoryLayer({
+        ConfigurationService.memoryConfigurationLayer({
           global: {
             modelAliases: {
               "bedrock-terra": { base: "terra", provider: "bedrock", candidates: ["global-model"] },
@@ -151,12 +155,12 @@ describe("ConfigService", () => {
 
   it.effect("does not inspect or project ambient AWS credentials", () =>
     Effect.gen(function* () {
-      const config = yield* ConfigService.effective()
+      const config = yield* ConfigurationService.effectiveConfiguration()
       expect(config.environment.providerCredentials).toEqual({})
       expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(config)).not.toContain("aws-secret-must-not-leak")
     }).pipe(
       provideLayer(
-        ConfigService.liveEnvironmentLayer({ webProviders }).pipe(
+        ConfigurationService.liveConfigurationLayer({ webProviders }).pipe(
           Layer.provide(
             ConfigProvider.layer(
               ConfigProvider.fromEnv({
@@ -175,7 +179,7 @@ describe("ConfigService", () => {
 
   it.effect("does not send the built-in provider credential to an overridden endpoint", () =>
     Effect.gen(function* () {
-      const config = yield* ConfigService.effective()
+      const config = yield* ConfigurationService.effectiveConfiguration()
       expect(config.settings.providers.openai).toEqual({
         protocol: "openai",
         baseUrl: "https://workspace.models.test/v1",
@@ -183,7 +187,7 @@ describe("ConfigService", () => {
       expect(config.environment.providerCredentials).toEqual({})
     }).pipe(
       provideLayer(
-        ConfigService.liveEnvironmentLayer({
+        ConfigurationService.liveConfigurationLayer({
           webProviders,
           workspace: { providers: { openai: { baseUrl: "https://workspace.models.test/v1" } } },
         }).pipe(
@@ -195,7 +199,7 @@ describe("ConfigService", () => {
 
   it.effect("reads only configured provider API-key environment references and keeps values redacted", () => {
     const secret = "configured-secret-must-not-leak"
-    const layer = ConfigService.liveEnvironmentLayer({
+    const layer = ConfigurationService.liveConfigurationLayer({
       webProviders,
       global: { providers: { openai: { apiKeyEnv: "RIKA_MODEL_API_KEY" } } },
     }).pipe(
@@ -209,8 +213,10 @@ describe("ConfigService", () => {
     )
     return Effect.gen(function* () {
       const effective = yield* Effect.scoped(
-        Layer.build(layer).pipe(Effect.map((context) => Context.get(context, ConfigService.Service))),
-      ).pipe(Effect.flatMap((service: ConfigService.Interface) => service.effective))
+        Layer.build(layer).pipe(
+          Effect.map((context) => Context.get(context, ConfigurationService.ConfigurationService)),
+        ),
+      ).pipe(Effect.flatMap((service: ConfigurationService.ConfigurationServiceShape) => service.effective))
       expect(Object.keys(effective.environment.providerCredentials).toSorted()).toEqual([
         "ANTHROPIC_API_KEY",
         "RIKA_MODEL_API_KEY",
@@ -226,7 +232,7 @@ describe("ConfigService", () => {
     const globalSecret = "global-secret-must-not-leak"
     const workspaceSecret = "workspace-secret-must-not-leak"
     return Effect.gen(function* () {
-      const config = yield* ConfigService.effective()
+      const config = yield* ConfigurationService.effectiveConfiguration()
       expect(config.settings.webSearch.providers).toEqual({ exa: { configured: true }, custom: { configured: true } })
       expect(Redacted.value(config.environment.webSearchCredentials.exa!)).toBe(workspaceSecret)
       expect(Redacted.value(config.environment.webSearchCredentials.custom!)).toBe(globalSecret)
@@ -235,7 +241,7 @@ describe("ConfigService", () => {
       expect(encoded).not.toContain(workspaceSecret)
     }).pipe(
       provideLayer(
-        ConfigService.memoryLayer({
+        ConfigurationService.memoryConfigurationLayer({
           global: {
             webSearch: { providers: { exa: { apiKey: globalSecret }, custom: { apiKey: globalSecret } } },
           },
@@ -246,7 +252,7 @@ describe("ConfigService", () => {
   })
 
   it.effect("uses common web search environment fallbacks without replacing explicit settings", () => {
-    const layer = ConfigService.liveEnvironmentLayer({
+    const layer = ConfigurationService.liveConfigurationLayer({
       webProviders,
       workspace: { webSearch: { providers: { parallel: { apiKey: "settings-parallel" } } } },
     }).pipe(
@@ -263,7 +269,7 @@ describe("ConfigService", () => {
       ),
     )
     return Effect.gen(function* () {
-      const config = yield* ConfigService.effective()
+      const config = yield* ConfigurationService.effectiveConfiguration()
       expect(Object.keys(config.settings.webSearch.providers).toSorted()).toEqual(["exa", "firecrawl", "parallel"])
       expect(Object.keys(config.environment.webSearchCredentials).toSorted()).toEqual(["exa", "firecrawl", "parallel"])
       expect(Redacted.value(config.environment.webSearchCredentials.parallel!)).toBe("settings-parallel")
@@ -274,9 +280,9 @@ describe("ConfigService", () => {
 
   it.effect("uses installed provider descriptors and rejects configured providers that are not installed", () =>
     Effect.gen(function* () {
-      const configured = yield* ConfigService.effective().pipe(
+      const configured = yield* ConfigurationService.effectiveConfiguration().pipe(
         provideLayer(
-          ConfigService.liveEnvironmentLayer({
+          ConfigurationService.liveConfigurationLayer({
             webProviders: [{ id: "custom", credentialEnvironment: "CUSTOM_SEARCH_KEY" }],
           }).pipe(
             Layer.provide(
@@ -288,9 +294,9 @@ describe("ConfigService", () => {
       expect(Redacted.value(configured.environment.webSearchCredentials.custom!)).toBe("custom-secret")
 
       const exit = yield* Effect.exit(
-        ConfigService.effective().pipe(
+        ConfigurationService.effectiveConfiguration().pipe(
           provideLayer(
-            ConfigService.liveEnvironmentLayer({
+            ConfigurationService.liveConfigurationLayer({
               webProviders: [{ id: "installed", credentialEnvironment: "INSTALLED_KEY" }],
               workspace: { webSearch: { providers: { missing: { apiKey: "secret" } } } },
             }),
@@ -304,7 +310,7 @@ describe("ConfigService", () => {
 
   it.effect("merges intentionally configurable product settings and reports credential presence", () =>
     Effect.gen(function* () {
-      const config = yield* ConfigService.effective()
+      const config = yield* ConfigurationService.effectiveConfiguration()
       expect(config.settings.keymap.submit).toBe("ctrl+enter")
       expect(config.settings.notifications.enabled).toBe(false)
       expect(config.settings.mcp.docs).toMatchObject({ transport: "remote" })
@@ -317,7 +323,7 @@ describe("ConfigService", () => {
       ])
     }).pipe(
       provideLayer(
-        ConfigService.testLayer({
+        ConfigurationService.testConfigurationLayer({
           workspace: {
             keymap: { submit: "ctrl+enter" },
             notifications: { enabled: false },
@@ -334,7 +340,7 @@ describe("ConfigService", () => {
 
   it.effect("applies workspace scalar values and merges every map-shaped setting by key", () =>
     Effect.gen(function* () {
-      const config = yield* ConfigService.effective()
+      const config = yield* ConfigurationService.effectiveConfiguration()
       expect(config.settings.keymap).toMatchObject({ mode: "alt+m", submit: "ctrl+enter", newline: "alt+enter" })
       expect(Object.keys(config.settings.mcp).toSorted()).toEqual(["global", "shared", "workspace"])
       expect(config.settings.mcp.shared).toMatchObject({ command: "workspace-shared" })
@@ -343,7 +349,7 @@ describe("ConfigService", () => {
       expect(config.settings.logging).toEqual({ level: "error" })
     }).pipe(
       provideLayer(
-        ConfigService.memoryLayer({
+        ConfigurationService.memoryConfigurationLayer({
           global: {
             keymap: { mode: "alt+m", submit: "alt+enter" },
             mcp: {
@@ -371,12 +377,12 @@ describe("ConfigService", () => {
 
   it.effect("defaults streamingOnly for chatgpt.com base URLs and honors explicit overrides", () =>
     Effect.gen(function* () {
-      const config = yield* ConfigService.effective()
+      const config = yield* ConfigurationService.effectiveConfiguration()
       expect(config.settings.providers.openai.streamingOnly).toBe(true)
       expect(config.settings.providers.anthropic.streamingOnly).toBeUndefined()
     }).pipe(
       provideLayer(
-        ConfigService.memoryLayer({
+        ConfigurationService.memoryConfigurationLayer({
           global: { providers: { openai: { baseUrl: "https://chatgpt.com/backend-api/codex" } } },
         }),
       ),
@@ -385,12 +391,12 @@ describe("ConfigService", () => {
 
   it.effect("lets an explicit streamingOnly override disable base URL detection", () =>
     Effect.gen(function* () {
-      const config = yield* ConfigService.effective()
+      const config = yield* ConfigurationService.effectiveConfiguration()
       expect(config.settings.providers.openai.streamingOnly).toBe(false)
       expect(config.settings.providers.anthropic.streamingOnly).toBe(true)
     }).pipe(
       provideLayer(
-        ConfigService.memoryLayer({
+        ConfigurationService.memoryConfigurationLayer({
           global: {
             providers: {
               openai: { baseUrl: "https://chatgpt.com/backend-api/codex", streamingOnly: false },
@@ -404,7 +410,7 @@ describe("ConfigService", () => {
 
   it.effect("builds a self-described alias from a preset without naming a built-in base", () =>
     Effect.gen(function* () {
-      const config = yield* ConfigService.effective()
+      const config = yield* ConfigurationService.effectiveConfiguration()
       const alias = config.settings.models["gate-sonnet"]!
       expect(alias.displayName).toBe("Sonnet 5")
       expect(alias.provider).toBe("anthropic")
@@ -417,7 +423,7 @@ describe("ConfigService", () => {
       expect(route.effort).toBe("max")
     }).pipe(
       provideLayer(
-        ConfigService.memoryLayer({
+        ConfigurationService.memoryConfigurationLayer({
           global: {
             modelAliases: {
               "gate-sonnet": {
@@ -436,14 +442,14 @@ describe("ConfigService", () => {
 
   it.effect("accepts an alias that declares its own limits and efforts", () =>
     Effect.gen(function* () {
-      const config = yield* ConfigService.effective()
+      const config = yield* ConfigurationService.effectiveConfiguration()
       const alias = config.settings.models["gate-custom"]!
       expect(alias.limits).toEqual({ maxInputTokens: 900_000, maxOutputTokens: 32_000, keepRecentTokens: 48_000 })
       expect(alias.variants.medium?.normal.options).toEqual({ output_config: { effort: "medium" } })
       expect(alias.displayName).toBe("gate-custom")
     }).pipe(
       provideLayer(
-        ConfigService.memoryLayer({
+        ConfigurationService.memoryConfigurationLayer({
           global: {
             modelAliases: {
               "gate-custom": {
@@ -461,7 +467,7 @@ describe("ConfigService", () => {
 
   it.effect("lets a mode route set its own reasoning effort", () =>
     Effect.gen(function* () {
-      const config = yield* ConfigService.effective()
+      const config = yield* ConfigurationService.effectiveConfiguration()
       expect(config.settings.modes.high).toEqual({
         main: { alias: "sol", effort: "high" },
         oracle: { alias: "opus", effort: "max" },
@@ -469,7 +475,7 @@ describe("ConfigService", () => {
       expect(ConfigContract.resolveModelRoute(config.settings, "high", "oracle").effort).toBe("max")
     }).pipe(
       provideLayer(
-        ConfigService.memoryLayer({
+        ConfigurationService.memoryConfigurationLayer({
           global: {
             modelRoutes: {
               modes: { high: { main: { alias: "sol", effort: "high" }, oracle: { alias: "opus", effort: "max" } } },
@@ -482,14 +488,14 @@ describe("ConfigService", () => {
 
   it.effect("routes thread titles to a configured alias instead of the fixed default", () =>
     Effect.gen(function* () {
-      const config = yield* ConfigService.effective()
+      const config = yield* ConfigurationService.effectiveConfiguration()
       const route = ConfigContract.resolveThreadTitleRoute(config.settings)
       expect(route.alias).toBe("gate-sonnet")
       expect(route.displayName).toBe("Sonnet 5")
       expect(route.effort).toBe("low")
     }).pipe(
       provideLayer(
-        ConfigService.memoryLayer({
+        ConfigurationService.memoryConfigurationLayer({
           global: {
             modelAliases: {
               "gate-sonnet": {
@@ -508,7 +514,7 @@ describe("ConfigService", () => {
 
   it.effect("keeps base-derived aliases working and reports them as deprecated", () =>
     Effect.gen(function* () {
-      const config = yield* ConfigService.effective()
+      const config = yield* ConfigurationService.effectiveConfiguration()
       const alias = config.settings.models["legacy-sonnet"]!
       expect(alias.limits).toEqual(ConfigContract.defaults.models.fable!.limits)
       expect(alias.displayName).toBe("legacy-sonnet")
@@ -519,7 +525,7 @@ describe("ConfigService", () => {
       })
     }).pipe(
       provideLayer(
-        ConfigService.memoryLayer({
+        ConfigurationService.memoryConfigurationLayer({
           global: {
             modelAliases: {
               "legacy-sonnet": { base: "fable", provider: "bedrock", candidates: ["us.anthropic.claude-sonnet-5"] },

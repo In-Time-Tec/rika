@@ -1,5 +1,13 @@
 import { describe, expect, it } from "@effect/vitest"
-import { ConfigContract, Models } from "@rika/configuration/configuration-settings"
+import * as SettingsDefaults from "./configuration-defaults"
+import * as SettingsDecoder from "./configuration-settings-decoder"
+import * as ModelResolution from "../model-routing/model-route-resolution"
+import { isStreamingOnlyBaseUrl } from "../model-routing/model-route"
+import { catalog } from "../model-routing/model-catalog"
+import type { ConfigurationSettings } from "./configuration-settings"
+
+const ConfigContract = { ...SettingsDefaults, ...SettingsDecoder, ...ModelResolution, isStreamingOnlyBaseUrl }
+const Models = { catalog }
 
 describe("ConfigContract", () => {
   it("owns the built-in model catalog, routes, limits, variants, and compaction policy", () => {
@@ -219,7 +227,7 @@ describe("ConfigContract", () => {
     expect(fable.candidates).toEqual(["claude-fable-5", "claude-opus-4-8"])
     expect(fable.model).toBe(fable.candidates[0])
 
-    const emptyAlias: ConfigContract.Settings = {
+    const emptyAlias: ConfigurationSettings = {
       ...ConfigContract.defaults,
       models: {
         ...ConfigContract.defaults.models,
@@ -235,7 +243,7 @@ describe("ConfigContract", () => {
     const missingProvider = {
       ...ConfigContract.defaults,
       providers: { anthropic: ConfigContract.defaults.providers.anthropic },
-    } as ConfigContract.Settings
+    } as ConfigurationSettings
     expect(() => ConfigContract.resolveModelRoute(missingProvider, "medium")).toThrowError(
       /terra.*missing provider openai/,
     )
