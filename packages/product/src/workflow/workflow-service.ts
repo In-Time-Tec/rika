@@ -19,7 +19,7 @@ export interface Interface {
   readonly cancel: (runId: string) => Effect.Effect<ExecutionBackend.WorkflowInspection | undefined, WorkflowError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/product/workflow/Service") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/product/workflow/workflow-service/Service") {}
 
 export const layer = Layer.effect(
   Service,

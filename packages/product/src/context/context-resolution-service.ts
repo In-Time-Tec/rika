@@ -36,7 +36,7 @@ export type GlobLookup = (
 export interface Interface {
   readonly resolve: (input: Input) => Effect.Effect<Result, PlatformError.PlatformError>
 }
-export class Service extends Context.Service<Service, Interface>()("@rika/product/resolved-context/Service") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/product/context/context-resolution-service/Service") {}
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex")
 const globPattern = (value: string) => value.includes("*")

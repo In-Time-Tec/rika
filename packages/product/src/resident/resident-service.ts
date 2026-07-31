@@ -303,7 +303,7 @@ export interface Interface {
   >
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/product/resident-service/Service") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/product/resident/resident-service/Service") {}
 
 export const testLayer = (implementation: Interface): Layer.Layer<Service> => Layer.succeed(Service, implementation)
 

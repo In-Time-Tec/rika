@@ -85,7 +85,7 @@ export interface Interface {
   ) => Effect.Effect<CommitResult, RepositoryError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/product/usage-repository/Service") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/product/thread/repository/usage-repository/Service") {}
 
 const emptyMaterialized: Materialized = {
   pricedAttempts: 0,

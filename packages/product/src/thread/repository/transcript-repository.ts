@@ -132,7 +132,7 @@ export interface Interface {
   readonly globalCostUsd: Effect.Effect<number, RepositoryError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/product/transcript-repository/Service") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/product/thread/repository/transcript-repository/Service") {}
 
 const emptyProjection = (turn: Turn, projectionVersion: number): Projection => ({
   turn,

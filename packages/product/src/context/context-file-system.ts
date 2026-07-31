@@ -7,7 +7,7 @@ export interface Interface {
   readonly readFileString: (path: string) => Effect.Effect<string, PlatformError.PlatformError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/product/context-file-system/Service") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/product/context/context-file-system/Service") {}
 
 export const liveLayer = Layer.effect(
   Service,

@@ -240,7 +240,7 @@ class OperationError extends Schema.TaggedErrorClass<OperationError>()("Operatio
   message: Schema.String,
 }) {}
 const operationError = (message: string) => OperationError.make({ message })
-const executeShellCommand = Effect.fn("Operation.executeShellCommand")(function* (
+const executeShellCommand = Effect.fn("ProductOperation.executeShellCommand")(function* (
   tools: ToolRuntime.Interface,
   command: string,
 ) {
@@ -463,7 +463,7 @@ export interface AuthOperationOptions {
   readonly layer: Layer.Layer<OpenAiAuth.Service, OperationError>
   readonly assertOpenAiDirect: (workspace: string) => Effect.Effect<void, OperationError>
 }
-export const runAuth = Effect.fn("Operation.runAuth")(function* (
+export const runAuth = Effect.fn("ProductOperation.runAuth")(function* (
   input: Extract<Input, { readonly _tag: "Auth" }>,
   options: AuthOperationOptions,
   defaultWorkspace: string,
@@ -504,7 +504,7 @@ export const runAuth = Effect.fn("Operation.runAuth")(function* (
   }
   yield* Console.log(message)
 })
-const reconcileInternal = Effect.fn("Operation.reconcile")(function* (
+const reconcileInternal = Effect.fn("ProductOperation.reconcile")(function* (
   extensions?: ExecutionExtensions.ExecutionExtensionInterface,
   prepare?: (
     turn: Turn.AgentExecutionTurn,
@@ -786,7 +786,7 @@ const reconcileInternal = Effect.fn("Operation.reconcile")(function* (
     { discard: true },
   )
 })
-export const reconcile = Effect.fn("Operation.reconcilePublic")(function* (
+export const reconcile = Effect.fn("ProductOperation.reconcilePublic")(function* (
   extensions?: ExecutionExtensions.ExecutionExtensionInterface,
   prepare?: (
     turn: Turn.AgentExecutionTurn,
@@ -941,7 +941,7 @@ const projectedOutcomeStatus = (status: "completed" | "failed" | "cancelled"): "
 }
 const sessionQuiescencePollAttempts = 40
 const sessionQuiescenceCandidateLimit = 8
-const executionTreeQuiescent = Effect.fn("Operation.executionTreeQuiescent")(function* (
+const executionTreeQuiescent = Effect.fn("ProductOperation.executionTreeQuiescent")(function* (
   backend: ExecutionBackend.Interface,
   turnId: string,
   reference: boolean = false,
@@ -973,7 +973,7 @@ const executionTreeQuiescent = Effect.fn("Operation.executionTreeQuiescent")(fun
 })
 const workflowReplacementKey = (runId: string, ownerTurnId?: string, workspace?: string) =>
   JSON.stringify([runId, ownerTurnId, workspace])
-export const hasActiveExecutionWork = Effect.fn("Operation.hasActiveExecutionWork")(function* () {
+export const hasActiveExecutionWork = Effect.fn("ProductOperation.hasActiveExecutionWork")(function* () {
   const turns = yield* TurnRepository.Service
   const backend = yield* ExecutionBackend.Service
   const persisted =
@@ -1020,7 +1020,7 @@ export const hasActiveExecutionWork = Effect.fn("Operation.hasActiveExecutionWor
   }
   return backend.listOpenRootExecutions === undefined ? false : (yield* backend.listOpenRootExecutions).length > 0
 })
-const blockedSessionWriter = Effect.fn("Operation.blockedSessionWriter")(function* (
+const blockedSessionWriter = Effect.fn("ProductOperation.blockedSessionWriter")(function* (
   backend: ExecutionBackend.Interface,
   threadId: Thread.ThreadId,
 ) {
@@ -1037,7 +1037,7 @@ const blockedSessionWriter = Effect.fn("Operation.blockedSessionWriter")(functio
   }
   return undefined
 })
-const settleStopRequestedTurns = Effect.fn("Operation.settleStopRequestedTurns")(function* <E, R>(
+const settleStopRequestedTurns = Effect.fn("ProductOperation.settleStopRequestedTurns")(function* <E, R>(
   backend: ExecutionBackend.Interface,
   settle: (
     turnId: Turn.TurnId,
@@ -1065,7 +1065,7 @@ const settleStopRequestedTurns = Effect.fn("Operation.settleStopRequestedTurns")
     yield* Effect.logInfo("execution.stop.settled").pipe(Effect.annotateLogs({ "rika.turn.id": String(turn.id) }))
   }
 })
-export const stopActiveExecutionWork = Effect.fn("Operation.stopActiveExecutionWork")(function* () {
+export const stopActiveExecutionWork = Effect.fn("ProductOperation.stopActiveExecutionWork")(function* () {
   const turns = yield* TurnRepository.Service
   const backend = yield* ExecutionBackend.Service
   const running = (yield* turns.listNonterminal).filter((turn) => turn.status !== "queued")
@@ -1079,7 +1079,7 @@ export const stopActiveExecutionWork = Effect.fn("Operation.stopActiveExecutionW
     turns.setStatus(turnId, status, cursor, settledAt).pipe(Effect.asVoid),
   )
 })
-export const settleAbandonedRecoveredWork = Effect.fn("Operation.settleAbandonedRecoveredWork")(function* (
+export const settleAbandonedRecoveredWork = Effect.fn("ProductOperation.settleAbandonedRecoveredWork")(function* (
   grace: Duration.Duration,
   watchedThreads: () => ReadonlySet<string>,
 ) {
@@ -1122,7 +1122,7 @@ export const settleAbandonedRecoveredWork = Effect.fn("Operation.settleAbandoned
     )
   }
 })
-const awaitSessionQuiescence = Effect.fn("Operation.awaitSessionQuiescence")(function* (
+const awaitSessionQuiescence = Effect.fn("ProductOperation.awaitSessionQuiescence")(function* (
   backend: ExecutionBackend.Interface,
   threadId: Thread.ThreadId,
 ) {
@@ -1174,7 +1174,7 @@ const queueMutationEvent = (queue: TurnRepository.QueueItemChange): InteractiveE
 const unavailable = (input: Input, message = `${input._tag} is specified but not implemented yet`) =>
   OperationUnavailable.make({ operation: input._tag, message })
 const writeThread = (thread: Thread.Thread) => Console.log(encodeJson(thread))
-const requireThread = Effect.fn("Operation.requireThread")(function* (
+const requireThread = Effect.fn("ProductOperation.requireThread")(function* (
   repository: ThreadRepository.Interface,
   id: string,
 ) {
@@ -1292,7 +1292,7 @@ export const productLayer = <
         ExecutionBackend.Service,
       )
       const usageRepository = Context.get(dependencyContext, UsageRepository.Service)
-      const publishThreadUsage = Effect.fn("Operation.publishThreadUsage")(function* (
+      const publishThreadUsage = Effect.fn("ProductOperation.publishThreadUsage")(function* (
         value: UsageRepository.TurnUsage | undefined,
       ) {
         if (value === undefined) return
@@ -1394,7 +1394,7 @@ export const productLayer = <
         dependencyContext,
         Context.make(ExecutionBackend.Service, acquiredBackend),
       )
-      const commitUsageSource = Effect.fn("Operation.commitUsageSource")(function* (
+      const commitUsageSource = Effect.fn("ProductOperation.commitUsageSource")(function* (
         sourceId: string,
         threadId: string,
         turnId: string,
@@ -1510,7 +1510,7 @@ export const productLayer = <
       ) => {
         for (const event of undeliveredEvents(events, delivered)) executionIngest.deliver(turnId, event)
       }
-      const stopActiveExecutionWorkWithProjection = Effect.fn("Operation.stopActiveExecutionWorkWithProjection")(
+      const stopActiveExecutionWorkWithProjection = Effect.fn("ProductOperation.stopActiveExecutionWorkWithProjection")(
         function* () {
           const turns = yield* TurnRepository.Service
           const backend = yield* ExecutionBackend.Service
@@ -1568,7 +1568,7 @@ export const productLayer = <
       const settledTitleExecutions = new Set<string>()
       const titleAttempts = new Map<string, number>()
       const maximumTitleAttempts = 3
-      const titleThread = Effect.fn("Operation.titleThread")(function* (
+      const titleThread = Effect.fn("ProductOperation.titleThread")(function* (
         thread: Thread.Thread,
         firstTurn: Turn.AgentExecutionTurn,
         announce: (event: InteractiveEvent) => void,
@@ -1655,19 +1655,19 @@ export const productLayer = <
           Effect.andThen(PubSub.publish(turnChanges, undefined)),
           Effect.asVoid,
         )
-      const dispatchThreadSummaries = Effect.fn("Operation.dispatchThreadSummaries")(function* (
+      const dispatchThreadSummaries = Effect.fn("ProductOperation.dispatchThreadSummaries")(function* (
         dispatch: (event: InteractiveEvent) => void,
       ) {
         const summaries = yield* ThreadSummaryRepository.Service
         dispatch({ _tag: "ThreadsListed", threads: yield* summaries.list() })
       })
-      const ensureTurnSummary = Effect.fn("Operation.ensureTurnSummary")(function* (turn: Turn.Turn) {
+      const ensureTurnSummary = Effect.fn("ProductOperation.ensureTurnSummary")(function* (turn: Turn.Turn) {
         const summaries = yield* ThreadSummaryRepository.Service
         yield* summaries.ensureTurn(turn.id, turn.threadId, turn.updatedAt)
         yield* notifyThreadSummaries
         yield* notifyTurnChanged(turn)
       })
-      const projectExecutionResult = Effect.fn("Operation.projectExecutionResult")(function* (
+      const projectExecutionResult = Effect.fn("ProductOperation.projectExecutionResult")(function* (
         threadId: Thread.ThreadId,
         result: ExecutionBackend.Result,
       ) {
@@ -1675,7 +1675,7 @@ export const productLayer = <
         yield* summaries.replaceTurn(ThreadActivity.projectionInput(threadId, result, yield* Clock.currentTimeMillis))
         yield* notifyThreadSummaries
       })
-      const setTurnStatus = Effect.fn("Operation.setTurnStatus")(function* (
+      const setTurnStatus = Effect.fn("ProductOperation.setTurnStatus")(function* (
         id: Turn.TurnId,
         status: Turn.Status,
         lastCursor: string | undefined,
@@ -1687,7 +1687,7 @@ export const productLayer = <
         yield* notifyTurnChanged(turn)
         return turn
       })
-      const repairThreadSummaries = Effect.fn("Operation.repairThreadSummaries")(function* () {
+      const repairThreadSummaries = Effect.fn("ProductOperation.repairThreadSummaries")(function* () {
         const summaries = yield* ThreadSummaryRepository.Service
         const backend = yield* ExecutionBackend.Service
         let previousBatch: ReadonlyArray<readonly [string, string, string | undefined]> = []
@@ -1754,7 +1754,7 @@ export const productLayer = <
           )
         }
       })
-      const settleReviewOwner = Effect.fn("Operation.settleReviewOwner")(function* (
+      const settleReviewOwner = Effect.fn("ProductOperation.settleReviewOwner")(function* (
         turn: Pick<Turn.AgentExecutionTurn, "id" | "lastCursor">,
         fanOutId: string,
         initial?: ExecutionBackend.FanOutInspection,
@@ -1777,7 +1777,7 @@ export const productLayer = <
         )
         return inspection
       })
-      const startReviewSettlement = Effect.fn("Operation.startReviewSettlement")(function* (
+      const startReviewSettlement = Effect.fn("ProductOperation.startReviewSettlement")(function* (
         turn: Pick<Turn.AgentExecutionTurn, "id" | "lastCursor">,
         fanOutId: string,
         initial?: ExecutionBackend.FanOutInspection,
@@ -1801,7 +1801,7 @@ export const productLayer = <
       })
       const testRoute = (mode: ModeId) => Effect.succeed(Turn.testExecutionRoute(mode))
       const resolveExecutionRoute = options.resolveExecutionRoute ?? testRoute
-      const executionPrompt = Effect.fn("Operation.executionPrompt")(function* (
+      const executionPrompt = Effect.fn("ProductOperation.executionPrompt")(function* (
         workspace: string,
         prompt: string,
         promptParts?: ReadonlyArray<Turn.PromptPart>,
@@ -1868,7 +1868,7 @@ export const productLayer = <
           messages,
         }
       })
-      const prepareExecution = Effect.fn("Operation.prepareExecution")(function* (
+      const prepareExecution = Effect.fn("ProductOperation.prepareExecution")(function* (
         turn: Turn.AgentExecutionTurn,
         workspace: string,
         persistExtensionPin: boolean = true,
@@ -1912,7 +1912,7 @@ export const productLayer = <
         Effect.scoped,
         Effect.mapError((error) => operationError(String(error))),
       )
-      const reconcileThreadResults = Effect.fn("Operation.reconcileThreadResults")(function* () {
+      const reconcileThreadResults = Effect.fn("ProductOperation.reconcileThreadResults")(function* () {
         if (threadInteractions === undefined) return false
         const turns = Context.get(dependencyContext, TurnRepository.Service)
         const transcripts = Context.get(dependencyContext, TranscriptRepository.Service)
@@ -2011,7 +2011,7 @@ export const productLayer = <
         }
         return retry
       })
-      const makeInteractiveSession = Effect.fn("Operation.makeInteractiveSession")(function* (
+      const makeInteractiveSession = Effect.fn("ProductOperation.makeInteractiveSession")(function* (
         workspace: string,
         settings: {
           readonly initialThreadId?: string
@@ -2165,7 +2165,7 @@ export const productLayer = <
           selectionLoadFiber = undefined
           return fiber === undefined ? Effect.void : Fiber.interrupt(fiber)
         })
-        const openSelectionProjectionFeed = Effect.fn("Operation.interactive.openSelectionProjectionFeed")(function* (
+        const openSelectionProjectionFeed = Effect.fn("ProductOperation.interactive.openSelectionProjectionFeed")(function* (
           state: SelectionEpochState,
         ) {
           const scope = yield* Scope.make()
@@ -2174,7 +2174,7 @@ export const productLayer = <
             .pipe(Effect.provideService(Scope.Scope, scope))
           state.projectionFeed = { watch, scope, promoted: false }
         })
-        const startSelectionProjectionFeed = Effect.fn("Operation.interactive.startSelectionProjectionFeed")(function* (
+        const startSelectionProjectionFeed = Effect.fn("ProductOperation.interactive.startSelectionProjectionFeed")(function* (
           state: SelectionEpochState,
           dispatch: (event: InteractiveEvent) => void,
         ) {
@@ -2219,7 +2219,7 @@ export const productLayer = <
             const feed = state.projectionFeed
             return feed === undefined || feed.promoted ? Effect.void : Scope.close(feed.scope, Exit.void)
           })
-        const activateCreatedThread = Effect.fn("Operation.interactive.activateCreatedThread")(function* (
+        const activateCreatedThread = Effect.fn("ProductOperation.interactive.activateCreatedThread")(function* (
           thread: Thread.Thread,
           epoch: number,
           dispatch: (event: InteractiveEvent) => void,
@@ -2283,7 +2283,7 @@ export const productLayer = <
               }),
             )
             .pipe(Effect.flatten)
-        const submit = Effect.fn("Operation.interactive.submit")(function* (
+        const submit = Effect.fn("ProductOperation.interactive.submit")(function* (
           prompt: string,
           dispatch: (event: InteractiveEvent) => void,
           mode: ModeId = "medium",
@@ -2546,7 +2546,7 @@ export const productLayer = <
             Effect.scoped,
             Effect.catch((error) => Effect.sync(() => dispatchFailure(dispatch, error))),
           )
-        const readQueue = Effect.fn("Operation.interactive.readQueue")(function* (
+        const readQueue = Effect.fn("ProductOperation.interactive.readQueue")(function* (
           threadId: Thread.ThreadId,
           dispatch: (event: InteractiveEvent) => void,
         ) {
@@ -2561,7 +2561,7 @@ export const productLayer = <
             change: { _tag: "Reset", items: queue.turns.map(queueItem) },
           })
         })
-        const drainQueued = Effect.fn("Operation.interactive.drainQueued")(function* (
+        const drainQueued = Effect.fn("ProductOperation.interactive.drainQueued")(function* (
           thread: Thread.Thread,
           dispatch: (event: InteractiveEvent) => void,
         ) {
@@ -2569,7 +2569,7 @@ export const productLayer = <
           const backend = yield* ExecutionBackend.Service
           let claimed = 0
           let staleRefused = false
-          const refuseStaleQueued = Effect.fn("Operation.interactive.refuseStaleQueued")(function* () {
+          const refuseStaleQueued = Effect.fn("ProductOperation.interactive.refuseStaleQueued")(function* () {
             const queue = yield* turns.readQueue(thread.id)
             const now = yield* Clock.currentTimeMillis
             const staleError = staleQueuedTurnsError(thread.id, queue.turns, now, queuedTurnPromoteMaxAgeMs)
@@ -2583,7 +2583,7 @@ export const productLayer = <
             })
             return yield* staleError
           })
-          const runPromoted = Effect.fn("Operation.interactive.runPromoted")(function* (
+          const runPromoted = Effect.fn("ProductOperation.interactive.runPromoted")(function* (
             claim: TurnRepository.QueueClaim,
           ) {
             const promotedTurn = claim.turn
@@ -2687,7 +2687,7 @@ export const productLayer = <
             yield* ensureIngest(updatedTurn.threadId, updatedTurn.id)
             return isTerminalStatus(result.status) && result.status !== "failed"
           })
-          const runNext = Effect.fn("Operation.interactive.runNextQueued")(function* () {
+          const runNext = Effect.fn("ProductOperation.interactive.runNextQueued")(function* () {
             return yield* Effect.uninterruptibleMask((restore) =>
               Effect.gen(function* () {
                 return yield* claimQueuedTurn(thread.id, yield* Clock.currentTimeMillis)
@@ -2751,7 +2751,7 @@ export const productLayer = <
                 }).pipe(Effect.orElseSucceed(() => 0)),
               ),
             )
-        const promoteThread = Effect.fn("Operation.interactive.promoteThread")(function* (
+        const promoteThread = Effect.fn("ProductOperation.interactive.promoteThread")(function* (
           thread: Thread.Thread,
           dispatch: (event: InteractiveEvent) => void,
         ) {
@@ -2766,7 +2766,7 @@ export const productLayer = <
           const now = yield* Clock.currentTimeMillis
           yield* backend.wakeThreadHost({ ...wake, now })
         })
-        const settleThread = Effect.fn("Operation.interactive.settleThread")(function* (
+        const settleThread = Effect.fn("ProductOperation.interactive.settleThread")(function* (
           thread: Thread.Thread,
           dispatch: (event: InteractiveEvent) => void,
         ) {
@@ -2775,23 +2775,23 @@ export const productLayer = <
             Effect.orElseSucceed(() => undefined),
           )
         })
-        const activeInThread = Effect.fn("Operation.interactive.activeInThread")(function* (threadId: Thread.ThreadId) {
+        const activeInThread = Effect.fn("ProductOperation.interactive.activeInThread")(function* (threadId: Thread.ThreadId) {
           const turns = yield* TurnRepository.Service
           const turn = yield* turns.findActive(threadId)
           if (turn === undefined) return yield* operationError("No active turn")
           return turn
         })
-        const active = Effect.fn("Operation.interactive.active")(function* () {
+        const active = Effect.fn("ProductOperation.interactive.active")(function* () {
           const thread = yield* Ref.get(interactiveThread)
           if (thread === undefined) return yield* operationError("No thread selected")
           return yield* activeInThread(thread.id)
         })
-        const threadForTurn = Effect.fn("Operation.interactive.threadForTurn")(function* (turn: Turn.Turn) {
+        const threadForTurn = Effect.fn("ProductOperation.interactive.threadForTurn")(function* (turn: Turn.Turn) {
           const thread = yield* (yield* ThreadRepository.Service).get(turn.threadId)
           if (thread === undefined) return yield* operationError(`Thread ${turn.threadId} does not exist`)
           return thread
         })
-        const followClaimedTurn = Effect.fn("Operation.interactive.followClaimedTurn")(function* (
+        const followClaimedTurn = Effect.fn("ProductOperation.interactive.followClaimedTurn")(function* (
           turnId: Turn.TurnId,
           dispatch: (event: InteractiveEvent) => void,
         ) {
@@ -2837,7 +2837,7 @@ export const productLayer = <
               message: `Execution ${result.status}`,
             })
         })
-        const observeTurn = Effect.fn("Operation.interactive.observeTurn")(function* (
+        const observeTurn = Effect.fn("ProductOperation.interactive.observeTurn")(function* (
           turn: Turn.AgentExecutionTurn,
           dispatch: (event: InteractiveEvent) => void,
         ) {
@@ -2856,7 +2856,7 @@ export const productLayer = <
             ),
           )
         })
-        const initialTranscriptWindow = Effect.fn("Operation.interactive.initialTranscriptWindow")(function* (
+        const initialTranscriptWindow = Effect.fn("ProductOperation.interactive.initialTranscriptWindow")(function* (
           state: SelectionEpochState,
         ) {
           const turns = yield* TurnRepository.Service
@@ -2924,7 +2924,7 @@ export const productLayer = <
           }
           return { entries: window.flat(), hasOlder, oldestCursor }
         })
-        const loadTranscriptPage = Effect.fn("Operation.interactive.loadTranscriptPage")(function* (
+        const loadTranscriptPage = Effect.fn("ProductOperation.interactive.loadTranscriptPage")(function* (
           state: SelectionEpochState,
           dispatch: (event: InteractiveEvent) => void,
           before?: TranscriptRepository.PageCursor,
@@ -3072,7 +3072,7 @@ export const productLayer = <
               ),
             )
           })
-        const loadThread = Effect.fn("Operation.interactive.loadThread")(function* (
+        const loadThread = Effect.fn("ProductOperation.interactive.loadThread")(function* (
           thread: Thread.Thread,
           request: number,
           dispatch: (event: InteractiveEvent) => void,
@@ -3089,7 +3089,7 @@ export const productLayer = <
             yield* notifyThreadSummaries
           }).pipe(Effect.ensuring(closeCandidateProjectionFeed(state)))
         })
-        const runThreadLoad = Effect.fn("Operation.interactive.runThreadLoad")(function* (
+        const runThreadLoad = Effect.fn("ProductOperation.interactive.runThreadLoad")(function* (
           thread: Thread.Thread,
           request: number,
           dispatch: (event: InteractiveEvent) => void,
@@ -3109,7 +3109,7 @@ export const productLayer = <
             ),
           )
         })
-        const createAndSelectThread = Effect.fn("Operation.interactive.createAndSelectThread")(function* () {
+        const createAndSelectThread = Effect.fn("ProductOperation.interactive.createAndSelectThread")(function* () {
           activeSelectionState = undefined
           candidateSelectionState = undefined
           yield* interruptSelectionLoad
@@ -3928,7 +3928,7 @@ export const productLayer = <
         | { readonly running: true; readonly rescan: boolean; readonly completed: Deferred.Deferred<void> }
       const reconcileSchedule = yield* Ref.make<ReconcileSchedule>({ running: false })
       let requestResultRetry: Effect.Effect<void> = Effect.void
-      const runScheduledReconcile = Effect.fn("Operation.runScheduledReconcile")(function* (
+      const runScheduledReconcile = Effect.fn("ProductOperation.runScheduledReconcile")(function* (
         completed: Deferred.Deferred<void>,
       ) {
         while (true) {
@@ -4029,7 +4029,7 @@ export const productLayer = <
               OperationUnavailable.make({ operation: "ResidentReplacement", message: String(error) }),
             ),
           ),
-        run: Effect.fn("Operation.product.run")(function* (input) {
+        run: Effect.fn("ProductOperation.product.run")(function* (input) {
           if (
             input._tag === "Interactive" ||
             input._tag === "Run" ||
@@ -4095,7 +4095,7 @@ export const productLayer = <
                             : Effect.succeed(existingThread),
                         ),
                       )
-              const runTurn = Effect.fn("Operation.runTurn")(function* (
+              const runTurn = Effect.fn("ProductOperation.runTurn")(function* (
                 turn: Turn.AgentExecutionTurn,
                 preparedInput?: {
                   readonly prompt: string
@@ -4211,7 +4211,7 @@ export const productLayer = <
                 }
                 return result
               })
-              const drainRunQueue = Effect.fn("Operation.drainRunQueue")(function* () {
+              const drainRunQueue = Effect.fn("ProductOperation.drainRunQueue")(function* () {
                 while (true) {
                   const queue = yield* turns.readQueue(thread.id)
                   if (queue.queuedCount === 0) return
@@ -4795,7 +4795,7 @@ export const testLayer = (calls: Ref.Ref<ReadonlyArray<Input>>) =>
   Layer.succeed(
     Service,
     Service.of({
-      run: Effect.fn("Operation.test.run")(function* (input) {
+      run: Effect.fn("ProductOperation.test.run")(function* (input) {
         yield* Ref.update(calls, (current) => [...current, input])
       }),
     }),

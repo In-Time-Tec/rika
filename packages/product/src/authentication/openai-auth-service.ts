@@ -33,7 +33,7 @@ export interface HostInterface {
     expectedState: Redacted.Redacted<string>,
   ) => Effect.Effect<AuthorizationResult, AuthError>
 }
-export class Host extends Context.Service<Host, HostInterface>()("@rika/product/openai-auth/Host") {}
+export class Host extends Context.Service<Host, HostInterface>()("@rika/product/authentication/openai-auth-service/Host") {}
 
 export interface DevicePrompt {
   readonly verificationUrl: string
@@ -44,7 +44,7 @@ export interface PresenterInterface {
   readonly device: (prompt: DevicePrompt) => Effect.Effect<void, AuthError>
 }
 export class Presenter extends Context.Service<Presenter, PresenterInterface>()(
-  "@rika/product/openai-auth/Presenter",
+  "@rika/product/authentication/openai-auth-service/Presenter",
 ) {}
 
 export const TokenResponse = Schema.Struct({
@@ -78,7 +78,7 @@ export interface HttpInterface {
     userCode: string,
   ) => Effect.Effect<Option.Option<typeof DevicePollResponse.Type>, AuthError>
 }
-export class Http extends Context.Service<Http, HttpInterface>()("@rika/product/openai-auth/Http") {}
+export class Http extends Context.Service<Http, HttpInterface>()("@rika/product/authentication/openai-auth-service/Http") {}
 
 export const CredentialDisk = Schema.Struct({
   formatVersion: Schema.Literal(credentialFormatVersion),
@@ -119,7 +119,7 @@ export interface StoreInterface {
   readonly remove: Effect.Effect<boolean, StoreError>
   readonly serialized: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | StoreError, R>
 }
-export class Store extends Context.Service<Store, StoreInterface>()("@rika/product/openai-auth/Store") {}
+export class Store extends Context.Service<Store, StoreInterface>()("@rika/product/authentication/openai-auth-service/Store") {}
 
 const utf8 = (value: string) =>
   Result.match(Encoding.decodeBase64(Encoding.encodeBase64(value)), {
@@ -250,7 +250,7 @@ export interface ServiceInterface {
   readonly acquire: Effect.Effect<Credential, Error>
   readonly refreshRejected: (generation: string) => Effect.Effect<Credential, Error>
 }
-export class Service extends Context.Service<Service, ServiceInterface>()("@rika/product/openai-auth/Service") {}
+export class Service extends Context.Service<Service, ServiceInterface>()("@rika/product/authentication/openai-auth-service/Service") {}
 
 export interface TimingOptions {
   readonly deviceTimeout?: number

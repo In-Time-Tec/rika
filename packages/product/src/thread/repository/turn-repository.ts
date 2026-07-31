@@ -160,4 +160,4 @@ export interface Interface {
   ) => Effect.Effect<boolean, RepositoryError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/product/turn-repository/Service") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/product/thread/repository/turn-repository/Service") {}

@@ -111,11 +111,11 @@ export interface Interface {
     input: LegacyReadInput,
   ) => Effect.Effect<Result, QueryError | ThreadNotFoundError | ArchivedThreadError>
 }
-export class Service extends Context.Service<Service, Interface>()("@rika/product/thread-query/Service") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/product/thread/query/thread-query-service/Service") {}
 export class Factory extends Context.Service<
   Factory,
   { readonly forWorkspace: (workspace: string) => Effect.Effect<Interface> }
->()("@rika/product/thread-query/Factory") {}
+>()("@rika/product/thread/query/thread-query-service/Factory") {}
 export class QueryError extends Schema.TaggedErrorClass<QueryError>()("ThreadQueryError", { message: Schema.String }) {}
 export class ThreadNotFoundError extends Schema.TaggedErrorClass<ThreadNotFoundError>()("ThreadNotFoundError", {
   threadId: Schema.String,
@@ -257,7 +257,7 @@ export const makeForWorkspace = (workspace: string) =>
     const interactions = yield* ThreadInteractionRepository.Service
     const turns = yield* TurnRepository.Service
     const transcripts = yield* TranscriptRepository.Service
-    const rebuildWorkspaceSearch = Effect.fn("ThreadQuery.rebuildWorkspaceSearch")(function* () {
+    const rebuildWorkspaceSearch = Effect.fn("ThreadQueryService.rebuildWorkspaceSearch")(function* () {
       const workspaceThreads = (yield* threadRepository.listAll).filter((thread) => thread.workspace === workspace)
       yield* Effect.forEach(
         workspaceThreads,
@@ -272,7 +272,7 @@ export const makeForWorkspace = (workspace: string) =>
         { concurrency: 4, discard: true },
       )
     })
-    const find = Effect.fn("ThreadQuery.find")(function* (input: FindInput) {
+    const find = Effect.fn("ThreadQueryService.find")(function* (input: FindInput) {
       if (input.query.trim().length === 0) return yield* QueryError.make({ message: "query must be non-empty" })
       const limit = yield* bounded("limit", input.limit, 10, 50)
       yield* rebuildWorkspaceSearch().pipe(Effect.mapError(mapError))
@@ -306,7 +306,7 @@ export const makeForWorkspace = (workspace: string) =>
       )
       return { schemaVersion, threads: results, truncated: page.nextCursor !== undefined }
     })
-    const readStructured = Effect.fn("ThreadQuery.readStructured")(function* (input: ReadInput) {
+    const readStructured = Effect.fn("ThreadQueryService.readStructured")(function* (input: ReadInput) {
       if (input.threadId.trim().length === 0 || input.threadId.trim() !== input.threadId)
         return yield* QueryError.make({ message: "threadId must be a non-empty identifier" })
       const threadId = Thread.ThreadId.make(input.threadId)
@@ -498,11 +498,11 @@ export const makeForWorkspace = (workspace: string) =>
         omissions,
       )
     })
-    const search = Effect.fn("ThreadQuery.search")(function* (input: FindInput) {
+    const search = Effect.fn("ThreadQueryService.search")(function* (input: FindInput) {
       const result = yield* find(input)
       return { text: encodeJson(result), truncated: result.truncated }
     })
-    const read = Effect.fn("ThreadQuery.read")(function* (input: LegacyReadInput) {
+    const read = Effect.fn("ThreadQueryService.read")(function* (input: LegacyReadInput) {
       const limit = yield* bounded("maxTurns", input.maxTurns, 10, 20)
       yield* bounded("maxChars", input.maxChars, transcriptBudget, transcriptBudget)
       const result = yield* readStructured({

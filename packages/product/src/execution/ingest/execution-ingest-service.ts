@@ -437,7 +437,7 @@ const finishReaders = (pipeline: Pipeline) => {
   if (pipeline.active <= 0) pipeline.readersFinished.openUnsafe()
 }
 
-export const make = Effect.fn("ExecutionIngest.make")(function* (options: Options) {
+export const make = Effect.fn("ExecutionIngestService.make")(function* (options: Options) {
   const ownerScope = yield* Effect.scope
   const commitWindow = Duration.fromInputUnsafe(options.commitWindow ?? defaultCommitWindow)
   const commitEvents = Math.max(1, Math.floor(options.commitEvents ?? defaultCommitEvents))
@@ -713,7 +713,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
     pipeline: Pipeline,
     terminal: boolean,
   ) => Effect.Effect<boolean, UsageCost.ProjectionFailure | UsageRepository.RepositoryError>
-  commitUsage = Effect.fn("ExecutionIngest.commitUsage")(function* (pipeline: Pipeline, terminal: boolean) {
+  commitUsage = Effect.fn("ExecutionIngestService.commitUsage")(function* (pipeline: Pipeline, terminal: boolean) {
     if (
       pipeline.usagePending.length === 0 &&
       pipeline.usageRefoldFromVersion === undefined &&
@@ -1380,7 +1380,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
       ),
     )
 
-  const ensure = Effect.fn("ExecutionIngest.ensure")(function* (root: Root) {
+  const ensure = Effect.fn("ExecutionIngestService.ensure")(function* (root: Root) {
     yield* admission.withPermits(1)(
       Effect.gen(function* () {
         const live = pipelines.get(String(root.turnId))
@@ -1619,13 +1619,13 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
       }
       accept(pipeline, pipeline.nodes.get(pipeline.rootKey)!, event)
     },
-    consumed: Effect.fn("ExecutionIngest.consumed")(function* (turnId: Turn.TurnId) {
+    consumed: Effect.fn("ExecutionIngestService.consumed")(function* (turnId: Turn.TurnId) {
       const pipeline = pipelines.get(String(turnId))
       if (pipeline !== undefined) return yield* Deferred.await(pipeline.rootCommitted)
       const failure = failedPipelines.get(String(turnId))
       if (failure !== undefined) return yield* failure
     }),
-    flush: Effect.fn("ExecutionIngest.flush")(function* (turnId: Turn.TurnId) {
+    flush: Effect.fn("ExecutionIngestService.flush")(function* (turnId: Turn.TurnId) {
       const deferred = yield* Deferred.make<void, Failure>()
       const pipeline = pipelines.get(String(turnId))
       if (pipeline === undefined) {
@@ -1641,7 +1641,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
       wake(pipeline)
       return yield* Deferred.await(deferred)
     }),
-    settled: Effect.fn("ExecutionIngest.settled")(function* (turnId: Turn.TurnId) {
+    settled: Effect.fn("ExecutionIngestService.settled")(function* (turnId: Turn.TurnId) {
       const pipeline = pipelines.get(String(turnId))
       if (pipeline !== undefined) return yield* Deferred.await(pipeline.finished)
       const failure = failedPipelines.get(String(turnId))

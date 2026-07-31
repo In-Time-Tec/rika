@@ -175,5 +175,5 @@ export interface Interface {
   readonly listReadyResults: (limit?: number) => Effect.Effect<ReadonlyArray<ResultRoute>, RepositoryError>
 }
 export class Service extends Context.Service<Service, Interface>()(
-  "@rika/product/thread-interaction-repository/Service",
+  "@rika/product/thread/repository/thread-interaction-repository/Service",
 ) {}

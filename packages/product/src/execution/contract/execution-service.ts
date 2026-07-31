@@ -157,7 +157,7 @@ export interface SteerReceipt {
 }
 
 export class Service extends Context.Service<Service, Interface>()(
-  "@rika/product/product-execution-contract/Service",
+  "@rika/product/execution/contract/execution-service/Service",
 ) {}
 
 export const AgentDepth = {

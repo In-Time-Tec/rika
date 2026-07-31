@@ -34,7 +34,7 @@ export interface Interface {
   readonly listRepairCandidates: (limit?: number) => Effect.Effect<ReadonlyArray<RepairCandidate>, RepositoryError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/product/thread-summary-repository/Service") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/product/thread/repository/thread-summary-repository/Service") {}
 
 interface Activity {
   readonly turnId: TurnId

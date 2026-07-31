@@ -19,7 +19,7 @@ export interface Options {
 }
 
 export class Configuration extends Context.Service<Configuration, Options>()(
-  "@rika/product/thread-tool-service/Configuration",
+  "@rika/product/thread/tool/thread-tool-service/Configuration",
 ) {}
 
 type Failure = { readonly _tag: string }
@@ -39,7 +39,7 @@ export interface Interface {
   ) => Effect.Effect<typeof ThreadContract.WaitForThreadsSuccess.Type, Failure>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/product/thread-tool-service/Service") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/product/thread/tool/thread-tool-service/Service") {}
 
 export class GatewayUnavailable extends Schema.TaggedErrorClass<GatewayUnavailable>()("ThreadToolGatewayUnavailable", {
   state: Schema.Literals(["uninstalled", "installed", "closed"]),
