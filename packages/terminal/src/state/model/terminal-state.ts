@@ -27,25 +27,19 @@ import * as ExecutionEventsModule from "../../presentation/transcript/execution-
 import * as SessionModule from "../../terminal-session"
 import * as FormatModule from "../../presentation/terminal/terminal-format"
 import * as ThemeModule from "../../presentation/terminal/terminal-theme"
-
 export { idle, isLoading, isReady, loading, ready, readyOr } from "./terminal-loadable-state"
-export type { Loadable } from "./terminal-loadable-state"
 export type { Activity } from "./terminal-activity-state"
 export type { UsageDisplay, UsageTime } from "./terminal-usage-state"
 export type { ComposerAttachment, ComposerDraft, PendingSteering, PromptPart } from "./terminal-composer-state"
-
 export const Mode = ModeId
 export type Mode = typeof Mode.Type
-
 export const Entry = Schema.Struct({
   role: Schema.Literals(["user", "assistant", "notice"]),
   text: Schema.String,
   turnId: Schema.optionalKey(Schema.String),
 })
 export type Entry = typeof Entry.Type
-
 type TranscriptBlockModel = TranscriptPresentationModel.Block
-
 interface ThreadItemModel {
   readonly id: string
   readonly title: string
@@ -57,7 +51,6 @@ interface ThreadItemModel {
   readonly lastActivityAt: number
   readonly editTotals?: { readonly added: number; readonly modified: number; readonly removed: number }
 }
-
 type TranscriptItemModel =
   | {
       readonly _tag: "Entry"
@@ -77,7 +70,6 @@ type TranscriptItemModel =
       readonly parentId?: string
       readonly order?: TranscriptUnit.UnitOrder
     }
-
 export interface PaletteState {
   readonly open: boolean
   readonly query: string
@@ -107,7 +99,6 @@ export interface ThreadSidebarState {
   readonly selected: number
   readonly scrollTop: number
 }
-
 const WorkspaceFilesSchema = Schema.Union([
   loadableSchemas.idle,
   loadableSchemas.loading,
@@ -193,7 +184,6 @@ export type QueueChange =
   | { readonly _tag: "Added"; readonly item: QueueItem }
   | { readonly _tag: "Updated"; readonly item: QueueItem }
   | { readonly _tag: "Removed"; readonly turnId: string }
-
 export const Model = Schema.Struct({
   workspace: Schema.String,
   branch: Schema.optional(Schema.String),
@@ -286,7 +276,6 @@ export const Model = Schema.Struct({
   threadPreview: ThreadPreviewSchema,
 })
 export type Model = typeof Model.Type
-
 const initialImpl: {
   (workspace: string, mode?: Mode): Model
   (mode?: Mode): (workspace: string) => Model
@@ -341,12 +330,10 @@ const initialImpl: {
     threadPreview: idle,
   }),
 )
-
 export const withModeRoutes: {
   (routes: ModeRoutes): (model: Model) => Model
   (model: Model, routes: ModeRoutes): Model
 } = Function.dual(2, (model: Model, routes: ModeRoutes): Model => ({ ...model, modeRoutes: routes }))
-
 const nextModeImpl = (mode: Mode): Mode => modeIds[(modeIds.indexOf(mode) + 1) % modeIds.length]!
 const nextUsageDisplayImpl = (display: UsageDisplay | undefined): UsageDisplay => {
   if (display === undefined || display === "cost") return "tokens"
@@ -378,10 +365,8 @@ const displayInputImpl = ComposerState.displayInput
 const expandPastedTextImpl = ComposerState.expandPastedText
 const promptPartsImpl = ComposerState.promptParts
 const pastedTextTokenAtImpl = ComposerState.pastedTextTokenAt
-
 const initialModel = initialImpl
 const updateModel = reduceState
-
 export { initialImpl as initial }
 export { nextModeImpl as nextMode }
 export { nextUsageDisplayImpl as nextUsageDisplay }
@@ -407,7 +392,6 @@ export { displayInputImpl as displayInput }
 export { expandPastedTextImpl as expandPastedText }
 export { promptPartsImpl as promptParts }
 export { pastedTextTokenAtImpl as pastedTextTokenAt }
-
 export type {
   TranscriptBlockModel as TranscriptBlock,
   TranscriptItemModel as TranscriptItem,
@@ -512,5 +496,4 @@ export namespace Session {
   export type Adapter = SessionModule.Adapter
   export const execute = SessionModule.execute
 }
-
 export { ViewStateExports as ViewState }

@@ -1,41 +1,43 @@
+import { RGBA } from "@opentui/core"
+
 export interface TerminalThemeColors {
-  readonly text: string
-  readonly subtle: string
-  readonly muted: string
-  readonly surface: string
-  readonly teal: string
-  readonly green: string
-  readonly red: string
-  readonly amber: string
-  readonly blue: string
-  readonly purple: string
-  readonly gold: string
+  readonly text: RGBA
+  readonly subtle: RGBA
+  readonly muted: RGBA
+  readonly surface: RGBA
+  readonly teal: RGBA
+  readonly green: RGBA
+  readonly red: RGBA
+  readonly amber: RGBA
+  readonly blue: RGBA
+  readonly purple: RGBA
+  readonly gold: RGBA | string
   readonly low: string
   readonly medium: string
   readonly high: string
   readonly ultra: string
-  readonly selectionBg: string
-  readonly selectionFg: string
-  readonly selectionHint: string
+  readonly selectionBg: RGBA
+  readonly selectionFg: RGBA
+  readonly selectionHint: RGBA
 }
 export const colors: TerminalThemeColors = {
-  text: "white",
-  subtle: "brightBlack",
-  muted: "brightBlack",
-  surface: "default",
-  teal: "cyan",
-  green: "green",
-  red: "red",
-  amber: "yellow",
-  blue: "blue",
-  purple: "magenta",
-  gold: "yellow",
+  text: RGBA.fromIndex(7),
+  subtle: RGBA.fromIndex(8),
+  muted: RGBA.fromIndex(8),
+  surface: RGBA.defaultBackground(),
+  teal: RGBA.fromIndex(6),
+  green: RGBA.fromIndex(2),
+  red: RGBA.fromIndex(1),
+  amber: RGBA.fromIndex(3),
+  blue: RGBA.fromIndex(4),
+  purple: RGBA.fromIndex(5),
+  gold: RGBA.fromIndex(3),
   low: "#ffd700",
   medium: "#3dffa6",
   high: "#3dd4ff",
   ultra: "#d8b3ff",
-  selectionBg: "yellow",
-  selectionFg: "black",
-  selectionHint: "blue",
+  selectionBg: RGBA.fromIndex(3),
+  selectionFg: RGBA.fromIndex(0),
+  selectionHint: RGBA.fromIndex(4),
 }
 export const spacing = { transcript: 1, inputHorizontal: 1, inputHeight: 5, overlayTop: 4, overlayHeight: 10 } as const
