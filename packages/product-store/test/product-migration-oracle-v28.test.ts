@@ -64,6 +64,58 @@ it.layer(BunServices.layer)("v28 migration oracle", (test) => {
     ),
   )
 
+  test.effect(
+    "rejects malformed JSON and connection identities without changing database or sidecars",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem
+          const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-v28-malformed-" })
+          const malformedRoutes = new Map<string, string>()
+          for (const kind of oracle.malformedJsonCases) {
+            let routeText = "[]"
+            if (kind === "truncated-object") routeText = '{"version":1'
+            else if (kind === "scalar") routeText = "null"
+            malformedRoutes.set(`json-${kind}`, routeText)
+          }
+          const encodedRoute = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.UnknownFromJsonString))(
+            oracle.legacyRoute,
+          )
+          for (const kind of oracle.malformedConnectionIdentityCases) {
+            let replacement = '"connectionIdentity":{"opaque":1}'
+            if (kind === "primitive") replacement = '"connectionIdentity":"opaque"'
+            else if (kind === "unknown-field") replacement = '"connectionIdentity":{"opaque":"ok","extra":true}'
+            else if (kind === "missing-connection-identity") replacement = ""
+            else if (kind === "missing-opaque") replacement = '"connectionIdentity":{}'
+            else if (kind === "empty-opaque") replacement = '"connectionIdentity":{"opaque":""}'
+            const marker = '"connectionIdentity":{"opaque":"connection-main"}'
+            malformedRoutes.set(
+              `identity-${kind}`,
+              kind === "missing-connection-identity"
+                ? encodedRoute.replace(`,${marker}`, "")
+                : encodedRoute.replace(marker, replacement),
+            )
+          }
+          for (const [name, routeText] of malformedRoutes) {
+            const filename = `${directory}/${name}/rika.db`
+            yield* makeDatabase(filename)
+            yield* prepareV27(filename, routeText)
+            const before = new Map<string, Uint8Array>()
+            for (const path of databaseSidecars(filename))
+              if (yield* fileSystem.exists(path)) before.set(path, yield* fileSystem.readFile(path))
+            const result = yield* Effect.result(makeDatabase(filename))
+            expect(result._tag).toBe("Failure")
+            for (const path of databaseSidecars(filename)) {
+              const exists = yield* fileSystem.exists(path)
+              expect(exists).toBe(before.has(path))
+              if (exists) expect(yield* fileSystem.readFile(path)).toEqual(before.get(path))
+            }
+          }
+        }),
+      ),
+    30_000,
+  )
+
   test.effect("rejects every declared future version before writing database or sidecar bytes", () =>
     Effect.scoped(
       Effect.gen(function* () {

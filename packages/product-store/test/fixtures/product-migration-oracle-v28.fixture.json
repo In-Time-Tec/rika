@@ -4,6 +4,15 @@
   "sourceVersion": 1,
   "targetVersion": 1,
   "rejectedVersions": [2, 99],
+  "malformedJsonCases": ["truncated-object", "scalar", "array"],
+  "malformedConnectionIdentityCases": [
+    "primitive",
+    "unknown-field",
+    "missing-connection-identity",
+    "missing-opaque",
+    "empty-opaque",
+    "numeric-opaque"
+  ],
   "legacyRoute": {
     "version": 1,
     "mode": "fixture-mode",

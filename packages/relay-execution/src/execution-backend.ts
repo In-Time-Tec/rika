@@ -54,20 +54,13 @@ import { LanguageModel, Tool, Toolkit } from "effect/unstable/ai"
 import { FetchHttpClient } from "effect/unstable/http"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { createHash } from "node:crypto"
-import {
-  AgentProfile,
-  BackendError,
-  Event,
-  type ExecutionCheckpoint,
-  type ExecutionReference,
-  type ExecutionRoutePin,
-  type EventScope,
-  type OpenRootExecution,
-  type PromptPart,
-  Service,
-  type StartInput,
-  Status,
-} from "@rika/product/execution-service"
+import { AgentProfile } from "@rika/product/execution-child-run"
+import { BackendError, Service } from "@rika/product/execution-service"
+import type { Event, ExecutionCheckpoint } from "@rika/product/execution-event"
+import type { ExecutionReference, OpenRootExecution } from "@rika/product/execution-identifier"
+import type { ExecutionRoutePin } from "@rika/product/execution-route-snapshot"
+import type { EventScope, PromptPart, StartInput } from "@rika/product/execution-request"
+import { Status } from "@rika/product/execution-status"
 import { toExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
 import {
   agentKeyForName,

@@ -6,6 +6,7 @@ export interface ExecutionExtensionPin {
   readonly mcpFingerprint: string
   readonly resolvedContextDigest: string
 }
+
 export interface WorkflowInspection {
   readonly runId: string
   readonly ownerTurnId?: string

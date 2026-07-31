@@ -14472,6 +14472,14 @@
     },
     {
       "from": "packages/product/src/execution-child-run.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/execution-child-run.ts",
       "to": "packages/product/src/execution-route-snapshot.ts",
       "specifier": "./execution-route-snapshot",
       "kind": "import",
@@ -14487,9 +14495,33 @@
       "production": true
     },
     {
+      "from": "packages/product/src/execution-event.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/execution-event.ts",
+      "to": "packages/product/src/execution-status.ts",
+      "specifier": "./execution-status",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/product/src/execution-identifier.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/execution-identifier.ts",
+      "to": "packages/product/src/execution-child-run.ts",
+      "specifier": "./execution-child-run",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -14642,6 +14674,14 @@
       "from": "packages/product/src/execution-inspection.ts",
       "to": "packages/product/src/execution-status.ts",
       "specifier": "./execution-status",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/execution-request.ts",
+      "to": "packages/product/src/execution-event.ts",
+      "specifier": "./execution-event",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -15088,6 +15128,38 @@
     },
     {
       "from": "packages/product/src/product-execution-contract.ts",
+      "to": "packages/product/src/execution-approval.ts",
+      "specifier": "./execution-approval",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/product-execution-contract.ts",
+      "to": "packages/product/src/execution-child-run.ts",
+      "specifier": "./execution-child-run",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/product-execution-contract.ts",
+      "to": "packages/product/src/execution-event.ts",
+      "specifier": "./execution-event",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/product-execution-contract.ts",
+      "to": "packages/product/src/execution-identifier.ts",
+      "specifier": "./execution-identifier",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/product-execution-contract.ts",
       "to": "packages/product/src/execution-ingest.ts",
       "specifier": "./execution-ingest",
       "kind": "import",
@@ -15096,8 +15168,40 @@
     },
     {
       "from": "packages/product/src/product-execution-contract.ts",
+      "to": "packages/product/src/execution-inspection.ts",
+      "specifier": "./execution-inspection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/product-execution-contract.ts",
+      "to": "packages/product/src/execution-request.ts",
+      "specifier": "./execution-request",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/product-execution-contract.ts",
       "to": "packages/product/src/execution-route-snapshot.ts",
       "specifier": "./execution-route-snapshot",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/product-execution-contract.ts",
+      "to": "packages/product/src/execution-status.ts",
+      "specifier": "./execution-status",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/product-execution-contract.ts",
+      "to": "packages/product/src/execution-workflow.ts",
+      "specifier": "./execution-workflow",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -16576,6 +16680,30 @@
     },
     {
       "from": "packages/product/test/status-parity.test.ts",
+      "to": "packages/product/src/execution-child-run.ts",
+      "specifier": "@rika/product/execution-child-run",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/status-parity.test.ts",
+      "to": "packages/product/src/execution-event.ts",
+      "specifier": "@rika/product/execution-event",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/status-parity.test.ts",
+      "to": "packages/product/src/execution-status.ts",
+      "specifier": "@rika/product/execution-status",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/status-parity.test.ts",
       "to": "packages/product/src/product-execution-contract.ts",
       "specifier": "@rika/product/execution-service",
       "kind": "import",
@@ -16976,8 +17104,48 @@
     },
     {
       "from": "packages/relay-execution/src/execution-backend.ts",
+      "to": "packages/product/src/execution-child-run.ts",
+      "specifier": "@rika/product/execution-child-run",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/execution-backend.ts",
+      "to": "packages/product/src/execution-event.ts",
+      "specifier": "@rika/product/execution-event",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/execution-backend.ts",
+      "to": "packages/product/src/execution-identifier.ts",
+      "specifier": "@rika/product/execution-identifier",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/execution-backend.ts",
+      "to": "packages/product/src/execution-request.ts",
+      "specifier": "@rika/product/execution-request",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/execution-backend.ts",
       "to": "packages/product/src/execution-route-snapshot.ts",
       "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/execution-backend.ts",
+      "to": "packages/product/src/execution-status.ts",
+      "specifier": "@rika/product/execution-status",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -17258,6 +17426,38 @@
       "from": "packages/relay-execution/src/prompt-cache.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay-execution-layer.ts",
+      "to": "packages/product/src/execution-child-run.ts",
+      "specifier": "@rika/product/execution-child-run",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay-execution-layer.ts",
+      "to": "packages/product/src/execution-event.ts",
+      "specifier": "@rika/product/execution-event",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay-execution-layer.ts",
+      "to": "packages/product/src/execution-identifier.ts",
+      "specifier": "@rika/product/execution-identifier",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay-execution-layer.ts",
+      "to": "packages/product/src/execution-status.ts",
+      "specifier": "@rika/product/execution-status",
       "kind": "import",
       "relationship": "runtime",
       "production": true

@@ -68,6 +68,8 @@ export const ExecutionRouteSnapshot = Schema.Struct({
   ),
 })
 export type ExecutionRouteSnapshot = typeof ExecutionRouteSnapshot.Type
+export type ExecutionModelRoute = ExecutionRouteModelSnapshot
+export type ExecutionRoutePin = ExecutionRouteSnapshot
 
 export const modelRegistrationIdentity = (value: string): ModelRegistrationIdentity =>
   Schema.decodeUnknownSync(ModelRegistrationIdentity)(value)

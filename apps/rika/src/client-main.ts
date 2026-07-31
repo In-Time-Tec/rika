@@ -11,7 +11,6 @@ import {
   Effect,
   Exit,
   FileSystem,
-  Fiber,
   Layer,
   Option,
   Path,
@@ -72,20 +71,6 @@ export const cleanInteractiveRuntimeExit = (exitCode: number): boolean =>
 
 export const interactiveRuntimeRestartLimit = 3
 
-export const isInteractiveClientLaunch = (argv: ReadonlyArray<string> | undefined): boolean => {
-  if (argv === undefined) return true
-  return !argv.some(
-    (argument) =>
-      argument === "--execute" ||
-      argument === "-x" ||
-      argument === "run" ||
-      argument === "review" ||
-      argument === "threads" ||
-      argument === "workflow" ||
-      argument === "workflows",
-  )
-}
-
 export type InteractiveRuntimeRestartDecision =
   | { readonly _tag: "respawn"; readonly environment: Record<string, string> }
   | { readonly _tag: "fail"; readonly message: string }
@@ -119,7 +104,25 @@ export const interactiveRuntimeRestartPlan = (input: {
 }
 
 let interactiveSigintObserved = false
-let interactiveClientLaunch = true
+let interactiveClientLaunch = false
+
+export const clientSigintMode = (input: Pick<Operation.Input, "_tag"> | undefined): "root" | "child" =>
+  input?._tag === "Interactive" ? "child" : "root"
+
+type InterruptibleRoot = { readonly interruptUnsafe: () => void }
+
+export const installClientSigintHandler = (input: {
+  readonly inputMode: () => "root" | "child"
+  readonly rootFiber: () => InterruptibleRoot | undefined
+  readonly onSignal: () => void
+}) => {
+  const handler = () => {
+    input.onSignal()
+    if (input.inputMode() === "root") input.rootFiber()?.interruptUnsafe()
+  }
+  process.on("SIGINT", handler)
+  return () => process.off("SIGINT", handler)
+}
 
 const privateRuntime = Effect.fn("ClientMain.privateRuntime")(function* (role: "interactive" | "resident") {
   const path = yield* Path.Path
@@ -155,6 +158,7 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
       >()
       return Operation.Service.of({
         run: Effect.fn("ClientMain.dispatch")(function* (input) {
+          interactiveClientLaunch = clientSigintMode(input) === "child"
           return yield* Effect.gen(function* () {
             const home = yield* Config.string("HOME").pipe(Config.withDefault(process.cwd()))
             const database = yield* Config.string("RIKA_DATABASE").pipe(Config.withDefault(dataPaths(home).database))
@@ -163,7 +167,6 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
             )
             const dataRoot = yield* DataRoot.canonicalDataRoot(database, executionDatabase)
             const forwardedArguments = argv ?? (yield* stdio.args)
-            interactiveClientLaunch = isInteractiveClientLaunch(forwardedArguments)
             return yield* Effect.scoped(
               Effect.gen(function* () {
                 if (input._tag === "Interactive") {
@@ -320,15 +323,18 @@ export const clientProcessExitCode = <E, A>(input: {
 if (import.meta.main) {
   let interruptedBySigint = false
   let rootFiber: ReturnType<typeof Effect.runFork> | undefined
-  const interruptRoot = () => {
-    interruptedBySigint = true
-    interactiveSigintObserved = true
-    if (!interactiveClientLaunch && rootFiber !== undefined) Effect.runFork(Fiber.interrupt(rootFiber))
-  }
-  process.on("SIGINT", interruptRoot)
+  const removeSigintHandler = installClientSigintHandler({
+    inputMode: () => (interactiveClientLaunch ? "child" : "root"),
+    rootFiber: () => rootFiber,
+    onSignal: () => {
+      interruptedBySigint = true
+      interactiveSigintObserved = true
+    },
+  })
   rootFiber = Effect.runFork(run().pipe(provideLayerScoped(Layer.merge(BunServices.layer, FetchHttpClient.layer))))
+  if (interruptedBySigint && !interactiveClientLaunch) rootFiber.interruptUnsafe()
   rootFiber.addObserver((exit) => {
-    process.off("SIGINT", interruptRoot)
+    removeSigintHandler()
     process.exit(clientProcessExitCode({ exit, interruptedBySigint }))
   })
 }

@@ -1,4 +1,7 @@
 import * as ExecutionContract from "@rika/product/execution-service"
+import { Event as DirectEvent } from "@rika/product/execution-event"
+import { Status as DirectStatus } from "@rika/product/execution-status"
+import { AgentProfile as DirectAgentProfile } from "@rika/product/execution-child-run"
 import * as TurnSchema from "@rika/product/turn-record"
 import { ExecutionStatus } from "@rika/coding-tools/coding-tool-catalog"
 import { describe, expect, it } from "vitest"
@@ -10,6 +13,9 @@ describe("execution status parity", () => {
   it("keeps every Status vocabulary identical", () => {
     expect(members(TurnSchema.Status as never)).toEqual([...ExecutionStatus.statuses])
     expect(members(ExecutionContract.Status as never)).toEqual([...ExecutionStatus.statuses])
+    expect(ExecutionContract.Event).toBe(DirectEvent)
+    expect(ExecutionContract.Status).toBe(DirectStatus)
+    expect(ExecutionContract.AgentProfile).toBe(DirectAgentProfile)
   })
 
   it("classifies every status exactly once", () => {

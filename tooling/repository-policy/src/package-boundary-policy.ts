@@ -380,8 +380,16 @@ export const checkTestTopology = (input: {
   readonly sourcePath: string
   readonly testPaths: ReadonlyArray<string>
   readonly exception?: string
-}): PolicyDiagnostic[] =>
-  input.testPaths.length > 0 || input.exception !== undefined
+}): PolicyDiagnostic[] => {
+  const sourceMatch = /^(.*)\/src\/(.*)\.(tsx?)$/.exec(input.sourcePath)
+  const sameStem =
+    sourceMatch !== null &&
+    input.testPaths.some(
+      (testPath) =>
+        testPath === `${sourceMatch[1]}/test/${sourceMatch[2]}.test.${sourceMatch[3]}` ||
+        testPath === input.sourcePath.replace(/\.(tsx?)$/, ".test.$1"),
+    )
+  return sameStem || input.exception !== undefined
     ? []
     : [
         diagnostic(
@@ -392,6 +400,7 @@ export const checkTestTopology = (input: {
           "warning",
         ),
       ]
+}
 
 export const checkPackageEdges = (manifests: ReadonlyArray<NamedManifest>): PolicyDiagnostic[] => {
   const names = new Set(
@@ -595,22 +604,75 @@ export const checkWorkspaceTestTopology = Effect.fn("RepositoryPolicy.checkWorks
   const path = yield* Path
   const sources = yield* fileSystem.glob("{apps,packages}/**/src/**/*.ts", {
     root,
-    exclude: ["**/node_modules/**", "**/dist/**"],
+    exclude: ["**/node_modules/**", "**/dist/**", "**/.turbo/**"],
   })
   const tests = yield* fileSystem.glob("{apps,packages}/**/test/**/*.ts", {
     root,
-    exclude: ["**/node_modules/**", "**/dist/**"],
+    exclude: ["**/node_modules/**", "**/dist/**", "**/.turbo/**"],
   })
-  return sources.flatMap((absoluteSource) => {
-    const sourcePath = path.isAbsolute(absoluteSource) ? path.relative(root, absoluteSource) : absoluteSource
+  const relative = (value: string) =>
+    (path.isAbsolute(value) ? path.relative(root, value) : value).replaceAll("\\", "/")
+  const sourcePaths = new Set(sources.map(relative))
+  const testPaths = new Set(tests.map(relative))
+  const diagnostics: PolicyDiagnostic[] = []
+  const exceptionSources = new Set<string>()
+  for (const exception of exceptions) {
+    if (exceptionSources.has(exception.sourcePath))
+      diagnostics.push(
+        diagnostic(
+          exception.sourcePath,
+          "test-topology-exception",
+          "source module has more than one ownership exception",
+          "Keep one exact exception for each source module",
+        ),
+      )
+    exceptionSources.add(exception.sourcePath)
+    if (!sourcePaths.has(exception.sourcePath))
+      diagnostics.push(
+        diagnostic(
+          exception.sourcePath,
+          "test-topology-exception",
+          "ownership exception names a missing source module",
+          "Remove the stale exception or point it at an existing source path",
+        ),
+      )
+    if (!testPaths.has(exception.testPath))
+      diagnostics.push(
+        diagnostic(
+          exception.testPath,
+          "test-topology-exception",
+          "ownership exception names a missing test module",
+          "Remove the stale exception or point it at an existing test path",
+        ),
+      )
+    if (sourcePaths.has(exception.sourcePath) && testPaths.has(exception.testPath)) {
+      const testText = yield* fileSystem.readFileString(path.join(root, exception.testPath))
+      const sourceStem =
+        exception.sourcePath
+          .split("/")
+          .at(-1)
+          ?.replace(/\.tsx?$/, "") ?? ""
+      const sourceImport = exception.sourcePath.replace(/\.(tsx?)$/, "")
+      if (!testText.includes(sourceStem) && !testText.includes(sourceImport))
+        diagnostics.push(
+          diagnostic(
+            exception.testPath,
+            "test-topology-exception",
+            `ownership exception test does not reach ${exception.sourcePath}`,
+            "Use a broader test that imports or exercises the named source module",
+          ),
+        )
+    }
+  }
+  for (const sourcePath of sourcePaths) {
     const packageRoot = sourcePath.split("/src/")[0]
-    const ownedTests = tests.filter((candidate) => {
-      const testPath = path.isAbsolute(candidate) ? path.relative(root, candidate) : candidate
-      return testPath.startsWith(`${packageRoot}/test/`)
-    })
+    const ownedTests = [...testPaths].filter((testPath) => testPath.startsWith(`${packageRoot}/test/`))
     const exception = exceptions.find((item) => item.sourcePath === sourcePath)?.testPath
-    return checkTestTopology({ sourcePath, testPaths: ownedTests, ...(exception === undefined ? {} : { exception }) })
-  })
+    diagnostics.push(
+      ...checkTestTopology({ sourcePath, testPaths: ownedTests, ...(exception === undefined ? {} : { exception }) }),
+    )
+  }
+  return diagnostics
 })
 
 export const scanSourcePolicies = Effect.fn("RepositoryPolicy.scanSourcePolicies")(function* (root = ".") {

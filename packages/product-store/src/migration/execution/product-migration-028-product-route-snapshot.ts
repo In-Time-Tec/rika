@@ -102,6 +102,12 @@ const legacyModel = (value: unknown, expectedRole: (typeof roles)[number]): Exec
         runtimeRecord.credentialIdentity,
         "Malformed legacy execution route runtime identity",
       )
+    const connectionIdentity = requireRecord(
+      runtimeRecord.connectionIdentity,
+      "Malformed legacy execution route connection identity",
+    )
+    requireKeys(connectionIdentity, ["opaque"], "Unsupported legacy execution route connection identity field")
+    requireString(connectionIdentity.opaque, "Malformed legacy execution route connection identity")
   }
   const fingerprint =
     input.openAiAccountFingerprint === undefined

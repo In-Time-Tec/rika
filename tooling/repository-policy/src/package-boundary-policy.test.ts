@@ -6,6 +6,7 @@ import {
   checkPackageMetadata,
   checkScriptBoundaries,
   checkSourceMetrics,
+  checkTestTopology,
   validateWaivers,
   applyBaselineAndWaivers,
 } from "./package-boundary-policy"
@@ -71,6 +72,28 @@ describe("repository policy", () => {
         (item) => item.severity === "error",
       ),
     ).toBe(true)
+  })
+
+  test("matches tests by source-relative stem instead of package ownership", () => {
+    expect(
+      checkTestTopology({
+        sourcePath: "packages/example/src/feature/nested-value.ts",
+        testPaths: ["packages/example/test/feature/nested-value.test.ts"],
+      }),
+    ).toEqual([])
+    expect(
+      checkTestTopology({
+        sourcePath: "packages/example/src/feature/nested-value.ts",
+        testPaths: ["packages/example/test/other/nested-value.test.ts"],
+      })[0],
+    ).toEqual(expect.objectContaining({ rule: "test-topology", severity: "warning" }))
+    expect(
+      checkTestTopology({
+        sourcePath: "packages/example/src/feature/nested-value.ts",
+        testPaths: ["packages/example/test/feature/nested-value.test.ts"],
+        exception: "packages/example/test/integration.test.ts",
+      }),
+    ).toEqual([])
   })
 
   test("validates exact path waivers and suppresses only matching baseline diagnostics", () => {
