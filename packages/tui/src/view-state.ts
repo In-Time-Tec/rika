@@ -235,7 +235,10 @@ const settleSteering = (
 
 const cancelTranscriptBlocks = (blocks: ReadonlyArray<TranscriptBlock>): ReadonlyArray<TranscriptBlock> =>
   blocks.map((block) => {
-    if ((block._tag === "ToolCall" || block._tag === "ChildAgent") && block.status === "running")
+    if (
+      (block._tag === "ToolCall" || block._tag === "ChildAgent" || block._tag === "Compaction") &&
+      block.status === "running"
+    )
       return { ...block, status: "cancelled" as const }
     return block
   })

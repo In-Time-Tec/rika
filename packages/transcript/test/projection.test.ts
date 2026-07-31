@@ -1125,6 +1125,82 @@ describe("Transcript projection", () => {
     })
   })
 
+  it.each(["microcompact", "unchanged"] as const)(
+    "revises a running compaction to complete on %s completed without committed",
+    (kind) => {
+      const projection = project("turn-a", "prompt", [
+        {
+          cursor: "compaction-started",
+          sequence: 0,
+          type: "agent.compaction.started",
+          createdAt: 0,
+          data: { turn: 3, compaction_id: "c1", trigger: "threshold", started_at: 0 },
+        },
+        {
+          cursor: "compaction-completed",
+          sequence: 1,
+          type: "agent.compaction.completed",
+          createdAt: 1,
+          data: { turn: 3, compaction_id: "c1", kind, completed_at: 1 },
+        },
+      ])
+      expect(projection.units.find((item) => item.key === "compaction:turn-a")).toMatchObject({
+        revision: 1,
+        content: { _tag: "Block", block: { _tag: "Compaction", status: "complete" } },
+      })
+      expect(projection.units.filter((item) => item.key.startsWith("compaction:"))).toHaveLength(1)
+    },
+  )
+
+  it("attaches the checkpoint when summarize completed is followed by committed", () => {
+    const projection = project("turn-a", "prompt", [
+      {
+        cursor: "compaction-started",
+        sequence: 0,
+        type: "agent.compaction.started",
+        createdAt: 0,
+        data: { turn: 3, compaction_id: "c1", trigger: "overflow", started_at: 0 },
+      },
+      {
+        cursor: "compaction-completed",
+        sequence: 1,
+        type: "agent.compaction.completed",
+        createdAt: 1,
+        data: { turn: 3, compaction_id: "c1", kind: "summarize", completed_at: 1 },
+      },
+      {
+        cursor: "compaction-committed",
+        sequence: 2,
+        type: "agent.compaction.committed",
+        createdAt: 2,
+        data: { checkpoint_id: "entry:checkpoint", session_id: "session:one", compaction_id: "c1" },
+      },
+    ])
+    expect(projection.units.find((item) => item.key === "compaction:turn-a")).toMatchObject({
+      revision: 2,
+      content: {
+        _tag: "Block",
+        block: { _tag: "Compaction", status: "complete", checkpoint: "entry:checkpoint" },
+      },
+    })
+    expect(projection.units.filter((item) => item.key.startsWith("compaction:"))).toHaveLength(1)
+  })
+
+  it("settles a running compaction when the turn is cancelled", () => {
+    const projection = project("turn-a", "prompt", [
+      {
+        cursor: "compaction-started",
+        sequence: 0,
+        type: "agent.compaction.started",
+        createdAt: 0,
+      },
+    ])
+    const swept = settleRunning(projection, "cancelled", 50)
+    expect(swept.units.find((item) => item.key === "compaction:turn-a")).toMatchObject({
+      content: { _tag: "Block", block: { _tag: "Compaction", status: "cancelled" } },
+    })
+  })
+
   it("projects every semantic block shape with stable keys across lifecycle revisions", () => {
     const projection = project("turn-a", "prompt", [
       { cursor: "reason", sequence: 0, type: "model.reasoning.delta", createdAt: 0, text: "thinking" },

@@ -161,6 +161,9 @@ const toolBlockFrom = (unit: Unit): Extract<Block, { _tag: "ToolCall" }> | undef
 const childBlockFrom = (unit: Unit): Extract<Block, { _tag: "ChildAgent" }> | undefined =>
   unit.content._tag === "Block" && unit.content.block._tag === "ChildAgent" ? unit.content.block : undefined
 
+const compactionBlockFrom = (unit: Unit): Extract<Block, { _tag: "Compaction" }> | undefined =>
+  unit.content._tag === "Block" && unit.content.block._tag === "Compaction" ? unit.content.block : undefined
+
 const isRootUnit = (unit: Unit): boolean => unit.parentId === undefined && unit.order.length === 1
 
 const agentScopeCallKey = (candidate: ChildParentCandidate): string =>
@@ -199,6 +202,8 @@ const indexUnit = (value: OwnedFold, unit: Unit): void => {
     addIndex(value.childUnitsById, executionKey(child.id), unit.key)
     if (child.status === "running") value.runningUnits.add(unit.key)
   }
+  const compaction = compactionBlockFrom(unit)
+  if (compaction !== undefined && compaction.status === "running") value.runningUnits.add(unit.key)
   if (unit.content._tag === "Entry" && unit.content.role === "assistant") {
     value.assistantUnits.add(unit.key)
     addIndex(value.assistantUnitsByRevision, unit.revision, unit.key)
@@ -249,6 +254,7 @@ const unindexUnit = (value: OwnedFold, unit: Unit): void => {
     removeIndex(value.childUnitsById, executionKey(child.id), unit.key)
     value.runningUnits.delete(unit.key)
   }
+  if (compactionBlockFrom(unit) !== undefined) value.runningUnits.delete(unit.key)
   if (unit.content._tag === "Entry" && unit.content.role === "assistant") {
     value.assistantUnits.delete(unit.key)
     removeIndex(value.assistantUnitsByRevision, unit.revision, unit.key)
@@ -879,6 +885,12 @@ const genericBlock = (turnId: string, event: SourceEvent): Block | undefined => 
     return { _tag: "Diff", path: string(value.path, "diff"), patch: event.text ?? string(value.patch ?? value.diff) }
   if (event.type === "agent.compaction.started")
     return { _tag: "Compaction", summary: event.text ?? string(value.summary), status: "running" }
+  if (event.type === "agent.compaction.completed")
+    return {
+      _tag: "Compaction",
+      summary: event.text ?? string(value.summary),
+      status: "complete",
+    }
   if (event.type === "agent.compaction.committed")
     return {
       _tag: "Compaction",
@@ -1137,6 +1149,7 @@ const applyReasoning = (
 const settledBlock = (block: Block, status: "failed" | "cancelled"): Block | undefined => {
   if (block._tag === "ToolCall" && block.status === "running") return { ...block, status }
   if (block._tag === "ChildAgent" && block.status === "running") return { ...block, status }
+  if (block._tag === "Compaction" && block.status === "running") return { ...block, status }
   return undefined
 }
 
@@ -1372,12 +1385,30 @@ const applyKnownEvent = (value: OwnedFold, change: MutableMutation, event: Sourc
     return applyChild(value, change, turnId, event)
   const block = genericBlock(turnId, event)
   if (block === undefined) return
+  const key = genericKey(turnId, event, block)
+  const previous = value.units.get(key)
+  const previousCompaction =
+    previous !== undefined && previous.content._tag === "Block" && previous.content.block._tag === "Compaction"
+      ? previous.content.block
+      : undefined
+  const nextBlock =
+    block._tag === "Compaction" && previousCompaction !== undefined
+      ? {
+          ...block,
+          summary: block.summary.length > 0 ? block.summary : previousCompaction.summary,
+          ...(block.checkpoint !== undefined
+            ? { checkpoint: block.checkpoint }
+            : previousCompaction.checkpoint !== undefined
+              ? { checkpoint: previousCompaction.checkpoint }
+              : {}),
+        }
+      : block
   upsertUnit(
     value,
     change,
-    makeUnit(genericKey(turnId, event, block), turnId, event.sequence, 0, event.sequence, {
+    makeUnit(key, turnId, event.sequence, 0, event.sequence, {
       _tag: "Block",
-      block,
+      block: nextBlock,
     }),
   )
 }
