@@ -28,6 +28,8 @@ import {
   Stream,
 } from "effect"
 import * as IngestProjection from "./execution-projection-state"
+import type * as IngestProjectionContract from "./execution-projection-contract"
+import type * as IngestProjectionTypes from "./execution-projection-types"
 import * as UsageCost from "../../usage/usage-projection"
 
 export const projectionVersion = 4
@@ -66,10 +68,10 @@ export interface Discovery {
 
 export type Failure = IngestFailure | UsageCost.ProjectionFailure
 
-export type ProjectionSnapshot = IngestProjection.Snapshot
-export type ProjectionPatch = IngestProjection.Patch
+export type ProjectionSnapshot = IngestProjectionContract.Snapshot
+export type ProjectionPatch = IngestProjectionContract.Patch
 export type ProjectionChange =
-  | IngestProjection.Change
+  | IngestProjectionContract.Change
   | {
       readonly _tag: "ProjectionFailed"
       readonly threadId: Thread.ThreadId
@@ -143,7 +145,7 @@ interface Node {
   status: Settled | undefined
   resumed: boolean
   caught: boolean
-  attachment: IngestProjection.Attachment | undefined
+  attachment: IngestProjectionTypes.Attachment | undefined
 }
 
 interface Pipeline {
@@ -179,7 +181,7 @@ interface Pipeline {
   usagePending: Array<UsageCost.RootExecution & { readonly event: ExecutionBackend.Event }>
   usageFold: UsageCost.UsageFold
   usageNotificationPending: boolean
-  delta: IngestProjection.ProjectionDelta
+  delta: IngestProjectionTypes.ProjectionDelta
   failure: Failure | undefined
   patchRevision: number
   streamClosed: boolean
@@ -373,7 +375,7 @@ const validateStoredAttachments = (
   turn: Turn.AgentExecutionTurn,
   stored: TranscriptRepository.Projection,
   nodes: ReadonlyMap<string, Node>,
-  attachments: ReadonlyMap<string, IngestProjection.Attachment>,
+  attachments: ReadonlyMap<string, IngestProjectionTypes.Attachment>,
 ): string | undefined => {
   const persisted = new Map(stored.units.map((unit) => [unit.key, unit]))
   for (const [key, node] of nodes) {
@@ -486,7 +488,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
   const publishPatch = (
     pipeline: Pipeline,
     origin: IngestProjection.ProjectionOrigin,
-    visible: IngestProjection.VisibleDelta,
+    visible: IngestProjectionTypes.VisibleDelta,
   ) => {
     const root = pipeline.nodes.get(pipeline.rootKey)!
     const baseRevision = pipeline.patchRevision
@@ -604,7 +606,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
     recordChange(pipeline)
   }
 
-  const resolveChild = (pipeline: Pipeline, parent: Node, child: Node, visible?: IngestProjection.VisibleDelta) => {
+  const resolveChild = (pipeline: Pipeline, parent: Node, child: Node, visible?: IngestProjectionTypes.VisibleDelta) => {
     if (parent.parentKey !== undefined && parent.attachment === undefined) {
       const waiting = pipeline.unresolvedByParent.get(parent.key) ?? new Set<string>()
       waiting.add(child.key)
@@ -660,7 +662,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
     pipeline: Pipeline,
     node: Node,
     mutation: TranscriptProjection.FoldMutation,
-    visible?: IngestProjection.VisibleDelta,
+    visible?: IngestProjectionTypes.VisibleDelta,
   ) => {
     if (!mutation.stateChanged && mutation.units.upsert.length === 0 && mutation.units.remove.length === 0) return
     if (visible !== undefined) IngestProjection.recordVisibleMutation(visible, node.key, mutation)
@@ -687,7 +689,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
     pipeline: Pipeline,
     node: Node,
     mutation: TranscriptProjection.FoldMutation,
-    visible?: IngestProjection.VisibleDelta,
+    visible?: IngestProjectionTypes.VisibleDelta,
   ) => {
     recordMutation(pipeline, node, mutation, visible)
     const outcome = interruptedAncestorOutcome(pipeline.nodes, node)
@@ -699,7 +701,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
     pipeline: Pipeline,
     ancestor: Node,
     outcome: InterruptedOutcome,
-    visible?: IngestProjection.VisibleDelta,
+    visible?: IngestProjectionTypes.VisibleDelta,
   ) => {
     for (const key of pipeline.runningNodes) {
       if (key === ancestor.key) continue
@@ -1046,7 +1048,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
     pipeline: Pipeline,
     parent: Node,
     childExecutionId: string,
-    visible?: IngestProjection.VisibleDelta,
+    visible?: IngestProjectionTypes.VisibleDelta,
   ) => {
     const key = TranscriptCorrelation.executionKey(childExecutionId)
     if (key.length === 0 || key === parent.key || pipeline.nodes.has(key)) return
@@ -1084,7 +1086,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
     if (pipeline.stopped || !pipeline.accepting) return
     try {
       if (event.executionId.length > 0 && !ExecutionId.ownsExecution(node.key, event.executionId)) return
-      const visible: IngestProjection.VisibleDelta = new Map()
+      const visible: IngestProjectionTypes.VisibleDelta = new Map()
       if (TranscriptProjection.Fold.isTransientEvent(event)) {
         const mutation = TranscriptProjection.Fold.applyFoldEvent(node.fold, event)
         if (!mutation.stateChanged && mutation.units.upsert.length === 0 && mutation.units.remove.length === 0) return

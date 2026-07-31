@@ -4,6 +4,8 @@ import * as TranscriptPage from "@rika/product/transcript-page"
 import * as Turn from "@rika/product/turn-record"
 import { Schema } from "effect"
 import * as IngestProjection from "../../execution/ingest/execution-projection-contract"
+import * as IngestProjectionSchema from "../../execution/ingest/execution-projection-schema"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 
 export interface QueueItem {
   readonly id: Turn.TurnId
@@ -62,7 +64,7 @@ export type InteractiveEvent =
       readonly streamId: string
       readonly patchRevision: number
       readonly state: IngestProjection.VisibleState
-      readonly units: ReadonlyArray<IngestProjection.Unit>
+      readonly units: ReadonlyArray<TranscriptUnit.Unit>
       readonly rootStatus?: IngestProjection.TerminalStatus
     }
   | {
@@ -268,12 +270,12 @@ export const InteractiveEventSchema = Schema.Union([
   Schema.Struct({
     _tag: Schema.tag("TranscriptProjectionStarted"),
     selectionEpoch: Schema.Int,
-    ...IngestProjection.SnapshotSchema.fields,
+    ...IngestProjectionSchema.SnapshotSchema.fields,
   }),
   Schema.Struct({
     _tag: Schema.tag("TranscriptProjectionPatched"),
     selectionEpoch: Schema.Int,
-    ...IngestProjection.PatchSchema.fields,
+    ...IngestProjectionSchema.PatchSchema.fields,
   }),
   Schema.Struct({
     _tag: Schema.tag("TranscriptProjectionStopped"),
@@ -282,7 +284,7 @@ export const InteractiveEventSchema = Schema.Union([
     rootTurnId: Turn.TurnId,
     streamId: Schema.String,
     patchRevision: Schema.Int,
-    status: IngestProjection.TerminalStatusSchema,
+    status: IngestProjectionSchema.TerminalStatusSchema,
   }),
   Schema.Struct({
     _tag: Schema.tag("TranscriptProjectionFailed"),

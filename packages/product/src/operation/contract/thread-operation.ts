@@ -1,3 +1,3 @@
-export { Input } from "./operation-input-schema"
+export { Input } from "./product-operation"
 export { InvalidInput } from "./product-operation-service"
-export type { Input as ThreadOperation } from "./operation-input-schema"
+export type { Input as ThreadOperation } from "./product-operation"

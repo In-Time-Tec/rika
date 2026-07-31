@@ -1,8 +1,6 @@
 import { Schema } from "effect"
-import { ModelRegistrationIdentity, modelRegistrationIdentity } from "./model-registration-identity"
-import { ProviderAuthentication, ProviderConnectionSnapshot } from "./provider-connection-snapshot"
-export { ModelRegistrationIdentity, modelRegistrationIdentity } from "./model-registration-identity"
-export { ProviderAuthentication, ProviderConnectionSnapshot } from "./provider-connection-snapshot"
+import { ModelRegistrationIdentity } from "./model-registration-identity"
+import { ProviderConnectionSnapshot } from "./provider-connection-snapshot"
 
 const ModelRouteRole = Schema.Literals([
   "main",

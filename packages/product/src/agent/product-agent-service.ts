@@ -3,29 +3,29 @@ import { AgentProfile } from "./agent-profile"
 import { Context, Effect, Layer, Schema } from "effect"
 
 export const Profile = AgentProfile
-export type Profile = typeof Profile.Type
+type Profile = typeof Profile.Type
 
-export interface InvokeInput {
+interface InvokeInput {
   readonly parentTurnId: string
   readonly childId: string
   readonly profile: Profile
   readonly prompt: string
 }
 
-export interface ChildEvent {
+interface ChildEvent {
   readonly parentTurnId: string
   readonly childId: string
   readonly profile: Profile
   readonly type: "accepted"
 }
 
-export interface TaskInput {
+interface TaskInput {
   readonly id: string
   readonly prompt: string
   readonly profile?: Profile
 }
 
-export interface ParallelInput {
+interface ParallelInput {
   readonly parentTurnId: string
   readonly fanOutId: string
   readonly workspace?: string

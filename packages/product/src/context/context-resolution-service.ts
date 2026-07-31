@@ -1,32 +1,9 @@
 import { createHash } from "node:crypto"
-import { Context, Effect, FileSystem, Layer, Path, PlatformError, Schema } from "effect"
+import { Context, Effect, FileSystem, Layer, Path, PlatformError } from "effect"
 import * as LocalPath from "@rika/coding-tools/local-path"
 import * as ContextFileSystem from "./context-file-system"
-
-export const Diagnostic = Schema.Struct({
-  _tag: Schema.Literals(["PathOutsideWorkspace", "ReferenceNotFound", "ReferenceReadFailed"]),
-  path: Schema.String,
-  message: Schema.String,
-})
-export type Diagnostic = typeof Diagnostic.Type
-
-export const Source = Schema.Struct({
-  path: Schema.String,
-  kind: Schema.Literals(["guidance", "reference"]),
-  content: Schema.String,
-  digest: Schema.String,
-})
-export type Source = typeof Source.Type
-export interface Result {
-  readonly sources: ReadonlyArray<Source>
-  readonly diagnostics: ReadonlyArray<Diagnostic>
-  readonly digest: string
-}
-export interface Input {
-  readonly workspace: string
-  readonly targetPaths?: ReadonlyArray<string>
-  readonly references?: ReadonlyArray<string>
-}
+import { Diagnostic, Source } from "./resolved-context"
+import type { Input, Result } from "./resolved-context"
 const maximumReferenceFiles = 1_000
 export type GlobLookup = (
   workspace: string,
