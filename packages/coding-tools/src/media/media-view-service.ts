@@ -44,7 +44,7 @@ export interface AnalyzerInterface {
   readonly analyze: (input: AnalysisInput) => Effect.Effect<string, MediaAnalysisError>
 }
 export class MediaAnalyzer extends Context.Service<MediaAnalyzer, AnalyzerInterface>()(
-  "@rika/coding-tools/media-view/MediaAnalyzer",
+  "@rika/coding-tools/media/media-view-service/MediaAnalyzer",
 ) {}
 export const analyzerTestLayer = (analyze: AnalyzerInterface["analyze"]) =>
   Layer.succeed(MediaAnalyzer, MediaAnalyzer.of({ analyze }))
@@ -57,7 +57,9 @@ export interface Interface {
     path: string,
   ) => Effect.Effect<Output, MediaMissingError | MediaOversizedError | UnsupportedMediaError | MediaAnalysisError>
 }
-export class Service extends Context.Service<Service, Interface>()("@rika/coding-tools/media-view/Service") {}
+export class Service extends Context.Service<Service, Interface>()(
+  "@rika/coding-tools/media/media-view-service/Service",
+) {}
 
 const maximumSize = 25 * 1024 * 1024
 const outputLimit = 40_000

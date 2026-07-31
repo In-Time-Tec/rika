@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import * as MediaView from "../media-view"
+import * as MediaView from "../media/media-view-service"
 
 export const Result = Schema.Struct({
   text: Schema.String,

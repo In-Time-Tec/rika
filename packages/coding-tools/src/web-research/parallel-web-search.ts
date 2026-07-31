@@ -39,7 +39,9 @@ export interface Interface {
   readonly search: (input: SearchInput) => Effect.Effect<ReadonlyArray<SearchResult>, SearchError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/coding-tools/parallel-search/Service") {}
+export class Service extends Context.Service<Service, Interface>()(
+  "@rika/coding-tools/web-research/parallel-web-search/Service",
+) {}
 
 export interface LayerOptions {
   readonly apiKey?: Redacted.Redacted<string>

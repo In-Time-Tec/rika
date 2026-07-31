@@ -1,4 +1,4 @@
-import { Effect, Function, type FileSystem, type Path } from "effect"
+import { Effect, FileSystem, Function, Path } from "effect"
 
 export const pathContainedIn: {
   (candidate: string, path: Path.Path): (root: string) => boolean

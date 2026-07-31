@@ -24,7 +24,9 @@ export interface Interface {
   readonly read: (input: Input) => Effect.Effect<string, Error>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/coding-tools/read-web-page/Service") {}
+export class Service extends Context.Service<Service, Interface>()(
+  "@rika/coding-tools/web-research/read-web-page-service/Service",
+) {}
 
 export interface LayerOptions {
   readonly apiKey?: Redacted.Redacted<string>

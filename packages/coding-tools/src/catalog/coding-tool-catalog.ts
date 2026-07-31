@@ -1,10 +1,18 @@
 import { Function, Schema } from "effect"
-import * as AgentTools from "./agent-tools"
-import * as ThreadTools from "./thread-tools"
-import * as Runtime from "./tool-runtime"
-import * as ToolPolicy from "./tool-policy"
-
-export { Idempotency, Presentation } from "./tool-policy"
+import * as AgentTools from "../delegation/agent-tool-contract"
+import * as ThreadTools from "./thread-tool-contract"
+import * as Runtime from "../runtime/coding-tool-runtime"
+import * as ToolPolicy from "../policy/coding-tool-policy"
+import * as ParallelSearch from "../web-research/parallel-web-search"
+import * as WebSearch from "../web-research/web-search-service"
+import * as ReadWebPage from "../web-research/read-web-page-service"
+import * as ProcessRegistry from "../process/shell-process-registry"
+import * as MediaView from "../media/media-view-service"
+import * as LocalPath from "../workspace/local-path"
+import * as LocalSafetyPolicy from "../policy/local-safety-policy"
+import * as WorkspaceIndex from "../workspace/workspace-file-search"
+import * as ToolInvocation from "./tool-invocation"
+export { Idempotency, Presentation } from "../policy/coding-tool-policy"
 
 export const Definition = Schema.Struct({
   name: Schema.String,
@@ -121,12 +129,12 @@ export const resolveAgentPresentation = (name: string): ToolPolicy.Presentation 
   return agentPresentation(profile, `${display} working`, `${display} finished`)
 }
 
-export interface AgentPhrase {
+interface CatalogAgentPhrase {
   readonly name: string
   readonly status: "running" | "complete" | "failed" | "cancelled"
 }
 
-export const agentPhrase = ({ name, status }: AgentPhrase): string => {
+export const agentPhrase = ({ name, status }: CatalogAgentPhrase): string => {
   const presentation = resolveAgentPresentation(name)
   if (status === "running") return presentation.activeLabel
   if (status === "complete") return presentation.completeLabel
@@ -195,3 +203,66 @@ export const resolvePresentation = (rawName: string): ToolPolicy.Presentation =>
     return { family: "direct", action: name, activeLabel: "Slack", completeLabel: "Slack" }
   return { family: "generic", action: "tool", activeLabel: "Running tool", completeLabel: "Ran tool" }
 }
+
+export const Catalog = {
+  Definition,
+  definitions,
+  makeDefinitions,
+  get,
+  agentProfile,
+  agentDisplay,
+  resolveAgentPresentation,
+  agentPhrase,
+  resolvePresentation,
+}
+
+export namespace Catalog {
+  export type AgentPhrase = CatalogAgentPhrase
+}
+
+export namespace ExecutionId {
+  export const executionNamespacePrefixes = ["execution:", "child:", "workflow:"] as const
+  export const isExecutionNamespace = (value: string): boolean =>
+    executionNamespacePrefixes.some((prefix) => value.startsWith(prefix))
+  export const executionKey = (value: string): string => value.replace(/^execution:/, "")
+  export const ownsExecution: {
+    (turnId: string, executionId: string): boolean
+    (executionId: string): (turnId: string) => boolean
+  } = Function.dual(2, (turnId: string, executionId: string): boolean => executionKey(executionId) === turnId)
+}
+
+export namespace ExecutionStatus {
+  export const statuses = ["accepted", "queued", "running", "waiting", "completed", "failed", "cancelled"] as const
+  export const Status = Schema.Literals(statuses)
+  export type Status = typeof Status.Type
+  export const terminalStatuses = ["completed", "failed", "cancelled"] as const satisfies ReadonlyArray<Status>
+  export type TerminalStatus = (typeof terminalStatuses)[number]
+  export const isTerminalStatus = (status: Status): status is TerminalStatus =>
+    status === "completed" || status === "failed" || status === "cancelled"
+  export const isActiveStatus = (status: Status): boolean => !isTerminalStatus(status) && status !== "queued"
+  export const occupiesQueue = (status: Status): boolean => !isTerminalStatus(status)
+  export const terminalEventStatus = (eventType: string): Status | undefined => {
+    if (eventType === "execution.completed") return "completed"
+    if (eventType === "execution.failed") return "failed"
+    if (eventType === "execution.cancelled") return "cancelled"
+    return undefined
+  }
+  export const isTerminalEventType = (eventType: string): boolean => terminalEventStatus(eventType) !== undefined
+}
+
+export {
+  ToolPolicy,
+  ParallelSearch,
+  WebSearch,
+  ReadWebPage,
+  ProcessRegistry,
+  MediaView,
+  LocalPath,
+  LocalSafetyPolicy,
+  WorkspaceIndex,
+  ThreadTools,
+  Runtime,
+  AgentTools,
+  ToolInvocation,
+}
+export { ToolInvocation as ToolInvocationService }

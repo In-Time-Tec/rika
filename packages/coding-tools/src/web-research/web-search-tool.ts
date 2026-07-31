@@ -1,8 +1,8 @@
 import { Schema } from "effect"
 import { Tool } from "effect/unstable/ai"
-import * as Policy from "../tool-policy"
-import * as WebSearch from "../web-search"
-import { Result, ToolFailure } from "./result"
+import * as Policy from "../policy/coding-tool-policy"
+import * as WebSearch from "../web-research/web-search-service"
+import { Result, ToolFailure } from "../runtime/coding-tool-result"
 export const Request = Schema.Struct({
   _tag: Schema.tag("WebSearch"),
   objective: WebSearch.Objective,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { pathContainedIn } from "../src/workspace-boundary"
+import { pathContainedIn } from "../src/policy/workspace-boundary-policy"
 
 describe("workspace boundary", () => {
   const path = {

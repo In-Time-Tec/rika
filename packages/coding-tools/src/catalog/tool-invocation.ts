@@ -20,5 +20,5 @@ export const absoluteDeadline: {
 })
 
 export class ToolInvocation extends Context.Service<ToolInvocation, Value>()(
-  "@rika/coding-tools/tool-invocation/ToolInvocation",
+  "@rika/coding-tools/catalog/tool-invocation/ToolInvocation",
 ) {}

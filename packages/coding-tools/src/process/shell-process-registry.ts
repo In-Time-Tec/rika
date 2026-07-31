@@ -94,7 +94,9 @@ export interface Interface {
   readonly cancel: (processId: string) => Effect.Effect<void, ProcessNotFound | PlatformError.PlatformError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/coding-tools/process-registry/Service") {}
+export class Service extends Context.Service<Service, Interface>()(
+  "@rika/coding-tools/process/shell-process-registry/Service",
+) {}
 
 export const layer = Layer.effect(
   Service,

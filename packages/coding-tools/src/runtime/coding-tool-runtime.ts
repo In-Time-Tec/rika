@@ -1,26 +1,36 @@
 import { Config, ConfigProvider, Context, Data, Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
-import * as LocalPath from "./local-path"
-import * as LocalSafetyPolicy from "./local-safety-policy"
+import * as LocalPath from "../workspace/local-path"
+import * as LocalSafetyPolicy from "../policy/local-safety-policy"
 import { Toolkit } from "effect/unstable/ai"
-import * as WebSearchService from "./web-search"
-import * as ReadWebPageService from "./read-web-page"
-import * as ProcessRegistry from "./process-registry"
-import * as MediaView from "./media-view"
-import * as ToolPolicy from "./tool-policy"
-import * as WorkspaceIndex from "./workspace-index"
-import { unifiedDiff } from "./unified-diff"
+import * as WebSearchService from "../web-research/web-search-service"
+import * as ReadWebPageService from "../web-research/read-web-page-service"
+import * as ProcessRegistry from "../process/shell-process-registry"
+import * as MediaView from "../media/media-view-service"
+import * as ToolPolicy from "../policy/coding-tool-policy"
+import * as CodingToolResult from "./coding-tool-result"
+import { RuntimeFilesystem } from "./coding-tool-runtime-filesystem"
+import * as WorkspaceIndex from "../workspace/workspace-file-search"
+import { unifiedDiff } from "../workspace/unified-diff"
 
-import * as ToolDefinitions from "./tool-definitions"
+import * as GrepContract from "../workspace/grep-files-tool"
+import * as ReadContract from "../workspace/read-file-tool"
+import * as WriteContract from "../workspace/write-file-tool"
+import * as EditContract from "../workspace/edit-file-tool"
+import * as BashContract from "../process/bash-tool"
+import * as ShellCommandStatusContract from "../process/shell-command-status-tool"
+import * as WebSearchContract from "../web-research/web-search-tool"
+import * as ReadWebPageContract from "../web-research/read-web-page-tool"
+import * as ViewMediaContract from "../media/view-media-tool"
 
-export const Grep = ToolDefinitions.Grep.Request
-export const Read = ToolDefinitions.Read.Request
-export const Write = ToolDefinitions.Write.Request
-export const Edit = ToolDefinitions.Edit.Request
-export const Bash = ToolDefinitions.Bash.Request
-export const ShellCommandStatus = ToolDefinitions.ShellCommandStatus.Request
-export const WebSearch = ToolDefinitions.WebSearch.Request
-export const ReadWebPage = ToolDefinitions.ReadWebPage.Request
-export const ViewMedia = ToolDefinitions.ViewMedia.Request
+export const Grep = GrepContract.Request
+export const Read = ReadContract.Request
+export const Write = WriteContract.Request
+export const Edit = EditContract.Request
+export const Bash = BashContract.Request
+export const ShellCommandStatus = ShellCommandStatusContract.Request
+export const WebSearch = WebSearchContract.Request
+export const ReadWebPage = ReadWebPageContract.Request
+export const ViewMedia = ViewMediaContract.Request
 export const Shell = Schema.Struct({
   _tag: Schema.tag("Shell"),
   command: Schema.String,
@@ -42,42 +52,39 @@ export const Request = Schema.Union([
   ViewMedia,
 ])
 export type Request = typeof Request.Type
-const boundedDiff = (patch: string | undefined): { readonly diff?: string } =>
-  patch === undefined ? {} : { diff: patch }
-
-export const Result = ToolDefinitions.Result.Result
+export const Result = CodingToolResult.Result
 export type Result = typeof Result.Type
 
 export class ToolError extends Schema.TaggedErrorClass<ToolError>()("ToolError", {
   tool: Schema.String,
   message: Schema.String,
   kind: Schema.Literals(["operation", "timeout"]),
-  category: ToolDefinitions.Result.FailureCategory,
+  category: CodingToolResult.FailureCategory,
   outcome: Schema.Literals(["known", "unknown"]),
-  recovery: ToolDefinitions.Result.Recovery,
+  recovery: CodingToolResult.Recovery,
   nextAction: Schema.String,
 }) {}
 
-export const grepTool = ToolDefinitions.Grep.tool
-export const readTool = ToolDefinitions.Read.tool
-export const writeTool = ToolDefinitions.Write.tool
-export const editTool = ToolDefinitions.Edit.tool
-export const bashTool = ToolDefinitions.Bash.tool
-export const shellCommandStatusTool = ToolDefinitions.ShellCommandStatus.tool
-export const webSearchTool = ToolDefinitions.WebSearch.tool
-export const readWebPageTool = ToolDefinitions.ReadWebPage.tool
-export const viewMediaTool = ToolDefinitions.ViewMedia.tool
+export const grepTool = GrepContract.tool
+export const readTool = ReadContract.tool
+export const writeTool = WriteContract.tool
+export const editTool = EditContract.tool
+export const bashTool = BashContract.tool
+export const shellCommandStatusTool = ShellCommandStatusContract.tool
+export const webSearchTool = WebSearchContract.tool
+export const readWebPageTool = ReadWebPageContract.tool
+export const viewMediaTool = ViewMediaContract.tool
 
 export const registrations: ReadonlyArray<ToolPolicy.Registration> = [
-  ToolDefinitions.Grep.registration,
-  ToolDefinitions.Read.registration,
-  ToolDefinitions.Write.registration,
-  ToolDefinitions.Edit.registration,
-  ToolDefinitions.Bash.registration,
-  ToolDefinitions.ShellCommandStatus.registration,
-  ToolDefinitions.WebSearch.registration,
-  ToolDefinitions.ReadWebPage.registration,
-  ToolDefinitions.ViewMedia.registration,
+  GrepContract.registration,
+  ReadContract.registration,
+  WriteContract.registration,
+  EditContract.registration,
+  BashContract.registration,
+  ShellCommandStatusContract.registration,
+  WebSearchContract.registration,
+  ReadWebPageContract.registration,
+  ViewMediaContract.registration,
 ]
 
 export const toolkit = Toolkit.make(
@@ -147,24 +154,18 @@ export interface Interface {
   readonly run: (request: Request) => Effect.Effect<Result, ToolError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/coding-tools/tool-runtime/Service") {}
+export class Service extends Context.Service<Service, Interface>()(
+  "@rika/coding-tools/runtime/coding-tool-runtime/Service",
+) {}
 
 const maxOutput = 40_000
-const boundedPrefix = (text: string, limit: number) => {
-  const prefix = text.slice(0, limit)
-  const final = prefix.charCodeAt(prefix.length - 1)
-  return final >= 0xd800 && final <= 0xdbff ? prefix.slice(0, -1) : prefix
-}
-const bounded = (text: string, limit = maxOutput): Result => ({
-  text: boundedPrefix(text, limit),
-  truncated: text.length > limit,
-})
+const bounded = (text: string, limit = maxOutput): Result => RuntimeFilesystem.boundedText<Result>(text, limit)
 const boundResult = (request: Request, result: Result): Result => {
   const limit = contract(request).outputLimit
   let remaining = limit
   const trim = (value: string | undefined) => {
     if (value === undefined) return undefined
-    const trimmed = boundedPrefix(value, remaining)
+    const trimmed = RuntimeFilesystem.boundedPrefix(value, remaining)
     remaining -= trimmed.length
     return trimmed
   }
@@ -188,10 +189,10 @@ const boundResult = (request: Request, result: Result): Result => {
 }
 
 interface FailureDetails {
-  readonly category: ToolDefinitions.Result.FailureCategory
+  readonly category: CodingToolResult.FailureCategory
   readonly message: string
   readonly outcome: "known" | "unknown"
-  readonly recovery: ToolDefinitions.Result.Recovery
+  readonly recovery: CodingToolResult.Recovery
   readonly nextAction: string
 }
 
@@ -492,13 +493,8 @@ const runtimeLayer = (workspace: string) =>
                     nextAction: "Use whole-number line bounds where start is at least 1 and end is not before start",
                   })
                 const target = yield* resolveRead(request.path)
-                const lines = (yield* fileSystem.readFileString(target)).split("\n")
-                return bounded(
-                  lines
-                    .slice(start - 1, end)
-                    .map((line, index) => `${start + index}: ${line}`)
-                    .join("\n"),
-                )
+                const content = yield* fileSystem.readFileString(target)
+                return bounded(RuntimeFilesystem.lineWindow(content, start, end))
               }
               case "Write": {
                 const target = yield* resolveWrite(request.path)
@@ -509,7 +505,7 @@ const runtimeLayer = (workspace: string) =>
                 yield* fileSystem.writeFileString(target, request.content)
                 return {
                   ...bounded(`Successfully wrote ${request.content.length} bytes to ${request.path}`),
-                  ...boundedDiff(unifiedDiff(request.path, previous, request.content, !exists)),
+                  ...RuntimeFilesystem.boundedDiff(unifiedDiff(request.path, previous, request.content, !exists)),
                 }
               }
               case "Edit": {
@@ -551,14 +547,16 @@ const runtimeLayer = (workspace: string) =>
                     nextAction:
                       "Retry with more surrounding context, or set replace_all only when every match should change",
                   })
-                const next =
-                  request.replaceAll === true
-                    ? content.split(request.oldStr).join(request.newStr)
-                    : content.slice(0, first) + request.newStr + content.slice(first + request.oldStr.length)
+                const next = RuntimeFilesystem.replaceText(
+                  content,
+                  request.oldStr,
+                  request.newStr,
+                  request.replaceAll === true,
+                )
                 yield* fileSystem.writeFileString(target, next)
                 return {
                   ...bounded(`Successfully replaced text in ${request.path}`),
-                  ...boundedDiff(unifiedDiff(request.path, content, next)),
+                  ...RuntimeFilesystem.boundedDiff(unifiedDiff(request.path, content, next, false)),
                 }
               }
               case "Bash": {
@@ -636,7 +634,6 @@ const runtimeLayer = (workspace: string) =>
 export const layerWithProcessRegistry = (workspace: string) =>
   runtimeLayer(workspace).pipe(Layer.provide(WorkspaceIndex.layer(workspace)))
 
-/** Runtime composition point for tests or hosts that provide their own index. */
 export const layerWithServices = (workspace: string) => runtimeLayer(workspace)
 
 export const layer = (workspace: string) =>

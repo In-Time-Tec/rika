@@ -1,7 +1,7 @@
 import { Context, Effect, FileSystem, Layer, Path, Schema, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
-import { containedRelativePath } from "./workspace-boundary"
+import { containedRelativePath } from "../policy/workspace-boundary-policy"
 
 export interface GlobOptions {
   readonly pageIndex?: number
@@ -62,7 +62,9 @@ export interface Interface {
   readonly grep: (query: string, options?: GrepOptions) => Effect.Effect<GrepResult, WorkspaceIndexError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/coding-tools/workspace-index/Service") {}
+export class Service extends Context.Service<Service, Interface>()(
+  "@rika/coding-tools/workspace/workspace-file-search/Service",
+) {}
 
 const indexError = (operation: Operation, cause: unknown) =>
   WorkspaceIndexError.make({ operation, message: cause instanceof Error ? cause.message : String(cause) })

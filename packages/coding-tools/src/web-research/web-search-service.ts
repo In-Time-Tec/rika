@@ -73,7 +73,9 @@ export interface Interface {
   ) => Effect.Effect<ReadonlyArray<ProviderOutcome>, SelectionError | ExecutionError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/coding-tools/web-search/Service") {}
+export class Service extends Context.Service<Service, Interface>()(
+  "@rika/coding-tools/web-research/web-search-service/Service",
+) {}
 
 const searchProvider = (provider: SearchProvider, request: SearchRequest) =>
   provider.search(request).pipe(
@@ -142,5 +144,5 @@ export {
   parallel,
   providerAvailability,
   providerRegistry,
-} from "./web-search-providers"
-export type { ProviderId, ProviderOptions } from "./web-search-providers"
+} from "./web-search-provider"
+export type { ProviderId, ProviderOptions } from "./web-search-provider"

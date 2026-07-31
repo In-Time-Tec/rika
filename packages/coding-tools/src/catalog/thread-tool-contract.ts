@@ -1,7 +1,7 @@
 import { Schema } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
-import * as Policy from "./tool-policy"
-import { ToolInvocation } from "./tool-invocation"
+import * as Policy from "../policy/coding-tool-policy"
+import { ToolInvocation } from "../catalog/tool-invocation"
 import { ModeId } from "@rika/configuration/behavior-mode"
 
 const NonEmptyString = Schema.String.check(Schema.isMinLength(1))

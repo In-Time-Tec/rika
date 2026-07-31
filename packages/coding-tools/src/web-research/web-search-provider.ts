@@ -1,7 +1,6 @@
 import { Effect, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
-import Parallel from "parallel-web"
-import * as WebSearch from "./web-search"
+import * as WebSearch from "./web-search-service"
 
 export interface ProviderOptions {
   readonly apiKey?: Redacted.Redacted<string>
@@ -80,6 +79,71 @@ const urlResult = (
   }
 }
 
+const ParallelResponse = Schema.Struct({
+  search_id: Schema.String,
+  session_id: Schema.String,
+  results: Schema.Array(
+    Schema.Struct({
+      url: Schema.String,
+      title: Schema.optionalKey(Schema.String),
+      publish_date: Schema.optionalKey(Schema.String),
+      excerpts: Schema.Array(Schema.String),
+    }),
+  ),
+})
+const ParallelResponseJson = Schema.fromJsonString(ParallelResponse)
+const ParallelRequestJson = Schema.fromJsonString(
+  Schema.Struct({
+    objective: Schema.String,
+    search_queries: Schema.Array(Schema.String),
+    mode: Schema.Literal("advanced"),
+    max_chars_total: Schema.Int,
+  }),
+)
+
+const parallelRequest = (
+  options: ProviderOptions,
+  key: string,
+  request: WebSearch.SearchRequest,
+): Effect.Effect<typeof ParallelResponse.Type, WebSearch.ProviderFailure> => {
+  const body = Schema.encodeSync(ParallelRequestJson)({
+    objective: request.objective,
+    search_queries: [...request.searchQueries],
+    mode: "advanced",
+    max_chars_total: 40_000,
+  })
+  return Effect.callback((resume) => {
+    const controller = new AbortController()
+    const fetcher = options.fetch ?? globalThis.fetch
+    const url = `${options.baseUrl ?? "https://api.parallel.ai"}/v1/search`
+    fetcher(url, {
+      method: "POST",
+      headers: { "x-api-key": key, "content-type": "application/json" },
+      body,
+      signal: controller.signal,
+    }).then(
+      (response) => {
+        if (!response.ok) {
+          resume(Effect.fail(mapSdkFailure("parallel", { status: response.status })))
+          return
+        }
+        response.text().then(
+          (responseBody) => {
+            try {
+              resume(Effect.succeed(Schema.decodeUnknownSync(ParallelResponseJson)(responseBody)))
+            } catch (cause) {
+              resume(Effect.fail(failure("parallel", "response", `Malformed response: ${String(cause)}`)))
+            }
+          },
+          (cause: unknown) => resume(Effect.fail(mapSdkFailure("parallel", cause))),
+        )
+      },
+      (cause: unknown) => resume(Effect.fail(mapSdkFailure("parallel", cause))),
+    )
+    return Effect.sync(() => controller.abort())
+  })
+}
+
 const makeParallel = (_client: HttpClient.HttpClient, options: ProviderOptions): WebSearch.SearchProvider => ({
   id: "parallel",
   capabilities: new Set(["web"]),
@@ -87,31 +151,7 @@ const makeParallel = (_client: HttpClient.HttpClient, options: ProviderOptions):
   search: (request) =>
     Effect.gen(function* () {
       const key = yield* credential("parallel", "PARALLEL_API_KEY", options.apiKey)
-      const client = new Parallel({
-        apiKey: key,
-        baseURL: options.baseUrl,
-        maxRetries: 0,
-        timeout: 30_000,
-        ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
-      })
-      const response = yield* Effect.callback<Parallel.SearchResult, WebSearch.ProviderFailure>((resume) => {
-        const controller = new AbortController()
-        client
-          .search(
-            {
-              objective: request.objective,
-              search_queries: [...request.searchQueries],
-              mode: "advanced",
-              max_chars_total: 40_000,
-            },
-            { signal: controller.signal, maxRetries: 0 },
-          )
-          .then(
-            (result) => resume(Effect.succeed(result)),
-            (cause: unknown) => resume(Effect.fail(mapSdkFailure("parallel", cause))),
-          )
-        return Effect.sync(() => controller.abort())
-      })
+      const response = yield* parallelRequest(options, key, request)
       return {
         results: response.results.map((result) => ({
           url: result.url,

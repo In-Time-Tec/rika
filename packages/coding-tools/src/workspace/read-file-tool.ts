@@ -1,7 +1,7 @@
 import { Schema } from "effect"
 import { Tool } from "effect/unstable/ai"
-import * as Policy from "../tool-policy"
-import { Result, ToolFailure } from "./result"
+import * as Policy from "../policy/coding-tool-policy"
+import { Result, ToolFailure } from "../runtime/coding-tool-result"
 export const Request = Schema.Struct({
   _tag: Schema.tag("Read"),
   path: Schema.String,
