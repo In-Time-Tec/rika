@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import * as TurnContract from "@rika/product/turn-repository"
 import { Fixtures as RuntimeFixtures } from "./interactive-session-runtime-support"
 import { Fixtures as TranscriptFixtures } from "./interactive-session-transcript-support"
 import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Result, Schema } from "effect"
@@ -124,7 +125,7 @@ const storeCompletedTranscript = Effect.fn("InteractiveSessionTest.storeComplete
 })
 
 const completeActive = Effect.fn("InteractiveSessionTest.completeActive")(function* (
-  turns: RuntimeFixtures.TurnRepository.Interface,
+  turns: TurnContract.Interface,
   transcripts: RuntimeFixtures.TranscriptRepository.Interface,
   updatedAt: number,
 ) {
@@ -136,7 +137,7 @@ const completeActive = Effect.fn("InteractiveSessionTest.completeActive")(functi
 const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
   pagedEvents?: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>,
   stalePageCursor: boolean = false,
-  turnPageRequests?: Ref.Ref<ReadonlyArray<RuntimeFixtures.TurnRepository.PageCursor | undefined>>,
+  turnPageRequests?: Ref.Ref<ReadonlyArray<TurnContract.PageCursor | undefined>>,
   cancelFailure: boolean = false,
   initialTurnsCompleted: boolean = false,
   completion?: {
@@ -332,7 +333,7 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
         }),
     resolveInvocationSource: () => Effect.die("unused"),
   })
-  const selectionTurns: RuntimeFixtures.TurnRepository.Interface =
+  const selectionTurns: TurnContract.Interface =
     turnPageRequests === undefined
       ? turns
       : {
@@ -1361,7 +1362,7 @@ describe("InteractiveSession controls", () => {
 
   it.effect("bounds the initial page and exhausts older pages without duplicate units", () =>
     Effect.gen(function* () {
-      const turnPageRequests = yield* Ref.make<ReadonlyArray<RuntimeFixtures.TurnRepository.PageCursor | undefined>>([])
+      const turnPageRequests = yield* Ref.make<ReadonlyArray<TurnContract.PageCursor | undefined>>([])
       const { session, turns, transcripts, older } = yield* makeHarness(undefined, false, turnPageRequests)
       yield* completeActive(turns, transcripts, 2)
       for (let index = 0; index < 240; index += 1) {

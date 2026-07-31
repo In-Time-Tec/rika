@@ -4,8 +4,6 @@ import {
   decodeAgent,
   decodeQueueState,
   encodeExtensionPin,
-  decodeStoredTurn,
-  StoredTurnRow,
   ExtensionPinJson,
   PromptPartsJson,
   ExecutionRouteJson,
@@ -13,9 +11,7 @@ import {
   LineageJson,
 } from "./turn-row-codec"
 import {
-  clone,
   cursorFor,
-  isTerminalStatus,
   missing,
   pageSize,
   queuedTurnUnavailable,
@@ -24,171 +20,17 @@ import {
   takeQueuedError,
 } from "./turn-memory-support"
 export { Service }
-import { Effect, Layer, Ref, Schema, Semaphore } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import { ThreadId } from "@rika/product/thread-record"
-import * as ExecutionStatus from "@rika/product/execution-status"
-import {
-  AgentExecutionTurn,
-  ExecutionExtensionPin,
-  ExecutionRoutePin,
-  PromptPart,
-  RecordedShellTurn,
-  Status,
-  StopIntent,
-  Turn,
-  TurnAuthor,
-  TurnId,
-  TurnLineage,
-  isAgentExecution,
-  isRunningRecordedShell,
-} from "@rika/product/turn-record"
-import type { RunningRecordedShellTurn } from "@rika/product/turn-record"
-
-export { RepositoryError, QueueFull, QueuedTurnUnavailable } from "@rika/product/turn-repository"
-import { RepositoryError, QueueFull, QueuedTurnUnavailable } from "@rika/product/turn-repository"
-
-export interface CreateInput {
-  readonly id: TurnId
-  readonly threadId: ThreadId
-  readonly prompt: string
-  readonly promptParts?: ReadonlyArray<PromptPart>
-  readonly executionRoute: ExecutionRoutePin
-  readonly reviewFanOutId?: string
-  readonly author?: TurnAuthor
-  readonly lineage?: TurnLineage
-  readonly queueCapacity: number
-  readonly now: number
-}
-
-export const PageCursor = Schema.Struct({ createdAt: Schema.Finite, id: TurnId })
-export interface PageCursor extends Schema.Schema.Type<typeof PageCursor> {}
-
-export interface PageOptions {
-  readonly before?: PageCursor | undefined
-  readonly limit?: number
-}
-
-export interface PageResult {
-  readonly turns: ReadonlyArray<Turn>
-  readonly hasOlder: boolean
-  readonly oldestCursor: PageCursor | undefined
-  readonly newestCursor: PageCursor | undefined
-}
-
-export interface QueueItemChange {
-  readonly threadId: ThreadId
-  readonly revision: number
-  readonly queuedCount: number
-  readonly becameNonempty: boolean
-  readonly change:
-    | { readonly _tag: "Added"; readonly turn: AgentExecutionTurn }
-    | { readonly _tag: "Updated"; readonly turn: AgentExecutionTurn }
-    | { readonly _tag: "Removed"; readonly turnId: TurnId }
-}
-
-export interface QueueSnapshot {
-  readonly threadId: ThreadId
-  readonly revision: number
-  readonly queuedCount: number
-  readonly turns: ReadonlyArray<AgentExecutionTurn>
-}
-
-export type Submission = AgentExecutionTurn & { readonly queue?: QueueItemChange }
-
-export interface QueueClaim {
-  readonly turn: AgentExecutionTurn
-  readonly token: string
-}
-
-export type QueueClaimFinish =
-  | { readonly _tag: "Transitioned"; readonly turn: AgentExecutionTurn; readonly queue: QueueItemChange }
-  | { readonly _tag: "Unavailable" }
-
-export interface QueuedTurnTake {
-  readonly turn: AgentExecutionTurn
-  readonly queue: QueueItemChange
-}
-
-export interface QueueWake {
-  readonly threadId: ThreadId
-  readonly generation: number
-  readonly queueRevision: number
-}
-
-export const defaultPageSize = 50
-export const maximumPageSize = 200
-
-export interface Interface {
-  readonly createForSubmission: (input: CreateInput) => Effect.Effect<Submission, RepositoryError | QueueFull>
-  readonly copy: (
-    turn: AgentExecutionTurn,
-    queueCapacity: number,
-  ) => Effect.Effect<Submission, RepositoryError | QueueFull>
-  readonly get: (id: TurnId) => Effect.Effect<Turn | undefined, RepositoryError>
-  readonly list: (threadId: ThreadId) => Effect.Effect<ReadonlyArray<Turn>, RepositoryError>
-  readonly listRecentNonqueued: (
-    threadId: ThreadId,
-    limit: number,
-  ) => Effect.Effect<ReadonlyArray<Turn>, RepositoryError>
-  readonly page: (threadId: ThreadId, options?: PageOptions) => Effect.Effect<PageResult, RepositoryError>
-  readonly findActive: (threadId: ThreadId) => Effect.Effect<AgentExecutionTurn | undefined, RepositoryError>
-  readonly readQueue: (threadId: ThreadId) => Effect.Effect<QueueSnapshot, RepositoryError>
-  readonly listNonterminal: Effect.Effect<ReadonlyArray<AgentExecutionTurn>, RepositoryError>
-  readonly listStopRequested: Effect.Effect<ReadonlyArray<AgentExecutionTurn>, RepositoryError>
-  readonly requestStop: (id: TurnId, now: number) => Effect.Effect<AgentExecutionTurn | undefined, RepositoryError>
-  readonly claimNextQueued: (threadId: ThreadId, now: number) => Effect.Effect<QueueClaim | undefined, RepositoryError>
-  readonly finishQueuedClaim: (
-    claim: QueueClaim,
-    status: "running" | "failed",
-    lastCursor: string | undefined,
-    extensionPin: ExecutionExtensionPin | undefined,
-    now: number,
-  ) => Effect.Effect<QueueClaimFinish, RepositoryError>
-  readonly releaseQueuedClaim: (claim: QueueClaim) => Effect.Effect<void, RepositoryError>
-  readonly resetQueueClaims: Effect.Effect<void, RepositoryError>
-  readonly editQueued: (
-    id: TurnId,
-    prompt: string,
-    now: number,
-  ) => Effect.Effect<AgentExecutionTurn & { readonly queue: QueueItemChange }, RepositoryError>
-  readonly takeQueued: (id: TurnId) => Effect.Effect<QueuedTurnTake, RepositoryError | QueuedTurnUnavailable>
-  readonly dequeue: (id: TurnId) => Effect.Effect<QueueItemChange, RepositoryError>
-  readonly requeueAccepted: (
-    id: TurnId,
-    queueCapacity: number,
-    now: number,
-  ) => Effect.Effect<AgentExecutionTurn & { readonly queue: QueueItemChange }, RepositoryError | QueueFull>
-  readonly requestQueueWake: (threadId: ThreadId) => Effect.Effect<QueueWake | undefined, RepositoryError>
-  readonly consumeQueueWake: (threadId: ThreadId, generation: number) => Effect.Effect<boolean, RepositoryError>
-  readonly setExtensionPin: (
-    id: TurnId,
-    pin: ExecutionExtensionPin,
-  ) => Effect.Effect<AgentExecutionTurn, RepositoryError>
-  readonly setStatus: (
-    id: TurnId,
-    status: Status,
-    lastCursor: string | undefined,
-    now: number,
-  ) => Effect.Effect<AgentExecutionTurn, RepositoryError>
-  readonly startAccepted: (id: TurnId, now: number) => Effect.Effect<boolean, RepositoryError>
-  readonly cancelAccepted: (id: TurnId, now: number) => Effect.Effect<boolean, RepositoryError>
-  readonly repairCursor: (
-    id: TurnId,
-    status: Status,
-    expectedCursor: string | undefined,
-    cursor: string | undefined,
-  ) => Effect.Effect<boolean, RepositoryError>
-}
-
+import { TurnId } from "@rika/product/turn-record"
+import { readTurn } from "./turn-sqlite-reader"
+import { listAgentTurns } from "./turn-sqlite-queries"
+import { RepositoryError, QueueFull } from "@rika/product/turn-repository"
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const sql = yield* SqlClient
-    const get = Effect.fn("TurnRepository.get")(function* (id: TurnId) {
-      const rows = yield* sql`SELECT * FROM rika_turns WHERE id = ${id}`.pipe(Effect.mapError(repositoryError))
-      return rows[0] === undefined ? undefined : yield* decode(rows[0])
-    })
+    const get = Effect.fn("TurnRepository.get")((id: TurnId) => readTurn(sql, id))
     return Service.of({
       createForSubmission: Effect.fn("TurnRepository.createForSubmission")(function* (input) {
         const promptParts =
@@ -357,20 +199,12 @@ export const layer = Layer.effect(
           )
           .pipe(Effect.mapError(repositoryError))
       }),
-      listNonterminal: Effect.gen(function* () {
-        const rows =
-          yield* sql`SELECT * FROM rika_turns WHERE turn_kind = 'AgentExecution' AND status IN ('queued', 'accepted', 'running', 'waiting') AND stop_intent = 'none' ORDER BY created_at ASC, rowid ASC`.pipe(
-            Effect.mapError(repositoryError),
-          )
-        return yield* Effect.all(rows.map(decodeAgent))
-      }).pipe(Effect.withSpan("TurnRepository.listNonterminal")),
-      listStopRequested: Effect.gen(function* () {
-        const rows =
-          yield* sql`SELECT * FROM rika_turns WHERE turn_kind = 'AgentExecution' AND status IN ('queued', 'accepted', 'running', 'waiting') AND stop_intent = 'requested' ORDER BY created_at ASC, rowid ASC`.pipe(
-            Effect.mapError(repositoryError),
-          )
-        return yield* Effect.all(rows.map(decodeAgent))
-      }).pipe(Effect.withSpan("TurnRepository.listStopRequested")),
+      listNonterminal: listAgentTurns(sql, "none", repositoryError).pipe(
+        Effect.withSpan("TurnRepository.listNonterminal"),
+      ),
+      listStopRequested: listAgentTurns(sql, "requested", repositoryError).pipe(
+        Effect.withSpan("TurnRepository.listStopRequested"),
+      ),
       requestStop: Effect.fn("TurnRepository.requestStop")(function* (id, now) {
         const rows = yield* sql`UPDATE rika_turns SET stop_intent = 'requested', updated_at = ${now}
           WHERE id = ${id} AND turn_kind = 'AgentExecution' AND status IN ('queued', 'accepted', 'running', 'waiting') RETURNING *`.pipe(
@@ -666,8 +500,4 @@ export const layer = Layer.effect(
     })
   }),
 )
-
 export { makeMemory, memoryLayer, memoryCoordinator } from "./memory-turn-repository"
-export type { MemoryRefoldWrite } from "./turn-memory-support"
-
-export { decodeStoredTurn } from "./turn-row-codec"

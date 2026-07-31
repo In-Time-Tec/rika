@@ -1,7 +1,6 @@
 import { Effect, Schema } from "effect"
 import { ThreadId } from "@rika/product/thread-record"
-import * as TurnRepository from "@rika/product/turn-repository"
-import { AgentExecutionTurn, RecordedShellTurn, Turn, TurnId, isAgentExecution } from "@rika/product/turn-record"
+import { AgentExecutionTurn, RecordedShellTurn, Turn, TurnId } from "@rika/product/turn-record"
 import type { RunningRecordedShellTurn } from "@rika/product/turn-record"
 import {
   QueueFull,

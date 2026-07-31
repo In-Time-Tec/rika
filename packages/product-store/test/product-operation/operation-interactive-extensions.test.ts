@@ -3,6 +3,7 @@ import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
+import * as TurnContract from "@rika/product/turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
 import * as SummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
@@ -63,7 +64,7 @@ const providerCostEvent = (
 
 const interactiveLayer = (
   repository: ThreadRepository.Interface,
-  turns: TurnRepository.Interface,
+  turns: TurnContract.Interface,
   backend: ExecutionBackend.Interface,
   registration: Deferred.Deferred<Operation.InteractiveSession>,
   makeThreadId: Effect.Effect<Thread.ThreadId> = Effect.die("unused"),
@@ -642,7 +643,7 @@ describe("interactive session extensions", () => {
         const firstPageRead = yield* Deferred.make<void>()
         const releaseFirst = yield* Deferred.make<void>()
         let selectingFirst = false
-        const selectionTurns: TurnRepository.Interface = {
+        const selectionTurns: TurnContract.Interface = {
           ...turns,
           page: (threadId, options) => {
             const block = selectingFirst && threadId === first.id

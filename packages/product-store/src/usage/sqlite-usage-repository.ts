@@ -1,6 +1,6 @@
 import { Service } from "@rika/product/usage-repository"
 export { Service }
-import { Clock, Effect, Layer, Ref, Schema } from "effect"
+import { Clock, Effect, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 
 export const projectionVersion = 3
@@ -87,16 +87,7 @@ export interface Interface {
   ) => Effect.Effect<CommitResult, RepositoryError>
 }
 
-const zero: Materialized = {
-  pricedAttempts: 0,
-  unpricedAttempts: 0,
-  countedAttempts: 0,
-  uncountedAttempts: 0,
-  sourceComplete: false,
-}
-const clone = <A>(value: A): A => structuredClone(value)
 const error = (cause: unknown) => RepositoryError.make({ message: String(cause) })
-const memoryKey = (sourceId: string, turnId: string) => `${turnId}\0${sourceId}`
 const safe = (value: number | undefined, name: string) => {
   if (value !== undefined && (!Number.isSafeInteger(value) || value < 0))
     throw new Error(`${name} must be a non-negative safe integer`)

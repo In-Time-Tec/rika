@@ -7,6 +7,7 @@ import * as ThreadInteractionRepository from "@rika/product-store/sqlite-thread-
 import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
+import * as TurnContract from "@rika/product/turn-repository"
 import * as ProductStoreUsageRepository from "@rika/product-store/sqlite-usage-repository"
 import * as ProductStoreSummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
 import * as Turn from "@rika/product/turn-record"
@@ -208,7 +209,7 @@ const backend = ExecutionBackend.Service.of({
 })
 
 const inspectFromTurns =
-  (turns: TurnRepository.Interface) =>
+  (turns: TurnContract.Interface) =>
   (turnId: string): Effect.Effect<ExecutionBackend.Inspection | undefined, ExecutionBackend.BackendError> =>
     turns.get(Turn.TurnId.make(turnId)).pipe(
       Effect.map((turn) =>
@@ -306,7 +307,7 @@ const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarne
     ...turns,
     page: (threadId, options) => {
       if (targetPageFailed && threadId === target.id)
-        return Effect.fail(TurnRepository.RepositoryError.make({ message: "forced Turn page failure" }))
+        return Effect.fail(TurnContract.RepositoryError.make({ message: "forced Turn page failure" }))
       if (targetPageBlocked && threadId === target.id)
         return Deferred.succeed(targetPageEntered, undefined).pipe(
           Effect.andThen(Deferred.await(releaseTargetPage)),

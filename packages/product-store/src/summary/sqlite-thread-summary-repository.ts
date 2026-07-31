@@ -1,13 +1,10 @@
 import { Service } from "@rika/product/thread-summary-repository"
 export { Service }
-import * as ExecutionStatus from "@rika/product/execution-status"
-import { Effect, Layer, Ref, Schema } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import * as ThreadRepository from "../thread/sqlite-thread-repository"
 import { ThreadId } from "@rika/product/thread-record"
 import { EditTotals, RepairCandidate, ThreadSummary } from "@rika/product/thread-summary"
-import * as TurnRepository from "../turn/sqlite-turn-repository"
-import { Status, TurnId, isAgentExecution } from "@rika/product/turn-record"
+import { Status, TurnId } from "@rika/product/turn-record"
 import * as ThreadState from "@rika/product/thread-state"
 
 export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("ThreadSummaryRepositoryError", {
@@ -35,16 +32,6 @@ export interface Interface {
   readonly replaceTurn: (input: TurnActivityInput) => Effect.Effect<void, RepositoryError>
   readonly markRead: (threadId: ThreadId, now: number) => Effect.Effect<void, RepositoryError>
   readonly listRepairCandidates: (limit?: number) => Effect.Effect<ReadonlyArray<RepairCandidate>, RepositoryError>
-}
-
-interface Activity {
-  readonly turnId: TurnId
-  readonly threadId: ThreadId
-  readonly projectedCursor?: string
-  readonly complete: boolean
-  readonly editTotals: EditTotals
-  readonly lastEventAt?: number
-  readonly updatedAt: number
 }
 
 import { ThreadSummaryRow as SummaryRow } from "./thread-summary-row-codec"
@@ -104,11 +91,6 @@ const decodeRepair = (row: unknown) =>
       ...(value.last_cursor === null ? {} : { lastCursor: value.last_cursor }),
     })
   }).pipe(Effect.mapError(repositoryError))
-
-const compareSummaries = (left: ThreadSummary, right: ThreadSummary) =>
-  Number(right.pinned) - Number(left.pinned) ||
-  right.lastActivityAt - left.lastActivityAt ||
-  left.id.localeCompare(right.id)
 
 export const layer = Layer.effect(
   Service,

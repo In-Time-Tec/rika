@@ -2,12 +2,11 @@ import { Service } from "@rika/product/thread-summary-repository"
 export { Service }
 import * as ExecutionStatus from "@rika/product/execution-status"
 import { Effect, Layer, Ref, Schema } from "effect"
-import { SqlClient } from "effect/unstable/sql/SqlClient"
 import * as ThreadRepository from "../thread/memory-thread-repository"
 import { ThreadId } from "@rika/product/thread-record"
 import { EditTotals, RepairCandidate, ThreadSummary } from "@rika/product/thread-summary"
 import * as TurnRepository from "../turn/memory-turn-repository"
-import { Status, TurnId, isAgentExecution } from "@rika/product/turn-record"
+import { TurnId, isAgentExecution } from "@rika/product/turn-record"
 import * as ThreadState from "@rika/product/thread-state"
 
 export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("ThreadSummaryRepositoryError", {
@@ -47,78 +46,8 @@ interface Activity {
   readonly updatedAt: number
 }
 
-const SummaryRow = Schema.Struct({
-  id: Schema.String,
-  workspace: Schema.String,
-  title: Schema.String,
-  pinned: Schema.Finite,
-  archived: Schema.Finite,
-  status_rank: Schema.Finite,
-  last_status: Schema.NullOr(Schema.String),
-  last_activity_at: Schema.Finite,
-  last_read_at: Schema.NullOr(Schema.Finite),
-  turn_count: Schema.Finite,
-  current_activity_count: Schema.Finite,
-  added: Schema.Finite,
-  modified: Schema.Finite,
-  removed: Schema.Finite,
-})
-
-const RepairRow = Schema.Struct({
-  turn_id: Schema.String,
-  thread_id: Schema.String,
-  status: Schema.String,
-  last_cursor: Schema.NullOr(Schema.String),
-})
-
 const repositoryError = (error: unknown) => RepositoryError.make({ message: String(error) })
 const listLimit = (value: number | undefined) => Math.min(Math.max(value ?? 100, 1), 100)
-
-const decodeSummary = (row: unknown) =>
-  Schema.decodeUnknownEffect(SummaryRow)(row).pipe(
-    Effect.flatMap((value) =>
-      Effect.gen(function* () {
-        const editTotals =
-          value.turn_count > 0 && value.turn_count === value.current_activity_count
-            ? {
-                added: Math.max(0, value.added),
-                modified: Math.max(0, value.modified),
-                removed: Math.max(0, value.removed),
-              }
-            : undefined
-        const id = yield* Schema.decodeUnknownEffect(ThreadId)(value.id)
-        return {
-          id,
-          workspace: value.workspace,
-          title: value.title,
-          pinned: value.pinned === 1,
-          archived: value.archived === 1,
-          status: ThreadState.threadStateFromRank({
-            rank: value.status_rank,
-            lastStatus: value.last_status ?? undefined,
-          }),
-          unread: value.last_activity_at > (value.last_read_at ?? 0),
-          lastActivityAt: value.last_activity_at,
-          ...(editTotals === undefined ? {} : { editTotals }),
-        } satisfies ThreadSummary
-      }),
-    ),
-    Effect.mapError(repositoryError),
-  )
-
-const decodeRepair = (row: unknown) =>
-  Effect.gen(function* () {
-    const value = yield* Schema.decodeUnknownEffect(RepairRow)(row)
-    const status = yield* Schema.decodeUnknownEffect(Status)(value.status)
-    const turnId = yield* Schema.decodeUnknownEffect(TurnId)(value.turn_id)
-    const threadId = yield* Schema.decodeUnknownEffect(ThreadId)(value.thread_id)
-    return RepairCandidate.make({
-      turnId,
-      threadId,
-      status,
-      ...(value.last_cursor === null ? {} : { lastCursor: value.last_cursor }),
-    })
-  }).pipe(Effect.mapError(repositoryError))
 
 const compareSummaries = (left: ThreadSummary, right: ThreadSummary) =>
   Number(right.pinned) - Number(left.pinned) ||

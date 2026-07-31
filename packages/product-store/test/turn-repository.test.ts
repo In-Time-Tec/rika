@@ -1,9 +1,9 @@
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "../src/turn/sqlite-turn-repository"
+import * as TurnContract from "@rika/product/turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import { expect, it } from "@effect/vitest"
-import { Effect, Layer, Schema } from "effect"
-import { makeRecordingSql } from "./recording-sql"
+import { Effect, Layer } from "effect"
 
 const provideLayer =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -13,12 +13,12 @@ const provideLayer =
       return yield* effect.pipe(Effect.provide(context))
     })
 
-type CurrentCreateInput = Omit<TurnRepository.CreateInput, "executionRoute" | "queueCapacity"> & {
+type CurrentCreateInput = Omit<TurnContract.CreateInput, "executionRoute" | "queueCapacity"> & {
   readonly executionRoute?: Turn.ExecutionRoutePin
   readonly queueCapacity?: number
 }
 
-const create = (repository: TurnRepository.Interface, input: CurrentCreateInput) =>
+const create = (repository: TurnContract.Interface, input: CurrentCreateInput) =>
   repository.createForSubmission({
     executionRoute: Turn.testExecutionRoute(),
     ...input,
@@ -598,7 +598,7 @@ it.effect("memory rejects concurrent submissions beyond queue capacity without c
     expect(failures).toHaveLength(7)
     for (const result of failures)
       expect(result._tag === "Failure" ? result.failure : undefined).toEqual(
-        TurnRepository.QueueFull.make({ threadId, capacity: 3, count: 3 }),
+        TurnContract.QueueFull.make({ threadId, capacity: 3, count: 3 }),
       )
     expect(yield* repository.readQueue(threadId)).toMatchObject({ revision: 3, queuedCount: 3 })
     expect((yield* repository.list(threadId)).length).toBe(4)
@@ -699,4 +699,3 @@ it.effect("memory edits and dequeues only queued turns", () =>
     expect((yield* Effect.result(repository.dequeue(queued.id)))._tag).toBe("Failure")
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
-

@@ -4,6 +4,7 @@ import * as ThreadRepository from "../src/thread/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as ThreadSummaryRepository from "../src/summary/sqlite-thread-summary-repository"
 import * as TurnRepository from "../src/turn/sqlite-turn-repository"
+import * as TurnContract from "@rika/product/turn-repository"
 import * as Turn from "@rika/product/turn-record"
 
 const provideLayer =
@@ -20,8 +21,8 @@ const repositories = Layer.merge(ThreadRepository.memoryLayer(), TurnRepository.
 const layer = Layer.merge(repositories, ThreadSummaryRepository.memoryLayer.pipe(Layer.provide(repositories)))
 
 const create = (
-  repository: TurnRepository.Interface,
-  input: Omit<TurnRepository.CreateInput, "executionRoute" | "queueCapacity">,
+  repository: TurnContract.Interface,
+  input: Omit<TurnContract.CreateInput, "executionRoute" | "queueCapacity">,
 ) => repository.createForSubmission({ ...input, executionRoute: Turn.testExecutionRoute(), queueCapacity: 128 })
 
 describe("memory thread summaries", () => {

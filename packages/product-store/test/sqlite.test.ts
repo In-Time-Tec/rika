@@ -13,6 +13,7 @@ import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as ThreadSummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
 import * as TurnRepository from "../src/turn/sqlite-turn-repository"
+import * as TurnContract from "@rika/product/turn-repository"
 import * as TranscriptRepository from "../src/transcript/sqlite-transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import {
@@ -25,8 +26,8 @@ import {
 const id = Thread.ThreadId.make("thread-a")
 
 const create = (
-  repository: TurnRepository.Interface,
-  input: Omit<TurnRepository.CreateInput, "executionRoute" | "queueCapacity"> & { readonly queueCapacity?: number },
+  repository: TurnContract.Interface,
+  input: Omit<TurnContract.CreateInput, "executionRoute" | "queueCapacity"> & { readonly queueCapacity?: number },
 ) =>
   repository.createForSubmission({
     queueCapacity: 128,
@@ -786,4 +787,3 @@ test("rejects partial and future schemas without changing them", () => {
   )
   return Effect.runPromise(Effect.scoped(program.pipe(provideLayer(BunServices.layer))))
 })
-

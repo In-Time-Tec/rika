@@ -1,5 +1,6 @@
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "../src/turn/sqlite-turn-repository"
+import * as TurnContract from "@rika/product/turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import { expect, it } from "@effect/vitest"
 import { Effect, Layer, Schema } from "effect"
@@ -13,12 +14,12 @@ const provideLayer =
       return yield* effect.pipe(Effect.provide(context))
     })
 
-type CurrentCreateInput = Omit<TurnRepository.CreateInput, "executionRoute" | "queueCapacity"> & {
+type CurrentCreateInput = Omit<TurnContract.CreateInput, "executionRoute" | "queueCapacity"> & {
   readonly executionRoute?: Turn.ExecutionRoutePin
   readonly queueCapacity?: number
 }
 
-const create = (repository: TurnRepository.Interface, input: CurrentCreateInput) =>
+const create = (repository: TurnContract.Interface, input: CurrentCreateInput) =>
   repository.createForSubmission({
     executionRoute: Turn.testExecutionRoute(),
     ...input,
@@ -160,7 +161,7 @@ const sqlTest = (
     sql: ReturnType<typeof makeRecordingSql>,
   ) => Effect.Effect<
     void,
-    TurnRepository.RepositoryError | TurnRepository.QueueFull | Schema.SchemaError,
+    TurnContract.RepositoryError | TurnContract.QueueFull | Schema.SchemaError,
     TurnRepository.Service
   >,
 ) => {

@@ -7,6 +7,7 @@ import * as ThreadRepository from "../src/thread/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "../src/transcript/sqlite-transcript-repository"
 import * as TurnRepository from "../src/turn/sqlite-turn-repository"
+import * as TurnContract from "@rika/product/turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import { projectionVersion, provideLayer, sqliteLayer } from "./transcript-repository-fixtures"
 
@@ -33,7 +34,7 @@ const terminal = (turn: Turn.RunningRecordedShellTurn): Turn.TerminalRecordedShe
 })
 
 const exercise = Effect.fn("RecordedShellRepositoryTest.exercise")(function* (
-  turns: TurnRepository.Interface,
+  turns: TurnContract.Interface,
   transcripts: TranscriptRepository.Interface,
 ) {
   const invalid = running("recorded-shell-invalid")

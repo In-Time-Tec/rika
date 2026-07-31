@@ -3,52 +3,26 @@ export { Service }
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
-import * as TranscriptRecordedShell from "@rika/transcript/recorded-shell-presentation"
-import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import { Effect, Layer, Ref, Schema } from "effect"
-import { SqlClient } from "effect/unstable/sql/SqlClient"
-import { ThreadId } from "@rika/product/thread-record"
+import { Effect, Layer, Ref } from "effect"
 import * as TurnRepository from "../turn/memory-turn-repository"
+import type { Interface as TurnRepositoryInterface } from "@rika/product/turn-repository"
 import { Turn, TurnId, isAgentExecution, isRecordedShell } from "@rika/product/turn-record"
-import type { AgentExecutionTurn, RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/turn-record"
-import {
-  EntrySchema,
-  PageCursor,
-  type Entry,
-  ExecutionAttachment,
-  ExecutionCheckpoint,
-  invalidatedProjectionVersion,
-} from "@rika/product/transcript-repository"
-import type {
-  Projection,
-  CheckpointOptions,
-  DeltaCheckpointOptions,
-  UnitDelta,
-  RefoldOptions,
-  PageOptions,
-  Page,
-  ProjectionRecoveryCandidate,
-  WriteResult,
-  RefoldWriteResult,
-  RecordedShellWriteResult,
-  Interface,
-} from "@rika/product/transcript-repository"
-import { RepositoryError } from "@rika/product/transcript-repository"
+import type { RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/turn-record"
+import type { Projection, WriteResult } from "@rika/product/transcript-repository"
+import { invalidatedProjectionVersion, RepositoryError } from "@rika/product/transcript-repository"
 import { support } from "./transcript-repository-support"
+import { materializeMemory, memoryEntry, sameAttachment } from "./transcript-memory-state"
+import type { MemoryEntry } from "./transcript-memory-state"
 const {
-  error,
   clone,
   sameTurn,
-  sameExecutionAttachment,
   refoldTurn,
+  storedProjection,
   pageSize,
   cursorFor,
-  storedProjection,
   withUnits,
   recordedShellProjection,
   validateRecordedShellProjection,
-  compareText,
   before,
   after,
   compareDescending,
@@ -67,69 +41,12 @@ type MemoryWrite =
   | { readonly _tag: "Success"; readonly result: WriteResult }
   | { readonly _tag: "Failure"; readonly error: RepositoryError }
 type MemoryRefoldProjectionWrite = { readonly _tag: "Commit"; readonly value: void } | { readonly _tag: "Stale" }
-
 const memoryWriteResult = (write: MemoryWrite): Effect.Effect<WriteResult, RepositoryError> =>
   write._tag === "Success" ? Effect.succeed(write.result) : Effect.fail(write.error)
-
-interface MemoryEntry {
-  projection: Projection
-  unitsByKey: Map<string, TranscriptUnit.Unit>
-  orderOwners: Map<string, string>
-  checkpointsByKey: Map<string, ExecutionCheckpoint>
-  attachmentsByUnit: Map<string, string>
-}
-
-const materializeMemory = (entry: MemoryEntry): Projection => ({
-  ...clone(entry.projection),
-  units: [...entry.unitsByKey.values()]
-    .toSorted((left, right) => TranscriptOrdering.compareUnitOrder(left.order, right.order))
-    .map(clone),
-  executionCheckpoints: [...entry.checkpointsByKey.values()]
-    .toSorted((left, right) => compareText(left.executionKey, right.executionKey))
-    .map(clone),
-})
-
-const memoryEntry = (
-  turn: Turn,
-  projection: TranscriptProjectionModel.Projection,
-  options: CheckpointOptions,
-  checkpointGeneration: number,
-): MemoryEntry => {
-  const unitsByKey = new Map(projection.units.map((unit) => [unit.key, clone(unit)]))
-  const checkpointsByKey = new Map(
-    options.executionCheckpoints.map((checkpoint) => [checkpoint.executionKey, clone(checkpoint)]),
-  )
-  return {
-    projection: storedProjection(
-      turn,
-      { ...projection, units: [] },
-      { ...options, executionCheckpoints: [] },
-      checkpointGeneration,
-    ),
-    unitsByKey,
-    orderOwners: new Map(
-      [...unitsByKey.values()].map((unit) => [TranscriptOrdering.encodeUnitOrder(unit.order), unit.key]),
-    ),
-    checkpointsByKey,
-    attachmentsByUnit: new Map(
-      [...checkpointsByKey.values()]
-        .filter((checkpoint) => checkpoint.attachment !== undefined)
-        .map((checkpoint) => [checkpoint.attachment!.parentUnitKey, checkpoint.executionKey]),
-    ),
-  }
-}
-
-const sameAttachment = (left: ExecutionCheckpoint, right: ExecutionCheckpoint): boolean =>
-  left.executionId === right.executionId &&
-  (left.attachment === undefined || right.attachment === undefined
-    ? left.attachment === right.attachment
-    : sameExecutionAttachment(left.attachment, right.attachment))
-
 export interface MemoryOptions {
   readonly initial?: ReadonlyArray<Projection>
-  readonly turns?: TurnRepository.Interface
+  readonly turns?: TurnRepositoryInterface
 }
-
 export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
   Effect.gen(function* () {
     const initial = memoryOptions.initial ?? []
@@ -568,7 +485,6 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
       ),
     })
   })
-
 export const memoryLayer = Layer.effect(Service, makeMemory())
 export const memoryLayerWithTurns = Layer.effect(
   Service,

@@ -14,7 +14,6 @@ import * as TranscriptRepository from "../src/transcript/sqlite-transcript-repos
 import * as TurnRepository from "../src/turn/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import {
-  attachedExecutionCheckpoint,
   commitAll,
   event,
   executionCheckpoint,
@@ -27,7 +26,7 @@ import {
   unit,
 } from "./transcript-repository-fixtures"
 
-const UnitJson = Schema.fromJsonString(TranscriptUnit.Unit)
+const _UnitJson = Schema.fromJsonString(TranscriptUnit.Unit)
 
 const compareExecutionCheckpoints = (
   left: TranscriptRepository.ExecutionCheckpoint,
@@ -108,7 +107,7 @@ it.effect("lists terminal roots whose current SQLite projection has an unfinishe
   ).pipe(provideLayer(BunServices.layer)),
 )
 
-const usageEvent: TranscriptSourceEvent.SourceEvent = {
+const _usageEvent: TranscriptSourceEvent.SourceEvent = {
   cursor: "usage-5",
   sequence: 5,
   type: "model.usage.reported",
@@ -579,4 +578,3 @@ it.effect("authoritatively adopts corrected durable terminal outcomes during ref
     }),
   ).pipe(provideLayer(BunServices.layer)),
 )
-

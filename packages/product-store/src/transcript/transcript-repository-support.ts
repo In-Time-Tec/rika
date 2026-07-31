@@ -8,97 +8,22 @@ import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import { ThreadId } from "@rika/product/thread-record"
 import { Turn, TurnId } from "@rika/product/turn-record"
 import type { AgentExecutionTurn, RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/turn-record"
-import { EntrySchema, PageCursor, type Entry } from "@rika/product/transcript-page"
+import { PageCursor, type Entry } from "@rika/product/transcript-page"
 import {
   ExecutionAttachment,
   ExecutionCheckpoint,
-  invalidatedProjectionVersion,
   type Projection,
   type CheckpointOptions,
-  type DeltaCheckpointOptions,
   type UnitDelta,
   type RefoldOptions,
   type PageOptions,
-  type Page,
-  type ProjectionRecoveryCandidate,
-  type WriteResult,
-  type RefoldWriteResult,
-  type RecordedShellWriteResult,
 } from "@rika/product/transcript-repository"
 import { RepositoryError } from "@rika/product/transcript-repository"
 class RefoldStale extends Schema.TaggedErrorClass<RefoldStale>()("TranscriptRefoldStale", {}) {}
 
-const CheckpointRow = Schema.Struct({
-  model_phase: Schema.Finite,
-  checkpoint_generation: Schema.Finite,
-  revision: Schema.Finite,
-  usable_completion_sequence: Schema.NullOr(Schema.Finite),
-  oldest_cursor: Schema.NullOr(Schema.String),
-  checkpoint_cursor: Schema.NullOr(Schema.String),
-  cost_usd: Schema.NullOr(Schema.Finite),
-  usage_cursors_json: Schema.NullOr(Schema.String),
-  pricing_version: Schema.NullOr(Schema.String),
-  projection_version: Schema.Finite,
-})
-
 const ProjectionRecoveryCandidateRow = Schema.Struct({
   thread_id: ThreadId,
   turn_id: TurnId,
-})
-
-const ExecutionCheckpointRow = Schema.Struct({
-  execution_key: Schema.String,
-  execution_id: Schema.String,
-  cursor: Schema.String,
-  sequence: Schema.Finite,
-  status: Schema.NullOr(Schema.String),
-  revision: Schema.Finite,
-  model_phase: Schema.Finite,
-  usable_completion_sequence: Schema.NullOr(Schema.Finite),
-  oldest_cursor: Schema.NullOr(Schema.String),
-  checkpoint_cursor: Schema.NullOr(Schema.String),
-  cost_usd: Schema.NullOr(Schema.Finite),
-  usage_cursors_json: Schema.NullOr(Schema.String),
-  pricing_version: Schema.NullOr(Schema.String),
-  parent_execution_key: Schema.NullOr(Schema.String),
-  parent_unit_key: Schema.NullOr(Schema.String),
-  parent_id: Schema.NullOr(Schema.String),
-  parent_order_key: Schema.NullOr(Schema.String),
-})
-
-const StoredUnitRow = Schema.Struct({
-  unit_key: Schema.String,
-  execution_key: Schema.NullOr(Schema.String),
-  turn_id: Schema.String,
-  parent_id: Schema.NullOr(Schema.String),
-  tool_id: Schema.NullOr(Schema.String),
-  unit_json: Schema.String,
-  unit_order_key: Schema.String,
-})
-
-const UnitRow = Schema.Struct({
-  unit_key: Schema.String,
-  execution_key: Schema.NullOr(Schema.String),
-  unit_json: Schema.String,
-  unit_order_key: Schema.String,
-  durable_parent_id: Schema.NullOr(Schema.String),
-  durable_tool_id: Schema.NullOr(Schema.String),
-  checkpoint_execution_id: Schema.NullOr(Schema.String),
-  checkpoint_is_root: Schema.NullOr(Schema.Finite),
-  attachment_parent_execution_key: Schema.NullOr(Schema.String),
-  attachment_parent_unit_key: Schema.NullOr(Schema.String),
-  attachment_parent_id: Schema.NullOr(Schema.String),
-  attachment_parent_order_key: Schema.NullOr(Schema.String),
-  attachment_unit_key: Schema.NullOr(Schema.String),
-  attachment_unit_execution_key: Schema.NullOr(Schema.String),
-  attachment_unit_order_key: Schema.NullOr(Schema.String),
-  attachment_unit_tool_id: Schema.NullOr(Schema.String),
-  attachment_unit_json: Schema.NullOr(Schema.String),
-  turn_id: Schema.String,
-  projection_revision: Schema.Finite,
-  model_phase: Schema.Finite,
-  cost_usd: Schema.NullOr(Schema.Finite),
-  projection_version: Schema.Finite,
 })
 
 const UnitJson = Schema.fromJsonString(TranscriptUnit.Unit)
@@ -512,11 +437,7 @@ const validateDelta = (delta: UnitDelta) =>
   })
 
 export const support = {
-  CheckpointRow,
   ProjectionRecoveryCandidateRow,
-  ExecutionCheckpointRow,
-  StoredUnitRow,
-  UnitRow,
   UnitJson,
   UsageCursorsJson,
   error,

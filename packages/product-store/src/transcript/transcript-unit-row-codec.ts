@@ -24,3 +24,13 @@ export const TranscriptUnitRow = Schema.Struct({
   cost_usd: Schema.NullOr(Schema.Finite),
   projection_version: Schema.Finite,
 })
+
+export const TranscriptStoredUnitRow = Schema.Struct({
+  unit_key: Schema.String,
+  execution_key: Schema.NullOr(Schema.String),
+  turn_id: Schema.String,
+  parent_id: Schema.NullOr(Schema.String),
+  tool_id: Schema.NullOr(Schema.String),
+  unit_json: Schema.String,
+  unit_order_key: Schema.String,
+})

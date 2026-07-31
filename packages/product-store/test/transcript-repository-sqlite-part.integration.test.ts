@@ -18,9 +18,6 @@ import {
   commitAll,
   event,
   executionCheckpoint,
-  invalidCheckpointGraphs,
-  type NestedProjectionFixture,
-  nestedProjection,
   projectionVersion,
   provideLayer,
   sqliteLayer,
@@ -45,7 +42,7 @@ const usageEvent: TranscriptSourceEvent.SourceEvent = {
   },
 }
 
-const compareExecutionCheckpoints = (
+const _compareExecutionCheckpoints = (
   left: TranscriptRepository.ExecutionCheckpoint,
   right: TranscriptRepository.ExecutionCheckpoint,
 ): number => {

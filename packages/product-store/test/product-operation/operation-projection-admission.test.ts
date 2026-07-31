@@ -2,6 +2,7 @@ import { expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
+import * as TurnContract from "@rika/product/turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
@@ -103,7 +104,7 @@ const selectionLoaded = (events: ReadonlyArray<Operation.InteractiveEvent>, thre
 type Client = {
   readonly session: Operation.InteractiveSession
   readonly events: Array<Operation.InteractiveEvent>
-  readonly turns: TurnRepository.Interface
+  readonly turns: TurnContract.Interface
   readonly usage: UsageRepository.Interface
 }
 

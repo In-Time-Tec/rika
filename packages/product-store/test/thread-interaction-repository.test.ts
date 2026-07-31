@@ -3,6 +3,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer } from "effect"
 import * as Database from "../src/database/product-database-layer"
 import * as Repository from "../src/interaction/sqlite-thread-interaction-repository"
+import * as InteractionContract from "@rika/product/thread-interaction-repository"
 import * as ThreadRepository from "../src/thread/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "../src/turn/sqlite-turn-repository"
@@ -62,7 +63,7 @@ const invocation = (digest: string, input = digest, now = 2) => ({
 const provideBun = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Layer.build(BunServices.layer).pipe(Effect.flatMap((context) => Effect.provide(effect, context)))
 
-const exercise = (repository: Repository.Interface) =>
+const exercise = (repository: InteractionContract.Interface) =>
   Effect.gen(function* () {
     const targetThreadId = Thread.ThreadId.make("target")
     const targetTurnId = Turn.TurnId.make("target-turn")
@@ -80,7 +81,7 @@ const exercise = (repository: Repository.Interface) =>
       })
       .pipe(
         Effect.mapError((cause) =>
-          Repository.RepositoryError.make({ message: `create: ${cause.message ?? String(cause)}` }),
+          InteractionContract.RepositoryError.make({ message: `create: ${cause.message ?? String(cause)}` }),
         ),
       )
     const duplicate = yield* repository.createThread({
@@ -132,7 +133,7 @@ const exercise = (repository: Repository.Interface) =>
       })
       .pipe(
         Effect.mapError((cause) =>
-          Repository.RepositoryError.make({ message: `message: ${cause.message ?? String(cause)}` }),
+          InteractionContract.RepositoryError.make({ message: `message: ${cause.message ?? String(cause)}` }),
         ),
       )
     const firstUndeliveredPage = yield* repository.listUndeliveredResults(1)
@@ -144,7 +145,7 @@ const exercise = (repository: Repository.Interface) =>
       .bindStop({ ...invocation("stop", "stop", 4), targetThreadId })
       .pipe(
         Effect.mapError((cause) =>
-          Repository.RepositoryError.make({ message: `stop: ${cause.message ?? String(cause)}` }),
+          InteractionContract.RepositoryError.make({ message: `stop: ${cause.message ?? String(cause)}` }),
         ),
       )
     const stoppedAgain = yield* repository.bindStop({ ...invocation("stop", "stop", 99), targetThreadId })
@@ -154,7 +155,9 @@ const exercise = (repository: Repository.Interface) =>
         result: { status: "completed", cursor: "cursor", sequence: 4, output: "done" },
         now: 5,
       })
-      .pipe(Effect.mapError((cause) => Repository.RepositoryError.make({ message: `ready: ${cause.message}` })))
+      .pipe(
+        Effect.mapError((cause) => InteractionContract.RepositoryError.make({ message: `ready: ${cause.message}` })),
+      )
     const queueFull = yield* Effect.result(
       repository.deliverResult({
         targetTurnId,
@@ -182,7 +185,7 @@ const exercise = (repository: Repository.Interface) =>
       { concurrency: "unbounded" },
     ).pipe(
       Effect.mapError((cause) =>
-        Repository.RepositoryError.make({ message: `deliver: ${cause.message ?? String(cause)}` }),
+        InteractionContract.RepositoryError.make({ message: `deliver: ${cause.message ?? String(cause)}` }),
       ),
     )
     const deliveredAgain = yield* repository.deliverResult({

@@ -1,9 +1,6 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
-import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
-import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
 import { expect, test } from "vitest"
 import { Database as NativeDatabase } from "bun:sqlite"
 import { Effect, FileSystem, Layer, Schema } from "effect"
@@ -13,20 +10,16 @@ import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as ThreadSummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
 import * as TurnRepository from "../src/turn/sqlite-turn-repository"
+import * as TurnContract from "@rika/product/turn-repository"
 import * as TranscriptRepository from "../src/transcript/sqlite-transcript-repository"
 import * as Turn from "@rika/product/turn-record"
-import {
-  attachedExecutionCheckpoint,
-  commitAll,
-  executionCheckpoint,
-  projectionVersion,
-} from "./transcript-repository-fixtures"
+import { commitAll } from "./transcript-repository-fixtures"
 
 const id = Thread.ThreadId.make("thread-a")
 
 const create = (
-  repository: TurnRepository.Interface,
-  input: Omit<TurnRepository.CreateInput, "executionRoute" | "queueCapacity"> & { readonly queueCapacity?: number },
+  repository: TurnContract.Interface,
+  input: Omit<TurnContract.CreateInput, "executionRoute" | "queueCapacity"> & { readonly queueCapacity?: number },
 ) =>
   repository.createForSubmission({
     queueCapacity: 128,
@@ -55,7 +48,7 @@ const legacyModel = (model: Turn.ExecutionModelRoute) => {
   }
 }
 
-const createPreBranchDatabase = (filename: string) => {
+const _createPreBranchDatabase = (filename: string) => {
   const database = new NativeDatabase(filename)
   database.exec(`
     CREATE TABLE rika_migrations (
@@ -333,7 +326,7 @@ test("concurrent SQLite submissions cannot exceed queue capacity and dequeue fre
         expect(failures).toHaveLength(7)
         for (const result of failures)
           expect(result._tag === "Failure" ? result.failure : undefined).toEqual(
-            TurnRepository.QueueFull.make({ threadId: id, capacity: 3, count: 3 }),
+            TurnContract.QueueFull.make({ threadId: id, capacity: 3, count: 3 }),
           )
         const full = yield* turns.readQueue(id)
         expect(full).toMatchObject({ revision: 3, queuedCount: 3 })

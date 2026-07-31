@@ -4,60 +4,64 @@ import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlatio
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
-import * as TranscriptRecordedShell from "@rika/transcript/recorded-shell-presentation"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import { Effect, Layer, Ref, Schema } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import { ThreadId } from "@rika/product/thread-record"
-import * as TurnRepository from "../turn/sqlite-turn-repository"
 import { Turn, TurnId, isAgentExecution, isRecordedShell } from "@rika/product/turn-record"
-import type { AgentExecutionTurn, RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/turn-record"
-import { EntrySchema, PageCursor, type Entry, ExecutionAttachment, ExecutionCheckpoint, invalidatedProjectionVersion } from "@rika/product/transcript-repository"
-import type { Projection, CheckpointOptions, DeltaCheckpointOptions, UnitDelta, RefoldOptions, PageOptions, Page, ProjectionRecoveryCandidate, WriteResult, RefoldWriteResult, RecordedShellWriteResult, Interface } from "@rika/product/transcript-repository"
+import type { RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/turn-record"
+import {
+  EntrySchema,
+  PageCursor,
+  type Entry,
+  ExecutionAttachment,
+  ExecutionCheckpoint,
+  invalidatedProjectionVersion,
+} from "@rika/product/transcript-repository"
+import type {
+  Projection,
+  CheckpointOptions,
+  DeltaCheckpointOptions,
+  UnitDelta,
+  RefoldOptions,
+  PageOptions,
+  Page,
+  ProjectionRecoveryCandidate,
+  WriteResult,
+  RefoldWriteResult,
+  RecordedShellWriteResult,
+  Interface,
+} from "@rika/product/transcript-repository"
 import { RepositoryError } from "@rika/product/transcript-repository"
 import { support } from "./transcript-repository-support"
-const { CheckpointRow, ProjectionRecoveryCandidateRow, ExecutionCheckpointRow, StoredUnitRow, UnitRow, UnitJson, UsageCursorsJson, error, refoldStale, isRefoldStale, refoldTurn, pageSize, cursorFor, withUnits, recordedShellProjection, validateRecordedShellProjection, before, after, validateUnits, validateStateScalars, validateProjectionVersion, validateCurrentProjectionVersion, validateCheckpoint, validateAttachmentSet, validatePageOptions, validateDelta } = support
+import { decodeTranscriptExecutionCheckpoint } from "./transcript-checkpoint-codec"
+import { decodeStoredTurn } from "../turn/turn-row-codec"
+import { TranscriptUnitRow } from "./transcript-unit-row-codec"
+import { readTranscriptProjection } from "./transcript-sqlite-reader"
+const {
+  error,
+  refoldStale,
+  isRefoldStale,
+  refoldTurn,
+  pageSize,
+  cursorFor,
+  recordedShellProjection,
+  validateRecordedShellProjection,
+  validateUnits,
+  validateCurrentProjectionVersion,
+  validateCheckpoint,
+  validateAttachmentSet,
+  validatePageOptions,
+  validateDelta,
+  UnitJson,
+  UsageCursorsJson,
+} = support
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const sql = yield* SqlClient
-    const decodeTurn = (row: unknown) => TurnRepository.decodeStoredTurn(row).pipe(Effect.mapError(error))
-    const decodeExecutionCheckpoint = Effect.fn("TranscriptRepository.decodeExecutionCheckpoint")(function* (value: unknown) {
-      const row = yield* Schema.decodeUnknownEffect(ExecutionCheckpointRow)(value)
-      const status = row.status === null ? undefined : yield* Schema.decodeUnknownEffect(Schema.Literals(["completed", "failed", "cancelled"]))(row.status)
-      const usageCursors = row.usage_cursors_json === null ? undefined : yield* Schema.decodeUnknownEffect(UsageCursorsJson)(row.usage_cursors_json)
-      const parentValues = [row.parent_execution_key, row.parent_unit_key, row.parent_id, row.parent_order_key]
-      const hasParent = parentValues.every((candidate) => candidate !== null)
-      if (!hasParent && parentValues.some((candidate) => candidate !== null)) return yield* RepositoryError.make({ message: `Execution ${row.execution_key} has a partial attachment` })
-      return {
-        executionKey: row.execution_key,
-        executionId: row.execution_id,
-        cursor: row.cursor,
-        sequence: row.sequence,
-        ...(status === undefined ? {} : { status }),
-        state: {
-          revision: row.revision,
-          modelPhase: row.model_phase,
-          ...(row.usable_completion_sequence === null ? {} : { usableCompletionSequence: row.usable_completion_sequence }),
-          ...(row.oldest_cursor === null ? {} : { oldestCursor: row.oldest_cursor }),
-          ...(row.checkpoint_cursor === null ? {} : { checkpointCursor: row.checkpoint_cursor }),
-          ...(row.cost_usd === null ? {} : { costUsd: row.cost_usd }),
-          ...(usageCursors === undefined ? {} : { usageCursors }),
-          ...(row.pricing_version === null ? {} : { pricingVersion: row.pricing_version }),
-        },
-        ...(hasParent
-          ? {
-              attachment: {
-                parentExecutionKey: row.parent_execution_key!,
-                parentUnitKey: row.parent_unit_key!,
-                parentId: row.parent_id!,
-                parentOrderKey: row.parent_order_key!,
-              },
-            }
-          : {}),
-      } satisfies ExecutionCheckpoint
-    })
-    const loadExecutionCheckpoints = Effect.fn("TranscriptRepository.loadExecutionCheckpoints")(function* (turnId: TurnId) {
+    const loadExecutionCheckpoints = Effect.fn("TranscriptRepository.loadExecutionCheckpoints")(function* (
+      turnId: TurnId,
+    ) {
       const rows = yield* sql`
         SELECT execution_key, execution_id, cursor, sequence, status, revision, model_phase, usable_completion_sequence,
           oldest_cursor, checkpoint_cursor, cost_usd, usage_cursors_json, pricing_version,
@@ -66,86 +70,17 @@ export const layer = Layer.effect(
         WHERE turn_id = ${turnId}
         ORDER BY execution_key COLLATE BINARY
       `.pipe(Effect.mapError(error))
-      return yield* Effect.all(rows.map((value) => decodeExecutionCheckpoint(value).pipe(Effect.mapError(error))))
-    })
-    const get = Effect.fn("TranscriptRepository.get")(function* (turnId: TurnId) {
-      const checkpointRows = yield* sql`
-        SELECT c.checkpoint_generation, c.model_phase, c.revision, c.usable_completion_sequence,
-          c.oldest_cursor, c.checkpoint_cursor, c.cost_usd, c.usage_cursors_json,
-          c.pricing_version, c.projection_version, t.*
-        FROM rika_transcript_checkpoints c
-        JOIN rika_turns t ON t.id = c.turn_id
-        WHERE c.turn_id = ${turnId}
-      `.pipe(Effect.mapError(error))
-      if (checkpointRows[0] === undefined) return undefined
-      const row = yield* Schema.decodeUnknownEffect(CheckpointRow)(checkpointRows[0]).pipe(Effect.mapError(error))
-      const turn = yield* decodeTurn(checkpointRows[0])
-      const unitRows = yield* sql`
-        SELECT unit_key, execution_key, turn_id, parent_id, tool_id, unit_json, unit_order_key
-        FROM rika_transcript_units
-        WHERE turn_id = ${turnId}
-        ORDER BY unit_order_key ASC
-      `.pipe(Effect.mapError(error))
-      const units = yield* Effect.all(
-        unitRows.map((value) =>
-          Schema.decodeUnknownEffect(StoredUnitRow)(value).pipe(
-            Effect.flatMap((unitRow) =>
-              Schema.decodeUnknownEffect(UnitJson)(unitRow.unit_json).pipe(
-                Effect.filterOrFail(
-                  (unit) => {
-                    const toolId = unit.content._tag === "Block" && unit.content.block._tag === "ToolCall" ? unit.content.block.id : null
-                    return unit.key === unitRow.unit_key && (isRecordedShell(turn) ? null : TranscriptCorrelation.executionKey(unit.turnId)) === unitRow.execution_key && TranscriptOrdering.hasIntrinsicOrder(unit) && TranscriptOrdering.encodeUnitOrder(unit.order) === unitRow.unit_order_key && (unit.parentId ?? null) === unitRow.parent_id && toolId === unitRow.tool_id
-                  },
-                  () => RepositoryError.make({ message: "Transcript unit identity does not match its durable key" }),
-                ),
-              ),
-            ),
-            Effect.mapError(error),
-          ),
-        ),
+      return yield* Effect.all(
+        rows.map((value) => decodeTranscriptExecutionCheckpoint(value).pipe(Effect.mapError(error))),
       )
-      yield* validateUnits(units)
-      const executionCheckpoints = yield* loadExecutionCheckpoints(turnId)
-      const usageCursors = row.usage_cursors_json === null ? undefined : yield* Schema.decodeUnknownEffect(UsageCursorsJson)(row.usage_cursors_json).pipe(Effect.mapError(error))
-      const state: TranscriptProjectionModel.ProjectionState = {
-        revision: row.revision,
-        modelPhase: row.model_phase,
-        ...(row.usable_completion_sequence === null ? {} : { usableCompletionSequence: row.usable_completion_sequence }),
-        ...(row.oldest_cursor === null ? {} : { oldestCursor: row.oldest_cursor }),
-        ...(row.checkpoint_cursor === null ? {} : { checkpointCursor: row.checkpoint_cursor }),
-        ...(row.cost_usd === null ? {} : { costUsd: row.cost_usd }),
-        ...(usageCursors === undefined ? {} : { usageCursors }),
-        ...(row.pricing_version === null ? {} : { pricingVersion: row.pricing_version }),
-      }
-      yield* validateProjectionVersion(turn.id, row.projection_version)
-      yield* validateStateScalars(turn.id, "root projection", state)
-      const invalidatedEmpty = row.projection_version === invalidatedProjectionVersion && units.length === 0 && executionCheckpoints.length === 0
-      if (isRecordedShell(turn)) {
-        if (executionCheckpoints.length !== 0) return yield* RepositoryError.make({ message: `Recorded shell turn ${turn.id} has execution checkpoints` })
-        yield* validateRecordedShellProjection(turn, withUnits(state, units), row.projection_version)
-      } else if (!invalidatedEmpty) {
-        yield* validateCheckpoint(turn, state, { executionCheckpoints, projectionVersion: row.projection_version }, true)
-        yield* validateAttachmentSet(turn, units, executionCheckpoints)
-      }
-      return {
-        turn,
-        units,
-        checkpointGeneration: row.checkpoint_generation,
-        revision: state.revision,
-        modelPhase: state.modelPhase,
-        usableCompletionSequence: state.usableCompletionSequence,
-        oldestCursor: state.oldestCursor,
-        checkpointCursor: state.checkpointCursor,
-        costUsd: state.costUsd,
-        usageCursors: state.usageCursors,
-        pricingVersion: state.pricingVersion,
-        executionCheckpoints,
-        projectionVersion: row.projection_version,
-      } satisfies Projection
     })
-    const listProjectionRecoveryCandidates = Effect.fn("TranscriptRepository.listProjectionRecoveryCandidates")(function* (projectionVersion: number) {
-      yield* validateCurrentProjectionVersion(projectionVersion)
-      const rows = yield* sql`
+    const get = Effect.fn("TranscriptRepository.get")((turnId: TurnId) =>
+      readTranscriptProjection(sql, turnId, loadExecutionCheckpoints),
+    )
+    const listProjectionRecoveryCandidates = Effect.fn("TranscriptRepository.listProjectionRecoveryCandidates")(
+      function* (projectionVersion: number) {
+        yield* validateCurrentProjectionVersion(projectionVersion)
+        const rows = yield* sql`
         SELECT t.thread_id, t.id AS turn_id
         FROM rika_turns t
         LEFT JOIN rika_transcript_checkpoints c ON c.turn_id = t.id
@@ -162,21 +97,24 @@ export const layer = Layer.effect(
           )
         ORDER BY t.created_at ASC, t.rowid ASC
       `.pipe(Effect.mapError(error))
-      return yield* Effect.all(
-        rows.map((row) =>
-          Schema.decodeUnknownEffect(ProjectionRecoveryCandidateRow)(row).pipe(
-            Effect.map((candidate) => ({ threadId: candidate.thread_id, turnId: candidate.turn_id })),
-            Effect.mapError(error),
+        return yield* Effect.all(
+          rows.map((row) =>
+            Schema.decodeUnknownEffect(support.ProjectionRecoveryCandidateRow)(row).pipe(
+              Effect.map((candidate) => ({ threadId: candidate.thread_id, turnId: candidate.turn_id })),
+              Effect.mapError(error),
+            ),
           ),
-        ),
-      )
-    })
+        )
+      },
+    )
     const storeUnit = Effect.fn("TranscriptRepository.storeUnit")(function* (turn: Turn, unit: TranscriptUnit.Unit) {
-      if (!TranscriptOrdering.hasIntrinsicOrder(unit)) return yield* RepositoryError.make({ message: `Transcript unit ${unit.key} has a non-intrinsic order` })
+      if (!TranscriptOrdering.hasIntrinsicOrder(unit))
+        return yield* RepositoryError.make({ message: `Transcript unit ${unit.key} has a non-intrinsic order` })
       const encoded = yield* Schema.encodeEffect(UnitJson)(unit)
       const orderKey = TranscriptOrdering.encodeUnitOrder(unit.order)
       const executionKey = isRecordedShell(turn) ? null : TranscriptCorrelation.executionKey(unit.turnId)
-      const rows = yield* sql`INSERT INTO rika_transcript_units (turn_id, unit_key, execution_key, thread_id, unit_order_key, tool_id, parent_id, revision, unit_json, created_at, updated_at)
+      const rows =
+        yield* sql`INSERT INTO rika_transcript_units (turn_id, unit_key, execution_key, thread_id, unit_order_key, tool_id, parent_id, revision, unit_json, created_at, updated_at)
           VALUES (${turn.id}, ${unit.key}, ${executionKey}, ${turn.threadId}, ${orderKey}, ${unit.content._tag === "Block" && unit.content.block._tag === "ToolCall" ? unit.content.block.id : null}, ${unit.parentId ?? null}, ${unit.revision}, ${encoded}, ${turn.createdAt}, ${turn.updatedAt})
           ON CONFLICT(turn_id, unit_key) DO UPDATE SET thread_id = excluded.thread_id,
             unit_order_key = excluded.unit_order_key, revision = excluded.revision, unit_json = excluded.unit_json,
@@ -186,13 +124,20 @@ export const layer = Layer.effect(
             AND rika_transcript_units.tool_id IS excluded.tool_id
             AND rika_transcript_units.parent_id IS excluded.parent_id
           RETURNING unit_key`
-      if (rows.length === 0) return yield* RepositoryError.make({ message: `Transcript unit ${unit.key} changed its intrinsic identity` })
+      if (rows.length === 0)
+        return yield* RepositoryError.make({ message: `Transcript unit ${unit.key} changed its intrinsic identity` })
     }, Effect.mapError(error))
-    const checkpointValues = Effect.fn("TranscriptRepository.checkpointValues")(function* (state: TranscriptProjectionModel.ProjectionState) {
-      const usageCursors = state.usageCursors === undefined ? null : yield* Schema.encodeEffect(UsageCursorsJson)(state.usageCursors)
+    const checkpointValues = Effect.fn("TranscriptRepository.checkpointValues")(function* (
+      state: TranscriptProjectionModel.ProjectionState,
+    ) {
+      const usageCursors =
+        state.usageCursors === undefined ? null : yield* Schema.encodeEffect(UsageCursorsJson)(state.usageCursors)
       return { usageCursors }
     })
-    const storeExecutionCheckpoint = Effect.fn("TranscriptRepository.storeExecutionCheckpoint")(function* (turn: Turn, checkpoint: ExecutionCheckpoint) {
+    const storeExecutionCheckpoint = Effect.fn("TranscriptRepository.storeExecutionCheckpoint")(function* (
+      turn: Turn,
+      checkpoint: ExecutionCheckpoint,
+    ) {
       const values = yield* checkpointValues(checkpoint.state)
       const attachment = checkpoint.attachment
       const rows = yield* sql`INSERT INTO rika_transcript_execution_checkpoints (
@@ -227,7 +172,11 @@ export const layer = Layer.effect(
           message: `Execution checkpoint ${checkpoint.executionKey} changed its intrinsic identity`,
         })
     })
-    const commitCheckpoint = Effect.fn("TranscriptRepository.commitCheckpoint")(function* (turn: Turn, state: TranscriptProjectionModel.ProjectionState, options: DeltaCheckpointOptions) {
+    const commitCheckpoint = Effect.fn("TranscriptRepository.commitCheckpoint")(function* (
+      turn: Turn,
+      state: TranscriptProjectionModel.ProjectionState,
+      options: DeltaCheckpointOptions,
+    ) {
       const values = yield* checkpointValues(state)
       const rows =
         options.expectedGeneration === undefined
@@ -253,7 +202,11 @@ export const layer = Layer.effect(
             RETURNING turn_id`.pipe(Effect.mapError(error))
       return rows.length > 0
     })
-    const replaceCheckpointForRefold = Effect.fn("TranscriptRepository.replaceCheckpointForRefold")(function* (turn: Turn, state: TranscriptProjectionModel.ProjectionState, options: RefoldOptions) {
+    const replaceCheckpointForRefold = Effect.fn("TranscriptRepository.replaceCheckpointForRefold")(function* (
+      turn: Turn,
+      state: TranscriptProjectionModel.ProjectionState,
+      options: RefoldOptions,
+    ) {
       const values = yield* checkpointValues(state)
       const rows = yield* sql`UPDATE rika_transcript_checkpoints SET
           thread_id = ${turn.threadId}, checkpoint_generation = checkpoint_generation + 1,
@@ -269,7 +222,11 @@ export const layer = Layer.effect(
         RETURNING turn_id`.pipe(Effect.mapError(error))
       return rows.length > 0
     })
-    const loadAttachmentUnits = Effect.fn("TranscriptRepository.loadAttachmentUnits")(function* (turn: Turn, delta: UnitDelta, checkpoints: ReadonlyArray<ExecutionCheckpoint>) {
+    const loadAttachmentUnits = Effect.fn("TranscriptRepository.loadAttachmentUnits")(function* (
+      turn: Turn,
+      delta: UnitDelta,
+      checkpoints: ReadonlyArray<ExecutionCheckpoint>,
+    ) {
       const upsertKeys = new Set(delta.upsert.map((unit) => unit.key))
       const missingParentKeys = [
         ...new Set(
@@ -297,13 +254,20 @@ export const layer = Layer.effect(
       )
       return [...delta.upsert, ...loaded]
     })
-    const validateDurableUnitRemoval = Effect.fn("TranscriptRepository.validateDurableUnitRemoval")(function* (turn: Turn, key: string) {
+    const validateDurableUnitRemoval = Effect.fn("TranscriptRepository.validateDurableUnitRemoval")(function* (
+      turn: Turn,
+      key: string,
+    ) {
       const rows = yield* sql`SELECT execution_key FROM rika_transcript_execution_checkpoints
         WHERE turn_id = ${turn.id} AND parent_unit_key = ${key}
         LIMIT 1`
-      if (rows.length > 0) return yield* RepositoryError.make({ message: `Transcript unit ${key} has an attached execution` })
+      if (rows.length > 0)
+        return yield* RepositoryError.make({ message: `Transcript unit ${key} has an attached execution` })
     })
-    const insertRecordedShell = Effect.fn("TranscriptRepository.insertRecordedShell")(function* (turn: RunningRecordedShellTurn | TerminalRecordedShellTurn, projectionVersion: number) {
+    const insertRecordedShell = Effect.fn("TranscriptRepository.insertRecordedShell")(function* (
+      turn: RunningRecordedShellTurn | TerminalRecordedShellTurn,
+      projectionVersion: number,
+    ) {
       const projection = recordedShellProjection(turn)
       yield* validateUnits(projection.units)
       yield* validateRecordedShellProjection(turn, projection, projectionVersion)
@@ -323,15 +287,21 @@ export const layer = Layer.effect(
                 ${resultTruncated}, ${result?.exitCode ?? null},
                 '{"_tag":"Human"}', '{"_tag":"Original"}', ${turn.createdAt}, ${turn.updatedAt}
               )`
-            const committed = yield* commitCheckpoint(turn, TranscriptProjection.Projection.projectionState(projection), {
-              executionCheckpoints: [],
-              projectionVersion,
-              expectedGeneration: undefined,
-            })
-            if (!committed) return yield* RepositoryError.make({ message: `Recorded shell transcript ${turn.id} already exists` })
+            const committed = yield* commitCheckpoint(
+              turn,
+              TranscriptProjection.Projection.projectionState(projection),
+              {
+                executionCheckpoints: [],
+                projectionVersion,
+                expectedGeneration: undefined,
+              },
+            )
+            if (!committed)
+              return yield* RepositoryError.make({ message: `Recorded shell transcript ${turn.id} already exists` })
             yield* Effect.forEach(projection.units, (unit) => storeUnit(turn, unit), { discard: true })
             const stored = yield* get(turn.id)
-            if (stored === undefined) return yield* RepositoryError.make({ message: `Recorded shell transcript ${turn.id} was not stored` })
+            if (stored === undefined)
+              return yield* RepositoryError.make({ message: `Recorded shell transcript ${turn.id} was not stored` })
             return stored
           }),
         )
@@ -347,10 +317,18 @@ export const layer = Layer.effect(
           .withTransaction(
             Effect.gen(function* () {
               if (!(yield* commitCheckpoint(turn, state, options))) return "stale" as const
-              const checkpoints = new Map((yield* loadExecutionCheckpoints(turn.id)).map((checkpoint) => [checkpoint.executionKey, checkpoint]))
-              for (const checkpoint of options.executionCheckpoints) checkpoints.set(checkpoint.executionKey, checkpoint)
+              const checkpoints = new Map(
+                (yield* loadExecutionCheckpoints(turn.id)).map((checkpoint) => [checkpoint.executionKey, checkpoint]),
+              )
+              for (const checkpoint of options.executionCheckpoints)
+                checkpoints.set(checkpoint.executionKey, checkpoint)
               const merged = [...checkpoints.values()]
-              yield* validateCheckpoint(turn, state, { executionCheckpoints: merged, projectionVersion: options.projectionVersion }, true)
+              yield* validateCheckpoint(
+                turn,
+                state,
+                { executionCheckpoints: merged, projectionVersion: options.projectionVersion },
+                true,
+              )
               const attachmentUnits = yield* loadAttachmentUnits(turn, delta, merged)
               yield* validateAttachmentSet(turn, attachmentUnits, merged)
               yield* Effect.forEach(
@@ -363,7 +341,11 @@ export const layer = Layer.effect(
                 { discard: true },
               )
               yield* Effect.forEach(delta.upsert, (unit) => storeUnit(turn, unit), { discard: true })
-              yield* Effect.forEach(options.executionCheckpoints, (checkpoint) => storeExecutionCheckpoint(turn, checkpoint), { discard: true })
+              yield* Effect.forEach(
+                options.executionCheckpoints,
+                (checkpoint) => storeExecutionCheckpoint(turn, checkpoint),
+                { discard: true },
+              )
               return "committed" as const
             }),
           )
@@ -384,32 +366,52 @@ export const layer = Layer.effect(
                 RETURNING id`
               if (adopted.length === 0) return yield* refoldStale
               if (!(yield* replaceCheckpointForRefold(replacementTurn, projection, options))) return yield* refoldStale
-              yield* sql`DELETE FROM rika_transcript_execution_checkpoints WHERE turn_id = ${turn.id}`.pipe(Effect.mapError(error))
+              yield* sql`DELETE FROM rika_transcript_execution_checkpoints WHERE turn_id = ${turn.id}`.pipe(
+                Effect.mapError(error),
+              )
               yield* sql`DELETE FROM rika_transcript_units WHERE turn_id = ${turn.id}`.pipe(Effect.mapError(error))
               yield* Effect.forEach(projection.units, (unit) => storeUnit(replacementTurn, unit), { discard: true })
-              yield* Effect.forEach(options.executionCheckpoints, (checkpoint) => storeExecutionCheckpoint(replacementTurn, checkpoint), { discard: true })
+              yield* Effect.forEach(
+                options.executionCheckpoints,
+                (checkpoint) => storeExecutionCheckpoint(replacementTurn, checkpoint),
+                { discard: true },
+              )
               const committed = yield* get(turn.id)
-              if (committed === undefined) return yield* RepositoryError.make({ message: `Transcript ${turn.id} disappeared during refold` })
-              if (!isAgentExecution(committed.turn)) return yield* RepositoryError.make({ message: `Transcript ${turn.id} changed turn kind during refold` })
+              if (committed === undefined)
+                return yield* RepositoryError.make({ message: `Transcript ${turn.id} disappeared during refold` })
+              if (!isAgentExecution(committed.turn))
+                return yield* RepositoryError.make({ message: `Transcript ${turn.id} changed turn kind during refold` })
               return { _tag: "Committed", turn: committed.turn } as const
             }),
           )
-          .pipe(Effect.catch((failure) => (isRefoldStale(failure) ? Effect.succeed({ _tag: "Stale" } as const) : Effect.fail(error(failure)))))
+          .pipe(
+            Effect.catch((failure) =>
+              isRefoldStale(failure) ? Effect.succeed({ _tag: "Stale" } as const) : Effect.fail(error(failure)),
+            ),
+          )
       }),
       createRecordedShell: insertRecordedShell,
       copyRecordedShell: insertRecordedShell,
-      settleRecordedShell: Effect.fn("TranscriptRepository.settleRecordedShell")(function* (expected, turn, expectedGeneration, projectionVersion) {
-        if (turn.id !== expected.id || turn.threadId !== expected.threadId || turn.prompt !== expected.prompt || turn.command !== expected.command || turn.createdAt !== expected.createdAt || turn.updatedAt < expected.updatedAt)
-          return yield* RepositoryError.make({
-            message: `Recorded shell turn ${turn.id} changed its intrinsic identity`,
-          })
-        const projection = recordedShellProjection(turn)
-        yield* validateUnits(projection.units)
-        yield* validateRecordedShellProjection(turn, projection, projectionVersion)
-        return yield* sql
-          .withTransaction(
-            Effect.gen(function* () {
-              const updated = yield* sql`UPDATE rika_turns SET
+      settleRecordedShell: Effect.fn("TranscriptRepository.settleRecordedShell")(
+        function* (expected, turn, expectedGeneration, projectionVersion) {
+          if (
+            turn.id !== expected.id ||
+            turn.threadId !== expected.threadId ||
+            turn.prompt !== expected.prompt ||
+            turn.command !== expected.command ||
+            turn.createdAt !== expected.createdAt ||
+            turn.updatedAt < expected.updatedAt
+          )
+            return yield* RepositoryError.make({
+              message: `Recorded shell turn ${turn.id} changed its intrinsic identity`,
+            })
+          const projection = recordedShellProjection(turn)
+          yield* validateUnits(projection.units)
+          yield* validateRecordedShellProjection(turn, projection, projectionVersion)
+          return yield* sql
+            .withTransaction(
+              Effect.gen(function* () {
+                const updated = yield* sql`UPDATE rika_turns SET
                     status = ${turn.status}, shell_result_text = ${turn.result.text},
                     shell_result_truncated = ${turn.result.truncated ? 1 : 0},
                     shell_result_exit_code = ${turn.result.exitCode ?? null}, updated_at = ${turn.updatedAt}
@@ -418,24 +420,33 @@ export const layer = Layer.effect(
                     AND shell_command = ${expected.command} AND created_at = ${expected.createdAt}
                     AND updated_at = ${expected.updatedAt}
                   RETURNING id`
-              if (updated.length === 0) return yield* refoldStale
-              const committed = yield* commitCheckpoint(turn, TranscriptProjection.Projection.projectionState(projection), {
-                executionCheckpoints: [],
-                projectionVersion,
-                expectedGeneration,
-              })
-              if (!committed) return yield* refoldStale
-              yield* Effect.forEach(projection.units, (unit) => storeUnit(turn, unit), { discard: true })
-              const stored = yield* get(turn.id)
-              if (stored === undefined)
-                return yield* RepositoryError.make({
-                  message: `Recorded shell transcript ${turn.id} disappeared`,
-                })
-              return { _tag: "Committed" as const, projection: stored }
-            }),
-          )
-          .pipe(Effect.catch((failure) => (isRefoldStale(failure) ? Effect.succeed({ _tag: "Stale" } as const) : Effect.fail(error(failure)))))
-      }),
+                if (updated.length === 0) return yield* refoldStale
+                const committed = yield* commitCheckpoint(
+                  turn,
+                  TranscriptProjection.Projection.projectionState(projection),
+                  {
+                    executionCheckpoints: [],
+                    projectionVersion,
+                    expectedGeneration,
+                  },
+                )
+                if (!committed) return yield* refoldStale
+                yield* Effect.forEach(projection.units, (unit) => storeUnit(turn, unit), { discard: true })
+                const stored = yield* get(turn.id)
+                if (stored === undefined)
+                  return yield* RepositoryError.make({
+                    message: `Recorded shell transcript ${turn.id} disappeared`,
+                  })
+                return { _tag: "Committed" as const, projection: stored }
+              }),
+            )
+            .pipe(
+              Effect.catch((failure) =>
+                isRefoldStale(failure) ? Effect.succeed({ _tag: "Stale" } as const) : Effect.fail(error(failure)),
+              ),
+            )
+        },
+      ),
       page: Effect.fn("TranscriptRepository.page")(function* (threadId, options = {}) {
         yield* validatePageOptions(options)
         const limit = pageSize(options.limit)
@@ -519,19 +530,41 @@ export const layer = Layer.effect(
         }
         const entries = yield* Effect.all(
           rows.slice(0, limit).map((value) =>
-            Schema.decodeUnknownEffect(UnitRow)(value).pipe(
+            Schema.decodeUnknownEffect(TranscriptUnitRow)(value).pipe(
               Effect.flatMap((row) =>
                 Effect.gen(function* () {
                   const unit = yield* Schema.decodeUnknownEffect(UnitJson)(row.unit_json)
                   const turnId = yield* Schema.decodeUnknownEffect(TurnId)(row.turn_id)
-                  const turn = yield* decodeTurn(value)
-                  const toolId = unit.content._tag === "Block" && unit.content.block._tag === "ToolCall" ? unit.content.block.id : null
-                  if (unit.key !== row.unit_key || (isRecordedShell(turn) ? null : TranscriptCorrelation.executionKey(unit.turnId)) !== row.execution_key || !TranscriptOrdering.hasIntrinsicOrder(unit) || TranscriptOrdering.encodeUnitOrder(unit.order) !== row.unit_order_key || (unit.parentId ?? null) !== row.durable_parent_id || toolId !== row.durable_tool_id || turn.id !== turnId)
+                  const turn = yield* decodeStoredTurn(value).pipe(Effect.mapError(error))
+                  const toolId =
+                    unit.content._tag === "Block" && unit.content.block._tag === "ToolCall"
+                      ? unit.content.block.id
+                      : null
+                  if (
+                    unit.key !== row.unit_key ||
+                    (isRecordedShell(turn) ? null : TranscriptCorrelation.executionKey(unit.turnId)) !==
+                      row.execution_key ||
+                    !TranscriptOrdering.hasIntrinsicOrder(unit) ||
+                    TranscriptOrdering.encodeUnitOrder(unit.order) !== row.unit_order_key ||
+                    (unit.parentId ?? null) !== row.durable_parent_id ||
+                    toolId !== row.durable_tool_id ||
+                    turn.id !== turnId
+                  )
                     return yield* RepositoryError.make({
                       message: "Transcript unit order does not match its durable key",
                     })
                   if (isRecordedShell(turn)) {
-                    if (row.execution_key !== null || unit.parentId !== undefined || row.checkpoint_execution_id !== null || row.checkpoint_is_root !== null || row.attachment_parent_execution_key !== null || row.attachment_parent_unit_key !== null || row.attachment_parent_id !== null || row.attachment_parent_order_key !== null || row.attachment_unit_key !== null)
+                    if (
+                      row.execution_key !== null ||
+                      unit.parentId !== undefined ||
+                      row.checkpoint_execution_id !== null ||
+                      row.checkpoint_is_root !== null ||
+                      row.attachment_parent_execution_key !== null ||
+                      row.attachment_parent_unit_key !== null ||
+                      row.attachment_parent_id !== null ||
+                      row.attachment_parent_order_key !== null ||
+                      row.attachment_unit_key !== null
+                    )
                       return yield* RepositoryError.make({
                         message: "Recorded shell unit has an execution attachment",
                       })
@@ -546,19 +579,58 @@ export const layer = Layer.effect(
                       row.projection_version,
                     )
                   } else {
-                    if (row.checkpoint_execution_id === null || TranscriptCorrelation.executionKey(row.checkpoint_execution_id) !== row.execution_key) return yield* RepositoryError.make({ message: "Transcript unit has no execution checkpoint" })
+                    if (
+                      row.checkpoint_execution_id === null ||
+                      TranscriptCorrelation.executionKey(row.checkpoint_execution_id) !== row.execution_key
+                    )
+                      return yield* RepositoryError.make({ message: "Transcript unit has no execution checkpoint" })
                     if (row.checkpoint_is_root === 1) {
-                      if (row.execution_key !== TranscriptCorrelation.executionKey(String(turnId)) || unit.parentId !== undefined || row.attachment_parent_execution_key !== null || row.attachment_parent_unit_key !== null || row.attachment_parent_id !== null || row.attachment_parent_order_key !== null || row.attachment_unit_key !== null)
+                      if (
+                        row.execution_key !== TranscriptCorrelation.executionKey(String(turnId)) ||
+                        unit.parentId !== undefined ||
+                        row.attachment_parent_execution_key !== null ||
+                        row.attachment_parent_unit_key !== null ||
+                        row.attachment_parent_id !== null ||
+                        row.attachment_parent_order_key !== null ||
+                        row.attachment_unit_key !== null
+                      )
                         return yield* RepositoryError.make({
                           message: "Transcript root unit has contradictory durable attachment",
                         })
                     } else {
-                      if (row.checkpoint_is_root !== 0 || row.attachment_parent_execution_key === null || row.attachment_parent_unit_key === null || row.attachment_parent_id === null || row.attachment_parent_order_key === null || row.attachment_unit_key !== row.attachment_parent_unit_key || row.attachment_unit_execution_key !== row.attachment_parent_execution_key || row.attachment_unit_order_key !== row.attachment_parent_order_key || row.attachment_unit_tool_id !== row.attachment_parent_id || row.attachment_unit_json === null || unit.parentId !== row.attachment_parent_id)
+                      if (
+                        row.checkpoint_is_root !== 0 ||
+                        row.attachment_parent_execution_key === null ||
+                        row.attachment_parent_unit_key === null ||
+                        row.attachment_parent_id === null ||
+                        row.attachment_parent_order_key === null ||
+                        row.attachment_unit_key !== row.attachment_parent_unit_key ||
+                        row.attachment_unit_execution_key !== row.attachment_parent_execution_key ||
+                        row.attachment_unit_order_key !== row.attachment_parent_order_key ||
+                        row.attachment_unit_tool_id !== row.attachment_parent_id ||
+                        row.attachment_unit_json === null ||
+                        unit.parentId !== row.attachment_parent_id
+                      )
                         return yield* RepositoryError.make({
                           message: "Transcript child unit has contradictory durable attachment",
                         })
                       const parent = yield* Schema.decodeUnknownEffect(UnitJson)(row.attachment_unit_json)
-                      if (parent.key !== row.attachment_parent_unit_key || TranscriptCorrelation.executionKey(parent.turnId) !== row.attachment_parent_execution_key || TranscriptOrdering.encodeUnitOrder(parent.order) !== row.attachment_parent_order_key || parent.content._tag !== "Block" || parent.content.block._tag !== "ToolCall" || parent.content.block.id !== row.attachment_parent_id || TranscriptOrdering.encodeUnitOrder(unit.order) !== TranscriptOrdering.encodeUnitOrder(TranscriptOrdering.childOrder(parent.order, row.checkpoint_execution_id, TranscriptOrdering.localOrder(unit.order))))
+                      if (
+                        parent.key !== row.attachment_parent_unit_key ||
+                        TranscriptCorrelation.executionKey(parent.turnId) !== row.attachment_parent_execution_key ||
+                        TranscriptOrdering.encodeUnitOrder(parent.order) !== row.attachment_parent_order_key ||
+                        parent.content._tag !== "Block" ||
+                        parent.content.block._tag !== "ToolCall" ||
+                        parent.content.block.id !== row.attachment_parent_id ||
+                        TranscriptOrdering.encodeUnitOrder(unit.order) !==
+                          TranscriptOrdering.encodeUnitOrder(
+                            TranscriptOrdering.childOrder(
+                              parent.order,
+                              row.checkpoint_execution_id,
+                              TranscriptOrdering.localOrder(unit.order),
+                            ),
+                          )
+                      )
                         return yield* RepositoryError.make({
                           message: "Transcript child unit path contradicts its durable attachment",
                         })
@@ -581,7 +653,9 @@ export const layer = Layer.effect(
         const totals = yield* sql`SELECT COALESCE(SUM(cost_usd), 0) AS thread_cost_usd
           FROM rika_transcript_checkpoints
           WHERE thread_id = ${threadId}`.pipe(Effect.mapError(error))
-        const total = yield* Schema.decodeUnknownEffect(Schema.Struct({ thread_cost_usd: Schema.Finite }))(totals[0]).pipe(Effect.mapError(error))
+        const total = yield* Schema.decodeUnknownEffect(Schema.Struct({ thread_cost_usd: Schema.Finite }))(
+          totals[0],
+        ).pipe(Effect.mapError(error))
         return {
           entries: chronological,
           hasOlder: options.after === undefined && rows.length > limit,
@@ -601,5 +675,26 @@ export const layer = Layer.effect(
   }),
 )
 export { makeMemory, memoryLayer, memoryLayerWithTurns } from "./memory-transcript-repository"
-export { EntrySchema, PageCursor, ExecutionAttachment, ExecutionCheckpoint, invalidatedProjectionVersion, RepositoryError } from "@rika/product/transcript-repository"
-export type { Entry, Projection, CheckpointOptions, DeltaCheckpointOptions, UnitDelta, RefoldOptions, PageOptions, Page, ProjectionRecoveryCandidate, WriteResult, RefoldWriteResult, RecordedShellWriteResult, Interface } from "@rika/product/transcript-repository"
+export {
+  EntrySchema,
+  PageCursor,
+  ExecutionAttachment,
+  ExecutionCheckpoint,
+  invalidatedProjectionVersion,
+  RepositoryError,
+} from "@rika/product/transcript-repository"
+export type {
+  Entry,
+  Projection,
+  CheckpointOptions,
+  DeltaCheckpointOptions,
+  UnitDelta,
+  RefoldOptions,
+  PageOptions,
+  Page,
+  ProjectionRecoveryCandidate,
+  WriteResult,
+  RefoldWriteResult,
+  RecordedShellWriteResult,
+  Interface,
+} from "@rika/product/transcript-repository"

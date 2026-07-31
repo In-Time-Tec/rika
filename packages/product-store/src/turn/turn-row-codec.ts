@@ -1,7 +1,6 @@
 import { Effect, Schema } from "effect"
 import { ThreadId } from "@rika/product/thread-record"
 import {
-  AgentExecutionTurn,
   ExecutionExtensionPin,
   ExecutionRoutePin,
   PromptPart,
@@ -13,14 +12,8 @@ import {
   TurnLineage,
   isAgentExecution,
 } from "@rika/product/turn-record"
-import {
-  QueuedTurnUnavailable,
-  QueueFull,
-  RepositoryError,
-  defaultPageSize,
-  maximumPageSize,
-} from "@rika/product/turn-repository"
-import type { PageCursor, Submission, QueueItemChange } from "@rika/product/turn-repository"
+import { RepositoryError } from "@rika/product/turn-repository"
+
 const Row = Schema.Struct({
   id: Schema.String,
   thread_id: Schema.String,
@@ -56,59 +49,13 @@ export const PromptPartsJson = Schema.fromJsonString(Schema.Array(PromptPart))
 export const ExecutionRouteJson = Schema.fromJsonString(ExecutionRoutePin)
 export const AuthorJson = Schema.fromJsonString(TurnAuthor)
 export const LineageJson = Schema.fromJsonString(TurnLineage)
+
 const repositoryError = (error: unknown) =>
   Schema.is(RepositoryError)(error) ? error : RepositoryError.make({ message: String(error) })
-const submissionError = (error: unknown) => (Schema.is(QueueFull)(error) ? error : repositoryError(error))
-const takeQueuedError = (error: unknown) => (Schema.is(QueuedTurnUnavailable)(error) ? error : repositoryError(error))
-const missing = (id: TurnId) => RepositoryError.make({ message: `Turn ${id} does not exist` })
-const queuedTurnUnavailable = (id: TurnId) =>
-  QueuedTurnUnavailable.make({ turnId: id, message: `Turn ${id} is not queued` })
-const clone = <T extends Turn>(turn: T): T => structuredClone(turn)
-const sameTurn = Schema.toEquivalence(Turn)
-const pageSize = (limit: number | undefined) =>
-  Math.min(maximumPageSize, Math.max(1, Math.floor(limit ?? defaultPageSize)))
-const cursorFor = (turn: Turn | undefined): PageCursor | undefined =>
-  turn === undefined ? undefined : { createdAt: turn.createdAt, id: turn.id }
+
 export const decodeQueueState = (row: unknown) =>
   Schema.decodeUnknownEffect(QueueStateRow)(row).pipe(Effect.mapError(repositoryError))
-interface MemoryQueueState {
-  readonly revision: number
-  readonly queuedCount: number
-  readonly wakeGeneration: number
-  readonly wakePending: boolean
-}
 
-interface MemoryState {
-  readonly turns: ReadonlyMap<TurnId, Turn>
-  readonly queues: ReadonlyMap<ThreadId, MemoryQueueState>
-  readonly claims: ReadonlyMap<TurnId, string>
-  readonly nextClaimToken: number
-}
-
-type MemorySubmissionResult =
-  | { readonly _tag: "Duplicate" }
-  | { readonly _tag: "Full"; readonly error: QueueFull }
-  | { readonly _tag: "Created"; readonly submission: Submission }
-
-type MemoryRequeueResult =
-  | { readonly _tag: "Unavailable" }
-  | { readonly _tag: "Full"; readonly error: QueueFull }
-  | { readonly _tag: "Queued"; readonly value: AgentExecutionTurn & { readonly queue: QueueItemChange } }
-
-const emptyQueueState: MemoryQueueState = {
-  revision: 0,
-  queuedCount: 0,
-  wakeGeneration: 0,
-  wakePending: false,
-}
-
-const queueState = (state: MemoryState, threadId: ThreadId): MemoryQueueState =>
-  state.queues.get(threadId) ?? emptyQueueState
-
-const withQueueState = (state: MemoryState, threadId: ThreadId, queue: MemoryQueueState): MemoryState => ({
-  ...state,
-  queues: new Map(state.queues).set(threadId, queue),
-})
 export const decode = (row: unknown) =>
   Effect.gen(function* () {
     const value = yield* Schema.decodeUnknownEffect(Row)(row)
@@ -185,7 +132,6 @@ export const decodeAgent = (row: unknown) =>
   decode(row).pipe(Effect.filterOrFail(isAgentExecution, () => repositoryError("Expected an AgentExecution turn")))
 
 export const StoredTurnRow = Row
-
 export const decodeStoredTurn = decode
 export const encodeExtensionPin = (pin: ExecutionExtensionPin) =>
   Schema.encodeEffect(ExtensionPinJson)(pin).pipe(Effect.mapError(repositoryError))

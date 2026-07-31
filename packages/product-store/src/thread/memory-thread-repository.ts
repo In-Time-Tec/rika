@@ -1,7 +1,6 @@
 import { Service } from "@rika/product/thread-repository"
 export { Service }
 import { Effect, Layer, Ref, Schema } from "effect"
-import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { Thread, ThreadId, ThreadLineage } from "@rika/product/thread-record"
 
 export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("ThreadRepositoryError", {
@@ -40,10 +39,6 @@ export interface Interface {
   readonly remove: (id: ThreadId) => Effect.Effect<void, RepositoryError>
 }
 
-import { ThreadRow as Row } from "./thread-row-codec"
-const LabelsJson = Schema.fromJsonString(Schema.Array(Schema.String))
-const LineageJson = Schema.fromJsonString(ThreadLineage)
-const repositoryError = (error: unknown) => RepositoryError.make({ message: String(error) })
 const listLimit = (value: number | undefined) => Math.min(Math.max(value ?? 50, 1), 100)
 const missing = (id: ThreadId) => RepositoryError.make({ message: `Thread ${id} does not exist` })
 const clone = (thread: Thread): Thread => structuredClone(thread)
@@ -63,25 +58,6 @@ const select = (threads: ReadonlyArray<Thread>, input: ListInput = {}) =>
     .toSorted(compare)
     .slice(0, listLimit(input.limit))
     .map(clone)
-
-const decode = (row: unknown) =>
-  Effect.gen(function* () {
-    const value = yield* Schema.decodeUnknownEffect(Row)(row)
-    const labels = yield* Schema.decodeUnknownEffect(LabelsJson)(value.labels_json)
-    const lineage = yield* Schema.decodeUnknownEffect(LineageJson)(value.lineage_json)
-    const id = yield* Schema.decodeUnknownEffect(ThreadId)(value.id)
-    return {
-      id,
-      workspace: value.workspace,
-      title: value.title,
-      labels,
-      pinned: value.pinned === 1,
-      archived: value.archived === 1,
-      lineage,
-      createdAt: value.created_at,
-      updatedAt: value.updated_at,
-    }
-  }).pipe(Effect.mapError(repositoryError))
 
 export const makeMemory = (initial: ReadonlyArray<Thread> = []) =>
   Effect.gen(function* () {

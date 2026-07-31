@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Fixtures } from "./thread-query-support"
 import { Context, Effect, Layer, Schema, Stream } from "effect"
 import { ThreadQuery, ThreadToolHandlers } from "@rika/product/product-operation"
+import * as ThreadSearchRepository from "@rika/product/thread-search-repository"
 import { provideLayer } from "../support/product-test-layer"
 import { delegationUnit, storeProjection } from "../support/product-test-transcript-fixture"
 
@@ -72,7 +73,7 @@ const stateThreads = (["waiting", "running", "queued", "failed"] as const).map((
 const search = Fixtures.ThreadSearchRepository.Service.of({
   search: (input) =>
     Effect.sync(() => {
-      let results: Fixtures.ThreadSearchRepository.SearchPage["results"] = []
+      let results: ThreadSearchRepository.SearchPage["results"] = []
       if (input.workspace === workspace && input.query === "states") {
         results = stateThreads.map(({ thread }) => ({
           schemaVersion: 2,
