@@ -1,5 +1,4 @@
 #!/usr/bin/env bun
-import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Operation from "@rika/product/product-operation"
 import * as ResidentService from "@rika/product/resident-service"
@@ -308,10 +307,9 @@ if (import.meta.main) {
     interactiveSigintObserved = true
   }
   process.once("SIGINT", markSigint)
-  BunRuntime.runMain(run().pipe(provideLayerScoped(Layer.merge(BunServices.layer, FetchHttpClient.layer))), {
-    teardown: (exit, onExit) => {
-      process.off("SIGINT", markSigint)
-      onExit(clientProcessExitCode({ exit, interruptedBySigint }))
-    },
+  const fiber = Effect.runFork(run().pipe(provideLayerScoped(Layer.merge(BunServices.layer, FetchHttpClient.layer))))
+  fiber.addObserver((exit) => {
+    process.off("SIGINT", markSigint)
+    process.exit(clientProcessExitCode({ exit, interruptedBySigint }))
   })
 }

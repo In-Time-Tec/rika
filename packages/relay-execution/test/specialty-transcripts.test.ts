@@ -1,11 +1,24 @@
 import { describe, expect, it } from "@effect/vitest"
-import { AgentProfiles } from "@rika/product/execution-service"
+import * as AgentProfiles from "../src/agent-profiles"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Catalog } from "@rika/coding-tools/coding-tool-catalog"
-import { Effect, Layer, Schema } from "effect"
+import { Effect, Function, Layer, Schema } from "effect"
 import { ProductAgent } from "@rika/product/product-operation"
-import { provideLayer } from "./layer"
-import { executionRoute } from "./current-state"
+import * as Turn from "@rika/product/turn-record"
+
+const provideLayer: {
+  <RIn, E2, ROut>(
+    layer: Layer.Layer<ROut, E2, RIn>,
+  ): <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | E2, RIn | Exclude<R, ROut>>
+  <A, E, R, RIn, E2, ROut>(
+    effect: Effect.Effect<A, E, R>,
+    layer: Layer.Layer<ROut, E2, RIn>,
+  ): Effect.Effect<A, E | E2, RIn | Exclude<R, ROut>>
+} = Function.dual(2, <A, E, R, RIn, E2, ROut>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<ROut, E2, RIn>) =>
+  Effect.scoped(Effect.flatMap(Layer.build(layer), (context) => Effect.provide(effect, context))),
+)
+
+const executionRoute = () => Turn.testExecutionRoute()
 
 const model = { provider: "test", model: "deterministic" }
 const specialtyNames = ["task", "oracle", "librarian"] as const

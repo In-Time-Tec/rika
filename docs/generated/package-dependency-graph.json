@@ -319,6 +319,33 @@
     },
     {
       "from": "package:@rika/product-store",
+      "to": "package:@rika/coding-tools",
+      "specifier": "@rika/coding-tools",
+      "kind": "package",
+      "relationship": "test",
+      "production": false,
+      "dependencySection": "devDependencies"
+    },
+    {
+      "from": "package:@rika/product-store",
+      "to": "package:@rika/configuration",
+      "specifier": "@rika/configuration",
+      "kind": "package",
+      "relationship": "test",
+      "production": false,
+      "dependencySection": "devDependencies"
+    },
+    {
+      "from": "package:@rika/product-store",
+      "to": "package:@rika/extensions",
+      "specifier": "@rika/extensions",
+      "kind": "package",
+      "relationship": "test",
+      "production": false,
+      "dependencySection": "devDependencies"
+    },
+    {
+      "from": "package:@rika/product-store",
       "to": "package:@rika/product",
       "specifier": "@rika/product",
       "kind": "package",
@@ -498,8 +525,5 @@
       "dependencySection": "dependencies"
     }
   ],
-  "violations": [
-    "apps/rika/test/model-provider-runtime.test.ts: unresolved internal or asset import ../src/bedrock-auth-refresh",
-    "apps/rika/test/test-model-script.test.ts: unresolved internal or asset import ../src/bedrock-auth-refresh"
-  ]
+  "violations": []
 }

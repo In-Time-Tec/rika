@@ -1929,6 +1929,72 @@ it("keeps the newest committed usage revision and drops older ones", () => {
   expect(newer.state.model.usageTime).toEqual({ _tag: "Available", accumulatedMillis: 31_000 })
 })
 
+it("preserves available usage across an unpriced refresh without carrying it to a new thread", () => {
+  const page = InteractiveController.update(initialState(), {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 1,
+    activitySequence: 0,
+    queueRevision: 0,
+    queue: [],
+    thread,
+    entries: entries("new", 2),
+    hasOlder: false,
+  })
+  const available = InteractiveController.update(page.state, {
+    _tag: "ThreadUsageUpdated",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    revision: 1,
+    cost: { _tag: "Available", usd: 1.25, unpricedAttempts: 0 },
+    tokens: { _tag: "Available", total: 10, uncountedAttempts: 0 },
+    time: { _tag: "Unavailable" },
+  })
+  const refreshed = InteractiveController.update(available.state, {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 2,
+    activitySequence: 1,
+    queueRevision: 0,
+    queue: [],
+    thread,
+    entries: entries("new", 2),
+    hasOlder: false,
+  })
+  const unpriced = InteractiveController.update(refreshed.state, {
+    _tag: "ThreadUsageUpdated",
+    selectionEpoch: 2,
+    threadId: thread.id,
+    revision: 2,
+    cost: { _tag: "Unavailable" },
+    tokens: { _tag: "Unavailable" },
+    time: { _tag: "Unavailable" },
+  })
+  const otherThread = { ...thread, id: Thread.ThreadId.make("other-thread") }
+  const newSelection = InteractiveController.update(unpriced.state, {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 3,
+    activitySequence: 2,
+    queueRevision: 0,
+    queue: [],
+    thread: otherThread,
+    entries: entries("other", 2),
+    hasOlder: false,
+  })
+  const unknown = InteractiveController.update(newSelection.state, {
+    _tag: "ThreadUsageUpdated",
+    selectionEpoch: 3,
+    threadId: otherThread.id,
+    revision: 1,
+    cost: { _tag: "Unavailable" },
+    tokens: { _tag: "Unavailable" },
+    time: { _tag: "Unavailable" },
+  })
+
+  expect(unpriced.state.model.usageCost).toEqual({ _tag: "Available", usd: 1.25, unpricedAttempts: 0 })
+  expect(unpriced.state.model.costUsd).toBe(1.25)
+  expect(unknown.state.model.usageCost).toEqual({ _tag: "Unavailable" })
+  expect(unknown.state.model.costUsd).toBeUndefined()
+})
+
 it("shows the session total and updates it when child usage arrives", () => {
   const page = InteractiveController.update(initialState(), {
     _tag: "SelectionLoaded",

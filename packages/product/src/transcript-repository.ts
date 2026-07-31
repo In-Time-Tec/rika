@@ -1,8 +1,7 @@
 import { Context, Effect, Layer, Schema } from "effect"
 import * as Transcript from "@rika/transcript/transcript-unit"
 import { ThreadId } from "@rika/product/thread-record"
-import * as TurnRepository from "./turn-repository"
-import { Turn, TurnId, isAgentExecution, isRecordedShell } from "@rika/product/turn-record"
+import { Turn, TurnId } from "@rika/product/turn-record"
 import type { AgentExecutionTurn, RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/turn-record"
 import { EntrySchema, PageCursor, type Entry } from "@rika/product/transcript-page"
 
@@ -90,8 +89,6 @@ export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()(
   message: Schema.String,
 }) {}
 
-class RefoldStale extends Schema.TaggedErrorClass<RefoldStale>()("TranscriptRefoldStale", {}) {}
-
 export type WriteResult = "committed" | "stale"
 export type RefoldWriteResult =
   | { readonly _tag: "Committed"; readonly turn: AgentExecutionTurn }
@@ -155,7 +152,7 @@ const emptyProjection = (turn: Turn, projectionVersion: number): Projection => (
 export const memoryLayerWithTurns = Layer.succeed(
   Service,
   Service.of({
-    get: () => Effect.succeed<Projection | undefined>(undefined),
+    get: (): Effect.Effect<Projection | undefined> => Effect.sync(() => undefined),
     listProjectionRecoveryCandidates: () => Effect.succeed<ReadonlyArray<ProjectionRecoveryCandidate>>([]),
     commitDelta: () => Effect.succeed<WriteResult>("committed"),
     replaceForRefold: (turn: AgentExecutionTurn) => Effect.succeed<RefoldWriteResult>({ _tag: "Committed", turn }),

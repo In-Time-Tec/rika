@@ -566,7 +566,9 @@ const runtimeLayer = (workspace: string) =>
                 const processId = yield* startChecked("/bin/bash", ["-lc", request.command], cwd)
                 const output = yield* processes
                   .poll(processId, Math.min(Math.max(0, request.timeoutMillis ?? 10_000), 60_000), maxOutput)
-                  .pipe(Effect.onInterrupt(() => processes.cancel(processId).pipe(Effect.ignore)))
+                  .pipe(
+                    Effect.onInterrupt(() => Effect.uninterruptible(processes.cancel(processId).pipe(Effect.ignore))),
+                  )
                 return {
                   ...output,
                   text: `${output.stdout}${output.stderr}${output.exitCode === undefined || output.exitCode === 0 ? "" : `\nexit ${output.exitCode}`}`.trim(),

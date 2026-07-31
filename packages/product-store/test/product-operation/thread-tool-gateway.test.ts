@@ -6,7 +6,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Effect, Exit, Ref, Scope } from "effect"
 import type { ThreadTools, ToolInvocation } from "@rika/coding-tools/coding-tool-catalog"
-import * as ThreadToolService from "../src/thread-tool-service"
+import * as ThreadToolService from "../../../product/src/thread-tool-service"
 
 const invocation: ToolInvocation.Value = {
   executionId: "execution",

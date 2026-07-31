@@ -695,14 +695,6 @@
       "package": "effect"
     },
     {
-      "id": "external:fs",
-      "workspace": "root",
-      "kind": "external",
-      "production": true,
-      "publicExports": [],
-      "package": "fs"
-    },
-    {
       "id": "external:fs/promises",
       "workspace": "root",
       "kind": "external",
@@ -2105,15 +2097,6 @@
       "publicExports": []
     },
     {
-      "id": "packages/product/test/multi-agent-process.ts",
-      "path": "packages/product/test/multi-agent-process.ts",
-      "workspace": "@rika/product",
-      "package": "@rika/product",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
       "id": "packages/product/test/transcript-repository-fixture.ts",
       "path": "packages/product/test/transcript-repository-fixture.ts",
       "workspace": "@rika/product",
@@ -2384,6 +2367,15 @@
       "publicExports": []
     },
     {
+      "id": "packages/relay-execution/test/multi-agent-process.ts",
+      "path": "packages/relay-execution/test/multi-agent-process.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/relay-execution/test/process-protocol.ts",
       "path": "packages/relay-execution/test/process-protocol.ts",
       "workspace": "@rika/relay-execution",
@@ -2415,15 +2407,6 @@
       "path": "packages/relay-execution/test/workflow-process.ts",
       "workspace": "@rika/relay-execution",
       "package": "@rika/relay-execution",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "packages/terminal/intent-test.tmp.ts",
-      "path": "packages/terminal/intent-test.tmp.ts",
-      "workspace": "@rika/terminal",
-      "package": "@rika/terminal",
       "kind": "source",
       "production": true,
       "publicExports": []
@@ -2935,14 +2918,6 @@
       "from": "apps/rika/src/client-main.ts",
       "to": "apps/rika/src/resident-process-startup.ts",
       "specifier": "./resident-process-startup",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/client-main.ts",
-      "to": "external:@effect/platform-bun/BunRuntime",
-      "specifier": "@effect/platform-bun/BunRuntime",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -4085,14 +4060,6 @@
     },
     {
       "from": "apps/rika/src/resident-main.ts",
-      "to": "external:@effect/platform-bun/BunRuntime",
-      "specifier": "@effect/platform-bun/BunRuntime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-main.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -4607,6 +4574,14 @@
       "from": "apps/rika/test/tui-app.ts",
       "to": "external:effect/unstable/http",
       "specifier": "effect/unstable/http",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app.ts",
+      "to": "external:effect/unstable/sql/SqlClient",
+      "specifier": "effect/unstable/sql/SqlClient",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -6284,6 +6259,14 @@
       "from": "packages/product-store/src/product-database.ts",
       "to": "packages/product-store/src/migration/execution/product-migration-028-product-route-snapshot.ts",
       "specifier": "./migration/execution/product-migration-028-product-route-snapshot",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product-store/src/product-database.ts",
+      "to": "packages/product/src/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -8426,8 +8409,8 @@
     },
     {
       "from": "packages/product/test/current-state.ts",
-      "to": "packages/product-store/src/turn-repository.ts",
-      "specifier": "@rika/product-store/sqlite-turn-repository",
+      "to": "packages/product/src/turn-repository.ts",
+      "specifier": "@rika/product/turn-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -8449,81 +8432,9 @@
       "production": true
     },
     {
-      "from": "packages/product/test/multi-agent-process.ts",
-      "to": "external:@batonfx/test",
-      "specifier": "@batonfx/test",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/test/multi-agent-process.ts",
-      "to": "external:@effect/platform-bun/BunRuntime",
-      "specifier": "@effect/platform-bun/BunRuntime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/test/multi-agent-process.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/test/multi-agent-process.ts",
-      "to": "external:@relayfx/sdk",
-      "specifier": "@relayfx/sdk",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/test/multi-agent-process.ts",
-      "to": "external:@relayfx/sdk/sqlite",
-      "specifier": "@relayfx/sdk/sqlite",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/test/multi-agent-process.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/test/multi-agent-process.ts",
-      "to": "packages/product/src/product-execution-contract.ts",
-      "specifier": "@rika/product/execution-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/test/multi-agent-process.ts",
-      "to": "packages/product/src/product-operation.ts",
-      "specifier": "@rika/product/product-operation",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
       "from": "packages/product/test/transcript-repository-fixture.ts",
       "to": "external:effect",
       "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/test/transcript-repository-fixture.ts",
-      "to": "packages/product-store/src/transcript-repository.ts",
-      "specifier": "@rika/product-store/sqlite-transcript-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -8532,6 +8443,14 @@
       "from": "packages/product/test/transcript-repository-fixture.ts",
       "to": "packages/product/src/execution-ingest.ts",
       "specifier": "../src/execution-ingest",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/test/transcript-repository-fixture.ts",
+      "to": "packages/product/src/transcript-repository.ts",
+      "specifier": "@rika/product/transcript-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -8820,6 +8739,14 @@
       "from": "packages/relay-execution/src/execution-backend.ts",
       "to": "packages/configuration/src/paths.ts",
       "specifier": "@rika/configuration/configuration-paths",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/execution-backend.ts",
+      "to": "packages/product/src/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -9321,6 +9248,78 @@
       "production": true
     },
     {
+      "from": "packages/relay-execution/test/multi-agent-process.ts",
+      "to": "external:@batonfx/test",
+      "specifier": "@batonfx/test",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/test/multi-agent-process.ts",
+      "to": "external:@effect/platform-bun/BunRuntime",
+      "specifier": "@effect/platform-bun/BunRuntime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/test/multi-agent-process.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/test/multi-agent-process.ts",
+      "to": "external:@relayfx/sdk",
+      "specifier": "@relayfx/sdk",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/test/multi-agent-process.ts",
+      "to": "external:@relayfx/sdk/sqlite",
+      "specifier": "@relayfx/sdk/sqlite",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/test/multi-agent-process.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/test/multi-agent-process.ts",
+      "to": "packages/product/src/product-operation.ts",
+      "specifier": "@rika/product/product-operation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/test/multi-agent-process.ts",
+      "to": "packages/product/src/turn-schema.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/test/multi-agent-process.ts",
+      "to": "packages/relay-execution/src/relay-execution-layer.ts",
+      "specifier": "@rika/relay-execution/relay-execution-layer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/relay-execution/test/process-protocol.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -9500,14 +9499,6 @@
       "from": "packages/relay-execution/test/workflow-process.ts",
       "to": "packages/relay-execution/src/execution-backend.ts",
       "specifier": "../src/execution-backend",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/intent-test.tmp.ts",
-      "to": "external:@opentui/core",
-      "specifier": "@opentui/core",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10858,6 +10849,14 @@
     },
     {
       "from": "scripts/bench/seed-populated-root.ts",
+      "to": "external:effect/unstable/sql/SqlError",
+      "specifier": "effect/unstable/sql/SqlError",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/bench/seed-populated-root.ts",
       "to": "packages/product-store/src/product-database.ts",
       "specifier": "../../packages/product-store/src/product-database",
       "kind": "import",
@@ -11433,8 +11432,5 @@
       "production": true
     }
   ],
-  "violations": [
-    "apps/rika/test/model-provider-runtime.test.ts: unresolved internal or asset import ../src/bedrock-auth-refresh",
-    "apps/rika/test/test-model-script.test.ts: unresolved internal or asset import ../src/bedrock-auth-refresh"
-  ]
+  "violations": []
 }

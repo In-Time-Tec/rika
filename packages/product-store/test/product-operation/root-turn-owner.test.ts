@@ -4,7 +4,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Deferred, Effect, Ref } from "effect"
-import * as RootTurnOwner from "../src/root-turn-owner"
+import * as RootTurnOwner from "../../../product/src/root-turn-owner"
 
 const threadId = Thread.ThreadId.make("thread")
 const turn = (id: string, status: Turn.Status, createdAt = 0): Turn.Turn => ({

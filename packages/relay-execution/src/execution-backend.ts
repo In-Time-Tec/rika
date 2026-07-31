@@ -68,6 +68,7 @@ import {
   type StartInput,
   Status,
 } from "@rika/product/execution-service"
+import { toExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
 import {
   agentKeyForName,
   mainInstructions,
@@ -135,6 +136,8 @@ const observableEventTypes = new Set([
   "model.input.prepared",
   "model.output.completed",
   "model.usage.reported",
+  "model.attempt.completed",
+  "model.attempt.failed",
   "tool.call.requested",
   "tool.result.received",
   "steering.delivered",
@@ -201,7 +204,7 @@ export interface LayerOptions<AdditionalTools extends Record<string, Tool.Any> =
   readonly recoveryChildSettlementGrace?: Duration.Input
 }
 
-export const routedToolRuntimeLayer: {
+const routedToolRuntimeLayer: {
   <E, R>(
     resolveWorkspace: (executionId: string) => Effect.Effect<string, BackendError>,
   ): (
@@ -561,11 +564,18 @@ const awaitExecutionRunning = (
 }
 const makeChildExecutionId = (parentTurnId: string, childId: string) =>
   Ids.ChildExecutionId.make(encodeChildExecutionId(parentTurnId, childId))
-const executionRouteFromMetadata = (metadata: Readonly<Record<string, unknown>> | undefined) => {
+export const decodeExecutionRouteMetadata = (
+  metadata: Readonly<Record<string, unknown>> | undefined,
+): ExecutionRoutePin | undefined => {
   const route = metadata?.rika_execution_route
-  if (route === null || typeof route !== "object" || !("main" in route) || !("oracle" in route)) return undefined
-  return route as unknown as ExecutionRoutePin
+  try {
+    return route === undefined ? undefined : toExecutionRouteSnapshot(route)
+  } catch {
+    return undefined
+  }
 }
+
+const executionRouteFromMetadata = decodeExecutionRouteMetadata
 const threadIdFromMetadata = (metadata: Readonly<Record<string, unknown>> | undefined) => {
   const threadId = metadata?.rika_thread_id
   return typeof threadId === "string" && threadId.length > 0 ? threadId : undefined
@@ -1030,6 +1040,19 @@ const traceWithoutResult = <A, E, R>(name: string, effect: Effect.Effect<A, E, R
     )
   })
 
+const zeroPriceFromMetadata = (metadata: ModelRegistry.Metadata | undefined) => {
+  const pricing = metadata?.pricing
+  if (
+    pricing !== null &&
+    typeof pricing === "object" &&
+    pricing !== undefined &&
+    (pricing as { inputPerMTok?: unknown }).inputPerMTok === 0 &&
+    (pricing as { outputPerMTok?: unknown }).outputPerMTok === 0
+  )
+    return { amount: 0, currency: "USD" }
+  return undefined
+}
+
 const followExecution = (
   client: Client.Interface,
   turnId: string,
@@ -1038,6 +1061,7 @@ const followExecution = (
   stopAtActionableWait = true,
   reference?: ExecutionReference,
   eventScope: EventScope = "tree",
+  attemptCost?: { readonly amount: number; readonly currency: string },
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -1116,7 +1140,13 @@ const followExecution = (
               )
                 return Effect.succeed(true)
               const spawnedChild = childExecutionIdFromEvent(item.event)
-              const mapped = attributedEvent(item.event, root ? undefined : String(execution))
+              const attributed = attributedEvent(item.event, root ? undefined : String(execution))
+              const mapped =
+                attemptCost !== undefined &&
+                attributed.type === "model.attempt.completed" &&
+                (attributed.data?.cost === undefined || attributed.data.cost === null)
+                  ? { ...attributed, data: { ...attributed.data, cost: attemptCost } }
+                  : attributed
               const terminal: Status | undefined = ExecutionStatus.terminalEventStatus(mapped.type)
               const inspectActionable =
                 stopAtActionableWait && isActionableWait(mapped) && typeof mapped.data?.wait_id === "string"
@@ -1293,6 +1323,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
     readonly webSearchCredentials?: LayerOptions["webSearchCredentials"]
     readonly registerModels?: (registrations: ReadonlyArray<ModelRegistry.Registration>) => Effect.Effect<void>
     readonly onClientReady?: (client: Client.Interface) => Effect.Effect<void>
+    readonly attemptCost?: { readonly amount: number; readonly currency: string } | undefined
   },
 ) =>
   Layer.effect(
@@ -1783,6 +1814,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                 true,
                 undefined,
                 input.eventScope,
+                options.attemptCost,
               ).pipe(Effect.ensuring(Fiber.interrupt(starter)))
             }).pipe(
               Effect.tapCause((cause) =>
@@ -1804,9 +1836,16 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
         ),
         follow: Effect.fn(
           function* (turnId, afterCursor, onEvent, reference, eventScope) {
-            return yield* followExecution(client, turnId, afterCursor, onEvent, true, reference, eventScope).pipe(
-              Effect.mapError(error),
-            )
+            return yield* followExecution(
+              client,
+              turnId,
+              afterCursor,
+              onEvent,
+              true,
+              reference,
+              eventScope,
+              options.attemptCost,
+            ).pipe(Effect.mapError(error))
           },
           (effect) => traceWithoutResult("ExecutionBackend.follow", effect),
         ),
@@ -1894,11 +1933,11 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               }),
             )
             const cancelledAt = yield* Clock.currentTimeMillis
-            const tree = yield* executionTreeIds(client, id)
             const accepted = yield* client.executions.cancel({
               execution_id: id,
               cancelled_at: cancelledAt,
             })
+            const tree = yield* executionTreeIds(client, id)
             yield* cancelOutlivingChildren(client, id, cancelledAt, tree)
             const replay = yield* client.executions.replay({ execution_id: id })
             const events = replay.events.map(event)
@@ -2591,6 +2630,7 @@ export const layer = <
           return layerFromClient({
             ...options,
             onClientReady: (client) => Deferred.complete(relayClient, Effect.succeed(client)).pipe(Effect.asVoid),
+            attemptCost: zeroPriceFromMetadata(options.registration.metadata),
             registerModels: (registrations) =>
               Effect.forEach(
                 registrations,

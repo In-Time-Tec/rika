@@ -2130,7 +2130,7 @@ describe("Surface", () => {
           usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 2 },
         }),
       )
-      expect(modeLabelText()).toBe(" $— ─ medium ")
+      expect(modeLabelText()).toBe(" $1.25 ─ medium ")
       surface.update(
         model({
           mode: "medium",
@@ -2139,7 +2139,7 @@ describe("Surface", () => {
           usageCost: { _tag: "Available", usd: 0.0074, unpricedAttempts: 1 },
         }),
       )
-      expect(modeLabelText()).toBe(" $— ─ medium ")
+      expect(modeLabelText()).toBe(" $0.007 ─ medium ")
       surface.update(
         model({
           mode: "medium",
@@ -2147,7 +2147,7 @@ describe("Surface", () => {
           usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 2 },
         }),
       )
-      expect(modeLabelText()).toBe(" $— ─ medium ")
+      expect(modeLabelText()).toBe(" $1.25 ─ medium ")
       surface.update(model({ mode: "medium", busy: false, costUsd: 5.4449, fastMode: true }))
       expect(modeLabelText()).toBe(" $5.44 ─ ↯medium ")
       const globalTotalUsd = 12.34

@@ -8,10 +8,10 @@ import * as ExecutionBackend from "@rika/product/execution-service"
 import * as Transcript from "@rika/transcript/transcript-unit"
 import { Context, Deferred, Effect, Exit, Layer, Ref, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
-import * as ExecutionIngest from "../src/execution-ingest"
-import * as UsageCost from "../src/usage-cost"
-import { executionRoute } from "./current-state"
-import { storeProjection } from "./transcript-repository-fixture"
+import * as ExecutionIngest from "../../../product/src/execution-ingest"
+import * as UsageCost from "../../../product/src/usage-cost"
+import { executionRoute } from "../../../product/test/current-state"
+import { storeProjection } from "../../../product/test/transcript-repository-fixture"
 
 const threadId = Thread.ThreadId.make("ingest-thread")
 const rootId = Turn.TurnId.make("root")
@@ -111,6 +111,7 @@ const makeHarness = Effect.fn("ExecutionIngestTest.makeHarness")(function* (opti
   readonly commitGate?: (write: number) => Effect.Effect<void>
   readonly pageHold?: { readonly after: string; readonly open: Deferred.Deferred<void> }
   readonly onFailure?: (failure: ExecutionIngest.Failure) => void
+  readonly onCommitted?: (commit: ExecutionIngest.Commit) => void
 }) {
   const turn = makeTurn(options.turnStatus ?? "completed")
   const turns = yield* TurnRepository.makeMemory([turn])
@@ -262,6 +263,7 @@ const makeHarness = Effect.fn("ExecutionIngestTest.makeHarness")(function* (opti
     ...(options.commitEvents === undefined ? {} : { commitEvents: options.commitEvents }),
     ...(options.watchCapacity === undefined ? {} : { watchCapacity: options.watchCapacity }),
     ...(options.onFailure === undefined ? {} : { onFailure: options.onFailure }),
+    ...(options.onCommitted === undefined ? {} : { onCommitted: options.onCommitted }),
   })
   const projectionChanges: Array<ExecutionIngest.ProjectionChange> = []
   const projectionWatch = yield* ingest.watchThread(threadId)
@@ -292,6 +294,40 @@ const settle = (ingest: ExecutionIngest.Interface) =>
   ingest.settled(rootId).pipe(Effect.andThen(Effect.yieldNow), Effect.andThen(Effect.yieldNow))
 
 describe("ExecutionIngest", () => {
+  it.effect("notifies committed usage after a zero-cost attempt is observed", () =>
+    Effect.gen(function* () {
+      const commits: Array<ExecutionIngest.Commit> = []
+      const { ingest } = yield* makeHarness({
+        script: {
+          root: {
+            status: "completed",
+            events: [
+              started("root"),
+              event("root", "attempt", 1, "model.attempt.completed", {
+                data: { model_attempt_id: "attempt-1", cost: { amount: 0, currency: "USD" } },
+              }),
+              event("root", "usage", 2, "model.usage.reported", {
+                data: {
+                  model_attempt_id: "attempt-1",
+                  input_tokens: 2,
+                  output_tokens: 3,
+                },
+              }),
+              event("root", "completed", 3, "execution.completed"),
+            ],
+          },
+        },
+        onCommitted: (commit) => commits.push(commit),
+      })
+
+      yield* ingest.ensure({ threadId, turnId: rootId })
+      yield* settle(ingest)
+
+      expect(commits.some((commit) => commit.usageChanged)).toBe(true)
+      expect(commits.at(-1)).toMatchObject({ threadId, rootTurnId: rootId, terminal: true, usageChanged: true })
+    }),
+  )
+
   it.effect("publishes one anchored global patch for each accepted projection mutation", () =>
     Effect.gen(function* () {
       const { ingest, projectionChanges, projectionWatch, transcripts } = yield* makeHarness({

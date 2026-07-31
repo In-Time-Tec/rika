@@ -7,7 +7,7 @@ import * as Database from "@rika/product-store/product-database-layer"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
-import * as TranscriptRepositoryTest from "@rika/product-store/sqlite-transcript-repository"
+import { SqlClient } from "effect/unstable/sql/SqlClient"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
@@ -61,6 +61,24 @@ export interface TuiAppOptions {
   readonly holdExecutionFollows?: Deferred.Deferred<void>
 }
 
+const invalidateProjection = Effect.fn("TuiApp.invalidateProjection")(function* (turnId: Turn.TurnId) {
+  const sql = yield* SqlClient
+  yield* sql.withTransaction(
+    Effect.gen(function* () {
+      const rows = yield* sql`UPDATE rika_transcript_checkpoints
+        SET projection_version = 2, model_phase = -1,
+          usable_completion_sequence = NULL,
+          oldest_cursor = NULL, checkpoint_cursor = NULL, cost_usd = NULL, usage_cursors_json = NULL,
+          pricing_version = NULL
+        WHERE turn_id = ${turnId}
+        RETURNING turn_id`
+      if (rows.length !== 1) return yield* Effect.die(`Transcript projection ${turnId} does not exist`)
+      yield* sql`DELETE FROM rika_transcript_execution_checkpoints WHERE turn_id = ${turnId}`
+      yield* sql`DELETE FROM rika_transcript_units WHERE turn_id = ${turnId}`
+    }),
+  )
+})
+
 export const makeProjectionsLegacy = Effect.fn("TuiApp.makeProjectionsLegacy")(function* (root: string) {
   const path = yield* Path.Path
   const database = Database.layer(path.join(root, "rika.db"))
@@ -76,7 +94,7 @@ export const makeProjectionsLegacy = Effect.fn("TuiApp.makeProjectionsLegacy")(f
       const projection = yield* transcripts.get(turn.id)
       if (projection === undefined) continue
       aged.push(String(turn.id))
-      yield* TranscriptRepositoryTest.invalidateProjection(turn.id).pipe(Effect.provide(context))
+      yield* invalidateProjection(turn.id).pipe(Effect.provide(context))
     }
   return aged
 })
@@ -129,7 +147,17 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
     yield* fileSystem.writeFileString(target, content)
   }
   const lanes = options.lanes ?? [{ script: options.script ?? [] }]
-  const fixtures = yield* Effect.forEach(lanes, (lane) => TestModel.make([...lane.script]))
+  const fixtures = yield* Effect.forEach(lanes, (lane) =>
+    TestModel.make([...lane.script], {
+      metadata: {
+        provider: "test",
+        model: "scripted",
+        contextWindow: 1_000_000,
+        maxOutput: 1_000_000,
+        pricing: { inputPerMTok: 0, outputPerMTok: 0 },
+      },
+    }),
+  )
   const services = yield* Effect.forEach(fixtures, (built) =>
     Layer.build(built.layer).pipe(Effect.map((context) => Context.get(context, LanguageModel.LanguageModel))),
   )
@@ -149,6 +177,7 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
   const registration = yield* ModelRegistry.registration({
     ...fixture.selection,
     layer: Layer.succeed(LanguageModel.LanguageModel, routedModel),
+    ...(fixture.registration.metadata === undefined ? {} : { metadata: fixture.registration.metadata }),
   })
   const database = Database.layer(path.join(root, "rika.db"))
   const repositoryLayer = ThreadRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
@@ -180,29 +209,24 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
     toolRuntimeLayer: toolRuntimeLayer(workspace),
   }).pipe(Layer.provide(BunServices.layer), Layer.orDie)
   const held = options.holdExecutionFollows
-  const backendLayer =
-    held === undefined
-      ? relayBackendLayer
-      : Layer.effect(
-          ExecutionBackend.Service,
-          Effect.gen(function* () {
-            const backend = yield* ExecutionBackend.Service
-            const follow = backend.follow
-            return ExecutionBackend.Service.of({
-              ...backend,
-              ...(follow === undefined
-                ? {}
-                : {
-                    follow: (turnId, afterCursor, onEvent, reference, eventScope) =>
-                      Deferred.await(held).pipe(
-                        Effect.andThen(
-                          Effect.suspend(() => follow(turnId, afterCursor, onEvent, reference, eventScope)),
-                        ),
-                      ),
-                  }),
-            })
-          }),
-        ).pipe(Layer.provide(relayBackendLayer))
+  const backendLayer = Layer.effect(
+    ExecutionBackend.Service,
+    Effect.gen(function* () {
+      const backend = yield* ExecutionBackend.Service
+      const follow = backend.follow
+      return ExecutionBackend.Service.of({
+        ...backend,
+        ...(follow === undefined
+          ? {}
+          : {
+              follow: (turnId, afterCursor, onEvent, reference, eventScope) =>
+                (held === undefined ? Effect.void : Deferred.await(held)).pipe(
+                  Effect.andThen(Effect.suspend(() => follow(turnId, afterCursor, onEvent, reference, eventScope))),
+                ),
+            }),
+      })
+    }),
+  ).pipe(Layer.provide(relayBackendLayer))
   const setup = yield* Effect.acquireRelease(
     Effect.promise(() =>
       createTestRenderer({ width: options.width ?? 100, height: options.height ?? 30, exitOnCtrlC: false }),

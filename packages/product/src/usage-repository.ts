@@ -100,11 +100,11 @@ export const memoryLayer = Layer.succeed(
   Service.of({
     admitSource: (sourceId: string, turnId: string, threadId: string) =>
       Effect.succeed<SourceUsage>({ sourceId, turnId, threadId, revision: 0, projectionVersion, ...emptyMaterialized }),
-    readSource: () => Effect.succeed<SourceUsage | undefined>(undefined),
-    readTurn: () => Effect.succeed<TurnUsage | undefined>(undefined),
+    readSource: (): Effect.Effect<SourceUsage | undefined> => Effect.sync(() => undefined),
+    readTurn: (): Effect.Effect<TurnUsage | undefined> => Effect.sync(() => undefined),
     readThread: () => Effect.succeed<Aggregate>({ turns: 0, revision: 0, projectionVersion, ...emptyMaterialized }),
     readGlobal: Effect.succeed<Aggregate>({ turns: 0, revision: 0, projectionVersion, ...emptyMaterialized }),
-    loadSourceFold: () => Effect.succeed<undefined>(undefined),
+    loadSourceFold: (): Effect.Effect<undefined> => Effect.sync(() => undefined),
     commitSource: (sourceId: string, turnId: string, _revision: number, foldJson: string, totals: Materialized) =>
       Effect.succeed<CommitResult>({
         _tag: "Applied",

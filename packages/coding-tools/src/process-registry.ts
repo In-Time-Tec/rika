@@ -108,7 +108,7 @@ export const layer = Layer.effect(
         Effect.flatMap((current) =>
           Effect.forEach(
             current.values(),
-            (entry) => entry.process.kill({ killSignal: "SIGTERM" }).pipe(Effect.ignore),
+            (entry) => entry.process.kill({ killSignal: "SIGTERM", forceKillAfter: "100 millis" }).pipe(Effect.ignore),
             { concurrency: "unbounded", discard: true },
           ),
         ),
@@ -185,7 +185,7 @@ export const layer = Layer.effect(
       cancel: Effect.fn("ProcessRegistry.cancel")(function* (processId) {
         const entry = (yield* Ref.get(entries)).get(processId)
         if (entry === undefined) return yield* new ProcessNotFound({ message: `Unknown process id: ${processId}` })
-        yield* entry.process.kill()
+        yield* entry.process.kill({ killSignal: "SIGTERM", forceKillAfter: "100 millis" })
         yield* Ref.update(entries, (current) => {
           const next = new Map(current)
           next.delete(processId)

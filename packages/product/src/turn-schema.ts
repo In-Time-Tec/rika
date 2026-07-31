@@ -42,10 +42,10 @@ export const ExecutionExtensionPin = Schema.Struct({
 export type ExecutionExtensionPin = typeof ExecutionExtensionPin.Type
 
 export const ExecutionModelRoute = ExecutionRouteModelSnapshot
-export type ExecutionModelRoute = typeof ExecutionRouteModelSnapshot.Type
+export type ExecutionModelRoute = ExecutionRouteModelSnapshot
 
 export const ExecutionRoutePin = ExecutionRouteSnapshot
-export type ExecutionRoutePin = typeof ExecutionRouteSnapshot.Type
+export type ExecutionRoutePin = ExecutionRouteSnapshot
 
 export const testExecutionRoute = (mode: RouteModeId = "test"): ExecutionRoutePin => {
   const route = {

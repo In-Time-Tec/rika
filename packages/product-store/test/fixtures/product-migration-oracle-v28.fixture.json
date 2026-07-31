@@ -1,0 +1,19 @@
+{
+  "migrationCount": 28,
+  "migrationName": "product_route_snapshot",
+  "sourceVersion": 1,
+  "targetVersion": 1,
+  "routeRoles": [
+    "main",
+    "oracle",
+    "title",
+    "compaction",
+    "librarian",
+    "painter",
+    "review",
+    "readThread",
+    "surgeon",
+    "task"
+  ],
+  "rejectedVersions": [2, 99]
+}

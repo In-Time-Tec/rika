@@ -98,27 +98,40 @@ export const buildTestModelScript: (
   })
 })
 
-export const makeReloadingTestModel: (path: string) => Effect.Effect<any, unknown, any> = Effect.fn(
-  "Main.makeReloadingTestModel",
-)(function* (path: string) {
-  const { TestModel } = yield* Effect.tryPromise({
-    try: () => import("@batonfx/test"),
-    catch: (cause) => ExternalBoundaryError.make({ operation: "load test model", message: String(cause) }),
-  })
-  const load = Effect.gen(function* () {
+export const makeReloadingTestModel: (
+  path: string,
+) => Effect.Effect<TestModelTypes.Fixture, ExternalBoundaryError | Schema.SchemaError, FileSystem.FileSystem> =
+  Effect.fn("Main.makeReloadingTestModel")(function* (path: string) {
+    const { TestModel } = yield* Effect.tryPromise({
+      try: () => import("@batonfx/test"),
+      catch: (cause) => ExternalBoundaryError.make({ operation: "load test model", message: String(cause) }),
+    })
+    const load = Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const script = yield* fileSystem.readFileString(path)
+      return yield* TestModel.make(yield* buildTestModelScript(script))
+    })
+    const initial = yield* load.pipe(
+      Effect.mapError((cause) =>
+        ExternalBoundaryError.make({ operation: "read test model script", message: String(cause) }),
+      ),
+    )
     const fileSystem = yield* FileSystem.FileSystem
-    const script = yield* fileSystem.readFileString(path)
-    return yield* TestModel.make(yield* buildTestModelScript(script))
-  })
-  const initial = yield* load
-  return {
-    ...initial,
-    registration: {
+    const reloadingLayer = Layer.unwrap(
+      load.pipe(
+        Effect.mapError((cause) =>
+          ExternalBoundaryError.make({ operation: "read test model script", message: String(cause) }),
+        ),
+        Effect.orDie,
+        Effect.map((fixture) => fixture.registration.layer),
+      ),
+    ).pipe(Layer.provide(Layer.succeed(FileSystem.FileSystem, fileSystem)))
+    const registration: TestModelTypes.Fixture["registration"] = {
       ...initial.registration,
-      layer: Layer.unwrap(load.pipe(Effect.map((fixture) => fixture.registration.layer))),
-    },
-  }
-})
+      layer: reloadingLayer,
+    }
+    return { ...initial, registration }
+  })
 
 export const makeScriptedModel = Effect.fn("ScriptedModelRuntime.makeScriptedModel")(function* (script: string) {
   const { TestModel } = yield* Effect.tryPromise({

@@ -4,17 +4,54 @@ import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
+import * as SummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Runtime as ToolRuntime } from "@rika/coding-tools/coding-tool-catalog"
 import * as Transcript from "@rika/transcript/transcript-unit"
 import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Result, Schema } from "effect"
 import { TestClock } from "effect/testing"
-import * as ExecutionIngest from "../src/execution-ingest"
+import * as ExecutionIngest from "../../../product/src/execution-ingest"
 import { Operation } from "@rika/product/product-operation"
-import * as UsageCost from "../src/usage-cost"
-import { createTurn, executionRoute } from "./current-state"
-import { delegationUnit, invalidatedProjection, storeProjection } from "./transcript-repository-fixture"
+import * as UsageCost from "../../../product/src/usage-cost"
+import { createTurn, executionRoute } from "../../../product/test/current-state"
+import {
+  delegationUnit,
+  invalidatedProjection,
+  storeProjection,
+} from "../../../product/test/transcript-repository-fixture"
+
+const productLayer = <
+  ThreadError,
+  TurnError,
+  BackendError,
+  ThreadSummaryError = never,
+  TranscriptError = never,
+  ThreadInteractionError = never,
+  UsageError = never,
+>(
+  options: Operation.ProductLayerOptions<
+    ThreadError,
+    TurnError,
+    BackendError,
+    ThreadSummaryError,
+    TranscriptError,
+    ThreadInteractionError,
+    UsageError
+  >,
+) =>
+  Operation.productLayer({
+    ...options,
+    threadSummaryRepositoryLayer:
+      options.threadSummaryRepositoryLayer ??
+      SummaryRepository.memoryLayer.pipe(
+        Layer.provide(Layer.merge(options.repositoryLayer, options.turnRepositoryLayer)),
+      ),
+    transcriptRepositoryLayer:
+      options.transcriptRepositoryLayer ??
+      TranscriptRepository.memoryLayerWithTurns.pipe(Layer.provide(options.turnRepositoryLayer)),
+    usageRepositoryLayer: options.usageRepositoryLayer ?? UsageRepository.memoryLayer,
+  })
 
 const collectEvents = (session: Operation.InteractiveSession, events: Array<Operation.InteractiveEvent>) =>
   Effect.forkChild(session.events((event) => events.push(event))).pipe(Effect.andThen(Effect.yieldNow))
@@ -312,7 +349,7 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
               Effect.andThen(turns.page(threadId, options)),
             ),
         }
-  const layer = Operation.productLayer({
+  const layer = productLayer({
     repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),
     turnRepositoryLayer: Layer.succeed(TurnRepository.Service, selectionTurns),
     transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
@@ -388,7 +425,7 @@ describe("InteractiveSession controls", () => {
         cancel: () => Effect.die("unused"),
         resolveInvocationSource: () => Effect.die("unused"),
       })
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
@@ -495,7 +532,7 @@ describe("InteractiveSession controls", () => {
         cancel: () => Effect.die("unused"),
         resolveInvocationSource: () => Effect.die("unused"),
       })
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionBackend.Service, submittedBackend),
@@ -658,7 +695,7 @@ describe("InteractiveSession controls", () => {
         cancel: () => Effect.die("unused"),
         resolveInvocationSource: () => Effect.die("unused"),
       })
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
@@ -982,7 +1019,7 @@ describe("InteractiveSession controls", () => {
         resolveInvocationSource: () => Effect.die("unused"),
       })
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: ThreadRepository.memoryLayer([older]),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionBackend.Service, checkingBackend),
@@ -1068,7 +1105,7 @@ describe("InteractiveSession controls", () => {
         const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
         const commands = yield* Ref.make<ReadonlyArray<string>>([])
         let turnNumber = 0
-        const layer = Operation.productLayer({
+        const layer = productLayer({
           repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),
           turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
           backendLayer: Layer.succeed(
@@ -1892,7 +1929,7 @@ const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagent
       }),
     resolveInvocationSource: () => Effect.die("unused"),
   })
-  const layer = Operation.productLayer({
+  const layer = productLayer({
     repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),
     turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
     transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
@@ -3119,7 +3156,7 @@ const makeSpendHarness = Effect.fn("InteractiveSessionTest.makeSpendHarness")(fu
       ),
     resolveInvocationSource: () => Effect.die("unused"),
   })
-  const layer = Operation.productLayer({
+  const layer = productLayer({
     repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),
     turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
     transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),

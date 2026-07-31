@@ -7,9 +7,9 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Effect, Layer, Ref } from "effect"
 import { TestConsole } from "effect/testing"
-import * as ExecutionIngest from "../src/execution-ingest"
+import * as ExecutionIngest from "../../../product/src/execution-ingest"
 import { Operation } from "@rika/product/product-operation"
-import { provideLayer } from "./layer"
+import { provideLayer } from "../../../product/test/layer"
 
 const backend = ExecutionBackend.Service.of({
   invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),

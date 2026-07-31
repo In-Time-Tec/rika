@@ -472,13 +472,13 @@
   },
   {
     "rule": "file-size",
-    "paths": ["packages/product/test/execution-ingest.test.ts"],
+    "paths": ["packages/product-store/test/product-operation/execution-ingest.test.ts"],
     "removalSlice": 3,
     "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
   },
   {
     "rule": "file-size",
-    "paths": ["packages/product/test/interactive-session.test.ts"],
+    "paths": ["packages/product-store/test/product-operation/interactive-session.test.ts"],
     "removalSlice": 3,
     "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
   },
@@ -490,15 +490,21 @@
   },
   {
     "rule": "file-size",
-    "paths": ["packages/product/test/operation-interactive-extensions.test.ts"],
+    "paths": ["packages/product-store/test/product-operation/operation-interactive-extensions.test.ts"],
     "removalSlice": 3,
     "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
   },
   {
     "rule": "file-size",
-    "paths": ["packages/product/test/operation.test.ts"],
+    "paths": ["packages/product-store/test/product-operation/operation.test.ts"],
     "removalSlice": 3,
     "reason": "Serial Plan 027 foundation migration waiver; this existing implementation is replaced by the owning semantic contract or adapter slice."
+  },
+  {
+    "rule": "dependency-count",
+    "paths": ["packages/product-store/test/product-operation/operation.test.ts"],
+    "removalSlice": 3,
+    "reason": "Product operation integration coverage remains a single migration boundary until its adapter-backed scenarios are separated."
   },
   {
     "rule": "file-size",
@@ -763,5 +769,17 @@
     "paths": ["packages/coding-tools/src/agent-tools.ts"],
     "removalSlice": 3,
     "reason": "Serial Plan 027 foundation migration waiver; existing implementation is replaced by owning semantic contract or adapter slice."
+  },
+  {
+    "rule": "export-count",
+    "paths": ["packages/relay-execution/src/model/provider/model-provider-runtime.ts"],
+    "removalSlice": 3,
+    "reason": "Relay provider adapter remains a single migration boundary until its released-provider contracts are decomposed."
+  },
+  {
+    "rule": "export-count",
+    "paths": ["packages/relay-execution/src/relay-execution-layer.ts"],
+    "removalSlice": 3,
+    "reason": "Relay composition exports remain together until the adapter layer is decomposed into exact public factories."
   }
 ]

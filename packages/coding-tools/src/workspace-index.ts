@@ -62,9 +62,7 @@ export interface Interface {
   readonly grep: (query: string, options?: GrepOptions) => Effect.Effect<GrepResult, WorkspaceIndexError>
 }
 
-export class Service extends Context.Service<Service, Interface>()(
-  "@rika/coding-tools/workspace-file-search/Service",
-) {}
+export class Service extends Context.Service<Service, Interface>()("@rika/coding-tools/workspace-index/Service") {}
 
 const indexError = (operation: Operation, cause: unknown) =>
   WorkspaceIndexError.make({ operation, message: cause instanceof Error ? cause.message : String(cause) })

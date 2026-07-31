@@ -33,6 +33,7 @@ export interface State {
   readonly liveProjections: ReadonlyMap<string, Transcript.Projection>
   readonly projectionStreams?: ReadonlyMap<string, ProjectionStream>
   readonly threadCostUsd?: number
+  readonly lastAvailableUsageCost?: Extract<ViewState.Model["usageCost"], { readonly _tag: "Available" }>
   readonly usageRevision?: number
   readonly hasOlder?: boolean
   readonly hasNewer?: boolean
@@ -534,16 +535,21 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       return { state, preserveAnchor: false }
     if (state.usageRevision !== undefined && event.revision < state.usageRevision)
       return { state, preserveAnchor: false }
-    const threadCostUsd = event.cost._tag === "Available" ? event.cost.usd : state.threadCostUsd
+    const availableUsageCost = event.cost._tag === "Available" ? event.cost : state.lastAvailableUsageCost
+    const threadCostUsd =
+      availableUsageCost?._tag === "Available" ? availableUsageCost.usd : (state.threadCostUsd ?? state.model.costUsd)
+    const usageCost = availableUsageCost ?? event.cost
+    const lastAvailableUsageCost = event.cost._tag === "Available" ? event.cost : state.lastAvailableUsageCost
     const { costUsd: _, ...withoutCost } = state.model
     return {
       state: {
         ...state,
         usageRevision: event.revision,
         ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
+        ...(lastAvailableUsageCost === undefined ? {} : { lastAvailableUsageCost }),
         model: {
           ...withoutCost,
-          usageCost: event.cost,
+          usageCost,
           usageTokens: event.tokens,
           usageTime: event.time,
           ...(threadCostUsd === undefined ? {} : { costUsd: threadCostUsd }),
@@ -568,17 +574,20 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
     const queue = keepNewerQueue ? state.model.queue : event.queue
     const queueRevision = keepNewerQueue ? state.model.queueRevision : event.queueRevision
     const entries = normalizeEntries(event.entries)
-    const sameSelection =
-      event.selectionEpoch === state.selectionEpoch && state.model.currentThreadId === event.thread.id
+    const sameThread = state.model.currentThreadId === event.thread.id
+    const preservedUsageCost = sameThread
+      ? (state.lastAvailableUsageCost ??
+        (state.model.usageCost?._tag === "Available" ? state.model.usageCost : undefined))
+      : undefined
     const model = cleared({
       ...state.model,
-      ...(sameSelection
-        ? {}
-        : {
+      ...(preservedUsageCost === undefined
+        ? {
             usageCost: { _tag: "Loading" as const },
             usageTokens: { _tag: "Loading" as const },
             usageTime: { _tag: "Loading" as const },
-          }),
+          }
+        : { usageCost: preservedUsageCost }),
       activeTurnId: activeTurn?.id,
       busy: activeTurn !== undefined,
       activity: activeTurn === undefined ? undefined : { _tag: "Waiting" },
@@ -603,7 +612,8 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       },
       threadPreview: ViewState.idle,
     })
-    const selectedCostUsd = event.threadCostUsd ?? (sameSelection ? state.threadCostUsd : undefined)
+    const selectedCostUsd =
+      event.threadCostUsd ?? (sameThread ? (state.threadCostUsd ?? preservedUsageCost?.usd) : undefined)
     const activeProjection =
       activeTurn === undefined
         ? undefined
@@ -642,6 +652,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
               ? state.replayTurns
               : new Map([...state.replayTurns, [activeTurn.id, activeTurn] as const]),
           ...(selectedCostUsd === undefined ? {} : { threadCostUsd: selectedCostUsd }),
+          ...(preservedUsageCost === undefined ? {} : { lastAvailableUsageCost: preservedUsageCost }),
         },
         preserveAnchor: true,
         discarded: true,
@@ -665,6 +676,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
         oldestCursor: event.oldestCursor ?? cursorForEntry(selected[0]),
         newestCursor: event.newestCursor,
         ...(selectedCostUsd === undefined ? {} : { threadCostUsd: selectedCostUsd }),
+        ...(preservedUsageCost === undefined ? {} : { lastAvailableUsageCost: preservedUsageCost }),
       },
       preserveAnchor: false,
     }

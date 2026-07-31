@@ -3,7 +3,7 @@ import { expect, test } from "vitest"
 import { Effect, FileSystem, Layer, Path, Schema } from "effect"
 import { FixtureProcessError, spawnFixtureProcess } from "./process-protocol"
 
-const script = new URL("../../app/test/multi-agent-process.ts", import.meta.url).pathname
+const script = new URL("./multi-agent-process.ts", import.meta.url).pathname
 
 const runNative = <A, E>(effect: Effect.Effect<A, E, Layer.Success<typeof BunServices.layer>>) =>
   Effect.runPromise(

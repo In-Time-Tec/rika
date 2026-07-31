@@ -16,7 +16,7 @@ import {
   executionRoutePinFromPrepared,
   modelRoutesForExecution,
 } from "../src/resident-product"
-import * as BedrockAuthRefresh from "@rika/relay-execution/model-provider-runtime"
+import { bedrockAuthRefreshTestLayer } from "@rika/relay-execution/model-provider-runtime"
 import * as ModelProviderRuntime from "@rika/relay-execution/model-provider-runtime"
 
 const credential = (fingerprint: string): OpenAiAuth.Credential => ({
@@ -45,7 +45,7 @@ const authService = (
 const runtimeLayer = (auth: OpenAiAuth.ServiceInterface) =>
   ModelProviderRuntime.Service.layer.pipe(
     Layer.provide(Layer.succeed(OpenAiAuth.Service, auth)),
-    Layer.provide(BedrockAuthRefresh.testLayer({ run: () => Effect.void })),
+    Layer.provide(bedrockAuthRefreshTestLayer({ run: () => Effect.void })),
   )
 
 const withRuntime = <A, E>(
@@ -117,7 +117,9 @@ test("prepares distinct registrations for every default model tuple and aligns e
           )
           for (const { mode, settings, tuning } of variants)
             for (const route of executionModelRoutes(executionRoutePin(settings, mode, tuning)))
-              expect(tuples.has(`${route.provider}\0${route.model}\0${route.registrationKey}`)).toBe(true)
+              expect(
+                tuples.has(`${route.providerConnection.provider}\0${route.model}\0${route.registrationIdentity}`),
+              ).toBe(true)
         }),
       { OPENAI_API_KEY: "test-api-key" },
     ),
@@ -629,11 +631,8 @@ test("uses a native OpenAI account without an API key and applies account reques
         expect(prepared.plans[0]?.options).toMatchObject({ store: false })
         expect(prepared.plans[0]?.options).not.toHaveProperty("max_output_tokens")
         const execution = executionRoutePinFromPrepared("medium", prepared)
-        expect(execution.main.providerRuntime).toEqual({
-          adapter: "openai-account",
-          credentialIdentity: "account-a",
-        })
-        expect(execution.main.openAiAccountFingerprint).toBe("account-a")
+        expect(execution.main.providerConnection.authentication).toBe("account")
+        expect(execution.main.providerConnection.apiKeyEnvironment).toBe("OPENAI_API_KEY")
       }),
     ),
   ))
@@ -647,15 +646,16 @@ test("pins provider runtime identity, roundtrips JSON, and normalizes old accoun
   expect(account.registrationKey).not.toBe(api.registrationKey)
   const pin = executionRoutePin(ConfigContract.defaults, "medium")
   const encoded = Schema.decodeUnknownSync(Turn.ExecutionRoutePin)(JSON.parse(JSON.stringify(pin)))
-  expect(encoded.main.providerRuntime).toEqual(pin.main.providerRuntime)
-  const { providerRuntime: _, ...oldPin } = pin.main
+  expect(encoded.main.providerConnection).toEqual(pin.main.providerConnection)
   expect(
-    ModelProviderRuntime.normalizePinnedRuntime(
-      Schema.decodeUnknownSync(Turn.ExecutionModelRoute)({
-        ...oldPin,
-        openAiAccountFingerprint: "old-account",
-      }),
-    ),
+    ModelProviderRuntime.normalizePinnedRuntime({
+      ...pin.main,
+      provider: "openai",
+      registrationKey: "old-registration",
+      providerProtocol: "openai",
+      providerBaseUrl: "https://api.openai.com/v1",
+      openAiAccountFingerprint: "old-account",
+    }),
   ).toEqual({ adapter: "openai-account", credentialIdentity: "old-account" })
 })
 
@@ -742,17 +742,25 @@ test("restores old API and account routes with their stored registration keys", 
       (runtime) =>
         Effect.gen(function* () {
           const base = executionRoutePin(ConfigContract.defaults, "medium").main
-          const { providerRuntime: _, ...oldBase } = base
-          const api = yield* Schema.decodeUnknownEffect(Turn.ExecutionModelRoute)({
+          const oldBase = {
+            ...base,
+            provider: base.providerConnection.provider,
+            providerProtocol: base.providerConnection.protocol,
+            providerBaseUrl: base.providerConnection.baseUrl,
+            ...(base.providerConnection.apiKeyEnvironment === undefined
+              ? {}
+              : { providerApiKeyEnv: base.providerConnection.apiKeyEnvironment }),
+          }
+          const api = {
             ...oldBase,
             registrationKey: "stored-api",
-          })
-          const { providerApiKeyEnv: __, ...accountBase } = oldBase
-          const account = yield* Schema.decodeUnknownEffect(Turn.ExecutionModelRoute)({
-            ...accountBase,
-            openAiAccountFingerprint: "account-a",
+            providerRuntime: { adapter: "openai", credentialIdentity: "OPENAI_API_KEY" },
+          }
+          const account = {
+            ...oldBase,
+            providerRuntime: { adapter: "openai-account", credentialIdentity: "account-a" },
             registrationKey: "stored-account",
-          })
+          }
           const restored = yield* runtime.restore([api, account])
           expect(restored.map((item) => item.registrationKey)).toEqual(["stored-api", "stored-account"])
         }),

@@ -14,7 +14,9 @@ export interface Interface {
   readonly run: (command: Command) => Effect.Effect<void, Failure>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/cli/bedrock-auth-refresh/Service") {}
+export class Service extends Context.Service<Service, Interface>()(
+  "@rika/relay-execution/model/provider/bedrock-auth-refresh/Service",
+) {}
 
 export const liveLayer = Layer.effect(
   Service,

@@ -1,6 +1,9 @@
-import { expect, test } from "vitest"
-import { readFileSync } from "node:fs"
-import { resolve } from "node:path"
+import { expect, it } from "@effect/vitest"
+import * as BunServices from "@effect/platform-bun/BunServices"
+import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect"
+
+const PackageManifest = Schema.Struct({ exports: Schema.Record(Schema.String, Schema.String) })
+const PackageManifestJson = Schema.fromJsonString(PackageManifest)
 
 const expected: Record<string, ReadonlyArray<string>> = {
   "@rika/configuration": [
@@ -159,11 +162,19 @@ const expected: Record<string, ReadonlyArray<string>> = {
 
 for (const [packageName, names] of Object.entries(expected)) {
   const packagePath = packageName.slice("@rika/".length)
-  const manifest = JSON.parse(readFileSync(resolve("packages", packagePath, "package.json"), "utf8")) as {
-    exports: Record<string, string>
-  }
-  test(`${packageName} exports exactly frozen keys`, () => {
-    expect(Object.keys(manifest.exports).toSorted()).toEqual(names.map((name) => `./${name}`).toSorted())
-    expect(Object.keys(manifest.exports)).not.toContain(".")
-  })
+  it(`${packageName} exports exactly frozen keys`, () =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const context = yield* Layer.build(BunServices.layer)
+          const path = Context.get(context, Path.Path)
+          const fileSystem = Context.get(context, FileSystem.FileSystem)
+          const manifest = yield* Schema.decodeUnknownEffect(PackageManifestJson)(
+            yield* fileSystem.readFileString(path.resolve("packages", packagePath, "package.json")),
+          )
+          expect(Object.keys(manifest.exports).toSorted()).toEqual(names.map((name) => `./${name}`).toSorted())
+          expect(Object.keys(manifest.exports)).not.toContain(".")
+        }),
+      ),
+    ))
 }

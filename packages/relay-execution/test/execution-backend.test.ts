@@ -641,14 +641,22 @@ describe("ExecutionBackend Relay client adapter", () => {
         streamEvents: [
           relayEvent("tool.call.requested", 1, [Content.text("SECRET_CONTENT")], { input: "SECRET_DATA" }),
           relayEvent("tool.result.received", 2, [Content.text("SECRET_RESULT")]),
-          relayEvent("execution.completed", 3),
+          relayEvent("model.attempt.completed", 3, undefined, {
+            model_attempt_id: "attempt-priced",
+            cost: { amount: 0, currency: "USD" },
+          }),
+          relayEvent("model.attempt.failed", 4, undefined, {
+            model_attempt_id: "attempt-failed",
+            error: { message: "provider unavailable" },
+          }),
+          relayEvent("execution.completed", 5),
         ],
       })
       const lines: Array<string> = []
       const logger = Logger.make((options) => lines.push(Logger.formatJson.log(options)))
-      yield* Effect.gen(function* () {
+      const result = yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
-        yield* start(backend, {
+        return yield* start(backend, {
           threadId: "thread-observed",
           turnId: "turn-observed",
           prompt: "SECRET_PROMPT",
@@ -668,8 +676,18 @@ describe("ExecutionBackend Relay client adapter", () => {
         "execution.event.received",
         "execution.event.received",
         "execution.event.received",
+        "execution.event.received",
+        "execution.event.received",
         "execution.follow.completed",
       ])
+      expect(result.events.find((event) => event.type === "model.attempt.completed")?.data).toMatchObject({
+        model_attempt_id: "attempt-priced",
+        cost: { amount: 0, currency: "USD" },
+      })
+      expect(result.events.find((event) => event.type === "model.attempt.failed")?.data).toMatchObject({
+        model_attempt_id: "attempt-failed",
+        error: { message: "provider unavailable" },
+      })
       expect(records.find((record) => record.message === "execution.event.received")?.annotations).toMatchObject({
         "rika.execution.id": "execution:turn-observed",
         "rika.turn.id": "turn-observed",
@@ -1978,6 +1996,7 @@ describe("ExecutionBackend Relay client adapter", () => {
         rika_workspace: "/client/workspace",
       })
       expect(fanOutInputs[0].children[0].metadata.rika_execution_route).toEqual({
+        version: 1,
         mode: "test",
         compactionSummary: routeFor("compaction", summarySelection, mainCompaction),
         main: routeFor("main", selection, mainCompaction),

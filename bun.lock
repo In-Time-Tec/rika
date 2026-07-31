@@ -153,6 +153,9 @@
       "devDependencies": {
         "@effect/platform-bun": "catalog:",
         "@effect/vitest": "catalog:",
+        "@rika/coding-tools": "workspace:*",
+        "@rika/configuration": "workspace:*",
+        "@rika/extensions": "workspace:*",
         "@types/bun": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",

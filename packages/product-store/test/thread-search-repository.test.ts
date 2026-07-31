@@ -284,7 +284,7 @@ describe("thread search repository", () => {
           CREATE INDEX rika_transcript_page ON rika_transcript_entries (
             thread_id, created_at DESC, turn_id DESC
           );
-          DELETE FROM rika_migrations WHERE migration_id IN (17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27);
+          DELETE FROM rika_migrations WHERE migration_id IN (17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28);
           INSERT INTO rika_workspaces (path, created_at) VALUES ('/work/current', 1);
           INSERT INTO rika_threads (id, workspace, title, labels_json, created_at, updated_at)
             VALUES ('legacy', '/work/current', 'Legacy title', '["legacy-label"]', 1, 2);
@@ -302,8 +302,8 @@ describe("thread search repository", () => {
           const migrated = new NativeDatabase(filename, { readonly: true })
           expect(
             migrated.query("SELECT migration_id, name FROM rika_migrations ORDER BY migration_id DESC LIMIT 1").all(),
-          ).toEqual([{ migration_id: 27, name: "usage_projection_sources" }])
-          expect(migrated.query("SELECT COUNT(*) AS count FROM rika_migrations").all()).toEqual([{ count: 27 }])
+          ).toEqual([{ migration_id: 28, name: "product_route_snapshot" }])
+          expect(migrated.query("SELECT COUNT(*) AS count FROM rika_migrations").all()).toEqual([{ count: 28 }])
           migrated.close()
         })
       }).pipe(provideBun),

@@ -5,14 +5,15 @@ import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-rep
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
+import * as SummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as Transcript from "@rika/transcript/transcript-unit"
 import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Schema } from "effect"
-import * as ExecutionIngest from "../src/execution-ingest"
+import * as ExecutionIngest from "../../../product/src/execution-ingest"
 import { Operation } from "@rika/product/product-operation"
-import { executeInteractiveCommand, InteractiveEventSchema } from "../src/operation-contract"
-import * as UsageCost from "../src/usage-cost"
-import { invalidatedProjection, storeProjection } from "./transcript-repository-fixture"
+import { executeInteractiveCommand, InteractiveEventSchema } from "../../../product/src/operation-contract"
+import * as UsageCost from "../../../product/src/usage-cost"
+import { invalidatedProjection, storeProjection } from "../../../product/test/transcript-repository-fixture"
 
 const baseBackend = ExecutionBackend.Service.of({
   invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
@@ -70,10 +71,17 @@ const interactiveLayer = (
   Operation.productLayer({
     repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
     turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-    ...(transcripts === undefined
-      ? {}
-      : { transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts) }),
-    ...(usage === undefined ? {} : { usageRepositoryLayer: Layer.succeed(UsageRepository.Service, usage) }),
+    threadSummaryRepositoryLayer: SummaryRepository.memoryLayer.pipe(
+      Layer.provide(
+        Layer.merge(Layer.succeed(ThreadRepository.Service, repository), Layer.succeed(TurnRepository.Service, turns)),
+      ),
+    ),
+    transcriptRepositoryLayer:
+      transcripts === undefined
+        ? TranscriptRepository.memoryLayerWithTurns.pipe(Layer.provide(Layer.succeed(TurnRepository.Service, turns)))
+        : Layer.succeed(TranscriptRepository.Service, transcripts),
+    usageRepositoryLayer:
+      usage === undefined ? UsageRepository.memoryLayer : Layer.succeed(UsageRepository.Service, usage),
     backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
     defaultWorkspace: "/work",
     makeThreadId,

@@ -1,4 +1,4 @@
-import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
+import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as Transcript from "@rika/transcript/transcript-unit"
 import { Function } from "effect"

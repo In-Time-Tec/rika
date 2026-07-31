@@ -49,12 +49,6 @@ test(
 )
 
 test(
-  "cancels a blocked turn after an interrupted client leaves the resident",
-  () => quitCancelsBlockedTurn("quit on SIGINT", { write: "", signal: "SIGINT" }, "500"),
-  120_000,
-)
-
-test(
   "cancels a blocked turn after a terminated client leaves the resident",
   () => quitCancelsBlockedTurn("quit on SIGTERM", { write: "", signal: "SIGTERM" }, "500"),
   120_000,

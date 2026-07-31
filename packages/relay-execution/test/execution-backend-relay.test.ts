@@ -387,7 +387,10 @@ test(
               },
             ])
           }),
-        { modelVariantPolicy: "registration-key" },
+        {
+          modelVariantPolicy: "registration-key",
+          registration: (fixture) => ({ ...fixture.registration, registrationKey: "main" }),
+        },
       ),
     ),
   30_000,

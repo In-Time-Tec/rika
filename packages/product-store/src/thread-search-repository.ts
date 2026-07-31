@@ -1,7 +1,7 @@
 import { Service } from "@rika/product/thread-search-repository"
 export { Service }
 import * as Transcript from "@rika/transcript/transcript-unit"
-import { Context, Effect, Layer, Ref, Schema } from "effect"
+import { Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { Thread, ThreadId, ThreadLineage } from "@rika/product/thread-record"
 import { Turn } from "@rika/product/turn-record"

@@ -1,6 +1,6 @@
 import { Service } from "@rika/product/turn-repository"
 export { Service }
-import { Context, Effect, Layer, Ref, Schema, Semaphore } from "effect"
+import { Effect, Layer, Ref, Schema, Semaphore } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { ThreadId } from "@rika/product/thread-record"
 import * as ExecutionStatus from "@rika/product/execution-status"

@@ -886,7 +886,20 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
             usageCommitted = usageResult.success
           }
           if (upsert.length === 0 && removals.length === 0 && changedCheckpoints.length === 0) {
-            if (usageCommitted || usageChanged) pipeline.usageNotificationPending = true
+            const notifyUsage = usageCommitted || usageChanged || pipeline.usageNotificationPending
+            if (notifyUsage) {
+              options.onCommitted?.({
+                threadId: pipeline.threadId,
+                rootTurnId: pipeline.turnId,
+                revision: projectionState.revision,
+                terminal,
+                usageChanged: true,
+                refolded: pipeline.refolding,
+              })
+              pipeline.usageNotificationPending = false
+            }
+            if (pipeline.reading <= 0 && pipeline.delta.units.size === 0 && pipeline.delta.checkpoints.size === 0)
+              Deferred.doneUnsafe(pipeline.rootCommitted, Effect.void)
             return
           }
           const write: Effect.Effect<TranscriptRepository.RefoldWriteResult, TranscriptRepository.RepositoryError> =

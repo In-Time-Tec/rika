@@ -78,8 +78,8 @@ export const runtimeRouteFromSnapshot = (
   ...(route.providerConnection.apiKeyEnvironment === undefined
     ? {}
     : { providerApiKeyEnv: route.providerConnection.apiKeyEnvironment }),
-  ...(route.providerConnection.authentication === "openai-account"
-    ? { openAiAccountFingerprint: route.providerConnection.apiKeyEnvironment }
+  ...(route.providerConnection.authentication === "account" && route.providerConnection.credentialIdentity !== undefined
+    ? { openAiAccountFingerprint: route.providerConnection.credentialIdentity }
     : {}),
   effort: route.effort,
   fast: route.fast,
@@ -89,8 +89,10 @@ export const runtimeRouteFromSnapshot = (
 })
 export type ModelSelection = ModelRegistry.ModelSelection
 export type CompactionOptions = Compaction.DefaultOptions
-export * from "./bedrock-auth-refresh"
 import * as BedrockAuthRefresh from "./bedrock-auth-refresh"
+export const bedrockAuthRefreshService = BedrockAuthRefresh.Service
+export const bedrockAuthRefreshLiveLayer = BedrockAuthRefresh.liveLayer
+export const bedrockAuthRefreshTestLayer = BedrockAuthRefresh.testLayer
 
 export interface ProviderRuntimePin {
   readonly adapter: string
@@ -633,7 +635,9 @@ export interface ServiceInterface {
   readonly normalizePinned: (route: RuntimeModelRoute) => ProviderRuntimePin
 }
 
-export class Service extends Context.Service<Service, ServiceInterface>()("@rika/cli/model-provider-runtime/Service") {
+export class Service extends Context.Service<Service, ServiceInterface>()(
+  "@rika/relay-execution/model/provider/model-provider-runtime/Service",
+) {
   static readonly layer = Layer.effect(
     Service,
     Effect.gen(function* () {

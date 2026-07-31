@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, Fiber, Layer, Sink, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import * as BedrockAuthRefresh from "@rika/relay-execution/model-provider-runtime"
+import { bedrockAuthRefreshLiveLayer, bedrockAuthRefreshService } from "@rika/relay-execution/model-provider-runtime"
 
 const processHandle = (exitCode: Effect.Effect<ChildProcessSpawner.ExitCode>, killed: Array<string>) =>
   ChildProcessSpawner.makeHandle({
@@ -33,7 +33,7 @@ const environment = (exitCode: Effect.Effect<ChildProcessSpawner.ExitCode>) => {
   return {
     commands,
     killed,
-    layer: BedrockAuthRefresh.liveLayer.pipe(Layer.provide(spawner)),
+    layer: bedrockAuthRefreshLiveLayer.pipe(Layer.provide(spawner)),
   }
 }
 
@@ -43,7 +43,7 @@ describe("BedrockAuthRefresh", () => {
     return Effect.scoped(
       Effect.gen(function* () {
         const context = yield* Layer.build(fixture.layer)
-        const refresh = Context.get(context, BedrockAuthRefresh.Service)
+        const refresh = Context.get(context, bedrockAuthRefreshService)
         yield* refresh.run({ command: "aws", args: ["sso", "login", "--profile", "engineering"] })
         expect(fixture.commands[0]).toMatchObject({
           command: "aws",
@@ -59,7 +59,7 @@ describe("BedrockAuthRefresh", () => {
     return Effect.scoped(
       Effect.gen(function* () {
         const context = yield* Layer.build(fixture.layer)
-        const refresh = Context.get(context, BedrockAuthRefresh.Service)
+        const refresh = Context.get(context, bedrockAuthRefreshService)
         const result = yield* Effect.result(refresh.run({ command: "secret-command", args: ["secret-argument"] }))
         expect(result).toMatchObject({
           _tag: "Failure",
@@ -79,7 +79,7 @@ describe("BedrockAuthRefresh", () => {
     return Effect.scoped(
       Effect.gen(function* () {
         const context = yield* Layer.build(fixture.layer)
-        const refresh = Context.get(context, BedrockAuthRefresh.Service)
+        const refresh = Context.get(context, bedrockAuthRefreshService)
         const fiber = yield* Effect.forkChild(refresh.run({ command: "aws", args: ["sso", "login"] }))
         yield* Effect.yieldNow
         yield* TestClock.adjust("3 minutes")

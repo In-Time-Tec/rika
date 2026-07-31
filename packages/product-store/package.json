@@ -24,6 +24,9 @@
     "@effect/platform-bun": "catalog:",
     "@effect/vitest": "catalog:",
     "@types/bun": "catalog:",
+    "@rika/configuration": "workspace:*",
+    "@rika/coding-tools": "workspace:*",
+    "@rika/extensions": "workspace:*",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },

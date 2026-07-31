@@ -1,22 +1,16 @@
 import { Context, Effect, Schema } from "effect"
 import { ThreadId } from "@rika/product/thread-record"
-import * as ExecutionStatus from "@rika/product/execution-status"
 import {
   AgentExecutionTurn,
   ExecutionExtensionPin,
   ExecutionRoutePin,
   PromptPart,
-  RecordedShellTurn,
   Status,
-  StopIntent,
   Turn,
   TurnAuthor,
   TurnId,
   TurnLineage,
-  isAgentExecution,
-  isRunningRecordedShell,
 } from "@rika/product/turn-record"
-import type { RunningRecordedShellTurn } from "@rika/product/turn-record"
 
 export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("TurnRepositoryError", {
   message: Schema.String,

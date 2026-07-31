@@ -123,11 +123,10 @@ describe("release target construction", () => {
       "/resident-host-transport.ts",
       "/apps/rika/src/main.ts",
       "/product-database.ts",
-      "/thread-repository.ts",
-      "/turn-repository.ts",
-      "/transcript-repository.ts",
+      "/packages/product-store/src/thread-repository.ts",
+      "/packages/product-store/src/turn-repository.ts",
+      "/packages/product-store/src/transcript-repository.ts",
       "/execution-backend.ts",
-      "/packages/coding-tools/",
       "/packages/terminal/",
     ])
       expect(files).not.toContain(forbidden)

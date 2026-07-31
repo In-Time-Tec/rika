@@ -1,6 +1,5 @@
 #!/usr/bin/env bun
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
-import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Operation from "@rika/product/product-operation"
 import * as ResidentService from "@rika/product/resident-service"
@@ -118,57 +117,51 @@ const start = () => {
       Effect.flatMap((scope) =>
         Effect.gen(function* () {
           const productLoaded = yield* Ref.make(false)
+          const bunServices = yield* Layer.buildWithScope(BunServices.layer, scope)
           const loadProduct: Effect.Effect<Operation.Interface, Operation.OperationUnavailable, never> =
             yield* Effect.cached(
-              Clock.currentTimeMillis
-                .pipe(
-                  Effect.flatMap((startedAt) =>
-                    Effect.gen(function* () {
-                      const product = yield* Effect.tryPromise({
-                        try: () => import("./resident-product"),
-                        catch: (cause) =>
-                          Operation.OperationUnavailable.make({
-                            operation: "ResidentProduct",
-                            message: String(cause),
-                          }),
-                      })
-                      const authOperations = product.createAuthOperations(authOptions)
-                      return yield* Layer.buildWithScope(
-                        product
-                          .createOperationLayer({ ...productOptions, authOperations }, interactive)
-                          .pipe(
-                            Layer.provide(Layer.mergeAll(BunServices.layer, BunCrypto.layer, FetchHttpClient.layer)),
-                          ),
-                        scope,
-                      )
-                        .pipe(
-                          Effect.map((context) => Context.get(context, Operation.Service)),
-                          Effect.tap(() => Ref.set(productLoaded, true)),
-                          Effect.tap(() =>
-                            Clock.currentTimeMillis.pipe(
-                              Effect.flatMap((completedAt) =>
-                                Effect.logInfo("resident.product.loaded").pipe(
-                                  Effect.annotateLogs("rika.duration.ms", completedAt - startedAt),
-                                ),
-                              ),
+              Clock.currentTimeMillis.pipe(
+                Effect.flatMap((startedAt) =>
+                  Effect.gen(function* () {
+                    const product = yield* Effect.tryPromise({
+                      try: () => import("./resident-product"),
+                      catch: (cause) =>
+                        Operation.OperationUnavailable.make({
+                          operation: "ResidentProduct",
+                          message: String(cause),
+                        }),
+                    })
+                    const authOperations = product.createAuthOperations(authOptions)
+                    return yield* Layer.buildWithScope(
+                      product
+                        .createOperationLayer({ ...productOptions, authOperations }, interactive)
+                        .pipe(Layer.provide(Layer.mergeAll(BunServices.layer, BunCrypto.layer, FetchHttpClient.layer))),
+                      scope,
+                    ).pipe(
+                      Effect.map((context) => Context.get(context, Operation.Service)),
+                      Effect.tap(() => Ref.set(productLoaded, true)),
+                      Effect.tap(() =>
+                        Clock.currentTimeMillis.pipe(
+                          Effect.flatMap((completedAt) =>
+                            Effect.logInfo("resident.product.loaded").pipe(
+                              Effect.annotateLogs("rika.duration.ms", completedAt - startedAt),
                             ),
                           ),
-                        )
-                        .pipe(
-                          Effect.mapError((error) =>
-                            Schema.is(Operation.OperationUnavailable)(error)
-                              ? error
-                              : Operation.OperationUnavailable.make({
-                                  operation: "ResidentProduct",
-                                  message: String(error),
-                                }),
-                          ),
-                        )
-                    }),
-                  ),
-                )
-                .pipe(Effect.provide(BunServices.layer)),
-            )
+                        ),
+                      ),
+                      Effect.mapError((error) =>
+                        Schema.is(Operation.OperationUnavailable)(error)
+                          ? error
+                          : Operation.OperationUnavailable.make({
+                              operation: "ResidentProduct",
+                              message: String(error),
+                            }),
+                      ),
+                    )
+                  }),
+                ),
+              ),
+            ).pipe(Effect.provideContext(bunServices))
           return Operation.Service.of({
             hasActiveExecutionWork: Ref.get(productLoaded).pipe(
               Effect.flatMap((loaded) =>
@@ -324,7 +317,9 @@ const start = () => {
           }),
           provideLayerScoped(Layer.mergeAll(BunServices.layer, BunCrypto.layer, FetchHttpClient.layer)),
         )
-  BunRuntime.runMain(observedProgram("resident", hostDataRoot ?? defaultDataRoot, hostProgram))
+  process.on("SIGINT", () => {})
+  const fiber = Effect.runFork(observedProgram("resident", hostDataRoot ?? defaultDataRoot, hostProgram))
+  fiber.addObserver((exit) => process.exit(exit._tag === "Success" ? 0 : 1))
 }
 
 if (import.meta.main) start()

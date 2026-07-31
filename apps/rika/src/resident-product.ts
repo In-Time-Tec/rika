@@ -52,10 +52,9 @@ import {
   PlatformError,
   Redacted,
   Schema,
-  Semaphore,
 } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import * as BedrockAuthRefresh from "@rika/relay-execution/model-provider-runtime"
+import { bedrockAuthRefreshLiveLayer } from "@rika/relay-execution/model-provider-runtime"
 import { lazyBackendLayer } from "./lazy-backend"
 import * as ModelProviderRuntime from "@rika/relay-execution/model-provider-runtime"
 import * as ScriptedModelRuntime from "@rika/relay-execution/scripted-model-runtime"
@@ -126,11 +125,6 @@ export const validateWebSearchProviders = (credentials: Readonly<Record<string, 
 
 export class WorkspaceFileError extends Schema.TaggedErrorClass<WorkspaceFileError>()("WorkspaceFileError", {
   path: Schema.String,
-  message: Schema.String,
-}) {}
-
-class ExternalBoundaryError extends Schema.TaggedErrorClass<ExternalBoundaryError>()("ExternalBoundaryError", {
-  operation: Schema.String,
   message: Schema.String,
 }) {}
 
@@ -307,15 +301,14 @@ const executionModelRoute = (
       route.providerConnection.protocol === "amazon-bedrock"
         ? (route.providerConnection.endpoint ?? "bedrock://default")
         : ModelProviderRuntime.normalizedBaseUrl(route.providerConnection.baseUrl),
-    authentication:
-      plan.runtime.adapter === "openai-account"
-        ? "openai-account"
-        : route.providerConnection.apiKeyEnv === undefined
-          ? "none"
-          : "api-key",
+    authentication: (() => {
+      if (plan.runtime.adapter === "openai-account") return "account" as const
+      return route.providerConnection.apiKeyEnv === undefined ? "none" : "api-key"
+    })(),
     ...(route.providerConnection.apiKeyEnv === undefined
       ? {}
       : { apiKeyEnvironment: route.providerConnection.apiKeyEnv }),
+    ...(plan.runtime.adapter === "openai-account" ? { credentialIdentity: plan.runtime.credentialIdentity } : {}),
   },
   registrationIdentity: modelRegistrationIdentity(plan.registrationKey),
   effort: route.effort,
@@ -500,12 +493,32 @@ export const withPinnedRouteRegistration = Effect.fn("Main.withPinnedRouteRegist
     readonly resolveLegacyRoute?: (
       input: ExecutionBackend.StartInput,
     ) => Effect.Effect<{ readonly executionRoute: Turn.ExecutionRoutePin }, ExecutionBackend.BackendError>
+    readonly unavailable?: ReadonlyArray<PersistedRouteRegistrationFailure>
+    readonly registeredRoutes?: ReadonlyArray<Turn.ExecutionModelRoute>
+    readonly registerPinnedRoutes?: (
+      routes: ReadonlyArray<Turn.ExecutionModelRoute>,
+    ) => Effect.Effect<ReadonlyArray<unknown>, ExecutionBackend.BackendError>
   },
 ) {
+  yield* Effect.void
   return ExecutionBackend.Service.of({
     ...backend,
     start: (input) =>
       Effect.gen(function* () {
+        const unavailable = options.unavailable?.find((failure) =>
+          executionModelRoutes(input.executionRoute).some(
+            (route) => registrationTuple(route) === registrationTuple(failure.route),
+          ),
+        )
+        if (unavailable !== undefined) return yield* unavailableRouteError(unavailable)
+        const registered = new Set((options.registeredRoutes ?? []).map(registrationTuple))
+        const missing = executionModelRoutes(input.executionRoute).filter(
+          (route, index, routes) =>
+            !registered.has(registrationTuple(route)) &&
+            routes.findIndex((candidate) => registrationTuple(candidate) === registrationTuple(route)) === index,
+        )
+        if (missing.length > 0 && options.registerPinnedRoutes !== undefined)
+          yield* options.registerPinnedRoutes(missing)
         if (!isLegacyUnavailableExecutionRoute(input.executionRoute)) return yield* backend.start(input)
         if (options.resolveLegacyRoute === undefined)
           return yield* ExecutionBackend.BackendError.make({
@@ -772,6 +785,7 @@ export const configuredBackendLayer = ({
           Effect.flatMap((backend) =>
             withPinnedRouteRegistration(backend, {
               ...(resolveLegacyRoute === undefined ? {} : { resolveLegacyRoute }),
+              ...(unavailablePersistedRoutes.length === 0 ? {} : { unavailable: unavailablePersistedRoutes }),
             }),
           ),
         ),
@@ -1024,7 +1038,7 @@ const createOperationLayerImpl = (
           ? ModelProviderRuntime.bypassLayer
           : ModelProviderRuntime.Service.layer.pipe(
               Layer.provide(openAiAuthLayer),
-              Layer.provide(BedrockAuthRefresh.liveLayer),
+              Layer.provide(bedrockAuthRefreshLiveLayer),
             ),
       )
       const modelProviders = Context.get(providerRuntimeContext, ModelProviderRuntime.Service)

@@ -1,6 +1,6 @@
 import { Context, Effect, Schema } from "effect"
 import * as Transcript from "@rika/transcript/transcript-unit"
-import { Thread, ThreadId, ThreadLineage } from "@rika/product/thread-record"
+import { Thread, ThreadId } from "@rika/product/thread-record"
 import { Turn } from "@rika/product/turn-record"
 
 export const schemaVersion = 2 as const
@@ -77,14 +77,3 @@ export interface Interface {
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/product/thread-search-repository/Service") {}
-
-interface Document {
-  readonly thread: Thread
-  readonly title: string
-  readonly labels: string
-  readonly humanPrompts: string
-  readonly agentPrompts: string
-  readonly rootAssistant: string
-  readonly childAssistant: string
-  readonly files: string
-}

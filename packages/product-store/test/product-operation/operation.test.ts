@@ -5,6 +5,8 @@ import * as ThreadInteractionRepository from "@rika/product-store/sqlite-thread-
 import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
+import * as ProductStoreUsageRepository from "@rika/product-store/sqlite-usage-repository"
+import * as ProductStoreSummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { AgentDepth } from "@rika/product/execution-service"
@@ -14,11 +16,43 @@ import { ExecutionExtensions, PluginRegistry } from "@rika/extensions/plugin-con
 import { Context, Clock, Deferred, Duration, Effect, Fiber, Layer, Queue, Ref, Scheduler, Schema } from "effect"
 import { TestClock, TestConsole } from "effect/testing"
 import { it as rawIt } from "vitest"
-import * as ExecutionIngest from "../src/execution-ingest"
+import * as ExecutionIngest from "../../../product/src/execution-ingest"
 import { Operation, ResolvedContext } from "@rika/product/product-operation"
-import { queuedTurnPromoteMaxAgeMs } from "../src/queued-turn-policy"
-import { createTurn, executionRoute } from "./current-state"
-import { storeProjection } from "./transcript-repository-fixture"
+import { queuedTurnPromoteMaxAgeMs } from "../../../product/src/queued-turn-policy"
+import { createTurn, executionRoute } from "../../../product/test/current-state"
+import { storeProjection } from "../../../product/test/transcript-repository-fixture"
+
+const productLayer = <
+  ThreadError,
+  TurnError,
+  BackendError,
+  ThreadSummaryError = never,
+  TranscriptError = never,
+  ThreadInteractionError = never,
+  UsageError = never,
+>(
+  options: Operation.ProductLayerOptions<
+    ThreadError,
+    TurnError,
+    BackendError,
+    ThreadSummaryError,
+    TranscriptError,
+    ThreadInteractionError,
+    UsageError
+  >,
+) =>
+  Operation.productLayer({
+    ...options,
+    threadSummaryRepositoryLayer:
+      options.threadSummaryRepositoryLayer ??
+      ProductStoreSummaryRepository.memoryLayer.pipe(
+        Layer.provide(Layer.merge(options.repositoryLayer, options.turnRepositoryLayer)),
+      ),
+    transcriptRepositoryLayer:
+      options.transcriptRepositoryLayer ??
+      TranscriptRepository.memoryLayerWithTurns.pipe(Layer.provide(options.turnRepositoryLayer)),
+    usageRepositoryLayer: options.usageRepositoryLayer ?? ProductStoreUsageRepository.memoryLayer,
+  })
 
 const provideLayer =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -102,7 +136,7 @@ const backend = ExecutionBackend.Service.of({
   start: (input) =>
     Effect.succeed({
       turnId: input.turnId,
-      status: "completed",
+      status: "completed" as const,
       events: [
         {
           executionId: String(input.turnId),
@@ -129,10 +163,40 @@ const backend = ExecutionBackend.Service.of({
           createdAt: 2,
         },
       ],
-    }),
-  replay: (turnId) => Effect.succeed({ turnId, status: "completed", events: [] }),
+    }).pipe(Effect.tap((result) => Effect.sync(() => result.events.forEach((event) => input.onEvent?.(event))))),
   cancel: (turnId) => Effect.succeed({ turnId, status: "cancelled", events: [] }),
   inspect: () => Effect.void.pipe(Effect.as(undefined)),
+  replay: (turnId) =>
+    Effect.succeed({
+      turnId,
+      status: "completed" as const,
+      events: [
+        {
+          executionId: String(turnId),
+          cursor: "cursor-started",
+          sequence: 0,
+          type: "execution.started" as const,
+          timestampSource: "server" as const,
+          createdAt: 0,
+        },
+        {
+          executionId: String(turnId),
+          cursor: "cursor-a",
+          sequence: 1,
+          type: "model.output.completed" as const,
+          createdAt: 1,
+          text: "answer",
+        },
+        {
+          executionId: String(turnId),
+          cursor: "cursor-b",
+          sequence: 2,
+          type: "execution.completed" as const,
+          timestampSource: "server" as const,
+          createdAt: 2,
+        },
+      ],
+    }),
   steer: (turnId) => Effect.succeed({ steeringMessageId: `steering:${turnId}:steering:0`, sequence: 0 }),
   resolveInvocationSource: () => Effect.die("unused"),
 })
@@ -266,9 +330,11 @@ const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarne
       Effect.succeed({ turnId, status: "running" as const, waits: [], pendingTools: [], children: [] }),
     replay: (turnId) => Effect.succeed({ turnId, status: "running" as const, events: [] }),
   })
-  const layer = Operation.productLayer({
+  const transcripts = yield* TranscriptRepository.makeMemory({ turns: selectionTurns })
+  const layer = productLayer({
     repositoryLayer: Layer.succeed(ThreadRepository.Service, delayedRepository),
     turnRepositoryLayer: Layer.succeed(TurnRepository.Service, selectionTurns),
+    transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
     backendLayer: Layer.succeed(ExecutionBackend.Service, selectionBackend),
     defaultWorkspace: "/work",
     makeThreadId: Effect.die("unused"),
@@ -392,7 +458,7 @@ describe("Operation", () => {
         yield* settleEvents
       }).pipe(
         provideLayer(
-          Operation.productLayer({
+          productLayer({
             repositoryLayer: ThreadRepository.memoryLayer([thread]),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
             transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
@@ -560,7 +626,7 @@ describe("Operation", () => {
         expect(yield* Ref.get(relayReads)).toEqual([])
       }).pipe(
         provideLayer(
-          Operation.productLayer({
+          productLayer({
             repositoryLayer: ThreadRepository.memoryLayer([thread]),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
             transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
@@ -905,7 +971,7 @@ describe("Operation", () => {
               }
             }),
         })
-        const layer = Operation.productLayer({
+        const layer = productLayer({
           repositoryLayer: ThreadRepository.memoryLayer([selectionThread(String(turn.threadId))]),
           turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
           backendLayer: Layer.succeed(ExecutionBackend.Service, inspectedBackend),
@@ -980,7 +1046,7 @@ describe("Operation", () => {
         }
       }).pipe(
         provideLayer(
-          Operation.productLayer({
+          productLayer({
             repositoryLayer: ThreadRepository.memoryLayer(),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, repository),
             backendLayer: Layer.succeed(ExecutionBackend.Service, closedBackend),
@@ -1033,7 +1099,7 @@ describe("Operation", () => {
           yield* Fiber.join(yield* Deferred.await(submitted))
         }).pipe(
           provideLayer(
-            Operation.productLayer({
+            productLayer({
               repositoryLayer: ThreadRepository.memoryLayer([thread]),
               turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
               backendLayer: Layer.succeed(ExecutionBackend.Service, admittedBackend),
@@ -1074,7 +1140,7 @@ describe("Operation", () => {
         yield* session.submit("must not persist")
       }).pipe(
         provideLayer(
-          Operation.productLayer({
+          productLayer({
             repositoryLayer: ThreadRepository.memoryLayer(),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, repository),
             backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
@@ -1135,7 +1201,7 @@ describe("Operation", () => {
         while ((yield* turns.get(Turn.TurnId.make("turn-2")))?.status !== "completed") yield* Effect.yieldNow
       }).pipe(
         provideLayer(
-          Operation.productLayer({
+          productLayer({
             repositoryLayer: ThreadRepository.memoryLayer(),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
             backendLayer,
@@ -1709,7 +1775,7 @@ describe("Operation", () => {
       })
       const layer = Layer.merge(
         TestConsole.layer,
-        Operation.productLayer({
+        productLayer({
           repositoryLayer: ThreadRepository.memoryLayer(),
           turnRepositoryLayer: TurnRepository.memoryLayer(),
           backendLayer: Layer.succeed(ExecutionBackend.Service, workflowBackend),
@@ -1756,7 +1822,7 @@ describe("Operation", () => {
       })
       const layer = Layer.merge(
         TestConsole.layer,
-        Operation.productLayer({
+        productLayer({
           repositoryLayer: ThreadRepository.memoryLayer(),
           turnRepositoryLayer: TurnRepository.memoryLayer(),
           backendLayer: Layer.succeed(ExecutionBackend.Service, workflowBackend),
@@ -1799,7 +1865,7 @@ describe("Operation", () => {
       })
       const layer = Layer.merge(
         TestConsole.layer,
-        Operation.productLayer({
+        productLayer({
           repositoryLayer: ThreadRepository.memoryLayer(),
           turnRepositoryLayer: TurnRepository.memoryLayer(),
           backendLayer: Layer.succeed(ExecutionBackend.Service, workflowBackend),
@@ -1838,7 +1904,7 @@ describe("Operation", () => {
       const turns = yield* TurnRepository.makeMemory()
       const layer = Layer.mergeAll(
         TestConsole.layer,
-        Operation.productLayer({
+        productLayer({
           repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
           turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
           backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
@@ -1936,7 +2002,7 @@ describe("Operation", () => {
       }
       const layer = Layer.merge(
         TestConsole.layer,
-        Operation.productLayer({
+        productLayer({
           repositoryLayer: ThreadRepository.memoryLayer([thread]),
           turnRepositoryLayer: TurnRepository.memoryLayer([turn]),
           backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
@@ -2003,7 +2069,7 @@ describe("Operation", () => {
           updatedAt: 6,
         },
       ])
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
@@ -2061,7 +2127,7 @@ describe("Operation", () => {
       const repository = yield* ThreadRepository.makeMemory([source])
       const turns = yield* TurnRepository.makeMemory(sourceTurns)
       const turnSequence = yield* Ref.make(0)
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
@@ -2112,7 +2178,7 @@ describe("Operation", () => {
           }),
         ),
       )
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
@@ -2184,7 +2250,7 @@ describe("Operation", () => {
       })
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
       const turnSequence = yield* Ref.make(0)
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, delayedTurns),
         backendLayer: Layer.succeed(ExecutionBackend.Service, forkBackend),
@@ -2242,7 +2308,7 @@ describe("Operation", () => {
         yield* operation.run(input)
       }).pipe(
         provideLayer(
-          Operation.productLayer({
+          productLayer({
             repositoryLayer: ThreadRepository.memoryLayer(),
             turnRepositoryLayer: TurnRepository.memoryLayer(),
             backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
@@ -2311,7 +2377,7 @@ describe("Operation", () => {
         })
       }).pipe(
         provideLayer(
-          Operation.productLayer({
+          productLayer({
             repositoryLayer: ThreadRepository.memoryLayer([thread]),
             turnRepositoryLayer: TurnRepository.memoryLayer(turns),
             backendLayer: Layer.succeed(ExecutionBackend.Service, repairBackend),
@@ -2356,7 +2422,7 @@ describe("Operation", () => {
               : Effect.void.pipe(Effect.as(undefined)),
         })
         const context = yield* Layer.build(
-          Operation.productLayer({
+          productLayer({
             repositoryLayer: ThreadRepository.memoryLayer([thread]),
             turnRepositoryLayer: TurnRepository.memoryLayer([turn]),
             backendLayer: Layer.succeed(ExecutionBackend.Service, repairBackend),
@@ -2415,7 +2481,7 @@ describe("Operation", () => {
             Effect.andThen(backend.start(input)),
           ),
       })
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: ThreadRepository.memoryLayer([thread]),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionBackend.Service, repairBackend),
@@ -2471,7 +2537,7 @@ describe("Operation", () => {
           Effect.andThen(turns.listNonterminal),
         ),
       })
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: ThreadRepository.memoryLayer(),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, countedTurns),
         backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
@@ -2509,7 +2575,7 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const received = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: ThreadRepository.memoryLayer(),
         turnRepositoryLayer: TurnRepository.memoryLayer(),
         backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
@@ -2636,7 +2702,7 @@ describe("Operation", () => {
           wakeThreadHost: (wake) => Ref.update(wakes, (values) => [...values, wake]),
           registerTurnPromoter: (promoter) => Ref.update(promoters, (values) => [...values, promoter]),
         })
-        const layer = Operation.productLayer({
+        const layer = productLayer({
           repositoryLayer: ThreadRepository.memoryLayer([thread]),
           turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
           backendLayer: Layer.succeed(ExecutionBackend.Service, promotedBackend),
@@ -2724,6 +2790,8 @@ describe("Operation", () => {
               createdAt: eventCount + 1,
             },
           ]
+          const turns = yield* TurnRepository.makeMemory()
+          const transcripts = yield* TranscriptRepository.makeMemory({ turns })
           let recovered: Extract<Operation.InteractiveEvent, { readonly _tag: "SelectionLoaded" }> | undefined
           let resyncRequested = false
           const overflowBackend = ExecutionBackend.Service.of({
@@ -2733,11 +2801,14 @@ describe("Operation", () => {
                 for (const event of streamed) input.onEvent?.(event)
                 return { turnId: input.turnId, status: "completed" as const, events: streamed }
               }),
+            inspect: (turnId) =>
+              Effect.succeed({ turnId, status: "completed" as const, waits: [], pendingTools: [], children: [] }),
             replay: (turnId) => Effect.succeed({ turnId, status: "completed" as const, events: streamed }),
           })
-          const layer = Operation.productLayer({
+          const layer = productLayer({
             repositoryLayer: ThreadRepository.memoryLayer(),
-            turnRepositoryLayer: TurnRepository.memoryLayer(),
+            turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+            transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
             backendLayer: Layer.succeed(ExecutionBackend.Service, overflowBackend),
             defaultWorkspace: "/work",
             makeThreadId: Effect.succeed(Thread.ThreadId.make("overflow-thread")),
@@ -3045,7 +3116,7 @@ describe("Operation", () => {
             : repository.get(id),
       })
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, interleavingRepository),
         turnRepositoryLayer: TurnRepository.memoryLayer(),
         backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
@@ -3310,7 +3381,7 @@ describe("Operation", () => {
       const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const dispatch = (event: Operation.InteractiveEvent) => runSync(Ref.update(events, (all) => [...all, event]))
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: ThreadRepository.memoryLayer(),
         turnRepositoryLayer: TurnRepository.memoryLayer([
           {
@@ -3414,7 +3485,7 @@ describe("Operation", () => {
           updatedAt: 1,
         },
       ])
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: ThreadRepository.memoryLayer([thread]),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionBackend.Service, hostedBackend),
@@ -3546,7 +3617,7 @@ describe("Operation", () => {
         yield* Effect.yieldNow
       }).pipe(
         provideLayer(
-          Operation.productLayer({
+          productLayer({
             repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
             backendLayer: Layer.succeed(ExecutionBackend.Service, controlBackend),
@@ -3623,7 +3694,7 @@ describe("Operation", () => {
             return yield* backend.start(input)
           }),
       })
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: ThreadRepository.memoryLayer([thread]),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionBackend.Service, preparedBackend),
@@ -3722,7 +3793,7 @@ describe("Operation", () => {
         start: (input) =>
           Ref.update(starts, (all) => [...all, String(input.turnId)]).pipe(Effect.andThen(backend.start(input))),
       })
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: ThreadRepository.memoryLayer([thread]),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionBackend.Service, preparedBackend),
@@ -3832,7 +3903,7 @@ describe("Operation", () => {
         yield* Fiber.join(steering)
       }).pipe(
         provideLayer(
-          Operation.productLayer({
+          productLayer({
             repositoryLayer: ThreadRepository.memoryLayer([thread]),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, delayedTurns),
             backendLayer: Layer.succeed(ExecutionBackend.Service, raceBackend),
@@ -3908,7 +3979,7 @@ describe("Operation", () => {
         yield* settleEvents
       }).pipe(
         provideLayer(
-          Operation.productLayer({
+          productLayer({
             repositoryLayer: ThreadRepository.memoryLayer([thread]),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
             backendLayer: Layer.succeed(ExecutionBackend.Service, failingBackend),
@@ -3978,7 +4049,7 @@ describe("Operation", () => {
         yield* Effect.yieldNow
       }).pipe(
         provideLayer(
-          Operation.productLayer({
+          productLayer({
             repositoryLayer: ThreadRepository.memoryLayer([thread]),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
             backendLayer: Layer.succeed(ExecutionBackend.Service, {
@@ -4062,7 +4133,7 @@ describe("Operation", () => {
         yield* Fiber.join(interrupted)
       }).pipe(
         provideLayer(
-          Operation.productLayer({
+          productLayer({
             repositoryLayer: ThreadRepository.memoryLayer([thread]),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
             backendLayer: Layer.succeed(ExecutionBackend.Service, gateBackend),
@@ -4111,7 +4182,7 @@ describe("Operation", () => {
         yield* Fiber.interrupt(eventsFiber)
       }).pipe(
         provideLayer(
-          Operation.productLayer({
+          productLayer({
             repositoryLayer: ThreadRepository.memoryLayer([thread]),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
             backendLayer: Layer.succeed(ExecutionBackend.Service, ownerBackend),
@@ -4186,7 +4257,7 @@ describe("Operation", () => {
         yield* Fiber.join(submitted)
       }).pipe(
         provideLayer(
-          Operation.productLayer({
+          productLayer({
             repositoryLayer: ThreadRepository.memoryLayer([thread]),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
             backendLayer: Layer.succeed(ExecutionBackend.Service, gateBackend),
@@ -4248,7 +4319,7 @@ describe("Operation", () => {
         yield* session.interruptAndSend("replacement")
       }).pipe(
         provideLayer(
-          Operation.productLayer({
+          productLayer({
             repositoryLayer: ThreadRepository.memoryLayer([thread]),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, racingTurns),
             backendLayer: Layer.succeed(ExecutionBackend.Service, raceBackend),
@@ -4324,7 +4395,7 @@ describe("Operation", () => {
         yield* session.cancel
       }).pipe(
         provideLayer(
-          Operation.productLayer({
+          productLayer({
             repositoryLayer: ThreadRepository.memoryLayer([thread]),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, collisionTurns),
             backendLayer: Layer.succeed(ExecutionBackend.Service, collisionBackend),
@@ -4344,6 +4415,7 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const repository = yield* ThreadRepository.makeMemory()
       const turns = yield* TurnRepository.makeMemory()
+      const transcripts = yield* TranscriptRepository.makeMemory({ turns })
       const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
@@ -4395,9 +4467,10 @@ describe("Operation", () => {
             ),
           ),
       })
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+        transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
         backendLayer: Layer.succeed(ExecutionBackend.Service, liveBackend),
         defaultWorkspace: "/work",
         makeThreadId: Effect.succeed(Thread.ThreadId.make("thread-interactive")),
@@ -4509,7 +4582,7 @@ describe("Operation", () => {
       const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
       const starts = yield* Ref.make(0)
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(
@@ -4576,7 +4649,7 @@ describe("Operation", () => {
             }),
           ),
       })
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionBackend.Service, cancellingBackend),
@@ -4621,7 +4694,7 @@ describe("Operation", () => {
       const turns = yield* TurnRepository.makeMemory()
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
       const inputs = yield* Ref.make<ReadonlyArray<ResolvedContext.Input>>([])
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
@@ -4666,7 +4739,15 @@ describe("Operation", () => {
           Ref.update(titleInvocations, (values) => [...values, input]).pipe(
             Effect.as({ ...input, type: "accepted" as const }),
           ),
-        follow: (executionId) =>
+        inspect: (executionId) =>
+          Ref.get(titleInvocations).pipe(
+            Effect.map((invocations) =>
+              invocations.length === 0
+                ? undefined
+                : { turnId: executionId, status: "completed" as const, waits: [], pendingTools: [], children: [] },
+            ),
+          ),
+        replay: (executionId) =>
           Effect.succeed({
             turnId: executionId,
             status: "completed" as const,
@@ -4717,7 +4798,7 @@ describe("Operation", () => {
             }),
           ),
       })
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionBackend.Service, routedBackend),
@@ -4742,6 +4823,8 @@ describe("Operation", () => {
         })
         yield* session.submit("Build groceries", "high")
         while ((yield* Ref.get(titleInvocations)).length < 1) yield* Effect.yieldNow
+        while ((yield* repository.get(Thread.ThreadId.make("thread-selected-title")))?.title !== "Selected Route Title")
+          yield* Effect.yieldNow
       }).pipe(provideLayer(layer))
 
       expect(yield* Ref.get(starts)).toEqual(["high-model:turn-selected-title"])
@@ -4765,7 +4848,7 @@ describe("Operation", () => {
         ...backend,
         invokeChild: () => Effect.fail(ExecutionBackend.BackendError.make({ message: "title unavailable" })),
       })
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionBackend.Service, titleFailingBackend),
@@ -4863,7 +4946,7 @@ describe("Operation", () => {
         while ((yield* repository.get(thread.id))?.title !== "Recovered Durable Title") yield* Effect.yieldNow
       }).pipe(
         provideLayer(
-          Operation.productLayer({
+          productLayer({
             repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
             backendLayer: Layer.succeed(ExecutionBackend.Service, restartedBackend),
@@ -4892,7 +4975,7 @@ describe("Operation", () => {
         wakeThreadHost: () => Effect.fail(ExecutionBackend.BackendError.make({ message: "promotion failed" })),
         registerTurnPromoter: () => Effect.void,
       })
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionBackend.Service, promotionFailingBackend),
@@ -4997,7 +5080,7 @@ describe("Operation", () => {
                 yield* Effect.yieldNow
           }).pipe(
             provideLayer(
-              Operation.productLayer({
+              productLayer({
                 repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
                 turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
                 backendLayer: Layer.succeed(ExecutionBackend.Service, caseBackend),
@@ -5108,7 +5191,7 @@ describe("Operation", () => {
       })
       const layer = Layer.mergeAll(
         TestConsole.layer,
-        Operation.productLayer({
+        productLayer({
           repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
           turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
           backendLayer: Layer.succeed(ExecutionBackend.Service, runBackend),
@@ -5242,6 +5325,49 @@ describe("Operation", () => {
               },
             ],
           }),
+        replay: (executionId) =>
+          Effect.succeed({
+            turnId: String(executionId),
+            status: "completed" as const,
+            events:
+              String(executionId) === childId
+                ? childEvents
+                : [
+                    executionStarted(String(executionId)),
+                    {
+                      executionId: String(executionId),
+                      cursor: "root-tool",
+                      sequence: 1,
+                      type: "tool.call.requested" as const,
+                      createdAt: 1,
+                      data: { tool_call_id: "call_1", tool_name: "task", input: { prompt: "review" } },
+                    },
+                    {
+                      executionId: String(executionId),
+                      cursor: "root-spawn",
+                      sequence: 2,
+                      type: "child_run.spawned" as const,
+                      createdAt: 2,
+                      data: { child_execution_id: childId, preset_name: "Oracle" },
+                    },
+                    {
+                      executionId: String(executionId),
+                      cursor: "root-answer",
+                      sequence: 3,
+                      type: "model.output.completed" as const,
+                      createdAt: 4,
+                      text: "delegated review finished",
+                    },
+                    {
+                      executionId: String(executionId),
+                      cursor: "root-done",
+                      sequence: 4,
+                      type: "execution.completed" as const,
+                      timestampSource: "server" as const,
+                      createdAt: 5,
+                    },
+                  ],
+          }),
       })
       yield* Effect.gen(function* () {
         const operation = yield* Operation.Service
@@ -5257,7 +5383,7 @@ describe("Operation", () => {
         provideLayer(
           Layer.mergeAll(
             TestConsole.layer,
-            Operation.productLayer({
+            productLayer({
               repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
               turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
               transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
@@ -5307,7 +5433,7 @@ describe("Operation", () => {
       const turns = yield* TurnRepository.makeMemory()
       const layer = Layer.mergeAll(
         TestConsole.layer,
-        Operation.productLayer({
+        productLayer({
           repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
           turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
           backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
@@ -5362,7 +5488,7 @@ describe("Operation", () => {
       expect(error.message).toContain("Thread missing does not exist")
     }).pipe(
       provideLayer(
-        Operation.productLayer({
+        productLayer({
           repositoryLayer: ThreadRepository.memoryLayer(),
           turnRepositoryLayer: TurnRepository.memoryLayer(),
           backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
@@ -5389,7 +5515,7 @@ describe("Operation", () => {
       expect(error.message).toContain("Thread missing does not exist")
     }).pipe(
       provideLayer(
-        Operation.productLayer({
+        productLayer({
           repositoryLayer: ThreadRepository.memoryLayer(),
           turnRepositoryLayer: TurnRepository.memoryLayer(),
           backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
@@ -5430,7 +5556,7 @@ describe("Operation", () => {
         },
       ])
       const starts = yield* Ref.make(0)
-      const operationLayer = Operation.productLayer({
+      const operationLayer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(
@@ -5483,7 +5609,7 @@ describe("Operation", () => {
       expect(error.message).toContain("backend failed")
     }).pipe(
       provideLayer(
-        Operation.productLayer({
+        productLayer({
           repositoryLayer: ThreadRepository.memoryLayer(),
           turnRepositoryLayer: TurnRepository.memoryLayer(),
           backendLayer: Layer.succeed(
@@ -5613,7 +5739,7 @@ describe("Operation", () => {
         })
       }).pipe(
         provideLayer(
-          Operation.productLayer({
+          productLayer({
             repositoryLayer: ThreadRepository.memoryLayer([thread]),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
             backendLayer: Layer.succeed(ExecutionBackend.Service, runBackend),
@@ -5666,7 +5792,7 @@ describe("Operation", () => {
           )
         }).pipe(
           provideLayer(
-            Operation.productLayer({
+            productLayer({
               repositoryLayer: ThreadRepository.memoryLayer(),
               turnRepositoryLayer: TurnRepository.memoryLayer(),
               backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
@@ -5831,7 +5957,7 @@ describe("Operation", () => {
         })
       }).pipe(
         provideLayer(
-          Operation.productLayer({
+          productLayer({
             repositoryLayer: ThreadRepository.memoryLayer([mentioned]),
             turnRepositoryLayer: TurnRepository.memoryLayer([
               {
@@ -5875,7 +6001,7 @@ describe("Operation", () => {
       }
       const layer = Layer.merge(
         TestConsole.layer,
-        Operation.productLayer({
+        productLayer({
           repositoryLayer: ThreadRepository.memoryLayer([thread]),
           turnRepositoryLayer: TurnRepository.memoryLayer(),
           backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
@@ -5898,42 +6024,18 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const modes = yield* Ref.make<ReadonlyArray<string>>([])
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: ThreadRepository.memoryLayer(),
         turnRepositoryLayer: TurnRepository.memoryLayer(),
         backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
         resolveExecutionRoute: (mode) => {
           runSync(Ref.update(modes, (all) => [...all, mode]))
+          const route = Turn.testExecutionRoute(mode)
           return Effect.succeed({
-            version: 1,
-            mode,
+            ...route,
             tokenBudget: 1,
-            main: {
-              role: "main",
-              alias: "test",
-              provider: "test",
-              model: "test",
-              registrationKey: "test",
-              providerProtocol: "test",
-              providerBaseUrl: "test://model",
-              effort: "medium",
-              fast: false,
-              requestVariant: "test",
-              compaction: { contextWindow: 10, reserveTokens: 2, keepRecentTokens: 1 },
-            },
-            oracle: {
-              role: "oracle",
-              alias: "test",
-              provider: "test",
-              model: "test",
-              registrationKey: "test",
-              providerProtocol: "test",
-              providerBaseUrl: "test://model",
-              effort: "medium",
-              fast: false,
-              requestVariant: "test",
-              compaction: { contextWindow: 10, reserveTokens: 2, keepRecentTokens: 1 },
-            },
+            main: { ...route.main, compaction: { contextWindow: 10, reserveTokens: 2, keepRecentTokens: 1 } },
+            oracle: { ...route.oracle, compaction: { contextWindow: 10, reserveTokens: 2, keepRecentTokens: 1 } },
           })
         },
         defaultWorkspace: "/work",
@@ -5954,7 +6056,7 @@ describe("Operation", () => {
       }).pipe(provideLayer(layer))
       expect(yield* Ref.get(modes)).toEqual(["ultra"])
 
-      const workflowLayer = Operation.productLayer({
+      const workflowLayer = productLayer({
         repositoryLayer: ThreadRepository.memoryLayer(),
         turnRepositoryLayer: TurnRepository.memoryLayer(),
         backendLayer: Layer.succeed(
@@ -6093,7 +6195,7 @@ describe("Operation", () => {
       const turns = yield* TurnRepository.makeMemory([sourceTurn, targetTurn])
       const transcriptContext = yield* Layer.build(TranscriptRepository.memoryLayer)
       const transcripts = Context.get(transcriptContext, TranscriptRepository.Service)
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: ThreadRepository.memoryLayer([source, target]),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
@@ -6219,7 +6321,7 @@ describe("Operation", () => {
         },
       })
       const turns = yield* TurnRepository.makeMemory([sourceTurn, failedTurn, cancelledTurn])
-      const layer = Operation.productLayer({
+      const layer = productLayer({
         repositoryLayer: ThreadRepository.memoryLayer([source, failedThread, cancelledThread]),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         transcriptRepositoryLayer: TranscriptRepository.memoryLayer,
@@ -6279,7 +6381,7 @@ describe("Operation", () => {
               ],
             }),
         })
-        const layer = Operation.productLayer({
+        const layer = productLayer({
           repositoryLayer: ThreadRepository.memoryLayer(),
           turnRepositoryLayer: TurnRepository.memoryLayer(),
           transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),

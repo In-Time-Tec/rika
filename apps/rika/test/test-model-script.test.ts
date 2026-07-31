@@ -18,13 +18,10 @@ import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import { ViewState } from "@rika/terminal/terminal-state"
 import { Surface } from "@rika/terminal/opentui-surface"
 import {
-  buildTestModelScript,
   configuredBackendLayer,
   executionModelRoutes,
   executionRoutePin,
   modelRoutesForExecution,
-  makeReloadingTestModel,
-  parseTestModelScript,
   productionCompaction,
   resolveExecutionRouteForSettings,
   resolveExecutionWorkspace,
@@ -33,9 +30,15 @@ import {
   persistedTitleModelRoutesForStartup,
   withPinnedRouteRegistration,
 } from "../src/resident-product"
+import {
+  buildTestModelScript,
+  makeReloadingTestModel,
+  parseTestModelScript,
+} from "@rika/relay-execution/scripted-model-runtime"
 import { withClientWorkspace } from "../src/interactive-main"
-import * as BedrockAuthRefresh from "@rika/relay-execution/model-provider-runtime"
+import { bedrockAuthRefreshTestLayer } from "@rika/relay-execution/model-provider-runtime"
 import { modelRoutePlan, Service as ModelProviderRuntime } from "@rika/relay-execution/model-provider-runtime"
+import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
 
 const distinctModelRoutes = (routes: ReadonlyArray<ConfigContract.ResolvedModelRoute>) =>
   routes.filter(
@@ -72,7 +75,7 @@ const recordingBackend = (starts: Array<ExecutionBackend.StartInput>, registrati
     ...(registrations === undefined
       ? {}
       : {
-          registerModels: (values) =>
+          registerModels: (values: ReadonlyArray<ModelRegistry.Registration>) =>
             Effect.sync(() => {
               registrations.push(...values.map((value) => value.registrationKey ?? ""))
             }),
@@ -192,7 +195,7 @@ test("pins GPT 5.6 routes to each mode's configured effort and selected fast tie
       const route = executionRoutePin(ConfigContract.defaults, mode, { fastMode })
       for (const selected of [route.main, route.oracle, route.title!]) {
         expect(selected.model).toMatch(/^gpt-5\.6-/)
-        expect(selected.providerProtocol).toBe("openai")
+        expect(selected.providerConnection.protocol).toBe("openai")
       }
       expect(route.main.providerOptions).toMatchObject({
         reasoning: { effort: ConfigContract.defaults.modes[mode].main.effort },
@@ -206,7 +209,7 @@ test("pins GPT 5.6 routes to each mode's configured effort and selected fast tie
         role: "title",
         alias: "luna",
         model: "gpt-5.6-luna",
-        providerProtocol: "openai",
+        providerConnection: { protocol: "openai" },
         effort: "low",
         fast: false,
         providerOptions: { reasoning: { effort: "low" } },
@@ -252,9 +255,9 @@ test("pins aliases, variants, candidates, specialists, titles, and summaries as 
     compactionSummary: { alias: "sol", effort: "xhigh", fast: false },
   })
   for (const route of executionModelRoutes(pin)) {
-    expect(route.providerBaseUrl).toBe("https://models.example.test/v1?tenant=admission")
-    expect(route.providerApiKeyEnv).toBe("ADMISSION_API_KEY")
-    expect(route.requestVariant).toBe(route.registrationKey)
+    expect(route.providerConnection.baseUrl).toBe("https://models.example.test/v1?tenant=admission")
+    expect(route.providerConnection.apiKeyEnvironment).toBe("ADMISSION_API_KEY")
+    expect(route.requestVariant).toBe(route.registrationIdentity)
     expect(JSON.stringify(route)).not.toContain("secret")
   }
   expect(pin.main.providerOptions).toMatchObject({ reasoning: { effort: "medium" }, service_tier: "priority" })
@@ -441,20 +444,22 @@ test("isolates a stale persisted route while healthy routes keep starting", () =
     Effect.scoped(
       Effect.gen(function* () {
         const route = executionRoutePin(ConfigContract.defaults, "medium")
-        const { providerApiKeyEnv: _, ...healthy } = route.main
-        const { providerRuntime: __, ...oldMain } = route.main
+        const healthy = route.main
         const stale = {
-          ...oldMain,
+          ...route.main,
           alias: "retired",
-          provider: "retired-provider",
-          providerProtocol: "retired-provider",
-          registrationKey: "retired-registration",
-          providerApiKeyEnv: "RETIRED_API_KEY",
+          registrationIdentity: modelRegistrationIdentity("retired-registration"),
           requestVariant: "retired-registration",
+          providerConnection: {
+            ...route.main.providerConnection,
+            provider: "retired-provider",
+            protocol: "retired-provider",
+            apiKeyEnvironment: "RETIRED_API_KEY",
+          },
         }
         const unavailable = [{ route: stale, message: "Missing RETIRED_API_KEY for retired-provider" }]
         expect(unavailable[0]?.route.alias).toBe("retired")
-        expect(unavailable[0]?.route.registrationKey).toBe("retired-registration")
+        expect(unavailable[0]?.route.registrationIdentity).toBe("retired-registration")
         expect(unavailable[0]?.message).toContain("RETIRED_API_KEY")
         const starts = new Array<ExecutionBackend.StartInput>()
         const backend = recordingBackend(starts)
@@ -468,6 +473,7 @@ test("isolates a stale persisted route while healthy routes keep starting", () =
           turnId: "healthy-turn",
           prompt: "healthy",
           executionRoute: {
+            version: route.version,
             mode: route.mode,
             main: healthy,
             oracle: { ...healthy, role: "oracle" as const },
@@ -479,6 +485,7 @@ test("isolates a stale persisted route while healthy routes keep starting", () =
             ...input,
             turnId: "stale-turn",
             executionRoute: {
+              version: route.version,
               mode: route.mode,
               main: stale,
               oracle: { ...stale, role: "oracle" as const },
@@ -526,20 +533,22 @@ test("builds the configured backend with duplicate persisted routes and one unav
             },
           }
           const pinned = executionRoutePin(settings, "medium")
-          const { providerRuntime: _, ...oldMain } = pinned.main
           const restored = {
-            ...oldMain,
-            registrationKey: "restored-startup",
+            ...pinned.main,
+            registrationIdentity: modelRegistrationIdentity("restored-startup"),
             requestVariant: "restored-startup",
           }
           const stale = {
-            ...oldMain,
+            ...pinned.main,
             alias: "retired-startup",
-            provider: "retired-startup",
-            providerProtocol: "retired-startup",
-            registrationKey: "retired-startup",
-            providerApiKeyEnv: "RETIRED_STARTUP_API_KEY",
+            registrationIdentity: modelRegistrationIdentity("retired-startup"),
             requestVariant: "retired-startup",
+            providerConnection: {
+              ...pinned.main.providerConnection,
+              provider: "retired-startup",
+              protocol: "retired-startup",
+              apiKeyEnvironment: "RETIRED_STARTUP_API_KEY",
+            },
           }
           const auth = OpenAiAuth.Service.of({
             loginBrowser: () => Effect.die("unused"),
@@ -551,7 +560,7 @@ test("builds the configured backend with duplicate persisted routes and one unav
           })
           const providerLayer = ModelProviderRuntime.layer.pipe(
             Layer.provide(Layer.succeed(OpenAiAuth.Service, auth)),
-            Layer.provide(BedrockAuthRefresh.testLayer({ run: () => Effect.void })),
+            Layer.provide(bedrockAuthRefreshTestLayer({ run: () => Effect.void })),
           )
           const context = yield* Layer.buildWithScope(
             configuredBackendLayer({
@@ -575,6 +584,7 @@ test("builds the configured backend with duplicate persisted routes and one unav
               turnId: "stale-startup-turn",
               prompt: "stale",
               executionRoute: {
+                version: pinned.version,
                 mode: "medium",
                 main: stale,
                 oracle: { ...stale, role: "oracle" },
@@ -601,15 +611,21 @@ test("resolves a legacy unavailable route to the current default when it starts"
       const current = executionRoutePin(ConfigContract.defaults, "medium")
       const legacyModel = {
         ...current.main,
+        role: "main" as const,
         alias: "legacy-unavailable",
-        provider: "legacy-unavailable",
         model: "legacy-unavailable",
-        registrationKey: "legacy-unavailable",
-        providerProtocol: "test" as const,
-        providerBaseUrl: "test://legacy-unavailable",
+        registrationIdentity: modelRegistrationIdentity("legacy-unavailable"),
         requestVariant: "legacy-unavailable",
+        providerConnection: {
+          ...current.main.providerConnection,
+          provider: "legacy-unavailable",
+          protocol: "test",
+          baseUrl: "test://legacy-unavailable",
+          authentication: "none" as const,
+        },
       }
       const legacy: Turn.ExecutionRoutePin = {
+        version: 1,
         mode: "test",
         main: legacyModel,
         oracle: { ...legacyModel, role: "oracle" },
@@ -618,17 +634,7 @@ test("resolves a legacy unavailable route to the current default when it starts"
       const isolated = yield* withPinnedRouteRegistration(recordingBackend(starts), {
         registeredRoutes: executionModelRoutes(current),
         unavailable: [],
-        registerPinnedRoutes: (routes) =>
-          Effect.succeed(
-            routes.map(
-              (route) =>
-                ({
-                  provider: route.provider,
-                  model: route.model,
-                  registrationKey: route.registrationKey,
-                }) as ModelRegistry.Registration,
-            ),
-          ),
+        registerPinnedRoutes: () => Effect.succeed([]),
         resolveLegacyRoute: () => Effect.succeed({ executionRoute: current, registrations: [] }),
       })
       yield* isolated.start({
@@ -653,16 +659,10 @@ test("re-registers a cloned active route when interrupt-and-send starts it", () 
         registeredRoutes: [],
         unavailable: [],
         registerPinnedRoutes: (routes) =>
-          Effect.succeed(
-            routes.map(
-              (route) =>
-                ({
-                  provider: route.provider,
-                  model: route.model,
-                  registrationKey: route.registrationKey,
-                }) as ModelRegistry.Registration,
-            ),
-          ),
+          Effect.sync(() => {
+            registrations.push(...routes.map((route) => route.registrationIdentity))
+            return []
+          }),
       })
       yield* isolated.start({
         threadId: "interrupt-thread",
@@ -671,8 +671,8 @@ test("re-registers a cloned active route when interrupt-and-send starts it", () 
         executionRoute: cloned,
       })
       expect(starts).toHaveLength(1)
-      expect(registrations).toContain(cloned.main.registrationKey)
-      expect(registrations).toContain(cloned.oracle.registrationKey)
+      expect(registrations).toContain(cloned.main.registrationIdentity)
+      expect(registrations).toContain(cloned.oracle.registrationIdentity)
     }),
   ))
 
@@ -689,18 +689,18 @@ test("restores every pinned role from a nonterminal turn into the restart regist
     stopIntent: "none",
     executionRoute: {
       ...route,
-      main: { ...route.main, registrationKey: "workspace-main" },
-      oracle: { ...route.oracle, registrationKey: "workspace-oracle" },
+      main: { ...route.main, registrationIdentity: modelRegistrationIdentity("workspace-main") },
+      oracle: { ...route.oracle, registrationIdentity: modelRegistrationIdentity("workspace-oracle") },
     },
     reviewFanOutId: "review:review-owner",
     createdAt: 1,
     updatedAt: 2,
   }
-  expect(persistedModelRoutesForStartup([owner]).map((candidate) => candidate.registrationKey)).toEqual([
+  expect(persistedModelRoutesForStartup([owner]).map((candidate) => candidate.registrationIdentity)).toEqual([
     "workspace-main",
     "workspace-oracle",
-    route.title!.registrationKey,
-    route.compactionSummary!.registrationKey,
+    route.title!.registrationIdentity,
+    route.compactionSummary!.registrationIdentity,
   ])
   const titleOwner: Turn.AgentExecutionTurn = {
     ...owner,
@@ -708,12 +708,12 @@ test("restores every pinned role from a nonterminal turn into the restart regist
     status: "completed",
     executionRoute: {
       ...route,
-      title: { ...route.title!, registrationKey: "completed-title-route" },
+      title: { ...route.title!, registrationIdentity: modelRegistrationIdentity("completed-title-route") },
     },
   }
   expect(
     [...persistedModelRoutesForStartup([owner]), titleOwner.executionRoute.title!].map(
-      (candidate) => candidate.registrationKey,
+      (candidate) => candidate.registrationIdentity,
     ),
   ).toContain("completed-title-route")
 })
@@ -754,7 +754,10 @@ test("loads title model pins from completed turn rows for restart registration",
               prompt: "title me",
               executionRoute: {
                 ...route,
-                title: { ...route.title!, registrationKey: "durable-title-registration" },
+                title: {
+                  ...route.title!,
+                  registrationIdentity: modelRegistrationIdentity("durable-title-registration"),
+                },
               },
               queueCapacity: 128,
               now: 1,
@@ -762,7 +765,7 @@ test("loads title model pins from completed turn rows for restart registration",
             yield* turns.setStatus(turn.id, "completed", undefined, 2)
           }).pipe(Effect.provide(repositories))
           const titleRoutes = yield* persistedTitleModelRoutesForStartup.pipe(Effect.provide(databaseContext))
-          expect(titleRoutes.map((candidate) => candidate.registrationKey)).toContain("durable-title-registration")
+          expect(titleRoutes.map((candidate) => candidate.registrationIdentity)).toContain("durable-title-registration")
         }),
       ),
     ),

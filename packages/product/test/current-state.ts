@@ -1,4 +1,4 @@
-import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
+import * as TurnRepository from "@rika/product/turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import { Effect, Function } from "effect"
 

@@ -38,6 +38,19 @@ const provideLayer =
       return yield* effect.pipe(Effect.provide(context))
     })
 
+const legacyModel = (model: Turn.ExecutionModelRoute) => {
+  const { providerConnection, registrationIdentity, ...rest } = model
+  return {
+    ...rest,
+    provider: providerConnection.provider,
+    registrationKey: registrationIdentity,
+    providerProtocol: providerConnection.protocol,
+    providerBaseUrl: providerConnection.baseUrl,
+    providerApiKeyEnv: "TEST_API_KEY",
+    providerOptions: { gatewayProtocol: "opaque" },
+  }
+}
+
 const createPreBranchDatabase = (filename: string) => {
   const database = new NativeDatabase(filename)
   database.exec(`
@@ -150,18 +163,6 @@ const createPreBranchDatabase = (filename: string) => {
   const insertMigration = database.query("INSERT INTO rika_migrations (migration_id, name) VALUES (?, ?)")
   for (const [index, name] of migrations.entries()) insertMigration.run(index + 1, name)
   const currentRoute = Turn.testExecutionRoute()
-  const legacyModel = (model: (typeof currentRoute)["main"]) => {
-    const { providerConnection, registrationIdentity, ...rest } = model
-    return {
-      ...rest,
-      provider: providerConnection.provider,
-      registrationKey: registrationIdentity,
-      providerProtocol: providerConnection.protocol,
-      providerBaseUrl: providerConnection.baseUrl,
-      providerApiKeyEnv: "TEST_API_KEY",
-      providerOptions: { gatewayProtocol: "opaque" },
-    }
-  }
   const executionRoute = JSON.stringify({
     ...currentRoute,
     main: legacyModel(currentRoute.main),

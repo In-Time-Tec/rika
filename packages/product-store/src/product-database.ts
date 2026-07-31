@@ -3,6 +3,7 @@ import * as SqliteMigrator from "@effect/sql-sqlite-bun/SqliteMigrator"
 import { Cause, Effect, Exit, FileSystem, Layer, Option, Path, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { productRouteSnapshot } from "./migration/execution/product-migration-028-product-route-snapshot"
+import { toExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
 
 const baseline = Effect.gen(function* () {
   const sql = yield* SqlClient
@@ -1076,6 +1077,7 @@ const schemaObjectsByMigration: ReadonlyArray<ReadonlyArray<string>> = [
   stableTranscriptObjects,
   stableTranscriptObjects,
   stableTranscriptObjects,
+  stableTranscriptObjects,
 ]
 
 const SchemaObject = Schema.Struct({ type: Schema.String, name: Schema.String })
@@ -1130,7 +1132,6 @@ const inspectExisting = (filename: string) =>
                 readonly: true,
                 readwrite: false,
                 create: false,
-                disableWAL: true,
               }),
             )
             return yield* inspectDatabase().pipe(Effect.provide(context))
@@ -1200,6 +1201,37 @@ const isFreshDatabaseFile = Effect.fn("ProductDatabase.isFreshDatabaseFile")(fun
   return false
 })
 
+const validateRoutePayloads = (filename: string) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const context = yield* Layer.build(
+        SqliteClient.layer({
+          filename,
+          readonly: true,
+          readwrite: false,
+          create: false,
+        }),
+      )
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient
+        const rows = yield* sql<{ readonly id: string; readonly route: string }>`
+          SELECT id, execution_route_json AS route
+          FROM rika_turns
+          WHERE execution_route_json IS NOT NULL
+        `
+        for (const row of rows) {
+          const value = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(row.route).pipe(
+            Effect.mapError((error) => fail(`Malformed execution route JSON for turn ${row.id}: ${String(error)}`)),
+          )
+          yield* Effect.try({
+            try: () => toExecutionRouteSnapshot(value),
+            catch: (error) => fail(`Malformed execution route for turn ${row.id}: ${String(error)}`),
+          })
+        }
+      }).pipe(Effect.provide(context))
+    }),
+  )
+
 const preflight = Effect.fn("ProductDatabase.preflight")(function* (filename: string) {
   const fileSystem = yield* FileSystem.FileSystem
   const exists = yield* fileSystem
@@ -1207,7 +1239,10 @@ const preflight = Effect.fn("ProductDatabase.preflight")(function* (filename: st
     .pipe(Effect.mapError((error) => fail(`Could not inspect the Rika product database path: ${String(error)}`)))
   if (!exists) return "fresh" as const
   if (yield* isFreshDatabaseFile(filename)) return "fresh" as const
-  return yield* validateKnown(yield* inspectExisting(filename))
+  const state = yield* inspectExisting(filename)
+  const status = yield* validateKnown(state)
+  if (status === "tracked" && state.migrationRows.length === 27) yield* validateRoutePayloads(filename)
+  return status
 })
 
 const enableForeignKeys = Effect.gen(function* () {

@@ -3,7 +3,7 @@ import { Schema } from "effect"
 export const ModelRegistrationIdentity = Schema.String.pipe(Schema.brand("ModelRegistrationIdentity"))
 export type ModelRegistrationIdentity = typeof ModelRegistrationIdentity.Type
 
-export const ProviderAuthentication = Schema.Literals(["api-key", "openai-account", "none"])
+export const ProviderAuthentication = Schema.Literals(["api-key", "account", "none"])
 export type ProviderAuthentication = typeof ProviderAuthentication.Type
 
 export const ProviderConnectionSnapshot = Schema.Struct({
@@ -12,6 +12,7 @@ export const ProviderConnectionSnapshot = Schema.Struct({
   baseUrl: Schema.String,
   authentication: ProviderAuthentication,
   apiKeyEnvironment: Schema.optionalKey(Schema.String),
+  credentialIdentity: Schema.optionalKey(Schema.String),
 })
 export type ProviderConnectionSnapshot = typeof ProviderConnectionSnapshot.Type
 
@@ -69,7 +70,7 @@ export const ExecutionRouteSnapshot = Schema.Struct({
 export type ExecutionRouteSnapshot = typeof ExecutionRouteSnapshot.Type
 
 export const modelRegistrationIdentity = (value: string): ModelRegistrationIdentity =>
-  value as ModelRegistrationIdentity
+  Schema.decodeUnknownSync(ModelRegistrationIdentity)(value)
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -106,6 +107,7 @@ const roles: ReadonlyArray<ModelRouteRole> = [
   "surgeon",
   "task",
 ]
+const roleSet = new Set<string>(roles)
 
 const convertModel = (inputValue: unknown, expectedRole: ModelRouteRole): ExecutionRouteModelSnapshot => {
   const input = requireRecord(inputValue, "Malformed execution route model")
@@ -131,8 +133,7 @@ const convertModel = (inputValue: unknown, expectedRole: ModelRouteRole): Execut
     "Unsupported execution route model field",
   )
   const role = requireString(input.role, "Malformed execution route role")
-  if (role !== expectedRole || !roles.includes(role as ModelRouteRole))
-    throw new Error("Malformed execution route role")
+  if (role !== expectedRole || !roleSet.has(role)) throw new Error("Malformed execution route role")
   const provider = requireString(input.provider, "Malformed execution route provider")
   const protocol = requireString(input.providerProtocol, "Malformed execution route protocol")
   const baseUrl = requireString(input.providerBaseUrl, "Malformed execution route base URL")
@@ -158,18 +159,18 @@ const convertModel = (inputValue: unknown, expectedRole: ModelRouteRole): Execut
     )
     requireString(runtimeRecord.adapter, "Malformed execution route provider runtime")
   }
-  const fingerprint = input.openAiAccountFingerprint
-  if (fingerprint !== undefined) requireString(fingerprint, "Malformed execution route account identity")
+  const fingerprint =
+    input.openAiAccountFingerprint === undefined
+      ? undefined
+      : requireString(input.openAiAccountFingerprint, "Malformed execution route account identity")
   const apiKeyEnvironment =
     input.providerApiKeyEnv === undefined
       ? undefined
       : requireString(input.providerApiKeyEnv, "Malformed execution route API key environment")
-  const authentication: ProviderAuthentication =
-    (isRecord(runtime) && runtime.adapter === "openai-account") || fingerprint !== undefined
-      ? "openai-account"
-      : apiKeyEnvironment === undefined
-        ? "none"
-        : "api-key"
+  let authentication: ProviderAuthentication = "none"
+  if ((isRecord(runtime) && runtime.adapter === "openai-account") || fingerprint !== undefined)
+    authentication = "account"
+  else if (apiKeyEnvironment !== undefined) authentication = "api-key"
   const providerOptions = input.providerOptions
   if (providerOptions !== undefined && !isRecord(providerOptions)) throw new Error("Malformed execution route options")
   return {
@@ -182,6 +183,7 @@ const convertModel = (inputValue: unknown, expectedRole: ModelRouteRole): Execut
       baseUrl,
       authentication,
       ...(apiKeyEnvironment === undefined ? {} : { apiKeyEnvironment }),
+      ...(authentication === "account" && fingerprint !== undefined ? { credentialIdentity: fingerprint } : {}),
     },
     registrationIdentity: modelRegistrationIdentity(identity),
     effort,
@@ -196,14 +198,13 @@ const convertModel = (inputValue: unknown, expectedRole: ModelRouteRole): Execut
   }
 }
 
-export const toExecutionRouteSnapshot = (routeValue: Record<string, unknown>): ExecutionRouteSnapshot => {
+export const toExecutionRouteSnapshot = (routeValue: unknown): ExecutionRouteSnapshot => {
   const route = requireRecord(routeValue, "Malformed execution route")
   requireKeys(
     route,
     ["version", "mode", "tokenBudget", "title", "compactionSummary", "main", "oracle", "agents"],
     "Unsupported execution route field",
   )
-  if (route.version !== undefined && route.version !== 1) throw new Error("Unsupported execution route version")
   const mode = requireString(route.mode, "Malformed execution route mode")
   const modelValues = [
     route.main,
@@ -213,6 +214,7 @@ export const toExecutionRouteSnapshot = (routeValue: Record<string, unknown>): E
     ...(isRecord(route.agents) ? Object.values(route.agents) : []),
   ]
   if (modelValues.some((value) => isRecord(value) && value.providerConnection !== undefined)) {
+    if (route.version !== 1) throw new Error("Unsupported execution route version")
     for (const value of modelValues) {
       if (value === undefined) continue
       const model = requireRecord(value, "Malformed execution route model")
@@ -235,12 +237,13 @@ export const toExecutionRouteSnapshot = (routeValue: Record<string, unknown>): E
       const connection = requireRecord(model.providerConnection, "Malformed provider connection")
       requireKeys(
         connection,
-        ["provider", "protocol", "baseUrl", "authentication", "apiKeyEnvironment"],
+        ["provider", "protocol", "baseUrl", "authentication", "apiKeyEnvironment", "credentialIdentity"],
         "Unsupported provider connection field",
       )
     }
     return Schema.decodeUnknownSync(ExecutionRouteSnapshot)(route)
   }
+  if (route.version !== undefined && route.version !== 1) throw new Error("Unsupported execution route version")
   const result: Record<string, unknown> = {
     version: 1,
     mode,

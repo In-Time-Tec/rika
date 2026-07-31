@@ -292,7 +292,9 @@ export interface Interface {
   ) => Effect.Effect<void, BackendError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/product/execution-service/Service") {}
+export class Service extends Context.Service<Service, Interface>()(
+  "@rika/product/product-execution-contract/Service",
+) {}
 
 export const AgentDepth = {
   childExecutionId: (parentExecutionId: string, childId: string): string =>

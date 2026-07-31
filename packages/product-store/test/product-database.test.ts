@@ -15,10 +15,10 @@ it.layer(BunServices.layer)("product database", (test) => {
         yield* Effect.gen(function* () {
           const sql = yield* SqlClient
           const migrationRows = yield* sql`SELECT migration_id, name FROM rika_migrations ORDER BY migration_id`
-          expect(migrationRows).toHaveLength(27)
+          expect(migrationRows).toHaveLength(28)
           expect(migrationRows.at(-1)).toEqual({
-            migration_id: 27,
-            name: "usage_projection_sources",
+            migration_id: 28,
+            name: "product_route_snapshot",
           })
           const objects = yield* sql`SELECT name FROM sqlite_schema
             WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%'
@@ -257,7 +257,7 @@ it.layer(BunServices.layer)("product database", (test) => {
               ('turn-legacy', 'thread-legacy', 7, 1, 'legacy-fold', 500, 50, 25, '[]', 2, 3, 4, 5, 1, 3)`
             yield* sql`DROP TABLE rika_turn_usage_current`
             yield* sql`CREATE INDEX rika_turn_usage_thread ON rika_turn_usage (thread_id, turn_id)`
-            yield* sql`DELETE FROM rika_migrations WHERE migration_id IN (23, 24, 25, 26, 27)`
+            yield* sql`DELETE FROM rika_migrations WHERE migration_id IN (23, 24, 25, 26, 27, 28)`
           }).pipe(Effect.provide(yield* Layer.build(layer(filename)))),
         )
 
@@ -270,7 +270,7 @@ it.layer(BunServices.layer)("product database", (test) => {
           expect(names).not.toContain("consumed_json")
           expect(yield* sql`SELECT * FROM rika_transcript_execution_checkpoints`).toEqual([])
           expect(yield* sql`SELECT migration_id, name FROM rika_migrations ORDER BY migration_id DESC LIMIT 1`).toEqual(
-            [{ migration_id: 27, name: "usage_projection_sources" }],
+            [{ migration_id: 28, name: "product_route_snapshot" }],
           )
           expect(
             yield* sql`SELECT source_id, turn_id, thread_id, revision, projection_version, fold_json,

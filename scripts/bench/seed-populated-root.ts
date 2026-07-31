@@ -6,6 +6,7 @@ import * as ThreadRepository from "../../packages/product-store/src/thread-repos
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "../../packages/product-store/src/turn-repository"
 import { Config, Effect, FileSystem, Layer, Path, Schema } from "effect"
+import type { SqlError } from "effect/unstable/sql/SqlError"
 import type { ConfigError as EffectConfigError } from "effect/Config"
 import type * as PlatformError from "effect/PlatformError"
 
@@ -26,7 +27,7 @@ const sqliteLayer = (
   filename: string,
 ): Layer.Layer<
   ThreadRepository.Service | TurnRepository.Service,
-  PlatformError.PlatformError | Database.ProductDatabaseError,
+  PlatformError.PlatformError | Database.ProductDatabaseError | SqlError,
   FileSystem.FileSystem | Path.Path
 > => {
   const database = Database.layer(filename)
@@ -77,7 +78,7 @@ const seed = Effect.gen(function* () {
 
 const configuredDatabase: Layer.Layer<
   ThreadRepository.Service | TurnRepository.Service,
-  EffectConfigError | PlatformError.PlatformError | Database.ProductDatabaseError,
+  EffectConfigError | PlatformError.PlatformError | Database.ProductDatabaseError | SqlError,
   FileSystem.FileSystem | Path.Path
 > = Layer.unwrap(configuration.pipe(Effect.map(({ root }) => sqliteLayer(`${root}/rika.db`))))
 

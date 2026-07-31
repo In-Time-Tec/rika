@@ -1,6 +1,6 @@
 import { Service } from "@rika/product/usage-repository"
 export { Service }
-import { Clock, Context, Effect, Layer, Ref, Schema } from "effect"
+import { Clock, Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 
 export const projectionVersion = 3

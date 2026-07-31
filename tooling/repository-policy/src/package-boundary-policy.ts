@@ -93,6 +93,64 @@ const allDependencies = (manifest: PackageManifest) => [
   ),
 ]
 const isProvider = (name: string) => languageModelProviderPackages.has(name) || name.startsWith("@ai-sdk/")
+const packageOwner = (filePath: string) => {
+  if (filePath.startsWith("apps/rika/")) return "@rika/cli"
+  const match = /^packages\/([^/]+)\//.exec(filePath)
+  return match?.[1] === undefined ? undefined : `@rika/${match[1]}`
+}
+const sourcePackageEdges: Readonly<Record<string, ReadonlySet<string>>> = allowedPackageEdges
+const extensionFrameworks = new Set(["@batonfx/core", "@batonfx/mcp", "@batonfx/skills"])
+const isReleasedFrameworkImport = (owner: string | undefined, specifier: string) => {
+  if (owner === "@rika/relay-execution")
+    return (
+      (specifier.startsWith("@batonfx/") || specifier.startsWith("@relayfx/")) &&
+      (!specifier.startsWith("@relayfx/") || specifier === "@relayfx/sdk" || specifier === "@relayfx/sdk/sqlite")
+    )
+  return owner === "@rika/extensions" && extensionFrameworks.has(specifier)
+}
+const sourceImportDiagnostics = (filePath: string, text: string): PolicyDiagnostic[] => {
+  const owner = packageOwner(filePath)
+  if (owner === undefined) return []
+  const diagnostics: PolicyDiagnostic[] = []
+  const importPattern =
+    /(?:import\s*(?:type\s*)?(?:[^"']+from\s*)?|export\s+(?:[^"']+from\s*)?|import\s*\()(["'])([^"']+)\1/g
+  for (const match of text.matchAll(importPattern)) {
+    const specifier = match[2]
+    if (specifier === undefined) continue
+    const offset = match.index ?? 0
+    const line = text.slice(0, offset).split("\n").length
+    const rikaTarget = specifier.match(/^(@rika\/[^/]+)/)?.[1]
+    if (
+      filePath.includes("/src/") &&
+      rikaTarget !== undefined &&
+      rikaTarget !== owner &&
+      owner !== "@rika/cli" &&
+      sourcePackageEdges[owner]?.has(rikaTarget) !== true
+    )
+      diagnostics.push(
+        diagnostic(
+          `${filePath}:${line}`,
+          "source-package-edge",
+          `${owner} imports ${specifier}, which is outside the exact package allowlist`,
+          "Move the contract inward and import the owning package's exact public subpath",
+        ),
+      )
+    if (specifier.startsWith("@batonfx/") || specifier.startsWith("@relayfx/") || isProvider(specifier)) {
+      if (!isReleasedFrameworkImport(owner, specifier))
+        diagnostics.push(
+          diagnostic(
+            `${filePath}:${line}`,
+            "forbidden-external-import",
+            `${owner} imports forbidden framework or provider package ${specifier}`,
+            owner === "@rika/cli"
+              ? "Move Relay, Baton, and provider construction behind @rika/relay-execution"
+              : "Keep framework and provider imports inside the owning adapter boundary",
+          ),
+        )
+    }
+  }
+  return diagnostics
+}
 const isForbiddenLocalLink = (version: string) =>
   forbiddenProtocols.some((protocol) => version.startsWith(protocol)) && !version.startsWith(autoresearchLinkPrefix)
 const diagnostic = (
@@ -532,9 +590,12 @@ export const readWorkspaceManifests = Effect.fn("RepositoryPolicy.readWorkspaceM
 export const scanSourcePolicies = Effect.fn("RepositoryPolicy.scanSourcePolicies")(function* (root = ".") {
   const fileSystem = yield* FileSystem
   const path = yield* Path
-  const paths = yield* fileSystem.glob("{apps,packages,scripts,test,tooling}/**/*.{ts,tsx,mts,cts}", {
+  const paths = (yield* fileSystem.glob("{apps,packages,scripts,test,tooling}/**/*.{ts,tsx,mts,cts}", {
     root,
     exclude: ["**/node_modules/**", "**/dist/**"],
+  })).filter((candidate) => {
+    const segments = candidate.split(/[\\/]+/)
+    return !segments.includes("node_modules") && !segments.includes("dist")
   })
   const diagnostics = yield* Effect.all(
     paths.toSorted().map((absolutePath) =>
@@ -544,7 +605,11 @@ export const scanSourcePolicies = Effect.fn("RepositoryPolicy.scanSourcePolicies
           path.isAbsolute(absolutePath) ? absolutePath : path.join(root, absolutePath),
         )
         const basename = invalidBasename(filePath)
-        return [...(basename === undefined ? [] : [basename]), ...sourceMetrics(filePath, text)]
+        return [
+          ...(basename === undefined ? [] : [basename]),
+          ...sourceMetrics(filePath, text),
+          ...sourceImportDiagnostics(filePath, text),
+        ]
       }),
     ),
     { concurrency: "unbounded" },

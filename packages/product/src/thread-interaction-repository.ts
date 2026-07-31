@@ -1,8 +1,6 @@
 import { Context, Effect, Schema } from "effect"
 import { Thread, ThreadId } from "@rika/product/thread-record"
-import * as TurnRepository from "./turn-repository"
-import { ExecutionRoutePin, Turn, TurnId, isAgentExecution } from "@rika/product/turn-record"
-import { ExecutionStatus } from "@rika/coding-tools/coding-tool-catalog"
+import { ExecutionRoutePin, Turn, TurnId } from "@rika/product/turn-record"
 
 export const ReceiptKind = Schema.Literals(["create", "message", "steer", "cancel", "stop"])
 export type ReceiptKind = typeof ReceiptKind.Type
@@ -179,19 +177,3 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()(
   "@rika/product/thread-interaction-repository/Service",
 ) {}
-
-interface Receipt {
-  readonly digest: string
-  readonly input: string
-  readonly kind: ReceiptKind
-  readonly value: AcceptedThreadTurn | BoundThreadControl
-}
-interface State {
-  readonly threads: ReadonlyMap<ThreadId, Thread>
-  readonly turns: ReadonlyMap<TurnId, Turn>
-  readonly receipts: ReadonlyMap<string, Receipt>
-  readonly routes: ReadonlyMap<TurnId, ResultRoute>
-  readonly results: ReadonlyMap<TurnId, RootResult>
-  readonly relationships: ReadonlyArray<ThreadRelationship>
-  readonly revisions: ReadonlyMap<ThreadId, number>
-}

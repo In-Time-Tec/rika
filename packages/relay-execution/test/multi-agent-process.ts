@@ -3,10 +3,11 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { TestModel } from "@batonfx/test"
 import { ChildFanOutHost, Client, Content, Ids, ModelHub, Runtime, ToolRuntime } from "@relayfx/sdk"
 import { SQLite } from "@relayfx/sdk/sqlite"
-import * as RelayExecutionBackend from "@rika/product/execution-service"
-import * as ExecutionBackend from "@rika/product/execution-service"
+import * as RelayExecutionBackend from "@rika/relay-execution/relay-execution-layer"
+import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import { Config, Effect, FileSystem, Layer, Logger, Schedule, Schema, Semaphore, Stdio, Stream } from "effect"
 import { ProductAgent } from "@rika/product/product-operation"
+import * as Turn from "@rika/product/turn-record"
 
 class FixtureError extends Schema.TaggedErrorClass<FixtureError>()("MultiAgentProcessFixtureError", {
   message: Schema.String,
@@ -40,35 +41,7 @@ const ChildResult = Schema.Struct({
   completedAt: Schema.optional(Schema.Finite),
 })
 
-const executionRoute: ExecutionBackend.ExecutionRoutePin = {
-  mode: "test",
-  main: {
-    role: "main",
-    alias: "test",
-    provider: "test",
-    model: "deterministic",
-    registrationKey: "test",
-    providerProtocol: "test",
-    providerBaseUrl: "test://model",
-    effort: "medium",
-    fast: false,
-    requestVariant: "test",
-    compaction: { contextWindow: 372_000, reserveTokens: 128_000, keepRecentTokens: 32_000 },
-  },
-  oracle: {
-    role: "oracle",
-    alias: "test",
-    provider: "test",
-    model: "deterministic",
-    registrationKey: "test",
-    providerProtocol: "test",
-    providerBaseUrl: "test://model",
-    effort: "medium",
-    fast: false,
-    requestVariant: "test",
-    compaction: { contextWindow: 372_000, reserveTokens: 128_000, keepRecentTokens: 32_000 },
-  },
-}
+const executionRoute: ExecutionBackend.ExecutionRoutePin = Turn.testExecutionRoute()
 const decodeMessage = Schema.decodeEffect(Schema.fromJsonString(Message))
 const decodeChildResult = Schema.decodeEffect(Schema.UnknownFromJsonString)
 const encodeLine = Schema.encodeEffect(Schema.UnknownFromJsonString)

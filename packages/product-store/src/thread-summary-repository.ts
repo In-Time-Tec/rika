@@ -1,7 +1,7 @@
 import { Service } from "@rika/product/thread-summary-repository"
 export { Service }
 import * as ExecutionStatus from "@rika/product/execution-status"
-import { Context, Effect, Layer, Ref, Schema } from "effect"
+import { Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import * as ThreadRepository from "./thread-repository"
 import { ThreadId } from "@rika/product/thread-record"

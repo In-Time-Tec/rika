@@ -2454,9 +2454,8 @@ export class Surface {
       else if (model.usageTokens?._tag === "Unavailable") usageText = "— tok"
       else usageText = "···· tok"
     } else {
-      if (model.usageCost?._tag === "Available" && model.usageCost.unpricedAttempts > 0) usageText = "$—"
+      if (model.usageCost?._tag === "Available") usageText = formatCost(model.usageCost.usd)
       else if (model.costUsd !== undefined) usageText = formatCost(model.costUsd)
-      else if (model.usageCost?._tag === "Available") usageText = formatCost(model.usageCost.usd)
       else if (model.usageCost?._tag === "Unavailable") usageText = "$—"
       else if (model.usageCost?._tag === "Loading" || model.busy) usageText = "$····"
     }
