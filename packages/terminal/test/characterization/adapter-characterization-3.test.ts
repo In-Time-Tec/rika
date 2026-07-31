@@ -328,18 +328,32 @@ const editToolBlock = {
   input: JSON.stringify({ path: "src/a.ts", patch: "@@\n-old\n+new" }),
   status: "complete" as const,
   presentation: {
-    family: "direct" as const,
+    family: "edit" as const,
     action: "edit" as const,
     activeLabel: "Editing",
     completeLabel: "Edited",
   },
   detail: "src/a.ts",
   output: "@@\n-old\n+new",
-  files: [],
+  patch: "@@\n-old\n+new",
+  files: [
+    {
+      key: "patch:0",
+      path: "src/a.ts",
+      kind: "update" as const,
+      patch: "--- a/src/a.ts\n+++ b/src/a.ts\n@@\n-old\n+new",
+      additions: 1,
+      deletions: 1,
+      preview: true,
+      status: "complete" as const,
+    },
+  ],
 }
 
 const renderedText = (changes: Partial<Model>): string =>
-  renderTranscriptStyled({ ...initial("/workspace", "medium"), ...changes }).chunks.map((chunk) => chunk.text).join("")
+  renderTranscriptStyled({ ...initial("/workspace", "medium"), ...changes })
+    .chunks.map((chunk) => chunk.text)
+    .join("")
 
 const model = (changes: Partial<Model> = {}): Model => ({ ...initial("/workspace", "medium"), ...changes })
 

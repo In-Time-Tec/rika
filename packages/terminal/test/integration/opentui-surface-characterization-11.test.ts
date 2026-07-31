@@ -662,7 +662,7 @@ test("loads the workspace file tree with Opt+T and keeps it separate from change
         expect(model.changedFilesOpen).toBe(true)
         const changedFrame = setup.captureCharFrame()
         expect(changedFrame).toContain("Changed files (1)")
-        expect(changedFrame).toContain("adapter.ts +4 -1")
+        expect(changedFrame).toContain("opentui-surf +4 -1")
       } finally {
         surface.destroy()
         setup.renderer.destroy()

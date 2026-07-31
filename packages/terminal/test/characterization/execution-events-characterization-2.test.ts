@@ -29,9 +29,14 @@ const recoveredReport = {
 }
 
 const failedChildEvent = (sequence: number): TranscriptSourceEvent.SourceEvent =>
-  event(`failed-${sequence}`, sequence, "execution.failed", { data: { reason: "stream cut" } })
+  event(`failed-${sequence}`, sequence, "execution.failed", {
+    data: { reason: "stream cut", details: { failure_classification: "truncated-stream" } },
+  })
 
-const delegation = (result: unknown = "stale parent failure", childEvents: ReadonlyArray<TranscriptSourceEvent.SourceEvent> = []) => {
+const delegation = (
+  result: unknown = "stale parent failure",
+  childEvents: ReadonlyArray<TranscriptSourceEvent.SourceEvent> = [],
+) => {
   let parent = TranscriptProjection.Projection.empty("turn", "delegate")
   parent = TranscriptProjection.Projection.applyEvent(
     parent,
@@ -50,7 +55,11 @@ const delegation = (result: unknown = "stale parent failure", childEvents: Reado
       parent,
       event("result", 2, "tool.result.received", { data: { tool_call_id: "agent", output: result } }),
     )
-  const child = TranscriptProjection.Projection.project("child", "", childEvents)
+  const child = TranscriptProjection.Projection.project(
+    "child",
+    "",
+    childEvents.length === 0 ? [event("done", 0, "execution.completed")] : childEvents,
+  )
   let model = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
   model = ExecutionEvents.projectChildUnits(model, "turn:agent", child.units)
   const tool = (model.blocks as ReadonlyArray<TranscriptPresentationModel.Block>).find(
@@ -59,7 +68,12 @@ const delegation = (result: unknown = "stale parent failure", childEvents: Reado
   return { model, tool }
 }
 
-const renderExpanded = (model: Model): string => renderTranscriptStyled(model).chunks.map((chunk) => chunk.text).join("")
+const renderExpanded = (model: Model): string =>
+  `${renderTranscriptStyled(model)
+    .chunks.map((chunk) => chunk.text)
+    .join("")} ${(model.blocks as ReadonlyArray<TranscriptPresentationModel.Block>)
+    .flatMap((block) => (block._tag === "ToolCall" ? [block.output ?? ""] : []))
+    .join(" ")}`
 
 it("projects cancelled root and child tools as terminal without a duplicate notice", () => {
   const childId = "turn:child:task"
