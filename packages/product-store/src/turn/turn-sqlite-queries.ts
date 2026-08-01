@@ -3,7 +3,33 @@ import type { SqlClient as SqlClientType } from "effect/unstable/sql/SqlClient"
 import { RepositoryError } from "@rika/product/turn-repository"
 import { decodeAgent } from "./turn-row-codec"
 
-export const listAgentTurns = (
+export function listAgentTurns(
+  stopIntent: "none" | "requested",
+  mapError: (cause: unknown) => RepositoryError,
+): (sql: SqlClientType) => ReturnType<typeof listAgentTurnsImplementation>
+export function listAgentTurns(
+  sql: SqlClientType,
+  stopIntent: "none" | "requested",
+  mapError: (cause: unknown) => RepositoryError,
+): ReturnType<typeof listAgentTurnsImplementation>
+export function listAgentTurns(
+  sqlOrStopIntent: SqlClientType | "none" | "requested",
+  stopIntentOrMapError?: "none" | "requested" | ((cause: unknown) => RepositoryError),
+  mapError?: (cause: unknown) => RepositoryError,
+):
+  | ReturnType<typeof listAgentTurnsImplementation>
+  | ((sql: SqlClientType) => ReturnType<typeof listAgentTurnsImplementation>) {
+  if (mapError === undefined) {
+    if (typeof sqlOrStopIntent !== "string" || typeof stopIntentOrMapError !== "function")
+      throw new Error("Invalid agent turn query arguments")
+    return (sql) => listAgentTurns(sql, sqlOrStopIntent, stopIntentOrMapError)
+  }
+  if (typeof sqlOrStopIntent === "string" || typeof stopIntentOrMapError !== "string")
+    throw new Error("Invalid agent turn query arguments")
+  return listAgentTurnsImplementation(sqlOrStopIntent, stopIntentOrMapError, mapError)
+}
+
+const listAgentTurnsImplementation = (
   sql: SqlClientType,
   stopIntent: "none" | "requested",
   mapError: (cause: unknown) => RepositoryError,

@@ -18,12 +18,22 @@ export type CurrentCreateInput = Omit<
   readonly queueCapacity?: number
 }
 
-export const create = (
-  repository: TurnContract.Interface,
-  input: CurrentCreateInput,
-): ReturnType<TurnContract.Interface["createForSubmission"]> =>
-  repository.createForSubmission({
+type CreateResult = ReturnType<TurnContract.Interface["createForSubmission"]>
+
+export function create(repository: TurnContract.Interface, input: CurrentCreateInput): CreateResult
+export function create(input: CurrentCreateInput): (repository: TurnContract.Interface) => CreateResult
+export function create(
+  repositoryOrInput: TurnContract.Interface | CurrentCreateInput,
+  input?: CurrentCreateInput,
+): CreateResult | ((repository: TurnContract.Interface) => CreateResult) {
+  if (!("createForSubmission" in repositoryOrInput)) {
+    if (input !== undefined) throw new Error("Invalid turn creation arguments")
+    return (repository) => create(repository, repositoryOrInput)
+  }
+  if (input === undefined) throw new Error("Invalid turn creation arguments")
+  return repositoryOrInput.createForSubmission({
     executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
     ...input,
     queueCapacity: input.queueCapacity ?? 128,
   })
+}

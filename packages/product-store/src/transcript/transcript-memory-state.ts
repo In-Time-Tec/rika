@@ -29,12 +29,45 @@ export const materializeMemory = (entry: MemoryEntry): Projection => ({
     .map(clone),
 })
 
-export const memoryEntry = (
+export function memoryEntry(
+  projection: TranscriptProjectionModel.Projection,
+  options: CheckpointOptions,
+  checkpointGeneration: number,
+): (turn: Turn) => MemoryEntry
+export function memoryEntry(
   turn: Turn,
   projection: TranscriptProjectionModel.Projection,
   options: CheckpointOptions,
   checkpointGeneration: number,
-): MemoryEntry => {
+): MemoryEntry
+export function memoryEntry(
+  turnOrProjection: Turn | TranscriptProjectionModel.Projection,
+  projectionOrOptions?: TranscriptProjectionModel.Projection | CheckpointOptions,
+  optionsOrGeneration?: CheckpointOptions | number,
+  checkpointGeneration?: number,
+): MemoryEntry | ((turn: Turn) => MemoryEntry) {
+  if (checkpointGeneration === undefined) {
+    if (
+      !("units" in turnOrProjection) ||
+      projectionOrOptions === undefined ||
+      !("executionCheckpoints" in projectionOrOptions) ||
+      typeof optionsOrGeneration !== "number"
+    )
+      throw new Error("Invalid memory entry arguments")
+    return (nextTurn) => memoryEntry(nextTurn, turnOrProjection, projectionOrOptions, optionsOrGeneration)
+  }
+  if (
+    !("_tag" in turnOrProjection) ||
+    projectionOrOptions === undefined ||
+    !("units" in projectionOrOptions) ||
+    optionsOrGeneration === undefined ||
+    typeof optionsOrGeneration === "number"
+  )
+    throw new Error("Invalid memory entry arguments")
+  const turn = turnOrProjection
+  const projection = projectionOrOptions
+  const options = optionsOrGeneration
+
   const unitsByKey = new Map(projection.units.map((unit) => [unit.key, clone(unit)]))
   const checkpointsByKey = new Map(
     options.executionCheckpoints.map((checkpoint) => [checkpoint.executionKey, clone(checkpoint)]),
@@ -63,8 +96,17 @@ export const memoryEntry = (
   }
 }
 
-export const sameAttachment = (left: ExecutionCheckpoint, right: ExecutionCheckpoint): boolean =>
-  left.executionId === right.executionId &&
-  (left.attachment === undefined || right.attachment === undefined
-    ? left.attachment === right.attachment
-    : sameExecutionAttachment(left.attachment, right.attachment))
+export function sameAttachment(left: ExecutionCheckpoint): (right: ExecutionCheckpoint) => boolean
+export function sameAttachment(left: ExecutionCheckpoint, right: ExecutionCheckpoint): boolean
+export function sameAttachment(
+  left: ExecutionCheckpoint,
+  right?: ExecutionCheckpoint,
+): boolean | ((right: ExecutionCheckpoint) => boolean) {
+  if (right === undefined) return (nextRight) => sameAttachment(left, nextRight)
+  return (
+    left.executionId === right.executionId &&
+    (left.attachment === undefined || right.attachment === undefined
+      ? left.attachment === right.attachment
+      : sameExecutionAttachment(left.attachment, right.attachment))
+  )
+}

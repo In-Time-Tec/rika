@@ -26,7 +26,7 @@ import { decodeTranscriptExecutionCheckpoint } from "./transcript-checkpoint-cod
 
 const { error, UnitJson, UsageCursorsJson } = support
 type CheckpointError = RepositoryError | Schema.SchemaError | SqlError
-type TurnValue = typeof Turn.Type
+type TurnValue = Turn
 type ProjectionState = Parameters<Interface["commitDelta"]>[1]
 interface CheckpointMethods {
   readonly loadExecutionCheckpoints: (

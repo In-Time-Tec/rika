@@ -19,7 +19,7 @@ export interface InteractiveHarness {
   readonly latest: RuntimeFixtures.Thread.Thread
 }
 
-export const makeHarness: (
+const makeHarnessImplementation: (
   pagedEvents?: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event>,
   stalePageCursor?: boolean,
   turnPageRequests?: Ref.Ref<ReadonlyArray<typeof TurnContract.PageCursor.Type | undefined>>,
@@ -263,3 +263,71 @@ export const makeHarness: (
     return { session, repositories, turns, transcripts, controls, hiddenExecutions, older, latest }
   },
 )
+
+type HarnessCompletion = {
+  readonly release: Deferred.Deferred<void, never>
+  readonly finished: Deferred.Deferred<void, never>
+  readonly finalTurnId: RuntimeFixtures.Turn.TurnId
+}
+type HarnessResult = ReturnType<typeof makeHarnessImplementation>
+
+export function makeHarness(
+  pagedEvents?: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event>,
+  stalePageCursor?: boolean,
+  turnPageRequests?: Ref.Ref<ReadonlyArray<typeof TurnContract.PageCursor.Type | undefined>>,
+  cancelFailure?: boolean,
+  initialTurnsCompleted?: boolean,
+  completion?: HarnessCompletion,
+): HarnessResult
+export function makeHarness(
+  stalePageCursor?: boolean,
+  turnPageRequests?: Ref.Ref<ReadonlyArray<typeof TurnContract.PageCursor.Type | undefined>>,
+  cancelFailure?: boolean,
+  initialTurnsCompleted?: boolean,
+  completion?: HarnessCompletion,
+): (pagedEvents?: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event>) => HarnessResult
+export function makeHarness(
+  pagedEventsOrStale?: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> | boolean,
+  staleOrRequests?: boolean | Ref.Ref<ReadonlyArray<typeof TurnContract.PageCursor.Type | undefined>>,
+  requestsOrCancel?: Ref.Ref<ReadonlyArray<typeof TurnContract.PageCursor.Type | undefined>> | boolean,
+  cancelOrInitial?: boolean,
+  initialOrCompletion?: boolean | HarnessCompletion,
+  completion?: HarnessCompletion,
+): HarnessResult | ((pagedEvents?: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event>) => HarnessResult) {
+  if (typeof pagedEventsOrStale === "boolean") {
+    if (
+      staleOrRequests === undefined ||
+      typeof staleOrRequests === "boolean" ||
+      typeof requestsOrCancel !== "boolean" ||
+      cancelOrInitial === undefined ||
+      typeof initialOrCompletion !== "object"
+    )
+      throw new Error("Invalid interactive harness arguments")
+    return (pagedEvents) =>
+      makeHarnessImplementation(
+        pagedEvents,
+        pagedEventsOrStale,
+        staleOrRequests,
+        requestsOrCancel,
+        cancelOrInitial,
+        initialOrCompletion,
+      )
+  }
+  if (
+    (staleOrRequests !== undefined && typeof staleOrRequests !== "boolean") ||
+    (requestsOrCancel !== undefined && typeof requestsOrCancel !== "object") ||
+    (cancelOrInitial !== undefined && typeof cancelOrInitial !== "boolean") ||
+    (initialOrCompletion !== undefined &&
+      typeof initialOrCompletion !== "boolean" &&
+      typeof initialOrCompletion !== "object")
+  )
+    throw new Error("Invalid interactive harness arguments")
+  return makeHarnessImplementation(
+    pagedEventsOrStale,
+    staleOrRequests,
+    requestsOrCancel,
+    cancelOrInitial,
+    typeof initialOrCompletion === "boolean" ? initialOrCompletion : undefined,
+    typeof initialOrCompletion === "object" ? initialOrCompletion : completion,
+  )
+}
