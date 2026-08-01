@@ -1,4 +1,4 @@
-import * as Diagnostic from "@rika/app/diagnostic-contract"
+import * as Diagnostic from "./diagnostic-file-logging-contract"
 import { Clock, DateTime, Duration, Effect, FileSystem, Layer, Logger, Option, Path, Queue, References } from "effect"
 
 export type ProcessRole = "client" | "resident"

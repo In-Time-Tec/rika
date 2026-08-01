@@ -61,6 +61,7 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
           usageCost,
           usageTokens: event.tokens,
           usageTime: event.time,
+          contextUsage: event.context,
           ...(threadCostUsd === undefined ? {} : { costUsd: threadCostUsd }),
         },
       },
@@ -95,6 +96,7 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
             usageCost: { _tag: "Loading" as const },
             usageTokens: { _tag: "Loading" as const },
             usageTime: { _tag: "Loading" as const },
+            contextUsage: { _tag: "Loading" as const },
           }
         : { usageCost: preservedUsageCost }),
       activeTurnId: activeTurn?.id,

@@ -1,7 +1,6 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { assert, describe, it } from "@effect/vitest"
-import { Operation } from "@rika/app"
-import * as Diagnostic from "@rika/app/diagnostic-contract"
+import * as Diagnostic from "../src/diagnostic-file-logging-contract"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import { Cause, Duration, Effect, FileSystem, Layer, Path, Ref, Schema } from "effect"
@@ -273,7 +272,10 @@ describe("Logging", () => {
               ),
             ),
             (context) =>
-              Operation.settleAbandonedRecoveredWork(Duration.zero, () => new Set()).pipe(Effect.provide(context)),
+              Effect.logError("execution.recovery.orphan_cancel_failed").pipe(
+                Effect.annotateLogs(Diagnostic.failure("RecoveredRootCancelFailure")),
+                Effect.provide(context),
+              ),
           ),
         )
         const { content, records } = yield* writtenRecords(root)

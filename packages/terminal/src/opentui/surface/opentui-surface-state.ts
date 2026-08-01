@@ -33,6 +33,7 @@ export interface Handlers {
   readonly pasteImage?: (image?: { readonly bytes: Uint8Array; readonly mediaType?: string }) => void
   readonly expandPaste?: (token: string) => void
   readonly clickToggle?: (unit: string) => void
+  readonly contextToggle?: () => void
   readonly usageToggle?: () => void
   readonly modeToggle?: () => void
   readonly composerResize?: (height: number) => void

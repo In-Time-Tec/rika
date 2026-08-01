@@ -206,7 +206,7 @@ export class SurfaceConstruction extends SurfaceLifecycleCleanup {
     })
     this.modeLabel.onMouseDown = (event) => {
       const column = event.x - this.modeLabel.screenX
-      if (column >= 0 && column < this.usageLabelWidth) this.handlers.usageToggle?.()
+      if (column >= 0 && column < this.usageLabelWidth) this.handlers.contextToggle?.()
       else if (column >= this.modeSegmentStart && column < this.modeLabel.width) this.handlers.modeToggle?.()
     }
     const updateUsageHover = (event: MouseEvent) => {

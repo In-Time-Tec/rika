@@ -151,6 +151,21 @@ const expandPastedTextAttachment = (model: Model, token: string): Model => {
     pastedText: model.pastedText.filter((candidate) => candidate.token !== token),
   }
 }
+const toggleContextDetails = (model: Model): Model => {
+  const open = !model.contextDetailsOpen
+  return {
+    ...model,
+    contextDetailsOpen: open,
+    paletteOpen: false,
+    palette: { open: false, query: "", selected: 0 },
+    modePicker: { ...model.modePicker, open: false },
+    filePicker: { ...model.filePicker, open: false, query: "", selected: 0 },
+    threadSwitcher: { open: false, query: "", selected: 0, kind: "switch", previewScroll: 0 },
+    shortcutsOpen: false,
+    shortcutsTrigger: undefined,
+  }
+}
+
 export const canSubmit = (model: Model): boolean =>
   model.editingTurnId === undefined &&
   !model.threadSwitcher.open &&
@@ -159,9 +174,11 @@ export const canSubmit = (model: Model): boolean =>
   !model.palette.open &&
   !model.modePicker.open &&
   !model.filePicker.open &&
+  !model.contextDetailsOpen &&
   !model.shortcutsOpen &&
   !(model.cursor > 0 && model.input[model.cursor - 1] === "\\")
 export const context = {
+  toggleContextDetails,
   sameChangedFiles,
   cancelTranscriptBlocks,
   insert,
@@ -186,6 +203,7 @@ export const update: {
 } = Function.dual(
   2,
   (model: Model, message: Message): Model =>
+    (message._tag === "ContextDetailsToggled" ? toggleContextDetails(model) : undefined) ??
     reduceData(model, message, update) ??
     reduceExecution(model, message, update) ??
     reduceOverlay(model, message, update) ??

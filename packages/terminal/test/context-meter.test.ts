@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import * as ContextMeter from "../src/context-meter"
+import * as ContextMeter from "../src/state/model/terminal-context-meter"
 
 const reading = (inputTokens: number): ContextMeter.Reading => ({
   inputTokens,

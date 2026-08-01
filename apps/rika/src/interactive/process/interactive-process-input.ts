@@ -13,12 +13,6 @@ const nextMode = (mode: Mode): Mode => {
   return modes[(modes.indexOf(mode) + 1) % modes.length]!
 }
 
-const nextUsageDisplay = (display: "cost" | "tokens" | "time" | undefined): "cost" | "tokens" | "time" => {
-  if (display === "cost") return "tokens"
-  if (display === "tokens") return "time"
-  return "cost"
-}
-
 type InputContext = Omit<InteractiveInputContext, "options" | "resume">
 
 export const createInputHandlers = (context: InputContext): Partial<Parameters<typeof createTui>[0]> => {
@@ -135,11 +129,8 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
       loop.model = update(loop.model, { _tag: "DetailToggled", id: unit ?? undefined })
       loop.renderer?.surface.update(loop.model)
     },
-    usageToggle: () => {
-      loop.model = {
-        ...loop.model,
-        usageDisplay: nextUsageDisplay(loop.model.usageDisplay),
-      }
+    contextToggle: () => {
+      loop.model = update(loop.model, { _tag: "ContextDetailsToggled" })
       render()
     },
     modeToggle: () => {

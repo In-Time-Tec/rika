@@ -2,6 +2,7 @@ import { CliRenderEvents } from "@opentui/core"
 import stringWidth from "string-width"
 import { filter } from "../../presentation/terminal/command-palette"
 import { colors } from "../../presentation/terminal/terminal-theme"
+import { contextDetails } from "../../presentation/terminal/terminal-context-details"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { filteredFiles } from "../../state/model/terminal-thread-navigation"
 import { type Model } from "../../state/model/terminal-state"
@@ -48,10 +49,11 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
     threadSidebarVisible: boolean,
   ): void {
     const composerTop = model.height - renderedInputHeight
-    let overlay: "threads" | "files" | "modes" | "palette" | undefined
+    let overlay: "threads" | "files" | "modes" | "context" | "palette" | undefined
     if (model.threadSwitcher.open) overlay = "threads"
     else if (model.filePicker.open) overlay = "files"
     else if (model.modePicker.open) overlay = "modes"
+    else if (model.contextDetailsOpen) overlay = "context"
     else if (model.palette.open || model.paletteOpen) overlay = "palette"
     this.paletteBox.visible = overlay !== undefined
     this.palette.visible = this.paletteBox.visible
@@ -83,6 +85,20 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
       this.paletteBox.bottomTitle = " ←→ turn · esc"
       this.paletteBox.bottomTitleAlignment = "right"
       this.palette.content = modePickerContent(model, Math.max(1, boxWidth - 4))
+      cursorEditor = undefined
+    } else if (overlay === "context") {
+      const boxWidth = Math.min(58, contentWidth)
+      const boxHeight = Math.min(9, Math.max(1, composerTop))
+      this.paletteBox.width = boxWidth
+      this.paletteBox.height = boxHeight
+      this.paletteBox.left = contentLeft + Math.max(0, contentWidth - boxWidth)
+      this.paletteBox.top = Math.max(0, composerTop - boxHeight)
+      this.paletteBox.title = " Context & Usage "
+      this.paletteBox.titleColor = toOpenColor(colors.teal)
+      this.paletteBox.titleAlignment = "left"
+      this.paletteBox.bottomTitle = " Ctrl+Y toggle · esc "
+      this.paletteBox.bottomTitleAlignment = "right"
+      this.palette.content = contextDetails(model, Math.max(1, boxWidth - 4), Math.max(1, boxHeight - 2), this.currentTimeMillis())
       cursorEditor = undefined
     } else if (overlay === "files") {
       const entries = filteredFiles(model).map((file) => `@${file}`)

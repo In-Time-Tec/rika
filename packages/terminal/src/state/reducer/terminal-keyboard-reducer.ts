@@ -25,6 +25,10 @@ const reduceKeyboardImpl = (
   switch (message._tag) {
     case "KeyPressed": {
       const key = message.key
+      if (key.ctrl && key.name === "y") return update(model, { _tag: "ContextDetailsToggled" })
+      if (model.contextDetailsOpen) {
+        return key.name === "escape" ? update(model, { _tag: "ContextDetailsToggled" }) : model
+      }
       const prelude = reduceKeyboardPrelude(model, key, update)
       if (prelude !== undefined) return prelude
       const picker = reduceKeyboardPicker(model, key, update, {

@@ -63,6 +63,18 @@ const ThreadPreviewSchema = Schema.Union([
   Schema.TaggedStruct("Loading", { previous: Schema.optionalKey(ThreadPreviewValueSchema) }),
   Schema.TaggedStruct("Ready", { value: ThreadPreviewValueSchema }),
 ])
+export const ContextUsage = Schema.Union([
+  Schema.Struct({ _tag: Schema.tag("Loading") }),
+  Schema.Struct({ _tag: Schema.tag("Unavailable") }),
+  Schema.Struct({
+    _tag: Schema.tag("Available"),
+    inputTokens: Schema.Finite,
+    contextWindow: Schema.Finite,
+    reserveTokens: Schema.Finite,
+  }),
+])
+export type ContextUsage = typeof ContextUsage.Type
+
 export const Model = Schema.Struct({
   workspace: Schema.String,
   branch: Schema.optional(Schema.String),
@@ -99,6 +111,8 @@ export const Model = Schema.Struct({
   busy: Schema.Boolean,
   activity: Schema.optional(Activity),
   costUsd: Schema.optional(Schema.Finite),
+  contextUsage: Schema.optional(ContextUsage),
+  contextDetailsOpen: Schema.Boolean,
   usageDisplay: Schema.optional(UsageDisplay),
   usageTime: Schema.optional(UsageTime),
   usageTokens: Schema.optional(
@@ -177,6 +191,8 @@ const initialImpl: {
     pendingSteering: [],
     cancelPending: false,
     busy: false,
+    contextUsage: { _tag: "Loading" },
+    contextDetailsOpen: false,
     usageDisplay: "cost",
     paletteOpen: false,
     palette: { open: false, query: "", selected: 0 },

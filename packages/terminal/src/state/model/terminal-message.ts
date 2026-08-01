@@ -22,6 +22,7 @@ type UiEvent = {
 
 type Message =
   | { readonly _tag: "KeyPressed"; readonly key: Key }
+  | { readonly _tag: "ContextDetailsToggled" }
   | { readonly _tag: "Pasted"; readonly text: string }
   | { readonly _tag: "ImageInserted"; readonly path: string }
   | { readonly _tag: "ImageRemoved"; readonly path: string }

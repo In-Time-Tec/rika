@@ -15,6 +15,7 @@ const initializeSelectedUsageImpl = (threadId: Thread.ThreadId, request: number)
   selectionEpoch: request,
   threadId,
   revision: 0,
+  context: { _tag: "Unavailable" },
   cost: { _tag: "Unavailable" },
   tokens: { _tag: "Unavailable" },
   time: { _tag: "Unavailable" },

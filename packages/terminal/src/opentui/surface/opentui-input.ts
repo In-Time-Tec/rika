@@ -22,6 +22,7 @@ import { SurfaceOverlayRegion } from "./opentui-overlay-region"
 import { colors } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { formatTokens } from "../../presentation/terminal/terminal-format"
+import * as ContextMeter from "../../state/model/terminal-context-meter"
 import { loaderFrame } from "../rendering/opentui-spinner"
 import { spinnerFrames } from "../rendering/opentui-spinner"
 import { renderSidebar } from "../rendering/opentui-render-block"
@@ -86,7 +87,16 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
 
   protected renderModeLabel(model: Model): void {
     let usageText = ""
-    if (model.usageDisplay === "time") {
+    if (model.currentThreadId !== undefined && model.contextUsage?._tag === "Available") {
+      const value = ContextMeter.meter(model.contextUsage, {
+        cells: this.modeLabel.width < 40 ? 4 : 8,
+        phase: this.loaderPhase,
+        animated: model.busy || model.activity !== undefined,
+      })
+      usageText = `${value.glyphs.join("")} ${value.percent}%`
+    } else if (model.currentThreadId !== undefined && model.contextUsage?._tag === "Loading") {
+      usageText = `${ContextMeter.loadingMeter(this.loaderPhase, { cells: 4 }).join("")} —`
+    } else if (model.usageDisplay === "time") {
       if (model.usageTime?._tag === "Available")
         usageText = formatActiveTime(activeTimeAt(model.usageTime, this.currentTimeMillis()))
       else if (model.usageTime?._tag === "Unavailable") usageText = `${activeTimeIcon} —`
