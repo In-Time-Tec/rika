@@ -2070,7 +2070,6 @@ export class Surface {
       zIndex: 30,
       selectable: false,
       wrapMode: "none",
-      backgroundColor: colors.surface,
       visible: false,
     })
     this.paletteDividerOne = new TextRenderable(renderer, {

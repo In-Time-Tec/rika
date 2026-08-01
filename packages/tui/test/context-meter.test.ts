@@ -42,7 +42,7 @@ describe("ContextMeter", () => {
     const low = { _tag: "Available" as const, ...reading(600_000) }
     const high = { _tag: "Available" as const, ...reading(850_000) }
     const compacted = { _tag: "Available" as const, ...reading(208_294) }
-    let model = { ...ViewState.initial("/work"), busy: true, contextUsage: low }
+    let model: ViewState.Model = { ...ViewState.initial("/work"), busy: true, contextUsage: low }
     model = ViewState.update(model, { _tag: "ContextUsageReplaced", contextUsage: high })
     expect(model.contextAnimation).toMatchObject({ flashTicks: 2, flashed75: true, flashed90: true })
     model = ViewState.update(model, { _tag: "AnimationTicked" })
