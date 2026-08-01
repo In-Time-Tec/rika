@@ -6,6 +6,7 @@ import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as ViewState from "@rika/terminal/terminal-state"
+import * as TerminalMessage from "@rika/terminal/terminal-message"
 import {
   Clock,
   Config,
@@ -302,7 +303,7 @@ const program = Effect.gen(function* () {
                       if (event._tag !== "TranscriptProjectionPatched" || event.origin._tag !== "Event") return
                       Queue.offerUnsafe(
                         events,
-                        `${event.origin.type}:${eventClock.currentTimeMillisUnsafe() - startedAt}:${ViewState.formatActivity(state.model.activity)}`,
+                        `${event.origin.type}:${eventClock.currentTimeMillisUnsafe() - startedAt}:${TerminalMessage.formatActivity(state.model.activity)}`,
                       )
                     }),
                   )

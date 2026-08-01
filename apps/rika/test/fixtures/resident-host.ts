@@ -1,4 +1,5 @@
 import * as InteractiveEvent from "@rika/product/interactive-event"
+import * as ProductOperation from "@rika/product/product-operation"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
@@ -186,7 +187,7 @@ const program = Effect.gen(function* () {
               })
             if (input.prompt[0] === "reject-before-start")
               return Effect.fail(
-                OperationUnavailable.make({
+                ProductOperation.OperationUnavailable.make({
                   operation: "Interactive",
                   message: "Interactive setup rejected",
                 }),
