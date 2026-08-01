@@ -3,12 +3,10 @@ import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import * as ExecutionBackend from "../contract/execution-service"
 import type { Node } from "./execution-ingest-state"
 import type { InterruptedOutcome } from "./execution-ingest-state"
-
 export const isInterruptedOutcome = (
   outcome: NonNullable<TranscriptUnit.Unit["executionOutcome"]>,
 ): outcome is InterruptedOutcome => outcome.status === "failed" || outcome.status === "cancelled"
-
-export const childExecutionIds = (event: ExecutionBackend.Event): ReadonlyArray<string> => {
+const childExecutionIds = (event: ExecutionBackend.Event): ReadonlyArray<string> => {
   const ids = new Set<string>()
   const addAliases = (value: Readonly<Record<string, unknown>> | undefined) => {
     if (value === undefined) return
@@ -26,14 +24,11 @@ export const childExecutionIds = (event: ExecutionBackend.Event): ReadonlyArray<
       if (child !== null && typeof child === "object") addAliases(child as Readonly<Record<string, unknown>>)
   return [...ids]
 }
-
-export const bySequence = (left: ExecutionBackend.Event, right: ExecutionBackend.Event) =>
-  left.sequence - right.sequence
-
+const bySequence = (left: ExecutionBackend.Event, right: ExecutionBackend.Event) => left.sequence - right.sequence
 export const fullyConsumed = (nodes: ReadonlyMap<string, Node>): boolean =>
   [...nodes.values()].every((node) => node.status !== undefined)
-
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+export const executionKey = TranscriptCorrelation.executionKey
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as ExecutionStatus from "../contract/execution-status"
 import { ExecutionId } from "../contract/execution-identifier"
@@ -43,29 +38,46 @@ import * as IngestState from "./execution-ingest-state"
 import type { VisibleDelta } from "./execution-projection-types"
 import * as IngestRestore from "./execution-ingest-restore"
 import type { Pipeline } from "./execution-ingest-state"
-import type { Options, IngestFailure } from "./execution-ingest-service"
-import * as UsageCost from "../../usage/usage-projection"
-
+import type { Options } from "./execution-ingest-service"
+import type { IngestFailure, Failure } from "./execution-ingest-failure"
+import type * as IngestProjectionContract from "./execution-projection-contract"
+import type * as UsageEvent from "../../usage/usage-event"
+import * as UsageFold from "../../usage/usage-fold"
+export interface Root {
+  readonly threadId: import("@rika/product/thread-record").ThreadId
+  readonly turnId: import("@rika/product/turn-record").TurnId
+}
+export interface Discovery {
+  readonly threadId: import("@rika/product/thread-record").ThreadId
+  readonly rootTurnId: import("@rika/product/turn-record").TurnId
+  readonly executionId: string
+}
+export type ProjectionChange =
+  | IngestProjectionContract.Change
+  | {
+      readonly _tag: "ProjectionFailed"
+      readonly threadId: import("@rika/product/thread-record").ThreadId
+      readonly rootTurnId: import("@rika/product/turn-record").TurnId
+      readonly streamId: string
+      readonly patchRevision: number
+      readonly failure: Failure
+    }
 export interface EventDependencies {
   readonly options: Options
   readonly commit: (pipeline: Pipeline) => Effect.Effect<void, never>
   readonly fail: (pipeline: Pipeline, node: Node, reason: IngestFailure["reason"], message: string) => void
-  readonly failProjection: (
-    pipeline: Pipeline,
-    failure: import("../../usage/usage-projection").ProjectionFailure,
-  ) => void
+  readonly failProjection: (pipeline: Pipeline, failure: UsageEvent.ProjectionFailure) => void
   readonly publishPatch: (
     pipeline: Pipeline,
     origin: import("./execution-projection-contract").ProjectionOrigin,
     visible: VisibleDelta,
   ) => void
   readonly wake: (pipeline: Pipeline) => void
-  readonly publish: (pipeline: Pipeline, change: import("./execution-ingest-service").ProjectionChange) => void
+  readonly publish: (pipeline: Pipeline, change: ProjectionChange) => void
   readonly commitEvents: number
   readonly finishPipeline: (pipeline: Pipeline) => void
   readonly settlePipeline: (pipeline: Pipeline) => void
 }
-
 const interruptedAncestorOutcome = (nodes: ReadonlyMap<string, Node>, node: Node): InterruptedOutcome | undefined =>
   IngestRestore.interruptedAncestorOutcome(nodes, node, isInterruptedOutcome)
 const spawnedChildIds = childExecutionIds
@@ -87,7 +99,6 @@ export const make = (dependencies: EventDependencies) => {
     pipeline.delta.checkpoints.add(node.key)
     IngestState.recordChange(pipeline)
   }
-
   const resolveChild = (pipeline: Pipeline, parent: Node, child: Node, visible?: VisibleDelta) => {
     if (parent.parentKey !== undefined && parent.attachment === undefined) {
       const waiting = pipeline.unresolvedByParent.get(parent.key) ?? new Set<string>()
@@ -144,7 +155,6 @@ export const make = (dependencies: EventDependencies) => {
       if (grandchild !== undefined) resolveChild(pipeline, child, grandchild, visible)
     }
   }
-
   const recordMutation = (
     pipeline: Pipeline,
     node: Node,
@@ -171,7 +181,6 @@ export const make = (dependencies: EventDependencies) => {
       if (child !== undefined) resolveChild(pipeline, node, child, visible)
     }
   }
-
   const applyMutation = (
     pipeline: Pipeline,
     node: Node,
@@ -183,7 +192,6 @@ export const make = (dependencies: EventDependencies) => {
     if (outcome !== undefined && TranscriptProjection.Fold.foldHasRunningUnits(node.fold))
       recordMutation(pipeline, node, TranscriptProjection.Fold.applyAncestorOutcome(node.fold, outcome), visible)
   }
-
   const applyDescendantOutcome = (
     pipeline: Pipeline,
     ancestor: Node,
@@ -197,17 +205,14 @@ export const make = (dependencies: EventDependencies) => {
         applyMutation(pipeline, node, TranscriptProjection.Fold.applyAncestorOutcome(node.fold, outcome), visible)
     }
   }
-
   let startNode: (pipeline: Pipeline, node: Node) => void
   let release: (pipeline: Pipeline, root: Node) => void
-
   const caught = (pipeline: Pipeline, node: Node) => {
     if (node.caught) return
     node.caught = true
     pipeline.reading -= 1
     if (pipeline.reading <= 0) dependencies.wake(pipeline)
   }
-
   const discover = (pipeline: Pipeline, parent: Node, childExecutionId: string, visible?: VisibleDelta) => {
     const key = TranscriptCorrelation.executionKey(childExecutionId)
     if (key.length === 0 || key === parent.key || pipeline.nodes.has(key)) return
@@ -244,7 +249,6 @@ export const make = (dependencies: EventDependencies) => {
       dependencies.publishPatch(pipeline, { _tag: "Discovery", executionId: childExecutionId }, localVisible)
     startNode(pipeline, node)
   }
-
   const accept = (pipeline: Pipeline, node: Node, event: ExecutionBackend.Event) => {
     if (pipeline.stopped || !pipeline.accepting) return
     try {
@@ -284,7 +288,7 @@ export const make = (dependencies: EventDependencies) => {
         event,
       }
       const terminal = ExecutionStatus.terminalEventStatus(event.type)
-      const usage = UsageCost.applyUsageFoldEvent(pipeline.usageFold, observation)
+      const usage = UsageFold.applyUsageFoldEvent(pipeline.usageFold, observation)
       if (Result.isFailure(usage)) {
         dependencies.failProjection(pipeline, usage.failure)
         return
@@ -321,13 +325,12 @@ export const make = (dependencies: EventDependencies) => {
         if (node.parentKey === undefined) pipeline.rootSettled.openUnsafe()
       } else if (pipeline.pending >= dependencies.commitEvents) dependencies.wake(pipeline)
       for (const childExecutionId of spawnedChildIds(event)) discover(pipeline, node, childExecutionId, visible)
-      if (UsageCost.usageFoldChanged(pipeline.usageFold)) pipeline.usagePending.push(observation)
+      if (UsageFold.usageFoldChanged(pipeline.usageFold)) pipeline.usagePending.push(observation)
       dependencies.publishPatch(pipeline, IngestProjection.eventOrigin(node.executionId, event), visible)
     } catch (cause) {
       dependencies.fail(pipeline, node, "backend", String(cause))
     }
   }
-
   const pageNode = (pipeline: Pipeline, node: Node, reference: ExecutionBackend.ExecutionReference | undefined) =>
     Effect.gen(function* () {
       if (dependencies.options.backend.pageEvents === undefined) {
@@ -353,7 +356,6 @@ export const make = (dependencies: EventDependencies) => {
         after = next
       }
     })
-
   const followNode = (pipeline: Pipeline, node: Node) =>
     Effect.gen(function* () {
       if (node.status !== undefined) return
@@ -432,14 +434,12 @@ export const make = (dependencies: EventDependencies) => {
         if (node.cursor === before) return
       }
     })
-
   release = (pipeline, root) => {
     const held = pipeline.delivered
     if (held === undefined) return
     pipeline.delivered = undefined
     for (const event of held.toSorted((left, right) => left.sequence - right.sequence)) accept(pipeline, root, event)
   }
-
   startNode = (pipeline, node) => {
     pipeline.active += 1
     pipeline.reading += 1
@@ -478,7 +478,6 @@ export const make = (dependencies: EventDependencies) => {
       ),
     )
   }
-
   return {
     startNode,
     release,

@@ -1,6 +1,6 @@
 import * as TurnRepository from "@rika/product/turn-repository"
 import type { InteractiveEvent } from "../interactive/interactive-event"
-import { queueItem } from "./execution-operation-coordination"
+import { queueItem } from "../interactive/interactive-session-queue"
 
 export const queueMutationEvent = (queue: TurnRepository.QueueItemChange): InteractiveEvent => ({
   _tag: "QueueUpdated",

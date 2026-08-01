@@ -1,14 +1,69 @@
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product/turn-repository"
-import { Effect, Exit, Ref, Scope, Stream } from "effect"
+import type { ProjectionChange } from "../../execution/ingest/execution-ingest-event"
+import { Function, Effect, Exit, Ref, Scope, Stream } from "effect"
 import type { InteractiveEvent } from "./interactive-event"
-import {
-  initializeSelectedUsage,
-  makeSelectionState,
-  queueItem,
-  transcriptProjectionEvent,
-} from "../dispatch/execution-operation-coordination"
-import type { SelectionEpochState } from "../dispatch/execution-operation-coordination"
+import { makeSelectionState, type SelectionEpochState } from "./interactive-thread-selection"
+import { queueItem } from "./interactive-session-queue"
+
+export type ThreadUsageEvent = Extract<InteractiveEvent, { readonly _tag: "ThreadUsageUpdated" }>
+
+export const initializeSelectedUsage = (threadId: Thread.ThreadId, request: number): ThreadUsageEvent => ({
+  _tag: "ThreadUsageUpdated",
+  selectionEpoch: request,
+  threadId,
+  revision: 0,
+  cost: { _tag: "Unavailable" },
+  tokens: { _tag: "Unavailable" },
+  time: { _tag: "Unavailable" },
+})
+
+export const transcriptProjectionEvent = (change: ProjectionChange): InteractiveEvent => {
+  switch (change._tag) {
+    case "ProjectionStarted": {
+      const { rootStatus: startedRootStatus, ...snapshot } = change.snapshot
+      return {
+        _tag: "TranscriptProjectionStarted",
+        selectionEpoch: 0,
+        ...snapshot,
+        ...(startedRootStatus === undefined ? {} : { rootStatus: startedRootStatus }),
+      }
+    }
+    case "ProjectionPatched": {
+      const { rootStatus: patchedRootStatus, ...patch } = change.patch
+      return {
+        _tag: "TranscriptProjectionPatched",
+        selectionEpoch: 0,
+        ...patch,
+        ...(patchedRootStatus === undefined ? {} : { rootStatus: patchedRootStatus }),
+      }
+    }
+    case "ProjectionStopped":
+      return {
+        _tag: "TranscriptProjectionStopped",
+        selectionEpoch: 0,
+        threadId: change.threadId,
+        rootTurnId: change.rootTurnId,
+        streamId: change.streamId,
+        patchRevision: change.patchRevision,
+        status: change.status,
+      }
+    case "ProjectionFailed":
+      return {
+        _tag: "TranscriptProjectionFailed",
+        selectionEpoch: 0,
+        threadId: change.threadId,
+        rootTurnId: change.rootTurnId,
+        streamId: change.streamId,
+        patchRevision: change.patchRevision,
+        executionId: change.failure.executionId ?? String(change.rootTurnId),
+        reason: change.failure.reason,
+        message: change.failure.message,
+      }
+    default:
+      return Function.absurd(change)
+  }
+}
 
 export const makeInteractiveSelectionProjection = (input: any) => {
   const {

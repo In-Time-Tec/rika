@@ -1,29 +1,11 @@
-import * as Thread from "@rika/product/thread-record"
-import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
-import * as TurnRepository from "@rika/product/turn-repository"
-import * as UsageRepository from "@rika/product/usage-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
-import * as ExecutionStatus from "../contract/execution-status"
-import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import {
-  Cause,
-  Deferred,
-  Duration,
-  Effect,
-  FiberSet,
-  Latch,
-  Queue,
-  Result,
-  Schema,
-  Scope,
-  Semaphore,
-  Stream,
-} from "effect"
-import type * as IngestProjectionContract from "./execution-projection-contract"
-import * as UsageCost from "../../usage/usage-projection"
+import { Cause, Deferred, Duration, Effect, FiberSet, Latch, Queue, Result, Scope, Semaphore } from "effect"
+import * as UsageFold from "../../usage/usage-fold"
+import * as UsageSnapshot from "../../usage/usage-snapshot"
+import * as UsageCodec from "../../usage/usage-snapshot-codec"
+import * as UsageEvent from "../../usage/usage-event"
 import * as IngestState from "./execution-ingest-state"
 import * as IngestEvent from "./execution-ingest-event"
 import * as IngestRestore from "./execution-ingest-restore"
@@ -31,6 +13,8 @@ import * as IngestCommit from "./execution-ingest-commit"
 import * as IngestWatch from "./execution-ingest-watch"
 import * as IngestLifecycle from "./execution-ingest-lifecycle"
 import * as IngestFailureRuntime from "./execution-ingest-failure"
+import { IngestFailure } from "./execution-ingest-failure"
+import type { Failure } from "./execution-ingest-failure"
 import * as IngestStop from "./execution-ingest-stop"
 
 export const projectionVersion = 4
@@ -39,97 +23,37 @@ export const defaultCommitWindow = Duration.millis(250)
 export const defaultCommitEvents = 64
 export const defaultWatchCapacity = 2_048
 
-export class IngestFailure extends Schema.TaggedErrorClass<IngestFailure>()("ExecutionIngestFailure", {
-  message: Schema.String,
-  threadId: Schema.String,
-  turnId: Schema.String,
-  executionId: Schema.String,
-  reason: Schema.Literals(["cursor-rejected", "backend", "repository", "checkpoint", "attachment"]),
-}) {}
-
-export class ProjectionWatchOverflow extends Schema.TaggedErrorClass<ProjectionWatchOverflow>()(
-  "ExecutionIngestProjectionWatchOverflow",
-  {
-    threadId: Schema.String,
-    capacity: Schema.Int,
-  },
-) {}
-
-export interface Root {
-  readonly threadId: Thread.ThreadId
-  readonly turnId: Turn.TurnId
-}
-
-export interface Discovery {
-  readonly threadId: Thread.ThreadId
-  readonly rootTurnId: Turn.TurnId
-  readonly executionId: string
-}
-
-export type Failure = IngestFailure | UsageCost.ProjectionFailure
-
-export type ProjectionSnapshot = IngestProjectionContract.Snapshot
-export type ProjectionPatch = IngestProjectionContract.Patch
-export type ProjectionChange =
-  | IngestProjectionContract.Change
-  | {
-      readonly _tag: "ProjectionFailed"
-      readonly threadId: Thread.ThreadId
-      readonly rootTurnId: Turn.TurnId
-      readonly streamId: string
-      readonly patchRevision: number
-      readonly failure: Failure
-    }
-
-export interface ProjectionWatch {
-  readonly snapshots: ReadonlyArray<ProjectionSnapshot>
-  readonly refolding: boolean
-  readonly changes: Stream.Stream<ProjectionChange, ProjectionWatchOverflow>
-}
-
-export interface Commit {
-  readonly threadId: Thread.ThreadId
-  readonly rootTurnId: Turn.TurnId
-  readonly revision: number
-  readonly terminal: boolean
-  readonly usageChanged: boolean
-  readonly refolded: boolean
-}
-
-export interface Refold {
-  readonly threadId: Thread.ThreadId
-  readonly rootTurnId: Turn.TurnId
-  readonly phase: "started" | "finished"
-}
-
 export interface Options {
   readonly backend: ExecutionBackend.Interface
-  readonly transcripts: TranscriptRepository.Interface
-  readonly turns: TurnRepository.Interface
-  readonly usage: UsageRepository.Interface
+  readonly transcripts: import("@rika/product/transcript-repository").Interface
+  readonly turns: import("@rika/product/turn-repository").Interface
+  readonly usage: import("@rika/product/usage-repository").Interface
   readonly commitWindow?: Duration.Input
   readonly commitEvents?: number
   readonly watchCapacity?: number
-  readonly onDiscovered?: (discovery: Discovery) => void
-  readonly onCommitted?: (commit: Commit) => void
-  readonly onRefold?: (refold: Refold) => void
+  readonly onDiscovered?: (discovery: IngestEvent.Discovery) => void
+  readonly onCommitted?: (commit: IngestCommit.Commit) => void
+  readonly onRefold?: (refold: IngestCommit.Refold) => void
   readonly onFailure?: (failure: Failure) => void
 }
 
 export interface Interface {
-  readonly ensure: (root: Root) => Effect.Effect<void, Failure>
-  readonly watchThread: (threadId: Thread.ThreadId) => Effect.Effect<ProjectionWatch, never, Scope.Scope>
-  readonly deliver: (turnId: Turn.TurnId, event: ExecutionBackend.Event) => void
-  readonly consumed: (turnId: Turn.TurnId) => Effect.Effect<void, Failure>
-  readonly flush: (turnId: Turn.TurnId) => Effect.Effect<void, Failure>
-  readonly settled: (turnId: Turn.TurnId) => Effect.Effect<void, Failure>
+  readonly ensure: (root: IngestEvent.Root) => Effect.Effect<void, Failure>
+  readonly watchThread: (
+    threadId: IngestEvent.Root["threadId"],
+  ) => Effect.Effect<IngestWatch.ProjectionWatch, never, Scope.Scope>
+  readonly deliver: (turnId: IngestEvent.Root["turnId"], event: ExecutionBackend.Event) => void
+  readonly consumed: (turnId: IngestEvent.Root["turnId"]) => Effect.Effect<void, Failure>
+  readonly flush: (turnId: IngestEvent.Root["turnId"]) => Effect.Effect<void, Failure>
+  readonly settled: (turnId: IngestEvent.Root["turnId"]) => Effect.Effect<void, Failure>
 }
 
 type InterruptedOutcome = IngestState.InterruptedOutcome
 type Node = IngestState.Node
 type Pipeline = IngestState.Pipeline
 
-const isTerminalStatus = ExecutionStatus.isTerminalStatus
+const isTerminalStatus = (status: string): boolean =>
+  status === "completed" || status === "failed" || status === "cancelled"
 const isInterruptedOutcome = IngestEvent.isInterruptedOutcome
 const fullyConsumed = IngestEvent.fullyConsumed
 const interruptedAncestorOutcome = (nodes: ReadonlyMap<string, Node>, node: Node): InterruptedOutcome | undefined =>
@@ -204,7 +128,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
       commitWindow,
     )
 
-  const ensure = Effect.fn("ExecutionIngestService.ensure")(function* (root: Root) {
+  const ensure = Effect.fn("ExecutionIngestService.ensure")(function* (root: IngestEvent.Root) {
     yield* admission.withPermits(1)(
       Effect.gen(function* () {
         const live = pipelines.get(String(root.turnId))
@@ -271,19 +195,19 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
             }),
           ),
         )
-        if (usageSource.projectionVersion > UsageRepository.projectionVersion)
-          return yield* UsageCost.ProjectionFailure.make({
+        if (usageSource.projectionVersion > UsageSnapshot.projectionVersion)
+          return yield* UsageEvent.ProjectionFailure.make({
             message: `Usage source ${usageSourceId} has unsupported projection version ${usageSource.projectionVersion}`,
             reason: "unsupported-version",
             threadId: String(root.threadId),
             turnId: String(root.turnId),
           })
         const usageRefoldFromVersion =
-          usageSource.projectionVersion < UsageRepository.projectionVersion ? usageSource.projectionVersion : undefined
+          usageSource.projectionVersion < UsageSnapshot.projectionVersion ? usageSource.projectionVersion : undefined
         const usageDecoded =
           usageRefoldFromVersion !== undefined || usageSource.foldJson === undefined
-            ? Result.succeed(UsageCost.empty)
-            : UsageCost.deserialize(usageSource.foldJson)
+            ? Result.succeed(UsageSnapshot.empty)
+            : UsageCodec.deserialize(usageSource.foldJson)
         if (Result.isFailure(usageDecoded)) return yield* usageDecoded.failure
         const restored = IngestRestore.restore(turn, refolding ? undefined : stored)
         if (restored.invalid !== undefined)
@@ -342,7 +266,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
         }
         failedPipelines.delete(String(root.turnId))
         if (!refolding && isTerminalStatus(turn.status) && fullyConsumed(restored.nodes)) return
-        const unitIndex = new Map<string, TranscriptUnit.Unit>()
+        const unitIndex = new Map<string, import("@rika/transcript/transcript-unit").Unit>()
         const unitOwners = new Map<string, string>()
         for (const [key, node] of restored.nodes)
           for (const unit of TranscriptProjection.Fold.foldUnits(node.fold)) {
@@ -354,7 +278,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
         const pipeline: Pipeline = {
           threadId: root.threadId,
           turnId: root.turnId,
-          rootKey: TranscriptCorrelation.executionKey(String(root.turnId)),
+          rootKey: IngestEvent.executionKey(String(root.turnId)),
           streamId: `projection-${nextStreamId}`,
           nodes: restored.nodes,
           order: restored.order,
@@ -382,7 +306,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
           usageSourceComplete: usageSource.sourceComplete,
           usageRefoldFromVersion,
           usagePending: [],
-          usageFold: UsageCost.restoreUsageFold(usageDecoded.success),
+          usageFold: UsageFold.restoreUsageFold(usageDecoded.success),
           usageNotificationPending: false,
           delta: {
             units: new Map(
@@ -448,13 +372,13 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
       }
       accept(pipeline, pipeline.nodes.get(pipeline.rootKey)!, event)
     },
-    consumed: Effect.fn("ExecutionIngestService.consumed")(function* (turnId: Turn.TurnId) {
+    consumed: Effect.fn("ExecutionIngestService.consumed")(function* (turnId: IngestEvent.Root["turnId"]) {
       const pipeline = pipelines.get(String(turnId))
       if (pipeline !== undefined) return yield* Deferred.await(pipeline.rootCommitted)
       const failure = failedPipelines.get(String(turnId))
       if (failure !== undefined) return yield* failure
     }),
-    flush: Effect.fn("ExecutionIngestService.flush")(function* (turnId: Turn.TurnId) {
+    flush: Effect.fn("ExecutionIngestService.flush")(function* (turnId: IngestEvent.Root["turnId"]) {
       const deferred = yield* Deferred.make<void, Failure>()
       const pipeline = pipelines.get(String(turnId))
       if (pipeline === undefined) {
@@ -470,7 +394,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
       wake(pipeline)
       return yield* Deferred.await(deferred)
     }),
-    settled: Effect.fn("ExecutionIngestService.settled")(function* (turnId: Turn.TurnId) {
+    settled: Effect.fn("ExecutionIngestService.settled")(function* (turnId: IngestEvent.Root["turnId"]) {
       const pipeline = pipelines.get(String(turnId))
       if (pipeline !== undefined) return yield* Deferred.await(pipeline.finished)
       const failure = failedPipelines.get(String(turnId))

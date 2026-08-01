@@ -1,12 +1,22 @@
 import * as Thread from "@rika/product/thread-record"
+import * as Turn from "@rika/product/turn-record"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Clock, Context, Effect, Ref } from "effect"
-import { queueItem } from "../dispatch/execution-operation-coordination"
+import type { QueueItem } from "./interactive-event"
 import { promotePendingTurns } from "./pending-turn-promotion"
 import { operationError } from "../operation-error"
 import type { InteractiveEvent } from "./interactive-event"
+
+export const queueItem = (turn: Turn.AgentExecutionTurn): QueueItem => {
+  const attachments = turn.promptParts
+    ?.filter((part) => part.type === "image")
+    .flatMap((part) => (part.filename === undefined ? [] : [part.filename]))
+  return attachments === undefined || attachments.length === 0
+    ? { id: turn.id, prompt: turn.prompt }
+    : { id: turn.id, prompt: turn.prompt, attachments }
+}
 
 export const makeInteractiveQueue = (input: any) => {
   const {

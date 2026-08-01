@@ -5,7 +5,10 @@ import * as ThreadInteractionRepository from "@rika/product/thread-interaction-r
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import { Clock, Context, Effect } from "effect"
-import { projectedOutcomeStatus } from "./execution-operation-coordination"
+
+export const projectedOutcomeStatus = (
+  status: "completed" | "failed" | "cancelled",
+): "complete" | "failed" | "cancelled" => (status === "completed" ? "complete" : status)
 
 export const makeThreadResultReconciliation =
   (input: any): any =>

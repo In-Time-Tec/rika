@@ -1,6 +1,28 @@
-import { persistedThreadUsage } from "../dispatch/execution-operation-coordination"
+import * as UsageSnapshot from "@rika/product/usage-snapshot"
+import type { InteractiveEvent } from "./interactive-event"
 import { makeInitialTranscriptWindow, makeInteractiveTranscriptPage } from "./interactive-transcript-page"
 import { makeInteractiveTranscriptLifecycle } from "./interactive-transcript-lifecycle"
+
+export const persistedThreadUsage = (
+  value: UsageSnapshot.Aggregate,
+): Pick<Extract<InteractiveEvent, { readonly _tag: "ThreadUsageUpdated" }>, "cost" | "tokens" | "time"> => ({
+  cost:
+    value.costNanoUsd === undefined
+      ? { _tag: "Unavailable" }
+      : { _tag: "Available", usd: value.costNanoUsd / 1_000_000_000, unpricedAttempts: value.unpricedAttempts },
+  tokens:
+    value.tokens === undefined
+      ? { _tag: "Unavailable" }
+      : { _tag: "Available", total: value.tokens, uncountedAttempts: value.uncountedAttempts },
+  time:
+    value.activeMillis === undefined
+      ? { _tag: "Unavailable" }
+      : {
+          _tag: "Available",
+          accumulatedMillis: value.activeMillis,
+          ...(value.activeSince === undefined ? {} : { activeSince: value.activeSince }),
+        },
+})
 
 export const makeInteractiveTranscript = (input: any) => {
   const lifecycleInput = { ...input, persistedThreadUsage }

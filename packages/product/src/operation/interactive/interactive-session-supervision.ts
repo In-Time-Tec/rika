@@ -4,7 +4,7 @@ import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
 import { Effect, PubSub } from "effect"
 import type { InteractiveEvent } from "./interactive-event"
-import { settleStopRequestedTurns } from "../dispatch/execution-operation-coordination"
+import { settleStopRequestedTurns } from "../../execution/lifecycle/product-execution-stop"
 
 const interactiveEventThreadId = (event: InteractiveEvent): string | undefined => {
   if (event._tag === "SelectionLoaded") return String(event.thread.id)

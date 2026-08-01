@@ -1,6 +1,7 @@
 import { Deferred, Effect } from "effect"
 import type { Pipeline, Node } from "./execution-ingest-state"
-import type { ProjectionChange, Failure } from "./execution-ingest-service"
+import type { ProjectionChange } from "./execution-ingest-event"
+import type { Failure } from "./execution-ingest-failure"
 
 export const finish = (
   pipeline: Pipeline,

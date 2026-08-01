@@ -2,7 +2,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Clock, Effect } from "effect"
 import { operationError } from "../operation-error"
-import { fanOutTurnStatus } from "./execution-operation-coordination"
+import { fanOutTurnStatus } from "../../execution/lifecycle/product-execution-quiescence"
 
 export const makeExecutionReview = (input: any) =>
   Effect.sync(() => {

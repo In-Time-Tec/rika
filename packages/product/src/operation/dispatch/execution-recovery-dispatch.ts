@@ -8,7 +8,11 @@ import * as ThreadActivity from "../../thread/query/thread-activity"
 import * as Turn from "../../thread/model/turn-record"
 import * as TurnRepository from "../../thread/repository/turn-repository"
 import { queuedTurnPromoteMaxAgeMs, staleQueuedTurnsError } from "../../thread/queue/pending-turn-policy"
-import { awaitSessionQuiescence, executionTreeQuiescent, fanOutTurnStatus } from "./execution-operation-coordination"
+import {
+  awaitSessionQuiescence,
+  executionTreeQuiescent,
+  fanOutTurnStatus,
+} from "../../execution/lifecycle/product-execution-quiescence"
 import { OperationError, operationError } from "../operation-error"
 import { Clock, Effect } from "effect"
 

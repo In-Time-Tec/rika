@@ -4,10 +4,12 @@ import * as TurnRepository from "@rika/product/turn-repository"
 import * as UsageRepository from "@rika/product/usage-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
-import { persistedThreadUsage } from "./execution-operation-coordination"
+import { persistedThreadUsage } from "../interactive/interactive-session-transcript-runtime"
 import * as RootTurnOwner from "../../thread/queue/root-turn-owner"
 import * as ThreadToolService from "../../thread/tool/thread-tool-service"
-import * as UsageCost from "../../usage/usage-projection"
+import * as UsageProjection from "../../usage/usage-projection"
+import * as UsageSnapshot from "../../usage/usage-snapshot"
+import * as UsageCodec from "../../usage/usage-snapshot-codec"
 import { Context, Effect, Layer, Result, Ref, Semaphore } from "effect"
 import { buildProductOperationDependencies } from "./product-operation-foundation-dependencies"
 import { makeProductOperationAdmission } from "./product-operation-admission"
@@ -50,7 +52,7 @@ export const makeProductOperationFoundation = Effect.fn("ProductOperation.makeFo
   }
   const usageRepository = dependencies.usageRepository
   const publishThreadUsage = Effect.fn("ProductOperation.publishThreadUsage")(function* (
-    value: UsageRepository.TurnUsage | undefined,
+    value: UsageSnapshot.TurnUsage | undefined,
   ) {
     if (value === undefined) return
     const thread = yield* usageRepository.readThread(value.threadId)
@@ -87,16 +89,16 @@ export const makeProductOperationFoundation = Effect.fn("ProductOperation.makeFo
       if (stored === undefined)
         return yield* UsageRepository.RepositoryError.make({ message: `Usage source ${sourceId} was not admitted` })
       const decoded =
-        stored.foldJson === undefined ? Result.succeed(UsageCost.empty) : UsageCost.deserialize(stored.foldJson)
+        stored.foldJson === undefined ? Result.succeed(UsageSnapshot.empty) : UsageCodec.deserialize(stored.foldJson)
       if (Result.isFailure(decoded)) return yield* decoded.failure
-      const folded = UsageCost.foldBatch(
+      const folded = UsageProjection.foldBatch(
         decoded.success,
         events.map((event) => ({ threadId, turnId, event })),
         terminal ? new Set([sourceId]) : new Set(),
       )
       if (Result.isFailure(folded)) return yield* folded.failure
-      const foldJson = UsageCost.serialize(folded.success)
-      const totals = { ...UsageCost.materialize(folded.success, turnId, threadId), sourceComplete: terminal }
+      const foldJson = UsageCodec.serialize(folded.success)
+      const totals = { ...UsageProjection.materialize(folded.success, turnId, threadId), sourceComplete: terminal }
       if (
         foldJson === stored.foldJson &&
         (yield* usageRepository.readSource(sourceId, turnId))?.sourceComplete === terminal

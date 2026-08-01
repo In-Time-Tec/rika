@@ -14,8 +14,8 @@ import {
   selectionMatches as _selectionMatches,
 } from "./interactive-thread-selection"
 import { Effect, Clock, Ref } from "effect"
-import { queueItem } from "../dispatch/execution-operation-coordination"
-import type { SelectionEpochState } from "../dispatch/execution-operation-coordination"
+import { queueItem } from "./interactive-session-queue"
+import type { SelectionEpochState } from "./interactive-thread-selection"
 import { operationError } from "../operation-error"
 import type { InteractiveEvent } from "./interactive-event"
 

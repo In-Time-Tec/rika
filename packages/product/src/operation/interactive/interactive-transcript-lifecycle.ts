@@ -2,8 +2,7 @@ import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
 import { Clock, Effect, Fiber, Ref } from "effect"
-import { makeSelectionState } from "../dispatch/execution-operation-coordination"
-import type { SelectionEpochState } from "../dispatch/execution-operation-coordination"
+import { makeSelectionState, type SelectionEpochState } from "./interactive-thread-selection"
 
 export const makeInteractiveTranscriptLifecycle = (input: any) => {
   const {

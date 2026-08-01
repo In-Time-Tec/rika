@@ -1,11 +1,21 @@
 import * as Thread from "@rika/product/thread-record"
-import { Cause, Effect, Queue, Scope, Stream } from "effect"
+import { Cause, Effect, Queue, Scope, Schema, Stream } from "effect"
 import * as IngestPatch from "./execution-projection-patch"
 import type { Pipeline, Watcher } from "./execution-ingest-state"
-import { ProjectionWatchOverflow } from "./execution-ingest-service"
-import type { ProjectionChange, ProjectionWatch } from "./execution-ingest-service"
+import type { ProjectionChange } from "./execution-ingest-event"
 import type * as IngestProjectionContract from "./execution-projection-contract"
 import type * as IngestProjectionTypes from "./execution-projection-types"
+
+export class ProjectionWatchOverflow extends Schema.TaggedErrorClass<ProjectionWatchOverflow>()(
+  "ExecutionIngestProjectionWatchOverflow",
+  { threadId: Schema.String, capacity: Schema.Int },
+) {}
+
+export interface ProjectionWatch {
+  readonly snapshots: ReadonlyArray<IngestProjectionContract.Snapshot>
+  readonly refolding: boolean
+  readonly changes: Stream.Stream<ProjectionChange, ProjectionWatchOverflow>
+}
 
 export const make = (
   pipelines: ReadonlyMap<string, Pipeline>,

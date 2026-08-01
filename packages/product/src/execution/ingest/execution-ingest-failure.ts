@@ -1,8 +1,18 @@
-import * as UsageCost from "../../usage/usage-projection"
-import { Deferred, Effect } from "effect"
-import { IngestFailure } from "./execution-ingest-service"
-import type { Failure, Options } from "./execution-ingest-service"
+import * as UsageEvent from "../../usage/usage-event"
+import { Deferred, Effect, Schema } from "effect"
+import type { Options } from "./execution-ingest-service"
+import type { ProjectionFailure } from "../../usage/usage-event"
 import type { Node, Pipeline } from "./execution-ingest-state"
+
+export class IngestFailure extends Schema.TaggedErrorClass<IngestFailure>()("ExecutionIngestFailure", {
+  message: Schema.String,
+  threadId: Schema.String,
+  turnId: Schema.String,
+  executionId: Schema.String,
+  reason: Schema.Literals(["cursor-rejected", "backend", "repository", "checkpoint", "attachment"]),
+}) {}
+
+export type Failure = IngestFailure | ProjectionFailure
 
 export interface FailureDependencies {
   readonly options: Options
@@ -38,7 +48,7 @@ export const make = (dependencies: FailureDependencies) => {
     pipeline.abandoned.openUnsafe()
     dependencies.wake(pipeline)
   }
-  const failProjection = (pipeline: Pipeline, failure: UsageCost.ProjectionFailure) => {
+  const failProjection = (pipeline: Pipeline, failure: UsageEvent.ProjectionFailure) => {
     if (pipeline.failure !== undefined) return
     pipeline.stopped = true
     pipeline.failure = failure

@@ -5,7 +5,7 @@ import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
 import { boundTurnEntries, transcriptCursorFor } from "../../transcript/transcript-bounds"
-import type { SelectionEpochState } from "../dispatch/execution-operation-coordination"
+import type { SelectionEpochState } from "./interactive-thread-selection"
 
 export const initialTranscriptWindow = (input: {
   readonly state: SelectionEpochState

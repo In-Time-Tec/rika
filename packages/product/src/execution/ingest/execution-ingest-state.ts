@@ -5,10 +5,13 @@ import type * as ExecutionBackend from "@rika/product/execution-service"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import type * as IngestProjectionTypes from "./execution-projection-types"
-import type * as UsageCost from "../../usage/usage-projection"
-import type { Failure } from "./execution-ingest-service"
+import type { Snapshot } from "../../usage/usage-snapshot"
+import type { RootExecution } from "../../usage/usage-event"
+import type { UsageFold } from "../../usage/usage-fold"
+import type { Failure } from "./execution-ingest-failure"
+import type { ProjectionChange } from "./execution-ingest-event"
+import type { ProjectionWatchOverflow } from "./execution-ingest-watch"
 import type { Cause, Deferred, Latch, Queue, Semaphore } from "effect"
-import type { ProjectionChange, ProjectionWatchOverflow } from "./execution-ingest-service"
 
 export type Settled = NonNullable<TranscriptRepository.ExecutionCheckpoint["status"]>
 export type InterruptedOutcome = NonNullable<TranscriptUnit.Unit["executionOutcome"]> & {
@@ -55,12 +58,12 @@ export interface Pipeline {
   stopped: boolean
   reading: number
   delivered: Array<ExecutionBackend.Event> | undefined
-  usageSnapshot: UsageCost.Snapshot
+  usageSnapshot: Snapshot
   usageRevision: number
   usageSourceComplete: boolean
   usageRefoldFromVersion: number | undefined
-  usagePending: Array<UsageCost.RootExecution & { readonly event: ExecutionBackend.Event }>
-  usageFold: UsageCost.UsageFold
+  usagePending: Array<RootExecution & { readonly event: ExecutionBackend.Event }>
+  usageFold: UsageFold
   usageNotificationPending: boolean
   delta: IngestProjectionTypes.ProjectionDelta
   failure: Failure | undefined

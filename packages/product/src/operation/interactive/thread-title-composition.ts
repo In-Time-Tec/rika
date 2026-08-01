@@ -1,4 +1,5 @@
 import { Cause, Clock, Effect } from "effect"
+import * as UsageSnapshot from "@rika/product/usage-snapshot"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
@@ -37,7 +38,7 @@ export const titleInteractiveThread = (input: {
   ) => Effect.Effect<any, any, never>
   readonly announce: (event: InteractiveEvent) => void
   readonly notify: Effect.Effect<any, any, never>
-  readonly publishUsage: (usage: UsageRepository.TurnUsage | undefined) => Effect.Effect<any, any, never>
+  readonly publishUsage: (usage: UsageSnapshot.TurnUsage | undefined) => Effect.Effect<any, any, never>
   readonly attempts: Map<string, number>
   readonly settled: Set<string>
 }) =>

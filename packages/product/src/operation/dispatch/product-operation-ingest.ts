@@ -1,8 +1,14 @@
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
+import type { Commit, Refold } from "../../execution/ingest/execution-ingest-commit"
 import { Cause, Effect, Queue } from "effect"
 import { failureKind, operationError } from "../operation-error"
-import { undeliveredEvents } from "./execution-operation-coordination"
+
+export const undeliveredEvents = (
+  events: ReadonlyArray<ExecutionBackend.Event>,
+  delivered: ReadonlySet<string>,
+): ReadonlyArray<ExecutionBackend.Event> =>
+  events.filter((event) => !delivered.has(event.cursor)).toSorted((left, right) => left.sequence - right.sequence)
 
 export const makeProductOperationIngest = (input: any) =>
   Effect.gen(function* () {
@@ -16,7 +22,7 @@ export const makeProductOperationIngest = (input: any) =>
       isTerminalStatus,
       ingestFailureMessage,
     } = input
-    const usageCommits = yield* Queue.unbounded<ExecutionIngest.Commit>()
+    const usageCommits = yield* Queue.unbounded<Commit>()
     const refoldingRoots = new Map<string, number>()
     const executionIngest = yield* ExecutionIngest.make({
       backend: acquiredBackend,
@@ -24,7 +30,7 @@ export const makeProductOperationIngest = (input: any) =>
       turns: input.turns,
       usage: usageRepository,
       onCommitted: (commit) => Queue.offerUnsafe(usageCommits, commit),
-      onRefold: (refold: ExecutionIngest.Refold) => {
+      onRefold: (refold: Refold) => {
         const key = String(refold.threadId)
         const current = refoldingRoots.get(key) ?? 0
         const next = refold.phase === "started" ? current + 1 : Math.max(0, current - 1)

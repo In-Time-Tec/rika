@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Effect, Exit, Layer, Schema } from "effect"
-import { ProductAgent } from "@rika/product/product-operation"
+import * as ProductAgent from "../src/agent/product-agent-service"
 import { provideLayer } from "./layer"
 import { executionRoute } from "./current-state"
 

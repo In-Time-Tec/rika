@@ -1,5 +1,30 @@
 import * as Thread from "@rika/product/thread-record"
-import type { SelectionEpochState } from "../dispatch/execution-operation-coordination"
+import type * as TranscriptRepository from "@rika/product/transcript-repository"
+import type { ProjectionWatch } from "../../execution/ingest/execution-ingest-watch"
+import type { Scope } from "effect"
+
+export type SelectionEpochState = {
+  readonly epoch: number
+  readonly thread: Thread.Thread
+  readonly loadedKeys: Set<string>
+  transcriptCursor: TranscriptRepository.PageCursor | undefined
+  newestTranscriptCursor: TranscriptRepository.PageCursor | undefined
+  hasOlder: boolean
+  projectionFeed?: {
+    readonly watch: ProjectionWatch
+    readonly scope: Scope.Closeable
+    promoted: boolean
+  }
+}
+
+export const makeSelectionState = (thread: Thread.Thread, epoch: number): SelectionEpochState => ({
+  epoch,
+  thread,
+  loadedKeys: new Set(),
+  transcriptCursor: undefined,
+  newestTranscriptCursor: undefined,
+  hasOlder: false,
+})
 
 export const isNewerSelectionEpoch = (requested: number, current: number): boolean => requested > current
 

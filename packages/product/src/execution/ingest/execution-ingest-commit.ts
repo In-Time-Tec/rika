@@ -7,13 +7,33 @@ import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Deferred, Effect, Result } from "effect"
 import * as IngestProjection from "./execution-projection-state"
 import type { Pipeline, Node } from "./execution-ingest-state"
-import type { Options, IngestFailure } from "./execution-ingest-service"
-import * as UsageCost from "../../usage/usage-projection"
+import type { Options } from "./execution-ingest-service"
+import type { IngestFailure } from "./execution-ingest-failure"
+import * as UsageProjection from "../../usage/usage-projection"
+import * as UsageFold from "../../usage/usage-fold"
+import * as UsageSnapshot from "../../usage/usage-snapshot"
+import * as UsageCodec from "../../usage/usage-snapshot-codec"
+import * as UsageEvent from "../../usage/usage-event"
+
+export interface Commit {
+  readonly threadId: import("@rika/product/thread-record").ThreadId
+  readonly rootTurnId: import("@rika/product/turn-record").TurnId
+  readonly revision: number
+  readonly terminal: boolean
+  readonly usageChanged: boolean
+  readonly refolded: boolean
+}
+
+export interface Refold {
+  readonly threadId: import("@rika/product/thread-record").ThreadId
+  readonly rootTurnId: import("@rika/product/turn-record").TurnId
+  readonly phase: "started" | "finished"
+}
 
 export interface CommitDependencies {
   readonly options: Options
   readonly fail: (pipeline: Pipeline, node: Node, reason: IngestFailure["reason"], message: string) => void
-  readonly failProjection: (pipeline: Pipeline, failure: UsageCost.ProjectionFailure) => void
+  readonly failProjection: (pipeline: Pipeline, failure: UsageEvent.ProjectionFailure) => void
   readonly resolveFlushWaiters: (pipeline: Pipeline) => void
   readonly projectionVersion: number
   readonly fullyConsumed: (nodes: ReadonlyMap<string, Node>) => boolean
@@ -23,7 +43,7 @@ export const make = (dependencies: CommitDependencies) => {
   let commitUsage: (
     pipeline: Pipeline,
     terminal: boolean,
-  ) => Effect.Effect<boolean, UsageCost.ProjectionFailure | UsageRepository.RepositoryError>
+  ) => Effect.Effect<boolean, UsageEvent.ProjectionFailure | UsageRepository.RepositoryError>
   commitUsage = Effect.fn("ExecutionIngestService.commitUsage")(function* (pipeline: Pipeline, terminal: boolean) {
     if (
       pipeline.usagePending.length === 0 &&
@@ -32,13 +52,13 @@ export const make = (dependencies: CommitDependencies) => {
     )
       return false
     const pending = pipeline.usagePending.slice()
-    const desired = UsageCost.snapshotUsageFold(pipeline.usageFold)
+    const desired = UsageFold.snapshotUsageFold(pipeline.usageFold)
     const complete = terminal
     const totals = {
-      ...UsageCost.materialize(desired, String(pipeline.turnId), String(pipeline.threadId)),
+      ...UsageProjection.materialize(desired, String(pipeline.turnId), String(pipeline.threadId)),
       sourceComplete: complete,
     }
-    const foldJson = UsageCost.serialize(desired)
+    const foldJson = UsageCodec.serialize(desired)
     const sourceId = String(pipeline.turnId)
     const write =
       pipeline.usageRefoldFromVersion === undefined
@@ -68,22 +88,22 @@ export const make = (dependencies: CommitDependencies) => {
       return true
     }
     const current = result.value ?? (yield* dependencies.options.usage.readSource(sourceId, String(pipeline.turnId)))
-    if (current === undefined || current.projectionVersion !== UsageRepository.projectionVersion)
-      return yield* UsageCost.ProjectionFailure.make({
+    if (current === undefined || current.projectionVersion !== UsageSnapshot.projectionVersion)
+      return yield* UsageEvent.ProjectionFailure.make({
         message: `Usage source ${sourceId} has unsupported projection version`,
         reason: "unsupported-version",
       })
     const decoded =
-      current.foldJson === undefined ? Result.succeed(UsageCost.empty) : UsageCost.deserialize(current.foldJson)
+      current.foldJson === undefined ? Result.succeed(UsageSnapshot.empty) : UsageCodec.deserialize(current.foldJson)
     if (Result.isFailure(decoded)) return yield* decoded.failure
-    const replayed = UsageCost.foldBatch(
+    const replayed = UsageProjection.foldBatch(
       decoded.success,
       pending,
       terminal ? new Set(pipeline.nodes.keys()) : new Set(),
     )
     if (Result.isFailure(replayed)) return yield* replayed.failure
     pipeline.usageSnapshot = decoded.success
-    pipeline.usageFold = UsageCost.restoreUsageFold(replayed.success)
+    pipeline.usageFold = UsageFold.restoreUsageFold(replayed.success)
     pipeline.usageRevision = current.revision
     pipeline.usageSourceComplete = current.sourceComplete
     pipeline.usageRefoldFromVersion = undefined

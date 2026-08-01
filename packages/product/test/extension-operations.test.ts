@@ -4,7 +4,7 @@ import { Effect, FileSystem, Layer, Schema } from "effect"
 import { TestConsole } from "effect/testing"
 import * as McpOAuth from "@rika/extensions/mcp-oauth-service"
 import * as SkillRegistry from "@rika/extensions/skill-registry"
-import { ExtensionOperations } from "@rika/product/product-operation"
+import * as ExtensionOperations from "../src/operation/dispatch/extension-operation-dispatch"
 import { provideLayer } from "./layer"
 
 const decodeJson = Schema.decodeSync(Schema.UnknownFromJsonString)

@@ -5,7 +5,7 @@ import { makeInteractiveOperationFeed } from "./interactive-operation-feed"
 import { makeInteractiveSessionComposition } from "./interactive-session-composition"
 import { makeInteractiveSelectionProjection } from "./interactive-selection-projection"
 import { dispatchInteractiveFailure } from "./interactive-session-errors"
-import type { SelectionEpochState } from "../dispatch/execution-operation-coordination"
+import type { SelectionEpochState } from "./interactive-thread-selection"
 
 export const makeInteractiveSessionState = (input: any): any =>
   Effect.gen(function* () {

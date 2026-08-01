@@ -1,7 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Effect, FileSystem, Layer, Path, PlatformError } from "effect"
-import { ContextFileSystem, ContextMentions, FileMentions, ResolvedContext } from "@rika/product/product-operation"
+import * as ContextFileSystem from "../src/context/context-file-system"
+import * as ContextMentions from "../src/context/context-mention-parser"
+import * as FileMentions from "../src/context/file-mention-parser"
+import * as ResolvedContext from "../src/context/context-resolution-service"
 import { provideLayer } from "./layer"
 
 const files = {

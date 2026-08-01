@@ -1,5 +1,5 @@
 import * as ExecutionStatus from "../../execution/contract/execution-status"
-import * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
+import type * as IngestProjectionContract from "../../execution/ingest/execution-projection-contract"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import type { InteractiveEvent } from "./interactive-event"
@@ -36,7 +36,7 @@ const appendRecordedShellOutput = (output: RecordedShellOutput, text: string): R
 
 const projectionVisibleState = (
   projection: Pick<TranscriptRepository.Projection, "revision" | "modelPhase" | "usableCompletionSequence">,
-): ExecutionIngest.ProjectionSnapshot["state"] => ({
+): IngestProjectionContract.Snapshot["state"] => ({
   revision: projection.revision,
   modelPhase: projection.modelPhase,
   ...(projection.usableCompletionSequence === undefined
