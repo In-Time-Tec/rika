@@ -49,7 +49,7 @@ const mergeChildAgent = (tool: Unit, child: Unit): Unit => {
   return merged
 }
 
-export const reconcileSubagentUnits = (
+const reconcileSubagentUnitsImpl = (
   model: Model,
   units: ReadonlyArray<Unit>,
 ): { readonly model: Model; readonly units: ReadonlyArray<Unit> } => {
@@ -170,7 +170,17 @@ const childAgentToolBlock = (block: ChildAgentBlock): ToolCall => ({
 const mergedAgentStatus = (existing: ToolCall["status"], child: ChildAgentBlock["status"]): ToolCall["status"] =>
   child === "running" && existing !== "running" ? existing : child
 
-export const nestedChildUnit = (
+export const reconcileSubagentUnits: {
+  (
+    arg1: Parameters<typeof reconcileSubagentUnitsImpl>[1],
+  ): (arg0: Parameters<typeof reconcileSubagentUnitsImpl>[0]) => ReturnType<typeof reconcileSubagentUnitsImpl>
+  (
+    arg0: Parameters<typeof reconcileSubagentUnitsImpl>[0],
+    arg1: Parameters<typeof reconcileSubagentUnitsImpl>[1],
+  ): ReturnType<typeof reconcileSubagentUnitsImpl>
+} = Function.dual(2, reconcileSubagentUnitsImpl)
+
+const nestedChildUnitImpl = (
   unit: Unit,
   batchToolChildIds: ReadonlySet<string>,
   batchAgentToolTokens: ReadonlySet<string>,
@@ -218,3 +228,19 @@ export const nestedChildUnit = (
       return Function.absurd(block)
   }
 }
+
+export const nestedChildUnit: {
+  (
+    arg1: Parameters<typeof nestedChildUnitImpl>[1],
+    arg2: Parameters<typeof nestedChildUnitImpl>[2],
+    arg3: Parameters<typeof nestedChildUnitImpl>[3],
+    arg4: Parameters<typeof nestedChildUnitImpl>[4],
+  ): (arg0: Parameters<typeof nestedChildUnitImpl>[0]) => ReturnType<typeof nestedChildUnitImpl>
+  (
+    arg0: Parameters<typeof nestedChildUnitImpl>[0],
+    arg1: Parameters<typeof nestedChildUnitImpl>[1],
+    arg2: Parameters<typeof nestedChildUnitImpl>[2],
+    arg3: Parameters<typeof nestedChildUnitImpl>[3],
+    arg4: Parameters<typeof nestedChildUnitImpl>[4],
+  ): ReturnType<typeof nestedChildUnitImpl>
+} = Function.dual(5, nestedChildUnitImpl)

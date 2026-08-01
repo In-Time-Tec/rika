@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import stringWidth from "string-width"
 import type { Model } from "../../state/model/terminal-state"
 import type { QueueItem } from "../../state/model/terminal-queue-item"
@@ -21,7 +22,7 @@ export const queueEditingHint: ReadonlyArray<QueueHintSegment> = [
 const minimumInlineQueueMessageWidth = 12
 export const queueHintWidth = (segments: ReadonlyArray<QueueHintSegment>): number =>
   stringWidth(` ${segments.map((segment) => `${segment.accent}${segment.suffix}`).join(" · ")} `)
-export const fittingQueueHint = (
+const fittingQueueHintImpl = (
   segments: ReadonlyArray<QueueHintSegment>,
   width: number,
 ): ReadonlyArray<QueueHintSegment> => {
@@ -31,6 +32,16 @@ export const fittingQueueHint = (
   }
   return []
 }
+
+export const fittingQueueHint: {
+  (
+    arg1: Parameters<typeof fittingQueueHintImpl>[1],
+  ): (arg0: Parameters<typeof fittingQueueHintImpl>[0]) => ReturnType<typeof fittingQueueHintImpl>
+  (
+    arg0: Parameters<typeof fittingQueueHintImpl>[0],
+    arg1: Parameters<typeof fittingQueueHintImpl>[1],
+  ): ReturnType<typeof fittingQueueHintImpl>
+} = Function.dual(2, fittingQueueHintImpl)
 export const displayCursorOffset = (model: Model): number => {
   let offset = model.cursor
   for (const attachment of model.pastedText) {

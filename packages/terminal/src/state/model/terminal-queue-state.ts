@@ -10,7 +10,7 @@ interface SubmittedDraft extends ComposerDraft {
   readonly turnId?: string
 }
 
-export const bindSubmittedDraft = (
+const bindSubmittedDraftImpl = (
   drafts: ReadonlyArray<SubmittedDraft>,
   turnId: string,
   submissionId?: string,
@@ -24,12 +24,33 @@ export const bindSubmittedDraft = (
   return drafts.map((draft, position) => (position === index ? { ...draft, turnId } : draft))
 }
 
-export const dropSubmittedDrafts = (
+export const bindSubmittedDraft: {
+  (
+    arg0: Parameters<typeof bindSubmittedDraftImpl>[0],
+    arg1: Parameters<typeof bindSubmittedDraftImpl>[1],
+    arg2?: Parameters<typeof bindSubmittedDraftImpl>[2],
+  ): ReturnType<typeof bindSubmittedDraftImpl>
+  (
+    arg1: Parameters<typeof bindSubmittedDraftImpl>[1],
+  ): (arg0: Parameters<typeof bindSubmittedDraftImpl>[0]) => ReturnType<typeof bindSubmittedDraftImpl>
+} = Function.dual((args) => args.length > 0, bindSubmittedDraftImpl)
+
+const dropSubmittedDraftsImpl = (
   drafts: ReadonlyArray<SubmittedDraft>,
   turnId: string | undefined,
 ): ReadonlyArray<SubmittedDraft> => (turnId === undefined ? [] : drafts.filter((draft) => draft.turnId !== turnId))
 
-export const takeSubmittedDraft = (
+export const dropSubmittedDrafts: {
+  (
+    arg1: Parameters<typeof dropSubmittedDraftsImpl>[1],
+  ): (arg0: Parameters<typeof dropSubmittedDraftsImpl>[0]) => ReturnType<typeof dropSubmittedDraftsImpl>
+  (
+    arg0: Parameters<typeof dropSubmittedDraftsImpl>[0],
+    arg1: Parameters<typeof dropSubmittedDraftsImpl>[1],
+  ): ReturnType<typeof dropSubmittedDraftsImpl>
+} = Function.dual(2, dropSubmittedDraftsImpl)
+
+const takeSubmittedDraftImpl = (
   drafts: ReadonlyArray<SubmittedDraft>,
   turnId: string | undefined,
 ): { readonly draft: SubmittedDraft | undefined; readonly rest: ReadonlyArray<SubmittedDraft> } => {
@@ -38,7 +59,17 @@ export const takeSubmittedDraft = (
   return { draft: drafts[index], rest: drafts.filter((_, position) => position !== index) }
 }
 
-export const settleSteering = (
+export const takeSubmittedDraft: {
+  (
+    arg1: Parameters<typeof takeSubmittedDraftImpl>[1],
+  ): (arg0: Parameters<typeof takeSubmittedDraftImpl>[0]) => ReturnType<typeof takeSubmittedDraftImpl>
+  (
+    arg0: Parameters<typeof takeSubmittedDraftImpl>[0],
+    arg1: Parameters<typeof takeSubmittedDraftImpl>[1],
+  ): ReturnType<typeof takeSubmittedDraftImpl>
+} = Function.dual(2, takeSubmittedDraftImpl)
+
+const settleSteeringImpl = (
   model: Model,
   turnId: string | undefined,
 ): { readonly pendingSteering: ReadonlyArray<Model["pendingSteering"][number]>; readonly restoredInput?: string } => {
@@ -48,10 +79,18 @@ export const settleSteering = (
   return { pendingSteering, restoredInput: matching.map((row) => row.text).join("\n") }
 }
 
-export const validQueueSelection = (
-  current: string | undefined,
-  queue: ReadonlyArray<QueueItem>,
-): string | undefined => (current !== undefined && queue.some((item) => item.id === current) ? current : undefined)
+export const settleSteering: {
+  (
+    arg1: Parameters<typeof settleSteeringImpl>[1],
+  ): (arg0: Parameters<typeof settleSteeringImpl>[0]) => ReturnType<typeof settleSteeringImpl>
+  (
+    arg0: Parameters<typeof settleSteeringImpl>[0],
+    arg1: Parameters<typeof settleSteeringImpl>[1],
+  ): ReturnType<typeof settleSteeringImpl>
+} = Function.dual(2, settleSteeringImpl)
+
+const validQueueSelectionImpl = (current: string | undefined, queue: ReadonlyArray<QueueItem>): string | undefined =>
+  current !== undefined && queue.some((item) => item.id === current) ? current : undefined
 const exitEditWhenRemoved = (model: Model, queue: ReadonlyArray<QueueItem>): Partial<Model> => {
   if (model.editingTurnId === undefined || queue.some((item) => item.id === model.editingTurnId)) return {}
   const restore = model.editReturn ?? { input: "", attachments: [] }
@@ -63,6 +102,16 @@ const exitEditWhenRemoved = (model: Model, queue: ReadonlyArray<QueueItem>): Par
     pastedText: [...restore.attachments],
   }
 }
+
+export const validQueueSelection: {
+  (
+    arg1: Parameters<typeof validQueueSelectionImpl>[1],
+  ): (arg0: Parameters<typeof validQueueSelectionImpl>[0]) => ReturnType<typeof validQueueSelectionImpl>
+  (
+    arg0: Parameters<typeof validQueueSelectionImpl>[0],
+    arg1: Parameters<typeof validQueueSelectionImpl>[1],
+  ): ReturnType<typeof validQueueSelectionImpl>
+} = Function.dual(2, validQueueSelectionImpl)
 
 export const replaceQueue: {
   (model: Model, queue: ReadonlyArray<QueueItem>): Model

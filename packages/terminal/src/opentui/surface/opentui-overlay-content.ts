@@ -220,7 +220,7 @@ export const previewBoxRows: {
   return rows
 })
 
-export const threadSwitcherContent = (model: Model, innerWidth: number, innerHeight: number): StyledText => {
+const threadSwitcherContentImpl = (model: Model, innerWidth: number, innerHeight: number): StyledText => {
   const horizontal = model.width >= 120
   const showPreview = horizontal || innerHeight >= 9
   const layoutWidth = Math.max(1, innerWidth - 1)
@@ -262,12 +262,34 @@ export const threadSwitcherContent = (model: Model, innerWidth: number, innerHei
   return new StyledText(chunks)
 }
 
-export const threadSwitcherListWidth = (model: Model, innerWidth: number): number => {
+export const threadSwitcherContent: {
+  (
+    arg1: Parameters<typeof threadSwitcherContentImpl>[1],
+    arg2: Parameters<typeof threadSwitcherContentImpl>[2],
+  ): (arg0: Parameters<typeof threadSwitcherContentImpl>[0]) => ReturnType<typeof threadSwitcherContentImpl>
+  (
+    arg0: Parameters<typeof threadSwitcherContentImpl>[0],
+    arg1: Parameters<typeof threadSwitcherContentImpl>[1],
+    arg2: Parameters<typeof threadSwitcherContentImpl>[2],
+  ): ReturnType<typeof threadSwitcherContentImpl>
+} = Function.dual(3, threadSwitcherContentImpl)
+
+const threadSwitcherListWidthImpl = (model: Model, innerWidth: number): number => {
   const layoutWidth = Math.max(1, innerWidth - 1)
   return model.width >= 120 ? Math.max(1, Math.floor((layoutWidth - 2) / 2)) : layoutWidth
 }
 
-export const filePickerContent = (model: Model, entries: ReadonlyArray<string>, innerWidth: number): StyledText => {
+export const threadSwitcherListWidth: {
+  (
+    arg1: Parameters<typeof threadSwitcherListWidthImpl>[1],
+  ): (arg0: Parameters<typeof threadSwitcherListWidthImpl>[0]) => ReturnType<typeof threadSwitcherListWidthImpl>
+  (
+    arg0: Parameters<typeof threadSwitcherListWidthImpl>[0],
+    arg1: Parameters<typeof threadSwitcherListWidthImpl>[1],
+  ): ReturnType<typeof threadSwitcherListWidthImpl>
+} = Function.dual(2, threadSwitcherListWidthImpl)
+
+const filePickerContentImpl = (model: Model, entries: ReadonlyArray<string>, innerWidth: number): StyledText => {
   const chunks: Array<TextChunk> = []
   entries.forEach((entry, index) => {
     if (index > 0) chunks.push(fg(colors.text)("\n"))
@@ -293,3 +315,15 @@ export const filePickerContent = (model: Model, entries: ReadonlyArray<string>, 
   }
   return new StyledText(chunks)
 }
+
+export const filePickerContent: {
+  (
+    arg1: Parameters<typeof filePickerContentImpl>[1],
+    arg2: Parameters<typeof filePickerContentImpl>[2],
+  ): (arg0: Parameters<typeof filePickerContentImpl>[0]) => ReturnType<typeof filePickerContentImpl>
+  (
+    arg0: Parameters<typeof filePickerContentImpl>[0],
+    arg1: Parameters<typeof filePickerContentImpl>[1],
+    arg2: Parameters<typeof filePickerContentImpl>[2],
+  ): ReturnType<typeof filePickerContentImpl>
+} = Function.dual(3, filePickerContentImpl)

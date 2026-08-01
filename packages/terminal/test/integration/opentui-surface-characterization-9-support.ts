@@ -1,4 +1,4 @@
-import { Data, Effect } from "effect"
+import { Function, Data, Effect } from "effect"
 import { type Model } from "../../src/state/model/terminal-state"
 import { type ThreadItem } from "../../src/state/model/terminal-thread-state"
 
@@ -10,12 +10,22 @@ export class OpenTuiError extends Data.TaggedError("OpenTuiError")<{ readonly ca
 export const openTui = <A>(operation: () => Promise<A>) =>
   Effect.tryPromise({ try: operation, catch: (cause) => new OpenTuiError({ cause }) })
 
-export const _insertText = (model: Model, text: string) => update(model, { _tag: "Pasted", text })
+const _insertTextImpl = (model: Model, text: string) => update(model, { _tag: "Pasted", text })
+
+export const _insertText: {
+  (
+    arg1: Parameters<typeof _insertTextImpl>[1],
+  ): (arg0: Parameters<typeof _insertTextImpl>[0]) => ReturnType<typeof _insertTextImpl>
+  (
+    arg0: Parameters<typeof _insertTextImpl>[0],
+    arg1: Parameters<typeof _insertTextImpl>[1],
+  ): ReturnType<typeof _insertTextImpl>
+} = Function.dual(2, _insertTextImpl)
 
 export const styledTextValue = (value: { readonly chunks: ReadonlyArray<{ readonly text: string }> } | string) =>
   typeof value === "string" ? value : value.chunks.map((chunk) => chunk.text).join("")
 
-export const streamingShell = (id: string, output?: string) => ({
+const streamingShellImpl = (id: string, output?: string) => ({
   _tag: "ToolCall" as const,
   id,
   name: "bash",
@@ -31,6 +41,14 @@ export const streamingShell = (id: string, output?: string) => ({
   ...(output === undefined ? {} : { output }),
   files: [],
 })
+
+export const streamingShell: {
+  (
+    arg0: Parameters<typeof streamingShellImpl>[0],
+    arg1?: Parameters<typeof streamingShellImpl>[1],
+  ): ReturnType<typeof streamingShellImpl>
+  (): (arg0: Parameters<typeof streamingShellImpl>[0]) => ReturnType<typeof streamingShellImpl>
+} = Function.dual((args) => args.length > 0, streamingShellImpl)
 
 export const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
   workspace: "/work",
@@ -90,7 +108,7 @@ export const _giantSubagentModel = (childCount: number): Model => {
   }
 }
 
-export const _collapsedSubagentModel = (answerCount: number, childCount: number): Model => {
+const _collapsedSubagentModelImpl = (answerCount: number, childCount: number): Model => {
   const entries = Array.from({ length: answerCount }, (_, index) => ({
     role: "assistant" as const,
     text: `answer ${index}`,
@@ -151,3 +169,13 @@ export const _collapsedSubagentModel = (answerCount: number, childCount: number)
     scrollFollow: true,
   }
 }
+
+export const _collapsedSubagentModel: {
+  (
+    arg1: Parameters<typeof _collapsedSubagentModelImpl>[1],
+  ): (arg0: Parameters<typeof _collapsedSubagentModelImpl>[0]) => ReturnType<typeof _collapsedSubagentModelImpl>
+  (
+    arg0: Parameters<typeof _collapsedSubagentModelImpl>[0],
+    arg1: Parameters<typeof _collapsedSubagentModelImpl>[1],
+  ): ReturnType<typeof _collapsedSubagentModelImpl>
+} = Function.dual(2, _collapsedSubagentModelImpl)

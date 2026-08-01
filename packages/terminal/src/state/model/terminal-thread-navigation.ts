@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import type { Model } from "./terminal-state"
 import type { ThreadItem } from "./terminal-thread-state"
 import { readyOr } from "./terminal-loadable-state"
@@ -20,8 +21,20 @@ export const filteredThreads = (model: Model): ReadonlyArray<ThreadItem> => {
 }
 export const selectedThreadMetadata = (model: Model): ThreadItem | undefined =>
   filteredThreads(model)[model.threadSwitcher.selected]
-export const renameThread = (
+const renameThreadImpl = (
   threads: ReadonlyArray<ThreadItem>,
   threadId: string,
   title: string,
 ): ReadonlyArray<ThreadItem> => threads.map((thread) => (thread.id === threadId ? { ...thread, title } : thread))
+
+export const renameThread: {
+  (
+    arg1: Parameters<typeof renameThreadImpl>[1],
+    arg2: Parameters<typeof renameThreadImpl>[2],
+  ): (arg0: Parameters<typeof renameThreadImpl>[0]) => ReturnType<typeof renameThreadImpl>
+  (
+    arg0: Parameters<typeof renameThreadImpl>[0],
+    arg1: Parameters<typeof renameThreadImpl>[1],
+    arg2: Parameters<typeof renameThreadImpl>[2],
+  ): ReturnType<typeof renameThreadImpl>
+} = Function.dual(3, renameThreadImpl)

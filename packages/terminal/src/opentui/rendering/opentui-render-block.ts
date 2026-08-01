@@ -125,7 +125,7 @@ export const renderSidebar: {
       .forEach((thread, row) => {
         const index = row + model.threadSidebar.scrollTop
         if (row > 0) chunks.push(fg(colors.text)("\n"))
-        const selected = model.threadSidebar.focused && index === model.threadSidebar.selected
+        const selected: boolean = model.threadSidebar.focused === true && index === model.threadSidebar.selected
         let marker = " "
         if (thread.id === model.currentThreadId) marker = "*"
         else if (isThreadBusy(thread.status)) marker = spinnerFrame
@@ -227,7 +227,7 @@ const fileTreeRows = (
   return rows
 }
 export const sidebarInnerWidth = (model: Model): number => Math.max(1, fileSidebarLayoutWidth(model) - 8)
-export const sidebarFileRows = (model: Model, innerWidth: number): ReadonlyArray<ChangedFileRow> =>
+const sidebarFileRowsImpl = (model: Model, innerWidth: number): ReadonlyArray<ChangedFileRow> =>
   model.changedFilesOpen
     ? fileTreeRows(model.changedFiles._tag === "Ready" ? model.changedFiles.value : [], innerWidth, true)
     : fileTreeRows(
@@ -237,7 +237,17 @@ export const sidebarFileRows = (model: Model, innerWidth: number): ReadonlyArray
         innerWidth,
         false,
       )
-export const renderFileRows = (rows: ReadonlyArray<ChangedFileRow>, hoveredRow?: number): StyledText => {
+
+export const sidebarFileRows: {
+  (
+    arg1: Parameters<typeof sidebarFileRowsImpl>[1],
+  ): (arg0: Parameters<typeof sidebarFileRowsImpl>[0]) => ReturnType<typeof sidebarFileRowsImpl>
+  (
+    arg0: Parameters<typeof sidebarFileRowsImpl>[0],
+    arg1: Parameters<typeof sidebarFileRowsImpl>[1],
+  ): ReturnType<typeof sidebarFileRowsImpl>
+} = Function.dual(2, sidebarFileRowsImpl)
+const renderFileRowsImpl = (rows: ReadonlyArray<ChangedFileRow>, hoveredRow?: number): StyledText => {
   const chunks: Array<TextChunk> = []
   for (const [index, row] of rows.entries()) {
     if (index > 0) chunks.push(fg(colors.text)("\n"))
@@ -247,6 +257,14 @@ export const renderFileRows = (rows: ReadonlyArray<ChangedFileRow>, hoveredRow?:
   }
   return new StyledText(chunks.map(toOpenStyledChunk))
 }
+
+export const renderFileRows: {
+  (
+    arg0: Parameters<typeof renderFileRowsImpl>[0],
+    arg1?: Parameters<typeof renderFileRowsImpl>[1],
+  ): ReturnType<typeof renderFileRowsImpl>
+  (): (arg0: Parameters<typeof renderFileRowsImpl>[0]) => ReturnType<typeof renderFileRowsImpl>
+} = Function.dual((args) => args.length > 0, renderFileRowsImpl)
 export const renderChangedFiles: {
   (model: Model, innerWidth: number, hoveredRow?: number): StyledText
   (innerWidth: number, hoveredRow?: number): (model: Model) => StyledText

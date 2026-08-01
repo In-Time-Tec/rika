@@ -1,4 +1,4 @@
-import { Option, Schema } from "effect"
+import { Function, Option, Schema } from "effect"
 import type { Model } from "../../state/model/terminal-state"
 import type { TranscriptBlock } from "../../state/model/terminal-transcript-state"
 import { toolKind } from "../../presentation/transcript/transcript-tool-detail"
@@ -7,13 +7,23 @@ import type { ToolKind } from "../../presentation/transcript/transcript-tool-typ
 const ToolInputJson = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
 export const toolInputValue = (input: string): Record<string, unknown> =>
   Option.getOrElse(Schema.decodeUnknownOption(ToolInputJson)(input), () => ({}))
-export const inputString = (value: Record<string, unknown>, keys: ReadonlyArray<string>): string | undefined => {
+const inputStringImpl = (value: Record<string, unknown>, keys: ReadonlyArray<string>): string | undefined => {
   for (const key of keys) {
     const candidate = value[key]
     if (typeof candidate === "string" && candidate.length > 0) return candidate
   }
   return undefined
 }
+
+export const inputString: {
+  (
+    arg1: Parameters<typeof inputStringImpl>[1],
+  ): (arg0: Parameters<typeof inputStringImpl>[0]) => ReturnType<typeof inputStringImpl>
+  (
+    arg0: Parameters<typeof inputStringImpl>[0],
+    arg1: Parameters<typeof inputStringImpl>[1],
+  ): ReturnType<typeof inputStringImpl>
+} = Function.dual(2, inputStringImpl)
 export type ToolUnit = {
   readonly kind: ToolKind
   readonly block: Extract<TranscriptBlock, { _tag: "ToolCall" }>
@@ -48,8 +58,18 @@ export const exploreChildLabel = (unit: ToolUnit): string => {
   const pattern = inputString(value, ["pattern", "query", "glob", "path"])
   return `${unit.block.presentation.action === "grep" ? "Grep" : "Searched"} ${unit.block.detail || pattern || ""}`.trimEnd()
 }
-export const toolUnitsFor = (model: Model, indices: ReadonlyArray<number>): ReadonlyArray<ToolUnit> =>
+const toolUnitsForImpl = (model: Model, indices: ReadonlyArray<number>): ReadonlyArray<ToolUnit> =>
   indices.map((index) => {
     const block = model.blocks[index] as Extract<TranscriptBlock, { _tag: "ToolCall" }>
     return { kind: toolKind(block.name, undefined), block, index }
   })
+
+export const toolUnitsFor: {
+  (
+    arg1: Parameters<typeof toolUnitsForImpl>[1],
+  ): (arg0: Parameters<typeof toolUnitsForImpl>[0]) => ReturnType<typeof toolUnitsForImpl>
+  (
+    arg0: Parameters<typeof toolUnitsForImpl>[0],
+    arg1: Parameters<typeof toolUnitsForImpl>[1],
+  ): ReturnType<typeof toolUnitsForImpl>
+} = Function.dual(2, toolUnitsForImpl)

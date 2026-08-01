@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import { modeIds } from "@rika/configuration/behavior-mode"
 import type { Message } from "../model/terminal-message"
 import type { Model } from "../model/terminal-state"
@@ -17,7 +18,7 @@ export interface KeyboardPickerContext {
   readonly continueShortcutsAfterEdit: (before: Model, after: Model) => Model
 }
 
-export const reduceKeyboardPicker = (
+const reduceKeyboardPickerImpl = (
   model: Model,
   key: Key,
   update: (model: Model, message: Message) => Model,
@@ -329,3 +330,17 @@ export const reduceKeyboardPicker = (
   }
   return undefined
 }
+
+export const reduceKeyboardPicker: {
+  (
+    arg1: Parameters<typeof reduceKeyboardPickerImpl>[1],
+    arg2: Parameters<typeof reduceKeyboardPickerImpl>[2],
+    arg3: Parameters<typeof reduceKeyboardPickerImpl>[3],
+  ): (arg0: Parameters<typeof reduceKeyboardPickerImpl>[0]) => ReturnType<typeof reduceKeyboardPickerImpl>
+  (
+    arg0: Parameters<typeof reduceKeyboardPickerImpl>[0],
+    arg1: Parameters<typeof reduceKeyboardPickerImpl>[1],
+    arg2: Parameters<typeof reduceKeyboardPickerImpl>[2],
+    arg3: Parameters<typeof reduceKeyboardPickerImpl>[3],
+  ): ReturnType<typeof reduceKeyboardPickerImpl>
+} = Function.dual(4, reduceKeyboardPickerImpl)

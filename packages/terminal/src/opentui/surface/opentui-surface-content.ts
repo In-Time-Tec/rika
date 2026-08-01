@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import { fg, bold, StyledText, type TextChunk } from "@opentui/core"
 import stringWidth from "string-width"
 import type { Model, Mode } from "../../state/model/terminal-state"
@@ -272,7 +273,7 @@ const mix = (
   return [a[0] + (b[0] - a[0]) * clamped, a[1] + (b[1] - a[1]) * clamped, a[2] + (b[2] - a[2]) * clamped]
 }
 
-export const welcomeContent = (width: number, height: number, phase: number, mode: Mode): StyledText => {
+const welcomeContentImpl = (width: number, height: number, phase: number, mode: Mode): StyledText => {
   if (height < 20)
     return new StyledText([
       fg(colors.text)("\n"),
@@ -312,3 +313,17 @@ export const welcomeContent = (width: number, height: number, phase: number, mod
   }
   return new StyledText(chunks)
 }
+
+export const welcomeContent: {
+  (
+    arg1: Parameters<typeof welcomeContentImpl>[1],
+    arg2: Parameters<typeof welcomeContentImpl>[2],
+    arg3: Parameters<typeof welcomeContentImpl>[3],
+  ): (arg0: Parameters<typeof welcomeContentImpl>[0]) => ReturnType<typeof welcomeContentImpl>
+  (
+    arg0: Parameters<typeof welcomeContentImpl>[0],
+    arg1: Parameters<typeof welcomeContentImpl>[1],
+    arg2: Parameters<typeof welcomeContentImpl>[2],
+    arg3: Parameters<typeof welcomeContentImpl>[3],
+  ): ReturnType<typeof welcomeContentImpl>
+} = Function.dual(4, welcomeContentImpl)

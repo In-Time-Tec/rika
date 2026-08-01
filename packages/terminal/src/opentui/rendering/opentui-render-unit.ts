@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import { bold, dim, fg, italic, strikethrough, StyledText, type TextChunk } from "@opentui/core"
 import stringWidth from "string-width"
 import type { Model } from "../../state/model/terminal-state"
@@ -27,6 +28,7 @@ import {
 } from "../../presentation/transcript/transcript-row"
 import type {
   AgentOutcome,
+  AgentResponseState,
   ToolTranscriptUnit,
   TranscriptUnit,
 } from "../../presentation/transcript/transcript-tool-types"
@@ -41,10 +43,12 @@ import {
 import { transcriptWrapWidth } from "./opentui-render-transcript-window"
 import { toolUnitsFor, shellCommandText, shellExitCode, type ToolUnit } from "./opentui-render-tool-detail"
 import type { TranscriptUnitBuild, UnitLineRange } from "./opentui-render-transcript-window"
-import { agentResponseOutcome } from "./opentui-render-transcript-revision"
 import { createToolBodyRenderer } from "./opentui-render-tool-bodies"
 
-export const transcriptUnitBuilder = (model: Model, spinnerFrame: string) => {
+const agentResponseOutcome = (state: AgentResponseState): AgentOutcome =>
+  state._tag === "Streaming" ? { kind: "answer", entry: state.answer } : state.outcome
+
+const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
   let chunks: Array<TextChunk> = []
   let line = 0
   const append = (chunk: TextChunk | TerminalTextChunk) => {
@@ -452,3 +456,13 @@ export const transcriptUnitBuilder = (model: Model, spinnerFrame: string) => {
   }
   return { renderUnit, isUnitVisible }
 }
+
+export const transcriptUnitBuilder: {
+  (
+    arg1: Parameters<typeof transcriptUnitBuilderImpl>[1],
+  ): (arg0: Parameters<typeof transcriptUnitBuilderImpl>[0]) => ReturnType<typeof transcriptUnitBuilderImpl>
+  (
+    arg0: Parameters<typeof transcriptUnitBuilderImpl>[0],
+    arg1: Parameters<typeof transcriptUnitBuilderImpl>[1],
+  ): ReturnType<typeof transcriptUnitBuilderImpl>
+} = Function.dual(2, transcriptUnitBuilderImpl)

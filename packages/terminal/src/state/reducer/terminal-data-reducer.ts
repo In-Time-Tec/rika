@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import type { Message } from "../model/terminal-message"
 import type { Model } from "../model/terminal-state"
 import type { TranscriptBlock, TranscriptItem } from "../model/terminal-transcript-state"
@@ -12,7 +13,7 @@ import {
 } from "../model/terminal-thread-navigation"
 import { context } from "./terminal-state-reducer"
 
-export const reduceData = (
+const reduceDataImpl = (
   model: Model,
   message: Message,
   _reduce: (model: Model, message: Message) => Model,
@@ -205,3 +206,15 @@ export const reduceData = (
   }
   return undefined
 }
+
+export const reduceData: {
+  (
+    arg1: Parameters<typeof reduceDataImpl>[1],
+    arg2: Parameters<typeof reduceDataImpl>[2],
+  ): (arg0: Parameters<typeof reduceDataImpl>[0]) => ReturnType<typeof reduceDataImpl>
+  (
+    arg0: Parameters<typeof reduceDataImpl>[0],
+    arg1: Parameters<typeof reduceDataImpl>[1],
+    arg2: Parameters<typeof reduceDataImpl>[2],
+  ): ReturnType<typeof reduceDataImpl>
+} = Function.dual(3, reduceDataImpl)
