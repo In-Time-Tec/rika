@@ -251,24 +251,60 @@ export const makeSubagentReloadHarness: (
   return { session, subagentThread, transcripts, turns }
 })
 
-export const selectionEntriesFor = (
+type SelectionEntries = {
+  readonly entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>
+  readonly events: ReadonlyArray<InteractiveEvent>
+}
+
+function selectionEntriesForImplementation(
+  threadId: RuntimeFixtures.Thread.ThreadId,
+  until?: (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) => boolean,
+): (session: InteractiveSession) => Effect.Effect<SelectionEntries, OperationUnavailable>
+function selectionEntriesForImplementation(
   session: InteractiveSession,
   threadId: RuntimeFixtures.Thread.ThreadId,
   until?: (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) => boolean,
-): Effect.Effect<
-  {
-    readonly entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>
-    readonly events: ReadonlyArray<InteractiveEvent>
-  },
-  OperationUnavailable
-> =>
-  Effect.gen(function* () {
+): Effect.Effect<SelectionEntries, OperationUnavailable>
+function selectionEntriesForImplementation(
+  sessionOrThreadId: InteractiveSession | RuntimeFixtures.Thread.ThreadId,
+  threadIdOrUntil?:
+    | RuntimeFixtures.Thread.ThreadId
+    | ((entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) => boolean),
+  until?: (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) => boolean,
+):
+  | Effect.Effect<SelectionEntries, OperationUnavailable>
+  | ((session: InteractiveSession) => Effect.Effect<SelectionEntries, OperationUnavailable>) {
+  if (typeof sessionOrThreadId === "string") {
+    if (threadIdOrUntil !== undefined && typeof threadIdOrUntil !== "function")
+      throw new Error("Invalid selection arguments")
+    const threadId = sessionOrThreadId
+    const untilPredicate = threadIdOrUntil
+    return (session) => selectionEntriesForImplementation(session, threadId, untilPredicate)
+  }
+  if (typeof threadIdOrUntil !== "string") throw new Error("Invalid selection arguments")
+  const threadId = threadIdOrUntil
+  return Effect.gen(function* () {
     const events: Array<InteractiveEvent> = []
-    yield* collectEvents(session, events)
-    yield* session.selectThread(threadId, 1)
+    yield* collectEvents(sessionOrThreadId, events)
+    yield* sessionOrThreadId.selectThread(threadId, 1)
     const entries = yield* awaitSelectionEntries(events, (loaded) => until === undefined || until(loaded))
     return { entries, events }
   })
+}
+
+type SelectionEntriesFor = {
+  (
+    session: InteractiveSession,
+    threadId: RuntimeFixtures.Thread.ThreadId,
+    until?: (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) => boolean,
+  ): Effect.Effect<SelectionEntries, OperationUnavailable>
+  (
+    threadId: RuntimeFixtures.Thread.ThreadId,
+    until?: (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) => boolean,
+  ): (session: InteractiveSession) => Effect.Effect<SelectionEntries, OperationUnavailable>
+}
+
+export const selectionEntriesFor: SelectionEntriesFor = selectionEntriesForImplementation
 
 export const nestedSubagentReady = (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) => {
   const { nestedTool, nestedAnswer } = nestedSubagentExpectations(entries)

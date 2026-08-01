@@ -5,17 +5,24 @@ import * as ExecutionInspection from "@rika/product/execution-inspection"
 import * as TurnContract from "@rika/product/turn-repository"
 import { Effect } from "effect"
 
-export const executionStarted = (
-  executionId: string,
-  cursor: string = `${executionId}:started`,
-): ExecutionEvent.Event => ({
+const executionStartedImplementation = (executionId: string, cursor?: string): ExecutionEvent.Event => ({
   executionId,
-  cursor,
+  cursor: cursor ?? `${executionId}:started`,
   sequence: 0,
   type: "execution.started",
   timestampSource: "server",
   createdAt: 0,
 })
+
+export function executionStarted(executionId: string, cursor?: string): ExecutionEvent.Event
+export function executionStarted(cursor?: string): (executionId: string) => ExecutionEvent.Event
+export function executionStarted(
+  executionIdOrCursor?: string,
+  cursor?: string,
+): ExecutionEvent.Event | ((executionId: string) => ExecutionEvent.Event) {
+  if (executionIdOrCursor === undefined) return (executionId) => executionStartedImplementation(executionId, cursor)
+  return executionStartedImplementation(executionIdOrCursor, cursor)
+}
 
 export const backend = ExecutionBackend.Service.of({
   invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
@@ -104,18 +111,46 @@ export const inspectFromTurns =
       Effect.orElseSucceed(() => undefined),
     )
 
-export const delegationEvent = (
+export function delegationEvent(
+  cursor: string,
+  sequence: number,
+  type: string,
+  data: Record<string, unknown>,
+): (executionId: string) => ExecutionEvent.Event
+export function delegationEvent(
   executionId: string,
   cursor: string,
   sequence: number,
   type: string,
   data: Record<string, unknown>,
-): ExecutionEvent.Event => ({
-  executionId,
-  cursor,
-  sequence,
-  type,
-  timestampSource: "server",
-  createdAt: sequence,
-  data,
-})
+): ExecutionEvent.Event
+export function delegationEvent(
+  executionIdOrCursor: string,
+  cursorOrSequence: string | number,
+  sequenceOrType: number | string,
+  typeOrData: string | Record<string, unknown>,
+  data?: Record<string, unknown>,
+): ExecutionEvent.Event | ((executionId: string) => ExecutionEvent.Event) {
+  if (typeof cursorOrSequence === "number") {
+    if (
+      typeof sequenceOrType !== "string" ||
+      typeof typeOrData !== "object" ||
+      typeOrData === null ||
+      data !== undefined
+    )
+      throw new Error("Invalid delegation event arguments")
+    return (executionId) =>
+      delegationEvent(executionId, executionIdOrCursor, cursorOrSequence, sequenceOrType, typeOrData)
+  }
+  if (typeof sequenceOrType !== "number" || typeof typeOrData !== "string" || data === undefined)
+    throw new Error("Invalid delegation event arguments")
+  return {
+    executionId: executionIdOrCursor,
+    cursor: cursorOrSequence,
+    sequence: sequenceOrType,
+    type: typeOrData,
+    timestampSource: "server",
+    createdAt: sequenceOrType,
+    data,
+  }
+}

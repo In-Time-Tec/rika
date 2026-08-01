@@ -27,12 +27,29 @@ const {
   UsageCursorsJson,
 } = support
 
-export const readTranscriptProjection = (
+export function readTranscriptProjection(
+  sql: SqlClientType,
+  turnId: TurnId,
+): (
+  loadExecutionCheckpoints: (turnId: TurnId) => Effect.Effect<ReadonlyArray<ExecutionCheckpoint>, RepositoryError>,
+) => Effect.Effect<Projection | undefined, RepositoryError>
+export function readTranscriptProjection(
   sql: SqlClientType,
   turnId: TurnId,
   loadExecutionCheckpoints: (turnId: TurnId) => Effect.Effect<ReadonlyArray<ExecutionCheckpoint>, RepositoryError>,
-) =>
-  Effect.gen(function* () {
+): Effect.Effect<Projection | undefined, RepositoryError>
+export function readTranscriptProjection(
+  sql: SqlClientType,
+  turnId: TurnId,
+  loadExecutionCheckpoints?: (turnId: TurnId) => Effect.Effect<ReadonlyArray<ExecutionCheckpoint>, RepositoryError>,
+):
+  | Effect.Effect<Projection | undefined, RepositoryError>
+  | ((
+      loadExecutionCheckpoints: (turnId: TurnId) => Effect.Effect<ReadonlyArray<ExecutionCheckpoint>, RepositoryError>,
+    ) => Effect.Effect<Projection | undefined, RepositoryError>) {
+  if (loadExecutionCheckpoints === undefined)
+    return (nextLoadExecutionCheckpoints) => readTranscriptProjection(sql, turnId, nextLoadExecutionCheckpoints)
+  return Effect.gen(function* () {
     const checkpointRows = yield* sql`
       SELECT c.checkpoint_generation, c.model_phase, c.revision, c.usable_completion_sequence,
         c.oldest_cursor, c.checkpoint_cursor, c.cost_usd, c.usage_cursors_json,
@@ -125,3 +142,4 @@ export const readTranscriptProjection = (
       projectionVersion: row.projection_version,
     } satisfies Projection
   })
+}

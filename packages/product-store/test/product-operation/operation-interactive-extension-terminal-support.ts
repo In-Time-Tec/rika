@@ -18,7 +18,7 @@ import { projectionVersion } from "./interactive-session-base-support"
 import { invalidatedProjection } from "../support/product-test-transcript-fixture"
 import { baseBackend, interactiveLayer, storeProjection, thread } from "./operation-interactive-extensions-support"
 
-export const terminalTransitionScenario = (
+const terminalTransitionScenarioImplementation = (
   inspectedStatus: "failed" | "cancelled",
   pagedHistory: boolean,
   oversizedProjection: boolean = false,
@@ -251,3 +251,30 @@ export const terminalTransitionScenario = (
       yield* Fiber.interrupt(operationFiber)
     }),
   )
+
+export function terminalTransitionScenario(
+  pagedHistory: boolean,
+  oversizedProjection?: boolean,
+): (inspectedStatus: "failed" | "cancelled") => Effect.Effect<void, object, Scope.Scope>
+export function terminalTransitionScenario(
+  inspectedStatus: "failed" | "cancelled",
+  pagedHistory: boolean,
+  oversizedProjection?: boolean,
+): Effect.Effect<void, object, Scope.Scope>
+export function terminalTransitionScenario(
+  inspectedStatusOrPagedHistory: "failed" | "cancelled" | boolean,
+  pagedHistoryOrOversized?: boolean,
+  oversizedProjection?: boolean,
+):
+  | Effect.Effect<void, object, Scope.Scope>
+  | ((inspectedStatus: "failed" | "cancelled") => Effect.Effect<void, object, Scope.Scope>) {
+  if (typeof inspectedStatusOrPagedHistory === "boolean")
+    return (inspectedStatus) =>
+      terminalTransitionScenarioImplementation(inspectedStatus, inspectedStatusOrPagedHistory, pagedHistoryOrOversized)
+  if (pagedHistoryOrOversized === undefined) throw new Error("Invalid terminal scenario arguments")
+  return terminalTransitionScenarioImplementation(
+    inspectedStatusOrPagedHistory,
+    pagedHistoryOrOversized,
+    oversizedProjection,
+  )
+}

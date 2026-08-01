@@ -6,8 +6,18 @@ import { expect, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import { create, provideLayer } from "./turn-repository-behavior-setup"
 
-export const stopIntentContract = (label: string, layer: Layer.Layer<TurnRepository.Service, never, never>) =>
-  it.effect(`${label} keeps a stopped turn out of the resumable set`, () =>
+export function stopIntentContract(label: string, layer: Layer.Layer<TurnRepository.Service, never, never>): void
+export function stopIntentContract(layer: Layer.Layer<TurnRepository.Service, never, never>): (label: string) => void
+export function stopIntentContract(
+  labelOrLayer: string | Layer.Layer<TurnRepository.Service, never, never>,
+  layer?: Layer.Layer<TurnRepository.Service, never, never>,
+): void | ((label: string) => void) {
+  if (typeof labelOrLayer !== "string") {
+    if (layer !== undefined) throw new Error("Invalid stop intent contract arguments")
+    return (label) => stopIntentContract(label, labelOrLayer)
+  }
+  if (layer === undefined) throw new Error("Invalid stop intent contract arguments")
+  return it.effect(`${labelOrLayer} keeps a stopped turn out of the resumable set`, () =>
     Effect.gen(function* () {
       const repository = yield* TurnRepository.Service
       const threadId = Thread.ThreadId.make("stop-thread")
@@ -29,5 +39,6 @@ export const stopIntentContract = (label: string, layer: Layer.Layer<TurnReposit
       expect((yield* repository.get(stopped.id))?.stopIntent).toBe("requested")
     }).pipe(provideLayer(layer)),
   )
+}
 
 export { Thread, TurnRepository, TurnContract, Turn }

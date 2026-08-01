@@ -1,18 +1,42 @@
 import type { InteractiveSession } from "@rika/product/interactive-session"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
-import type { Input } from "@rika/product/product-operation"
+import type { Input, OperationUnavailable } from "@rika/product/product-operation"
 import { Service } from "@rika/product/product-operation-service"
 import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"
-import { Effect, Layer, Ref } from "effect"
+import { Effect, Fiber, Layer, Ref } from "effect"
 import { TestClock } from "effect/testing"
 import * as ResolvedContext from "@rika/product/context-resolution-service"
 
-export const collectEvents = (session: InteractiveSession, events: Array<InteractiveEvent>) =>
-  Effect.gen(function* () {
-    const fiber = yield* Effect.forkChild(session.events((event) => events.push(event)))
+type CollectEvents = {
+  (session: InteractiveSession, events: Array<InteractiveEvent>): Effect.Effect<Fiber.Fiber<void, OperationUnavailable>>
+  (
+    events: Array<InteractiveEvent>,
+  ): (session: InteractiveSession) => Effect.Effect<Fiber.Fiber<void, OperationUnavailable>>
+}
+function collectEventsImplementation(
+  events: Array<InteractiveEvent>,
+): (session: InteractiveSession) => Effect.Effect<Fiber.Fiber<void, OperationUnavailable>>
+function collectEventsImplementation(
+  session: InteractiveSession,
+  events: Array<InteractiveEvent>,
+): Effect.Effect<Fiber.Fiber<void, OperationUnavailable>>
+function collectEventsImplementation(
+  sessionOrEvents: InteractiveSession | Array<InteractiveEvent>,
+  events?: Array<InteractiveEvent>,
+) {
+  if (!("events" in sessionOrEvents)) {
+    if (events !== undefined) throw new Error("Invalid event collection arguments")
+    return (session: InteractiveSession) => collectEventsImplementation(session, sessionOrEvents)
+  }
+  if (events === undefined) throw new Error("Invalid event collection arguments")
+  return Effect.gen(function* () {
+    const fiber = yield* Effect.forkChild(sessionOrEvents.events((event) => events.push(event)))
     yield* Effect.yieldNow
     return fiber
   })
+}
+
+export const collectEvents: CollectEvents = collectEventsImplementation
 
 export const holdSession =
   (sessions: Ref.Ref<ReadonlyArray<InteractiveSession>>) =>

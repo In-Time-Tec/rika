@@ -9,7 +9,17 @@ export const runWithChildDelegationLayer =
   <A, E, R>(effect: Effect.Effect<A, E, R | ROut>) =>
     provideProduct(layer)(effect)
 
-export const truncatedDelegationReport = (childExecutionId: string, reason: string) =>
-  AgentOutcomes.AgentContract.noReport({ childExecutionId, reason })
+export function truncatedDelegationReport(
+  reason: string,
+): (childExecutionId: string) => ReturnType<typeof AgentOutcomes.AgentContract.noReport>
+export function truncatedDelegationReport(
+  childExecutionId: string,
+  reason: string,
+): ReturnType<typeof AgentOutcomes.AgentContract.noReport>
+export function truncatedDelegationReport(childExecutionIdOrReason: string, reason?: string) {
+  if (reason === undefined)
+    return (childExecutionId: string) => truncatedDelegationReport(childExecutionId, childExecutionIdOrReason)
+  return AgentOutcomes.AgentContract.noReport({ childExecutionId: childExecutionIdOrReason, reason })
+}
 
 export const noReportRecovery = AgentOutcomes.AgentContract.noReportRecovery

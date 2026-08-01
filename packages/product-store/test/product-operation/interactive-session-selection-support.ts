@@ -104,35 +104,62 @@ const latestSelectionEntries = (events: ReadonlyArray<InteractiveEvent>) => {
   ])
 }
 
-export const awaitSelectionEntries = (
+function awaitSelectionEntriesImplementation(
   events: ReadonlyArray<InteractiveEvent>,
   until: (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) => boolean,
-) =>
-  Effect.gen(function* () {
+): Effect.Effect<ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>>
+function awaitSelectionEntriesImplementation(
+  until: (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) => boolean,
+): (events: ReadonlyArray<InteractiveEvent>) => Effect.Effect<ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>>
+function awaitSelectionEntriesImplementation(
+  eventsOrUntil:
+    | ReadonlyArray<InteractiveEvent>
+    | ((entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) => boolean),
+  until?: (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) => boolean,
+):
+  | Effect.Effect<ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>>
+  | ((events: ReadonlyArray<InteractiveEvent>) => Effect.Effect<ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>>) {
+  if (typeof eventsOrUntil === "function") {
+    return (events: ReadonlyArray<InteractiveEvent>) => awaitSelectionEntriesImplementation(events, eventsOrUntil)
+  }
+  if (until === undefined) throw new Error("Invalid selection wait arguments")
+  return Effect.gen(function* () {
     for (let attempt = 0; attempt < 2_000; attempt += 1) {
-      const entries = latestSelectionEntries(events)
+      const entries = latestSelectionEntries(eventsOrUntil)
       if (entries !== undefined && until(entries)) return entries
       yield* Effect.yieldNow
     }
-    return latestSelectionEntries(events) ?? []
+    return latestSelectionEntries(eventsOrUntil) ?? []
   })
+}
 
 type SelectionLoadedEvent = Extract<InteractiveEvent, { readonly _tag: "SelectionLoaded" }>
 type TranscriptPagePrependedEvent = Extract<InteractiveEvent, { readonly _tag: "TranscriptPagePrepended" }>
 
-export const awaitSelectionLoaded = (
+function awaitSelectionLoadedImplementation(
   events: ReadonlyArray<InteractiveEvent>,
   until: (event: SelectionLoadedEvent) => boolean,
-) =>
-  Effect.gen(function* () {
+): Effect.Effect<SelectionLoadedEvent>
+function awaitSelectionLoadedImplementation(
+  until: (event: SelectionLoadedEvent) => boolean,
+): (events: ReadonlyArray<InteractiveEvent>) => Effect.Effect<SelectionLoadedEvent>
+function awaitSelectionLoadedImplementation(
+  eventsOrUntil: ReadonlyArray<InteractiveEvent> | ((event: SelectionLoadedEvent) => boolean),
+  until?: (event: SelectionLoadedEvent) => boolean,
+) {
+  if (typeof eventsOrUntil === "function") {
+    return (events: ReadonlyArray<InteractiveEvent>) => awaitSelectionLoadedImplementation(events, eventsOrUntil)
+  }
+  if (until === undefined) throw new Error("Invalid selection wait arguments")
+  return Effect.gen(function* () {
     for (let attempt = 0; attempt < 2_000; attempt += 1) {
-      const event = events.findLast(
+      const event = eventsOrUntil.findLast(
         (candidate): candidate is SelectionLoadedEvent => candidate._tag === "SelectionLoaded" && until(candidate),
       )
       if (event !== undefined) return event
       yield* Effect.yieldNow
     }
-    const detail = events.map((event) => {
+    const detail = eventsOrUntil.map((event) => {
       if (event._tag === "SelectionLoaded")
         return {
           tag: event._tag,
@@ -146,11 +173,25 @@ export const awaitSelectionLoaded = (
     const encoded = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(detail).pipe(Effect.orDie)
     return yield* Effect.die(`selection did not load the expected transcript page: ${encoded}`)
   })
+}
 
-export const awaitPrependedPage = (events: ReadonlyArray<InteractiveEvent>, previousCount: number) =>
-  Effect.gen(function* () {
+function awaitPrependedPageImplementation(
+  events: ReadonlyArray<InteractiveEvent>,
+  previousCount: number,
+): Effect.Effect<TranscriptPagePrependedEvent>
+function awaitPrependedPageImplementation(
+  previousCount: number,
+): (events: ReadonlyArray<InteractiveEvent>) => Effect.Effect<TranscriptPagePrependedEvent>
+function awaitPrependedPageImplementation(
+  eventsOrCount: ReadonlyArray<InteractiveEvent> | number,
+  previousCount?: number,
+) {
+  if (typeof eventsOrCount === "number")
+    return (events: ReadonlyArray<InteractiveEvent>) => awaitPrependedPageImplementation(events, eventsOrCount)
+  if (previousCount === undefined) throw new Error("Invalid page wait arguments")
+  return Effect.gen(function* () {
     for (let attempt = 0; attempt < 2_000; attempt += 1) {
-      const pages = events.filter(
+      const pages = eventsOrCount.filter(
         (event): event is TranscriptPagePrependedEvent => event._tag === "TranscriptPagePrepended",
       )
       if (pages.length > previousCount) return pages.at(-1)!
@@ -158,3 +199,31 @@ export const awaitPrependedPage = (events: ReadonlyArray<InteractiveEvent>, prev
     }
     return yield* Effect.die("older transcript page did not load")
   })
+}
+
+type AwaitSelectionEntries = {
+  (
+    events: ReadonlyArray<InteractiveEvent>,
+    until: (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) => boolean,
+  ): Effect.Effect<ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>>
+  (
+    until: (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) => boolean,
+  ): (events: ReadonlyArray<InteractiveEvent>) => Effect.Effect<ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>>
+}
+type AwaitSelectionLoaded = {
+  (
+    events: ReadonlyArray<InteractiveEvent>,
+    until: (event: SelectionLoadedEvent) => boolean,
+  ): Effect.Effect<SelectionLoadedEvent>
+  (
+    until: (event: SelectionLoadedEvent) => boolean,
+  ): (events: ReadonlyArray<InteractiveEvent>) => Effect.Effect<SelectionLoadedEvent>
+}
+type AwaitPrependedPage = {
+  (events: ReadonlyArray<InteractiveEvent>, previousCount: number): Effect.Effect<TranscriptPagePrependedEvent>
+  (previousCount: number): (events: ReadonlyArray<InteractiveEvent>) => Effect.Effect<TranscriptPagePrependedEvent>
+}
+
+export const awaitSelectionEntries: AwaitSelectionEntries = awaitSelectionEntriesImplementation
+export const awaitSelectionLoaded: AwaitSelectionLoaded = awaitSelectionLoadedImplementation
+export const awaitPrependedPage: AwaitPrependedPage = awaitPrependedPageImplementation

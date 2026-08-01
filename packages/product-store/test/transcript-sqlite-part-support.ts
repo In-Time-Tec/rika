@@ -8,6 +8,8 @@ import * as ThreadRepository from "../src/thread/sqlite-thread-repository"
 import * as TurnRepository from "../src/turn/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 
+export const compareExecutionCheckpoints: CompareExecutionCheckpoints = compareExecutionCheckpointsImplementation
+
 export const UnitJson = Schema.fromJsonString(TranscriptUnit.Unit)
 
 export const usageEvent: TranscriptSourceEvent.SourceEvent = {
@@ -26,12 +28,24 @@ export const usageEvent: TranscriptSourceEvent.SourceEvent = {
   },
 }
 
-export const compareExecutionCheckpoints = (
+type CompareExecutionCheckpoints = {
+  (left: TranscriptPage.ExecutionCheckpoint, right: TranscriptPage.ExecutionCheckpoint): number
+  (right: TranscriptPage.ExecutionCheckpoint): (left: TranscriptPage.ExecutionCheckpoint) => number
+}
+function compareExecutionCheckpointsImplementation(
+  right: TranscriptPage.ExecutionCheckpoint,
+): (left: TranscriptPage.ExecutionCheckpoint) => number
+function compareExecutionCheckpointsImplementation(
   left: TranscriptPage.ExecutionCheckpoint,
   right: TranscriptPage.ExecutionCheckpoint,
-): number => {
-  if (left.executionKey < right.executionKey) return -1
-  if (left.executionKey > right.executionKey) return 1
+): number
+function compareExecutionCheckpointsImplementation(
+  leftOrRight: TranscriptPage.ExecutionCheckpoint,
+  right?: TranscriptPage.ExecutionCheckpoint,
+): number | ((left: TranscriptPage.ExecutionCheckpoint) => number) {
+  if (right === undefined) return (left) => compareExecutionCheckpointsImplementation(left, leftOrRight)
+  if (leftOrRight.executionKey < right.executionKey) return -1
+  if (leftOrRight.executionKey > right.executionKey) return 1
   return 0
 }
 
