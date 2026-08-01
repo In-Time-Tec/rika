@@ -37,8 +37,6 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-bun-v1-
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      - name: Make Effect TypeScript binary executable
-        run: find node_modules/.bun -path '*/@effect/tsgo-linux-*/lib/tsc' -exec chmod +x {} +
       - name: Prepare login shells for tool runs
         run: |
           sudo rm -f /etc/profile.d/blacksmith.sh
@@ -75,8 +73,6 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-bun-v1-
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      - name: Make Effect TypeScript binary executable
-        run: find node_modules/.bun -path '*/@effect/tsgo-linux-*/lib/tsc' -exec chmod +x {} +
       - name: Prepare login shells for tool runs
         run: |
           sudo rm -f /etc/profile.d/blacksmith.sh
@@ -113,8 +109,6 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-bun-v1-
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      - name: Make Effect TypeScript binary executable
-        run: find node_modules/.bun -path '*/@effect/tsgo-linux-*/lib/tsc' -exec chmod +x {} +
       - name: Prepare login shells for tool runs
         run: |
           sudo rm -f /etc/profile.d/blacksmith.sh

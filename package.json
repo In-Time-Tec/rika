@@ -126,5 +126,12 @@
   "rika": {
     "kind": "application",
     "domain": "repository"
+  },
+  "patchedDependencies": {
+    "@effect/tsgo-darwin-arm64@0.21.0": "patches/@effect%2Ftsgo-darwin-arm64@0.21.0.patch",
+    "@effect/tsgo-darwin-x64@0.21.0": "patches/@effect%2Ftsgo-darwin-x64@0.21.0.patch",
+    "@effect/tsgo-linux-arm@0.21.0": "patches/@effect%2Ftsgo-linux-arm@0.21.0.patch",
+    "@effect/tsgo-linux-arm64@0.21.0": "patches/@effect%2Ftsgo-linux-arm64@0.21.0.patch",
+    "@effect/tsgo-linux-x64@0.21.0": "patches/@effect%2Ftsgo-linux-x64@0.21.0.patch"
   }
 }
