@@ -2,6 +2,19 @@
 
 Rika is a local coding-agent CLI and OpenTUI app written in Effect TypeScript. Read `PRODUCT.md` for direction and `CONTEXT.md` for vocabulary and ownership.
 
+## Navigation
+
+- Start with `rg -n "<capability-or-symbol>" apps packages tooling` to find the likely owner.
+- Open that owner and the first `rankedTests` result from `check` before expanding to neighboring files.
+- For a source path, query structural relationships with:
+
+  ```bash
+  bun --cwd tooling/repository-graph query -- impact <path>
+  bun --cwd tooling/repository-graph query -- check <path>
+  bun --cwd tooling/repository-graph query -- tests <path>
+  bun --cwd tooling/repository-graph query -- why <path>
+  ```
+
 ## GREENFIELD PROJECT — BREAKING CHANGES ARE WELCOME!!!
 
 - THIS PROJECT HAS NO USERS!!! IT IS GREENFIELD!!!
