@@ -363,35 +363,8 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/lazy-backend.ts",
-      "path": "apps/rika/src/lazy-backend.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
       "id": "apps/rika/src/logging.ts",
       "path": "apps/rika/src/logging.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "apps/rika/src/openai-auth-adapter.ts",
-      "path": "apps/rika/src/openai-auth-adapter.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "apps/rika/src/openai-credential-store.ts",
-      "path": "apps/rika/src/openai-credential-store.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -426,8 +399,8 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/release-update.ts",
-      "path": "apps/rika/src/release-update.ts",
+      "id": "apps/rika/src/provider/openai/openai-auth-adapter.ts",
+      "path": "apps/rika/src/provider/openai/openai-auth-adapter.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -435,8 +408,26 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/resident-endpoint.ts",
-      "path": "apps/rika/src/resident-endpoint.ts",
+      "id": "apps/rika/src/provider/openai/openai-credential-store.ts",
+      "path": "apps/rika/src/provider/openai/openai-credential-store.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/provider/openai/openai-provider-auth.ts",
+      "path": "apps/rika/src/provider/openai/openai-provider-auth.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/release-update.ts",
+      "path": "apps/rika/src/release-update.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -453,8 +444,8 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/resident-process-startup.ts",
-      "path": "apps/rika/src/resident-process-startup.ts",
+      "id": "apps/rika/src/resident/composition/lazy-execution-backend.ts",
+      "path": "apps/rika/src/resident/composition/lazy-execution-backend.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -462,8 +453,8 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/resident-product.ts",
-      "path": "apps/rika/src/resident-product.ts",
+      "id": "apps/rika/src/resident/composition/resident-auth-layer.ts",
+      "path": "apps/rika/src/resident/composition/resident-auth-layer.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -471,8 +462,116 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/resident-startup.ts",
-      "path": "apps/rika/src/resident-startup.ts",
+      "id": "apps/rika/src/resident/composition/resident-configuration-adapter.ts",
+      "path": "apps/rika/src/resident/composition/resident-configuration-adapter.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/resident/composition/resident-execution-layer.ts",
+      "path": "apps/rika/src/resident/composition/resident-execution-layer.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/resident/composition/resident-execution-recovery.ts",
+      "path": "apps/rika/src/resident/composition/resident-execution-recovery.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/resident/composition/resident-product-config.ts",
+      "path": "apps/rika/src/resident/composition/resident-product-config.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/resident/composition/resident-product-context.ts",
+      "path": "apps/rika/src/resident/composition/resident-product-context.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/resident/composition/resident-product-layer.ts",
+      "path": "apps/rika/src/resident/composition/resident-product-layer.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/resident/composition/resident-repository-layer.ts",
+      "path": "apps/rika/src/resident/composition/resident-repository-layer.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/resident/composition/resident-runtime-tools.ts",
+      "path": "apps/rika/src/resident/composition/resident-runtime-tools.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/resident/process/resident-endpoint.ts",
+      "path": "apps/rika/src/resident/process/resident-endpoint.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "path": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/resident/process/resident-process-spawn.ts",
+      "path": "apps/rika/src/resident/process/resident-process-spawn.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/resident/process/resident-process.ts",
+      "path": "apps/rika/src/resident/process/resident-process.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/resident/process/resident-startup.ts",
+      "path": "apps/rika/src/resident/process/resident-startup.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -7327,6 +7426,15 @@
       "publicExports": []
     },
     {
+      "id": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "path": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/relay-execution/src/relay/execution/relay-execution-control-methods.ts",
       "path": "packages/relay-execution/src/relay/execution/relay-execution-control-methods.ts",
       "workspace": "@rika/relay-execution",
@@ -7435,6 +7543,15 @@
       "publicExports": []
     },
     {
+      "id": "packages/relay-execution/src/relay/execution/relay-execution-route.ts",
+      "path": "packages/relay-execution/src/relay/execution/relay-execution-route.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/relay-execution/src/relay/execution/relay-execution-routing.ts",
       "path": "packages/relay-execution/src/relay/execution/relay-execution-routing.ts",
       "workspace": "@rika/relay-execution",
@@ -7509,6 +7626,15 @@
     {
       "id": "packages/relay-execution/src/relay/execution/relay-host-composition.ts",
       "path": "packages/relay-execution/src/relay/execution/relay-host-composition.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/relay-execution/src/relay/execution/relay-product-tools.ts",
+      "path": "packages/relay-execution/src/relay/execution/relay-product-tools.ts",
       "workspace": "@rika/relay-execution",
       "package": "@rika/relay-execution",
       "kind": "source",
@@ -10988,8 +11114,16 @@
     },
     {
       "from": "apps/rika/src/client-main.ts",
-      "to": "apps/rika/src/resident-process-startup.ts",
-      "specifier": "./resident-process-startup",
+      "to": "apps/rika/src/resident/process/resident-process-spawn.ts",
+      "specifier": "./resident/process/resident-process-spawn",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/client-main.ts",
+      "to": "apps/rika/src/resident/process/resident-process.ts",
+      "specifier": "./resident/process/resident-process",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12708,8 +12842,16 @@
     },
     {
       "from": "apps/rika/src/interactive/process/process-startup-dispatcher.ts",
-      "to": "apps/rika/src/resident-process-startup.ts",
-      "specifier": "../../resident-process-startup",
+      "to": "apps/rika/src/resident/process/resident-process-spawn.ts",
+      "specifier": "../../resident/process/resident-process-spawn",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/process-startup-dispatcher.ts",
+      "to": "apps/rika/src/resident/process/resident-process.ts",
+      "specifier": "../../resident/process/resident-process",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12827,129 +12969,9 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/lazy-backend.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/lazy-backend.ts",
-      "to": "packages/product/src/execution/contract/execution-identifier.ts",
-      "specifier": "@rika/product/execution-identifier",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/lazy-backend.ts",
-      "to": "packages/product/src/execution/contract/execution-service.ts",
-      "specifier": "@rika/product/execution-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
       "from": "apps/rika/src/logging.ts",
       "to": "external:effect",
       "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/openai-auth-adapter.ts",
-      "to": "external:@effect/platform-bun/BunHttpServer",
-      "specifier": "@effect/platform-bun/BunHttpServer",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/openai-auth-adapter.ts",
-      "to": "external:✖",
-      "specifier": "✖",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/openai-auth-adapter.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/openai-auth-adapter.ts",
-      "to": "external:effect/unstable/http",
-      "specifier": "effect/unstable/http",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/openai-auth-adapter.ts",
-      "to": "external:effect/unstable/process",
-      "specifier": "effect/unstable/process",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/openai-auth-adapter.ts",
-      "to": "packages/product/src/authentication/openai-auth-contract.ts",
-      "specifier": "@rika/product/openai-auth-contract",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/openai-auth-adapter.ts",
-      "to": "packages/product/src/authentication/openai-auth-service.ts",
-      "specifier": "@rika/product/openai-auth-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/openai-credential-store.ts",
-      "to": "external:✖",
-      "specifier": "✖",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/openai-credential-store.ts",
-      "to": "external:crypto",
-      "specifier": "crypto",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/openai-credential-store.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "dynamic-import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/openai-credential-store.ts",
-      "to": "packages/product/src/authentication/openai-auth-contract.ts",
-      "specifier": "@rika/product/openai-auth-contract",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/openai-credential-store.ts",
-      "to": "packages/product/src/authentication/openai-auth-service.ts",
-      "specifier": "@rika/product/openai-auth-service",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -13019,7 +13041,23 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/release-update.ts",
+      "from": "apps/rika/src/provider/openai/openai-auth-adapter.ts",
+      "to": "external:@effect/platform-bun/BunHttpServer",
+      "specifier": "@effect/platform-bun/BunHttpServer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/provider/openai/openai-auth-adapter.ts",
+      "to": "external:✖",
+      "specifier": "✖",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/provider/openai/openai-auth-adapter.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -13027,7 +13065,7 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/release-update.ts",
+      "from": "apps/rika/src/provider/openai/openai-auth-adapter.ts",
       "to": "external:effect/unstable/http",
       "specifier": "effect/unstable/http",
       "kind": "import",
@@ -13035,7 +13073,7 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/release-update.ts",
+      "from": "apps/rika/src/provider/openai/openai-auth-adapter.ts",
       "to": "external:effect/unstable/process",
       "specifier": "effect/unstable/process",
       "kind": "import",
@@ -13043,79 +13081,31 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/resident-endpoint.ts",
-      "to": "external:effect",
-      "specifier": "effect",
+      "from": "apps/rika/src/provider/openai/openai-auth-adapter.ts",
+      "to": "packages/product/src/authentication/openai-auth-contract.ts",
+      "specifier": "@rika/product/openai-auth-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "apps/rika/src/resident-endpoint.ts",
-      "to": "packages/product/src/resident/resident-service.ts",
-      "specifier": "@rika/product/resident-service",
+      "from": "apps/rika/src/provider/openai/openai-auth-adapter.ts",
+      "to": "packages/product/src/authentication/openai-auth-service.ts",
+      "specifier": "@rika/product/openai-auth-service",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "apps/rika/src/resident-main.ts",
-      "to": "apps/rika/src/logging.ts",
-      "specifier": "./logging",
+      "from": "apps/rika/src/provider/openai/openai-credential-store.ts",
+      "to": "external:✖",
+      "specifier": "✖",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "apps/rika/src/resident-main.ts",
-      "to": "apps/rika/src/resident-process-startup.ts",
-      "specifier": "./resident-process-startup",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-main.ts",
-      "to": "apps/rika/src/resident-product.ts",
-      "specifier": "./resident-product",
-      "kind": "dynamic-import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-main.ts",
-      "to": "apps/rika/src/transport/host/resident-host-transport.ts",
-      "specifier": "./transport/host/resident-host-transport",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-main.ts",
-      "to": "apps/rika/src/version.ts",
-      "specifier": "./version",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-main.ts",
-      "to": "external:@effect/platform-bun/BunCrypto",
-      "specifier": "@effect/platform-bun/BunCrypto",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-main.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-main.ts",
+      "from": "apps/rika/src/provider/openai/openai-credential-store.ts",
       "to": "external:crypto",
       "specifier": "crypto",
       "kind": "import",
@@ -13123,151 +13113,47 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/resident-main.ts",
+      "from": "apps/rika/src/provider/openai/openai-credential-store.ts",
       "to": "external:effect",
       "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-main.ts",
-      "to": "external:effect/unstable/http",
-      "specifier": "effect/unstable/http",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-main.ts",
-      "to": "packages/configuration/src/path-resolution/configuration-paths.ts",
-      "specifier": "@rika/configuration/configuration-paths",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-main.ts",
-      "to": "packages/configuration/src/path-resolution/profile-data-paths.ts",
-      "specifier": "@rika/configuration/profile-data-paths",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-main.ts",
-      "to": "packages/configuration/src/settings/configuration-service.ts",
-      "specifier": "@rika/configuration/configuration-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-main.ts",
-      "to": "packages/configuration/src/settings/configuration-settings.ts",
-      "specifier": "@rika/configuration/configuration-settings",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-main.ts",
-      "to": "packages/product/src/operation/contract/product-operation-service.ts",
-      "specifier": "@rika/product/product-operation-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-main.ts",
-      "to": "packages/product/src/operation/contract/product-operation.ts",
-      "specifier": "@rika/product/product-operation",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-main.ts",
-      "to": "packages/product/src/operation/interactive/interactive-session.ts",
-      "specifier": "@rika/product/interactive-session",
       "kind": "dynamic-import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "apps/rika/src/resident-main.ts",
-      "to": "packages/product/src/resident/resident-interactive-feed.ts",
-      "specifier": "@rika/product/resident-interactive-feed",
-      "kind": "dynamic-import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-main.ts",
-      "to": "packages/product/src/resident/resident-service.ts",
-      "specifier": "@rika/product/resident-service",
+      "from": "apps/rika/src/provider/openai/openai-credential-store.ts",
+      "to": "packages/product/src/authentication/openai-auth-contract.ts",
+      "specifier": "@rika/product/openai-auth-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "apps/rika/src/resident-process-startup.ts",
-      "to": "external:effect",
-      "specifier": "effect",
+      "from": "apps/rika/src/provider/openai/openai-credential-store.ts",
+      "to": "packages/product/src/authentication/openai-auth-service.ts",
+      "specifier": "@rika/product/openai-auth-service",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "apps/rika/src/resident-process-startup.ts",
-      "to": "external:effect/unstable/process",
-      "specifier": "effect/unstable/process",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-process-startup.ts",
-      "to": "external:net",
-      "specifier": "net",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-process-startup.ts",
-      "to": "packages/product/src/resident/resident-service.ts",
-      "specifier": "@rika/product/resident-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "apps/rika/src/lazy-backend.ts",
-      "specifier": "./lazy-backend",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "apps/rika/src/openai-auth-adapter.ts",
+      "from": "apps/rika/src/provider/openai/openai-provider-auth.ts",
+      "to": "apps/rika/src/provider/openai/openai-auth-adapter.ts",
       "specifier": "./openai-auth-adapter",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "apps/rika/src/openai-credential-store.ts",
+      "from": "apps/rika/src/provider/openai/openai-provider-auth.ts",
+      "to": "apps/rika/src/provider/openai/openai-credential-store.ts",
       "specifier": "./openai-credential-store",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "apps/rika/src/resident-product.ts",
+      "from": "apps/rika/src/provider/openai/openai-provider-auth.ts",
       "to": "external:@effect/platform-bun/BunCrypto",
       "specifier": "@effect/platform-bun/BunCrypto",
       "kind": "import",
@@ -13275,7 +13161,7 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/resident-product.ts",
+      "from": "apps/rika/src/provider/openai/openai-provider-auth.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -13283,7 +13169,7 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/resident-product.ts",
+      "from": "apps/rika/src/provider/openai/openai-provider-auth.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -13291,7 +13177,7 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/resident-product.ts",
+      "from": "apps/rika/src/provider/openai/openai-provider-auth.ts",
       "to": "external:effect/unstable/http",
       "specifier": "effect/unstable/http",
       "kind": "import",
@@ -13299,367 +13185,7 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "external:effect/unstable/process",
-      "specifier": "effect/unstable/process",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "external:effect/unstable/sql/SqlClient",
-      "specifier": "effect/unstable/sql/SqlClient",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/coding-tools/src/catalog/thread-tool-contract.ts",
-      "specifier": "@rika/coding-tools/thread-tool-contract",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/coding-tools/src/media/media-view-service.ts",
-      "specifier": "@rika/coding-tools/media-view-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
-      "specifier": "@rika/coding-tools/coding-tool-runtime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/coding-tools/src/web-research/read-web-page-service.ts",
-      "specifier": "@rika/coding-tools/read-web-page-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/coding-tools/src/web-research/web-search-provider.ts",
-      "specifier": "@rika/coding-tools/web-search-provider",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/coding-tools/src/web-research/web-search-service.ts",
-      "specifier": "@rika/coding-tools/web-search-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/coding-tools/src/workspace/workspace-file-search.ts",
-      "specifier": "@rika/coding-tools/workspace-file-search",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/configuration/src/model-routing/behavior-mode.ts",
-      "specifier": "@rika/configuration/behavior-mode",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/configuration/src/model-routing/model-route-resolution.ts",
-      "specifier": "@rika/configuration/model-route-resolution",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/configuration/src/model-routing/model-route.ts",
-      "specifier": "@rika/configuration/model-route",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/configuration/src/path-resolution/configuration-paths.ts",
-      "specifier": "@rika/configuration/configuration-paths",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/configuration/src/settings/configuration-service.ts",
-      "specifier": "@rika/configuration/configuration-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/configuration/src/settings/configuration-settings.ts",
-      "specifier": "@rika/configuration/configuration-settings",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/extensions/src/mcp/mcp-oauth-service.ts",
-      "specifier": "@rika/extensions/mcp-oauth-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/extensions/src/skill/skill-registry.ts",
-      "specifier": "@rika/extensions/skill-registry",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product-store/src/database/product-database-layer.ts",
-      "specifier": "@rika/product-store/product-database-layer",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product-store/src/interaction/sqlite-thread-interaction-repository.ts",
-      "specifier": "@rika/product-store/sqlite-thread-interaction-repository",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product-store/src/search/sqlite-thread-search-repository.ts",
-      "specifier": "@rika/product-store/sqlite-thread-search-repository",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product-store/src/summary/sqlite-thread-summary-repository.ts",
-      "specifier": "@rika/product-store/sqlite-thread-summary-repository",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product-store/src/thread/sqlite-thread-repository.ts",
-      "specifier": "@rika/product-store/sqlite-thread-repository",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product-store/src/transcript/sqlite-transcript-repository.ts",
-      "specifier": "@rika/product-store/sqlite-transcript-repository",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product-store/src/turn/sqlite-turn-repository.ts",
-      "specifier": "@rika/product-store/sqlite-turn-repository",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product-store/src/usage/sqlite-usage-repository.ts",
-      "specifier": "@rika/product-store/sqlite-usage-repository",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product/src/context/context-file-system.ts",
-      "specifier": "@rika/product/context-file-system",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product/src/context/context-resolution-service.ts",
-      "specifier": "@rika/product/context-resolution-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product/src/execution/contract/execution-request.ts",
-      "specifier": "@rika/product/execution-request",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
-      "specifier": "@rika/product/execution-route-snapshot",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product/src/execution/contract/execution-service.ts",
-      "specifier": "@rika/product/execution-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product/src/execution/contract/model-registration-identity.ts",
-      "specifier": "@rika/product/model-registration-identity",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product/src/operation/contract/configuration-operation.ts",
-      "specifier": "@rika/product/configuration-operation",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product/src/operation/contract/extension-operation.ts",
-      "specifier": "@rika/product/extension-operation",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product/src/operation/contract/product-operation-service.ts",
-      "specifier": "@rika/product/product-operation-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product/src/operation/contract/product-operation.ts",
-      "specifier": "@rika/product/product-operation",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product/src/operation/interactive/interactive-session.ts",
-      "specifier": "@rika/product/interactive-session",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product/src/resident/resident-interactive-feed.ts",
-      "specifier": "@rika/product/resident-interactive-feed",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product/src/thread/model/thread-record.ts",
-      "specifier": "@rika/product/thread-record",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product/src/thread/model/thread-result.ts",
-      "specifier": "@rika/product/thread-result",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product/src/thread/model/turn-record.ts",
-      "specifier": "@rika/product/turn-record",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product/src/thread/query/thread-query-service.ts",
-      "specifier": "@rika/product/thread-query-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/product/src/thread/tool/thread-tool-service.ts",
-      "specifier": "@rika/product/thread-tool-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/relay-execution/src/model/provider/model-provider-runtime.ts",
-      "specifier": "@rika/relay-execution/model-provider-runtime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/relay-execution/src/model/provider/scripted-model-runtime.ts",
-      "specifier": "@rika/relay-execution/scripted-model-runtime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-product.ts",
-      "to": "packages/relay-execution/src/relay/execution/relay-execution-layer.ts",
-      "specifier": "@rika/relay-execution/relay-execution-layer",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident-startup.ts",
+      "from": "apps/rika/src/release-update.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -13667,7 +13193,1071 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/resident-startup.ts",
+      "from": "apps/rika/src/release-update.ts",
+      "to": "external:effect/unstable/http",
+      "specifier": "effect/unstable/http",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/release-update.ts",
+      "to": "external:effect/unstable/process",
+      "specifier": "effect/unstable/process",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident-main.ts",
+      "to": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "specifier": "./resident/process/resident-process-launch",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/lazy-execution-backend.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/lazy-execution-backend.ts",
+      "to": "packages/product/src/execution/contract/execution-identifier.ts",
+      "specifier": "@rika/product/execution-identifier",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/lazy-execution-backend.ts",
+      "to": "packages/product/src/execution/contract/execution-service.ts",
+      "specifier": "@rika/product/execution-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-auth-layer.ts",
+      "to": "apps/rika/src/provider/openai/openai-provider-auth.ts",
+      "specifier": "../../provider/openai/openai-provider-auth",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-auth-layer.ts",
+      "to": "apps/rika/src/resident/composition/resident-configuration-adapter.ts",
+      "specifier": "./resident-configuration-adapter",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-auth-layer.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-auth-layer.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-auth-layer.ts",
+      "to": "external:effect/unstable/http",
+      "specifier": "effect/unstable/http",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-auth-layer.ts",
+      "to": "packages/coding-tools/src/web-research/web-search-provider.ts",
+      "specifier": "@rika/coding-tools/web-search-provider",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-auth-layer.ts",
+      "to": "packages/configuration/src/path-resolution/configuration-paths.ts",
+      "specifier": "@rika/configuration/configuration-paths",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-auth-layer.ts",
+      "to": "packages/configuration/src/settings/configuration-service.ts",
+      "specifier": "@rika/configuration/configuration-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-auth-layer.ts",
+      "to": "packages/configuration/src/settings/configuration-settings.ts",
+      "specifier": "@rika/configuration/configuration-settings",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-auth-layer.ts",
+      "to": "packages/extensions/src/mcp/mcp-oauth-service.ts",
+      "specifier": "@rika/extensions/mcp-oauth-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-auth-layer.ts",
+      "to": "packages/extensions/src/skill/skill-registry.ts",
+      "specifier": "@rika/extensions/skill-registry",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-auth-layer.ts",
+      "to": "packages/product/src/operation/contract/extension-operation.ts",
+      "specifier": "@rika/product/extension-operation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-auth-layer.ts",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-auth-layer.ts",
+      "to": "packages/product/src/operation/contract/product-operation.ts",
+      "specifier": "@rika/product/product-operation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-configuration-adapter.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-configuration-adapter.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-configuration-adapter.ts",
+      "to": "packages/coding-tools/src/web-research/web-search-provider.ts",
+      "specifier": "@rika/coding-tools/web-search-provider",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-configuration-adapter.ts",
+      "to": "packages/coding-tools/src/workspace/workspace-file-search.ts",
+      "specifier": "@rika/coding-tools/workspace-file-search",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-configuration-adapter.ts",
+      "to": "packages/configuration/src/settings/configuration-service.ts",
+      "specifier": "@rika/configuration/configuration-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-configuration-adapter.ts",
+      "to": "packages/configuration/src/settings/configuration-settings.ts",
+      "specifier": "@rika/configuration/configuration-settings",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-configuration-adapter.ts",
+      "to": "packages/relay-execution/src/relay/execution/relay-execution-layer.ts",
+      "specifier": "@rika/relay-execution/relay-execution-layer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-layer.ts",
+      "to": "apps/rika/src/resident/composition/resident-configuration-adapter.ts",
+      "specifier": "./resident-configuration-adapter",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-layer.ts",
+      "to": "apps/rika/src/resident/composition/resident-execution-recovery.ts",
+      "specifier": "./resident-execution-recovery",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-layer.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-layer.ts",
+      "to": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
+      "specifier": "@rika/coding-tools/coding-tool-runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-layer.ts",
+      "to": "packages/configuration/src/settings/configuration-settings.ts",
+      "specifier": "@rika/configuration/configuration-settings",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-layer.ts",
+      "to": "packages/product-store/src/interaction/sqlite-thread-interaction-repository.ts",
+      "specifier": "@rika/product-store/sqlite-thread-interaction-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-layer.ts",
+      "to": "packages/product-store/src/search/sqlite-thread-search-repository.ts",
+      "specifier": "@rika/product-store/sqlite-thread-search-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-layer.ts",
+      "to": "packages/product-store/src/thread/sqlite-thread-repository.ts",
+      "specifier": "@rika/product-store/sqlite-thread-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-layer.ts",
+      "to": "packages/product-store/src/transcript/sqlite-transcript-repository.ts",
+      "specifier": "@rika/product-store/sqlite-transcript-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-layer.ts",
+      "to": "packages/product-store/src/turn/sqlite-turn-repository.ts",
+      "specifier": "@rika/product-store/sqlite-turn-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-layer.ts",
+      "to": "packages/product/src/execution/contract/execution-request.ts",
+      "specifier": "@rika/product/execution-request",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-layer.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-layer.ts",
+      "to": "packages/product/src/execution/contract/execution-service.ts",
+      "specifier": "@rika/product/execution-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-layer.ts",
+      "to": "packages/product/src/thread/tool/thread-tool-service.ts",
+      "specifier": "@rika/product/thread-tool-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-layer.ts",
+      "to": "packages/relay-execution/src/relay/execution/relay-execution-layer.ts",
+      "specifier": "@rika/relay-execution/relay-execution-layer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-recovery.ts",
+      "to": "apps/rika/src/resident/composition/resident-configuration-adapter.ts",
+      "specifier": "./resident-configuration-adapter",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-recovery.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-recovery.ts",
+      "to": "packages/product-store/src/thread/sqlite-thread-repository.ts",
+      "specifier": "@rika/product-store/sqlite-thread-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-recovery.ts",
+      "to": "packages/product-store/src/turn/sqlite-turn-repository.ts",
+      "specifier": "@rika/product-store/sqlite-turn-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-recovery.ts",
+      "to": "packages/product/src/execution/contract/execution-request.ts",
+      "specifier": "@rika/product/execution-request",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-recovery.ts",
+      "to": "packages/product/src/execution/contract/execution-service.ts",
+      "specifier": "@rika/product/execution-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-recovery.ts",
+      "to": "packages/product/src/thread/model/thread-record.ts",
+      "specifier": "@rika/product/thread-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-recovery.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-recovery.ts",
+      "to": "packages/relay-execution/src/relay/execution/relay-execution-layer.ts",
+      "specifier": "@rika/relay-execution/relay-execution-layer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-config.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-config.ts",
+      "to": "external:effect/unstable/process",
+      "specifier": "effect/unstable/process",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-config.ts",
+      "to": "packages/product/src/operation/contract/configuration-operation.ts",
+      "specifier": "@rika/product/configuration-operation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-context.ts",
+      "to": "apps/rika/src/resident/composition/resident-configuration-adapter.ts",
+      "specifier": "./resident-configuration-adapter",
+      "kind": "dynamic-import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-context.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-context.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-context.ts",
+      "to": "packages/product/src/context/context-file-system.ts",
+      "specifier": "@rika/product/context-file-system",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-context.ts",
+      "to": "packages/product/src/context/context-resolution-service.ts",
+      "specifier": "@rika/product/context-resolution-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
+      "to": "apps/rika/src/resident/composition/lazy-execution-backend.ts",
+      "specifier": "./lazy-execution-backend",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
+      "to": "apps/rika/src/resident/composition/resident-auth-layer.ts",
+      "specifier": "./resident-auth-layer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
+      "to": "apps/rika/src/resident/composition/resident-configuration-adapter.ts",
+      "specifier": "./resident-configuration-adapter",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
+      "to": "apps/rika/src/resident/composition/resident-execution-layer.ts",
+      "specifier": "./resident-execution-layer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
+      "to": "apps/rika/src/resident/composition/resident-execution-recovery.ts",
+      "specifier": "./resident-execution-recovery",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
+      "to": "apps/rika/src/resident/composition/resident-product-config.ts",
+      "specifier": "./resident-product-config",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
+      "to": "apps/rika/src/resident/composition/resident-product-context.ts",
+      "specifier": "./resident-product-context",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
+      "to": "apps/rika/src/resident/composition/resident-repository-layer.ts",
+      "specifier": "./resident-repository-layer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
+      "to": "apps/rika/src/resident/composition/resident-runtime-tools.ts",
+      "specifier": "./resident-runtime-tools",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
+      "to": "packages/configuration/src/path-resolution/configuration-paths.ts",
+      "specifier": "@rika/configuration/configuration-paths",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
+      "to": "packages/product/src/operation/contract/product-operation.ts",
+      "specifier": "@rika/product/product-operation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
+      "to": "packages/product/src/operation/interactive/interactive-session.ts",
+      "specifier": "@rika/product/interactive-session",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
+      "to": "packages/product/src/resident/resident-interactive-feed.ts",
+      "specifier": "@rika/product/resident-interactive-feed",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
+      "to": "packages/product/src/thread/tool/thread-tool-service.ts",
+      "specifier": "@rika/product/thread-tool-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
+      "to": "packages/relay-execution/src/relay/execution/relay-execution-layer.ts",
+      "specifier": "@rika/relay-execution/relay-execution-layer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-repository-layer.ts",
+      "to": "apps/rika/src/resident/composition/resident-execution-layer.ts",
+      "specifier": "./resident-execution-layer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-repository-layer.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-repository-layer.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-repository-layer.ts",
+      "to": "external:effect/unstable/sql/SqlClient",
+      "specifier": "effect/unstable/sql/SqlClient",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-repository-layer.ts",
+      "to": "packages/product-store/src/database/product-database-layer.ts",
+      "specifier": "@rika/product-store/product-database-layer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-repository-layer.ts",
+      "to": "packages/product-store/src/interaction/sqlite-thread-interaction-repository.ts",
+      "specifier": "@rika/product-store/sqlite-thread-interaction-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-repository-layer.ts",
+      "to": "packages/product-store/src/search/sqlite-thread-search-repository.ts",
+      "specifier": "@rika/product-store/sqlite-thread-search-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-repository-layer.ts",
+      "to": "packages/product-store/src/summary/sqlite-thread-summary-repository.ts",
+      "specifier": "@rika/product-store/sqlite-thread-summary-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-repository-layer.ts",
+      "to": "packages/product-store/src/thread/sqlite-thread-repository.ts",
+      "specifier": "@rika/product-store/sqlite-thread-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-repository-layer.ts",
+      "to": "packages/product-store/src/transcript/sqlite-transcript-repository.ts",
+      "specifier": "@rika/product-store/sqlite-transcript-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-repository-layer.ts",
+      "to": "packages/product-store/src/turn/sqlite-turn-repository.ts",
+      "specifier": "@rika/product-store/sqlite-turn-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-repository-layer.ts",
+      "to": "packages/product-store/src/usage/sqlite-usage-repository.ts",
+      "specifier": "@rika/product-store/sqlite-usage-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-repository-layer.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-repository-layer.ts",
+      "to": "packages/product/src/thread/model/thread-record.ts",
+      "specifier": "@rika/product/thread-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-repository-layer.ts",
+      "to": "packages/product/src/thread/model/thread-result.ts",
+      "specifier": "@rika/product/thread-result",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-repository-layer.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-runtime-tools.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-runtime-tools.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-runtime-tools.ts",
+      "to": "external:effect/unstable/http",
+      "specifier": "effect/unstable/http",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-runtime-tools.ts",
+      "to": "packages/coding-tools/src/media/media-view-service.ts",
+      "specifier": "@rika/coding-tools/media-view-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-runtime-tools.ts",
+      "to": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
+      "specifier": "@rika/coding-tools/coding-tool-runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-runtime-tools.ts",
+      "to": "packages/coding-tools/src/web-research/read-web-page-service.ts",
+      "specifier": "@rika/coding-tools/read-web-page-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-runtime-tools.ts",
+      "to": "packages/coding-tools/src/web-research/web-search-provider.ts",
+      "specifier": "@rika/coding-tools/web-search-provider",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-runtime-tools.ts",
+      "to": "packages/coding-tools/src/web-research/web-search-service.ts",
+      "specifier": "@rika/coding-tools/web-search-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-runtime-tools.ts",
+      "to": "packages/configuration/src/settings/configuration-settings.ts",
+      "specifier": "@rika/configuration/configuration-settings",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-runtime-tools.ts",
+      "to": "packages/product/src/execution/contract/execution-service.ts",
+      "specifier": "@rika/product/execution-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-endpoint.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-endpoint.ts",
+      "to": "packages/product/src/resident/resident-service.ts",
+      "specifier": "@rika/product/resident-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "to": "apps/rika/src/logging.ts",
+      "specifier": "../../logging",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "to": "apps/rika/src/resident/composition/resident-auth-layer.ts",
+      "specifier": "../composition/resident-auth-layer",
+      "kind": "dynamic-import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "to": "apps/rika/src/resident/composition/resident-product-layer.ts",
+      "specifier": "../composition/resident-product-layer",
+      "kind": "dynamic-import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "to": "apps/rika/src/resident/process/resident-process-spawn.ts",
+      "specifier": "./resident-process-spawn",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "to": "apps/rika/src/transport/host/resident-host-transport.ts",
+      "specifier": "../../transport/host/resident-host-transport",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "to": "apps/rika/src/version.ts",
+      "specifier": "../../version",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "to": "external:@effect/platform-bun/BunCrypto",
+      "specifier": "@effect/platform-bun/BunCrypto",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "to": "external:crypto",
+      "specifier": "crypto",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "to": "external:effect/unstable/http",
+      "specifier": "effect/unstable/http",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "to": "packages/configuration/src/path-resolution/configuration-paths.ts",
+      "specifier": "@rika/configuration/configuration-paths",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "to": "packages/configuration/src/path-resolution/profile-data-paths.ts",
+      "specifier": "@rika/configuration/profile-data-paths",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "to": "packages/configuration/src/settings/configuration-service.ts",
+      "specifier": "@rika/configuration/configuration-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "to": "packages/configuration/src/settings/configuration-settings.ts",
+      "specifier": "@rika/configuration/configuration-settings",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "to": "packages/product/src/operation/contract/product-operation.ts",
+      "specifier": "@rika/product/product-operation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "to": "packages/product/src/operation/interactive/interactive-session.ts",
+      "specifier": "@rika/product/interactive-session",
+      "kind": "dynamic-import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "to": "packages/product/src/resident/resident-interactive-feed.ts",
+      "specifier": "@rika/product/resident-interactive-feed",
+      "kind": "dynamic-import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "to": "packages/product/src/resident/resident-service.ts",
+      "specifier": "@rika/product/resident-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-spawn.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-spawn.ts",
+      "to": "external:effect/unstable/process",
+      "specifier": "effect/unstable/process",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-spawn.ts",
+      "to": "packages/product/src/resident/resident-service.ts",
+      "specifier": "@rika/product/resident-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process.ts",
+      "to": "external:effect/unstable/process",
+      "specifier": "effect/unstable/process",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process.ts",
+      "to": "external:net",
+      "specifier": "net",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process.ts",
+      "to": "packages/product/src/resident/resident-service.ts",
+      "specifier": "@rika/product/resident-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-startup.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-startup.ts",
       "to": "packages/product/src/resident/resident-service.ts",
       "specifier": "@rika/product/resident-service",
       "kind": "import",
@@ -14004,24 +14594,24 @@
     },
     {
       "from": "apps/rika/src/transport/client/resident-client-startup.ts",
-      "to": "apps/rika/src/resident-endpoint.ts",
-      "specifier": "../../resident-endpoint",
+      "to": "apps/rika/src/resident/process/resident-endpoint.ts",
+      "specifier": "../../resident/process/resident-endpoint",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
       "from": "apps/rika/src/transport/client/resident-client-startup.ts",
-      "to": "apps/rika/src/resident-process-startup.ts",
-      "specifier": "../../resident-process-startup",
+      "to": "apps/rika/src/resident/process/resident-process.ts",
+      "specifier": "../../resident/process/resident-process",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
       "from": "apps/rika/src/transport/client/resident-client-startup.ts",
-      "to": "apps/rika/src/resident-startup.ts",
-      "specifier": "../../resident-startup",
+      "to": "apps/rika/src/resident/process/resident-startup.ts",
+      "specifier": "../../resident/process/resident-startup",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -14268,16 +14858,16 @@
     },
     {
       "from": "apps/rika/src/transport/host/resident-host-lifecycle.ts",
-      "to": "apps/rika/src/resident-endpoint.ts",
-      "specifier": "../../resident-endpoint",
+      "to": "apps/rika/src/resident/process/resident-endpoint.ts",
+      "specifier": "../../resident/process/resident-endpoint",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
       "from": "apps/rika/src/transport/host/resident-host-lifecycle.ts",
-      "to": "apps/rika/src/resident-startup.ts",
-      "specifier": "../../resident-startup",
+      "to": "apps/rika/src/resident/process/resident-startup.ts",
+      "specifier": "../../resident/process/resident-startup",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -14468,16 +15058,16 @@
     },
     {
       "from": "apps/rika/src/transport/host/resident-host-transport.ts",
-      "to": "apps/rika/src/resident-endpoint.ts",
-      "specifier": "../../resident-endpoint",
+      "to": "apps/rika/src/resident/process/resident-endpoint.ts",
+      "specifier": "../../resident/process/resident-endpoint",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
       "from": "apps/rika/src/transport/host/resident-host-transport.ts",
-      "to": "apps/rika/src/resident-startup.ts",
-      "specifier": "../../resident-startup",
+      "to": "apps/rika/src/resident/process/resident-startup.ts",
+      "specifier": "../../resident/process/resident-startup",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -14804,8 +15394,8 @@
     },
     {
       "from": "apps/rika/test/client-main-harness.ts",
-      "to": "apps/rika/src/resident-endpoint.ts",
-      "specifier": "../src/resident-endpoint",
+      "to": "apps/rika/src/resident/process/resident-endpoint.ts",
+      "specifier": "../src/resident/process/resident-endpoint",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -15108,8 +15698,8 @@
     },
     {
       "from": "apps/rika/test/fixtures/resident-client.ts",
-      "to": "apps/rika/src/resident-process-startup.ts",
-      "specifier": "../../src/resident-process-startup",
+      "to": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "specifier": "../../src/resident/process/resident-process-launch",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -15180,6 +15770,14 @@
     },
     {
       "from": "apps/rika/test/fixtures/resident-client.ts",
+      "to": "packages/terminal/src/state/model/terminal-message.ts",
+      "specifier": "@rika/terminal/terminal-message",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/fixtures/resident-client.ts",
       "to": "packages/terminal/src/state/model/terminal-state.ts",
       "specifier": "@rika/terminal/terminal-state",
       "kind": "import",
@@ -15204,8 +15802,8 @@
     },
     {
       "from": "apps/rika/test/fixtures/resident-host.ts",
-      "to": "apps/rika/src/resident-process-startup.ts",
-      "specifier": "../../src/resident-process-startup",
+      "to": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "specifier": "../../src/resident/process/resident-process-launch",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -15262,6 +15860,14 @@
       "from": "apps/rika/test/fixtures/resident-host.ts",
       "to": "packages/product/src/operation/contract/product-operation-service.ts",
       "specifier": "@rika/product/product-operation-service",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/fixtures/resident-host.ts",
+      "to": "packages/product/src/operation/contract/product-operation.ts",
+      "specifier": "@rika/product/product-operation",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -15340,8 +15946,8 @@
     },
     {
       "from": "apps/rika/test/fixtures/resident-old-host.ts",
-      "to": "apps/rika/src/resident-endpoint.ts",
-      "specifier": "../../src/resident-endpoint",
+      "to": "apps/rika/src/resident/process/resident-endpoint.ts",
+      "specifier": "../../src/resident/process/resident-endpoint",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -15644,8 +16250,8 @@
     },
     {
       "from": "apps/rika/test/lazy-backend.test.ts",
-      "to": "apps/rika/src/lazy-backend.ts",
-      "specifier": "../src/lazy-backend",
+      "to": "apps/rika/src/resident/composition/lazy-execution-backend.ts",
+      "specifier": "../src/resident/composition/lazy-execution-backend",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -15772,8 +16378,8 @@
     },
     {
       "from": "apps/rika/test/openai-auth-adapter.test.ts",
-      "to": "apps/rika/src/openai-auth-adapter.ts",
-      "specifier": "../src/openai-auth-adapter",
+      "to": "apps/rika/src/provider/openai/openai-auth-adapter.ts",
+      "specifier": "../src/provider/openai/openai-auth-adapter",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -15828,8 +16434,8 @@
     },
     {
       "from": "apps/rika/test/openai-credential-store.native.test.ts",
-      "to": "apps/rika/src/openai-credential-store.ts",
-      "specifier": "../src/openai-credential-store",
+      "to": "apps/rika/src/provider/openai/openai-credential-store.ts",
+      "specifier": "../src/provider/openai/openai-credential-store",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -16156,8 +16762,8 @@
     },
     {
       "from": "apps/rika/test/resident-endpoint.test.ts",
-      "to": "apps/rika/src/resident-endpoint.ts",
-      "specifier": "../src/resident-endpoint",
+      "to": "apps/rika/src/resident/process/resident-endpoint.ts",
+      "specifier": "../src/resident/process/resident-endpoint",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -16188,8 +16794,8 @@
     },
     {
       "from": "apps/rika/test/resident-startup.test.ts",
-      "to": "apps/rika/src/resident-startup.ts",
-      "specifier": "../src/resident-startup",
+      "to": "apps/rika/src/resident/process/resident-startup.ts",
+      "specifier": "../src/resident/process/resident-startup",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -16316,8 +16922,8 @@
     },
     {
       "from": "apps/rika/test/resident-transport-lifecycle.proc.test.ts",
-      "to": "apps/rika/src/resident-endpoint.ts",
-      "specifier": "../src/resident-endpoint",
+      "to": "apps/rika/src/resident/process/resident-endpoint.ts",
+      "specifier": "../src/resident/process/resident-endpoint",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -16372,8 +16978,8 @@
     },
     {
       "from": "apps/rika/test/resident-transport.proc.test.ts",
-      "to": "apps/rika/src/resident-endpoint.ts",
-      "specifier": "../src/resident-endpoint",
+      "to": "apps/rika/src/resident/process/resident-endpoint.ts",
+      "specifier": "../src/resident/process/resident-endpoint",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -16708,8 +17314,24 @@
     },
     {
       "from": "apps/rika/test/test-model-script.test.ts",
-      "to": "apps/rika/src/resident-product.ts",
-      "specifier": "../src/resident-product",
+      "to": "apps/rika/src/resident/composition/resident-configuration-adapter.ts",
+      "specifier": "../src/resident/composition/resident-configuration-adapter",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/test-model-script.test.ts",
+      "to": "apps/rika/src/resident/composition/resident-execution-layer.ts",
+      "specifier": "../src/resident/composition/resident-execution-layer",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/test-model-script.test.ts",
+      "to": "apps/rika/src/resident/composition/resident-repository-layer.ts",
+      "specifier": "../src/resident/composition/resident-repository-layer",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -16862,14 +17484,6 @@
       "from": "apps/rika/test/test-model-script.test.ts",
       "to": "packages/product/src/execution/contract/execution-request.ts",
       "specifier": "@rika/product/execution-request",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/test-model-script.test.ts",
-      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
-      "specifier": "@rika/product/execution-route-snapshot",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -45587,6 +46201,142 @@
       "production": true
     },
     {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "to": "external:@effect/platform-bun/BunCrypto",
+      "specifier": "@effect/platform-bun/BunCrypto",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "to": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
+      "specifier": "@rika/coding-tools/coding-tool-runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "to": "packages/configuration/src/settings/configuration-settings.ts",
+      "specifier": "@rika/configuration/configuration-settings",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "to": "packages/product/src/authentication/openai-auth-service.ts",
+      "specifier": "@rika/product/openai-auth-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "to": "packages/product/src/execution/contract/execution-request.ts",
+      "specifier": "@rika/product/execution-request",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "to": "packages/product/src/execution/contract/execution-service.ts",
+      "specifier": "@rika/product/execution-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "to": "packages/product/src/thread/repository/thread-interaction-repository.ts",
+      "specifier": "@rika/product/thread-interaction-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "to": "packages/product/src/thread/repository/thread-repository.ts",
+      "specifier": "@rika/product/thread-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "to": "packages/product/src/thread/repository/thread-search-repository.ts",
+      "specifier": "@rika/product/thread-search-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "to": "packages/product/src/thread/repository/transcript-repository.ts",
+      "specifier": "@rika/product/transcript-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "to": "packages/product/src/thread/repository/turn-repository.ts",
+      "specifier": "@rika/product/turn-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "to": "packages/product/src/thread/tool/thread-tool-service.ts",
+      "specifier": "@rika/product/thread-tool-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "to": "packages/relay-execution/src/relay/execution/relay-execution-route.ts",
+      "specifier": "./relay-execution-route",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "to": "packages/relay-execution/src/relay/execution/relay-product-tools.ts",
+      "specifier": "./relay-product-tools",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/relay-execution/src/relay/execution/relay-execution-control-methods.ts",
       "to": "external:@relayfx/sdk",
       "specifier": "@relayfx/sdk",
@@ -46132,8 +46882,24 @@
     },
     {
       "from": "packages/relay-execution/src/relay/execution/relay-execution-layer.ts",
+      "to": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "specifier": "./relay-execution-configured",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-layer.ts",
       "to": "packages/relay-execution/src/relay/execution/relay-execution-identifier.ts",
       "specifier": "./relay-execution-identifier",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-layer.ts",
+      "to": "packages/relay-execution/src/relay/execution/relay-execution-route.ts",
+      "specifier": "./relay-execution-route",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -46302,6 +47068,94 @@
       "from": "packages/relay-execution/src/relay/execution/relay-execution-recovery.ts",
       "to": "packages/relay-execution/src/relay/execution/relay-recovery-policy.ts",
       "specifier": "./relay-recovery-policy",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-route.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-route.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-route.ts",
+      "to": "packages/configuration/src/model-routing/behavior-mode.ts",
+      "specifier": "@rika/configuration/behavior-mode",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-route.ts",
+      "to": "packages/configuration/src/model-routing/model-route-resolution.ts",
+      "specifier": "@rika/configuration/model-route-resolution",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-route.ts",
+      "to": "packages/configuration/src/model-routing/model-route.ts",
+      "specifier": "@rika/configuration/model-route",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-route.ts",
+      "to": "packages/configuration/src/settings/configuration-settings.ts",
+      "specifier": "@rika/configuration/configuration-settings",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-route.ts",
+      "to": "packages/product/src/authentication/openai-auth-service.ts",
+      "specifier": "@rika/product/openai-auth-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-route.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-route.ts",
+      "to": "packages/product/src/execution/contract/model-registration-identity.ts",
+      "specifier": "@rika/product/model-registration-identity",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-route.ts",
+      "to": "packages/relay-execution/src/model/provider/model-provider-runtime.ts",
+      "specifier": "../../model/provider/model-provider-runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-route.ts",
+      "to": "packages/relay-execution/src/model/provider/scripted-model-runtime.ts",
+      "specifier": "../../model/provider/scripted-model-runtime",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -46750,6 +47604,110 @@
       "from": "packages/relay-execution/src/relay/execution/relay-host-composition.ts",
       "to": "packages/relay-execution/src/relay/execution/relay-workflow-host.ts",
       "specifier": "./relay-workflow-host",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-product-tools.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-product-tools.ts",
+      "to": "packages/coding-tools/src/catalog/thread-tool-contract.ts",
+      "specifier": "@rika/coding-tools/thread-tool-contract",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-product-tools.ts",
+      "to": "packages/product/src/execution/contract/execution-service.ts",
+      "specifier": "@rika/product/execution-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-product-tools.ts",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-product-tools.ts",
+      "to": "packages/product/src/thread/query/thread-query-service.ts",
+      "specifier": "@rika/product/thread-query-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-product-tools.ts",
+      "to": "packages/product/src/thread/repository/thread-interaction-repository.ts",
+      "specifier": "@rika/product/thread-interaction-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-product-tools.ts",
+      "to": "packages/product/src/thread/repository/thread-repository.ts",
+      "specifier": "@rika/product/thread-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-product-tools.ts",
+      "to": "packages/product/src/thread/repository/thread-search-repository.ts",
+      "specifier": "@rika/product/thread-search-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-product-tools.ts",
+      "to": "packages/product/src/thread/repository/transcript-repository.ts",
+      "specifier": "@rika/product/transcript-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-product-tools.ts",
+      "to": "packages/product/src/thread/repository/turn-repository.ts",
+      "specifier": "@rika/product/turn-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-product-tools.ts",
+      "to": "packages/product/src/thread/tool/thread-tool-service.ts",
+      "specifier": "@rika/product/thread-tool-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-product-tools.ts",
+      "to": "packages/relay-execution/src/relay/execution/relay-execution-composition.ts",
+      "specifier": "./relay-execution-composition",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-product-tools.ts",
+      "to": "packages/relay-execution/src/relay/execution/relay-execution-layer.ts",
+      "specifier": "./relay-execution-layer",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -48164,6 +49122,30 @@
     },
     {
       "from": "packages/relay-execution/test/execution-backend-relay-composition.test.ts",
+      "to": "packages/configuration/src/settings/configuration-settings.ts",
+      "specifier": "@rika/configuration/configuration-settings",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/execution-backend-relay-composition.test.ts",
+      "to": "packages/product/src/execution/contract/execution-request.ts",
+      "specifier": "@rika/product/execution-request",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/execution-backend-relay-composition.test.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/execution-backend-relay-composition.test.ts",
       "to": "packages/product/src/execution/contract/execution-service.ts",
       "specifier": "@rika/product/execution-service",
       "kind": "import",
@@ -48172,8 +49154,32 @@
     },
     {
       "from": "packages/relay-execution/test/execution-backend-relay-composition.test.ts",
+      "to": "packages/product/src/execution/contract/model-registration-identity.ts",
+      "specifier": "@rika/product/model-registration-identity",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/execution-backend-relay-composition.test.ts",
+      "to": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "specifier": "../src/relay/execution/relay-execution-configured",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/execution-backend-relay-composition.test.ts",
       "to": "packages/relay-execution/src/relay/execution/relay-execution-layer.ts",
       "specifier": "../src/relay/execution/relay-execution-layer",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/execution-backend-relay-composition.test.ts",
+      "to": "packages/relay-execution/src/relay/execution/relay-execution-route.ts",
+      "specifier": "../src/relay/execution/relay-execution-route",
       "kind": "import",
       "relationship": "test",
       "production": false

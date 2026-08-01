@@ -27,7 +27,8 @@ import { Command } from "effect/unstable/cli"
 import { command, version } from "./command"
 import * as Logging from "./logging"
 import { layer as residentLayer } from "./transport/client/resident-client-transport"
-import * as ResidentProcessStartup from "./resident-process-startup"
+import * as ResidentProcessStartup from "./resident/process/resident-process"
+import { spawn as spawnResident } from "./resident/process/resident-process-spawn"
 import * as DataRoot from "@rika/configuration/canonical-data-root"
 import { resolveProfileDataPaths } from "@rika/configuration/profile-data-paths"
 
@@ -182,7 +183,7 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                       RIKA_INTERNAL_LAUNCH_ARGUMENTS: encodeLaunchArguments(forwardedArguments),
                       RIKA_INTERNAL_RUNTIME_RESTART_ATTEMPT: "0",
                     }
-                    delete environment[ResidentProcessStartup.runtimeRestartFdEnvironment]
+                    delete environment[ResidentProcessStartup.runtimeRestart.runtimeRestartFdEnvironment]
                     const execve = process.execve
                     if (execve === undefined)
                       return yield* ProductOperation.OperationUnavailable.make({
@@ -204,8 +205,8 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                         extendEnv: true,
                         env: {
                           RIKA_INTERNAL_CLIENT_RUNTIME: "1",
-                          [ResidentProcessStartup.runtimeRestartFdEnvironment]: String(
-                            ResidentProcessStartup.runtimeRestartFd,
+                          [ResidentProcessStartup.runtimeRestart.runtimeRestartFdEnvironment]: String(
+                            ResidentProcessStartup.runtimeRestart.runtimeRestartFd,
                           ),
                           ...restartEnvironment,
                         },
@@ -223,7 +224,9 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                       ),
                     )
                     const restartLine = yield* Stream.runFold(
-                      Stream.splitLines(Stream.decodeText(handle.getOutputFd(ResidentProcessStartup.runtimeRestartFd))),
+                      Stream.splitLines(
+                        Stream.decodeText(handle.getOutputFd(ResidentProcessStartup.runtimeRestart.runtimeRestartFd)),
+                      ),
                       () => Option.none<string>(),
                       (first, text) => (Option.isSome(first) ? first : Option.some(text)),
                     ).pipe(
@@ -235,7 +238,9 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                     )
                     const restart = Option.isSome(restartLine)
                       ? Option.getOrUndefined(
-                          yield* ResidentProcessStartup.decodeRuntimeRestart(restartLine.value).pipe(Effect.option),
+                          yield* ResidentProcessStartup.runtimeRestart
+                            .decodeRuntimeRestart(restartLine.value)
+                            .pipe(Effect.option),
                         )
                       : undefined
                     const decision = interactiveRuntimeRestartPlan({
@@ -267,7 +272,7 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                   dataRoot,
                   clientKind,
                   startHost: () =>
-                    ResidentProcessStartup.spawn({
+                    spawnResident({
                       executable: residentRuntime.executable,
                       arguments: residentRuntime.prefixArguments,
                       environment: {

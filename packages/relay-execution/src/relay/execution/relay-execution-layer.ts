@@ -11,6 +11,8 @@ import * as ReadWebPage from "@rika/coding-tools/read-web-page-service"
 import * as WebSearch from "@rika/coding-tools/web-search-service"
 import { makeRelayLayer } from "./relay-execution-composition"
 import * as Identifier from "./relay-execution-identifier"
+import Route from "./relay-execution-route"
+import Configured from "./relay-execution-configured"
 
 type ServiceContract = ExecutionServiceType
 export { ExecutionService as Service }
@@ -55,8 +57,20 @@ export interface LayerOptions<AdditionalTools extends Record<string, Tool.Any> =
 export const defaultModelResilience: ModelResilience.Interface = ModelResilience.make({
   retrySchedule: Schedule.exponential("500 millis", 2).pipe(Schedule.jittered, Schedule.upTo({ times: 3 })),
 })
-export const turnIdFromExecutionId = Identifier.turnIdFromExecutionId
-export const workspaceFromExecutionId = Identifier.workspaceFromExecutionId
+export const route = {
+  modelRoutesForExecution: Route.modelRoutesForExecution,
+  defaultModelRoutes: Route.defaultModelRoutes,
+  executionRoutePin: Route.executionRoutePin,
+  resolveExecutionRouteForSettings: Route.resolveExecutionRouteForSettings,
+  productionCompaction: Route.productionCompaction,
+}
+export const execution = {
+  turnIdFromExecutionId: Identifier.turnIdFromExecutionId,
+  workspaceFromExecutionId: Identifier.workspaceFromExecutionId,
+  configuredLayer: Configured.makeConfiguredLayer,
+  routeForSettings: Configured.makeConfiguredRoute,
+  modelRoutes: Configured.configuredExecutionModelRoutes,
+}
 
 export const layer = <
   AdditionalTools extends Record<string, Tool.Any> = {},

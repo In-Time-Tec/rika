@@ -1,7 +1,7 @@
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import { afterEach, expect, test } from "bun:test"
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
-import { layer } from "../src/openai-credential-store"
+import { layer } from "../src/provider/openai/openai-credential-store"
 
 const fs = process.getBuiltinModule("fs").promises
 const { tmpdir } = process.getBuiltinModule("os")

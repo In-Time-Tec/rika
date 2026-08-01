@@ -5,7 +5,7 @@ import { expect } from "vitest"
 import { fileURLToPath } from "node:url"
 import { Cause, Config, Duration, Effect, FileSystem, Function, Layer, Schema, Scope, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import * as ResidentEndpoint from "../src/resident-endpoint"
+import * as ResidentEndpoint from "../src/resident/process/resident-endpoint"
 import { alive, awaitExit } from "./resident-transport-harness"
 
 export const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | Scope.Scope>) =>

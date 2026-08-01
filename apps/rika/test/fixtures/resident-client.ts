@@ -26,7 +26,7 @@ import {
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { make } from "../../src/transport/client/resident-client-startup"
 import * as InteractiveController from "../../src/interactive/controller/interactive-controller"
-import * as ResidentProcessStartup from "../../src/resident-process-startup"
+import * as ResidentProcessStartup from "../../src/resident/process/resident-process-launch"
 
 const JsonLine = Schema.UnknownFromJsonString
 const HostStatus = Schema.fromJsonString(Schema.Struct({ hostPid: Schema.Finite }))

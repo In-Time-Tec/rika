@@ -3,7 +3,7 @@ import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import * as ExecutionEvent from "@rika/product/execution-event"
 import * as ExecutionIdentifier from "@rika/product/execution-identifier"
 import { Context, Effect, Layer } from "effect"
-import { lazyBackendLayer } from "../src/lazy-backend"
+import { lazyBackendLayer } from "../src/resident/composition/lazy-execution-backend"
 
 const completedResult = (turnId: string): ExecutionEvent.Result => ({ turnId, status: "completed", events: [] })
 

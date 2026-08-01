@@ -9,7 +9,8 @@ import * as ResidentService from "@rika/product/resident-service"
 import * as DataRoot from "@rika/configuration/canonical-data-root"
 import { Effect, Layer, Cause, Clock, References, Schema } from "effect"
 import * as Logging from "../../logging"
-import * as ResidentProcessStartup from "../../resident-process-startup"
+import * as ResidentProcessStartup from "../../resident/process/resident-process"
+import { spawn as spawnResident } from "../../resident/process/resident-process-spawn"
 import { provideLayerScoped } from "./process-layer"
 import { loadSettingsFile, failureKind, withClientWorkspace } from "./process-configuration"
 
@@ -111,7 +112,11 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
                       Effect.sync(() => {
                         runtimeRestartRequest.value = error.threadId === undefined ? {} : { threadId: error.threadId }
                       }).pipe(
-                        Effect.andThen(ResidentProcessStartup.signalRuntimeRestart(error.threadId).pipe(Effect.ignore)),
+                        Effect.andThen(
+                          ResidentProcessStartup.runtimeRestart
+                            .signalRuntimeRestart(error.threadId)
+                            .pipe(Effect.ignore),
+                        ),
                         Effect.andThen(
                           ProductOperation.OperationUnavailable.make({
                             operation: clientInput._tag,
@@ -133,7 +138,7 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
                           ...(runtimeRestarted ? { allowSupersede: false } : {}),
                           clientKind,
                           startHost: () =>
-                            ResidentProcessStartup.spawn({
+                            spawnResident({
                               executable: residentRuntime.executable,
                               arguments: residentRuntime.arguments,
                               environment: {
@@ -182,7 +187,9 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
                                     error.threadId === undefined ? {} : { threadId: error.threadId }
                                 }).pipe(
                                   Effect.andThen(
-                                    ResidentProcessStartup.signalRuntimeRestart(error.threadId).pipe(Effect.ignore),
+                                    ResidentProcessStartup.runtimeRestart
+                                      .signalRuntimeRestart(error.threadId)
+                                      .pipe(Effect.ignore),
                                   ),
                                 )
                               : Effect.void,

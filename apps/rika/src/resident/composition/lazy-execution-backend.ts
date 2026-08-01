@@ -2,16 +2,18 @@ import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ExecutionIdentifier from "@rika/product/execution-identifier"
 import { Context, Effect, Fiber, Layer, Ref } from "effect"
 
-export const lazyBackendLayer = <E>(backendLayer: Layer.Layer<ExecutionBackend.Service, E>) =>
+export const lazyBackendLayer = <E, R>(backendLayer: Layer.Layer<ExecutionBackend.Service, E, R>) =>
   Layer.effect(
     ExecutionBackend.Service,
     Effect.gen(function* () {
       const scope = yield* Effect.scope
+      const parent = yield* Effect.context<R>()
       const active = yield* Ref.make<ExecutionBackend.Interface | undefined>(undefined)
       const promoter = yield* Ref.make<ExecutionIdentifier.TurnPromoter | undefined>(undefined)
       const load = yield* Effect.cached(
         Effect.forkIn(
           Layer.buildWithScope(backendLayer, scope).pipe(
+            Effect.provideContext(parent),
             Effect.map((context) => Context.get(context, ExecutionBackend.Service)),
             Effect.tap((backend) => Ref.set(active, backend)),
             Effect.tap((backend) =>

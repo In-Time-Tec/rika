@@ -4,7 +4,7 @@ import { Database as NativeDatabase } from "bun:sqlite"
 import { fileURLToPath } from "node:url"
 import { Effect, FileSystem, Layer, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { claimStartup } from "../src/resident-startup"
+import { claimStartup } from "../src/resident/process/resident-startup"
 import { reapResidents } from "./client-main-harness"
 
 const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices>) =>

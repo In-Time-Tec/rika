@@ -2,7 +2,7 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Config, Effect, FileSystem, Layer, Logger, Path } from "effect"
-import { readOrCreateToken, resolve } from "../../src/resident-endpoint"
+import { readOrCreateToken, resolve } from "../../src/resident/process/resident-endpoint"
 
 const program = Effect.gen(function* () {
   const dataRoot = yield* Config.string("RIKA_TEST_RESIDENT_DATA_ROOT")

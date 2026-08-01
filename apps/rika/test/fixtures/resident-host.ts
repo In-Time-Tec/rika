@@ -11,7 +11,7 @@ import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
 import { Config, Console, Effect, Exit, FileSystem, Layer, Logger, Path, Ref, Schema, Scope } from "effect"
 import { serve } from "../../src/transport/host/resident-host-transport"
-import * as ResidentProcessStartup from "../../src/resident-process-startup"
+import * as ResidentProcessStartup from "../../src/resident/process/resident-process-launch"
 
 let activeWork = 0
 

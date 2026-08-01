@@ -3,9 +3,9 @@ import * as ResidentService from "@rika/product/resident-service"
 import { Clock, Crypto, Deferred, Effect, Exit, FileSystem, Function, Path, Schema, Scope } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import * as Socket from "effect/unstable/socket/Socket"
-import { readOrCreateToken, resolve } from "../../resident-endpoint"
-import * as ResidentProcessStartup from "../../resident-process-startup"
-import { claimStartup } from "../../resident-startup"
+import { readOrCreateToken, resolve } from "../../resident/process/resident-endpoint"
+import * as ResidentProcessStartup from "../../resident/process/resident-process"
+import { claimStartup } from "../../resident/process/resident-startup"
 import { transportError } from "../protocol/resident-message-codec"
 
 const mapResidentSocketFailure = (cause: unknown, accepted: boolean): ResidentService.ResidentServiceError => {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "vitest"
 import { Clock, Effect, Fiber, FileSystem } from "effect"
-import { resolve } from "../src/resident-endpoint"
+import { resolve } from "../src/resident/process/resident-endpoint"
 import {
   alive,
   attachedEffect,
