@@ -25,7 +25,11 @@ const nextUsageDisplay = (display: "cost" | "tokens" | "time" | undefined): "cos
 import { canSubmit, update } from "@rika/terminal/terminal-state-reducer"
 import { Cause, Effect, Fiber } from "effect"
 import * as InteractiveController from "../controller/interactive-controller"
-import * as Process from "./interactive-process"
+import { terminalTitleSequence, traceTuiModelEvent } from "./interactive-process"
+import { settleTuiInitialization } from "./process-lifecycle"
+import { pasteClipboardPng, pastedImagePath, persistPastedImage, gitOutput } from "./process-workspace"
+import { workspaceGlob } from "./process-files"
+import { failureKind } from "./process-configuration"
 import { imagePasteBlockedNotice } from "../input/prompt-input"
 import { initialSubmitAction } from "../input/command-input"
 import { nextSubmissionId } from "../controller/terminal-turn-submission"
@@ -38,16 +42,6 @@ export interface InteractiveTuiOptions {
   readonly makeRenderer?: NonNullable<Parameters<typeof createTui>[0]["makeRenderer"]>
   readonly writeTerminalTitle?: (sequence: string) => void
 }
-
-const terminalTitleSequence = Process.terminalTitleSequence
-const traceTuiModelEvent = Process.traceTuiModelEvent
-const settleTuiInitialization = Process.settleTuiInitialization
-const pastedImagePath = Process.pastedImagePath
-const persistPastedImage = Process.persistPastedImage
-const pasteClipboardPng = Process.pasteClipboardPng
-const workspaceGlob = Process.workspaceGlob
-const gitOutput = Process.gitOutput
-const failureKind = Process.failureKind
 
 export const interactiveTui =
   (options: InteractiveTuiOptions) =>

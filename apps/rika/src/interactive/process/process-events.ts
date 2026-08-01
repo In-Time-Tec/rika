@@ -113,6 +113,8 @@ export const makeEventRouter = (runtime: Runtime) => {
             }),
           ),
         )
+      if (!loop.model.busy && loop.model.activeTurnId === undefined && loop.model.activity === undefined)
+        loop.submittedSinceIdle = false
       return
     }
     if (event._tag === "QueueUpdated") {
@@ -287,6 +289,8 @@ export const makeEventRouter = (runtime: Runtime) => {
     } else {
       loop.model = update(loop.model, event)
     }
+    if (!loop.model.busy && loop.model.activeTurnId === undefined && loop.model.activity === undefined)
+      loop.submittedSinceIdle = false
     render(
       event._tag === "ContextDiagnostics" ||
         event._tag === "ExecutionFailed" ||

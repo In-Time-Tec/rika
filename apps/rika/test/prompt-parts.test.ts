@@ -6,17 +6,15 @@ import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner
 import * as ViewState from "@rika/terminal/terminal-state"
 import * as Reducer from "@rika/terminal/terminal-state-reducer"
 import * as Session from "@rika/terminal/terminal-session"
+import { defaultOpenArguments, parseChangedFiles, resolveLocalFile } from "../src/interactive/process/process-files"
+import { materializePromptParts } from "../src/interactive/process/process-prompt"
 import {
-  defaultOpenArguments,
-  materializePromptParts,
-  parseChangedFiles,
   pasteClipboardPng,
   pastedImagePath,
   persistPastedImage,
   readChangedFiles,
   refreshChangedFilesOn,
-  resolveLocalFile,
-} from "../src/interactive/process/interactive-process"
+} from "../src/interactive/process/process-workspace"
 import { initialSubmitAction } from "../src/interactive/input/command-input"
 import { imagePasteBlockedNotice } from "../src/interactive/input/prompt-input"
 

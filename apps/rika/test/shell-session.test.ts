@@ -27,7 +27,7 @@ import {
   refreshThreadsOnSwitcherOpen,
   settleTuiInitialization,
   tuiSignalExitCode,
-} from "../src/interactive/process/interactive-process"
+} from "../src/interactive/process/process-lifecycle"
 import * as InteractiveController from "../src/interactive/controller/interactive-controller"
 
 test("maps TUI signals to numeric process exit codes", () => {

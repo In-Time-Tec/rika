@@ -1,5 +1,8 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as Process from "./interactive-process"
+import * as ProcessFiles from "./process-files"
+import * as ProcessLifecycle from "./process-lifecycle"
+import * as ProcessPrompt from "./process-prompt"
+import * as ProcessWorkspace from "./process-workspace"
 import * as ProcessLayer from "./process-layer"
 import * as InteractiveController from "../controller/interactive-controller"
 import { classifyPrompt, displayInput, promptParts } from "@rika/terminal/terminal-session"
@@ -19,18 +22,18 @@ import { renderGoodbye } from "../input/goodbye-message"
 type Runtime = any
 const provideLayerScoped = ProcessLayer.provideLayerScoped
 const noopSelectionResync = (_threadId: string, _selectionEpoch: number) => undefined
-const mkdir = Process.mkdir
-const rm = Process.rm
-const childExit = Process.childExit
-const resolveLocalFileImpl = Process.resolveLocalFileImpl
-const readChangedFilesEffect = Process.readChangedFilesEffect
-const refreshChangedFilesOn = Process.refreshChangedFilesOn
-const defaultOpenArguments = Process.defaultOpenArguments
-const editorArguments = Process.editorArguments
-const materializePromptParts = Process.materializePromptParts
-const quitStopWorkBound = Process.quitStopWorkBound
-const interruptTrackedFibers = Process.interruptTrackedFibers
-const tuiSignalExitCode = Process.tuiSignalExitCode
+const mkdir = ProcessFiles.mkdir
+const rm = ProcessFiles.rm
+const childExit = ProcessWorkspace.childExit
+const resolveLocalFileImpl = ProcessFiles.resolveLocalFileImpl
+const readChangedFilesEffect = ProcessWorkspace.readChangedFilesEffect
+const refreshChangedFilesOn = ProcessWorkspace.refreshChangedFilesOn
+const defaultOpenArguments = ProcessFiles.defaultOpenArguments
+const editorArguments = ProcessFiles.editorArguments
+const materializePromptParts = ProcessPrompt.materializePromptParts
+const quitStopWorkBound = ProcessLifecycle.quitStopWorkBound
+const interruptTrackedFibers = ProcessLifecycle.interruptTrackedFibers
+const tuiSignalExitCode = ProcessLifecycle.tuiSignalExitCode
 
 export const makeProcessRuntime = (runtime: Runtime) => {
   const { loop, fork, session, options, recoverSession, resume } = runtime
@@ -200,7 +203,8 @@ export const makeProcessRuntime = (runtime: Runtime) => {
               session.submit(classified.prompt, mode, materialized, tuning, submissionId),
             ),
             Effect.catchIf(
-              (failure): failure is Process.PromptAttachmentError => failure instanceof Process.PromptAttachmentError,
+              (failure): failure is ProcessPrompt.PromptAttachmentError =>
+                failure instanceof ProcessPrompt.PromptAttachmentError,
               (failure) =>
                 Effect.sync(() => {
                   let restored: Model = {
@@ -278,7 +282,7 @@ export const makeProcessRuntime = (runtime: Runtime) => {
             if (generation !== loop.selectionGeneration) return
             loop.renderSuppressed = false
             loop.model = update(loop.model, { _tag: "ThreadOpenCompleted" })
-            loop.renderer?.surface.update(loop.model)
+            if (loop.renderer !== undefined) loop.renderer.surface.update(loop.model)
           }),
         ),
       )
@@ -373,7 +377,7 @@ export const makeProcessRuntime = (runtime: Runtime) => {
           onSuccess: (path) =>
             Effect.gen(function* () {
               if (options.editor === undefined) {
-                const exit = yield* childExit("open file", defaultOpenArguments(path), {
+                const exit = yield* childExit("open file", defaultOpenArguments(path, process.platform), {
                   stdin: "ignore",
                   stdout: "ignore",
                   stderr: "ignore",

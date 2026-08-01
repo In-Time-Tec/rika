@@ -47,7 +47,7 @@ import {
   makeReloadingTestModel,
   parseTestModelScript,
 } from "@rika/relay-execution/scripted-model-runtime"
-import { withClientWorkspace } from "../src/interactive/process/interactive-process"
+import { withClientWorkspace } from "../src/interactive/process/process-configuration"
 import { bedrockAuthRefreshTestLayer } from "@rika/relay-execution/model-provider-runtime"
 import { modelRoutePlan, Service as ModelProviderRuntime } from "@rika/relay-execution/model-provider-runtime"
 import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
