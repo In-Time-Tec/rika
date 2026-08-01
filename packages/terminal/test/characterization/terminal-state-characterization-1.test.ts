@@ -91,7 +91,7 @@ test("summarizes top-level subagents separately from all other running tools", (
   expect(formatActivity(activity)).toBe("Running 1 subagent, 2 tools")
   expect(formatActivity({ _tag: "RunningTools", subagents: 5, tools: 3 })).toBe("Running 5 subagents, 3 tools")
 })
-test("exposes only thread switch, mode change, fast mode, and quit in the command palette", () => {
+test("exposes thread, mode, context, fast mode, and quit commands in the command palette", () => {
   expect(commands).toEqual([
     {
       id: "threads",
@@ -106,6 +106,13 @@ test("exposes only thread switch, mode change, fast mode, and quit in the comman
       label: "change mode",
       keybinding: "Ctrl+S",
       action: { _tag: "OpenModePicker" },
+    },
+    {
+      id: "context",
+      category: "usage",
+      label: "show context and usage",
+      keybinding: "Ctrl+Y",
+      action: { _tag: "ToggleContextDetails" },
     },
     { id: "fast-mode", category: "rika", label: "toggle fast mode", action: { _tag: "ToggleFastMode" } },
     {

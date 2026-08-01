@@ -18,6 +18,8 @@ import { ModelResilience } from "@batonfx/core"
 
 const defaultModelResilience: ModelResilience.Interface = {
   ...ModelResilience.none,
+  classify: ModelResilience.defaultClassify,
+  resolve: ModelResilience.defaultResolveFailure,
   retrySchedule: Schedule.exponential("500 millis", 2).pipe(Schedule.jittered, Schedule.upTo({ times: 3 })),
 }
 

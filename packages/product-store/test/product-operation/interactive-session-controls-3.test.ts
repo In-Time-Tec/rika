@@ -36,6 +36,7 @@ describe("InteractiveSession controls", () => {
         selectionEpoch: 2,
         threadId: "latest",
         revision: 0,
+        context: { _tag: "Unavailable" },
         cost: { _tag: "Unavailable" },
         tokens: { _tag: "Unavailable" },
         time: { _tag: "Unavailable" },
