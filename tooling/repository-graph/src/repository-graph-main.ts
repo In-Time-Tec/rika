@@ -4,14 +4,10 @@ import { Path } from "effect/Path"
 import { Argument, Command } from "effect/unstable/cli"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import {
-  graphFilePath,
-  readGraph,
-  writeGraphs,
-  type GraphArtifact,
-  type GraphKind,
-  type GraphNode,
-} from "./repository-graph"
+import { graphFilePath, readGraph, writeGraphs, type GraphArtifact } from "./repository-graph"
+
+type GraphKind = GraphArtifact["graphKind"]
+type GraphNode = GraphArtifact["nodes"][number]
 
 const kinds = ["all", "production", "test", "package"] as const
 const operations = ["dependencies", "users", "impact", "tests", "why", "graph", "violations", "check"] as const

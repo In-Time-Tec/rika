@@ -3,7 +3,7 @@ import { FileSystem } from "effect/FileSystem"
 import { Path } from "effect/Path"
 import { parse } from "@typescript-eslint/parser"
 
-export type PackageManifest = {
+type PackageManifest = {
   readonly name?: string
   readonly dependencies?: Record<string, string>
   readonly devDependencies?: Record<string, string>
@@ -13,8 +13,8 @@ export type PackageManifest = {
   readonly exports?: Record<string, string | Record<string, string>>
   readonly rika?: { readonly kind?: string; readonly domain?: string }
 }
-export type NamedManifest = { readonly path: string; readonly manifest: PackageManifest }
-export type PolicySeverity = "error" | "warning"
+type NamedManifest = { readonly path: string; readonly manifest: PackageManifest }
+type PolicySeverity = "error" | "warning"
 export type PolicyDiagnostic = {
   readonly path: string
   readonly rule: string
@@ -22,13 +22,7 @@ export type PolicyDiagnostic = {
   readonly message: string
   readonly remediation: string
 }
-export type MigrationWaiver = {
-  readonly rule: string
-  readonly paths: ReadonlyArray<string>
-  readonly removalSlice: number
-  readonly reason: string
-}
-export type TestOwnershipException = {
+type TestOwnershipException = {
   readonly sourcePath: string
   readonly testPath: string
   readonly relationship: "direct" | "public-api" | "integration" | "process"
@@ -161,7 +155,7 @@ const diagnostic = (
   severity: PolicySeverity = "error",
 ): PolicyDiagnostic => ({ path, rule, severity, message, remediation })
 
-export const checkDependencyManifests = (manifests: ReadonlyArray<NamedManifest>): string[] =>
+const checkDependencyManifests = (manifests: ReadonlyArray<NamedManifest>): string[] =>
   manifests.flatMap(({ path, manifest }) =>
     allDependencies(manifest).flatMap(([name, version]) => {
       if (isForbiddenLocalLink(version)) return [`${path}: ${name} uses ${version}`]
@@ -173,7 +167,7 @@ export const checkDependencyManifests = (manifests: ReadonlyArray<NamedManifest>
     }),
   )
 
-export const checkPackageMetadata = (manifests: ReadonlyArray<NamedManifest>): PolicyDiagnostic[] =>
+const checkPackageMetadata = (manifests: ReadonlyArray<NamedManifest>): PolicyDiagnostic[] =>
   manifests.flatMap(({ path, manifest }) => {
     const metadata = manifest.rika
     if (metadata === undefined)
@@ -203,7 +197,7 @@ export const checkPackageMetadata = (manifests: ReadonlyArray<NamedManifest>): P
 
 const exportTarget = (value: string | Record<string, string>) =>
   typeof value === "string" ? value : (value.import ?? value.default ?? value.require ?? Object.values(value)[0])
-export const checkExportMaps = (manifests: ReadonlyArray<NamedManifest>): PolicyDiagnostic[] =>
+const checkExportMaps = (manifests: ReadonlyArray<NamedManifest>): PolicyDiagnostic[] =>
   manifests.flatMap(({ path, manifest }) => {
     const packageName = manifest.name
     if (packageName === undefined || manifest.exports === undefined) return []
@@ -235,7 +229,7 @@ export const checkExportMaps = (manifests: ReadonlyArray<NamedManifest>): Policy
     })
   })
 
-export const checkScriptBoundaries = (manifests: ReadonlyArray<NamedManifest>): PolicyDiagnostic[] =>
+const checkScriptBoundaries = (manifests: ReadonlyArray<NamedManifest>): PolicyDiagnostic[] =>
   manifests.flatMap(({ path, manifest }) =>
     Object.entries(manifest.scripts ?? {}).flatMap(([name, command]) => {
       if (name.includes(":"))
@@ -260,9 +254,9 @@ export const checkScriptBoundaries = (manifests: ReadonlyArray<NamedManifest>): 
     }),
   )
 
-export const checkOutputPaths = (_manifests: ReadonlyArray<NamedManifest>): PolicyDiagnostic[] => []
+const checkOutputPaths = (_manifests: ReadonlyArray<NamedManifest>): PolicyDiagnostic[] => []
 
-export const checkSourceMetrics = (input: {
+const checkSourceMetrics = (input: {
   readonly path: string
   readonly lines: number
   readonly exports: number
@@ -272,12 +266,7 @@ export const checkSourceMetrics = (input: {
   const diagnostics: PolicyDiagnostic[] = []
   if (input.lines > 800)
     diagnostics.push(
-      diagnostic(
-        input.path,
-        "file-size",
-        `file has ${input.lines} lines`,
-        "Split the file at a semantic boundary or name a temporary migration waiver",
-      ),
+      diagnostic(input.path, "file-size", `file has ${input.lines} lines`, "Split the file at a semantic boundary"),
     )
   else if (input.lines > 500)
     diagnostics.push(
@@ -285,7 +274,7 @@ export const checkSourceMetrics = (input: {
         input.path,
         "file-size",
         `file has ${input.lines} lines`,
-        "Keep changed files under 500 lines or name a temporary migration waiver",
+        "Keep changed files under 500 lines",
         "warning",
       ),
     )
@@ -351,10 +340,7 @@ export const checkSourceMetrics = (input: {
   return diagnostics
 }
 
-export const checkDirectoryMetrics = (input: {
-  readonly path: string
-  readonly sourceFiles: number
-}): PolicyDiagnostic[] => {
+const checkDirectoryMetrics = (input: { readonly path: string; readonly sourceFiles: number }): PolicyDiagnostic[] => {
   if (input.sourceFiles > 30)
     return [
       diagnostic(
@@ -376,7 +362,7 @@ export const checkDirectoryMetrics = (input: {
     ]
   return []
 }
-export const checkTestTopology = (input: {
+const checkTestTopology = (input: {
   readonly sourcePath: string
   readonly testPaths: ReadonlyArray<string>
   readonly exception?: string
@@ -402,7 +388,7 @@ export const checkTestTopology = (input: {
       ]
 }
 
-export const checkPackageEdges = (manifests: ReadonlyArray<NamedManifest>): PolicyDiagnostic[] => {
+const checkPackageEdges = (manifests: ReadonlyArray<NamedManifest>): PolicyDiagnostic[] => {
   const names = new Set(
     manifests.map(({ manifest }) => manifest.name).filter((name): name is string => name !== undefined),
   )
@@ -424,7 +410,7 @@ export const checkPackageEdges = (manifests: ReadonlyArray<NamedManifest>): Poli
   })
 }
 
-export const checkManifests = (manifests: ReadonlyArray<NamedManifest>): PolicyDiagnostic[] => [
+const checkManifests = (manifests: ReadonlyArray<NamedManifest>): PolicyDiagnostic[] => [
   ...checkDependencyManifests(manifests).map((message) =>
     diagnostic(
       message.split(":")[0] ?? "package.json",
@@ -472,8 +458,24 @@ const sourceMetrics = (filePath: string, text: string): PolicyDiagnostic[] => {
   })
 }
 
+const migrationBasenamePattern = /^product-migration-(\d{3})-([a-z0-9]+(?:-[a-z0-9]+)*)\.ts$/
+const migrationBasename = (filePath: string) => {
+  const basename = filePath.split("/").pop() ?? ""
+  if (!/^product-migration-\d/.test(basename) || basename.endsWith(".test.ts")) return undefined
+  if (!migrationBasenamePattern.test(basename))
+    return diagnostic(
+      filePath,
+      "migration-basename",
+      "product migration basename must be product-migration-NNN-descriptive-kebab.ts",
+      "Use a three-digit unique migration ID followed by a nonempty descriptive kebab-case suffix",
+    )
+  return undefined
+}
+
 const invalidBasename = (filePath: string) => {
   const basename = filePath.split("/").pop() ?? ""
+  const migration = migrationBasename(filePath)
+  if (migration !== undefined || /^product-migration-\d/.test(basename)) return migration
   if (basename === "index.ts" || basename === "index.tsx")
     return diagnostic(
       filePath,
@@ -491,7 +493,29 @@ const invalidBasename = (filePath: string) => {
   return undefined
 }
 
-export const validateOwnershipExceptions = (value: unknown): TestOwnershipException[] => {
+const checkMigrationIdentity = (filePaths: ReadonlyArray<string>): PolicyDiagnostic[] => {
+  const entries = filePaths.flatMap((filePath) => {
+    const basename = filePath.split("/").pop() ?? ""
+    const match = migrationBasenamePattern.exec(basename)
+    return match?.[1] === undefined ? [] : [{ filePath, id: match[1] }]
+  })
+  const ids = new Map<string, string[]>()
+  for (const entry of entries) ids.set(entry.id, [...(ids.get(entry.id) ?? []), entry.filePath])
+  return [...ids.entries()]
+    .filter(([, paths]) => paths.length > 1)
+    .flatMap(([id, paths]) =>
+      paths.map((filePath) =>
+        diagnostic(
+          filePath,
+          "migration-identity",
+          `product migration ID ${id} is used by more than one source file`,
+          "Assign every product migration a unique three-digit ID",
+        ),
+      ),
+    )
+}
+
+const validateOwnershipExceptions = (value: unknown): TestOwnershipException[] => {
   if (!Array.isArray(value))
     throw new Error("tooling/repository-policy/test-ownership-exceptions.json: expected an array")
   return value.map((entry, index) => {
@@ -520,36 +544,9 @@ export const validateOwnershipExceptions = (value: unknown): TestOwnershipExcept
   })
 }
 
-export const validateWaivers = (value: unknown): MigrationWaiver[] => {
-  if (!Array.isArray(value))
-    throw new Error("tooling/repository-policy/migration-waivers.json: expected an array of named migration waivers")
-  return value.map((entry, index) => {
-    if (typeof entry !== "object" || entry === null)
-      throw new Error(`tooling/repository-policy/migration-waivers.json[${index}]: expected an object`)
-    const item = entry as Record<string, unknown>
-    const paths = item.paths
-    if (
-      typeof item.rule !== "string" ||
-      item.rule.length === 0 ||
-      !Array.isArray(paths) ||
-      paths.length === 0 ||
-      paths.some((pathValue) => typeof pathValue !== "string" || pathValue.includes("*")) ||
-      typeof item.removalSlice !== "number" ||
-      !Number.isInteger(item.removalSlice) ||
-      typeof item.reason !== "string" ||
-      item.reason.trim() === ""
-    )
-      throw new Error(
-        `tooling/repository-policy/migration-waivers.json[${index}]: rule, exact paths, removalSlice, and reason are required`,
-      )
-    return { rule: item.rule, paths: paths as string[], removalSlice: item.removalSlice, reason: item.reason }
-  })
-}
-
-export const applyBaselineAndWaivers = (input: {
+const applyBaseline = (input: {
   readonly diagnostics: ReadonlyArray<PolicyDiagnostic>
   readonly baseline: BaselineInventory
-  readonly waivers: ReadonlyArray<MigrationWaiver>
 }) =>
   input.diagnostics.filter((item) => {
     const baselineMatch =
@@ -561,11 +558,10 @@ export const applyBaselineAndWaivers = (input: {
           entry.severity === item.severity &&
           entry.message === item.message,
       )
-    const waiverMatch = input.waivers.some((waiver) => waiver.rule === item.rule && waiver.paths.includes(item.path))
-    return !baselineMatch && !waiverMatch
+    return !baselineMatch
   })
 
-export const readWorkspaceManifests = Effect.fn("RepositoryPolicy.readWorkspaceManifests")(function* (
+const readWorkspaceManifests = Effect.fn("RepositoryPolicy.readWorkspaceManifests")(function* (
   rootPath = "package.json",
 ) {
   const fileSystem = yield* FileSystem
@@ -596,7 +592,7 @@ export const readWorkspaceManifests = Effect.fn("RepositoryPolicy.readWorkspaceM
   )
 })
 
-export const checkWorkspaceTestTopology = Effect.fn("RepositoryPolicy.checkWorkspaceTestTopology")(function* (
+const checkWorkspaceTestTopology = Effect.fn("RepositoryPolicy.checkWorkspaceTestTopology")(function* (
   root = ".",
   exceptions: ReadonlyArray<TestOwnershipException> = [],
 ) {
@@ -675,7 +671,7 @@ export const checkWorkspaceTestTopology = Effect.fn("RepositoryPolicy.checkWorks
   return diagnostics
 })
 
-export const scanSourcePolicies = Effect.fn("RepositoryPolicy.scanSourcePolicies")(function* (root = ".") {
+const scanSourcePolicies = Effect.fn("RepositoryPolicy.scanSourcePolicies")(function* (root = ".") {
   const fileSystem = yield* FileSystem
   const path = yield* Path
   const paths = (yield* fileSystem.glob("{apps,packages,scripts,test,tooling}/**/*.{ts,tsx,mts,cts}", {
@@ -685,8 +681,9 @@ export const scanSourcePolicies = Effect.fn("RepositoryPolicy.scanSourcePolicies
     const segments = candidate.split(/[\\/]+/)
     return !segments.includes("node_modules") && !segments.includes("dist")
   })
+  const sortedPaths = paths.toSorted()
   const diagnostics = yield* Effect.all(
-    paths.toSorted().map((absolutePath) =>
+    sortedPaths.map((absolutePath) =>
       Effect.gen(function* () {
         const filePath = path.isAbsolute(absolutePath) ? path.relative(root, absolutePath) : absolutePath
         const text = yield* fileSystem.readFileString(
@@ -702,5 +699,27 @@ export const scanSourcePolicies = Effect.fn("RepositoryPolicy.scanSourcePolicies
     ),
     { concurrency: "unbounded" },
   )
-  return diagnostics.flat()
+  return [
+    ...diagnostics.flat(),
+    ...checkMigrationIdentity(sortedPaths.map((absolutePath) => path.relative(root, absolutePath))),
+  ]
 })
+
+export const repositoryPolicy = {
+  checkDependencyManifests,
+  checkPackageMetadata,
+  checkExportMaps,
+  checkScriptBoundaries,
+  checkOutputPaths,
+  checkSourceMetrics,
+  checkDirectoryMetrics,
+  checkTestTopology,
+  checkPackageEdges,
+  checkManifests,
+  checkMigrationIdentity,
+  validateOwnershipExceptions,
+  applyBaseline,
+  readWorkspaceManifests,
+  checkWorkspaceTestTopology,
+  scanSourcePolicies,
+}

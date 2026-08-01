@@ -4,17 +4,7 @@ import { Path } from "effect/Path"
 import { Command, Argument } from "effect/unstable/cli"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import {
-  applyBaselineAndWaivers,
-  checkManifests,
-  checkWorkspaceTestTopology,
-  readWorkspaceManifests,
-  scanSourcePolicies,
-  validateWaivers,
-  validateOwnershipExceptions,
-  type BaselineInventory,
-  type PolicyDiagnostic,
-} from "./package-boundary-policy"
+import { repositoryPolicy, type BaselineInventory, type PolicyDiagnostic } from "./package-boundary-policy"
 
 class PolicyError extends Schema.TaggedErrorClass<PolicyError>()("RepositoryPolicyError", { message: Schema.String }) {}
 
@@ -55,35 +45,30 @@ const checkedInOutputDiagnostics = Effect.fn("RepositoryPolicy.checkedInOutputDi
 const run = Effect.fn("RepositoryPolicy.run")(function* () {
   const path = yield* Path
   const root = path.resolve(import.meta.dirname, "../../..")
-  const manifests = yield* readWorkspaceManifests(path.join(root, "package.json"))
-  const sourceDiagnostics = yield* scanSourcePolicies(root)
+  const manifests = yield* repositoryPolicy.readWorkspaceManifests(path.join(root, "package.json"))
+  const sourceDiagnostics = yield* repositoryPolicy.scanSourcePolicies(root)
   const outputDiagnostics = yield* checkedInOutputDiagnostics(root)
-  const rawWaivers = yield* readJson<unknown>(path.join(root, "tooling/repository-policy/migration-waivers.json"))
-  const waivers = validateWaivers(rawWaivers)
   const rawExceptions = yield* readJson<unknown>(
     path.join(root, "tooling/repository-policy/test-ownership-exceptions.json"),
   )
-  const ownershipExceptions = validateOwnershipExceptions(rawExceptions)
+  const ownershipExceptions = repositoryPolicy.validateOwnershipExceptions(rawExceptions)
   const baseline = yield* readJson<BaselineInventory>(
     path.join(root, "tooling/repository-policy/baseline-inventory.json"),
   )
   if (baseline.base !== "19a8a4b" || !Array.isArray(baseline.paths) || !Array.isArray(baseline.entries))
     return yield* PolicyError.make({ message: "baseline inventory must be pinned to 19a8a4b" })
-  const diagnostics = applyBaselineAndWaivers({
+  const diagnostics = repositoryPolicy.applyBaseline({
     diagnostics: [
-      ...checkManifests(manifests),
+      ...repositoryPolicy.checkManifests(manifests),
       ...sourceDiagnostics,
       ...outputDiagnostics,
-      ...(yield* checkWorkspaceTestTopology(root, ownershipExceptions)),
+      ...(yield* repositoryPolicy.checkWorkspaceTestTopology(root, ownershipExceptions)),
     ],
     baseline,
-    waivers,
   })
   const errors = diagnostics.filter((item) => item.severity === "error")
   if (errors.length > 0) return yield* PolicyError.make({ message: errors.map(formatDiagnostic).join("\n") })
-  yield* Console.log(
-    `repository policy passed: ${manifests.length} manifests, ${diagnostics.length} diagnostics, ${waivers.length} waivers`,
-  )
+  yield* Console.log(`repository policy passed: ${manifests.length} manifests, ${diagnostics.length} diagnostics`)
 })
 
 const command = Command.make("repository-policy", { args: Argument.variadic(Argument.string("argument")) }, () => run())
