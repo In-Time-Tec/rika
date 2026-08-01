@@ -4,7 +4,7 @@ import { Path } from "effect/Path"
 import { Command, Argument } from "effect/unstable/cli"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { repositoryPolicy, type BaselineInventory, type PolicyDiagnostic } from "./package-boundary-policy"
+import { repositoryPolicy, type PolicyDiagnostic } from "./package-boundary-policy"
 
 class PolicyError extends Schema.TaggedErrorClass<PolicyError>()("RepositoryPolicyError", { message: Schema.String }) {}
 
@@ -52,20 +52,12 @@ const run = Effect.fn("RepositoryPolicy.run")(function* () {
     path.join(root, "tooling/repository-policy/test-ownership-exceptions.json"),
   )
   const ownershipExceptions = repositoryPolicy.validateOwnershipExceptions(rawExceptions)
-  const baseline = yield* readJson<BaselineInventory>(
-    path.join(root, "tooling/repository-policy/baseline-inventory.json"),
-  )
-  if (baseline.base !== "19a8a4b" || !Array.isArray(baseline.paths) || !Array.isArray(baseline.entries))
-    return yield* PolicyError.make({ message: "baseline inventory must be pinned to 19a8a4b" })
-  const diagnostics = repositoryPolicy.applyBaseline({
-    diagnostics: [
-      ...repositoryPolicy.checkManifests(manifests),
-      ...sourceDiagnostics,
-      ...outputDiagnostics,
-      ...(yield* repositoryPolicy.checkWorkspaceTestTopology(root, ownershipExceptions)),
-    ],
-    baseline,
-  })
+  const diagnostics = [
+    ...repositoryPolicy.checkManifests(manifests),
+    ...sourceDiagnostics,
+    ...outputDiagnostics,
+    ...(yield* repositoryPolicy.checkWorkspaceTestTopology(root, ownershipExceptions)),
+  ]
   const errors = diagnostics.filter((item) => item.severity === "error")
   if (errors.length > 0) return yield* PolicyError.make({ message: errors.map(formatDiagnostic).join("\n") })
   yield* Console.log(`repository policy passed: ${manifests.length} manifests, ${diagnostics.length} diagnostics`)

@@ -28,12 +28,6 @@ type TestOwnershipException = {
   readonly relationship: "direct" | "public-api" | "integration" | "process"
   readonly reason: string
 }
-export type BaselineInventory = {
-  readonly base: "19a8a4b"
-  readonly paths: ReadonlyArray<string>
-  readonly entries: ReadonlyArray<Pick<PolicyDiagnostic, "path" | "rule" | "severity" | "message">>
-}
-
 const forbiddenProtocols = ["file:", "link:"] as const
 const autoresearchLinkPrefix = "file:/private/tmp/rika-autoresearch-links/"
 const externalFrameworks = new Set([
@@ -472,8 +466,10 @@ const migrationBasename = (filePath: string) => {
   return undefined
 }
 
-const invalidBasename = (filePath: string) => {
+const frameworkConfigBasenames = new Set(["vitest.config.ts"])
+const checkSourceBasename = (filePath: string) => {
   const basename = filePath.split("/").pop() ?? ""
+  if (frameworkConfigBasenames.has(basename)) return undefined
   const migration = migrationBasename(filePath)
   if (migration !== undefined || /^product-migration-\d/.test(basename)) return migration
   if (basename === "index.ts" || basename === "index.tsx")
@@ -543,23 +539,6 @@ const validateOwnershipExceptions = (value: unknown): TestOwnershipException[] =
     }
   })
 }
-
-const applyBaseline = (input: {
-  readonly diagnostics: ReadonlyArray<PolicyDiagnostic>
-  readonly baseline: BaselineInventory
-}) =>
-  input.diagnostics.filter((item) => {
-    const baselineMatch =
-      input.baseline.paths.includes(item.path) ||
-      input.baseline.entries.some(
-        (entry) =>
-          entry.path === item.path &&
-          entry.rule === item.rule &&
-          entry.severity === item.severity &&
-          entry.message === item.message,
-      )
-    return !baselineMatch
-  })
 
 const readWorkspaceManifests = Effect.fn("RepositoryPolicy.readWorkspaceManifests")(function* (
   rootPath = "package.json",
@@ -689,7 +668,7 @@ const scanSourcePolicies = Effect.fn("RepositoryPolicy.scanSourcePolicies")(func
         const text = yield* fileSystem.readFileString(
           path.isAbsolute(absolutePath) ? absolutePath : path.join(root, absolutePath),
         )
-        const basename = invalidBasename(filePath)
+        const basename = checkSourceBasename(filePath)
         return [
           ...(basename === undefined ? [] : [basename]),
           ...sourceMetrics(filePath, text),
@@ -718,7 +697,7 @@ export const repositoryPolicy = {
   checkManifests,
   checkMigrationIdentity,
   validateOwnershipExceptions,
-  applyBaseline,
+  checkSourceBasename,
   readWorkspaceManifests,
   checkWorkspaceTestTopology,
   scanSourcePolicies,
