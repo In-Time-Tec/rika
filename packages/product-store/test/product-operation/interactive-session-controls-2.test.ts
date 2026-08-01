@@ -2,25 +2,13 @@ import type { InteractiveSession } from "@rika/product/interactive-session"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
-import {
-  RuntimeFixtures,
-  TranscriptFixtures,
-  Context,
-  Deferred,
-  Effect,
-  Fiber,
-  Layer,
-  Ref,
-  Result,
-  createTurn,
-  productLayer,
-  collectEvents,
-  waitForSessions,
-  active,
-  serverEvents,
-  makeHarness,
-} from "./interactive-session-base-support"
-import { awaitSelectionLoaded } from "./interactive-session-reload-support"
+import { Fixtures as RuntimeFixtures } from "./interactive-session-runtime-support"
+import { Fixtures as TranscriptFixtures } from "./interactive-session-transcript-support"
+import { Context, Deferred, Effect, Fiber, Layer, Ref, Result } from "effect"
+import { createTurn } from "../support/product-test-current-state"
+import { productLayer, collectEvents, waitForSessions, active, serverEvents } from "./interactive-session-base-support"
+import { makeHarness } from "./interactive-session-harness-support"
+import { awaitSelectionLoaded } from "./interactive-session-selection-support"
 
 describe("InteractiveSession controls", () => {
   it.effect("steers and cancels the selected active turn", () =>

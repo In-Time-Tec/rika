@@ -2,23 +2,12 @@ import type { InteractiveSession } from "@rika/product/interactive-session"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
-import {
-  RuntimeFixtures,
-  Context,
-  Deferred,
-  Effect,
-  Fiber,
-  Layer,
-  Queue,
-  Ref,
-  TestClock,
-  createTurn,
-  productLayer,
-  collectEvents,
-  waitForSessions,
-  serverEvents,
-  makeHarness,
-} from "./interactive-session-base-support"
+import { Fixtures as RuntimeFixtures } from "./interactive-session-runtime-support"
+import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref } from "effect"
+import { TestClock } from "effect/testing"
+import { createTurn } from "../support/product-test-current-state"
+import { productLayer, collectEvents, waitForSessions, serverEvents } from "./interactive-session-base-support"
+import { makeHarness } from "./interactive-session-harness-support"
 
 describe("InteractiveSession controls", () => {
   it.effect("publishes live thread summaries and clears unread state when a thread is selected", () =>

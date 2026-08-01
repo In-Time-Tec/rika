@@ -13,51 +13,6 @@ export const configuration = {
   maxCredentialFileSize: 256 * 1024,
 } as const
 
-type AuthorizationResult = {
-  readonly code: Redacted.Redacted<string>
-  readonly state: Redacted.Redacted<string>
-}
-
-type DevicePrompt = {
-  readonly verificationUrl: string
-  readonly userCode: string
-  readonly warning: string
-}
-
-interface HostInterface {
-  readonly authorize: (
-    url: URL,
-    expectedState: Redacted.Redacted<string>,
-  ) => Effect.Effect<AuthorizationResult, Contract.AuthError>
-}
-
-interface PresenterInterface {
-  readonly device: (prompt: DevicePrompt) => Effect.Effect<void, Contract.AuthError>
-}
-
-interface HttpInterface {
-  readonly exchange: (input: {
-    readonly code: Redacted.Redacted<string>
-    readonly verifier: Redacted.Redacted<string>
-    readonly redirectUri: string
-  }) => Effect.Effect<typeof Contract.TokenResponse.Type, Contract.AuthError>
-  readonly refresh: (
-    refreshToken: Redacted.Redacted<string>,
-  ) => Effect.Effect<typeof Contract.TokenResponse.Type, Contract.AuthError>
-  readonly deviceStart: Effect.Effect<typeof Contract.DeviceStartResponse.Type, Contract.AuthError>
-  readonly devicePoll: (
-    deviceAuthId: Redacted.Redacted<string>,
-    userCode: string,
-  ) => Effect.Effect<Option.Option<typeof Contract.DevicePollResponse.Type>, Contract.AuthError>
-}
-
-interface StoreInterface {
-  readonly load: Effect.Effect<Option.Option<typeof Contract.CredentialDisk.Type>, Contract.StoreError>
-  readonly save: (credential: typeof Contract.CredentialDisk.Type) => Effect.Effect<void, Contract.StoreError>
-  readonly remove: Effect.Effect<boolean, Contract.StoreError>
-  readonly serialized: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | Contract.StoreError, R>
-}
-
 const authError = (kind: Contract.AuthError["kind"], message: string) => Contract.AuthError.make({ kind, message })
 
 const utf8 = (value: string) =>

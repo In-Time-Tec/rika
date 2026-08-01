@@ -1,5 +1,4 @@
 import { Service } from "@rika/product/product-operation-service"
-import * as AgentOutcomes from "@rika/coding-tools/agent-tool-contract"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as ThreadInteractionRepository from "@rika/product-store/sqlite-thread-interaction-repository"
@@ -14,7 +13,12 @@ import { Context, Effect, Layer, Queue, Ref } from "effect"
 import { TestClock } from "effect/testing"
 
 import { executionRoute } from "../support/product-test-current-state"
-import { productLayer, provideLayer } from "../support/operation-layer-harness"
+import {
+  childDelegationLayer,
+  noReportRecovery,
+  runWithChildDelegationLayer,
+  truncatedDelegationReport,
+} from "./operation-child-delegation-support"
 import { settleEvents } from "../support/operation-session-harness"
 import { executionStarted, backend, delegationEvent } from "../support/operation-execution-fixtures"
 import { turnProvenance, selectionThread } from "../support/operation-selection-fixtures"
@@ -135,7 +139,7 @@ describe("Operation", () => {
       const turns = yield* TurnRepository.makeMemory([sourceTurn, targetTurn])
       const transcriptContext = yield* Layer.build(TranscriptRepository.memoryLayer)
       const transcripts = Context.get(transcriptContext, TranscriptRepository.Service)
-      const layer = productLayer({
+      const layer = childDelegationLayer({
         repositoryLayer: ThreadRepository.memoryLayer([source, target]),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
@@ -172,7 +176,7 @@ describe("Operation", () => {
           (yield* interactions.getMessages(source.id)).filter((turn) => turn.prompt === "proven final answer"),
         ).toHaveLength(1)
         expect(yield* Ref.get(pageRequests)).toEqual([undefined, "page-one", undefined, "page-one"])
-      }).pipe(provideLayer(layer))
+      }).pipe(runWithChildDelegationLayer(layer))
     }),
   )
 
@@ -263,7 +267,7 @@ describe("Operation", () => {
         },
       })
       const turns = yield* TurnRepository.makeMemory([sourceTurn, failedTurn, cancelledTurn])
-      const layer = productLayer({
+      const layer = childDelegationLayer({
         repositoryLayer: ThreadRepository.memoryLayer([source, failedThread, cancelledThread]),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         transcriptRepositoryLayer: TranscriptRepository.memoryLayer,
@@ -287,18 +291,17 @@ describe("Operation", () => {
         expect(yield* interactions.getRootResult(cancelledTurn.id)).toEqual({ status: "cancelled" })
         expect(yield* interactions.listUndeliveredResults()).toEqual([])
         expect(yield* interactions.getMessages(source.id)).toEqual([sourceTurn])
-      }).pipe(provideLayer(layer))
+      }).pipe(runWithChildDelegationLayer(layer))
     }),
   )
 
   it.effect("projects a truncated subagent as a failed delegation instead of a silent completion", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const noReport = AgentOutcomes.AgentContract.noReport({
-          childExecutionId: "child:execution%3Atruncated-turn:call-1",
-          reason:
-            "The subagent's final model turn ended before the provider reported why it stopped, so the stream was cut off and no report was produced.",
-        })
+        const noReport = truncatedDelegationReport(
+          "child:execution%3Atruncated-turn:call-1",
+          "The subagent's final model turn ended before the provider reported why it stopped, so the stream was cut off and no report was produced.",
+        )
         const transcriptContext = yield* Layer.build(TranscriptRepository.memoryLayer)
         const transcripts = Context.get(transcriptContext, TranscriptRepository.Service)
         const truncatedBackend = ExecutionBackend.Service.of({
@@ -323,7 +326,7 @@ describe("Operation", () => {
               ],
             }),
         })
-        const layer = productLayer({
+        const layer = childDelegationLayer({
           repositoryLayer: ThreadRepository.memoryLayer(),
           turnRepositoryLayer: TurnRepository.memoryLayer(),
           transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
@@ -348,7 +351,7 @@ describe("Operation", () => {
         yield* Effect.gen(function* () {
           const operation = yield* Service
           yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
-        }).pipe(provideLayer(layer))
+        }).pipe(runWithChildDelegationLayer(layer))
 
         const projection = yield* transcripts.get(Turn.TurnId.make("truncated-turn"))
         const delegation = projection?.units.flatMap((unit) =>
@@ -357,7 +360,7 @@ describe("Operation", () => {
         expect(delegation).toHaveLength(1)
         expect(delegation?.[0]?.status).toBe("failed")
         expect(delegation?.[0]?.output).toContain(noReport.reason)
-        expect(delegation?.[0]?.output).toContain(AgentOutcomes.AgentContract.noReportRecovery)
+        expect(delegation?.[0]?.output).toContain(noReportRecovery)
       }),
     ),
   )

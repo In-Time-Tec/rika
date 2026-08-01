@@ -5,8 +5,7 @@ import { ExecutionFixtures } from "./execution-ingest-fixtures"
 
 import { Fixtures } from "./execution-ingest-support"
 import * as ExecutionIngest from "../../src/execution/ingest/execution-ingest-service"
-import { Context, Deferred, Effect, Exit, Layer, Ref, Scope, Stream } from "effect"
-import { TestClock } from "effect/testing"
+import { Deferred, Effect, Exit, Scope, Stream } from "effect"
 
 describe("ExecutionIngest", () => {
   it.effect("rejects one durable cursor reused at a different sequence", () =>

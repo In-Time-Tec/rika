@@ -1,4 +1,3 @@
-import * as ProductOperation from "@rika/product/product-operation"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Service } from "@rika/product/product-operation-service"
 import type { Input } from "@rika/product/product-operation"

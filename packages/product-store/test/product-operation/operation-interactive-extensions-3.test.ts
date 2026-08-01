@@ -1,34 +1,21 @@
-import * as ExecutionRequest from "@rika/product/execution-request"
 import * as ExecutionEvent from "@rika/product/execution-event"
-import * as ThreadResult from "@rika/product/thread-result"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import type { InteractiveSession } from "@rika/product/interactive-session"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
-import {
-  ThreadRepository,
-  Thread,
-  TranscriptRepository,
-  TurnRepository,
-  Turn,
-  UsageRepository,
-  ExecutionBackend,
-  TranscriptProjection,
-  Context,
-  Deferred,
-  Effect,
-  Fiber,
-  Layer,
-  Queue,
-  Ref,
-  executeInteractiveCommand,
-  UsageCost,
-  storeProjection,
-  baseBackend,
-  thread,
-  interactiveLayer,
-} from "./operation-interactive-extensions-support"
+import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
+import * as Thread from "@rika/product/thread-record"
+import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
+import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
+import * as Turn from "@rika/product/turn-record"
+import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
+import * as ExecutionBackend from "@rika/product/execution-service"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import { executeInteractiveCommand } from "@rika/product/interactive-command"
+import * as UsageCost from "@rika/product/usage-projection"
+import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref } from "effect"
+import { storeProjection, baseBackend, thread, interactiveLayer } from "./operation-interactive-extensions-support"
 
 describe("interactive session extensions", () => {
   it.effect("loads one thread with its child cost and the data-root global total", () =>
@@ -70,8 +57,7 @@ describe("interactive session extensions", () => {
         const transcripts = Context.get(transcriptContext, TranscriptRepository.Service)
         for (const turnId of ["turn-first", "turn-second"] as const) {
           const target = (yield* turns.get(Turn.TurnId.make(turnId)))!
-          if (!ThreadResult.TurnResult.isAgentExecution(target))
-            return yield* Effect.die(`Expected agent execution turn ${turnId}`)
+          if (target._tag !== "AgentExecution") return yield* Effect.die(`Expected agent execution turn ${turnId}`)
           yield* storeProjection(
             transcripts,
             target,
@@ -310,7 +296,7 @@ describe("interactive session extensions", () => {
           },
         ])
         const registration = yield* Deferred.make<InteractiveSession>()
-        const starts = yield* Ref.make<ReadonlyArray<ExecutionRequest.StartInput>>([])
+        const starts = yield* Ref.make<ReadonlyArray<Parameters<ExecutionBackend.Interface["start"]>[0]>>([])
         const backend = ExecutionBackend.Service.of({
           ...baseBackend,
           start: (input) =>

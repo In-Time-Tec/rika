@@ -1,6 +1,5 @@
 import * as InteractiveEvent from "@rika/product/interactive-event"
 import * as TranscriptPage from "@rika/product/transcript-page"
-import type * as Operation from "@rika/product/product-operation-service"
 import type { InteractiveCommand } from "@rika/product/interactive-command"
 import * as Turn from "@rika/product/turn-record"
 import * as ThreadResult from "@rika/product/thread-result"

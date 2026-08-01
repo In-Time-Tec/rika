@@ -1,7 +1,5 @@
-import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import type { InteractiveSession } from "@rika/product/interactive-session"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
-import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -10,8 +8,6 @@ import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ExecutionEvent from "@rika/product/execution-event"
-import * as ExecutionRequest from "@rika/product/execution-request"
-import * as ExecutionIdentifier from "@rika/product/execution-identifier"
 import { Clock, Deferred, Effect, Fiber, Layer, Queue, Ref } from "effect"
 import { it as rawIt } from "vitest"
 
@@ -21,6 +17,8 @@ import { executionStarted, backend } from "../support/operation-execution-fixtur
 
 import { turnProvenance, threadLineage } from "../support/operation-selection-fixtures"
 import { makeSelectionLoadHarness } from "../support/operation-selection-harness"
+import { operationService, testExecutionRoute } from "./operation-selection-live-feed-support"
+import type { ThreadQueueWake, TurnPromoter } from "./operation-selection-live-feed-support"
 
 describe("Operation", () => {
   rawIt("publishes one promoted lifecycle and one copy of every streamed cursor to every session", () =>
@@ -45,14 +43,14 @@ describe("Operation", () => {
             prompt: "queued",
             status: "queued",
             stopIntent: "none",
-            executionRoute: ExecutionRouteSnapshot.testExecutionRoute("medium"),
+            executionRoute: testExecutionRoute("medium"),
             createdAt: yield* Clock.currentTimeMillis,
             updatedAt: yield* Clock.currentTimeMillis,
           },
         ])
         const starts = yield* Ref.make<ReadonlyArray<string>>([])
-        const promoters = yield* Ref.make<ReadonlyArray<ExecutionIdentifier.TurnPromoter>>([])
-        const wakes = yield* Ref.make<ReadonlyArray<ExecutionRequest.ThreadQueueWake>>([])
+        const promoters = yield* Ref.make<ReadonlyArray<TurnPromoter>>([])
+        const wakes = yield* Ref.make<ReadonlyArray<ThreadQueueWake>>([])
         const sessions = yield* Queue.unbounded<{
           readonly workspace: string
           readonly session: InteractiveSession
@@ -113,7 +111,7 @@ describe("Operation", () => {
             }),
         })
         yield* Effect.gen(function* () {
-          const operation = yield* Service
+          const operation = yield* operationService
           const coordinate = Effect.gen(function* () {
             const one = yield* Queue.take(sessions)
             const two = yield* Queue.take(sessions)
@@ -227,7 +225,7 @@ describe("Operation", () => {
               }),
           })
           yield* Effect.gen(function* () {
-            const operation = yield* Service
+            const operation = yield* operationService
             yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
           }).pipe(provideLayer(layer))
           expect(recovered).toBeDefined()

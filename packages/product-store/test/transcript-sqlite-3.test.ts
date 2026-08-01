@@ -2,24 +2,17 @@ import * as TranscriptPage from "@rika/product/transcript-page"
 import { invalidCheckpointGraphs, nestedProjection } from "./transcript-fixture-checkpoints"
 import type { NestedProjectionFixture } from "./transcript-fixture-checkpoints"
 import * as ThreadResult from "@rika/product/thread-result"
-import {
-  expect,
-  it,
-  BunServices,
-  TranscriptProjection,
-  Effect,
-  FileSystem,
-  SqlClient,
-  Thread,
-  TranscriptRepository,
-  Turn,
-  compareExecutionCheckpoints,
-  createTurn,
-  commitAll,
-  projectionVersion,
-  provideLayer,
-  sqliteLayer,
-} from "./transcript-sqlite-support"
+import { expect, it } from "@effect/vitest"
+import * as BunServices from "@effect/platform-bun/BunServices"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import { Effect, FileSystem } from "effect"
+import { SqlClient } from "effect/unstable/sql/SqlClient"
+import * as Thread from "@rika/product/thread-record"
+import * as TranscriptRepository from "../src/transcript/sqlite-transcript-repository"
+import * as Turn from "@rika/product/turn-record"
+import { compareExecutionCheckpoints, createTurn } from "./transcript-sqlite-support"
+import { commitAll, projectionVersion, sqliteLayer } from "./transcript-repository-fixtures"
+import { provideLayer } from "./sqlite-schema-support"
 
 it.effect("atomically couples an attached child to its parent SQLite unit", () =>
   Effect.scoped(

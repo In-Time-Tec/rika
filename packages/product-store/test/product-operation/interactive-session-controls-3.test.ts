@@ -1,24 +1,19 @@
-import * as TranscriptPage from "@rika/product/transcript-page"
-import * as ExecutionEvent from "@rika/product/execution-event"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { describe, expect, it } from "@effect/vitest"
+import * as TurnContract from "@rika/product/turn-repository"
+import { Fixtures as RuntimeFixtures } from "./interactive-session-runtime-support"
+import { Fixtures as TranscriptFixtures } from "./interactive-session-transcript-support"
+import { Effect, Ref, Schema } from "effect"
+import { projectionVersion, collectEvents } from "./interactive-session-base-support"
+import { createTurn } from "../support/product-test-current-state"
+import { delegationUnit, storeProjection } from "../support/product-test-transcript-fixture"
+import { storeCompletedTranscript, completeActive } from "./interactive-session-completion-support"
+import { makeHarness } from "./interactive-session-harness-support"
 import {
-  TurnContract,
-  RuntimeFixtures,
-  TranscriptFixtures,
-  Effect,
-  Ref,
-  Schema,
-  projectionVersion,
-  createTurn,
-  delegationUnit,
-  storeProjection,
-  collectEvents,
-  storeCompletedTranscript,
-  completeActive,
-  makeHarness,
-} from "./interactive-session-base-support"
-import { awaitSelectionEntries, awaitSelectionLoaded, awaitPrependedPage } from "./interactive-session-reload-support"
+  awaitSelectionEntries,
+  awaitSelectionLoaded,
+  awaitPrependedPage,
+} from "./interactive-session-selection-support"
 
 describe("InteractiveSession controls", () => {
   it.effect("selects a thread and reopens the latest persisted projection without raw replay", () =>

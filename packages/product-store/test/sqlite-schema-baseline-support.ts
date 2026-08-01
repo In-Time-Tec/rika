@@ -1,30 +1,20 @@
 import * as ThreadResult from "@rika/product/thread-result"
-import {
-  expect,
-  test,
-  BunServices,
-  TranscriptOrdering,
-  TranscriptProjection,
-  TranscriptProjectionModel,
-  Effect,
-  FileSystem,
-  Layer,
-  Schema,
-  SqlClient,
-  Database,
-  ThreadRepository,
-  ThreadSummaryRepository,
-  TurnRepository,
-  TranscriptRepository,
-  Turn,
-  id,
-  create,
-  provideLayer,
-  createPreBranchDatabase,
-  commitAll,
-  executionCheckpoint,
-  projectionVersion,
-} from "./sqlite-schema-support"
+import { expect, test } from "@effect/vitest"
+import * as BunServices from "@effect/platform-bun/BunServices"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
+import { Effect, FileSystem, Layer, Schema } from "effect"
+import { SqlClient } from "effect/unstable/sql/SqlClient"
+import * as Database from "@rika/product-store/product-database-layer"
+import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
+import * as ThreadSummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
+import * as TurnRepository from "../src/turn/sqlite-turn-repository"
+import * as TranscriptRepository from "../src/transcript/sqlite-transcript-repository"
+import * as Turn from "@rika/product/turn-record"
+import { id, create, provideLayer } from "./sqlite-schema-support"
+import { createPreBranchDatabase } from "./sqlite-schema-migration-fixtures"
+import { commitAll, executionCheckpoint, projectionVersion } from "./transcript-repository-fixtures"
 
 test("migrates a pre-branch database while invalidating its rebuildable transcript projection", () => {
   const program = Effect.scoped(

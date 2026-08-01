@@ -1,4 +1,3 @@
-import * as ProductOperation from "@rika/product/product-operation"
 import * as InteractiveEvent from "@rika/product/interactive-event"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"

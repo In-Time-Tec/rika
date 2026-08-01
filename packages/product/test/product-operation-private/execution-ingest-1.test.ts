@@ -5,8 +5,7 @@ import { ExecutionFixtures } from "./execution-ingest-fixtures"
 
 import { Fixtures } from "./execution-ingest-support"
 import * as ExecutionIngest from "../../src/execution/ingest/execution-ingest-service"
-import { Context, Deferred, Effect, Exit, Layer, Ref, Scope, Stream } from "effect"
-import { TestClock } from "effect/testing"
+import { Effect } from "effect"
 
 describe("ExecutionIngest", () => {
   it.effect("notifies committed usage after a zero-cost attempt is observed", () =>

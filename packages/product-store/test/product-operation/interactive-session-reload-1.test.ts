@@ -1,11 +1,8 @@
-import * as TranscriptPage from "@rika/product/transcript-page"
-import * as ExecutionEvent from "@rika/product/execution-event"
-import * as ExecutionInspection from "@rika/product/execution-inspection"
 import { describe, expect, it } from "@effect/vitest"
+import { Effect } from "effect"
+import { Fixtures as RuntimeFixtures } from "./interactive-session-runtime-support"
+import { Fixtures as TranscriptFixtures } from "./interactive-session-transcript-support"
 import {
-  RuntimeFixtures,
-  TranscriptFixtures,
-  Effect,
   subagentToolId,
   subagentChildId,
   subagentRootEvents,

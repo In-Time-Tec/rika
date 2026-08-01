@@ -1,4 +1,3 @@
-import { Schema } from "effect"
 import { ExecutionRouteSnapshot } from "../../execution/contract/execution-route-snapshot"
 import { ThreadId } from "../model/thread-record"
 import { TurnId } from "../model/turn-record"

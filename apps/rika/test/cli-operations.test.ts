@@ -1,4 +1,3 @@
-import * as ProductOperation from "@rika/product/product-operation"
 import { OperationUnavailable } from "@rika/product/product-operation"
 import * as ConfigurationService from "@rika/configuration/configuration-service"
 import * as SettingsDecoder from "@rika/configuration/configuration-settings"

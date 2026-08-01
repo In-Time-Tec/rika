@@ -1,20 +1,10 @@
 import * as ThreadQuery from "@rika/product/thread-query-service"
-import {
-  describe,
-  expect,
-  it,
-  Context,
-  Effect,
-  Layer,
-  Schema,
-  provideLayer,
-  Fixtures,
-  workspace,
-  storedThread,
-  storedTurn,
-  relatedThread,
-  queryLayer,
-} from "./thread-query-behavior-support"
+import { describe, expect, it } from "@effect/vitest"
+import { Context, Effect, Layer, Schema } from "effect"
+import { provideLayer } from "../support/product-test-layer"
+import { Fixtures } from "./thread-query-support"
+import { workspace, storedThread, storedTurn, relatedThread } from "./thread-query-fixtures"
+import { queryLayer } from "./thread-query-behavior-support"
 
 describe("ThreadQuery", () => {
   it.effect("finds metadata and file content only in the current workspace", () =>

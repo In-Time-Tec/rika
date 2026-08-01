@@ -1,18 +1,11 @@
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { describe, expect, it } from "@effect/vitest"
-import {
-  RuntimeFixtures,
-  TranscriptFixtures,
-  Deferred,
-  Effect,
-  Ref,
-  TestClock,
-  projectionVersion,
-  collectEvents,
-  spendThread,
-  spendTurnId,
-  makeSpendHarness,
-} from "./interactive-session-usage-support"
+import { Deferred, Effect, Ref } from "effect"
+import { TestClock } from "effect/testing"
+import { Fixtures as RuntimeFixtures } from "./interactive-session-runtime-support"
+import { Fixtures as TranscriptFixtures } from "./interactive-session-transcript-support"
+import { projectionVersion, collectEvents } from "./interactive-session-base-support"
+import { spendThread, spendTurnId, makeSpendHarness } from "./interactive-session-usage-support"
 
 describe("InteractiveSession persisted usage", () => {
   it.effect("never displays more than the persisted total when the same events are delivered again", () =>

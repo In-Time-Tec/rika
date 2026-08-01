@@ -1,25 +1,17 @@
 import * as TranscriptPage from "@rika/product/transcript-page"
 import { attachedExecutionCheckpoint } from "./transcript-fixture-checkpoints"
-import {
-  expect,
-  it,
-  BunServices,
-  TranscriptCorrelation,
-  TranscriptOrdering,
-  TranscriptProjection,
-  Effect,
-  FileSystem,
-  Thread,
-  TranscriptRepository,
-  Turn,
-  createTurn,
-  commitAll,
-  executionCheckpoint,
-  projectionVersion,
-  provideLayer,
-  sqliteLayer,
-  unit,
-} from "./transcript-sqlite-part-support"
+import { expect, it } from "@effect/vitest"
+import * as BunServices from "@effect/platform-bun/BunServices"
+import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import { Effect, FileSystem } from "effect"
+import * as Thread from "@rika/product/thread-record"
+import * as TranscriptRepository from "../src/transcript/sqlite-transcript-repository"
+import * as Turn from "@rika/product/turn-record"
+import { createTurn } from "./transcript-sqlite-support"
+import { commitAll, executionCheckpoint, projectionVersion, sqliteLayer, unit } from "./transcript-repository-fixtures"
+import { provideLayer } from "./sqlite-schema-support"
 
 it.effect("keyset-paginates a reopened nested intrinsic-order transcript without duplicates", () =>
   Effect.scoped(

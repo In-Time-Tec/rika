@@ -1,27 +1,25 @@
+import { expect, it } from "@effect/vitest"
+import * as BunServices from "@effect/platform-bun/BunServices"
+import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
+import { Effect, FileSystem } from "effect"
+import { SqlClient } from "effect/unstable/sql/SqlClient"
+import * as Thread from "@rika/product/thread-record"
+import * as TranscriptRepository from "../src/transcript/sqlite-transcript-repository"
+import * as Turn from "@rika/product/turn-record"
+import { createTurn } from "./transcript-sqlite-support"
 import {
-  expect,
-  it,
-  BunServices,
-  TranscriptCorrelation,
-  TranscriptOrdering,
-  TranscriptProjection,
-  TranscriptProjectionModel,
-  TranscriptUnit,
-  Effect,
-  FileSystem,
-  SqlClient,
-  Thread,
-  TranscriptRepository,
-  Turn,
-  createTurn,
   commitAll,
   event,
   executionCheckpoint,
   projectionVersion,
-  provideLayer,
   sqliteLayer,
   unit,
-} from "./transcript-sqlite-support"
+} from "./transcript-repository-fixtures"
+import { provideLayer } from "./sqlite-schema-support"
 
 it.effect("rejects the same out-of-domain projection scalars before SQLite writes", () =>
   Effect.scoped(
