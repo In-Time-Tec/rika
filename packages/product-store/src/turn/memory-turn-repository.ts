@@ -3,7 +3,7 @@ export { Service }
 import { Effect, Layer } from "effect"
 import * as ExecutionStatus from "@rika/product/execution-status"
 import { AgentExecutionTurn, Turn, isAgentExecution } from "@rika/product/turn-record"
-import { clone, cursorFor, pageSize } from "./turn-memory-support"
+import { clone, cursorFor, pageSize } from "./turn-memory-state"
 import { makeTurnMemoryLifecycle } from "./turn-memory-lifecycle"
 import { makeTurnMemoryQueue } from "./turn-memory-queue"
 import { makeTurnMemoryState } from "./turn-memory-state-operations"
@@ -92,5 +92,5 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
   })
 
 export const memoryLayer = (initial: ReadonlyArray<Turn> = []) => Layer.effect(Service, makeMemory(initial))
-export { memoryCoordinator } from "./turn-memory-support"
-export type { MemoryRefoldWrite } from "./turn-memory-support"
+export { memoryCoordinator } from "./turn-memory-coordination"
+export type { MemoryRefoldWrite } from "./turn-memory-coordination"

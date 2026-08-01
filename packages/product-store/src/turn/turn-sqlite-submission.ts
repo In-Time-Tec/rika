@@ -2,30 +2,22 @@ import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { QueueFull } from "@rika/product/turn-repository"
 import type { Interface } from "@rika/product/turn-repository"
-import {
-  decodeAgent,
-  decodeQueueState,
-  ExtensionPinJson,
-  PromptPartsJson,
-  ExecutionRouteJson,
-  AuthorJson,
-  LineageJson,
-} from "./turn-row-codec"
-import { missing, repositoryError, submissionError } from "./turn-memory-support"
-
+import { decodeAgent, decodeQueueState } from "./turn-row-codec"
+import { turnRowJson } from "./turn-row-json-codec"
+import { missing, repositoryError, submissionError } from "./turn-memory-errors"
 export const makeTurnSqliteSubmission = (sql: SqlClient): Pick<Interface, "createForSubmission" | "copy"> => ({
   createForSubmission: Effect.fn("TurnRepository.createForSubmission")(function* (input) {
     const promptParts =
       input.promptParts === undefined
         ? null
-        : yield* Schema.encodeEffect(PromptPartsJson)(input.promptParts).pipe(Effect.mapError(repositoryError))
-    const executionRoute = yield* Schema.encodeEffect(ExecutionRouteJson)(input.executionRoute).pipe(
+        : yield* Schema.encodeEffect(turnRowJson.promptParts)(input.promptParts).pipe(Effect.mapError(repositoryError))
+    const executionRoute = yield* Schema.encodeEffect(turnRowJson.executionRoute)(input.executionRoute).pipe(
       Effect.mapError(repositoryError),
     )
-    const author = yield* Schema.encodeEffect(AuthorJson)(input.author ?? { _tag: "Human" }).pipe(
+    const author = yield* Schema.encodeEffect(turnRowJson.author)(input.author ?? { _tag: "Human" }).pipe(
       Effect.mapError(repositoryError),
     )
-    const lineage = yield* Schema.encodeEffect(LineageJson)(input.lineage ?? { _tag: "Original" }).pipe(
+    const lineage = yield* Schema.encodeEffect(turnRowJson.lineage)(input.lineage ?? { _tag: "Original" }).pipe(
       Effect.mapError(repositoryError),
     )
     return yield* sql
@@ -74,16 +66,16 @@ export const makeTurnSqliteSubmission = (sql: SqlClient): Pick<Interface, "creat
     const promptParts =
       turn.promptParts === undefined
         ? null
-        : yield* Schema.encodeEffect(PromptPartsJson)(turn.promptParts).pipe(Effect.mapError(repositoryError))
+        : yield* Schema.encodeEffect(turnRowJson.promptParts)(turn.promptParts).pipe(Effect.mapError(repositoryError))
     const extensionPin =
       turn.extensionPin === undefined
         ? null
-        : yield* Schema.encodeEffect(ExtensionPinJson)(turn.extensionPin).pipe(Effect.mapError(repositoryError))
-    const executionRoute = yield* Schema.encodeEffect(ExecutionRouteJson)(turn.executionRoute).pipe(
+        : yield* Schema.encodeEffect(turnRowJson.extensionPin)(turn.extensionPin).pipe(Effect.mapError(repositoryError))
+    const executionRoute = yield* Schema.encodeEffect(turnRowJson.executionRoute)(turn.executionRoute).pipe(
       Effect.mapError(repositoryError),
     )
-    const author = yield* Schema.encodeEffect(AuthorJson)(turn.author).pipe(Effect.mapError(repositoryError))
-    const lineage = yield* Schema.encodeEffect(LineageJson)(turn.lineage).pipe(Effect.mapError(repositoryError))
+    const author = yield* Schema.encodeEffect(turnRowJson.author)(turn.author).pipe(Effect.mapError(repositoryError))
+    const lineage = yield* Schema.encodeEffect(turnRowJson.lineage)(turn.lineage).pipe(Effect.mapError(repositoryError))
     return yield* sql
       .withTransaction(
         Effect.gen(function* () {

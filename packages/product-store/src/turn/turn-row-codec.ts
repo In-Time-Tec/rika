@@ -1,11 +1,9 @@
 import { Effect, Schema } from "effect"
 import { ThreadId } from "@rika/product/thread-record"
 import { Turn, TurnId, isAgentExecution } from "@rika/product/turn-record"
-import { ExecutionExtensionPin } from "@rika/product/execution-workflow"
-import { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
-import { PromptPart } from "@rika/product/execution-request"
 import { Status } from "@rika/product/execution-status"
-import { TurnAuthor, TurnLineage } from "@rika/product/thread-relationship"
+import { turnRowJson } from "./turn-row-json-codec"
+import { ExecutionExtensionPin } from "@rika/product/execution-workflow"
 import type { StopIntent } from "@rika/product/thread-state"
 import { RepositoryError } from "@rika/product/turn-repository"
 
@@ -39,11 +37,13 @@ const QueueStateRow = Schema.Struct({
   wake_pending: Schema.Finite,
 })
 
-export const ExtensionPinJson = Schema.fromJsonString(ExecutionExtensionPin)
-export const PromptPartsJson = Schema.fromJsonString(Schema.Array(PromptPart))
-export const ExecutionRouteJson = Schema.fromJsonString(ExecutionRouteSnapshot)
-export const AuthorJson = Schema.fromJsonString(TurnAuthor)
-export const LineageJson = Schema.fromJsonString(TurnLineage)
+const {
+  extensionPin: ExtensionPinJson,
+  promptParts: PromptPartsJson,
+  executionRoute: ExecutionRouteJson,
+  author: AuthorJson,
+  lineage: LineageJson,
+} = turnRowJson
 
 const repositoryError = (error: unknown) =>
   Schema.is(RepositoryError)(error) ? error : RepositoryError.make({ message: String(error) })
@@ -126,7 +126,5 @@ export const decode = (row: unknown) =>
 export const decodeAgent = (row: unknown) =>
   decode(row).pipe(Effect.filterOrFail(isAgentExecution, () => repositoryError("Expected an AgentExecution turn")))
 
-export const StoredTurnRow = Row
-export const decodeStoredTurn = decode
 export const encodeExtensionPin = (pin: ExecutionExtensionPin) =>
   Schema.encodeEffect(ExtensionPinJson)(pin).pipe(Effect.mapError(repositoryError))

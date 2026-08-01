@@ -1,5 +1,6 @@
 import { Service } from "@rika/product/transcript-repository"
 export { Service }
+export * as Contract from "@rika/product/transcript-repository"
 import { Effect, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { TurnId } from "@rika/product/turn-record"
@@ -12,6 +13,7 @@ import {
   RepositoryError,
 } from "@rika/product/transcript-repository"
 import type {
+  Entry,
   Projection,
   CheckpointOptions,
   DeltaCheckpointOptions,
@@ -87,7 +89,7 @@ export {
   ExecutionCheckpoint,
   invalidatedProjectionVersion,
   RepositoryError,
-} from "@rika/product/transcript-repository"
+}
 export type {
   Entry,
   Projection,
@@ -102,4 +104,4 @@ export type {
   RefoldWriteResult,
   RecordedShellWriteResult,
   Interface,
-} from "@rika/product/transcript-repository"
+}
