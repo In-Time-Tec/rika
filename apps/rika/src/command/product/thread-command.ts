@@ -1,7 +1,7 @@
 import * as ProductOperation from "@rika/product/product-operation"
 import { Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
-import { dispatch } from "./shared"
+import { dispatch } from "../root/cli-operation-dispatch"
 
 const threadIdArgument = Argument.string("thread-id")
 const nonEmptyStrings = Schema.decodeUnknownSync(Schema.NonEmptyArray(Schema.String))
@@ -92,7 +92,7 @@ const exportCommand = Command.make(
   ({ threadId, format }) => dispatch({ _tag: "Thread", action: "export", threadId, format }),
 )
 
-export const command = Command.make("threads").pipe(
+export const threadCommand = Command.make("threads").pipe(
   Command.withDescription("Manage local durable threads"),
   Command.withSubcommands([
     Command.make("create", {}, () => dispatch({ _tag: "Thread", action: "new" })),

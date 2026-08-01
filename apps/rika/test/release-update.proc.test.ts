@@ -3,7 +3,7 @@ import { expect, it } from "@effect/vitest"
 import { ConfigProvider, Effect, FileSystem, Layer, Path } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import * as ReleaseUpdate from "../src/release-update"
+import * as ReleaseUpdate from "../src/release/release-update"
 
 const target = "linux-x64"
 const latest = "0.0.4"

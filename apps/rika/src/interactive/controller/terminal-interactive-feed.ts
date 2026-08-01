@@ -1,11 +1,10 @@
-import * as InteractiveEvent from "@rika/product/interactive-event"
 import * as Turn from "@rika/product/turn-record"
 import * as ThreadResult from "@rika/product/thread-result"
 import { HashMap } from "effect"
 import { applyTurnDelta } from "@rika/terminal/terminal-transcript-presentation"
 import type { ThreadItem } from "@rika/terminal/terminal-state"
 import { update as updateModel } from "@rika/terminal/terminal-state-reducer"
-import type { State, ProjectionStream, Update } from "./interactive-controller"
+import type { State, ProjectionStream, TranscriptEvent, Update } from "./interactive-controller"
 import {
   retaining,
   activeSeedEntries,
@@ -14,6 +13,7 @@ import {
   projectionFromEntries,
   displayedEntries,
   reconcileTranscriptBlocks,
+  cleared,
 } from "./interactive-transcript-projection"
 import {
   boundWindow,
@@ -26,20 +26,7 @@ import {
   sameCursor,
 } from "./interactive-transcript-window"
 import { activityAfterOrigin } from "./interactive-activity"
-type TranscriptEvent = Extract<
-  InteractiveEvent.InteractiveEvent,
-  | { readonly _tag: "SelectionLoaded" }
-  | { readonly _tag: "TranscriptPagePrepended" }
-  | { readonly _tag: "TranscriptPageAppended" }
-  | { readonly _tag: "TranscriptProjectionStarted" }
-  | { readonly _tag: "TranscriptProjectionPatched" }
-  | { readonly _tag: "TranscriptProjectionStopped" }
-  | { readonly _tag: "TranscriptProjectionFailed" }
-  | { readonly _tag: "TranscriptResyncRequired" }
-  | { readonly _tag: "ThreadUsageUpdated" }
-  | { readonly _tag: "ThreadRefolding" }
->
-import { cleared } from "./interactive-transcript-projection"
+const unchanged = (state: State): Update => ({ state, preserveAnchor: false })
 export const updateState = (state: State, event: TranscriptEvent): Update => {
   if (event._tag === "ThreadRefolding")
     return {
@@ -55,9 +42,8 @@ export const updateState = (state: State, event: TranscriptEvent): Update => {
     }
   if (event._tag === "ThreadUsageUpdated") {
     if (event.selectionEpoch !== state.selectionEpoch || event.threadId !== state.model.currentThreadId)
-      return { state, preserveAnchor: false }
-    if (state.usageRevision !== undefined && event.revision < state.usageRevision)
-      return { state, preserveAnchor: false }
+      return unchanged(state)
+    if (state.usageRevision !== undefined && event.revision < state.usageRevision) return unchanged(state)
     const availableUsageCost = event.cost._tag === "Available" ? event.cost : state.lastAvailableUsageCost
     const threadCostUsd =
       availableUsageCost?._tag === "Available" ? availableUsageCost.usd : (state.threadCostUsd ?? state.model.costUsd)
@@ -82,13 +68,13 @@ export const updateState = (state: State, event: TranscriptEvent): Update => {
     }
   }
   if (event._tag === "SelectionLoaded") {
-    if (event.selectionEpoch < state.selectionEpoch) return { state, preserveAnchor: false }
+    if (event.selectionEpoch < state.selectionEpoch) return unchanged(state)
     if (
       event.selectionEpoch === state.selectionEpoch &&
       state.model.currentThreadId === event.thread.id &&
       event.entries.some((entry) => entry.projectionRevision < (state.revisions.get(entry.turn.id) ?? -1))
     )
-      return { state, preserveAnchor: false }
+      return unchanged(state)
     const activeTurn = event.activeTurn
     const keepNewerQueue =
       event.selectionEpoch === state.selectionEpoch &&
@@ -203,8 +189,8 @@ export const updateState = (state: State, event: TranscriptEvent): Update => {
     }
   }
   if (event._tag === "TranscriptPagePrepended") {
-    if (event.selectionEpoch !== state.selectionEpoch) return { state, preserveAnchor: false }
-    if (state.model.currentThreadId !== event.threadId) return { state, preserveAnchor: false }
+    if (event.selectionEpoch !== state.selectionEpoch) return unchanged(state)
+    if (state.model.currentThreadId !== event.threadId) return unchanged(state)
     const projected = projectedRootIds(state.projectionStreams)
     const bounded = boundWindow(
       normalizeEntries([...state.entries, ...event.entries]).filter(
@@ -249,8 +235,8 @@ export const updateState = (state: State, event: TranscriptEvent): Update => {
   }
   if (event._tag === "TranscriptPageAppended") {
     if (event.selectionEpoch !== state.selectionEpoch || state.model.currentThreadId !== event.threadId)
-      return { state, preserveAnchor: false }
-    if (!sameCursor(event.requestedAfter, state.newestCursor)) return { state, preserveAnchor: false }
+      return unchanged(state)
+    if (!sameCursor(event.requestedAfter, state.newestCursor)) return unchanged(state)
     const projected = projectedRootIds(state.projectionStreams)
     const bounded = boundWindow(
       normalizeEntries([...state.entries, ...event.entries]).filter(
@@ -294,7 +280,7 @@ export const updateState = (state: State, event: TranscriptEvent): Update => {
   }
   if (event._tag === "TranscriptProjectionStarted") {
     if (event.selectionEpoch !== state.selectionEpoch || state.model.currentThreadId !== event.threadId)
-      return { state, preserveAnchor: false }
+      return unchanged(state)
     const rootTurnId = String(event.rootTurnId)
     if (event.turn.id !== event.rootTurnId || event.turn.threadId !== event.threadId)
       return { state, preserveAnchor: false, resync: true }
@@ -338,7 +324,7 @@ export const updateState = (state: State, event: TranscriptEvent): Update => {
   }
   if (event._tag === "TranscriptProjectionPatched") {
     if (event.selectionEpoch !== state.selectionEpoch || state.model.currentThreadId !== event.threadId)
-      return { state, preserveAnchor: false }
+      return unchanged(state)
     const rootTurnId = String(event.rootTurnId)
     const current = state.projectionStreams?.get(rootTurnId)
     if (
@@ -407,7 +393,7 @@ export const updateState = (state: State, event: TranscriptEvent): Update => {
   }
   if (event._tag === "TranscriptProjectionStopped") {
     if (event.selectionEpoch !== state.selectionEpoch || state.model.currentThreadId !== event.threadId)
-      return { state, preserveAnchor: false }
+      return unchanged(state)
     const rootTurnId = String(event.rootTurnId)
     const current = state.projectionStreams?.get(rootTurnId)
     if (
@@ -470,7 +456,7 @@ export const updateState = (state: State, event: TranscriptEvent): Update => {
   }
   if (event._tag === "TranscriptProjectionFailed") {
     if (event.selectionEpoch !== state.selectionEpoch || state.model.currentThreadId !== event.threadId)
-      return { state, preserveAnchor: false }
+      return unchanged(state)
     const rootTurnId = String(event.rootTurnId)
     const current = state.projectionStreams?.get(rootTurnId)
     if (
@@ -498,6 +484,6 @@ export const updateState = (state: State, event: TranscriptEvent): Update => {
     }
   }
   if (event.selectionEpoch !== state.selectionEpoch || state.model.currentThreadId !== event.threadId)
-    return { state, preserveAnchor: false }
-  return { state, preserveAnchor: false }
+    return unchanged(state)
+  return unchanged(state)
 }

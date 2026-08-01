@@ -2,7 +2,10 @@ import { expect, test } from "vitest"
 import { fileURLToPath } from "node:url"
 import { Effect, Fiber, FileSystem, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { interactiveRuntimeRestartLimit, interactiveRuntimeRestartPlan } from "../src/client-main"
+import {
+  interactiveRuntimeRestartLimit,
+  interactiveRuntimeRestartPlan,
+} from "../src/client/interactive-runtime-restart"
 import { interactivePty, run } from "./client-main-harness"
 
 test("restart plan respawns on exit 75 with a restart message", () => {

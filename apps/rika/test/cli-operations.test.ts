@@ -16,7 +16,7 @@ import * as WebSearchProvider from "@rika/coding-tools/web-search-provider"
 import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, Schema, Scope } from "effect"
 import { TestConsole } from "effect/testing"
 import { expect, it } from "@effect/vitest"
-import { run } from "../src/command"
+import { run } from "../src/command/root/rika-command"
 
 const NamedItemsJson = Schema.fromJsonString(Schema.Array(Schema.Struct({ name: Schema.String })))
 const NamedItemJson = Schema.fromJsonString(Schema.Struct({ name: Schema.String }))

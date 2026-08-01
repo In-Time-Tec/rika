@@ -13,7 +13,9 @@ import {
 } from "../../scripts/install-contract"
 import { launcherManifest, packedName, platformConstraints, platformPackageName } from "../../scripts/npm-package"
 import { archiveName, archiveRoot, targetNames } from "../../scripts/package"
-import * as ReleaseUpdate from "../../apps/rika/src/release-update"
+import * as ReleaseDownload from "../../apps/rika/src/release/release-download"
+import * as ReleaseInstall from "../../apps/rika/src/release/release-install"
+import * as ReleaseUpdate from "../../apps/rika/src/release/release-update"
 
 const installer = await Bun.file(new URL("../../install.sh", import.meta.url)).text()
 
@@ -70,18 +72,18 @@ describe("install contract", () => {
   })
 
   test("rika update and install.sh read the same release overrides", () => {
-    expect(installer).toContain(`${ReleaseUpdate.releaseApiUrlEnv}:-`)
-    expect(installer).toContain(`${ReleaseUpdate.releaseBaseUrlEnv}:-`)
-    expect(ReleaseUpdate.installRootEnv).toBe(installRootEnv)
-    expect(devRootSegments).toContain(ReleaseUpdate.developmentRootSegment)
+    expect(installer).toContain(`${ReleaseDownload.releaseApiUrlEnv}:-`)
+    expect(installer).toContain(`${ReleaseDownload.releaseBaseUrlEnv}:-`)
+    expect(ReleaseInstall.installRootEnv).toBe(installRootEnv)
+    expect(devRootSegments).toContain(ReleaseInstall.developmentRootSegment)
   })
 
   test("rika update names the same artifacts the packaging step publishes", () => {
-    expect(ReleaseUpdate.releaseTargets.toSorted()).toEqual(targetNames.toSorted())
+    expect(ReleaseInstall.releaseTargets.toSorted()).toEqual(targetNames.toSorted())
     for (const target of targetNames) {
       expect(ReleaseUpdate.archiveFileName("1.2.3", target)).toBe(archiveName("1.2.3", target))
       expect(ReleaseUpdate.archiveRootName("1.2.3", target)).toBe(archiveRoot("1.2.3", target))
-      expect(installer).toContain(`${ReleaseUpdate.releaseRepository}`)
+      expect(installer).toContain(`${ReleaseInstall.releaseRepository}`)
     }
   })
 

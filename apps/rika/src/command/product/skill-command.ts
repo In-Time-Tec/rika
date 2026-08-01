@@ -1,9 +1,9 @@
 import { Argument, Command } from "effect/unstable/cli"
-import { dispatch } from "./shared"
+import { dispatch } from "../root/cli-operation-dispatch"
 
 const nameArgument = Argument.string("name")
 
-export const command = Command.make("skills").pipe(
+export const skillCommand = Command.make("skills").pipe(
   Command.withDescription("Manage local agent skills"),
   Command.withSubcommands([
     Command.make("list", {}, () => dispatch({ _tag: "Skill", action: "list" })),

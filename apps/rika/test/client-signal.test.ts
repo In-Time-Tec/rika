@@ -1,5 +1,5 @@
 import { expect, test } from "vitest"
-import { clientSigintMode, installClientSigintHandler } from "../src/client-main"
+import { clientSigintMode, installClientSigintHandler } from "../src/client/client-process"
 
 test("startup and parsed operation select the process signal owner", () => {
   expect(clientSigintMode(undefined)).toBe("root")

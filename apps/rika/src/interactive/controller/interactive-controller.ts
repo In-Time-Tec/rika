@@ -7,7 +7,7 @@ import { Effect, Function, HashMap } from "effect"
 import type { Model } from "@rika/terminal/terminal-state"
 import { updateState } from "./terminal-interactive-feed"
 
-type TranscriptEvent = Extract<
+export type TranscriptEvent = Extract<
   InteractiveEvent.InteractiveEvent,
   | { readonly _tag: "SelectionLoaded" }
   | { readonly _tag: "TranscriptPagePrepended" }

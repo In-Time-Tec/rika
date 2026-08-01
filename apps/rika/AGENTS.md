@@ -1,6 +1,6 @@
 # Rika CLI
 
-Thin Effect CLI shell and process composition root. Leaf command modules export command values. `src/command.ts` exports the root command and testable `run(argv)`. `src/client-main.ts`, `src/interactive-main.ts`, `src/resident-main.ts`, and `src/performance-main.ts` interpret their isolated process programs.
+Thin Effect CLI shell and process composition root. Leaf command modules export command values. `src/command/root/rika-command.ts` exports the root command and testable `run(argv)`. `src/command/root/noninteractive-run-command.ts` owns JSONL parsing. `src/client-main.ts`, `src/interactive-main.ts`, `src/resident-main.ts`, and `src/performance-main.ts` interpret their isolated process programs.
 
 Do not initialize SQL, Relay, models, MCP, plugins, or OpenTUI before command parsing selects an operation that needs them.
 

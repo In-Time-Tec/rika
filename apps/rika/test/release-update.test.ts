@@ -2,7 +2,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
 import { ConfigProvider, Effect, FileSystem, Layer, Path } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import * as ReleaseUpdate from "../src/release-update"
+import * as ReleaseUpdate from "../src/release/release-update"
 
 const digestOf = (bytes: Uint8Array) => new Bun.CryptoHasher("sha256").update(bytes).digest("hex")
 

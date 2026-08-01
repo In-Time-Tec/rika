@@ -12,8 +12,8 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/command.ts",
-      "path": "apps/rika/src/command.ts",
+      "id": "apps/rika/src/client/client-process-exit.ts",
+      "path": "apps/rika/src/client/client-process-exit.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -21,8 +21,8 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/commands/auth.ts",
-      "path": "apps/rika/src/commands/auth.ts",
+      "id": "apps/rika/src/client/client-process.ts",
+      "path": "apps/rika/src/client/client-process.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -30,8 +30,8 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/commands/config.ts",
-      "path": "apps/rika/src/commands/config.ts",
+      "id": "apps/rika/src/client/interactive-runtime-restart.ts",
+      "path": "apps/rika/src/client/interactive-runtime-restart.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -39,8 +39,8 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/commands/diagnostics.ts",
-      "path": "apps/rika/src/commands/diagnostics.ts",
+      "id": "apps/rika/src/client/private-runtime-launch.ts",
+      "path": "apps/rika/src/client/private-runtime-launch.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -48,8 +48,8 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/commands/extensions.ts",
-      "path": "apps/rika/src/commands/extensions.ts",
+      "id": "apps/rika/src/command/product/auth-command.ts",
+      "path": "apps/rika/src/command/product/auth-command.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -57,8 +57,8 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/commands/mcp.ts",
-      "path": "apps/rika/src/commands/mcp.ts",
+      "id": "apps/rika/src/command/product/configuration-command.ts",
+      "path": "apps/rika/src/command/product/configuration-command.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -66,8 +66,8 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/commands/shared.ts",
-      "path": "apps/rika/src/commands/shared.ts",
+      "id": "apps/rika/src/command/product/diagnostics-command.ts",
+      "path": "apps/rika/src/command/product/diagnostics-command.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -75,8 +75,8 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/commands/skills.ts",
-      "path": "apps/rika/src/commands/skills.ts",
+      "id": "apps/rika/src/command/product/extension-command.ts",
+      "path": "apps/rika/src/command/product/extension-command.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -84,8 +84,8 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/commands/threads.ts",
-      "path": "apps/rika/src/commands/threads.ts",
+      "id": "apps/rika/src/command/product/mcp-command.ts",
+      "path": "apps/rika/src/command/product/mcp-command.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -93,8 +93,8 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/commands/tools.ts",
-      "path": "apps/rika/src/commands/tools.ts",
+      "id": "apps/rika/src/command/product/skill-command.ts",
+      "path": "apps/rika/src/command/product/skill-command.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -102,8 +102,62 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/commands/workflows.ts",
-      "path": "apps/rika/src/commands/workflows.ts",
+      "id": "apps/rika/src/command/product/thread-command.ts",
+      "path": "apps/rika/src/command/product/thread-command.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/command/product/tool-catalog-command.ts",
+      "path": "apps/rika/src/command/product/tool-catalog-command.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/command/product/workflow-command.ts",
+      "path": "apps/rika/src/command/product/workflow-command.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/command/root/cli-operation-dispatch.ts",
+      "path": "apps/rika/src/command/root/cli-operation-dispatch.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/command/root/noninteractive-run-command.ts",
+      "path": "apps/rika/src/command/root/noninteractive-run-command.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/command/root/review-command.ts",
+      "path": "apps/rika/src/command/root/review-command.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/command/root/rika-command.ts",
+      "path": "apps/rika/src/command/root/rika-command.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -221,15 +275,6 @@
     {
       "id": "apps/rika/src/interactive/input/prompt-input.ts",
       "path": "apps/rika/src/interactive/input/prompt-input.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "apps/rika/src/interactive/input/relaunch-input.ts",
-      "path": "apps/rika/src/interactive/input/relaunch-input.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -426,8 +471,35 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/release-update.ts",
-      "path": "apps/rika/src/release-update.ts",
+      "id": "apps/rika/src/release/relaunch-argument.ts",
+      "path": "apps/rika/src/release/relaunch-argument.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/release/release-download.ts",
+      "path": "apps/rika/src/release/release-download.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/release/release-install.ts",
+      "path": "apps/rika/src/release/release-install.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/release/release-update.ts",
+      "path": "apps/rika/src/release/release-update.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -7385,40 +7457,16 @@
   "edges": [
     {
       "from": "apps/rika/src/client-main.ts",
-      "to": "apps/rika/src/command.ts",
-      "specifier": "./command",
+      "to": "apps/rika/src/client/client-process-exit.ts",
+      "specifier": "./client/client-process-exit",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
       "from": "apps/rika/src/client-main.ts",
-      "to": "apps/rika/src/logging.ts",
-      "specifier": "./logging",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/client-main.ts",
-      "to": "apps/rika/src/resident/process/resident-process-spawn.ts",
-      "specifier": "./resident/process/resident-process-spawn",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/client-main.ts",
-      "to": "apps/rika/src/resident/process/resident-process.ts",
-      "specifier": "./resident/process/resident-process",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/client-main.ts",
-      "to": "apps/rika/src/transport/client/resident-client-transport.ts",
-      "specifier": "./transport/client/resident-client-transport",
+      "to": "apps/rika/src/client/client-process.ts",
+      "specifier": "./client/client-process",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -7441,14 +7489,6 @@
     },
     {
       "from": "apps/rika/src/client-main.ts",
-      "to": "external:effect/unstable/cli",
-      "specifier": "effect/unstable/cli",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/client-main.ts",
       "to": "external:effect/unstable/http",
       "specifier": "effect/unstable/http",
       "kind": "import",
@@ -7456,143 +7496,7 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/client-main.ts",
-      "to": "external:effect/unstable/process",
-      "specifier": "effect/unstable/process",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/client-main.ts",
-      "to": "packages/configuration/src/path-resolution/canonical-data-root.ts",
-      "specifier": "@rika/configuration/canonical-data-root",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/client-main.ts",
-      "to": "packages/configuration/src/path-resolution/profile-data-paths.ts",
-      "specifier": "@rika/configuration/profile-data-paths",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/client-main.ts",
-      "to": "packages/product/src/resident/resident-service-handshake.ts",
-      "specifier": "@rika/product/resident-service-handshake",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/client-main.ts",
-      "to": "packages/product/src/resident/resident-service.ts",
-      "specifier": "@rika/product/resident-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/command.ts",
-      "to": "apps/rika/src/commands/auth.ts",
-      "specifier": "./commands/auth",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/command.ts",
-      "to": "apps/rika/src/commands/config.ts",
-      "specifier": "./commands/config",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/command.ts",
-      "to": "apps/rika/src/commands/diagnostics.ts",
-      "specifier": "./commands/diagnostics",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/command.ts",
-      "to": "apps/rika/src/commands/extensions.ts",
-      "specifier": "./commands/extensions",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/command.ts",
-      "to": "apps/rika/src/commands/mcp.ts",
-      "specifier": "./commands/mcp",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/command.ts",
-      "to": "apps/rika/src/commands/shared.ts",
-      "specifier": "./commands/shared",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/command.ts",
-      "to": "apps/rika/src/commands/skills.ts",
-      "specifier": "./commands/skills",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/command.ts",
-      "to": "apps/rika/src/commands/threads.ts",
-      "specifier": "./commands/threads",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/command.ts",
-      "to": "apps/rika/src/commands/tools.ts",
-      "specifier": "./commands/tools",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/command.ts",
-      "to": "apps/rika/src/commands/workflows.ts",
-      "specifier": "./commands/workflows",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/command.ts",
-      "to": "apps/rika/src/release-update.ts",
-      "specifier": "./release-update",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/command.ts",
-      "to": "apps/rika/src/version.ts",
-      "specifier": "./version",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/command.ts",
+      "from": "apps/rika/src/client/client-process-exit.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -7600,55 +7504,31 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/command.ts",
-      "to": "external:effect/unstable/cli",
-      "specifier": "effect/unstable/cli",
+      "from": "apps/rika/src/client/client-process.ts",
+      "to": "apps/rika/src/client/interactive-runtime-restart.ts",
+      "specifier": "./interactive-runtime-restart",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "apps/rika/src/command.ts",
-      "to": "packages/configuration/src/model-routing/behavior-mode.ts",
-      "specifier": "@rika/configuration/behavior-mode",
+      "from": "apps/rika/src/client/client-process.ts",
+      "to": "apps/rika/src/client/private-runtime-launch.ts",
+      "specifier": "./private-runtime-launch",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/auth.ts",
-      "to": "apps/rika/src/commands/shared.ts",
-      "specifier": "./shared",
+      "from": "apps/rika/src/client/client-process.ts",
+      "to": "apps/rika/src/command/root/rika-command.ts",
+      "specifier": "../command/root/rika-command",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/auth.ts",
-      "to": "external:effect/unstable/cli",
-      "specifier": "effect/unstable/cli",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/commands/config.ts",
-      "to": "apps/rika/src/commands/shared.ts",
-      "specifier": "./shared",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/commands/config.ts",
-      "to": "external:effect/unstable/cli",
-      "specifier": "effect/unstable/cli",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/commands/diagnostics.ts",
+      "from": "apps/rika/src/client/client-process.ts",
       "to": "apps/rika/src/logging.ts",
       "specifier": "../logging",
       "kind": "import",
@@ -7656,7 +7536,31 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/diagnostics.ts",
+      "from": "apps/rika/src/client/client-process.ts",
+      "to": "apps/rika/src/resident/process/resident-process-spawn.ts",
+      "specifier": "../resident/process/resident-process-spawn",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/client/client-process.ts",
+      "to": "apps/rika/src/resident/process/resident-process.ts",
+      "specifier": "../resident/process/resident-process",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/client/client-process.ts",
+      "to": "apps/rika/src/transport/client/resident-client-transport.ts",
+      "specifier": "../transport/client/resident-client-transport",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/client/client-process.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -7664,7 +7568,7 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/diagnostics.ts",
+      "from": "apps/rika/src/client/client-process.ts",
       "to": "external:effect/unstable/cli",
       "specifier": "effect/unstable/cli",
       "kind": "import",
@@ -7672,7 +7576,7 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/diagnostics.ts",
+      "from": "apps/rika/src/client/client-process.ts",
       "to": "external:effect/unstable/process",
       "specifier": "effect/unstable/process",
       "kind": "import",
@@ -7680,7 +7584,7 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/diagnostics.ts",
+      "from": "apps/rika/src/client/client-process.ts",
       "to": "packages/configuration/src/path-resolution/canonical-data-root.ts",
       "specifier": "@rika/configuration/canonical-data-root",
       "kind": "import",
@@ -7688,7 +7592,7 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/diagnostics.ts",
+      "from": "apps/rika/src/client/client-process.ts",
       "to": "packages/configuration/src/path-resolution/profile-data-paths.ts",
       "specifier": "@rika/configuration/profile-data-paths",
       "kind": "import",
@@ -7696,31 +7600,39 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/extensions.ts",
-      "to": "apps/rika/src/commands/shared.ts",
-      "specifier": "./shared",
+      "from": "apps/rika/src/client/client-process.ts",
+      "to": "packages/product/src/resident/resident-service-handshake.ts",
+      "specifier": "@rika/product/resident-service-handshake",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/extensions.ts",
-      "to": "external:effect/unstable/cli",
-      "specifier": "effect/unstable/cli",
+      "from": "apps/rika/src/client/client-process.ts",
+      "to": "packages/product/src/resident/resident-service.ts",
+      "specifier": "@rika/product/resident-service",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/mcp.ts",
-      "to": "apps/rika/src/commands/shared.ts",
-      "specifier": "./shared",
+      "from": "apps/rika/src/client/interactive-runtime-restart.ts",
+      "to": "apps/rika/src/resident/process/resident-process.ts",
+      "specifier": "../resident/process/resident-process",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/mcp.ts",
+      "from": "apps/rika/src/client/interactive-runtime-restart.ts",
+      "to": "packages/product/src/resident/resident-service.ts",
+      "specifier": "@rika/product/resident-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/client/private-runtime-launch.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -7728,7 +7640,15 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/mcp.ts",
+      "from": "apps/rika/src/command/product/auth-command.ts",
+      "to": "apps/rika/src/command/root/cli-operation-dispatch.ts",
+      "specifier": "../root/cli-operation-dispatch",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/product/auth-command.ts",
       "to": "external:effect/unstable/cli",
       "specifier": "effect/unstable/cli",
       "kind": "import",
@@ -7736,7 +7656,31 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/shared.ts",
+      "from": "apps/rika/src/command/product/configuration-command.ts",
+      "to": "apps/rika/src/command/root/cli-operation-dispatch.ts",
+      "specifier": "../root/cli-operation-dispatch",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/product/configuration-command.ts",
+      "to": "external:effect/unstable/cli",
+      "specifier": "effect/unstable/cli",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/product/diagnostics-command.ts",
+      "to": "apps/rika/src/logging.ts",
+      "specifier": "../../logging",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/product/diagnostics-command.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -7744,15 +7688,7 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/skills.ts",
-      "to": "apps/rika/src/commands/shared.ts",
-      "specifier": "./shared",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/commands/skills.ts",
+      "from": "apps/rika/src/command/product/diagnostics-command.ts",
       "to": "external:effect/unstable/cli",
       "specifier": "effect/unstable/cli",
       "kind": "import",
@@ -7760,15 +7696,55 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/threads.ts",
-      "to": "apps/rika/src/commands/shared.ts",
-      "specifier": "./shared",
+      "from": "apps/rika/src/command/product/diagnostics-command.ts",
+      "to": "external:effect/unstable/process",
+      "specifier": "effect/unstable/process",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/threads.ts",
+      "from": "apps/rika/src/command/product/diagnostics-command.ts",
+      "to": "packages/configuration/src/path-resolution/canonical-data-root.ts",
+      "specifier": "@rika/configuration/canonical-data-root",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/product/diagnostics-command.ts",
+      "to": "packages/configuration/src/path-resolution/profile-data-paths.ts",
+      "specifier": "@rika/configuration/profile-data-paths",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/product/extension-command.ts",
+      "to": "apps/rika/src/command/root/cli-operation-dispatch.ts",
+      "specifier": "../root/cli-operation-dispatch",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/product/extension-command.ts",
+      "to": "external:effect/unstable/cli",
+      "specifier": "effect/unstable/cli",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/product/mcp-command.ts",
+      "to": "apps/rika/src/command/root/cli-operation-dispatch.ts",
+      "specifier": "../root/cli-operation-dispatch",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/product/mcp-command.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -7776,7 +7752,7 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/threads.ts",
+      "from": "apps/rika/src/command/product/mcp-command.ts",
       "to": "external:effect/unstable/cli",
       "specifier": "effect/unstable/cli",
       "kind": "import",
@@ -7784,15 +7760,31 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/tools.ts",
-      "to": "apps/rika/src/commands/shared.ts",
-      "specifier": "./shared",
+      "from": "apps/rika/src/command/product/skill-command.ts",
+      "to": "apps/rika/src/command/root/cli-operation-dispatch.ts",
+      "specifier": "../root/cli-operation-dispatch",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/tools.ts",
+      "from": "apps/rika/src/command/product/skill-command.ts",
+      "to": "external:effect/unstable/cli",
+      "specifier": "effect/unstable/cli",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/product/thread-command.ts",
+      "to": "apps/rika/src/command/root/cli-operation-dispatch.ts",
+      "specifier": "../root/cli-operation-dispatch",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/product/thread-command.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -7800,7 +7792,7 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/tools.ts",
+      "from": "apps/rika/src/command/product/thread-command.ts",
       "to": "external:effect/unstable/cli",
       "specifier": "effect/unstable/cli",
       "kind": "import",
@@ -7808,7 +7800,31 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/tools.ts",
+      "from": "apps/rika/src/command/product/tool-catalog-command.ts",
+      "to": "apps/rika/src/command/root/cli-operation-dispatch.ts",
+      "specifier": "../root/cli-operation-dispatch",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/product/tool-catalog-command.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/product/tool-catalog-command.ts",
+      "to": "external:effect/unstable/cli",
+      "specifier": "effect/unstable/cli",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/product/tool-catalog-command.ts",
       "to": "packages/configuration/src/model-routing/behavior-mode.ts",
       "specifier": "@rika/configuration/behavior-mode",
       "kind": "import",
@@ -7816,15 +7832,15 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/workflows.ts",
-      "to": "apps/rika/src/commands/shared.ts",
-      "specifier": "./shared",
+      "from": "apps/rika/src/command/product/workflow-command.ts",
+      "to": "apps/rika/src/command/root/cli-operation-dispatch.ts",
+      "specifier": "../root/cli-operation-dispatch",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/workflows.ts",
+      "from": "apps/rika/src/command/product/workflow-command.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -7832,9 +7848,209 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/commands/workflows.ts",
+      "from": "apps/rika/src/command/product/workflow-command.ts",
       "to": "external:effect/unstable/cli",
       "specifier": "effect/unstable/cli",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/cli-operation-dispatch.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/noninteractive-run-command.ts",
+      "to": "apps/rika/src/command/root/cli-operation-dispatch.ts",
+      "specifier": "./cli-operation-dispatch",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/noninteractive-run-command.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/noninteractive-run-command.ts",
+      "to": "external:effect/unstable/cli",
+      "specifier": "effect/unstable/cli",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/noninteractive-run-command.ts",
+      "to": "packages/configuration/src/model-routing/behavior-mode.ts",
+      "specifier": "@rika/configuration/behavior-mode",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/review-command.ts",
+      "to": "apps/rika/src/command/root/cli-operation-dispatch.ts",
+      "specifier": "./cli-operation-dispatch",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/review-command.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/review-command.ts",
+      "to": "external:effect/unstable/cli",
+      "specifier": "effect/unstable/cli",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/rika-command.ts",
+      "to": "apps/rika/src/command/product/auth-command.ts",
+      "specifier": "../product/auth-command",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/rika-command.ts",
+      "to": "apps/rika/src/command/product/configuration-command.ts",
+      "specifier": "../product/configuration-command",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/rika-command.ts",
+      "to": "apps/rika/src/command/product/diagnostics-command.ts",
+      "specifier": "../product/diagnostics-command",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/rika-command.ts",
+      "to": "apps/rika/src/command/product/extension-command.ts",
+      "specifier": "../product/extension-command",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/rika-command.ts",
+      "to": "apps/rika/src/command/product/mcp-command.ts",
+      "specifier": "../product/mcp-command",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/rika-command.ts",
+      "to": "apps/rika/src/command/product/skill-command.ts",
+      "specifier": "../product/skill-command",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/rika-command.ts",
+      "to": "apps/rika/src/command/product/thread-command.ts",
+      "specifier": "../product/thread-command",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/rika-command.ts",
+      "to": "apps/rika/src/command/product/tool-catalog-command.ts",
+      "specifier": "../product/tool-catalog-command",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/rika-command.ts",
+      "to": "apps/rika/src/command/product/workflow-command.ts",
+      "specifier": "../product/workflow-command",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/rika-command.ts",
+      "to": "apps/rika/src/command/root/cli-operation-dispatch.ts",
+      "specifier": "./cli-operation-dispatch",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/rika-command.ts",
+      "to": "apps/rika/src/command/root/noninteractive-run-command.ts",
+      "specifier": "./noninteractive-run-command",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/rika-command.ts",
+      "to": "apps/rika/src/command/root/review-command.ts",
+      "specifier": "./review-command",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/rika-command.ts",
+      "to": "apps/rika/src/release/release-update.ts",
+      "specifier": "../../release/release-update",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/rika-command.ts",
+      "to": "apps/rika/src/version.ts",
+      "specifier": "../../version",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/rika-command.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/rika-command.ts",
+      "to": "external:effect/unstable/cli",
+      "specifier": "effect/unstable/cli",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/rika-command.ts",
+      "to": "packages/configuration/src/model-routing/behavior-mode.ts",
+      "specifier": "@rika/configuration/behavior-mode",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -8131,14 +8347,6 @@
       "from": "apps/rika/src/interactive/controller/terminal-interactive-feed.ts",
       "to": "external:effect",
       "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/interactive/controller/terminal-interactive-feed.ts",
-      "to": "packages/product/src/operation/interactive/interactive-event.ts",
-      "specifier": "@rika/product/interactive-event",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -8849,16 +9057,8 @@
     },
     {
       "from": "apps/rika/src/interactive/process/process-start.ts",
-      "to": "apps/rika/src/command.ts",
-      "specifier": "../../command",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/interactive/process/process-start.ts",
-      "to": "apps/rika/src/interactive/input/relaunch-input.ts",
-      "specifier": "../input/relaunch-input",
+      "to": "apps/rika/src/command/root/rika-command.ts",
+      "specifier": "../../command/root/rika-command",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -8883,6 +9083,14 @@
       "from": "apps/rika/src/interactive/process/process-start.ts",
       "to": "apps/rika/src/interactive/process/process-startup-dispatcher.ts",
       "specifier": "./process-startup-dispatcher",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/process-start.ts",
+      "to": "apps/rika/src/release/relaunch-argument.ts",
+      "specifier": "../../release/relaunch-argument",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -9336,7 +9544,7 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/release-update.ts",
+      "from": "apps/rika/src/release/release-download.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -9344,7 +9552,7 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/release-update.ts",
+      "from": "apps/rika/src/release/release-download.ts",
       "to": "external:effect/unstable/http",
       "specifier": "effect/unstable/http",
       "kind": "import",
@@ -9352,9 +9560,49 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/release-update.ts",
+      "from": "apps/rika/src/release/release-install.ts",
+      "to": "apps/rika/src/release/release-download.ts",
+      "specifier": "./release-download",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/release/release-install.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/release/release-install.ts",
       "to": "external:effect/unstable/process",
       "specifier": "effect/unstable/process",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/release/release-update.ts",
+      "to": "apps/rika/src/release/release-download.ts",
+      "specifier": "./release-download",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/release/release-update.ts",
+      "to": "apps/rika/src/release/release-install.ts",
+      "specifier": "./release-install",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/release/release-update.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true

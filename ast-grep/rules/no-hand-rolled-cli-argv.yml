@@ -16,7 +16,7 @@ ignores:
   - "**/coverage/**"
   - "node_modules/**"
   - "repos/effect/**"
-  - "apps/rika/src/relaunch-arguments.ts"
+  - "apps/rika/src/release/relaunch-argument.ts"
   - "scripts/capture-tui-visuals.ts"
   - "scripts/package.ts"
   - "scripts/release-smoke.ts"

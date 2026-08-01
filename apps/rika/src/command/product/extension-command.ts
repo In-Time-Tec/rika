@@ -1,9 +1,9 @@
 import { Argument, Command } from "effect/unstable/cli"
-import { dispatch } from "./shared"
+import { dispatch } from "../root/cli-operation-dispatch"
 
 const nameArgument = Argument.string("name")
 
-export const command = Command.make("extensions").pipe(
+export const extensionCommand = Command.make("extensions").pipe(
   Command.withDescription("Manage trusted local extensions"),
   Command.withSubcommands([
     Command.make("list", {}, () => dispatch({ _tag: "Extension", action: "list" })),

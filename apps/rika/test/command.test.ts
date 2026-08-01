@@ -4,8 +4,11 @@ import type { Input } from "@rika/product/product-operation"
 import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, Ref, Stream } from "effect"
 import { TestConsole } from "effect/testing"
 import { expect, it } from "@effect/vitest"
-import { cleanInteractiveRuntimeExit, clientProcessExitCode, run as runClient } from "../src/client-main"
-import { parseJsonLines, readStreamInput, run } from "../src/command"
+import { run as runClient } from "../src/client/client-process"
+import { clientProcessExitCode } from "../src/client/client-process-exit"
+import { cleanInteractiveRuntimeExit } from "../src/client/interactive-runtime-restart"
+import { parseJsonLines, readStreamInput } from "../src/command/root/noninteractive-run-command"
+import { run } from "../src/command/root/rika-command"
 
 const workspace = process.cwd()
 

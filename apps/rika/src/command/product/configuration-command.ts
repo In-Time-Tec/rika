@@ -1,7 +1,7 @@
 import { Command, Flag } from "effect/unstable/cli"
-import { dispatch } from "./shared"
+import { dispatch } from "../root/cli-operation-dispatch"
 
-export const command = Command.make("config").pipe(
+export const configurationCommand = Command.make("config").pipe(
   Command.withDescription("Inspect and edit Rika configuration"),
   Command.withSubcommands([
     Command.make("list", {}, () => dispatch({ _tag: "Config", action: "list" })),

@@ -1,7 +1,7 @@
 import * as ProductOperation from "@rika/product/product-operation"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import { Option } from "effect"
-import { dispatch } from "./shared"
+import { dispatch } from "../root/cli-operation-dispatch"
 
 const start = Command.make(
   "start",
@@ -31,7 +31,7 @@ const cancel = Command.make("cancel", { runId: Argument.string("run-id") }, ({ r
   dispatch({ _tag: "Workflow", action: "cancel", runId }),
 )
 
-export const command = Command.make("workflows").pipe(
+export const workflowCommand = Command.make("workflows").pipe(
   Command.withDescription("Run, inspect, and cancel built-in durable workflows"),
   Command.withSubcommands([start, inspect, cancel]),
 )

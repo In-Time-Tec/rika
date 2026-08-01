@@ -1,9 +1,9 @@
 import { Argument, Command, Flag } from "effect/unstable/cli"
-import { dispatch } from "./shared"
+import { dispatch } from "../root/cli-operation-dispatch"
 
 const providerArgument = Argument.choice("provider", ["openai"])
 
-export const command = Command.make("auth").pipe(
+export const authCommand = Command.make("auth").pipe(
   Command.withDescription("Manage model provider account authentication"),
   Command.withSubcommands([
     Command.make(

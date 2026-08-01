@@ -3,7 +3,7 @@ import { Argument, Command } from "effect/unstable/cli"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import * as DataRoot from "@rika/configuration/canonical-data-root"
 import { resolveProfileDataPaths } from "@rika/configuration/profile-data-paths"
-import * as Logging from "../logging"
+import * as Logging from "../../logging"
 
 const dataRoot = Effect.fn("DiagnosticsCommand.dataRoot")(function* () {
   const home = yield* Config.option(Config.string("HOME"))
@@ -58,7 +58,7 @@ const performanceCommand = Command.make("performance", {}, () =>
   }),
 ).pipe(Command.withDescription("Evaluate the standard large-Thread rendering workload"))
 
-export const command = Command.make("diagnostics").pipe(
+export const diagnosticsCommand = Command.make("diagnostics").pipe(
   Command.withDescription("Inspect and export local Rika logs"),
   Command.withSubcommands([pathCommand, statusCommand, exportCommand, performanceCommand]),
 )

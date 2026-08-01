@@ -1,7 +1,7 @@
 import * as ProductOperation from "@rika/product/product-operation"
 import { Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
-import { dispatch } from "./shared"
+import { dispatch } from "../root/cli-operation-dispatch"
 
 const nameArgument = Argument.string("name")
 const oauth = Command.make("oauth").pipe(
@@ -54,7 +54,7 @@ const add = Command.make(
     }),
 )
 
-export const command = Command.make("mcp").pipe(
+export const mcpCommand = Command.make("mcp").pipe(
   Command.withDescription("Manage Model Context Protocol servers"),
   Command.withSubcommands([
     Command.make("list", {}, () => dispatch({ _tag: "Mcp", action: "list" })),
