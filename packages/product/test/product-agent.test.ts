@@ -4,7 +4,7 @@ import * as ExecutionStatus from "@rika/product/execution-status"
 import * as ExecutionChildRun from "@rika/product/execution-child-run"
 import { Effect, Exit, Layer, Schema } from "effect"
 import * as ProductAgent from "../src/agent/product-agent-service"
-import { provideLayer } from "./layer"
+import { provideLayer } from "./product-test-layer"
 import { executionRoute } from "./current-state"
 
 describe("ProductAgent", () => {

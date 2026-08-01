@@ -12,8 +12,9 @@ import * as WebSearch from "@rika/coding-tools/web-search-service"
 import { makeRelayLayer } from "./relay-execution-composition"
 import * as Identifier from "./relay-execution-identifier"
 
-type Service = ExecutionServiceType
-export type ModelVariantPolicy = "registration-key" | "fixed-selection"
+type ServiceContract = ExecutionServiceType
+export { ExecutionService as Service }
+type ModelVariantPolicy = "registration-key" | "fixed-selection"
 export type ToolRuntimeRequirements =
   ReturnType<typeof RikaToolRuntime.layer> extends Layer.Layer<infer _A, infer _E, infer R> ? R : never
 type SuppliedToolRuntimeRequirements =
@@ -63,7 +64,7 @@ export const layer = <
 >(
   options: LayerOptions<AdditionalTools, RuntimeRequirements>,
 ): Layer.Layer<
-  Service,
+  ServiceContract,
   BackendError | PlatformError.PlatformError | Runtime.AcquisitionError,
   Crypto.Crypto | ExternalToolRuntimeRequirements<RuntimeRequirements>
 > => makeRelayLayer(options)

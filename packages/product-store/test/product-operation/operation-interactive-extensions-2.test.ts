@@ -1,3 +1,4 @@
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import type { InteractiveSession } from "@rika/product/interactive-session"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { Service } from "@rika/product/product-operation-service"
@@ -35,7 +36,7 @@ describe("interactive session extensions", () => {
           prompt: "priced",
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
-          executionRoute: Turn.testExecutionRoute(),
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
           status: "completed",
           stopIntent: "none",
           createdAt: 1,
@@ -121,7 +122,7 @@ describe("interactive session extensions", () => {
           prompt: "a",
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
-          executionRoute: Turn.testExecutionRoute(),
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
           status: "running",
           stopIntent: "none",
           createdAt: 1,

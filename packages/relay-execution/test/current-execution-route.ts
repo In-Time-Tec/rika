@@ -7,8 +7,8 @@ import { modelRegistrationIdentity } from "@rika/product/model-registration-iden
 import { Effect, Function } from "effect"
 
 const model = (
-  role: ExecutionRouteSnapshot.ExecutionModelRoute["role"],
-): ExecutionRouteSnapshot.ExecutionModelRoute => ({
+  role: ExecutionRouteSnapshot.ExecutionRouteModelSnapshot["role"],
+): ExecutionRouteSnapshot.ExecutionRouteModelSnapshot => ({
   role,
   alias: role,
   model: "test",

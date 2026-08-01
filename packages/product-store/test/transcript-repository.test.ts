@@ -1,16 +1,10 @@
+import { nestedProjection } from "./transcript-fixture-checkpoints"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import * as TranscriptRepository from "../src/transcript/sqlite-transcript-repository"
 import * as TurnRepository from "../src/turn/sqlite-turn-repository"
-import {
-  commitAll,
-  event,
-  executionCheckpoint,
-  nestedProjection,
-  projectionVersion,
-  turn,
-} from "./transcript-repository-fixtures"
+import { commitAll, event, executionCheckpoint, projectionVersion, turn } from "./transcript-repository-fixtures"
 
 const _compareExecutionCheckpoints = (
   left: TranscriptRepository.ExecutionCheckpoint,

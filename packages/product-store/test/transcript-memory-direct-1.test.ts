@@ -1,15 +1,15 @@
+import { event } from "./transcript-fixture-core"
+import { executionCheckpoint } from "./transcript-fixture-checkpoints"
+import { projectionVersion } from "./transcript-fixture-core"
+import { turn } from "./transcript-fixture-core"
+import * as TurnRepository from "../src/turn/sqlite-turn-repository"
 import {
   expect,
   it,
   TranscriptProjection,
   Effect,
   TranscriptRepository,
-  TurnRepository,
   commitAll,
-  event,
-  executionCheckpoint,
-  projectionVersion,
-  turn,
 } from "./transcript-memory-behavior-support"
 
 it.effect("rejects a refold when the paired memory Turn tuple advanced concurrently", () =>

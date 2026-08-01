@@ -1,3 +1,4 @@
+import { attachedExecutionCheckpoint } from "./transcript-fixture-checkpoints"
 import {
   expect,
   it,
@@ -12,7 +13,6 @@ import {
   TranscriptRepository,
   Turn,
   createTurn,
-  attachedExecutionCheckpoint,
   commitAll,
   executionCheckpoint,
   projectionVersion,

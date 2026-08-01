@@ -1,3 +1,5 @@
+import * as ThreadResult from "@rika/product/thread-result"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import type { InteractiveSession } from "@rika/product/interactive-session"
 import { reconcile } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
@@ -58,7 +60,7 @@ describe("Operation", () => {
                     },
                   },
                 })
-                return Turn.testExecutionRoute("medium")
+                return ExecutionRouteSnapshot.testExecutionRoute("medium")
               }),
             defaultWorkspace: "/work",
             makeThreadId: Effect.succeed(Thread.ThreadId.make("thread-rejected-config")),
@@ -126,10 +128,14 @@ describe("Operation", () => {
       const firstTurn = yield* turns.get(Turn.TurnId.make("turn-1"))
       const secondTurn = yield* turns.get(Turn.TurnId.make("turn-2"))
       expect(
-        firstTurn !== undefined && Turn.isAgentExecution(firstTurn) ? firstTurn.executionRoute.mode : undefined,
+        firstTurn !== undefined && ThreadResult.TurnResult.isAgentExecution(firstTurn)
+          ? firstTurn.executionRoute.mode
+          : undefined,
       ).toBe("low")
       expect(
-        secondTurn !== undefined && Turn.isAgentExecution(secondTurn) ? secondTurn.executionRoute.mode : undefined,
+        secondTurn !== undefined && ThreadResult.TurnResult.isAgentExecution(secondTurn)
+          ? secondTurn.executionRoute.mode
+          : undefined,
       ).toBe("ultra")
       expect((yield* turns.get(Turn.TurnId.make("turn-2")))?.status).toBe("completed")
     }),

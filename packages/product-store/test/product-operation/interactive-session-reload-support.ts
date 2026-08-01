@@ -296,7 +296,7 @@ export const latestSelectionEntries = (events: ReadonlyArray<InteractiveEvent>) 
       continue
     }
     if (event._tag === "TranscriptProjectionStarted") {
-      if (!RuntimeFixtures.Turn.isAgentExecution(event.turn)) continue
+      if (!RuntimeFixtures.ThreadResult.TurnResult.isAgentExecution(event.turn)) continue
       if (
         selectionEpoch !== undefined &&
         (event.selectionEpoch !== selectionEpoch || String(event.threadId) !== threadId)

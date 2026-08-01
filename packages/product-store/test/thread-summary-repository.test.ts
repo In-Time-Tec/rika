@@ -1,3 +1,4 @@
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import * as ThreadRepository from "../src/thread/sqlite-thread-repository"
@@ -23,7 +24,12 @@ const layer = Layer.merge(repositories, ThreadSummaryRepository.memoryLayer.pipe
 const create = (
   repository: TurnContract.Interface,
   input: Omit<Parameters<TurnContract.Interface["createForSubmission"]>[0], "executionRoute" | "queueCapacity">,
-) => repository.createForSubmission({ ...input, executionRoute: Turn.testExecutionRoute(), queueCapacity: 128 })
+) =>
+  repository.createForSubmission({
+    ...input,
+    executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
+    queueCapacity: 128,
+  })
 
 describe("memory thread summaries", () => {
   it.effect("orders recent activity and derives status, unread state, and edit totals", () =>

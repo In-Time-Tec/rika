@@ -1,15 +1,13 @@
-import { Service } from "@rika/product/usage-repository"
-export { Service }
-export * as Contract from "@rika/product/usage-repository"
+import { Service, RepositoryError } from "@rika/product/usage-repository"
+import * as Contract from "@rika/product/usage-repository"
+export { Service, RepositoryError, Contract }
 import { Effect, Layer, Clock, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import { RepositoryError } from "@rika/product/usage-repository"
-import type { ActiveInterval, Materialized, SourceUsage, TurnUsage, Aggregate, CommitResult } from "./usage-model"
-export { RepositoryError }
-export type { ActiveInterval, Materialized, SourceUsage, TurnUsage, Aggregate, CommitResult } from "./usage-model"
-export type { Interface } from "@rika/product/usage-repository"
 import { projectionVersion } from "./usage-model"
-export { projectionVersion } from "./usage-model"
+import type { ActiveInterval, Materialized, SourceUsage, TurnUsage, Aggregate } from "./usage-model"
+export { projectionVersion }
+export type { Materialized } from "./usage-model"
+export type { Interface } from "@rika/product/usage-repository"
 
 const error = (cause: unknown) => RepositoryError.make({ message: String(cause) })
 const safe = (value: number | undefined, name: string) => {
@@ -248,4 +246,4 @@ export const layer = Layer.effect(
   }),
 )
 
-export { makeMemory, memoryLayer } from "./memory-usage-repository"
+export { memoryLayer } from "./memory-usage-repository"

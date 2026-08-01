@@ -8,7 +8,7 @@ export interface RegistryInterface {
 }
 
 export class Registry extends Context.Service<Registry, RegistryInterface>()(
-  "@rika/relay-execution/relay/execution/host/relay-thread-host-registry/Registry",
+  "@rika/relay-execution/relay/execution/relay-thread-host-registry/Registry",
 ) {}
 
 export const makeRegistry: Effect.Effect<RegistryInterface> = Effect.gen(function* () {

@@ -11,13 +11,13 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { createTestRenderer } from "@opentui/core/testing"
 import { Cause, Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Redacted, Schema } from "effect"
 import {
-  OpenAiAuth,
   productLayer,
   Service,
-  ThreadToolService,
   type InteractiveEvent,
   type InteractiveSession,
 } from "@rika/product/product-operation-service"
+import * as OpenAiAuth from "@rika/product/openai-auth-service"
+import * as ThreadToolService from "@rika/product/thread-tool-service"
 import * as Database from "@rika/product-store/product-database-layer"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as ThreadInteractionRepository from "@rika/product-store/sqlite-thread-interaction-repository"
@@ -29,7 +29,8 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import * as ExecutionRequest from "@rika/product/execution-request"
-import { ViewState } from "@rika/terminal/terminal-state"
+import * as ViewState from "@rika/terminal/terminal-state"
+import type { Model } from "@rika/terminal/terminal-state"
 import { Surface } from "@rika/terminal/opentui-surface"
 import {
   configuredBackendLayer,
@@ -936,9 +937,9 @@ test("renders configured model display names in the mode picker", () =>
           (value) => Effect.sync(() => value.destroy()),
         )
         surface.update({
-          ...ViewState.withModeRoutes(
+          ...ViewState.withModeRouteMap(
             ViewState.initial("/workspace", "high"),
-            ModelRouteLabel.modeRouteLabels(settings) as ViewState.ModeRoutes,
+            ModelRouteLabel.modeRouteLabels(settings) as Model["modeRoutes"],
           ),
           modePicker: { open: true, selected: 2 },
         })

@@ -1,8 +1,8 @@
+import { TurnResult } from "@rika/product/thread-result"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import { isAgentExecution } from "@rika/product/turn-record"
-import type { RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/turn-record"
+import type { RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/thread-result"
 import { RepositoryError } from "@rika/product/transcript-repository"
 import type { Interface } from "@rika/product/transcript-repository"
 import { support } from "./transcript-repository-support"
@@ -147,7 +147,7 @@ const makeTranscriptSqliteWrites = (
             const committed = yield* get(turn.id)
             if (committed === undefined)
               return yield* RepositoryError.make({ message: `Transcript ${turn.id} disappeared during refold` })
-            if (!isAgentExecution(committed.turn))
+            if (!TurnResult.isAgentExecution(committed.turn))
               return yield* RepositoryError.make({ message: `Transcript ${turn.id} changed turn kind during refold` })
             return { _tag: "Committed", turn: committed.turn } as const
           }),

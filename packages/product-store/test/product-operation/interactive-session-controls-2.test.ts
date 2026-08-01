@@ -419,7 +419,8 @@ describe("InteractiveSession controls", () => {
         expect(concurrent.some((event) => event._tag === "QueueUpdated")).toBe(false)
         expect(
           (yield* turns.list(RuntimeFixtures.Thread.ThreadId.make("shell-thread"))).find(
-            (turn) => RuntimeFixtures.Turn.isRecordedShell(turn) && turn.command === "printf alongside",
+            (turn) =>
+              RuntimeFixtures.ThreadResult.TurnResult.isRecordedShell(turn) && turn.command === "printf alongside",
           ),
         ).toMatchObject({
           _tag: "RecordedShell",

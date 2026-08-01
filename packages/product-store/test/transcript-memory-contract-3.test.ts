@@ -1,22 +1,22 @@
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as Thread from "@rika/product/thread-record"
+import * as Turn from "@rika/product/turn-record"
+import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
+import * as TranscriptUsage from "@rika/transcript/model-usage-fallback"
+import { event } from "./transcript-fixture-core"
+import { executionCheckpoint } from "./transcript-fixture-checkpoints"
+import { projectionVersion } from "./transcript-fixture-core"
+import { turn } from "./transcript-fixture-core"
+import { unit } from "./transcript-fixture-core"
+import { attachedExecutionCheckpoint } from "./transcript-fixture-checkpoints"
 import {
   expect,
   it,
-  TranscriptCorrelation,
-  TranscriptNestedProjection,
-  TranscriptOrdering,
   TranscriptProjection,
-  TranscriptUsage,
   Effect,
-  Thread,
   TranscriptRepository,
-  Turn,
-  attachedExecutionCheckpoint,
   commitAll,
-  event,
-  executionCheckpoint,
-  projectionVersion,
-  turn,
-  unit,
 } from "./transcript-memory-behavior-support"
 
 it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract", (test) => {

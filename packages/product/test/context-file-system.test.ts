@@ -2,7 +2,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer, Path } from "effect"
 import * as ContextFileSystem from "../src/context/context-file-system"
-import { provideLayer } from "./layer"
+import { provideLayer } from "./product-test-layer"
 
 describe("ContextFileSystem", () => {
   it.effect("delegates filesystem operations and converts directory errors to absence", () =>

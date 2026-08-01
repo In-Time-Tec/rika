@@ -76,7 +76,6 @@ const expected: Record<string, ReadonlyArray<string>> = {
     "agent-profile",
     "product-agent-service",
     "openai-auth-contract",
-    "openai-auth-flow",
     "openai-auth-service",
     "context-file-system",
     "context-resolution-service",

@@ -1,6 +1,7 @@
+import { TurnResult } from "@rika/product/thread-result"
 import { Effect, Ref, Semaphore } from "effect"
 import { ThreadId } from "@rika/product/thread-record"
-import { TurnId, AgentExecutionTurn, Turn, isAgentExecution, isRunningRecordedShell } from "@rika/product/turn-record"
+import { TurnId, AgentExecutionTurn, Turn } from "@rika/product/turn-record"
 import { MemoryCoordinatorTypeId } from "./turn-memory-coordination"
 import { clone, sameTurn } from "./turn-memory-state"
 import { emptyQueueState } from "./turn-memory-queue-state"
@@ -20,7 +21,7 @@ export const makeTurnMemoryState = (initial: ReadonlyArray<Turn>) =>
     const initialTurns = new Map(initial.map((turn) => [turn.id, clone(turn)]))
     const initialQueues = new Map<ThreadId, MemoryQueueState>()
     for (const turn of initialTurns.values()) {
-      if (!isAgentExecution(turn) || turn.status !== "queued") continue
+      if (!TurnResult.isAgentExecution(turn) || turn.status !== "queued") continue
       const current = initialQueues.get(turn.threadId) ?? emptyQueueState
       initialQueues.set(turn.threadId, {
         ...current,
@@ -40,7 +41,7 @@ export const makeTurnMemoryState = (initial: ReadonlyArray<Turn>) =>
     const modifyState = <A>(f: (current: MemoryState) => readonly [A, MemoryState]) => withLock(Ref.modify(state, f))
     const updateState = (f: (current: MemoryState) => MemoryState) => withLock(Ref.update(state, f))
     const agentExecutions: MemoryCoordinator["agentExecutions"] = Ref.get(state).pipe(
-      Effect.map((current) => [...current.turns.values()].filter(isAgentExecution).map(clone)),
+      Effect.map((current) => [...current.turns.values()].filter(TurnResult.isAgentExecution).map(clone)),
     )
     const adoptRefold: MemoryCoordinator["adoptRefold"] = (expected, status, cursor, write) =>
       withLock(
@@ -49,7 +50,7 @@ export const makeTurnMemoryState = (initial: ReadonlyArray<Turn>) =>
           const current = currentState.turns.get(expected.id)
           if (
             current === undefined ||
-            !isAgentExecution(current) ||
+            !TurnResult.isAgentExecution(current) ||
             current.status !== expected.status ||
             current.lastCursor !== expected.lastCursor
           )
@@ -70,10 +71,10 @@ export const makeTurnMemoryState = (initial: ReadonlyArray<Turn>) =>
             if (current !== undefined) return { _tag: "Stale" as const }
           } else if (
             current === undefined ||
-            !isRunningRecordedShell(current) ||
-            !isRunningRecordedShell(expected) ||
+            !TurnResult.isRunningRecordedShell(current) ||
+            !TurnResult.isRunningRecordedShell(expected) ||
             !sameTurn(current, expected) ||
-            isRunningRecordedShell(turn) ||
+            TurnResult.isRunningRecordedShell(turn) ||
             turn.threadId !== current.threadId ||
             turn.prompt !== current.prompt ||
             turn.command !== current.command ||

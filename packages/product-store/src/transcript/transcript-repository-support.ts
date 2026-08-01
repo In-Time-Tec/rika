@@ -6,11 +6,12 @@ import * as TranscriptRecordedShell from "@rika/transcript/recorded-shell-presen
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import { ThreadId } from "@rika/product/thread-record"
+import { ExecutionAttachment } from "@rika/product/thread-result"
 import { Turn, TurnId } from "@rika/product/turn-record"
-import type { AgentExecutionTurn, RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/turn-record"
+import type { AgentExecutionTurn } from "@rika/product/turn-record"
+import type { RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/thread-result"
 import { PageCursor, type Entry } from "@rika/product/transcript-page"
 import {
-  ExecutionAttachment,
   ExecutionCheckpoint,
   type Projection,
   type CheckpointOptions,

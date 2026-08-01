@@ -124,7 +124,7 @@ describe("InteractiveSession controls", () => {
         prompt: "queued prompt",
         now: 2,
       })
-      const shell: RuntimeFixtures.Turn.TerminalRecordedShellTurn = {
+      const shell: RuntimeFixtures.ThreadResult.TerminalRecordedShellTurn = {
         _tag: "RecordedShell",
         id: RuntimeFixtures.Turn.TurnId.make("recorded-shell"),
         threadId: older.id,

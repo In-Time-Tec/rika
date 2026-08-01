@@ -1,18 +1,18 @@
+import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import { event } from "./transcript-fixture-core"
+import { executionCheckpoint } from "./transcript-fixture-checkpoints"
+import { projectionVersion } from "./transcript-fixture-core"
+import { turn } from "./transcript-fixture-core"
+import { nestedProjection } from "./transcript-fixture-checkpoints"
+import { invalidCheckpointGraphs } from "./transcript-fixture-checkpoints"
 import {
   expect,
   it,
-  TranscriptCorrelation,
   TranscriptProjection,
   Effect,
   TranscriptRepository,
   compareExecutionCheckpoints,
   commitAll,
-  event,
-  executionCheckpoint,
-  invalidCheckpointGraphs,
-  nestedProjection,
-  projectionVersion,
-  turn,
 } from "./transcript-memory-behavior-support"
 
 it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract", (test) => {

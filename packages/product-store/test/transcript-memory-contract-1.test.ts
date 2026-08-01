@@ -1,18 +1,18 @@
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
+import * as Thread from "@rika/product/thread-record"
+import * as Turn from "@rika/product/turn-record"
+import { event } from "./transcript-fixture-core"
+import { executionCheckpoint } from "./transcript-fixture-checkpoints"
+import { projectionVersion } from "./transcript-fixture-core"
+import { turn } from "./transcript-fixture-core"
 import {
   expect,
   it,
-  TranscriptOrdering,
   TranscriptProjection,
-  TranscriptProjectionModel,
   Effect,
-  Thread,
   TranscriptRepository,
-  Turn,
   commitAll,
-  event,
-  executionCheckpoint,
-  projectionVersion,
-  turn,
 } from "./transcript-memory-behavior-support"
 
 it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract", (test) => {

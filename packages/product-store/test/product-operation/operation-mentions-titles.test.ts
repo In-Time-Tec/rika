@@ -1,3 +1,4 @@
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import type { InteractiveSession } from "@rika/product/interactive-session"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { Service } from "@rika/product/product-operation-service"
@@ -57,7 +58,7 @@ describe("Operation", () => {
       const starts = yield* Ref.make<ReadonlyArray<string>>([])
       const titleInvocations = yield* Ref.make<ReadonlyArray<ExecutionBackend.InvokeChildInput>>([])
       const titleRoute = {
-        ...Turn.testExecutionRoute("low").main,
+        ...ExecutionRouteSnapshot.testExecutionRoute("low").main,
         role: "title" as const,
         model: "gpt-5.6-luna",
         effort: "low",
@@ -132,7 +133,7 @@ describe("Operation", () => {
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionBackend.Service, routedBackend),
         resolveExecutionRoute: (mode) => {
-          const route = Turn.testExecutionRoute(mode)
+          const route = ExecutionRouteSnapshot.testExecutionRoute(mode)
           return Effect.succeed({
             ...route,
             main: { ...route.main, model: `${mode}-model` },
@@ -219,7 +220,7 @@ describe("Operation", () => {
         prompt,
         stopIntent: "none",
         status: "completed",
-        executionRoute: Turn.testExecutionRoute("medium"),
+        executionRoute: ExecutionRouteSnapshot.testExecutionRoute("medium"),
         createdAt: 1,
         updatedAt: 2,
       }

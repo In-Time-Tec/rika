@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import { AgentExecutionTurn, RecordedShellTurn } from "@rika/product/turn-record"
-import type { RunningRecordedShellTurn } from "@rika/product/turn-record"
+import type { RunningRecordedShellTurn } from "@rika/product/thread-result"
 import type { Interface } from "@rika/product/turn-repository"
 import { isTerminalStatus } from "@rika/product/execution-status"
 

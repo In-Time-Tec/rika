@@ -1,3 +1,5 @@
+import * as ThreadResult from "@rika/product/thread-result"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import type { InteractiveSession } from "@rika/product/interactive-session"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { Service } from "@rika/product/product-operation-service"
@@ -138,7 +140,7 @@ export const terminalTransitionScenario = (
         stopIntent: "none",
         author: { _tag: "Human" },
         lineage: { _tag: "Original" },
-        executionRoute: Turn.testExecutionRoute(),
+        executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
         status: oversizedProjection ? inspectedStatus : "completed",
         lastCursor: "terminal-cursor",
         createdAt: 1,
@@ -338,7 +340,9 @@ export const terminalTransitionScenario = (
         loadedPages.flat().length === 0 ? stored.units : loadedPages.flat().map((entry) => entry.unit)
       const deliveredTurn = loadedPages.flat()[0]?.turn ?? stored.turn
       expect(deliveredTurn.status).toBe(inspectedStatus)
-      expect(Turn.isAgentExecution(deliveredTurn) ? deliveredTurn.lastCursor : undefined).toBe("terminal-cursor")
+      expect(ThreadResult.TurnResult.isAgentExecution(deliveredTurn) ? deliveredTurn.lastCursor : undefined).toBe(
+        "terminal-cursor",
+      )
       expect(yield* turns.get(target.id)).toMatchObject({
         status: inspectedStatus,
         lastCursor: "terminal-cursor",

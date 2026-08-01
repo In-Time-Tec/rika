@@ -1,5 +1,5 @@
-import "./sqlite-schema-1.test-support"
-import "./sqlite-schema-2.test-support"
+import "./sqlite-schema-baseline-support"
+import "./sqlite-schema-queue-support"
 import { expect, test } from "vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Database as NativeDatabase } from "bun:sqlite"

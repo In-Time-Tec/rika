@@ -1,5 +1,6 @@
+import { TurnResult } from "@rika/product/thread-result"
 import { Effect, Schema } from "effect"
-import { AgentExecutionTurn, isAgentExecution } from "@rika/product/turn-record"
+import { AgentExecutionTurn } from "@rika/product/turn-record"
 import { RepositoryError } from "@rika/product/turn-repository"
 import type { Interface } from "@rika/product/turn-repository"
 import { turnRowJson } from "./turn-row-json-codec"
@@ -24,7 +25,7 @@ export const makeTurnMemoryLifecycle = ({
       Effect.gen(function* () {
         const currentState = yield* readUnlocked
         const current = currentState.turns.get(id)
-        if (current === undefined || !isAgentExecution(current)) return yield* missing(id)
+        if (current === undefined || !TurnResult.isAgentExecution(current)) return yield* missing(id)
         if (
           current.extensionPin !== undefined &&
           (yield* Schema.encodeEffect(turnRowJson.extensionPin)(current.extensionPin).pipe(
@@ -52,7 +53,7 @@ export const makeTurnMemoryLifecycle = ({
       ] => {
         const current = currentState.turns.get(id)
         if (current === undefined) return [{ _tag: "Missing" }, currentState]
-        if (!isAgentExecution(current)) return [{ _tag: "Missing" }, currentState]
+        if (!TurnResult.isAgentExecution(current)) return [{ _tag: "Missing" }, currentState]
         if (status === "queued" || current.status === "queued") return [{ _tag: "Queued" }, currentState]
         if (isTerminalStatus(current.status)) return [{ _tag: "Ok", turn: clone(current) }, currentState]
         const { lastCursor: previousCursor, ...withoutCursor } = current
@@ -80,7 +81,7 @@ export const makeTurnMemoryLifecycle = ({
   startAccepted: Effect.fn("TurnRepository.startAccepted")(function* (id, now) {
     return yield* modifyState((currentState) => {
       const current = currentState.turns.get(id)
-      if (current === undefined || !isAgentExecution(current) || current.status !== "accepted")
+      if (current === undefined || !TurnResult.isAgentExecution(current) || current.status !== "accepted")
         return [false, currentState]
       const next: AgentExecutionTurn = { ...current, status: "running", updatedAt: now }
       return [true, { ...currentState, turns: new Map(currentState.turns).set(id, next) }]
@@ -89,7 +90,7 @@ export const makeTurnMemoryLifecycle = ({
   cancelAccepted: Effect.fn("TurnRepository.cancelAccepted")(function* (id, now) {
     return yield* modifyState((currentState) => {
       const current = currentState.turns.get(id)
-      if (current === undefined || !isAgentExecution(current) || current.status !== "accepted")
+      if (current === undefined || !TurnResult.isAgentExecution(current) || current.status !== "accepted")
         return [false, currentState]
       const next: AgentExecutionTurn = { ...current, status: "cancelled", updatedAt: now }
       return [true, { ...currentState, turns: new Map(currentState.turns).set(id, next) }]
@@ -100,7 +101,7 @@ export const makeTurnMemoryLifecycle = ({
       const current = currentState.turns.get(id)
       if (
         current === undefined ||
-        !isAgentExecution(current) ||
+        !TurnResult.isAgentExecution(current) ||
         current.status !== status ||
         current.lastCursor !== expectedCursor
       )

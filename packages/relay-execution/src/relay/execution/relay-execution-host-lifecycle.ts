@@ -1,4 +1,4 @@
-import { entityKind } from "./host/relay-thread-host-constants"
+import { entityKind } from "./relay-thread-host-constants"
 import { Client, Ids, type Resident } from "@relayfx/sdk"
 import { Duration, Effect, Schedule } from "effect"
 

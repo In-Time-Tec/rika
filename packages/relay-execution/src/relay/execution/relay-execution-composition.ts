@@ -1,5 +1,5 @@
-import { Registry, makeRegistry } from "./host/relay-thread-host-registry"
-import { hostRegistration } from "./host/relay-thread-host"
+import { Registry, makeRegistry } from "./relay-thread-host-registry"
+import { hostRegistration } from "./relay-thread-host"
 import { defaultRecoveryChildSettlementGrace } from "./relay-recovery-policy"
 import { error } from "./relay-event-payload"
 import { eventHistoryOption } from "../../model/routing/relay-model-registry"

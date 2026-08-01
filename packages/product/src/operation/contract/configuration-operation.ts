@@ -1,3 +1,5 @@
 export { Input } from "./product-operation"
 export { InvalidInput } from "./product-operation-errors"
 export type { Input as ConfigurationOperation } from "./product-operation"
+export { Adapter, AdapterError, run, testLayer } from "../dispatch/configuration-operation-dispatch"
+export type { AdapterInterface, Options } from "../dispatch/configuration-operation-dispatch"

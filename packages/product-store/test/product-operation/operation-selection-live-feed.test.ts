@@ -1,3 +1,4 @@
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import type { InteractiveSession } from "@rika/product/interactive-session"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { Service } from "@rika/product/product-operation-service"
@@ -41,7 +42,7 @@ describe("Operation", () => {
             prompt: "queued",
             status: "queued",
             stopIntent: "none",
-            executionRoute: Turn.testExecutionRoute("medium"),
+            executionRoute: ExecutionRouteSnapshot.testExecutionRoute("medium"),
             createdAt: yield* Clock.currentTimeMillis,
             updatedAt: yield* Clock.currentTimeMillis,
           },

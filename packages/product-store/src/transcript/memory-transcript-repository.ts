@@ -1,3 +1,4 @@
+import { TurnResult } from "@rika/product/thread-result"
 import { Service } from "@rika/product/transcript-repository"
 export { Service }
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
@@ -6,8 +7,8 @@ import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Effect, Layer, Ref } from "effect"
 import * as TurnRepository from "../turn/memory-turn-repository"
 import type { Interface as TurnRepositoryInterface } from "@rika/product/turn-repository"
-import { Turn, TurnId, isAgentExecution, isRecordedShell } from "@rika/product/turn-record"
-import type { RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/turn-record"
+import { Turn, TurnId } from "@rika/product/turn-record"
+import type { RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/thread-result"
 import type { Projection, WriteResult } from "@rika/product/transcript-repository"
 import { invalidatedProjectionVersion, RepositoryError } from "@rika/product/transcript-repository"
 import { support } from "./transcript-repository-support"
@@ -80,7 +81,7 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
         projection.projectionVersion === invalidatedProjectionVersion &&
         projection.units.length === 0 &&
         projection.executionCheckpoints.length === 0
-      if (isRecordedShell(projection.turn)) {
+      if (TurnResult.isRecordedShell(projection.turn)) {
         if (projection.executionCheckpoints.length !== 0)
           return yield* RepositoryError.make({
             message: `Recorded shell turn ${projection.turn.id} has execution checkpoints`,
@@ -376,7 +377,7 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
               current.projection.projectionVersion !== options.expectedProjectionVersion ||
               current.projection.checkpointGeneration !== options.expectedGeneration ||
               options.projectionVersion <= current.projection.projectionVersion ||
-              !isAgentExecution(current.projection.turn) ||
+              !TurnResult.isAgentExecution(current.projection.turn) ||
               current.projection.turn.status !== turn.status ||
               current.projection.turn.lastCursor !== turn.lastCursor
             )
@@ -421,7 +422,7 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
                   current === undefined ||
                   current.projection.checkpointGeneration !== expectedGeneration ||
                   current.projection.projectionVersion !== projectionVersion ||
-                  !isRecordedShell(current.projection.turn) ||
+                  !TurnResult.isRecordedShell(current.projection.turn) ||
                   !sameTurn(current.projection.turn, expected)
                 )
                   return [{ _tag: "Stale" as const }, entries] as const

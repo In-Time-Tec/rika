@@ -1,11 +1,11 @@
-import { childSessionId } from "../relay-execution-id-codec"
-import { relayModelSelection } from "../../../model/routing/relay-model-selection"
+import { childSessionId } from "./relay-execution-id-codec"
+import { relayModelSelection } from "../../model/routing/relay-model-selection"
 import { ChildFanOutHost, Client, Ids } from "@relayfx/sdk"
 import { Clock, Deferred, Effect, Layer, Stream } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
-import * as ToolAdapter from "../relay-tool-runtime"
-import type { LayerOptions } from "../relay-execution-layer"
-import { parentPermissions } from "../../../agent/definition/agent-permissions"
+import * as ToolAdapter from "./relay-tool-runtime"
+import type { LayerOptions } from "./relay-execution-layer"
+import { parentPermissions } from "../../agent/definition/agent-permissions"
 
 export const childResult = (input: { readonly client: Client.Interface; readonly childId: string }) => {
   const childExecutionId = Ids.ExecutionId.make(input.childId)
@@ -43,7 +43,7 @@ export const makeFanOutHost = (context: {
     LayerOptions,
     "selection" | "oracleSelection" | "compaction" | "oracleCompaction" | "compactionSummarySelection"
   >
-  readonly fanOutAgentId: typeof import("../relay-execution-input").fanOutAgentId
+  readonly fanOutAgentId: typeof import("./relay-execution-input").fanOutAgentId
   readonly addressId: Ids.AddressId
   readonly parentPermissions: typeof parentPermissions
   readonly toolExecutionPolicy: { readonly concurrency: "unbounded" }

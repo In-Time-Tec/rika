@@ -1,3 +1,6 @@
+import { invalidCheckpointGraphs, nestedProjection } from "./transcript-fixture-checkpoints"
+import type { NestedProjectionFixture } from "./transcript-fixture-checkpoints"
+import * as ThreadResult from "@rika/product/thread-result"
 import {
   expect,
   it,
@@ -12,13 +15,10 @@ import {
   compareExecutionCheckpoints,
   createTurn,
   commitAll,
-  invalidCheckpointGraphs,
-  nestedProjection,
   projectionVersion,
   provideLayer,
   sqliteLayer,
 } from "./transcript-sqlite-support"
-import type { NestedProjectionFixture } from "./transcript-sqlite-support"
 
 it.effect("atomically couples an attached child to its parent SQLite unit", () =>
   Effect.scoped(
@@ -113,7 +113,7 @@ it.effect("requires a complete root-connected SQLite checkpoint graph for refold
         Effect.gen(function* () {
           if (before === undefined || replacement === undefined)
             return yield* Effect.die("refold graph fixture was not retained")
-          if (!Turn.isAgentExecution(before.turn))
+          if (!ThreadResult.TurnResult.isAgentExecution(before.turn))
             return yield* Effect.die("refold graph fixture did not retain an agent execution")
           const repository = yield* TranscriptRepository.Service
           const sql = yield* SqlClient

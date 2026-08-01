@@ -1,3 +1,4 @@
+import { TurnResult } from "@rika/product/thread-result"
 import { Effect } from "effect"
 import * as ExecutionStatus from "@rika/product/execution-status"
 import { QueueFull, RepositoryError } from "@rika/product/turn-repository"
@@ -5,7 +6,6 @@ import { clone } from "./turn-memory-state"
 import { queueState, withQueueState } from "./turn-memory-queue-state"
 import type { MemoryState, MemorySubmissionResult } from "./turn-memory-state"
 import type { TurnMemoryContext } from "./turn-memory-state-operations"
-import { isAgentExecution } from "@rika/product/turn-record"
 import type { AgentExecutionTurn } from "@rika/product/turn-record"
 import type { Interface, QueueItemChange } from "@rika/product/turn-repository"
 
@@ -17,7 +17,9 @@ export const makeTurnMemorySubmission = ({
       if (current.turns.has(input.id)) return [{ _tag: "Duplicate" as const }, current] as const
       const active = [...current.turns.values()].some(
         (turn) =>
-          isAgentExecution(turn) && turn.threadId === input.threadId && ExecutionStatus.occupiesQueue(turn.status),
+          TurnResult.isAgentExecution(turn) &&
+          turn.threadId === input.threadId &&
+          ExecutionStatus.occupiesQueue(turn.status),
       )
       const previousQueue = queueState(current, input.threadId)
       if (active && previousQueue.queuedCount >= input.queueCapacity)

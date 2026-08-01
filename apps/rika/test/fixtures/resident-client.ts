@@ -5,7 +5,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import { ViewState } from "@rika/terminal/terminal-state"
+import * as ViewState from "@rika/terminal/terminal-state"
 import {
   Clock,
   Config,

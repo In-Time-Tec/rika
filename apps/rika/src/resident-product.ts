@@ -12,16 +12,14 @@ import * as SettingsDecoder from "@rika/configuration/configuration-settings"
 import * as ConfigurationSettingsInput from "@rika/configuration/configuration-settings"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import {
-  ConfigOperations,
-  ContextFileSystem,
-  ExtensionOperations,
-  Operation,
-  ResolvedContext,
-  ThreadQuery,
-  ThreadToolHandlers,
-  ThreadToolService,
-} from "@rika/product/product-operation-service"
+import * as Operation from "@rika/product/product-operation-service"
+import * as ConfigOperations from "@rika/product/configuration-operation"
+import * as ContextFileSystem from "@rika/product/context-file-system"
+import * as ExtensionOperations from "@rika/product/extension-operation"
+import * as ResolvedContext from "@rika/product/context-resolution-service"
+import * as ThreadQuery from "@rika/product/thread-query-service"
+import { ThreadToolHandlers } from "@rika/product/product-operation-service"
+import * as ThreadToolService from "@rika/product/thread-tool-service"
 import * as McpOAuthService from "@rika/extensions/mcp-oauth-service"
 import * as SkillRegistry from "@rika/extensions/skill-registry"
 import * as Database from "@rika/product-store/product-database-layer"
@@ -125,7 +123,7 @@ export class ModelConfigurationError extends Schema.TaggedErrorClass<ModelConfig
 ) {}
 
 export const validateWebSearchProviders = (credentials: Readonly<Record<string, Redacted.Redacted<string>>>) => {
-  const unsupportedIds = RelayExecutionBackend.webSearchFactories(credentials).unsupportedIds
+  const unsupportedIds = WebSearchProvider.configuredProviderFactories(credentials).unsupportedIds
   return unsupportedIds.length === 0
     ? Effect.void
     : ModelConfigurationError.make({
@@ -301,8 +299,8 @@ type PreparedPlan = ModelProviderRuntime.PreparedRoutes["plans"][number]
 const executionModelRoute = (
   route: ModelRouteResolution.ResolvedModelRoute,
   plan: PreparedPlan,
-  role: ExecutionRouteSnapshot.ExecutionModelRoute["role"],
-): ExecutionRouteSnapshot.ExecutionModelRoute => ({
+  role: ExecutionRouteSnapshot.ExecutionRouteModelSnapshot["role"],
+): ExecutionRouteSnapshot.ExecutionRouteModelSnapshot => ({
   role,
   alias: route.alias,
   model: plan.selection.model,
@@ -418,7 +416,7 @@ export const resolveExecutionRouteForSettings = Effect.fn("Main.resolveExecution
 
 export const productionCompaction = (
   route?: Pick<ModelRouteResolution.ResolvedModelRoute, "compaction">,
-): ModelProviderRuntime.CompactionOptions => ({
+): ModelProviderRuntime.PreparedRoutes["plans"][number]["compaction"] => ({
   contextWindow: route?.compaction.contextWindow ?? SettingsDefaults.Defaults.defaultCompaction.contextWindow,
   reserveTokens: route?.compaction.reserveTokens ?? SettingsDefaults.Defaults.defaultCompaction.reserveTokens,
   keepRecentTokens: route?.compaction.keepRecentTokens ?? SettingsDefaults.Defaults.defaultCompaction.keepRecentTokens,
@@ -427,14 +425,14 @@ export const productionCompaction = (
 const registrationTuple = (
   candidate:
     | { readonly provider: string; readonly model: string; readonly registrationKey?: string }
-    | ExecutionRouteSnapshot.ExecutionModelRoute,
+    | ExecutionRouteSnapshot.ExecutionRouteModelSnapshot,
 ) =>
   "providerConnection" in candidate
     ? `${candidate.providerConnection.provider}\0${candidate.model}\0${candidate.registrationIdentity}`
     : `${candidate.provider}\0${candidate.model}\0${candidate.registrationKey ?? ""}`
 
 export interface PersistedRouteRegistrationFailure {
-  readonly route: ExecutionRouteSnapshot.ExecutionModelRoute
+  readonly route: ExecutionRouteSnapshot.ExecutionRouteModelSnapshot
   readonly message: string
 }
 
@@ -445,7 +443,7 @@ const causeMessage = (cause: Cause.Cause<unknown>) => {
 
 export const executionModelRoutes = (
   route: ExecutionRouteSnapshot.ExecutionRoutePin,
-): ReadonlyArray<ExecutionRouteSnapshot.ExecutionModelRoute> => [
+): ReadonlyArray<ExecutionRouteSnapshot.ExecutionRouteModelSnapshot> => [
   route.main,
   route.oracle,
   ...(route.title === undefined ? [] : [route.title]),
@@ -511,9 +509,9 @@ export const withPinnedRouteRegistration = Effect.fn("Main.withPinnedRouteRegist
       ExecutionBackend.BackendError
     >
     readonly unavailable?: ReadonlyArray<PersistedRouteRegistrationFailure>
-    readonly registeredRoutes?: ReadonlyArray<ExecutionRouteSnapshot.ExecutionModelRoute>
+    readonly registeredRoutes?: ReadonlyArray<ExecutionRouteSnapshot.ExecutionRouteModelSnapshot>
     readonly registerPinnedRoutes?: (
-      routes: ReadonlyArray<ExecutionRouteSnapshot.ExecutionModelRoute>,
+      routes: ReadonlyArray<ExecutionRouteSnapshot.ExecutionRouteModelSnapshot>,
     ) => Effect.Effect<ReadonlyArray<unknown>, ExecutionBackend.BackendError>
   },
 ) {
@@ -568,12 +566,12 @@ export interface ConfiguredBackendOptions {
     never
   >
   readonly settings?: SettingsDefaults.ConfigurationSettings
-  readonly persistedModelRoutes?: ReadonlyArray<ExecutionRouteSnapshot.ExecutionModelRoute>
+  readonly persistedModelRoutes?: ReadonlyArray<ExecutionRouteSnapshot.ExecutionRouteModelSnapshot>
   readonly webSearchCredentials?: Readonly<Record<string, Redacted.Redacted<string>>>
   readonly resolveLegacyRoute?: (input: ExecutionRequest.StartInput) => Effect.Effect<
     {
       readonly executionRoute: ExecutionRouteSnapshot.ExecutionRoutePin
-      readonly registrations: ReadonlyArray<ModelProviderRuntime.ModelRegistration>
+      readonly registrations: ReadonlyArray<ModelProviderRuntime.PreparedRoutes["registrations"][number]>
     },
     ExecutionBackend.BackendError
   >
@@ -637,11 +635,11 @@ export const configuredBackendLayer = ({
       yield* Effect.logInfo("model.backend.configured").pipe(
         Effect.annotateLogs("rika.model.backend.kind", backendKind),
       )
-      let registration: ModelProviderRuntime.ModelRegistration
-      let selection: ModelProviderRuntime.ModelSelection
-      let additionalRegistrations: Array<ModelProviderRuntime.ModelRegistration> = []
+      let registration: ModelProviderRuntime.PreparedRoutes["registrations"][number]
+      let selection: ModelProviderRuntime.PreparedRoutes["plans"][number]["selection"]
+      let additionalRegistrations: Array<ModelProviderRuntime.PreparedRoutes["registrations"][number]> = []
       let unavailablePersistedRoutes: ReadonlyArray<PersistedRouteRegistrationFailure> = []
-      let modelVariantPolicy: RelayExecutionBackend.ModelVariantPolicy = "registration-key"
+      let modelVariantPolicy: "registration-key" | "fixed-selection" = "registration-key"
       let providerPlans:
         | {
             readonly routePlan: PreparedPlan
@@ -652,12 +650,12 @@ export const configuredBackendLayer = ({
       if (testScript._tag === "Some") {
         const fixture = yield* ScriptedModelRuntime.makeScriptedModel(testScript.value)
         registration = fixture.registration
-        selection = fixture.selection
+        selection = fixture.selection as typeof selection
         modelVariantPolicy = "fixed-selection"
       } else if (testResponse._tag === "Some") {
         const fixture = yield* ScriptedModelRuntime.makeConstantModel(testResponse.value)
         registration = fixture.registration
-        selection = fixture.selection
+        selection = fixture.selection as typeof selection
         modelVariantPolicy = "fixed-selection"
       } else {
         const runtime = yield* ModelProviderRuntime.Service
@@ -767,7 +765,9 @@ export const configuredBackendLayer = ({
                         ),
                         Layer.provide(
                           Layer.merge(
-                            WebSearch.factoryLayer(RelayExecutionBackend.webSearchFactories(credentials).factories),
+                            WebSearch.factoryLayer(
+                              WebSearchProvider.configuredProviderFactories(credentials).factories,
+                            ),
                             ReadWebPage.layer(readPageCredential === undefined ? {} : { apiKey: readPageCredential }),
                           ).pipe(Layer.provide(FetchHttpClient.layer)),
                         ),
@@ -1252,7 +1252,7 @@ const createOperationLayerImpl = (
                   ),
                   Layer.provide(
                     Layer.merge(
-                      WebSearch.factoryLayer(RelayExecutionBackend.webSearchFactories(credentials).factories),
+                      WebSearch.factoryLayer(WebSearchProvider.configuredProviderFactories(credentials).factories),
                       ReadWebPage.layer(readPageCredential === undefined ? {} : { apiKey: readPageCredential }),
                     ).pipe(Layer.provide(FetchHttpClient.layer)),
                   ),

@@ -1,3 +1,4 @@
+import { nestedProjection } from "../transcript-fixture-checkpoints"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
@@ -8,13 +9,7 @@ import * as TranscriptRepository from "../../src/transcript/sqlite-transcript-re
 import * as TurnRepository from "../../src/turn/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
-import {
-  commitAll,
-  nestedProjection,
-  projectionVersion,
-  provideLayer,
-  sqliteLayer,
-} from "../transcript-repository-fixtures"
+import { commitAll, projectionVersion, provideLayer, sqliteLayer } from "../transcript-repository-fixtures"
 
 const createTurn = Effect.fn("TranscriptCheckpointDeltaTest.createTurn")(function* () {
   const threads = yield* ThreadRepository.Service

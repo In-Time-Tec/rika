@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Crypto, Effect, Layer, Runtime, Schema } from "effect"
-import { provideLayer } from "./layer"
+import { provideLayer } from "./product-test-layer"
 import * as ResidentHandshake from "../src/resident/resident-service-handshake"
 import * as ResidentService from "../src/resident/resident-service"
 

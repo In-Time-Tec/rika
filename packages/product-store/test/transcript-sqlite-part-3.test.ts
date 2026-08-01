@@ -1,3 +1,4 @@
+import * as ThreadResult from "@rika/product/thread-result"
 import {
   expect,
   it,
@@ -59,7 +60,7 @@ it.effect("persists a terminal outcome appended after the initial projection", (
           const repository = yield* TranscriptRepository.Service
           const reopened = yield* repository.get(turnId)
           if (reopened === undefined) return yield* Effect.die("terminal projection was not reopened")
-          if (!Turn.isAgentExecution(reopened.turn))
+          if (!ThreadResult.TurnResult.isAgentExecution(reopened.turn))
             return yield* Effect.die("terminal projection did not reopen an agent execution")
           expect(reopened?.units.find((candidate) => candidate.key === `turn:${turnId}:user`)).toMatchObject({
             revision: 2,

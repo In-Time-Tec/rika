@@ -102,7 +102,7 @@ export interface Interface {
   ) => Effect.Effect<void, BackendError>
 }
 
-export interface SteerReceipt {
+interface SteerReceipt {
   readonly steeringMessageId: string
   readonly sequence: number
 }
@@ -110,3 +110,38 @@ export interface SteerReceipt {
 export class Service extends Context.Service<Service, Interface>()(
   "@rika/product/execution/contract/execution-service/Service",
 ) {}
+
+export type {
+  FanOutInput,
+  FanOutInspection,
+  ChildProjection,
+  InvokeChildInput,
+  ChildEvent,
+  JoinPolicy,
+} from "./execution-child-run"
+export { PromptPart } from "./execution-request"
+export type { EventScope, SessionPurpose, StartInput } from "./execution-request"
+export { ExecutionExtensionPin } from "./execution-workflow"
+export type { WorkflowInspection } from "./execution-workflow"
+export type { Inspection } from "./execution-inspection"
+export { Event } from "./execution-event"
+export type { ExecutionCheckpoint, Result, EventPage } from "./execution-event"
+export { ExecutionId, AgentDepth, executionReference } from "./execution-identifier"
+export type { ExecutionReference, OpenRootExecution, InvocationSource, TurnPromoter } from "./execution-identifier"
+export {
+  statuses,
+  Status,
+  terminalStatuses,
+  isTerminalStatus,
+  isActiveStatus,
+  occupiesQueue,
+  terminalEventStatus,
+} from "./execution-status"
+export type { PendingApproval } from "./execution-approval"
+export {
+  ExecutionRouteModelSnapshot,
+  ExecutionRouteSnapshot,
+  ExecutionRoutePin,
+  testExecutionRoute,
+  toExecutionRouteSnapshot,
+} from "./execution-route-snapshot"

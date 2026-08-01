@@ -42,8 +42,8 @@ type PreparedPlan = ModelProviderRuntime.PreparedRoutes["plans"][number]
 const executionModelRoute = (
   route: ModelRouteResolution.ResolvedModelRoute,
   plan: PreparedPlan,
-  role: ExecutionRouteSnapshot.ExecutionModelRoute["role"],
-): ExecutionRouteSnapshot.ExecutionModelRoute => ({
+  role: ExecutionRouteSnapshot.ExecutionRouteModelSnapshot["role"],
+): ExecutionRouteSnapshot.ExecutionRouteModelSnapshot => ({
   role,
   alias: route.alias,
   model: plan.selection.model,
@@ -117,7 +117,7 @@ export const executionRoutePin = (
 
 export const executionModelRoutes = (
   route: ExecutionRouteSnapshot.ExecutionRoutePin,
-): ReadonlyArray<ExecutionRouteSnapshot.ExecutionModelRoute> => [
+): ReadonlyArray<ExecutionRouteSnapshot.ExecutionRouteModelSnapshot> => [
   route.main,
   route.oracle,
   ...(route.title === undefined ? [] : [route.title]),

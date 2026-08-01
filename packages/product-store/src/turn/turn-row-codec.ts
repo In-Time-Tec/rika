@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect"
+import { TurnResult } from "@rika/product/thread-result"
 import { ThreadId } from "@rika/product/thread-record"
-import { Turn, TurnId, isAgentExecution } from "@rika/product/turn-record"
+import { Turn, TurnId } from "@rika/product/turn-record"
 import { Status } from "@rika/product/execution-status"
 import { turnRowJson } from "./turn-row-json-codec"
 import { ExecutionExtensionPin } from "@rika/product/execution-workflow"
@@ -124,7 +125,9 @@ export const decode = (row: unknown) =>
   }).pipe(Effect.mapError(repositoryError))
 
 export const decodeAgent = (row: unknown) =>
-  decode(row).pipe(Effect.filterOrFail(isAgentExecution, () => repositoryError("Expected an AgentExecution turn")))
+  decode(row).pipe(
+    Effect.filterOrFail(TurnResult.isAgentExecution, () => repositoryError("Expected an AgentExecution turn")),
+  )
 
 export const encodeExtensionPin = (pin: ExecutionExtensionPin) =>
   Schema.encodeEffect(ExtensionPinJson)(pin).pipe(Effect.mapError(repositoryError))

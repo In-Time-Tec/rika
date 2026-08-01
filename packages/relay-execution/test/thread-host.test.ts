@@ -2,10 +2,10 @@ import { describe, expect, it } from "@effect/vitest"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { Context, Effect, Layer, Schema } from "effect"
 import { LanguageModel, Prompt, Tool, Toolkit } from "effect/unstable/ai"
-import * as ThreadHost from "../src/relay/execution/host/relay-thread-host"
-import { waitToolName } from "../src/relay/execution/host/relay-thread-host-constants"
-import { pendingQueueWakes } from "../src/relay/execution/host/relay-thread-host-queue"
-import { makeRegistry } from "../src/relay/execution/host/relay-thread-host-registry"
+import * as ThreadHost from "../src/relay/execution/relay-thread-host"
+import { waitToolName } from "../src/relay/execution/relay-thread-host-constants"
+import { pendingQueueWakes } from "../src/relay/execution/relay-thread-host-queue"
+import { makeRegistry } from "../src/relay/execution/relay-thread-host-registry"
 
 const promptWith = (messages: ReadonlyArray<Prompt.MessageEncoded>) => Prompt.make(messages)
 

@@ -21,6 +21,8 @@ import * as Handshake from "./resident-service-handshake"
 import { OperationUnavailable } from "../operation/contract/product-operation-errors"
 import { Input } from "../operation/contract/product-operation"
 import type { InteractiveSession } from "../operation/interactive/interactive-session"
+import type { Interface as OperationInterface } from "../operation/contract/product-operation-service"
+import type { InteractiveInput } from "./resident-interactive-feed"
 
 const ClientMessage = Schema.Union([
   Handshake.HandshakeProtocol.Handshake,
@@ -77,7 +79,7 @@ class ResidentRestartRequired extends Schema.TaggedErrorClass<ResidentRestartReq
   override readonly [Runtime.errorReported] = false
 }
 
-interface Connection {
+export interface Connection {
   readonly role: "owner" | "attached"
   readonly endpoint: string
   readonly connectionId: string
@@ -96,7 +98,7 @@ interface Connection {
   readonly closed: Effect.Effect<void>
   readonly close: Effect.Effect<void>
 }
-interface StartedHost {
+export interface StartedHost {
   readonly pid: number
   readonly startup: Effect.Effect<void, ResidentServiceError>
   readonly detach: Effect.Effect<void, ResidentServiceError>
@@ -264,3 +266,6 @@ const makeLifecycle = (changed: (state: LifecycleState) => Effect.Effect<void>) 
 const ServiceRuntime = { runtimeRestartExitCode, testLayer, canonicalServiceIdentity, makeLifecycle } as const
 
 export { ClientMessage, ServerMessage, ResidentServiceError, ResidentRestartRequired, Service, ServiceRuntime }
+export type Owner = (
+  interactive: (input: InteractiveInput, session: InteractiveSession) => Effect.Effect<void, OperationUnavailable>,
+) => Effect.Effect<OperationInterface, ResidentServiceError, Scope.Scope>

@@ -4,7 +4,7 @@ import { expect, it } from "@effect/vitest"
 import * as ConfigOperations from "../src/operation/dispatch/configuration-operation-dispatch"
 import { Effect, Layer, Redacted, Ref } from "effect"
 import { TestConsole } from "effect/testing"
-import { provideLayer } from "./layer"
+import { provideLayer } from "./product-test-layer"
 
 const options: ConfigOperations.Options = {
   globalConfigPath: "/home/config.json",

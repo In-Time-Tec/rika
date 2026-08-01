@@ -1,4 +1,13 @@
-import { OpenAiAuth } from "@rika/product/product-operation-service"
+import * as OpenAiAuthContract from "@rika/product/openai-auth-contract"
+import * as OpenAiAuthFlow from "@rika/product/openai-auth-service"
+
+namespace OpenAiAuth {
+  export import Store = OpenAiAuthFlow.Store
+  export import StoreError = OpenAiAuthFlow.Errors.StoreError
+  export const maxCredentialFileSize = OpenAiAuthFlow.configuration.maxCredentialFileSize
+  export const CredentialDisk = OpenAiAuthContract.CredentialDisk
+  export type StoreInterface = OpenAiAuthFlow.StoreInterface
+}
 import { Clock, Effect, Function, Layer, Option, Schema, Semaphore } from "effect"
 import { randomBytes } from "node:crypto"
 

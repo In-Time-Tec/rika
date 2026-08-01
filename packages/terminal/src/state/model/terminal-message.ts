@@ -1,8 +1,16 @@
+import { Schema } from "effect"
 import type { Unit } from "@rika/transcript/transcript-unit"
 import type { Key } from "../../presentation/terminal/terminal-keymap"
 import type { ChangedFile } from "./terminal-changed-file"
 import type { ThreadItem } from "./terminal-thread-state"
 import type { TranscriptBlock } from "./terminal-transcript-state"
+
+export const Entry = Schema.Struct({
+  role: Schema.Literals(["user", "assistant", "notice"]),
+  text: Schema.String,
+  turnId: Schema.optionalKey(Schema.String),
+})
+export type Entry = typeof Entry.Type
 
 export interface PastedTextAttachment {
   readonly type: "text" | "image"

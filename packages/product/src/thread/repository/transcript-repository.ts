@@ -58,6 +58,18 @@ export class Service extends Context.Service<Service, Interface>()(
   "@rika/product/thread/repository/transcript-repository/Service",
 ) {}
 
+export type {
+  CheckpointOptions,
+  DeltaCheckpointOptions,
+  UnitDelta,
+  RefoldOptions,
+  PageOptions,
+  ProjectionRecoveryCandidate,
+} from "./transcript-repository-options"
+export type { WriteResult, RefoldWriteResult, RecordedShellWriteResult } from "./transcript-repository-results"
+export { PageCursor, ExecutionCheckpoint, EntrySchema } from "../model/transcript-page"
+export type { Entry, Projection, Page } from "../model/transcript-page"
+
 const emptyProjection = (turn: Turn, projectionVersion: number): Projection => ({
   turn,
   units: [],
@@ -74,7 +86,7 @@ const emptyProjection = (turn: Turn, projectionVersion: number): Projection => (
   projectionVersion,
 })
 
-export const memoryLayerWithTurns = Layer.succeed(
+export const productMemoryLayerWithTurns = Layer.succeed(
   Service,
   Service.of({
     get: (): Effect.Effect<Projection | undefined> => Effect.sync(() => undefined),

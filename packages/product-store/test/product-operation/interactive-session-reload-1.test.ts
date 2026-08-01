@@ -285,7 +285,7 @@ describe("InteractiveSession subagent reload", () => {
       expect(
         root.every(
           (entry) =>
-            RuntimeFixtures.Turn.isAgentExecution(entry.turn) &&
+            RuntimeFixtures.ThreadResult.TurnResult.isAgentExecution(entry.turn) &&
             entry.turn.status === "failed" &&
             entry.turn.lastCursor === "root-failed",
         ),

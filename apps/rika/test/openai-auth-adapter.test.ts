@@ -1,5 +1,5 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { OpenAiAuth } from "@rika/product/product-operation-service"
+import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, Exit, Fiber, Layer, Redacted, Schema } from "effect"
 import { TestConsole } from "effect/testing"

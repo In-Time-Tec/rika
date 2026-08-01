@@ -95,7 +95,8 @@ export const buildProductOperationDependencies = <
     const threadSummaryRepositoryLayer =
       options.threadSummaryRepositoryLayer ?? ThreadSummaryRepository.memoryLayer.pipe(Layer.provide(repositories))
     const transcriptRepositoryLayer =
-      options.transcriptRepositoryLayer ?? TranscriptRepository.memoryLayerWithTurns.pipe(Layer.provide(repositories))
+      options.transcriptRepositoryLayer ??
+      TranscriptRepository.productMemoryLayerWithTurns.pipe(Layer.provide(repositories))
     const usageRepositoryLayer = options.usageRepositoryLayer ?? UsageRepository.memoryLayer
     const dependencies = Layer.mergeAll(
       repositories,

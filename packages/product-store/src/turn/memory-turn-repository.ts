@@ -1,8 +1,9 @@
+import { TurnResult } from "@rika/product/thread-result"
 import { Service } from "@rika/product/turn-repository"
 export { Service }
 import { Effect, Layer } from "effect"
 import * as ExecutionStatus from "@rika/product/execution-status"
-import { AgentExecutionTurn, Turn, isAgentExecution } from "@rika/product/turn-record"
+import { AgentExecutionTurn, Turn } from "@rika/product/turn-record"
 import { clone, cursorFor, pageSize } from "./turn-memory-state"
 import { makeTurnMemoryLifecycle } from "./turn-memory-lifecycle"
 import { makeTurnMemoryQueue } from "./turn-memory-queue"
@@ -57,7 +58,9 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
         return [...(yield* readState).turns.values()]
           .filter(
             (turn): turn is AgentExecutionTurn =>
-              isAgentExecution(turn) && turn.threadId === threadId && ExecutionStatus.isActiveStatus(turn.status),
+              TurnResult.isAgentExecution(turn) &&
+              turn.threadId === threadId &&
+              ExecutionStatus.isActiveStatus(turn.status),
           )
           .toSorted((left, right) => left.createdAt - right.createdAt)[0]
       }),
@@ -65,7 +68,9 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
         return [...(yield* readState).turns.values()]
           .filter(
             (turn): turn is AgentExecutionTurn =>
-              isAgentExecution(turn) && ExecutionStatus.occupiesQueue(turn.status) && turn.stopIntent === "none",
+              TurnResult.isAgentExecution(turn) &&
+              ExecutionStatus.occupiesQueue(turn.status) &&
+              turn.stopIntent === "none",
           )
           .toSorted((left, right) => left.createdAt - right.createdAt)
           .map(clone)
@@ -74,7 +79,9 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
         return [...(yield* readState).turns.values()]
           .filter(
             (turn): turn is AgentExecutionTurn =>
-              isAgentExecution(turn) && ExecutionStatus.occupiesQueue(turn.status) && turn.stopIntent === "requested",
+              TurnResult.isAgentExecution(turn) &&
+              ExecutionStatus.occupiesQueue(turn.status) &&
+              turn.stopIntent === "requested",
           )
           .toSorted((left, right) => left.createdAt - right.createdAt)
           .map(clone)
@@ -82,7 +89,11 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
       requestStop: Effect.fn("TurnRepository.requestStop")(function* (id, now) {
         return yield* modifyState((current) => {
           const existing = current.turns.get(id)
-          if (existing === undefined || !isAgentExecution(existing) || !ExecutionStatus.occupiesQueue(existing.status))
+          if (
+            existing === undefined ||
+            !TurnResult.isAgentExecution(existing) ||
+            !ExecutionStatus.occupiesQueue(existing.status)
+          )
             return [undefined, current] as const
           const updated: AgentExecutionTurn = { ...existing, stopIntent: "requested", updatedAt: now }
           return [clone(updated), { ...current, turns: new Map(current.turns).set(id, updated) }] as const

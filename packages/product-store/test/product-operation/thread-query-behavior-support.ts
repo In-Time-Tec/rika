@@ -32,7 +32,7 @@ export const storedTurn: Fixtures.Turn.AgentExecutionTurn = {
   id: Fixtures.Turn.TurnId.make("turn-1"),
   threadId: storedThread.id,
   prompt: "fix auth",
-  executionRoute: Fixtures.Turn.testExecutionRoute(),
+  executionRoute: Fixtures.ExecutionRouteSnapshot.testExecutionRoute(),
   author: { _tag: "Human" },
   lineage: { _tag: "Original" },
   status: "completed",

@@ -18,10 +18,10 @@ const parallelRootPrompt = "Explore alpha, beta, and gamma independently."
 const nestedRootPrompt = "Coordinate the nested work."
 
 const executionModelRoute = (
-  role: ExecutionBackend.ExecutionModelRoute["role"],
+  role: ExecutionBackend.ExecutionRouteModelSnapshot["role"],
   selection: { readonly provider: string; readonly model: string; readonly registrationKey?: string },
   effort = "medium",
-): ExecutionBackend.ExecutionModelRoute => ({
+): ExecutionBackend.ExecutionRouteModelSnapshot => ({
   role,
   alias: role,
   model: selection.model,

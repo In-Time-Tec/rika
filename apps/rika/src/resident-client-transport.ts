@@ -1,3 +1,4 @@
+import type { InteractiveCommand } from "@rika/product/interactive-command"
 import * as BunSocket from "@effect/platform-bun/BunSocket"
 import * as Operation from "@rika/product/product-operation-service"
 import * as ResidentHandshake from "@rika/product/resident-service-handshake"
@@ -364,7 +365,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                   const unavailable = (text: string) =>
                     Operation.OperationUnavailable.make({ operation: "ResidentConnection", message: text })
                   const invoke = Effect.fn("ResidentTransport.interactiveCommand")(function* (
-                    command: Operation.InteractiveCommand,
+                    command: InteractiveCommand,
                   ) {
                     const done = yield* Deferred.make<void, Operation.OperationUnavailable>()
                     const commandSequence = yield* commandWriteLock.withPermits(1)(

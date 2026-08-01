@@ -1,14 +1,6 @@
-import {
-  expect,
-  it,
-  Thread,
-  TurnRepository,
-  TurnContract,
-  Turn,
-  Effect,
-  provideLayer,
-  create,
-} from "./turn-repository-behavior-support"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
+import { expect, it, Thread, TurnRepository, TurnContract, Turn, Effect } from "./turn-repository-behavior-support"
+import { create, provideLayer } from "./turn-repository-behavior-setup"
 
 it.effect("memory copies exact queue status and requeues an unowned accepted claim", () =>
   Effect.gen(function* () {
@@ -20,7 +12,7 @@ it.effect("memory copies exact queue status and requeues an unowned accepted cla
         id: Turn.TurnId.make("copied-queued"),
         threadId,
         prompt: "copied",
-        executionRoute: Turn.testExecutionRoute(),
+        executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
         author: { _tag: "Human" },
         lineage: { _tag: "Original" },
         status: "queued",
@@ -38,7 +30,7 @@ it.effect("memory copies exact queue status and requeues an unowned accepted cla
           id: Turn.TurnId.make("copied-overflow"),
           threadId,
           prompt: "overflow",
-          executionRoute: Turn.testExecutionRoute(),
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
           status: "queued",
@@ -145,7 +137,7 @@ it.effect("memory lists nonterminal turns and rejects a missing extension pin", 
           id: Turn.TurnId.make("b"),
           threadId: Thread.ThreadId.make("thread-a"),
           prompt: "b",
-          executionRoute: Turn.testExecutionRoute(),
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
           status: "waiting",
@@ -158,7 +150,7 @@ it.effect("memory lists nonterminal turns and rejects a missing extension pin", 
           id: Turn.TurnId.make("a"),
           threadId: Thread.ThreadId.make("thread-a"),
           prompt: "a",
-          executionRoute: Turn.testExecutionRoute(),
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
           status: "running",

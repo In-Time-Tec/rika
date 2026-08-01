@@ -1,3 +1,5 @@
 export { Input } from "./product-operation"
 export { InvalidInput } from "./product-operation-errors"
 export type { Input as ExtensionOperation } from "./product-operation"
+export { Error, Service, layer, run } from "../dispatch/extension-operation-dispatch"
+export type { Interface, Options } from "../dispatch/extension-operation-dispatch"

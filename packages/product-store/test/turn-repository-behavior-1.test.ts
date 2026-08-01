@@ -1,15 +1,10 @@
+import * as ExecutionRequest from "@rika/product/execution-request"
+import * as ThreadResult from "@rika/product/thread-result"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionStatus from "@rika/product/execution-status"
-import {
-  expect,
-  it,
-  Thread,
-  TurnRepository,
-  Turn,
-  Effect,
-  provideLayer,
-  create,
-  stopIntentContract,
-} from "./turn-repository-behavior-support"
+import { expect, it, Thread, TurnRepository, Turn, Effect } from "./turn-repository-behavior-support"
+import { create, provideLayer } from "./turn-repository-behavior-setup"
+import { stopIntentContract } from "./turn-repository-behavior-contract"
 
 it.effect("a terminal turn cannot acquire a stop intent", () =>
   Effect.gen(function* () {
@@ -40,20 +35,20 @@ it.effect("memory turns preserve structured image prompt parts", () =>
       now: 1,
     })
     const stored = yield* repository.get(created.id)
-    expect(stored !== undefined && Turn.isAgentExecution(stored) ? stored.promptParts : undefined).toEqual(
-      created.promptParts,
-    )
+    expect(
+      stored !== undefined && ThreadResult.TurnResult.isAgentExecution(stored) ? stored.promptParts : undefined,
+    ).toEqual(created.promptParts)
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
 it.effect("memory turns snapshot attachments and execution pins at the repository boundary", () =>
   Effect.gen(function* () {
     const repository = yield* TurnRepository.Service
-    const promptParts: Array<Turn.PromptPart> = [
+    const promptParts: Array<ExecutionRequest.PromptPart> = [
       { type: "text", text: "inspect " },
       { type: "image", mediaType: "image/png", data: "b3JpZ2luYWw=", filename: "original.png" },
     ]
-    const executionRoute = Turn.testExecutionRoute("high")
+    const executionRoute = ExecutionRouteSnapshot.testExecutionRoute("high")
     const created = yield* create(repository, {
       id: Turn.TurnId.make("snapshot-turn"),
       threadId: Thread.ThreadId.make("snapshot-thread"),
@@ -63,7 +58,7 @@ it.effect("memory turns snapshot attachments and execution pins at the repositor
       now: 1,
     })
     const mutableRoute = executionRoute.main as { model: string }
-    const mutableCreatedParts = created.promptParts as Array<Turn.PromptPart> | undefined
+    const mutableCreatedParts = created.promptParts as Array<ExecutionRequest.PromptPart> | undefined
     promptParts[0] = { type: "text", text: "mutated" }
     mutableRoute.model = "mutated"
     mutableCreatedParts?.splice(0)
@@ -109,7 +104,7 @@ it.effect("memory turns pin the execution route at creation", () =>
       id: Turn.TurnId.make("turn-route-pin"),
       threadId: Thread.ThreadId.make("thread-route-pin"),
       prompt: "pin route",
-      executionRoute: Turn.testExecutionRoute("low"),
+      executionRoute: ExecutionRouteSnapshot.testExecutionRoute("low"),
       now: 1,
     })
     expect(created.executionRoute.mode).toBe("low")
@@ -123,7 +118,7 @@ it.effect("memory turns preserve review fan-out route ownership while nontermina
       id: Turn.TurnId.make("review-owner"),
       threadId: Thread.ThreadId.make("review-thread"),
       prompt: "Review workspace changes",
-      executionRoute: Turn.testExecutionRoute("medium"),
+      executionRoute: ExecutionRouteSnapshot.testExecutionRoute("medium"),
       reviewFanOutId: "review:review-owner",
       now: 1,
     })
@@ -349,7 +344,7 @@ it.effect("memory claims stay queued and edit or dequeue invalidate preparation"
         id: Turn.TurnId.make("claimed"),
         threadId,
         prompt: "before",
-        executionRoute: Turn.testExecutionRoute(),
+        executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
         author: { _tag: "Human" },
         lineage: { _tag: "Original" },
         status: "queued",

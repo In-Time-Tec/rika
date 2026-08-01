@@ -1,3 +1,4 @@
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
@@ -13,16 +14,7 @@ import * as ThreadRepository from "../src/thread/sqlite-thread-repository"
 import * as TranscriptRepository from "../src/transcript/sqlite-transcript-repository"
 import * as TurnRepository from "../src/turn/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
-import {
-  attachedExecutionCheckpoint,
-  commitAll,
-  event,
-  executionCheckpoint,
-  projectionVersion,
-  provideLayer,
-  sqliteLayer,
-  unit,
-} from "./transcript-repository-fixtures"
+import { commitAll, event, projectionVersion, provideLayer, sqliteLayer, unit } from "./transcript-repository-fixtures"
 
 export const UnitJson = Schema.fromJsonString(TranscriptUnit.Unit)
 
@@ -64,7 +56,7 @@ export const createTurn = Effect.fn("TranscriptRepositoryTest.createTurn")(funct
     id: turnId,
     threadId,
     prompt,
-    executionRoute: Turn.testExecutionRoute(),
+    executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
     queueCapacity: 128,
     now: 2,
   })
@@ -88,13 +80,5 @@ export {
   TurnRepository,
   Turn,
 }
-export {
-  attachedExecutionCheckpoint,
-  commitAll,
-  event,
-  executionCheckpoint,
-  projectionVersion,
-  provideLayer,
-  sqliteLayer,
-  unit,
-}
+export { commitAll, event, projectionVersion, provideLayer, sqliteLayer, unit }
+export { executionCheckpoint } from "./transcript-fixture-checkpoints"

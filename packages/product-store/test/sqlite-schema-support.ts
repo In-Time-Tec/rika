@@ -1,3 +1,4 @@
+import * as CheckpointFixtures from "./transcript-fixture-checkpoints"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
@@ -29,7 +30,7 @@ export const create = (
   repository.createForSubmission({
     queueCapacity: 128,
     ...input,
-    executionRoute: Turn.testExecutionRoute(),
+    executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
   })
 
 export const provideLayer =
@@ -40,7 +41,7 @@ export const provideLayer =
       return yield* effect.pipe(Effect.provide(context))
     })
 
-export const legacyModel = (model: ExecutionRouteSnapshot.ExecutionModelRoute) => {
+export const legacyModel = (model: ExecutionRouteSnapshot.ExecutionRouteModelSnapshot) => {
   const { providerConnection, registrationIdentity, ...rest } = model
   return {
     ...rest,
@@ -164,7 +165,7 @@ export const createPreBranchDatabase = (filename: string) => {
   ]
   const insertMigration = database.query("INSERT INTO rika_migrations (migration_id, name) VALUES (?, ?)")
   for (const [index, name] of migrations.entries()) insertMigration.run(index + 1, name)
-  const currentRoute = Turn.testExecutionRoute()
+  const currentRoute = ExecutionRouteSnapshot.testExecutionRoute()
   const executionRoute = JSON.stringify({
     ...currentRoute,
     main: legacyModel(currentRoute.main),
@@ -253,7 +254,7 @@ export {
   TranscriptRepository,
   Turn,
 }
-export const attachedExecutionCheckpoint = TranscriptFixtures.attachedExecutionCheckpoint
+export const attachedExecutionCheckpoint = CheckpointFixtures.attachedExecutionCheckpoint
 export const commitAll = TranscriptFixtures.commitAll
 export const executionCheckpoint = TranscriptFixtures.executionCheckpoint
 export const projectionVersion = TranscriptFixtures.projectionVersion

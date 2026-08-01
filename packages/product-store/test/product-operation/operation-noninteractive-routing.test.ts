@@ -1,3 +1,4 @@
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
@@ -144,7 +145,7 @@ describe("Operation", () => {
         backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
         resolveExecutionRoute: (mode) => {
           runSync(Ref.update(modes, (all) => [...all, mode]))
-          const route = Turn.testExecutionRoute(mode)
+          const route = ExecutionRouteSnapshot.testExecutionRoute(mode)
           return Effect.succeed({
             ...route,
             tokenBudget: 1,

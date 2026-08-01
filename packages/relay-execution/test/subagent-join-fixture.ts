@@ -4,9 +4,9 @@ import { modelRegistrationIdentity } from "@rika/product/model-registration-iden
 const encodeJson = (value: unknown) => JSON.stringify(value)
 
 const executionModelRoute = (
-  role: ExecutionBackend.ExecutionModelRoute["role"],
+  role: ExecutionBackend.ExecutionRouteModelSnapshot["role"],
   selection: { readonly provider: string; readonly model: string; readonly registrationKey?: string },
-): ExecutionBackend.ExecutionModelRoute => ({
+): ExecutionBackend.ExecutionRouteModelSnapshot => ({
   role,
   alias: role,
   model: selection.model,

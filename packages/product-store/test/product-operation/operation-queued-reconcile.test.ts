@@ -1,3 +1,4 @@
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import { reconcile } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
@@ -70,7 +71,7 @@ describe("Operation", () => {
           prompt: "Review workspace changes",
           status: "running",
           stopIntent: "none",
-          executionRoute: Turn.testExecutionRoute("medium"),
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute("medium"),
           reviewFanOutId: "review:review-owner",
           createdAt: 1,
           updatedAt: 2,

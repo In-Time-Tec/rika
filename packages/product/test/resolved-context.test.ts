@@ -5,7 +5,7 @@ import * as ContextFileSystem from "../src/context/context-file-system"
 import * as ContextMentions from "../src/context/context-mention-parser"
 import * as FileMentions from "../src/context/file-mention-parser"
 import * as ResolvedContext from "../src/context/context-resolution-service"
-import { provideLayer } from "./layer"
+import { provideLayer } from "./product-test-layer"
 
 const files = {
   "/work/AGENTS.md": "root",

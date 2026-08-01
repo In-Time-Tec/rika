@@ -2,6 +2,7 @@ import * as ModelRouteResolution from "@rika/configuration/model-route-resolutio
 import * as SettingsDefaults from "@rika/configuration/configuration-settings"
 import { expect, test } from "vitest"
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
+import * as OpenAiAuthFlow from "@rika/product/openai-auth-service"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import { Cause, ConfigProvider, Context, Effect, Layer, Redacted, Schema, Scope } from "effect"
 import { LanguageModel } from "effect/unstable/ai"
@@ -231,7 +232,10 @@ test("pins provider runtime identity, roundtrips JSON, and normalizes old accoun
 test("custom OpenAI and Anthropic routes never evaluate corrupt account status", () =>
   Effect.runPromise(
     withRuntime(
-      { ...authService(), status: Effect.fail(OpenAiAuth.StoreError.make({ kind: "corrupt", message: "hidden" })) },
+      {
+        ...authService(),
+        status: Effect.fail(OpenAiAuthFlow.Errors.StoreError.make({ kind: "corrupt", message: "hidden" })),
+      },
       (runtime) =>
         Effect.gen(function* () {
           const settings: SettingsDefaults.ConfigurationSettings = {

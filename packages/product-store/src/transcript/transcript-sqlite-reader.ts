@@ -1,9 +1,10 @@
+import { TurnResult } from "@rika/product/thread-result"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
 import { Effect, Schema } from "effect"
 import type { SqlClient as SqlClientType } from "effect/unstable/sql/SqlClient"
-import { TurnId, isRecordedShell } from "@rika/product/turn-record"
+import { TurnId } from "@rika/product/turn-record"
 import type { ExecutionCheckpoint, Projection } from "@rika/product/transcript-repository"
 import { invalidatedProjectionVersion, RepositoryError } from "@rika/product/transcript-repository"
 import { decode } from "../turn/turn-row-codec"
@@ -62,7 +63,7 @@ export const readTranscriptProjection = (
                       : null
                   return (
                     unit.key === unitRow.unit_key &&
-                    (isRecordedShell(turn) ? null : TranscriptCorrelation.executionKey(unit.turnId)) ===
+                    (TurnResult.isRecordedShell(turn) ? null : TranscriptCorrelation.executionKey(unit.turnId)) ===
                       unitRow.execution_key &&
                     TranscriptOrdering.hasIntrinsicOrder(unit) &&
                     TranscriptOrdering.encodeUnitOrder(unit.order) === unitRow.unit_order_key &&
@@ -98,7 +99,7 @@ export const readTranscriptProjection = (
     yield* validateStateScalars(turn.id, "root projection", state)
     const invalidatedEmpty =
       row.projection_version === invalidatedProjectionVersion && units.length === 0 && executionCheckpoints.length === 0
-    if (isRecordedShell(turn)) {
+    if (TurnResult.isRecordedShell(turn)) {
       if (executionCheckpoints.length !== 0)
         return yield* RepositoryError.make({ message: `Recorded shell turn ${turn.id} has execution checkpoints` })
       yield* validateRecordedShellProjection(turn, withUnits(state, units), row.projection_version)

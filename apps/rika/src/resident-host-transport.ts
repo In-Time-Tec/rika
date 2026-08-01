@@ -1,5 +1,6 @@
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
 import * as Operation from "@rika/product/product-operation-service"
+import { executeInteractiveCommand } from "@rika/product/interactive-command"
 import * as InteractiveFeedOverflow from "@rika/product/resident-interactive-feed"
 import * as ResidentHandshake from "@rika/product/resident-service-handshake"
 import * as ResidentService from "@rika/product/resident-service"
@@ -795,7 +796,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               const cancelled = yield* Deferred.make<void>()
               const effect = Effect.gen(function* () {
                 if (message.command._tag !== "Quit" || (yield* lifecycle.soleClient))
-                  yield* Operation.executeInteractiveCommand(active.session, message.command)
+                  yield* executeInteractiveCommand(active.session, message.command)
                 const completedAt = yield* Clock.currentTimeMillis
                 yield* Effect.logInfo("resident.interactive_command.completed").pipe(
                   Effect.annotateLogs({

@@ -6,7 +6,6 @@ import { Effect, FileSystem, Layer } from "effect"
 import * as Database from "@rika/product-store/product-database-layer"
 import * as Thread from "@rika/product/thread-record"
 import * as TurnContract from "@rika/product/turn-repository"
-import * as Turn from "@rika/product/turn-record"
 
 const _id = Thread.ThreadId.make("thread-a")
 
@@ -19,7 +18,7 @@ const _create = (
   repository.createForSubmission({
     queueCapacity: 128,
     ...input,
-    executionRoute: Turn.testExecutionRoute(),
+    executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
   })
 
 const provideLayer =
@@ -30,7 +29,7 @@ const provideLayer =
       return yield* effect.pipe(Effect.provide(context))
     })
 
-const legacyModel = (model: ExecutionRouteSnapshot.ExecutionModelRoute) => {
+const legacyModel = (model: ExecutionRouteSnapshot.ExecutionRouteModelSnapshot) => {
   const { providerConnection, registrationIdentity, ...rest } = model
   return {
     ...rest,
@@ -154,7 +153,7 @@ const _createPreBranchDatabase = (filename: string) => {
   ]
   const insertMigration = database.query("INSERT INTO rika_migrations (migration_id, name) VALUES (?, ?)")
   for (const [index, name] of migrations.entries()) insertMigration.run(index + 1, name)
-  const currentRoute = Turn.testExecutionRoute()
+  const currentRoute = ExecutionRouteSnapshot.testExecutionRoute()
   const executionRoute = JSON.stringify({
     ...currentRoute,
     main: legacyModel(currentRoute.main),

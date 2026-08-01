@@ -1,4 +1,4 @@
-import { OpenAiAuth } from "@rika/product/product-operation-service"
+import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import { afterEach, expect, test } from "bun:test"
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import { layer } from "../src/openai-credential-store"

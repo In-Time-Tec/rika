@@ -2,7 +2,7 @@ import { expect, test } from "vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { fileURLToPath } from "node:url"
 import { Effect, FileSystem, Layer, Path } from "effect"
-import { captureVisuals, scenarios } from "./visual.capture"
+import { captureVisuals, scenarios } from "./visual-capture-support"
 
 const removedActivityLabels = [/rivet/i, /semantic[- ]search/i, /ast[- ]grep[- ]outline/i]
 

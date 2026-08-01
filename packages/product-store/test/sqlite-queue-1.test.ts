@@ -1,3 +1,4 @@
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import {
   expect,
   test,
@@ -175,7 +176,7 @@ test("SQLite queue copy, take, and accepted rollback stay atomic", () => {
             id: Turn.TurnId.make("sqlite-copied-queued"),
             threadId: copyThread,
             prompt: "copied",
-            executionRoute: Turn.testExecutionRoute(),
+            executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
             author: { _tag: "Human" },
             lineage: { _tag: "Original" },
             status: "queued",
@@ -195,7 +196,7 @@ test("SQLite queue copy, take, and accepted rollback stay atomic", () => {
                 id: overflowId,
                 threadId: copyThread,
                 prompt: "overflow",
-                executionRoute: Turn.testExecutionRoute(),
+                executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
                 author: { _tag: "Human" },
                 lineage: { _tag: "Original" },
                 status: "queued",

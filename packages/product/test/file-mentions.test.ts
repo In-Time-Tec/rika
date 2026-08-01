@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Path } from "effect"
 import * as FileMentions from "../src/context/file-mention-parser"
-import { provideLayer } from "./layer"
+import { provideLayer } from "./product-test-layer"
 
 describe("FileMentions", () => {
   it("parses quoted, delimited, empty, and duplicate mentions", () => {

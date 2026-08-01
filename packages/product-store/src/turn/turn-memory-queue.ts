@@ -1,6 +1,7 @@
+import { TurnResult } from "@rika/product/thread-result"
 import { Effect } from "effect"
 import * as ExecutionStatus from "@rika/product/execution-status"
-import { AgentExecutionTurn, isAgentExecution } from "@rika/product/turn-record"
+import { AgentExecutionTurn } from "@rika/product/turn-record"
 import { QueueFull, RepositoryError } from "@rika/product/turn-repository"
 import type { Interface, QueueClaimFinish, QueueItemChange } from "@rika/product/turn-repository"
 import { queuedTurnUnavailable } from "./turn-memory-errors"
@@ -33,7 +34,7 @@ export const makeTurnMemoryQueue = ({
     const turns = [...current.turns.values()]
       .filter(
         (turn): turn is AgentExecutionTurn =>
-          isAgentExecution(turn) && turn.threadId === threadId && turn.status === "queued",
+          TurnResult.isAgentExecution(turn) && turn.threadId === threadId && turn.status === "queued",
       )
       .toSorted((left, right) => left.createdAt - right.createdAt)
       .map(clone)
@@ -42,12 +43,15 @@ export const makeTurnMemoryQueue = ({
   claimNextQueued: Effect.fn("TurnRepository.claimNextQueued")(function* (threadId, _now) {
     return yield* modifyState((current) => {
       const hasActive = [...current.turns.values()].some(
-        (turn) => isAgentExecution(turn) && turn.threadId === threadId && ExecutionStatus.isActiveStatus(turn.status),
+        (turn) =>
+          TurnResult.isAgentExecution(turn) &&
+          turn.threadId === threadId &&
+          ExecutionStatus.isActiveStatus(turn.status),
       )
       const queued = [...current.turns.values()]
         .filter(
           (turn): turn is AgentExecutionTurn =>
-            isAgentExecution(turn) &&
+            TurnResult.isAgentExecution(turn) &&
             turn.threadId === threadId &&
             turn.status === "queued" &&
             !current.claims.has(turn.id),
@@ -72,7 +76,7 @@ export const makeTurnMemoryQueue = ({
         const existing = current.turns.get(claim.turn.id)
         if (
           existing === undefined ||
-          !isAgentExecution(existing) ||
+          !TurnResult.isAgentExecution(existing) ||
           existing.status !== "queued" ||
           current.claims.get(claim.turn.id) !== claim.token
         )
@@ -209,7 +213,7 @@ export const makeTurnMemoryQueue = ({
       if (turn === undefined || turn.status !== "accepted") return [{ _tag: "Unavailable" as const }, current]
       const hasOtherActive = [...current.turns.values()].some(
         (candidate) =>
-          isAgentExecution(candidate) &&
+          TurnResult.isAgentExecution(candidate) &&
           candidate.id !== id &&
           candidate.threadId === turn.threadId &&
           ExecutionStatus.isActiveStatus(candidate.status),

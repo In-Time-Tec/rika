@@ -4,9 +4,9 @@ import {
   hostAgentId,
   hostMaxWaitTurns,
   hostSelection,
-} from "./host/relay-thread-host-constants"
-import { Registry, makeRegistry } from "./host/relay-thread-host-registry"
-import { toolkit, wakeThreadHost } from "./host/relay-thread-host"
+} from "./relay-thread-host-constants"
+import { Registry, makeRegistry } from "./relay-thread-host-registry"
+import { toolkit, wakeThreadHost } from "./relay-thread-host"
 import { Effect, Layer, Option, Semaphore } from "effect"
 import { Tool } from "effect/unstable/ai"
 import { Client, Ids } from "@relayfx/sdk"

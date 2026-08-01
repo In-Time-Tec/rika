@@ -62,6 +62,10 @@ type ProductLayerError<
   | OperationError
   | OperationUnavailable
 
+export { hasActiveExecutionWork } from "../../execution/lifecycle/product-execution-quiescence"
+export { stopActiveExecutionWork } from "../../execution/lifecycle/product-execution-stop"
+export { settleAbandonedRecoveredWork } from "../../execution/lifecycle/abandoned-product-work-settlement"
+
 export const productLayer = <
   ThreadError extends Error,
   TurnError extends Error,

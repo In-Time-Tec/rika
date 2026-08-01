@@ -1,8 +1,9 @@
+import { TurnResult } from "@rika/product/thread-result"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import { TurnId, isRecordedShell } from "@rika/product/turn-record"
+import { TurnId } from "@rika/product/turn-record"
 import type { Entry, Interface } from "@rika/product/transcript-repository"
 import { RepositoryError } from "@rika/product/transcript-repository"
 import { decode } from "../turn/turn-row-codec"
@@ -105,7 +106,7 @@ export const makeTranscriptSqlitePage = (sql: SqlClient): Pick<Interface, "page"
                 unit.content._tag === "Block" && unit.content.block._tag === "ToolCall" ? unit.content.block.id : null
               if (
                 unit.key !== row.unit_key ||
-                (isRecordedShell(turn) ? null : TranscriptCorrelation.executionKey(unit.turnId)) !==
+                (TurnResult.isRecordedShell(turn) ? null : TranscriptCorrelation.executionKey(unit.turnId)) !==
                   row.execution_key ||
                 !TranscriptOrdering.hasIntrinsicOrder(unit) ||
                 TranscriptOrdering.encodeUnitOrder(unit.order) !== row.unit_order_key ||
@@ -116,7 +117,7 @@ export const makeTranscriptSqlitePage = (sql: SqlClient): Pick<Interface, "page"
                 return yield* RepositoryError.make({
                   message: "Transcript unit order does not match its durable key",
                 })
-              if (isRecordedShell(turn)) {
+              if (TurnResult.isRecordedShell(turn)) {
                 if (
                   row.execution_key !== null ||
                   unit.parentId !== undefined ||

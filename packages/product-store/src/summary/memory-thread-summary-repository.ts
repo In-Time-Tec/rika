@@ -1,3 +1,4 @@
+import { TurnResult } from "@rika/product/thread-result"
 import { Service } from "@rika/product/thread-summary-repository"
 export { Service }
 import * as ExecutionStatus from "@rika/product/execution-status"
@@ -6,7 +7,7 @@ import * as ThreadRepository from "../thread/memory-thread-repository"
 import { ThreadId } from "@rika/product/thread-record"
 import { EditTotals, RepairCandidate, ThreadSummary } from "@rika/product/thread-summary"
 import * as TurnRepository from "../turn/memory-turn-repository"
-import { TurnId, isAgentExecution } from "@rika/product/turn-record"
+import { TurnId } from "@rika/product/turn-record"
 import * as ThreadState from "@rika/product/thread-state"
 
 export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("ThreadSummaryRepositoryError", {
@@ -76,7 +77,7 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
         const currentProjected = history.flatMap((turn) => {
           const activity = activityValues.get(turn.id)
           return activity !== undefined &&
-            (isAgentExecution(turn)
+            (TurnResult.isAgentExecution(turn)
               ? activity.projectedCursor === turn.lastCursor &&
                 (!ExecutionStatus.isTerminalStatus(turn.status) || activity.complete)
               : !ExecutionStatus.isTerminalStatus(turn.status) || activity.complete)
@@ -157,7 +158,7 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
         turns.list(thread.id).pipe(Effect.mapError(repositoryError)),
       )).flat()
       return history
-        .filter(isAgentExecution)
+        .filter(TurnResult.isAgentExecution)
         .filter((turn) => {
           const activity = activityValues.get(turn.id)
           return (

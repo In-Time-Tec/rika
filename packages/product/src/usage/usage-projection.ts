@@ -87,6 +87,9 @@ export const observe: {
 const isSnapshot = (value: unknown): value is Snapshot =>
   typeof value === "object" && value !== null && "turns" in value && value.turns instanceof Map
 
+export { empty } from "./usage-snapshot"
+export { serialize } from "./usage-snapshot-codec"
+
 export const foldBatch: {
   (
     observations: ReadonlyArray<RootExecution & { readonly event: ExecutionEvent.Event }>,

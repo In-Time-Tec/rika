@@ -1,3 +1,4 @@
+import * as ThreadResult from "@rika/product/thread-result"
 import {
   expect,
   test,
@@ -52,7 +53,7 @@ test("migrates a pre-branch database while invalidating its rebuildable transcri
             pinned: true,
           })
           const storedTurns = yield* turns.list(id)
-          const storedAgentTurns = storedTurns.filter(Turn.isAgentExecution)
+          const storedAgentTurns = storedTurns.filter(ThreadResult.TurnResult.isAgentExecution)
           expect(storedTurns.map((turn) => String(turn.id))).toEqual([
             "completed-turn",
             "legacy-unpinned-turn",
@@ -268,7 +269,7 @@ test("creates, persists, and reopens the current schema", () => {
         })
         const transcript = yield* TranscriptRepository.Service
         const storedTurn = yield* turns.get(Turn.TurnId.make("turn-a"))
-        if (storedTurn === undefined || !Turn.isAgentExecution(storedTurn))
+        if (storedTurn === undefined || !ThreadResult.TurnResult.isAgentExecution(storedTurn))
           return yield* Effect.die("turn-a was not stored as an agent execution")
         const projection = TranscriptProjection.Projection.project(storedTurn.id, storedTurn.prompt, [
           { cursor: "cursor-a", sequence: 1, type: "execution.completed", createdAt: 4 },
@@ -378,10 +379,14 @@ test("creates, persists, and reopens the current schema", () => {
             expect(result.thread?.labels).toEqual(["local"])
             expect(result.turn?.status).toBe("completed")
             expect(
-              result.turn !== undefined && Turn.isAgentExecution(result.turn) ? result.turn.lastCursor : undefined,
+              result.turn !== undefined && ThreadResult.TurnResult.isAgentExecution(result.turn)
+                ? result.turn.lastCursor
+                : undefined,
             ).toBe("cursor-a")
             expect(
-              result.turn !== undefined && Turn.isAgentExecution(result.turn) ? result.turn.extensionPin : undefined,
+              result.turn !== undefined && ThreadResult.TurnResult.isAgentExecution(result.turn)
+                ? result.turn.extensionPin
+                : undefined,
             ).toEqual({
               generation: "generation-a",
               sourceDigest: "source-a",

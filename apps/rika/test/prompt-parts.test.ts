@@ -3,7 +3,7 @@ import { afterEach, expect, test } from "vitest"
 import { Config, Data, Effect, FileSystem, Layer, Path, Stream } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
-import { ViewState } from "@rika/terminal/terminal-state"
+import * as ViewState from "@rika/terminal/terminal-state"
 import {
   defaultOpenArguments,
   initialSubmitAction,

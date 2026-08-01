@@ -1,3 +1,5 @@
+import * as ThreadResult from "@rika/product/thread-result"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import type { InteractiveSession } from "@rika/product/interactive-session"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { Service } from "@rika/product/product-operation-service"
@@ -41,7 +43,7 @@ describe("interactive session extensions", () => {
             prompt: "first",
             author: { _tag: "Human" },
             lineage: { _tag: "Original" },
-            executionRoute: Turn.testExecutionRoute(),
+            executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
             status: "completed",
             stopIntent: "none",
             createdAt: 1,
@@ -54,7 +56,7 @@ describe("interactive session extensions", () => {
             prompt: "second",
             author: { _tag: "Human" },
             lineage: { _tag: "Original" },
-            executionRoute: Turn.testExecutionRoute(),
+            executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
             status: "completed",
             stopIntent: "none",
             createdAt: 2,
@@ -66,7 +68,8 @@ describe("interactive session extensions", () => {
         const transcripts = Context.get(transcriptContext, TranscriptRepository.Service)
         for (const turnId of ["turn-first", "turn-second"] as const) {
           const target = (yield* turns.get(Turn.TurnId.make(turnId)))!
-          if (!Turn.isAgentExecution(target)) return yield* Effect.die(`Expected agent execution turn ${turnId}`)
+          if (!ThreadResult.TurnResult.isAgentExecution(target))
+            return yield* Effect.die(`Expected agent execution turn ${turnId}`)
           yield* storeProjection(
             transcripts,
             target,
@@ -183,7 +186,7 @@ describe("interactive session extensions", () => {
             prompt: "synth",
             author: { _tag: "Human" },
             lineage: { _tag: "Original" },
-            executionRoute: Turn.testExecutionRoute(),
+            executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
             status: "completed",
             stopIntent: "none",
             createdAt: 1,
@@ -297,7 +300,7 @@ describe("interactive session extensions", () => {
             prompt: "queued",
             author: { _tag: "Human" },
             lineage: { _tag: "Original" },
-            executionRoute: Turn.testExecutionRoute(),
+            executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
             status: "queued",
             stopIntent: "none",
             createdAt: 1,

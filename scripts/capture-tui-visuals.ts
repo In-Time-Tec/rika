@@ -1,7 +1,7 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Effect, FileSystem, Layer, Path } from "effect"
-import { captureVisuals } from "../packages/terminal/test/visual.capture"
+import { captureVisuals } from "../packages/terminal/test/visual-capture-support"
 
 const program = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem

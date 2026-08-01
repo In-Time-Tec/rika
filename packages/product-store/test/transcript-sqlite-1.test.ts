@@ -1,3 +1,4 @@
+import { nestedProjection } from "./transcript-fixture-checkpoints"
 import {
   expect,
   it,
@@ -10,7 +11,6 @@ import {
   Turn,
   createTurn,
   commitAll,
-  nestedProjection,
   projectionVersion,
   provideLayer,
   sqliteLayer,

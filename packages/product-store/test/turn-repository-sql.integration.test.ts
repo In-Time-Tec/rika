@@ -1,3 +1,7 @@
+import * as ExecutionWorkflow from "@rika/product/execution-workflow"
+import * as ExecutionRequest from "@rika/product/execution-request"
+import * as ThreadResult from "@rika/product/thread-result"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "../src/turn/sqlite-turn-repository"
 import * as TurnContract from "@rika/product/turn-repository"
@@ -18,13 +22,13 @@ type CurrentCreateInput = Omit<
   Parameters<TurnContract.Interface["createForSubmission"]>[0],
   "executionRoute" | "queueCapacity"
 > & {
-  readonly executionRoute?: Turn.ExecutionRoutePin
+  readonly executionRoute?: ExecutionRouteSnapshot.ExecutionRoutePin
   readonly queueCapacity?: number
 }
 
 const create = (repository: TurnContract.Interface, input: CurrentCreateInput) =>
   repository.createForSubmission({
-    executionRoute: Turn.testExecutionRoute(),
+    executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
     ...input,
     queueCapacity: input.queueCapacity ?? 128,
   })
@@ -71,7 +75,9 @@ it.effect("memory editQueued replaces content and clears stale prompt parts", ()
     yield* repository.editQueued(queued.id, "edited", 3)
     const stored = yield* repository.get(queued.id)
     expect(stored?.prompt).toBe("edited")
-    expect(stored !== undefined && Turn.isAgentExecution(stored) ? stored.promptParts : undefined).toBeUndefined()
+    expect(
+      stored !== undefined && ThreadResult.TurnResult.isAgentExecution(stored) ? stored.promptParts : undefined,
+    ).toBeUndefined()
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
@@ -107,7 +113,7 @@ it.effect("memory seeds queue revision to match the seeded queued count", () =>
           prompt: "one",
           status: "queued",
           stopIntent: "none",
-          executionRoute: Turn.testExecutionRoute(),
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
           createdAt: 1,
@@ -120,7 +126,7 @@ it.effect("memory seeds queue revision to match the seeded queued count", () =>
           prompt: "two",
           status: "queued",
           stopIntent: "none",
-          executionRoute: Turn.testExecutionRoute(),
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
           createdAt: 2,
@@ -136,7 +142,7 @@ const row = (overrides: Partial<Record<string, unknown>> = {}) => ({
   thread_id: "thread-a",
   turn_kind: "AgentExecution",
   prompt: "hello",
-  execution_route_json: JSON.stringify(Turn.testExecutionRoute()),
+  execution_route_json: JSON.stringify(ExecutionRouteSnapshot.testExecutionRoute()),
   shell_command: null,
   shell_result_text: null,
   shell_result_truncated: null,
@@ -191,13 +197,18 @@ it.effect("sql turns create, get, list, and decode cursor variants", () =>
       const missing = yield* repository.get(Turn.TurnId.make("missing"))
       const listed = yield* repository.list(Thread.ThreadId.make("thread-a"))
       expect(created.lastCursor).toBeUndefined()
-      expect(found !== undefined && Turn.isAgentExecution(found) ? found.lastCursor : undefined).toBe("cursor-a")
+      expect(
+        found !== undefined && ThreadResult.TurnResult.isAgentExecution(found) ? found.lastCursor : undefined,
+      ).toBe("cursor-a")
       expect(missing).toBeUndefined()
-      expect(listed.filter(Turn.isAgentExecution).map((turn) => turn.lastCursor)).toEqual([undefined, "cursor-b"])
+      expect(listed.filter(ThreadResult.TurnResult.isAgentExecution).map((turn) => turn.lastCursor)).toEqual([
+        undefined,
+        "cursor-b",
+      ])
       const parameters = sql.statements[0]?.parameters ?? []
       expect(parameters.slice(0, 4)).toEqual(["turn-a", "thread-a", "hello", null])
       const executionRoute = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(String(parameters[4]))
-      expect(executionRoute).toEqual(Turn.testExecutionRoute())
+      expect(executionRoute).toEqual(ExecutionRouteSnapshot.testExecutionRoute())
       expect(parameters.slice(5)).toEqual([null, '{"_tag":"Human"}', '{"_tag":"Original"}', "thread-a", 1, 1])
       expect(sql.statements.at(-1)).toEqual({
         sql: "SELECT * FROM rika_turns WHERE thread_id = ? ORDER BY created_at ASC, rowid ASC",
@@ -210,11 +221,13 @@ it.effect("sql turns create, get, list, and decode cursor variants", () =>
 it.effect("sql turns encode and decode structured attachments", () =>
   sqlTest((sql) =>
     Effect.gen(function* () {
-      const promptParts: ReadonlyArray<Turn.PromptPart> = [
+      const promptParts: ReadonlyArray<ExecutionRequest.PromptPart> = [
         { type: "text", text: "inspect " },
         { type: "image", mediaType: "image/png", data: "cG5n", filename: "shot.png" },
       ]
-      const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(Turn.PromptPart)))(promptParts)
+      const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(ExecutionRequest.PromptPart)))(
+        promptParts,
+      )
       sql.rows()
       sql.rows(row({ prompt: "inspect [Image 1]", prompt_parts_json: encoded }))
       const repository = yield* TurnRepository.Service
@@ -457,7 +470,7 @@ it.effect("sql lists nonterminal turns and mutates extension pins", () =>
         resolvedContextDigest: "context-a",
       }
       sql.rows(row(), row({ id: "turn-b", status: "waiting" }))
-      const encodedPin = yield* Schema.encodeEffect(Schema.fromJsonString(Turn.ExecutionExtensionPin))(pin)
+      const encodedPin = yield* Schema.encodeEffect(Schema.fromJsonString(ExecutionWorkflow.ExecutionExtensionPin))(pin)
       sql.rows(row({ extension_pin_json: encodedPin }))
       sql.rows()
       sql.error("list failed")

@@ -1,5 +1,6 @@
 import * as TranscriptPage from "@rika/product/transcript-page"
 import type * as Operation from "@rika/product/product-operation-service"
+import type { InteractiveCommand } from "@rika/product/interactive-command"
 import * as Turn from "@rika/product/turn-record"
 import * as ThreadResult from "@rika/product/thread-result"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
@@ -8,24 +9,15 @@ import * as TranscriptProjectionModel from "@rika/transcript/transcript-projecti
 import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Effect, Function, HashMap } from "effect"
-import type { Model } from "../../../packages/terminal/src/state/model/terminal-state"
-import type { Activity } from "../../../packages/terminal/src/state/model/terminal-activity-state"
-import {
-  runningToolsActivity,
-  streamActivity,
-} from "../../../packages/terminal/src/state/model/terminal-activity-state"
-import type { ThreadItem } from "../../../packages/terminal/src/state/model/terminal-thread-state"
-import { idle } from "../../../packages/terminal/src/state/model/terminal-loadable-state"
-import { applyQueueDelta, resetQueue } from "../../../packages/terminal/src/state/model/terminal-queue-state"
-import { update as updateModel } from "../../../packages/terminal/src/state/reducer/terminal-state-reducer"
-import {
-  applyRootUnits,
-  applyTurnDelta,
-} from "../../../packages/terminal/src/presentation/transcript/terminal-transcript-presentation"
-import type {
-  TranscriptBlock,
-  TranscriptItem,
-} from "../../../packages/terminal/src/state/model/terminal-transcript-state"
+import type { Model } from "@rika/terminal/terminal-state"
+import type { Activity } from "@rika/terminal/terminal-state"
+import { runningToolsActivity, streamActivity } from "@rika/terminal/terminal-state"
+import type { ThreadItem } from "@rika/terminal/terminal-state"
+import { idle } from "@rika/terminal/terminal-state"
+import { applyQueueDelta, resetQueue } from "@rika/terminal/terminal-state"
+import { update as updateModel } from "@rika/terminal/terminal-state-reducer"
+import { applyRootUnits, applyTurnDelta } from "@rika/terminal/terminal-transcript-presentation"
+import type { TranscriptBlock, TranscriptItem } from "@rika/terminal/terminal-state"
 
 type TranscriptEvent = Extract<
   Operation.InteractiveEvent,
@@ -169,7 +161,7 @@ export const installPaletteCommands = (commands: Array<PaletteCommand>): void =>
     if (!commands.some((candidate) => candidate.id === command.id)) commands.unshift(command)
 }
 
-export const paletteCommand = (action: unknown): Operation.InteractiveCommand | undefined =>
+export const paletteCommand = (action: unknown): InteractiveCommand | undefined =>
   action !== null && typeof action === "object" && "_tag" in action && action._tag === "NewThread"
     ? { _tag: "NewThread" }
     : undefined

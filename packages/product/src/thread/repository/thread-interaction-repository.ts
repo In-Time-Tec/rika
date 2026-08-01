@@ -61,3 +61,28 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()(
   "@rika/product/thread/repository/thread-interaction-repository/Service",
 ) {}
+
+export { ResultDelivery } from "./thread-interaction-result"
+export type { RootResult, ResultRoute, ResultRouteCursor, AcceptedThreadTurn } from "./thread-interaction-result"
+export { ReceiptKind } from "./thread-interaction-admission"
+export type {
+  Invocation,
+  CreateThreadInput,
+  AppendThreadMessageInput,
+  BindThreadControlInput,
+} from "./thread-interaction-admission"
+export type {
+  BoundThreadControl,
+  DeliveredThreadResult,
+  DeliverThreadResultInput,
+  SettleThreadResultInput,
+} from "./thread-interaction-delivery"
+export {
+  RepositoryError,
+  InvocationConflict,
+  AdmissionRejected,
+  QueueFull,
+  ResultNotReady,
+} from "./thread-interaction-errors"
+export { TurnAuthor, TurnLineage } from "../model/thread-relationship"
+export type { ThreadRelationship, RelationshipCursor } from "../model/thread-relationship"

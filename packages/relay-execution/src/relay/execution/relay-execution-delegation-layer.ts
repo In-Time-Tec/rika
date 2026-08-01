@@ -1,5 +1,5 @@
-import { type RegistryInterface } from "./host/relay-thread-host-registry"
-import { handlerLayer, promoteTurnTool } from "./host/relay-thread-host"
+import { type RegistryInterface } from "./relay-thread-host-registry"
+import { handlerLayer, promoteTurnTool } from "./relay-thread-host"
 import { pinnedSelection, routeForProfile } from "../../model/routing/relay-model-selection"
 import { toolkitFor } from "../../model/routing/relay-model-tools"
 import { Deferred, Effect, Layer, Schema } from "effect"

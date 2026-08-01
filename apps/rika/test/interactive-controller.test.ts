@@ -13,7 +13,7 @@ import * as TranscriptProjectionModel from "@rika/transcript/transcript-projecti
 import * as TranscriptRecordedShell from "@rika/transcript/recorded-shell-presentation"
 import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import { ExecutionEvents, Keys, Palette, ViewState } from "@rika/terminal/terminal-state"
+import * as ViewState from "@rika/terminal/terminal-state"
 import { renderTranscriptStyled } from "@rika/terminal/opentui-surface"
 import { HashMap } from "effect"
 import { expect, it } from "vitest"
@@ -239,7 +239,7 @@ const makeProjectionFeed = (
   }
 }
 
-const key = (input: Partial<Keys.Key> & Pick<Keys.Key, "name">): Keys.Key => ({
+const key = (input: Partial<ViewState.Keys.Key> & Pick<ViewState.Keys.Key, "name">): ViewState.Keys.Key => ({
   name: input.name,
   ctrl: input.ctrl ?? false,
   alt: input.alt ?? false,
@@ -381,7 +381,9 @@ it("maps the new-thread palette action to a command and resets the transcript fr
   InteractiveController.installPaletteCommands(palette)
   InteractiveController.installPaletteCommands(palette)
   expect(palette).toEqual(InteractiveController.paletteCommands)
-  InteractiveController.installPaletteCommands(Palette.commands as Array<InteractiveController.PaletteCommand>)
+  InteractiveController.installPaletteCommands(
+    ViewState.Palette.commands as Array<InteractiveController.PaletteCommand>,
+  )
   let paletteModel = ViewState.update(ViewState.initial("/work"), {
     _tag: "KeyPressed",
     key: key({ name: "o", ctrl: true }),
@@ -978,8 +980,8 @@ it("reloads one completed subagent tree with rendered markdown and no serialized
     hasOlder: false,
     threadCostUsd: 0,
   })
-  let liveModel = ExecutionEvents.projectUnits(ViewState.initial("/work", "medium"), parent.units)
-  liveModel = ExecutionEvents.projectChildUnits(liveModel, `${target.id}:agent`, child.units)
+  let liveModel = ViewState.ExecutionEvents.projectUnits(ViewState.initial("/work", "medium"), parent.units)
+  liveModel = ViewState.ExecutionEvents.projectChildUnits(liveModel, `${target.id}:agent`, child.units)
   liveModel = { ...liveModel, expandedRowKeys: [`tool:${target.id}:agent`] }
   const rendered = renderTranscriptStyled(loaded.state.model)
   const text = rendered.chunks.map((chunk) => chunk.text).join("")
@@ -1059,8 +1061,8 @@ it("keeps cancelled child tools terminal in live and reloaded projections", () =
     hasOlder: false,
     threadCostUsd: 0,
   }).state.model
-  let live = ExecutionEvents.projectUnits(ViewState.initial("/work", "medium"), parent.units)
-  live = ExecutionEvents.projectChildUnits(live, `${target.id}:agent`, child.units)
+  let live = ViewState.ExecutionEvents.projectUnits(ViewState.initial("/work", "medium"), parent.units)
+  live = ViewState.ExecutionEvents.projectChildUnits(live, `${target.id}:agent`, child.units)
 
   for (const model of [live, loaded]) {
     expect(model.blocks).toEqual([

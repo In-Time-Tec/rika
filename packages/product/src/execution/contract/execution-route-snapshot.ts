@@ -54,6 +54,8 @@ export const ExecutionRouteSnapshot = Schema.Struct({
   ),
 })
 export type ExecutionRouteSnapshot = typeof ExecutionRouteSnapshot.Type
+export const ExecutionRoutePin = ExecutionRouteSnapshot
+export type ExecutionRoutePin = typeof ExecutionRoutePin.Type
 export const testExecutionRoute = (mode = "test"): ExecutionRouteSnapshot => {
   const route = {
     alias: "test",

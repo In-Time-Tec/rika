@@ -1,14 +1,14 @@
-import { childSessionId } from "../relay-execution-id-codec"
-import { relayModelSelection } from "../../../model/routing/relay-model-selection"
-import { toolkitFor } from "../../../model/routing/relay-model-tools"
-import { compactionPolicy } from "../../../model/routing/relay-model-compaction"
+import { childSessionId } from "./relay-execution-id-codec"
+import { relayModelSelection } from "../../model/routing/relay-model-selection"
+import { toolkitFor } from "../../model/routing/relay-model-tools"
+import { compactionPolicy } from "../../model/routing/relay-model-compaction"
 import { WorkflowDefinitionHost, Client, Content, Ids } from "@relayfx/sdk"
 import { Deferred, Effect, Layer, Schema } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
-import type { LayerOptions } from "../relay-execution-layer"
-import * as IdentifierCodec from "../relay-execution-id-codec"
-import * as ToolAdapter from "../relay-tool-runtime"
-import { presets } from "../../../agent/definition/baton-agent-definition"
+import type { LayerOptions } from "./relay-execution-layer"
+import * as IdentifierCodec from "./relay-execution-id-codec"
+import * as ToolAdapter from "./relay-tool-runtime"
+import { presets } from "../../agent/definition/baton-agent-definition"
 
 export const makeWorkflowHost = <AdditionalTools extends Record<string, Tool.Any>>(deps: {
   readonly options: Pick<

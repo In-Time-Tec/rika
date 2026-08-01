@@ -1,10 +1,11 @@
+import { TurnResult } from "@rika/product/thread-result"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import { Turn, TurnId, isRecordedShell } from "@rika/product/turn-record"
+import { Turn, TurnId } from "@rika/product/turn-record"
 import { ExecutionCheckpoint, RepositoryError } from "@rika/product/transcript-repository"
 import type { UnitDelta, DeltaCheckpointOptions, RefoldOptions } from "@rika/product/transcript-repository"
 import { support } from "./transcript-repository-support"
@@ -33,7 +34,7 @@ export const makeTranscriptSqliteCheckpoints = (sql: SqlClient) => {
       return yield* RepositoryError.make({ message: `Transcript unit ${unit.key} has a non-intrinsic order` })
     const encoded = yield* Schema.encodeEffect(UnitJson)(unit)
     const orderKey = TranscriptOrdering.encodeUnitOrder(unit.order)
-    const executionKey = isRecordedShell(turn) ? null : TranscriptCorrelation.executionKey(unit.turnId)
+    const executionKey = TurnResult.isRecordedShell(turn) ? null : TranscriptCorrelation.executionKey(unit.turnId)
     const rows =
       yield* sql`INSERT INTO rika_transcript_units (turn_id, unit_key, execution_key, thread_id, unit_order_key, tool_id, parent_id, revision, unit_json, created_at, updated_at)
       VALUES (${turn.id}, ${unit.key}, ${executionKey}, ${turn.threadId}, ${orderKey}, ${unit.content._tag === "Block" && unit.content.block._tag === "ToolCall" ? unit.content.block.id : null}, ${unit.parentId ?? null}, ${unit.revision}, ${encoded}, ${turn.createdAt}, ${turn.updatedAt})

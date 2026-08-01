@@ -26,7 +26,7 @@ const create = (
   repository.createForSubmission({
     queueCapacity: 128,
     ...input,
-    executionRoute: Turn.testExecutionRoute(),
+    executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
   })
 
 const provideLayer =
@@ -37,7 +37,7 @@ const provideLayer =
       return yield* effect.pipe(Effect.provide(context))
     })
 
-const legacyModel = (model: ExecutionRouteSnapshot.ExecutionModelRoute) => {
+const legacyModel = (model: ExecutionRouteSnapshot.ExecutionRouteModelSnapshot) => {
   const { providerConnection, registrationIdentity, ...rest } = model
   return {
     ...rest,
@@ -161,7 +161,7 @@ const _createPreBranchDatabase = (filename: string) => {
   ]
   const insertMigration = database.query("INSERT INTO rika_migrations (migration_id, name) VALUES (?, ?)")
   for (const [index, name] of migrations.entries()) insertMigration.run(index + 1, name)
-  const currentRoute = Turn.testExecutionRoute()
+  const currentRoute = ExecutionRouteSnapshot.testExecutionRoute()
   const executionRoute = JSON.stringify({
     ...currentRoute,
     main: legacyModel(currentRoute.main),

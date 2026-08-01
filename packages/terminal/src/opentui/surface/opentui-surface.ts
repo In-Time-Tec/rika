@@ -10,6 +10,9 @@ const adapterError = (cause: unknown) => AdapterError.make({ message: String(cau
 
 export class Surface extends SurfaceConstruction {}
 
+export { renderTranscriptStyled } from "../rendering/opentui-renderer"
+export { probeNativeAsset } from "../rendering/opentui-spinner"
+
 export const create = (handlers: Handlers) =>
   Effect.tryPromise({
     try: () =>

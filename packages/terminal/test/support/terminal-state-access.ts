@@ -40,14 +40,13 @@ import { includeRowEnd } from "../../src/presentation/transcript/transcript-row-
 import { execute, type Adapter, type ModelTuning, type Action } from "../../src/terminal-session"
 import {
   Mode,
-  Entry,
   Model,
   initial,
   withModeRouteMap,
   type Mode as ModeType,
-  type Entry as EntryType,
   type Model as ModelType,
 } from "../../src/state/model/terminal-state"
+import { Entry, type Entry as EntryType } from "../../src/state/model/terminal-message"
 import { ChangedFile, type ChangedFile as ChangedFileType } from "../../src/state/model/terminal-changed-file"
 import { QueueItem, type QueueItem as QueueItemType } from "../../src/state/model/terminal-queue-item"
 import type { ThreadItem } from "../../src/state/model/terminal-thread-state"

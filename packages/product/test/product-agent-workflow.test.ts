@@ -5,7 +5,7 @@ import * as ExecutionChildRun from "@rika/product/execution-child-run"
 import { Effect, Layer } from "effect"
 import * as ProductAgent from "../src/agent/product-agent-service"
 import * as Workflow from "@rika/product/workflow-service"
-import { provideLayer } from "./layer"
+import { provideLayer } from "./product-test-layer"
 import { executionRoute } from "./current-state"
 
 const failure = ExecutionBackend.BackendError.make({ message: "backend failed" })

@@ -7,7 +7,7 @@ import { modelRegistrationIdentity } from "@rika/product/model-registration-iden
 const executionModelRoute = (
   role: "main" | "oracle",
   selection: { readonly provider: string; readonly model: string; readonly registrationKey?: string },
-): ExecutionBackend.ExecutionModelRoute => ({
+): ExecutionBackend.ExecutionRouteModelSnapshot => ({
   role,
   alias: role,
   model: selection.model,

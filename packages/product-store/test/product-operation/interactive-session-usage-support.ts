@@ -6,6 +6,7 @@ import * as TurnContract from "@rika/product/turn-repository"
 import * as UsageRepositoryContract from "@rika/product/usage-repository"
 import { TestClock } from "effect/testing"
 import { ExecutionIngest } from "@rika/product/product-operation-service"
+import { makeMemory } from "../../src/usage/memory-usage-repository"
 import {
   RuntimeFixtures,
   TranscriptFixtures,
@@ -137,7 +138,7 @@ export const makeSpendHarness: (options: SpendHarnessOptions) => Effect.Effect<S
     const follows = yield* Ref.make(0)
     const blocked = yield* Ref.make(0)
     const legacy = options.legacy === true ? legacyUsageRow() : undefined
-    const usage = yield* RuntimeFixtures.UsageRepository.makeMemory({
+    const usage = yield* makeMemory({
       initial:
         legacy === undefined
           ? []

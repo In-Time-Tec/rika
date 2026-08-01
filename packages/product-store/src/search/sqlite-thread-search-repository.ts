@@ -7,6 +7,7 @@ import { SearchModel } from "./thread-search-model"
 import { ThreadSearchRow as Row } from "./thread-search-row-codec"
 
 export type Interface = SearchModel.Interface
+export { RepositoryError }
 const {
   schemaVersion,
   defaultPageSize,
