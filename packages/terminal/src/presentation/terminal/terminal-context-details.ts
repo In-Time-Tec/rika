@@ -1,4 +1,5 @@
 import { bold, fg, StyledText, type TextChunk } from "@opentui/core"
+import { Function } from "effect"
 import { formatTokens } from "./terminal-format"
 import { formatContextTokens } from "../../state/model/terminal-usage-state"
 import { activeTimeAt, activeTimeIcon, formatActiveTime } from "../../state/model/terminal-activity-time"
@@ -19,7 +20,7 @@ const cost = (model: Model): string => {
 const time = (model: Model, now: number): string =>
   model.usageTime?._tag === "Available" ? formatActiveTime(activeTimeAt(model.usageTime, now)) : `${activeTimeIcon} —`
 
-export const contextDetails = (model: Model, width: number, height: number, now: number): StyledText => {
+const contextDetailsImpl = (model: Model, width: number, height: number, now: number): StyledText => {
   const chunks: Array<TextChunk> = []
   const line = (text: string, color = colors.text) => {
     if (chunks.length > 0) chunks.push(fg(colors.text)("\n"))
@@ -49,3 +50,8 @@ export const contextDetails = (model: Model, width: number, height: number, now:
   }
   return new StyledText(chunks)
 }
+
+export const contextDetails: {
+  (model: Model, width: number, height: number, now: number): StyledText
+  (width: number, height: number, now: number): (model: Model) => StyledText
+} = Function.dual(4, contextDetailsImpl)

@@ -269,6 +269,7 @@ test(
           method: "streamText",
           reason: AiError.RateLimitError.make({}),
         })
+        const resiliencePolicy = yield* ModelResilience.make({ retrySchedule: Schedule.recurs(1) })
         const program = withBackend(
           [TestModel.failure(retryable), TestModel.text("recovered")],
           (fixture) =>
@@ -281,7 +282,7 @@ test(
               })
               return { result, requests: yield* fixture.requests }
             }),
-          { modelResilience: Effect.runSync(ModelResilience.make({ retrySchedule: Schedule.recurs(1) })) },
+          { modelResilience: resiliencePolicy },
         )
         const result = yield* program
         expect(result.result.status).toBe("completed")

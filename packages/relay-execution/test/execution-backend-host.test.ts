@@ -205,14 +205,15 @@ it.effect.each([
       native.client = fixture.implementation
       native.databaseAcquisitions = 0
       native.runtimeGraphs = 0
+      const resiliencePolicy = resilience
+        ? yield* ModelResilience.make({ retrySchedule: Schedule.recurs(0) })
+        : undefined
       const result = yield* RelayExecutionBackend.layer({
         filename: ":memory:",
         workspace: "/tmp",
         registration: model.registration,
         selection: model.selection,
-        ...(resilience
-          ? { modelResilience: Effect.runSync(ModelResilience.make({ retrySchedule: Schedule.recurs(0) })) }
-          : {}),
+        ...(resiliencePolicy === undefined ? {} : { modelResilience: resiliencePolicy }),
         ...(extensions ? { additionalToolkit: Toolkit.make(), additionalHandlerLayer: Layer.empty } : {}),
       }).pipe(Layer.provide(BunServices.layer), Layer.build, Effect.exit)
       expect(result._tag).toBe("Success")
