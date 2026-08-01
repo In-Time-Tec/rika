@@ -1,5 +1,6 @@
 import type { Message } from "../model/terminal-message"
-import type { Model, QueueItem } from "../model/terminal-state"
+import type { Model } from "../model/terminal-state"
+import type { QueueItem } from "../model/terminal-queue-item"
 import { isPrintable } from "../../presentation/terminal/terminal-keymap"
 import { context } from "./terminal-state-reducer"
 import { reduceKeyboardPrelude } from "./terminal-keyboard-prelude"

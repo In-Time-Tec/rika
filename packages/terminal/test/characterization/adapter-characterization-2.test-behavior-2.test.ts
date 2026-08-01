@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest"
 import { Effect } from "effect"
-import { buildTranscript } from "../../src/opentui/surface/opentui-surface"
+import { buildTranscript } from "../../src/opentui/rendering/opentui-renderer"
 
 import { colors } from "../../src/presentation/terminal/terminal-theme"
 const opentuiValue = vi.hoisted(() => {
@@ -252,7 +252,7 @@ import {
   _nonEmptyLines,
   model,
   _createScoped,
-} from "./adapter-characterization-2.test-support"
+} from "./adapter-characterization-2-support"
 test("matches Amp edit, wait, explore, and subagent row shapes", () => {
   const presentation = {
     edit: { family: "edit" as const, action: "edit", activeLabel: "Editing", completeLabel: "Edited" },

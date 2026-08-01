@@ -1,6 +1,8 @@
 import type { Unit } from "@rika/transcript/transcript-unit"
 import type { Key } from "../../presentation/terminal/terminal-keymap"
-import type { ChangedFile, ThreadItem, TranscriptBlock } from "./terminal-state"
+import type { ChangedFile } from "./terminal-changed-file"
+import type { ThreadItem } from "./terminal-thread-state"
+import type { TranscriptBlock } from "./terminal-transcript-state"
 
 export interface PastedTextAttachment {
   readonly type: "text" | "image"

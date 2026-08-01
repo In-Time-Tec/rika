@@ -5,7 +5,7 @@ import { idle } from "../model/terminal-loadable-state"
 import { filteredFiles, filteredThreads } from "../model/terminal-thread-navigation"
 import { filter, type PaletteAction } from "../../presentation/terminal/command-palette"
 import { isPrintable, type Key } from "../../presentation/terminal/terminal-keymap"
-import { expandPastedText } from "../model/terminal-composer-state"
+import { expandPastedText } from "../model/terminal-composer-paste"
 
 export interface KeyboardPickerContext {
   readonly insert: (model: Model, value: string) => Model

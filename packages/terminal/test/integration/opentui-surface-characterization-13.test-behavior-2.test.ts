@@ -2,7 +2,8 @@ import { createTestRenderer } from "@opentui/core/testing"
 import { expect, test } from "vitest"
 import { Effect } from "effect"
 import { Surface } from "../../src/opentui/surface/opentui-surface"
-import { initial, type Model, update } from "../../src/state/model/terminal-state"
+import { initial, type Model } from "../../src/state/model/terminal-state"
+import { update } from "../../src/state/reducer/terminal-state-reducer"
 import {
   openTui,
   _insertText,
@@ -10,7 +11,7 @@ import {
   thread,
   _giantSubagentModel,
   _collapsedSubagentModel,
-} from "./opentui-surface-characterization-13.test-support"
+} from "./opentui-surface-characterization-13-support"
 test("keeps malformed thread titles on one styled picker row", () =>
   Effect.runPromise(
     Effect.gen(function* () {

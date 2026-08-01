@@ -20,8 +20,25 @@ import * as WorkspaceIndex from "@rika/coding-tools/workspace-file-search"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import { Palette, Session, ViewState } from "@rika/terminal/terminal-state"
-import { create as createTui, probeNativeAsset } from "@rika/terminal/opentui-surface"
+import { create as createTui } from "@rika/terminal/opentui-surface"
+import { probeNativeAsset } from "../../../packages/terminal/src/opentui/rendering/opentui-spinner"
+import { Mode, Model, initial, withModeRouteMap } from "../../../packages/terminal/src/state/model/terminal-state"
+import type { ModeRouteMap as ModeRoutes } from "../../../packages/terminal/src/state/model/terminal-mode-route"
+import type { ThreadItem } from "../../../packages/terminal/src/state/model/terminal-thread-state"
+import type { ChangedFile } from "../../../packages/terminal/src/state/model/terminal-changed-file"
+import {
+  classifyPrompt,
+  displayInput,
+  promptParts,
+} from "../../../packages/terminal/src/state/model/terminal-composer-state"
+import type { PromptPart } from "../../../packages/terminal/src/state/model/terminal-composer-state"
+import { expandPastedText } from "../../../packages/terminal/src/state/model/terminal-composer-paste"
+import { nextMode, nextUsageDisplay } from "../../../packages/terminal/src/state/model/terminal-mode-selection"
+import { selectedThreadMetadata } from "../../../packages/terminal/src/state/model/terminal-thread-navigation"
+import { formatBytes } from "../../../packages/terminal/src/presentation/terminal/terminal-format"
+import { commands } from "../../../packages/terminal/src/presentation/terminal/command-palette"
+import { canSubmit, update } from "../../../packages/terminal/src/state/reducer/terminal-state-reducer"
+import { execute, type Action, type Adapter, type ModelTuning } from "../../../packages/terminal/src/terminal-session"
 import type { PathTarget } from "@rika/terminal/terminal-transcript-presentation"
 import { FetchHttpClient } from "effect/unstable/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
@@ -54,10 +71,9 @@ import { relaunchArguments } from "./relaunch-arguments"
 import { layer as residentLayer } from "./resident-client-transport"
 import { maxClientMessageBytes } from "./resident-wire"
 import * as ResidentProcessStartup from "./resident-process-startup"
-import { Format } from "@rika/terminal/terminal-state"
 import { globalPaths, workspaceDirectory, workspacePaths } from "@rika/configuration/configuration-paths"
 
-InteractiveController.installPaletteCommands(Palette.commands as Array<InteractiveController.PaletteCommand>)
+InteractiveController.installPaletteCommands(commands as Array<InteractiveController.PaletteCommand>)
 
 const startupPathService = Effect.runSync(Effect.scoped(Layer.build(Path.layer))).pipe((context) =>
   Context.get(context, Path.Path),
@@ -162,7 +178,7 @@ const imageMediaType = (path: string) => {
   return "application/octet-stream"
 }
 
-export const imagePasteBlockedNotice = (model: Pick<ViewState.Model, "editingTurnId">): string | undefined =>
+export const imagePasteBlockedNotice = (model: Pick<Model, "editingTurnId">): string | undefined =>
   model.editingTurnId === undefined ? undefined : "Images cannot be pasted while editing a queued prompt"
 
 const pastedImageFormat = (bytes: Uint8Array, declaredMediaType?: string) => {
@@ -267,9 +283,9 @@ class ExternalBoundaryError extends Schema.TaggedErrorClass<ExternalBoundaryErro
 
 export const maxAttachmentBytes = 5_000_000
 const maxPromptPartsBytes = maxClientMessageBytes - 65_536
-const attachmentMegabytes = Format.formatBytes
+const attachmentMegabytes = formatBytes
 
-const materializePromptPartsImpl = (parts: ReadonlyArray<ViewState.PromptPart>, workspace: string) =>
+const materializePromptPartsImpl = (parts: ReadonlyArray<PromptPart>, workspace: string) =>
   Effect.forEach(
     parts,
     (part, index): Effect.Effect<ExecutionRequest.PromptPart, PromptAttachmentError, FileSystem.FileSystem> => {
@@ -343,25 +359,25 @@ const materializePromptPartsImpl = (parts: ReadonlyArray<ViewState.PromptPart>, 
   )
 
 export const materializePromptParts: {
-  (workspace: string): (parts: ReadonlyArray<ViewState.PromptPart>) => ReturnType<typeof materializePromptPartsImpl>
-  (parts: ReadonlyArray<ViewState.PromptPart>, workspace: string): ReturnType<typeof materializePromptPartsImpl>
+  (workspace: string): (parts: ReadonlyArray<PromptPart>) => ReturnType<typeof materializePromptPartsImpl>
+  (parts: ReadonlyArray<PromptPart>, workspace: string): ReturnType<typeof materializePromptPartsImpl>
 } = Function.dual(2, materializePromptPartsImpl)
 
 const initialSubmitActionImpl = (
   prompt: ReadonlyArray<string>,
-  mode: ViewState.Mode,
-): Extract<Session.Action, { readonly _tag: "Submit" }> | undefined => {
+  mode: Mode,
+): Extract<Action, { readonly _tag: "Submit" }> | undefined => {
   if (prompt.length === 0) return undefined
   const value = prompt.join(" ")
-  return { _tag: "Submit", prompt: value, parts: ViewState.promptParts(value), mode }
+  return { _tag: "Submit", prompt: value, parts: promptParts(value), mode }
 }
 
 export const initialSubmitAction: {
-  (mode: ViewState.Mode): (prompt: ReadonlyArray<string>) => ReturnType<typeof initialSubmitActionImpl>
-  (prompt: ReadonlyArray<string>, mode: ViewState.Mode): ReturnType<typeof initialSubmitActionImpl>
+  (mode: Mode): (prompt: ReadonlyArray<string>) => ReturnType<typeof initialSubmitActionImpl>
+  (prompt: ReadonlyArray<string>, mode: Mode): ReturnType<typeof initialSubmitActionImpl>
 } = Function.dual(2, initialSubmitActionImpl)
 
-const parseChangedFilesImpl = (statusText: string, numstatText: string): ReadonlyArray<ViewState.ChangedFile> => {
+const parseChangedFilesImpl = (statusText: string, numstatText: string): ReadonlyArray<ChangedFile> => {
   const counts = new Map<string, { added: number; removed: number }>()
   const numstatRecords = numstatText.split("\0")
   for (let index = 0; index < numstatRecords.length - 1; index += 1) {
@@ -377,7 +393,7 @@ const parseChangedFilesImpl = (statusText: string, numstatText: string): Readonl
       removed: removed === "-" ? 0 : Number(removed),
     })
   }
-  const files: Array<ViewState.ChangedFile> = []
+  const files: Array<ChangedFile> = []
   const statusRecords = statusText.split("\0")
   for (let index = 0; index < statusRecords.length - 1; index += 1) {
     const record = statusRecords[index]!
@@ -391,8 +407,8 @@ const parseChangedFilesImpl = (statusText: string, numstatText: string): Readonl
 }
 
 export const parseChangedFiles: {
-  (numstatText: string): (statusText: string) => ReadonlyArray<ViewState.ChangedFile>
-  (statusText: string, numstatText: string): ReadonlyArray<ViewState.ChangedFile>
+  (numstatText: string): (statusText: string) => ReadonlyArray<ChangedFile>
+  (statusText: string, numstatText: string): ReadonlyArray<ChangedFile>
 } = Function.dual(2, parseChangedFilesImpl)
 
 const gitOutput = (arguments_: ReadonlyArray<string>) => {
@@ -678,7 +694,7 @@ export const settleTuiInitialization: {
 
 export interface InteractiveTuiOptions {
   readonly editor?: string | undefined
-  readonly modeRoutes?: (() => ViewState.ModeRoutes | undefined) | undefined
+  readonly modeRoutes?: (() => ModeRoutes | undefined) | undefined
   readonly makeRenderer?: NonNullable<Parameters<typeof createTui>[0]["makeRenderer"]>
   readonly writeTerminalTitle?: (sequence: string) => void
 }
@@ -696,8 +712,8 @@ export const interactiveTui =
         const fork = Effect.runForkWith(context)
         const resolvedModeRoutes = options.modeRoutes?.()
         return yield* Effect.callback<void, Operation.OperationUnavailable>((resume) => {
-          let model = ViewState.initial(input.workspace ?? process.cwd(), input.mode ?? "medium")
-          if (resolvedModeRoutes !== undefined) model = ViewState.withModeRoutes(model, resolvedModeRoutes)
+          let model = initial(input.workspace ?? process.cwd(), input.mode ?? "medium")
+          if (resolvedModeRoutes !== undefined) model = withModeRouteMap(model, resolvedModeRoutes)
           let workingFrame: string | undefined
           const writeTerminalTitle =
             options.writeTerminalTitle ?? ((sequence: string) => process.stdout.write(sequence))
@@ -705,7 +721,7 @@ export const interactiveTui =
             const threadId = model.currentThreadId
             const title =
               model.currentThreadTitle ??
-              (model.threads as ReadonlyArray<ViewState.ThreadItem>).find((thread) => thread.id === threadId)?.title
+              (model.threads as ReadonlyArray<ThreadItem>).find((thread) => thread.id === threadId)?.title
             if (title !== undefined)
               writeTerminalTitle(terminalTitleSequence(title, model.workspace, model.busy ? workingFrame : undefined))
           }
@@ -731,7 +747,7 @@ export const interactiveTui =
           let liveTranscriptProjections = new Map<string, TranscriptProjectionModel.Projection>()
           let projectionStreams = new Map<string, InteractiveController.ProjectionStream>()
           let threadCostUsd: number | undefined
-          let lastAvailableUsageCost: Extract<ViewState.Model["usageCost"], { readonly _tag: "Available" }> | undefined
+          let lastAvailableUsageCost: Extract<Model["usageCost"], { readonly _tag: "Available" }> | undefined
           let transcriptHasOlder = false
           let transcriptHasNewer = false
           let transcriptOldestCursor: TranscriptPage.PageCursor | undefined
@@ -914,7 +930,7 @@ export const interactiveTui =
                     projectionModelPhase: seed.modelPhase,
                   })),
                 ]
-                model = ViewState.update(model, {
+                model = update(model, {
                   _tag: "TurnStarted",
                   turnId: event.turn.id,
                   prompt: event.turn.prompt,
@@ -926,14 +942,14 @@ export const interactiveTui =
                 event.selectionEpoch === activeSelectionEpoch &&
                 (model.currentThreadId === undefined || model.currentThreadId === event.threadId)
               )
-                model = ViewState.update(model, {
+                model = update(model, {
                   _tag: "SubmissionAdmitted",
                   turnId: event.turnId,
                   status: event.status,
                   ...(event.submissionId === undefined ? {} : { submissionId: event.submissionId }),
                 })
             } else if (event._tag === "ThreadsListed") {
-              model = ViewState.update(model, {
+              model = update(model, {
                 _tag: "ThreadsReplaced",
                 threads: event.threads.map((thread) => ({
                   id: thread.id,
@@ -951,7 +967,7 @@ export const interactiveTui =
               if (event.threadId !== undefined && event.selectionEpoch !== activeSelectionEpoch) return
               if (event.threadId !== undefined && model.currentThreadId !== event.threadId) return
               if (event.action === "cancelled")
-                model = ViewState.update(model, {
+                model = update(model, {
                   _tag: "ExecutionCancelled",
                   ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
                   ...(event.agentResponseArrived === undefined
@@ -964,7 +980,7 @@ export const interactiveTui =
                 event.steeringSequence !== undefined &&
                 event.steeringText !== undefined
               )
-                model = ViewState.update(model, {
+                model = update(model, {
                   _tag: "SteeringAccepted",
                   turnId: event.turnId,
                   sequence: event.steeringSequence,
@@ -974,14 +990,14 @@ export const interactiveTui =
               if (event.threadId !== undefined && event.selectionEpoch !== activeSelectionEpoch) return
               if (event.threadId !== undefined && model.currentThreadId !== event.threadId) return
               if (event.action === "steer" && event.turnId !== undefined && event.steeringText !== undefined)
-                model = ViewState.update(model, {
+                model = update(model, {
                   _tag: "SteeringFailed",
                   turnId: event.turnId,
                   text: event.steeringText,
                   message: event.message,
                 })
               if (event.action === "cancel")
-                model = ViewState.update(model, {
+                model = update(model, {
                   _tag: "CancelFailed",
                   ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
                   message: event.message,
@@ -989,7 +1005,7 @@ export const interactiveTui =
             } else if (event._tag === "ContextDiagnostics") {
               if (event.selectionEpoch !== activeSelectionEpoch) return
               if (model.currentThreadId !== event.threadId) return
-              model = ViewState.update(model, {
+              model = update(model, {
                 _tag: "BlockAdded",
                 block: {
                   _tag: "Notification",
@@ -1000,7 +1016,7 @@ export const interactiveTui =
             } else if (event._tag === "ExecutionFailed") {
               if (event.threadId !== undefined && event.selectionEpoch !== activeSelectionEpoch) return
               if (event.threadId !== undefined && model.currentThreadId !== event.threadId) return
-              model = ViewState.update(model, {
+              model = update(model, {
                 _tag: "ExecutionFailed",
                 ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
                 message: event.message,
@@ -1011,30 +1027,30 @@ export const interactiveTui =
               model = InteractiveController.updateQueue(model, event).model
             } else if (event._tag === "ShellCompleted") {
               if (model.currentThreadId !== event.threadId) return
-              if (event.incognito) model = ViewState.update(model, { _tag: "AssistantCompleted", text: event.text })
-              model = ViewState.update(model, { _tag: "ExecutionCompleted" })
+              if (event.incognito) model = update(model, { _tag: "AssistantCompleted", text: event.text })
+              model = update(model, { _tag: "ExecutionCompleted" })
             } else if (event._tag === "TitleCostUpdated") {
               if (model.currentThreadId === event.threadId) {
                 threadCostUsd = event.threadCostUsd
                 model = { ...model, costUsd: event.threadCostUsd }
               }
             } else if (event._tag === "ThreadTitled") {
-              model = ViewState.update(model, {
+              model = update(model, {
                 _tag: "ThreadTitleChanged",
                 threadId: event.threadId,
                 title: event.title,
               })
               if (model.currentThreadId === event.threadId) refreshTerminalTitle()
             } else if (event._tag === "ThreadActivated") {
-              model = ViewState.update(model, {
+              model = update(model, {
                 _tag: "ThreadActivated",
                 threadId: event.threadId,
                 title: event.title,
               })
               if (model.currentThreadId === event.threadId) refreshTerminalTitle()
             } else if (event._tag === "ThreadPreviewLoaded") {
-              if (model.threadSwitcher.open && ViewState.selectedThreadMetadata(model)?.id === event.threadId)
-                model = ViewState.update(model, {
+              if (model.threadSwitcher.open && selectedThreadMetadata(model)?.id === event.threadId)
+                model = update(model, {
                   _tag: "ThreadPreviewLoaded",
                   threadId: event.threadId,
                   turns: event.turns.map((turn) => ({
@@ -1043,7 +1059,7 @@ export const interactiveTui =
                   })),
                 })
             } else {
-              model = ViewState.update(model, event)
+              model = update(model, event)
             }
             render(
               event._tag === "ContextDiagnostics" ||
@@ -1114,7 +1130,7 @@ export const interactiveTui =
             const threadId = model.currentThreadId
             const threadTitle =
               model.currentThreadTitle ??
-              (model.threads as ReadonlyArray<ViewState.ThreadItem>).find((thread) => thread.id === threadId)?.title
+              (model.threads as ReadonlyArray<ThreadItem>).find((thread) => thread.id === threadId)?.title
             try {
               process.stdout.write(
                 renderGoodbye({
@@ -1229,12 +1245,12 @@ export const interactiveTui =
           process.on("SIGCONT", continueFromSuspend)
           const submit = (
             prompt: string,
-            parts: ReadonlyArray<ViewState.PromptPart>,
-            mode: ViewState.Mode,
-            tuning?: Session.ModelTuning,
+            parts: ReadonlyArray<PromptPart>,
+            mode: Mode,
+            tuning?: ModelTuning,
             submissionId?: string,
           ) => {
-            const classified = ViewState.classifyPrompt(prompt)
+            const classified = classifyPrompt(prompt)
             const effect =
               classified._tag === "Shell"
                 ? session.shell(
@@ -1248,7 +1264,7 @@ export const interactiveTui =
                     ),
                     Effect.catchTag("PromptAttachmentError", (failure) =>
                       Effect.sync(() => {
-                        let restored: ViewState.Model = {
+                        let restored: Model = {
                           ...model,
                           input: "",
                           cursor: 0,
@@ -1259,7 +1275,7 @@ export const interactiveTui =
                         for (const [index, part] of parts.entries()) {
                           if (part.type === "image") {
                             if (index !== failure.index)
-                              restored = ViewState.update(restored, { _tag: "ImageInserted", path: part.path })
+                              restored = update(restored, { _tag: "ImageInserted", path: part.path })
                           } else {
                             restored = {
                               ...restored,
@@ -1271,7 +1287,7 @@ export const interactiveTui =
                             }
                           }
                         }
-                        model = ViewState.update(restored, { _tag: "ExecutionFailed", message: failure.message })
+                        model = update(restored, { _tag: "ExecutionFailed", message: failure.message })
                         renderer?.surface.update(model)
                       }),
                     ),
@@ -1315,7 +1331,7 @@ export const interactiveTui =
             Effect.gen(function* () {
               yield* Effect.sync(() => {
                 if (generation !== selectionGeneration) return
-                model = ViewState.update(model, { _tag: "ThreadOpenRequested" })
+                model = update(model, { _tag: "ThreadOpenRequested" })
                 renderer?.surface.update(model)
                 renderSuppressed = true
               })
@@ -1324,7 +1340,7 @@ export const interactiveTui =
                   Effect.sync(() => {
                     if (generation !== selectionGeneration) return
                     renderSuppressed = false
-                    model = ViewState.update(model, { _tag: "ThreadOpenCompleted" })
+                    model = update(model, { _tag: "ThreadOpenCompleted" })
                     renderer?.surface.update(model)
                   }),
                 ),
@@ -1365,7 +1381,7 @@ export const interactiveTui =
               Effect.tap((files) =>
                 Effect.sync(() => {
                   const current = model
-                  model = ViewState.update(current, { _tag: "ChangedFilesReplaced", files })
+                  model = update(current, { _tag: "ChangedFilesReplaced", files })
                   if (model !== current) renderer?.surface.update(model)
                 }),
               ),
@@ -1393,7 +1409,7 @@ export const interactiveTui =
                   const relative = `${workspaceDirectory}/compose-${now}.md`
                   const file = `${model.workspace}/${relative}`
                   yield* mkdir(`${model.workspace}/.rika`, { recursive: true })
-                  yield* fileSystem.writeFileString(file, ViewState.displayInput(model))
+                  yield* fileSystem.writeFileString(file, displayInput(model))
                   const resumeTerminal = pauseTerminal()
                   yield* childExit("run editor", [options.editor, file], {
                     stdin: "inherit",
@@ -1403,7 +1419,7 @@ export const interactiveTui =
                   }).pipe(Effect.ensuring(Effect.sync(resumeTerminal)))
                   const edited = yield* fileSystem.readFileString(file)
                   yield* rm(file, { force: true })
-                  model = ViewState.update(model, { _tag: "ComposerReplaced", text: edited.replace(/\n$/, "") })
+                  model = update(model, { _tag: "ComposerReplaced", text: edited.replace(/\n$/, "") })
                   renderer?.surface.update(model)
                 }),
               ),
@@ -1463,7 +1479,7 @@ export const interactiveTui =
               ),
             )
           }
-          const adapter: Session.Adapter = {
+          const adapter: Adapter = {
             submit,
             quit: () => close(),
             editQueued: (id, prompt) => run(session.editQueued(id, prompt)),
@@ -1477,13 +1493,13 @@ export const interactiveTui =
             },
           }
           const consumePendingAction = () => {
-            const action = model.pendingAction as Session.Action | undefined
+            const action = model.pendingAction as Action | undefined
             const paletteCommand = InteractiveController.paletteCommand(action)
             if (paletteCommand?._tag === "NewThread") startSelection(() => session.newThread)
             else if (action !== undefined) {
-              Session.execute(adapter, action)
+              execute(adapter, action)
             }
-            model = ViewState.update(model, { _tag: "PaletteActionConsumed" })
+            model = update(model, { _tag: "PaletteActionConsumed" })
           }
           initialization = fork(
             settleTuiInitialization(
@@ -1496,7 +1512,7 @@ export const interactiveTui =
                 },
                 openPath,
                 scroll: (offset) => {
-                  model = ViewState.update(model, { _tag: "ScrollMoved", offset })
+                  model = update(model, { _tag: "ScrollMoved", offset })
                   if (offset <= 0 && !loadingOlder) {
                     const threadId = model.currentThreadId
                     const before = transcriptOldestCursor
@@ -1522,18 +1538,18 @@ export const interactiveTui =
                   if (offset > 0 && !loadingOlder) requestNewerPage()
                 },
                 scrollGeometry: (offset) => {
-                  model = ViewState.update(model, { _tag: "ScrollMoved", offset })
+                  model = update(model, { _tag: "ScrollMoved", offset })
                 },
                 scrollFollow: () => {
-                  model = ViewState.update(model, { _tag: "ScrollFollowed" })
+                  model = update(model, { _tag: "ScrollFollowed" })
                   requestNewerPage()
                 },
                 paste: (text) => {
-                  model = ViewState.update(model, { _tag: "Pasted", text })
+                  model = update(model, { _tag: "Pasted", text })
                   renderer?.surface.update(model)
                 },
                 expandPaste: (token) => {
-                  model = ViewState.update(model, { _tag: "PastedTextExpanded", token })
+                  model = update(model, { _tag: "PastedTextExpanded", token })
                   renderer?.surface.update(model)
                 },
                 pasteImage: (image) => {
@@ -1548,14 +1564,14 @@ export const interactiveTui =
                       renderer?.surface.showToast("Pasted image must be a non-empty PNG, JPEG, GIF, or WebP")
                       return
                     }
-                    model = ViewState.update(model, { _tag: "ImageInserted", path })
+                    model = update(model, { _tag: "ImageInserted", path })
                     renderer?.surface.update(model)
                     run(
                       persistPastedImage(model.workspace, path, image.bytes).pipe(
                         Effect.tap((persisted) =>
                           Effect.sync(() => {
                             if (persisted) return
-                            model = ViewState.update(model, { _tag: "ImageRemoved", path })
+                            model = update(model, { _tag: "ImageRemoved", path })
                             renderer?.surface.update(model)
                             renderer?.surface.showToast("Pasted image could not be saved")
                           }),
@@ -1573,7 +1589,7 @@ export const interactiveTui =
                             renderer?.surface.showToast("Clipboard does not contain a supported non-empty PNG image")
                             return
                           }
-                          model = ViewState.update(model, { _tag: "ImageInserted", path })
+                          model = update(model, { _tag: "ImageInserted", path })
                           renderer?.surface.update(model)
                         }),
                       ),
@@ -1582,19 +1598,19 @@ export const interactiveTui =
                   )
                 },
                 clickToggle: (unit) => {
-                  model = ViewState.update(model, { _tag: "DetailToggled", id: unit })
+                  model = update(model, { _tag: "DetailToggled", id: unit })
                   renderer?.surface.update(model)
                 },
                 usageToggle: () => {
                   model = {
                     ...model,
-                    usageDisplay: ViewState.nextUsageDisplay(model.usageDisplay),
+                    usageDisplay: nextUsageDisplay(model.usageDisplay),
                   }
                   render()
                 },
                 modeToggle: () => {
                   if (model.busy) return
-                  model = { ...model, mode: ViewState.nextMode(model.mode) }
+                  model = { ...model, mode: nextMode(model.mode) }
                   render()
                 },
                 key: (key) => {
@@ -1607,28 +1623,23 @@ export const interactiveTui =
                     return
                   }
                   const wasChangedFilesOpen = model.changedFilesOpen
-                  const beforePreviewId = model.threadSwitcher.open
-                    ? ViewState.selectedThreadMetadata(model)?.id
-                    : undefined
-                  const submitting = key.name === "return" && !key.shift && !key.ctrl && ViewState.canSubmit(model)
+                  const beforePreviewId = model.threadSwitcher.open ? selectedThreadMetadata(model)?.id : undefined
+                  const submitting = key.name === "return" && !key.shift && !key.ctrl && canSubmit(model)
                   const submissionId = submitting ? `submission-${++submissionSequence}` : undefined
                   const prompt = submitting ? model.input : undefined
-                  const parts = prompt === undefined ? undefined : ViewState.promptParts(prompt, model.pastedText)
-                  const submittedPrompt =
-                    prompt === undefined ? undefined : ViewState.expandPastedText(prompt, model.pastedText)
-                  model = ViewState.update(model, { _tag: "KeyPressed", key })
+                  const parts = prompt === undefined ? undefined : promptParts(prompt, model.pastedText)
+                  const submittedPrompt = prompt === undefined ? undefined : expandPastedText(prompt, model.pastedText)
+                  model = update(model, { _tag: "KeyPressed", key })
                   if (submitting)
-                    model = ViewState.update(model, {
+                    model = update(model, {
                       _tag: "Submitted",
                       ...(submissionId === undefined ? {} : { submissionId }),
                     })
                   if (!wasChangedFilesOpen && model.changedFilesOpen)
-                    model = ViewState.update(model, { _tag: "ChangedFilesRequested" })
-                  const afterPreviewId = model.threadSwitcher.open
-                    ? ViewState.selectedThreadMetadata(model)?.id
-                    : undefined
+                    model = update(model, { _tag: "ChangedFilesRequested" })
+                  const afterPreviewId = model.threadSwitcher.open ? selectedThreadMetadata(model)?.id : undefined
                   if (afterPreviewId !== undefined && afterPreviewId !== beforePreviewId)
-                    model = ViewState.update(model, { _tag: "ThreadPreviewRequested" })
+                    model = update(model, { _tag: "ThreadPreviewRequested" })
                   renderer?.surface.update(model)
                   if (!wasChangedFilesOpen && model.changedFilesOpen) run(loadChangedFiles())
                   if (afterPreviewId !== undefined && afterPreviewId !== beforePreviewId) {
@@ -1647,7 +1658,7 @@ export const interactiveTui =
                   }
                   if (submittedPrompt !== undefined && submittedPrompt.length > 0 && parts !== undefined) {
                     submittedSinceIdle = true
-                    Session.execute(adapter, {
+                    execute(adapter, {
                       _tag: "Submit",
                       prompt: submittedPrompt,
                       parts,
@@ -1658,29 +1669,29 @@ export const interactiveTui =
                   }
                   if (!model.busy && model.activeTurnId === undefined && model.activity === undefined)
                     submittedSinceIdle = false
-                  const action = model.pendingAction as Session.Action | undefined
+                  const action = model.pendingAction as Action | undefined
                   if (action !== undefined) consumePendingAction()
                 },
                 resize: (width, height) => {
-                  model = ViewState.update(model, { _tag: "Resized", width, height })
+                  model = update(model, { _tag: "Resized", width, height })
                   renderer?.surface.update(model)
                 },
                 composerResize: (height) => {
-                  model = ViewState.update(model, { _tag: "ComposerHeightChanged", height })
+                  model = update(model, { _tag: "ComposerHeightChanged", height })
                   renderer?.surface.update(model)
                 },
                 sidebarResize: (width) => {
-                  model = ViewState.update(model, { _tag: "SidebarWidthChanged", width })
+                  model = update(model, { _tag: "SidebarWidthChanged", width })
                   renderer?.surface.update(model)
                 },
                 threadSidebarSelect: (index) => {
-                  model = ViewState.update(model, { _tag: "ThreadSidebarSelectionConfirmed", index })
+                  model = update(model, { _tag: "ThreadSidebarSelectionConfirmed", index })
                   renderer?.surface.update(model)
-                  const action = model.pendingAction as Session.Action | undefined
+                  const action = model.pendingAction as Action | undefined
                   if (action !== undefined) consumePendingAction()
                 },
                 threadPreviewScroll: (offset) => {
-                  model = ViewState.update(model, { _tag: "ThreadPreviewScrolled", offset })
+                  model = update(model, { _tag: "ThreadPreviewScrolled", offset })
                   renderer?.surface.update(model)
                 },
               }),
@@ -1699,7 +1710,7 @@ export const interactiveTui =
                     pendingJobControlPause = false
                     suspend()
                   }
-                  model = ViewState.update(model, { _tag: "FilesRequested" })
+                  model = update(model, { _tag: "FilesRequested" })
                   created.surface.update(model)
                   run(Effect.logInfo("tui.renderer.started"))
                   if (closed) return
@@ -1709,13 +1720,13 @@ export const interactiveTui =
                     workspaceGlob(model.workspace, "**/*", 10_000).pipe(
                       Effect.tap((files) =>
                         Effect.sync(() => {
-                          model = ViewState.update(model, { _tag: "FilesReplaced", files: files.toSorted() })
+                          model = update(model, { _tag: "FilesReplaced", files: files.toSorted() })
                           created.surface.update(model)
                         }),
                       ),
                       Effect.catch((error) =>
                         Effect.sync(() => {
-                          model = ViewState.update(model, { _tag: "FilesFailed", message: error.message })
+                          model = update(model, { _tag: "FilesFailed", message: error.message })
                           created.surface.update(model)
                         }).pipe(Effect.andThen(Effect.logWarning(`workspace file index failed: ${error.message}`))),
                       ),
@@ -1728,7 +1739,7 @@ export const interactiveTui =
                         Effect.sync(() => {
                           const branch = text.trim()
                           if (exit === 0 && branch.length > 0 && branch !== "HEAD") {
-                            model = ViewState.update(model, { _tag: "BranchDetected", branch })
+                            model = update(model, { _tag: "BranchDetected", branch })
                             created.surface.update(model)
                           }
                         }),
@@ -1748,7 +1759,7 @@ export const interactiveTui =
                         initialSubmitAction(input.prompt, model.mode) === undefined
                           ? Effect.void
                           : Effect.sync(() => {
-                              Session.execute(adapter, initialSubmitAction(input.prompt, model.mode)!)
+                              execute(adapter, initialSubmitAction(input.prompt, model.mode)!)
                             }),
                       ),
                     ),
@@ -1834,7 +1845,7 @@ const start = () => {
   const residentRuntime = import.meta.path.startsWith("/$bunfs/")
     ? { executable: join(dirname(process.execPath), ".rika-resident"), arguments: [] }
     : { executable: process.execPath, arguments: [join(import.meta.dir, "resident-main.ts")] }
-  let clientModeRoutes: ViewState.ModeRoutes | undefined
+  let clientModeRoutes: ModeRoutes | undefined
   const clientOwnedInteractiveFunction = interactiveTui({ editor, modeRoutes: () => clientModeRoutes })
 
   const observedProgram = <A, E>(role: Logging.ProcessRole, dataRoot: string, program: Effect.Effect<A, E>) =>
@@ -1853,7 +1864,7 @@ const start = () => {
                   }),
                 ),
               )
-              clientModeRoutes = ModelRouteLabel.modeRouteLabels(effectiveConfig.settings) as ViewState.ModeRoutes
+              clientModeRoutes = ModelRouteLabel.modeRouteLabels(effectiveConfig.settings) as ModeRoutes
               return yield* program.pipe(
                 Effect.provideService(
                   References.MinimumLogLevel,

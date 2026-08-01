@@ -13,14 +13,11 @@ import {
 } from "@opentui/core"
 import { Clock, Effect, Fiber, Schedule } from "effect"
 import { fromOpenTui, type Key } from "../../presentation/terminal/terminal-keymap"
-import {
-  activeTimeAt,
-  activeTimeIcon,
-  formatActiveTime,
-  formatActivity,
-  pastedTextTokenAt,
-  type Model,
-} from "../../state/model/terminal-state"
+import { activeTimeAt } from "../../state/model/terminal-activity-time"
+import { type Model } from "../../state/model/terminal-state"
+import { activeTimeIcon, formatActiveTime } from "../../state/model/terminal-activity-time"
+import { formatActivity } from "../../state/model/terminal-activity-state"
+import { pastedTextTokenAt } from "../../state/model/terminal-composer-paste"
 import { SurfaceOverlayRegion } from "./opentui-overlay-region"
 import { colors } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "../rendering/terminal-text-adapter"

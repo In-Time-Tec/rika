@@ -1,24 +1,12 @@
 import { TextAttributes } from "../src/presentation/markdown/styled-text"
 import { expect, test } from "vitest"
-import { buildTranscript } from "../src/opentui/surface/opentui-surface"
+import { buildTranscript } from "../src/opentui/rendering/opentui-renderer"
 import { colors } from "../src/presentation/terminal/terminal-theme"
 import { renderToolSummary } from "../src/presentation/tool/tool-summary"
-import {
-  expandableRowIds,
-  rows as transcriptUnits,
-} from "../src/presentation/transcript/terminal-transcript-presentation"
+import { expandableRowIds, transcriptUnits } from "../src/presentation/transcript/transcript-row"
 
-import {
-  type ToolCall,
-  call,
-  model,
-  text,
-  chunkFor,
-  expectForeground,
-  hasAttribute,
-  shellPresentation,
-  explore,
-} from "./tool-presentation.test-support"
+import { toolFixtures, type ToolCall } from "./tool-presentation-support"
+const { call, model, text, chunkFor, expectForeground, hasAttribute, shellPresentation, explore } = toolFixtures
 test("styles tool actions as primary and paths and aggregate counts as muted", () => {
   const read = call("read", "read", { path: "src/a.ts" }, explore("read", "file"), { detail: "src/a.ts" })
   const edit = call(

@@ -3,13 +3,14 @@ import { expect, test } from "vitest"
 import { Effect } from "effect"
 import { Surface } from "../../src/opentui/surface/opentui-surface"
 import { colors } from "../../src/presentation/terminal/terminal-theme"
-import { initial, type Model, update } from "../../src/state/model/terminal-state"
+import { initial, type Model } from "../../src/state/model/terminal-state"
+import { update } from "../../src/state/reducer/terminal-state-reducer"
 import {
   openTui,
   _insertText,
   _giantSubagentModel,
   _collapsedSubagentModel,
-} from "./opentui-surface-characterization-8.test-support"
+} from "./opentui-surface-characterization-8-support"
 test("toggles expandable transcript headers without selecting them and keeps bodies selectable", () =>
   Effect.runPromise(
     Effect.gen(function* () {

@@ -2,12 +2,11 @@ import { bold, bg, dim, fg, StyledText, type TextChunk } from "@opentui/core"
 import stringWidth from "string-width"
 import type { Model } from "../../state/model/terminal-state"
 import { modeIds } from "@rika/configuration/behavior-mode"
-
 import { colors } from "../../presentation/terminal/terminal-theme"
-import { displayInput } from "../../state/model/terminal-state"
+import { displayInput } from "../../state/model/terminal-composer-state"
 import { truncateToWidth } from "../../presentation/terminal/terminal-format"
 import type { Command } from "../../presentation/terminal/command-palette"
-import type { ModeRouteLabel } from "../../state/model/terminal-state"
+import type { ModeRouteLabel } from "../../state/model/terminal-mode-route"
 const displayCursorOffset = (model: Model): number => {
   let offset = model.cursor
   for (const attachment of model.pastedText) {

@@ -2,7 +2,7 @@ import { CliRenderEvents } from "@opentui/core"
 import { sidebarFileRows, sidebarInnerWidth, renderFileRows } from "../rendering/opentui-render-block"
 import { SurfaceTranscriptRegion } from "./opentui-transcript-region"
 import type { Model } from "../../state/model/terminal-state"
-import { contentColumnWidth } from "../../state/model/terminal-state"
+import { contentColumnWidth } from "../../state/model/terminal-layout-state"
 import { spacing } from "../../presentation/terminal/terminal-theme"
 
 export abstract class SurfaceSidebarRegion extends SurfaceTranscriptRegion {

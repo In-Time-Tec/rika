@@ -1,50 +1,7 @@
 import { createCliRenderer } from "@opentui/core"
 import { Clock as EffectClock, Effect, Schema } from "effect"
 import { SurfaceConstruction } from "./opentui-surface-construction"
-import type { Handlers, SurfaceOptions } from "./opentui-surface-state"
-import { renderBlock, renderChangedFiles, renderSidebar } from "../rendering/opentui-render-block"
-import {
-  probeNativeAsset,
-  idleSpinnerFrame,
-  loaderFrame,
-  spinnerFrames,
-  spinnerInterval,
-  statusSpinnerFrames,
-  ToolSpinner,
-} from "../rendering/opentui-spinner"
-import {
-  renderTranscriptStyled,
-  boundedTranscriptModel,
-  buildTranscript,
-  maxBoundedTranscriptItems,
-  maxMountedTranscriptEntries,
-  transcriptWrapWidth,
-} from "../rendering/opentui-renderer"
-import { clipStyledLine, previewBoxRows } from "./opentui-overlay-content"
-import { formatTokens } from "../../presentation/terminal/terminal-format"
-
-export {
-  renderBlock,
-  renderChangedFiles,
-  renderSidebar,
-  idleSpinnerFrame,
-  loaderFrame,
-  probeNativeAsset,
-  spinnerFrames,
-  spinnerInterval,
-  statusSpinnerFrames,
-  ToolSpinner,
-  renderTranscriptStyled,
-  boundedTranscriptModel,
-  buildTranscript,
-  maxBoundedTranscriptItems,
-  maxMountedTranscriptEntries,
-  transcriptWrapWidth,
-}
-export { clipStyledLine, previewBoxRows }
-export type { Handlers, SurfaceOptions }
-export { maxMountedTranscriptRows } from "../../presentation/transcript/terminal-transcript-presentation"
-export { formatTokens }
+import type { Handlers } from "./opentui-surface-state"
 
 export class AdapterError extends Schema.TaggedErrorClass<AdapterError>()("TuiAdapterError", {
   message: Schema.String,

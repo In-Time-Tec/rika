@@ -2,15 +2,12 @@ import { createTestRenderer } from "@opentui/core/testing"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Effect, FileSystem, Path, Schema } from "effect"
 import { Surface } from "../src/opentui/surface/opentui-surface"
-import {
-  initial,
-  ready,
-  replaceQueue,
-  update,
-  type Model,
-  type ThreadItem,
-  type TranscriptBlock,
-} from "../src/state/model/terminal-state"
+import { initial, type Model } from "../src/state/model/terminal-state"
+import { ready } from "../src/state/model/terminal-loadable-state"
+import { replaceQueue } from "../src/state/model/terminal-queue-state"
+import { update } from "../src/state/reducer/terminal-state-reducer"
+import { type ThreadItem } from "../src/state/model/terminal-thread-state"
+import { type TranscriptBlock } from "../src/state/model/terminal-transcript-state"
 
 export const visualMetadata = {
   schema: 2,

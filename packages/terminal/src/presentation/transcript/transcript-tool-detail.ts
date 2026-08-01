@@ -1,62 +1,16 @@
 import { partialInputRecord } from "@rika/transcript/partial-tool-input"
 import { Function, Option, Schema } from "effect"
 import { escapeControlCharacters } from "../terminal/terminal-format"
-import type { Model, TranscriptBlock } from "../../state/model/terminal-state"
-
-export type ToolGroupKind = "explore" | "edit" | "shell" | "other"
-
-export type ToolKind = "read" | "search" | "edit" | "shell" | "other"
-
-export type AgentOutcome =
-  | { readonly kind: "answer"; readonly entry: number }
-  | { readonly kind: "error"; readonly text: string; readonly tone: "failed" | "cancelled" | "info" }
-
-export type AgentResponseState =
-  | { readonly _tag: "Streaming"; readonly answer: number }
-  | { readonly _tag: "Settled"; readonly outcome: AgentOutcome }
-
-export type ToolTranscriptUnit = {
-  readonly kind: "tool"
-  readonly group: ToolGroupKind
-  readonly blocks: ReadonlyArray<number>
-  readonly diffs: ReadonlyArray<number>
-  readonly children?: ReadonlyArray<ToolTranscriptUnit>
-  readonly agentResponse?: AgentResponseState
-}
-
-export type TranscriptUnit =
-  | { readonly kind: "entry"; readonly entry: number }
-  | ToolTranscriptUnit
-  | { readonly kind: "reasoning"; readonly block: number }
-  | { readonly kind: "diff"; readonly block: number }
-  | { readonly kind: "childAgent"; readonly block: number }
-  | { readonly kind: "block"; readonly block: number }
-
-export type TranscriptUnitId = string
+import type { Model } from "../../state/model/terminal-state"
+import type { TranscriptBlock } from "../../state/model/terminal-transcript-state"
+import type { TranscriptUnit, ToolKind } from "./transcript-tool-types"
+import type { ToolDetail, ToolSummary } from "./transcript-tool-detail-types"
 
 const readToolNames = new Set(["read", "view_file", "get_diagnostics"])
 const searchToolNames = new Set(["grep", "glob", "list_dir", "codebase_search"])
 const editToolNames = new Set(["edit", "write"])
 const shellToolNames = new Set(["bash", "run_command"])
 const ToolInputJson = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
-
-export interface PathTarget {
-  readonly path: string
-  readonly line?: number
-  readonly column?: number
-}
-
-export interface ToolDetail {
-  readonly block: number
-  readonly label: string
-  readonly summary: ToolSummary
-  readonly target?: PathTarget
-}
-
-export interface ToolSummary {
-  readonly primary: string
-  readonly secondary?: string
-}
 
 const summary = (primary: string, secondary?: string): ToolSummary => ({
   primary,

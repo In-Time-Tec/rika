@@ -9,7 +9,7 @@ import {
   _streamingShell,
   _giantSubagentModel,
   _collapsedSubagentModel,
-} from "./opentui-surface-characterization-6.test-support"
+} from "./opentui-surface-characterization-6-support"
 test("mounts entries appended below a detached transcript that fits the mount budget", () =>
   Effect.runPromise(
     Effect.gen(function* () {

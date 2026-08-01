@@ -1,5 +1,6 @@
 import { Function } from "effect"
-import type { Mode, PromptPart } from "./state/model/terminal-state"
+import type { Mode } from "./state/model/terminal-state"
+import type { PromptPart } from "./state/model/terminal-composer-state"
 
 export interface ModelTuning {
   readonly fastMode?: boolean

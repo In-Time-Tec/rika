@@ -1,14 +1,17 @@
 import type { ColorInput, TextChunk } from "@opentui/core"
-import { Function, Option, Schema } from "effect"
+import { Function } from "effect"
 import stringWidth from "string-width"
-import type { TranscriptBlock } from "../../state/model/terminal-state"
+import type { TranscriptBlock } from "../../state/model/terminal-transcript-state"
+import type { ChangedFile } from "../../state/model/terminal-changed-file"
+import type { Model } from "../../state/model/terminal-state"
 import { colors } from "../../presentation/terminal/terminal-theme"
 import { escapeControlCharacters, formatBytes, truncateToWidth } from "../../presentation/terminal/terminal-format"
 import { renderDiff } from "../../presentation/tool/diff-renderer"
 import { fg, dim, bg, underline, StyledText } from "@opentui/core"
-import { boundedThreadSidebarWidth, fileSidebarLayoutWidth } from "../../state/model/terminal-state"
-import type { ThreadItem } from "../../state/model/terminal-state"
-import { isThreadBusy } from "../../state/model/terminal-state"
+import { boundedThreadSidebarWidth } from "../../state/model/terminal-layout-state"
+import { fileSidebarLayoutWidth } from "../../state/model/terminal-layout-state"
+import type { ThreadItem } from "../../state/model/terminal-thread-state"
+import { isThreadBusy } from "../../state/model/terminal-thread-predicate"
 import { toOpenColor } from "./terminal-text-adapter"
 
 const idleSpinnerFrame = "⠭"
@@ -48,17 +51,6 @@ const iconChar = (failed: boolean, running: boolean, frame = idleSpinnerFrame, c
   if (cancelled) return "⊘"
   return failed ? "✕" : "✓"
 }
-const ToolInputJson = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
-const toolInputValue = (input: string): Record<string, unknown> =>
-  Option.getOrElse(Schema.decodeUnknownOption(ToolInputJson)(input), () => ({}))
-const inputString = (value: Record<string, unknown>, keys: ReadonlyArray<string>): string | undefined => {
-  for (const key of keys) {
-    const candidate = value[key]
-    if (typeof candidate === "string" && candidate.length > 0) return candidate
-  }
-  return undefined
-}
-
 export const renderBlock: {
   (width?: number): (block: TranscriptBlock) => string
   (block: TranscriptBlock): string
@@ -119,9 +111,9 @@ export const renderBlock: {
 )
 
 export const renderSidebar: {
-  (spinnerFrame?: string): (model: import("../../state/model/terminal-state").Model) => StyledText
-  (model: import("../../state/model/terminal-state").Model): StyledText
-  (model: import("../../state/model/terminal-state").Model, spinnerFrame?: string): StyledText
+  (spinnerFrame?: string): (model: Model) => StyledText
+  (model: Model): StyledText
+  (model: Model, spinnerFrame?: string): StyledText
 } = Function.dual(
   (args) => args.length > 1 || typeof args[0] !== "string",
   (model, spinnerFrame = "⠭"): StyledText => {
@@ -167,15 +159,15 @@ const changedFileColor = (status: string): ColorInput => {
 }
 interface ChangedNode {
   readonly children: Map<string, ChangedNode>
-  file?: import("../../state/model/terminal-state").ChangedFile
+  file?: ChangedFile
 }
 interface ChangedFileRow {
   readonly chunks: ReadonlyArray<TextChunk>
-  readonly file?: import("../../state/model/terminal-state").ChangedFile
+  readonly file?: ChangedFile
   readonly nameIndex?: number
 }
 const fileTreeRows = (
-  files: ReadonlyArray<import("../../state/model/terminal-state").ChangedFile>,
+  files: ReadonlyArray<ChangedFile>,
   innerWidth: number,
   showCounts: boolean,
 ): ReadonlyArray<ChangedFileRow> => {
@@ -234,12 +226,8 @@ const fileTreeRows = (
   walk(root, 0)
   return rows
 }
-export const sidebarInnerWidth = (model: import("../../state/model/terminal-state").Model): number =>
-  Math.max(1, fileSidebarLayoutWidth(model) - 8)
-export const sidebarFileRows = (
-  model: import("../../state/model/terminal-state").Model,
-  innerWidth: number,
-): ReadonlyArray<ChangedFileRow> =>
+export const sidebarInnerWidth = (model: Model): number => Math.max(1, fileSidebarLayoutWidth(model) - 8)
+export const sidebarFileRows = (model: Model, innerWidth: number): ReadonlyArray<ChangedFileRow> =>
   model.changedFilesOpen
     ? fileTreeRows(model.changedFiles._tag === "Ready" ? model.changedFiles.value : [], innerWidth, true)
     : fileTreeRows(
@@ -260,8 +248,8 @@ export const renderFileRows = (rows: ReadonlyArray<ChangedFileRow>, hoveredRow?:
   return new StyledText(chunks.map(toOpenStyledChunk))
 }
 export const renderChangedFiles: {
-  (model: import("../../state/model/terminal-state").Model, innerWidth: number, hoveredRow?: number): StyledText
-  (innerWidth: number, hoveredRow?: number): (model: import("../../state/model/terminal-state").Model) => StyledText
+  (model: Model, innerWidth: number, hoveredRow?: number): StyledText
+  (innerWidth: number, hoveredRow?: number): (model: Model) => StyledText
 } = Function.dual(
   (args) => args.length > 1 && typeof args[0] !== "number",
   (model, innerWidth, hoveredRow) =>
@@ -270,5 +258,3 @@ export const renderChangedFiles: {
       hoveredRow,
     ),
 )
-
-export { iconChar, toolInputValue, inputString }

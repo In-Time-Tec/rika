@@ -1,7 +1,7 @@
 import { expect, test } from "vitest"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import { ViewState } from "../../src/state/model/terminal-state"
-import { key, thread } from "./terminal-state-characterization-2.test-support"
+import { ViewState } from "../support/terminal-state-access"
+import { key, thread } from "./terminal-state-characterization-2-support"
 test("opens, filters, navigates, closes, and confirms the all-workspace thread switcher", () => {
   let model = ViewState.update(ViewState.initial("/work"), {
     _tag: "ThreadsReplaced",

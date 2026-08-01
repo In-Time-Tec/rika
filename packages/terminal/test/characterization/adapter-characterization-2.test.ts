@@ -1,11 +1,7 @@
 import { expect, test, vi } from "vitest"
 import { Effect } from "effect"
-import {
-  buildTranscript,
-  renderBlock,
-  renderSidebar,
-  renderTranscriptStyled,
-} from "../../src/opentui/surface/opentui-surface"
+import { buildTranscript, renderTranscriptStyled } from "../../src/opentui/rendering/opentui-renderer"
+import { renderBlock, renderSidebar } from "../../src/opentui/rendering/opentui-render-block"
 
 const opentuiValue = vi.hoisted(() => {
   const boxChildren: Array<object> = []
@@ -256,7 +252,7 @@ import {
   model,
   thread,
   _createScoped,
-} from "./adapter-characterization-2.test-support"
+} from "./adapter-characterization-2-support"
 test("renders every transcript block variant and sidebar state", () => {
   const blocks = [
     { _tag: "Reasoning", text: "why" },

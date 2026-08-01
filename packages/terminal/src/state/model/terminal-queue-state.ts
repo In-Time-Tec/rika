@@ -1,5 +1,7 @@
 import { Function } from "effect"
-import type { Model, QueueChange, QueueItem } from "./terminal-state"
+import type { Model } from "./terminal-state"
+import type { QueueChange } from "./terminal-queue-change"
+import type { QueueItem } from "./terminal-queue-item"
 import type { ComposerDraft } from "./terminal-composer-state"
 
 interface SubmittedDraft extends ComposerDraft {
@@ -139,14 +141,3 @@ export const applyQueueDelta: {
     }
   },
 )
-
-export const replaceTurnPrompt: {
-  (model: Model, turnId: string, prompt: string): Model
-  (turnId: string, prompt: string): (model: Model) => Model
-} = Function.dual(3, (model: Model, turnId: string, prompt: string): Model => {
-  const index = model.entries.findIndex((entry) => entry.role === "user" && entry.turnId === turnId)
-  if (index < 0) return model
-  const entries = [...model.entries]
-  entries[index] = { ...entries[index]!, text: prompt }
-  return { ...model, entries }
-})

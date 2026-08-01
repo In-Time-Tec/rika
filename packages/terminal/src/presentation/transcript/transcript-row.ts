@@ -1,15 +1,16 @@
 import { Function } from "effect"
 import { agentResponseState, isToolOutputDisplayed } from "./transcript-agent-response"
-import type { Model, TranscriptBlock, TranscriptItem } from "../../state/model/terminal-state"
-import {
-  toolKind,
-  type ToolGroupKind,
-  type ToolKind,
-  type AgentResponseState,
-  type ToolTranscriptUnit,
-  type TranscriptUnit,
-  type TranscriptUnitId,
-} from "./transcript-tool-detail"
+import type { Model } from "../../state/model/terminal-state"
+import type { TranscriptBlock, TranscriptItem } from "../../state/model/terminal-transcript-state"
+import { toolKind } from "./transcript-tool-detail"
+import type {
+  ToolGroupKind,
+  ToolKind,
+  AgentResponseState,
+  ToolTranscriptUnit,
+  TranscriptUnit,
+  TranscriptUnitId,
+} from "./transcript-tool-types"
 const groupOf = (kind: ToolKind): ToolGroupKind => (kind === "read" || kind === "search" ? "explore" : kind)
 
 export const orderedTranscriptItems = (model: Model): ReadonlyArray<TranscriptItem> =>

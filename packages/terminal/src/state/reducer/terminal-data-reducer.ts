@@ -1,5 +1,7 @@
 import type { Message } from "../model/terminal-message"
-import type { Model, TranscriptBlock, TranscriptItem, ThreadItem } from "../model/terminal-state"
+import type { Model } from "../model/terminal-state"
+import type { TranscriptBlock, TranscriptItem } from "../model/terminal-transcript-state"
+import type { ThreadItem } from "../model/terminal-thread-state"
 import { idle, loading, ready } from "../model/terminal-loadable-state"
 import { runningToolsActivity, streamActivity, type Activity } from "../model/terminal-activity-state"
 import {

@@ -1,12 +1,14 @@
 import stringWidth from "string-width"
 import { describe, expect, test } from "vitest"
-import { buildTranscript, transcriptWrapWidth } from "../src/opentui/surface/opentui-surface"
+import { buildTranscript } from "../src/opentui/rendering/opentui-renderer"
+import { transcriptWrapWidth } from "../src/opentui/rendering/opentui-render-transcript-window"
 import {
   expandableRowIds,
-  rows as transcriptUnits,
-  unitId,
-} from "../src/presentation/transcript/terminal-transcript-presentation"
-import { initial, type Model, type TranscriptBlock } from "../src/state/model/terminal-state"
+  transcriptUnits,
+  transcriptUnitId as unitId,
+} from "../src/presentation/transcript/transcript-row"
+import { initial, type Model } from "../src/state/model/terminal-state"
+import { type TranscriptBlock } from "../src/state/model/terminal-transcript-state"
 
 const longText =
   "Expected UnknownResponseStreamEvent, got " +

@@ -3,7 +3,8 @@ import { expect, test } from "vitest"
 import { Effect } from "effect"
 import { Surface } from "../../src/opentui/surface/opentui-surface"
 import { colors } from "../../src/presentation/terminal/terminal-theme"
-import { initial, type Model, update } from "../../src/state/model/terminal-state"
+import { initial, type Model } from "../../src/state/model/terminal-state"
+import { update } from "../../src/state/reducer/terminal-state-reducer"
 import {
   openTui,
   _insertText,
@@ -11,7 +12,7 @@ import {
   _streamingShell,
   _giantSubagentModel,
   _collapsedSubagentModel,
-} from "./opentui-surface-characterization-10.test-support"
+} from "./opentui-surface-characterization-10-support"
 test("renders a subagent tool tree and expands each child independently", () =>
   Effect.runPromise(
     Effect.gen(function* () {

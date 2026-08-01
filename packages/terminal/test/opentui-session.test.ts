@@ -1,10 +1,10 @@
 import { expect, test } from "vitest"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import { ExecutionEvents, Session, ViewState } from "../src/state/model/terminal-state"
+import { ExecutionEvents, Session, ViewState, type Adapter } from "./support/terminal-state-access"
 
 test("routes session actions only through available adapter callbacks", () => {
   const calls: Array<string> = []
-  const adapter: Session.Adapter = {
+  const adapter: Adapter = {
     submit: (prompt) => calls.push(`submit:${prompt}`),
     quit: () => calls.push("quit"),
     editQueued: (index, prompt) => calls.push(`edit:${index}:${prompt}`),

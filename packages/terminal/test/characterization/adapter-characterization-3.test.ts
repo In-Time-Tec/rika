@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest"
 import { Effect } from "effect"
-import { buildTranscript } from "../../src/opentui/surface/opentui-surface"
+import { buildTranscript } from "../../src/opentui/rendering/opentui-renderer"
 
 import { colors } from "../../src/presentation/terminal/terminal-theme"
 const opentuiValue = vi.hoisted(() => {
@@ -244,7 +244,8 @@ vi.mock("@opentui/core", () => ({
   },
   stripAnsiSequences: (text: string) => text,
 }))
-import {
+import { adapterFixtures3 } from "./adapter-characterization-3-support"
+const {
   shell,
   _windowUnitToolCall,
   _agentToolBlock,
@@ -256,7 +257,7 @@ import {
   model,
   _thread,
   _createScoped,
-} from "./adapter-characterization-3.test-support"
+} = adapterFixtures3
 test("matches Amp cancelled subagent and shell treatment", () => {
   const state = model({
     blocks: [

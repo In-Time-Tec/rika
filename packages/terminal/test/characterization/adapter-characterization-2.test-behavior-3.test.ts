@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest"
 import { Effect } from "effect"
-import { buildTranscript } from "../../src/opentui/surface/opentui-surface"
+import { buildTranscript } from "../../src/opentui/rendering/opentui-renderer"
 
 const opentuiValue = vi.hoisted(() => {
   const boxChildren: Array<object> = []
@@ -250,7 +250,7 @@ import {
   _nonEmptyLines,
   model,
   _createScoped,
-} from "./adapter-characterization-2.test-support"
+} from "./adapter-characterization-2-support"
 test("renders a completed subagent's tool-result fallback as markdown", () => {
   const state = model({
     blocks: [

@@ -1,48 +1,15 @@
-export {
-  attachChildProjections,
-  emptyAttachments,
-  type AttachmentResult,
-  type ChildProjection,
-} from "./transcript-attachment"
-export {
-  projectChildUnits as applyChildUnits,
-  projectUnitDelta as applyTurnDelta,
-  projectRootUnits as applyRootUnits,
-  projectUnits as applyTurnUnits,
-  type Event,
-} from "./terminal-transcript-projection"
-export {
-  includeRowEnd,
-  isRowWindowPinned,
-  maxMountedTranscriptRows,
-  minimumRowEnd,
-  pinnedRowWindow,
-  relocateRowEnd,
-  resolveRowEnd,
-  rowWindowStart,
-  shiftRowEnd,
-  type RowWindowState,
-} from "./terminal-transcript-window"
-export { agentOutputText, agentResponseState, isToolOutputDisplayed } from "./transcript-agent-response"
-export { agentToolSummary, escapePathTarget, toolDetail, toolDetails, toolKind } from "./transcript-tool-detail"
-export {
-  expandableRowIds,
-  expandableUnits,
-  isExpandableUnit,
-  orderedTranscriptItems,
-  transcriptUnitId as unitId,
-  transcriptUnits as rows,
-  unitToggleTargets,
-} from "./transcript-row"
-export type {
-  AgentOutcome,
-  AgentResponseState,
-  PathTarget,
-  ToolDetail,
-  ToolGroupKind,
-  ToolKind,
-  ToolSummary,
-  ToolTranscriptUnit,
-  TranscriptUnit,
-  TranscriptUnitId,
-} from "./transcript-tool-detail"
+import { projectChildUnits, projectRootUnits, projectUnitDelta, projectUnits } from "./terminal-transcript-projection"
+import { transcriptUnitId, transcriptUnits } from "./transcript-row"
+import { agentResponseState } from "./transcript-agent-response"
+export const applyChildUnits = projectChildUnits
+export const applyRootUnits = projectRootUnits
+export const applyTurnDelta = projectUnitDelta
+export const applyTurnUnits = projectUnits
+export const rows = transcriptUnits
+export const unitId = transcriptUnitId
+export const responseState = agentResponseState
+export type PathTarget = {
+  readonly path: string
+  readonly line?: number
+  readonly column?: number
+}

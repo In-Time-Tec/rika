@@ -1,0 +1,59 @@
+import { type Model, type ThreadItem, type TranscriptBlock, type Key } from "../support/terminal-state-access"
+
+export const key = (input: Partial<Key> & Pick<Key, "name">): Key => ({
+  name: input.name,
+  ctrl: input.ctrl ?? false,
+  alt: input.alt ?? false,
+  meta: input.meta ?? false,
+  shift: input.shift ?? false,
+  sequence: input.sequence ?? "",
+  eventType: input.eventType ?? "press",
+})
+
+export const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
+  workspace: "/work",
+  pinned: false,
+  archived: false,
+  status: "idle",
+  unread: false,
+  lastActivityAt: 0,
+  ...input,
+})
+
+export const readCall = (
+  id: string,
+  detail: string,
+  status: "running" | "complete" = "running",
+): Extract<TranscriptBlock, { _tag: "ToolCall" }> => ({
+  _tag: "ToolCall",
+  id,
+  name: "read",
+  input: detail,
+  status,
+  presentation: {
+    family: "explore",
+    action: "read",
+    activeLabel: "Exploring",
+    completeLabel: "Explored",
+    counter: "file",
+  },
+  detail,
+  files: [],
+})
+
+export const editFile = (id: string, path: string) => ({
+  key: id,
+  path,
+  kind: "update" as const,
+  patch: `--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-old\n+new`,
+  additions: 1,
+  deletions: 1,
+  preview: false,
+  status: "complete" as const,
+})
+
+export const busyQueueModel = (model: Model): Model => ({
+  ...model,
+  busy: true,
+  currentThreadId: "t",
+})

@@ -7,8 +7,25 @@ import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
 import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import { TranscriptPresenter, ViewState } from "@rika/terminal/terminal-state"
 import { Effect, Function, HashMap } from "effect"
+import type { Model } from "../../../packages/terminal/src/state/model/terminal-state"
+import type { Activity } from "../../../packages/terminal/src/state/model/terminal-activity-state"
+import {
+  runningToolsActivity,
+  streamActivity,
+} from "../../../packages/terminal/src/state/model/terminal-activity-state"
+import type { ThreadItem } from "../../../packages/terminal/src/state/model/terminal-thread-state"
+import { idle } from "../../../packages/terminal/src/state/model/terminal-loadable-state"
+import { applyQueueDelta, resetQueue } from "../../../packages/terminal/src/state/model/terminal-queue-state"
+import { update as updateModel } from "../../../packages/terminal/src/state/reducer/terminal-state-reducer"
+import {
+  applyRootUnits,
+  applyTurnDelta,
+} from "../../../packages/terminal/src/presentation/transcript/terminal-transcript-presentation"
+import type {
+  TranscriptBlock,
+  TranscriptItem,
+} from "../../../packages/terminal/src/state/model/terminal-transcript-state"
 
 type TranscriptEvent = Extract<
   Operation.InteractiveEvent,
@@ -30,7 +47,7 @@ type QueueEvent = Extract<
 >
 
 export interface State {
-  readonly model: ViewState.Model
+  readonly model: Model
   readonly selectionEpoch: number
   readonly replayTurns: ReadonlyMap<string, Turn.Turn>
   readonly entries: ReadonlyArray<TranscriptPage.Entry>
@@ -38,7 +55,7 @@ export interface State {
   readonly liveProjections: ReadonlyMap<string, TranscriptProjectionModel.Projection>
   readonly projectionStreams?: ReadonlyMap<string, ProjectionStream>
   readonly threadCostUsd?: number
-  readonly lastAvailableUsageCost?: Extract<ViewState.Model["usageCost"], { readonly _tag: "Available" }>
+  readonly lastAvailableUsageCost?: Extract<Model["usageCost"], { readonly _tag: "Available" }>
   readonly usageRevision?: number
   readonly hasOlder?: boolean
   readonly hasNewer?: boolean
@@ -132,7 +149,7 @@ export const warnUnattached = (unattached: ReadonlyArray<string>): Effect.Effect
   )
 
 export interface QueueUpdate {
-  readonly model: ViewState.Model
+  readonly model: Model
   readonly resync: boolean
 }
 
@@ -157,46 +174,38 @@ export const paletteCommand = (action: unknown): Operation.InteractiveCommand | 
     ? { _tag: "NewThread" }
     : undefined
 
-const updateQueueImpl = (model: ViewState.Model, event: QueueEvent): QueueUpdate => {
+const updateQueueImpl = (model: Model, event: QueueEvent): QueueUpdate => {
   if (event._tag === "QueueUpdated") {
     if (event.change._tag === "Reset")
       return {
-        model: ViewState.resetQueue(model, event.threadId, event.revision, event.change.items),
+        model: resetQueue(model, event.threadId, event.revision, event.change.items),
         resync: false,
       }
-    return ViewState.applyQueueDelta(model, event.threadId, event.revision, event.change, event.queuedCount)
+    return applyQueueDelta(model, event.threadId, event.revision, event.change, event.queuedCount)
   }
   const submittedPrompt = model.history.at(-1)
-  const failed = ViewState.update(model, {
+  const failed = updateModel(model, {
     _tag: "ExecutionFailed",
     message: `Queue full: ${event.count} pending prompts`,
   })
   return {
     model:
-      submittedPrompt === undefined
-        ? failed
-        : ViewState.update(failed, { _tag: "ComposerReplaced", text: submittedPrompt }),
+      submittedPrompt === undefined ? failed : updateModel(failed, { _tag: "ComposerReplaced", text: submittedPrompt }),
     resync: false,
   }
 }
 
 export const updateQueue: {
-  (event: QueueEvent): (model: ViewState.Model) => QueueUpdate
-  (model: ViewState.Model, event: QueueEvent): QueueUpdate
+  (event: QueueEvent): (model: Model) => QueueUpdate
+  (model: Model, event: QueueEvent): QueueUpdate
 } = Function.dual(2, updateQueueImpl)
 
-const removePromotedTurnImpl = (model: ViewState.Model, threadId: string, turnId: string): ViewState.Model => {
+const removePromotedTurnImpl = (model: Model, threadId: string, turnId: string): Model => {
   if (!model.queue.some((item) => item.id === turnId)) return model
   const revision = (model.queueRevision ?? 0) + 1
-  const applied = ViewState.applyQueueDelta(
-    model,
-    threadId,
-    revision,
-    { _tag: "Removed", turnId },
-    model.queue.length - 1,
-  )
+  const applied = applyQueueDelta(model, threadId, revision, { _tag: "Removed", turnId }, model.queue.length - 1)
   return applied.model.queue.some((item) => item.id === turnId)
-    ? ViewState.resetQueue(
+    ? resetQueue(
         model,
         threadId,
         revision,
@@ -206,11 +215,11 @@ const removePromotedTurnImpl = (model: ViewState.Model, threadId: string, turnId
 }
 
 export const removePromotedTurn: {
-  (threadId: string, turnId: string): (model: ViewState.Model) => ViewState.Model
-  (model: ViewState.Model, threadId: string, turnId: string): ViewState.Model
+  (threadId: string, turnId: string): (model: Model) => Model
+  (model: Model, threadId: string, turnId: string): Model
 } = Function.dual(3, removePromotedTurnImpl)
 
-const cleared = (model: ViewState.Model): ViewState.Model => ({
+const cleared = (model: Model): Model => ({
   ...model,
   entries: [],
   blocks: [],
@@ -221,7 +230,7 @@ const cleared = (model: ViewState.Model): ViewState.Model => ({
   eventCursor: undefined,
 })
 
-const retaining = (model: ViewState.Model, previous: ViewState.Model): ViewState.Model => ({
+const retaining = (model: Model, previous: Model): Model => ({
   ...model,
   entries: previous.entries,
   blocks: previous.blocks,
@@ -246,11 +255,7 @@ const activeSeedEntries = (
   }))
 }
 
-const project = (
-  model: ViewState.Model,
-  entries: ReadonlyArray<TranscriptPage.Entry>,
-  displayCostUsd: number | undefined,
-) => {
+const project = (model: Model, entries: ReadonlyArray<TranscriptPage.Entry>, displayCostUsd: number | undefined) => {
   const grouped = new Map<string, Array<TranscriptUnit.Unit>>()
   for (const entry of entries) {
     const rootTurnId = String(entry.turn.id)
@@ -259,7 +264,7 @@ const project = (
     else units.push(entry.unit)
   }
   let next = model
-  for (const [rootTurnId, units] of grouped) next = TranscriptPresenter.applyRootUnits(next, rootTurnId, units)
+  for (const [rootTurnId, units] of grouped) next = applyRootUnits(next, rootTurnId, units)
   const { costUsd: _, ...withoutCost } = next
   return displayCostUsd === undefined ? withoutCost : { ...withoutCost, costUsd: displayCostUsd }
 }
@@ -307,16 +312,16 @@ const displayedEntries = (
   return displayed === entries ? entries : normalizeEntries(displayed)
 }
 
-const reconcileTranscriptBlocks = (model: ViewState.Model): ViewState.Model => {
-  const blocks: Array<ViewState.TranscriptBlock> = []
-  const items: Array<ViewState.TranscriptItem> = []
+const reconcileTranscriptBlocks = (model: Model): Model => {
+  const blocks: Array<TranscriptBlock> = []
+  const items: Array<TranscriptItem> = []
   const mutableBlocks = new Map<string, number>()
-  for (const item of model.items as ReadonlyArray<ViewState.TranscriptItem>) {
+  for (const item of model.items as ReadonlyArray<TranscriptItem>) {
     if (item._tag === "Entry") {
       items.push(item)
       continue
     }
-    const block = model.blocks[item.index] as ViewState.TranscriptBlock | undefined
+    const block = model.blocks[item.index] as TranscriptBlock | undefined
     if (block === undefined) continue
     if (block._tag === "ToolResult") {
       const index = mutableBlocks.get(`ToolCall\u0000${block.id}`)
@@ -335,7 +340,7 @@ const reconcileTranscriptBlocks = (model: ViewState.Model): ViewState.Model => {
       const index = mutableBlocks.get(key)
       const current = index === undefined ? undefined : blocks[index]
       if (index !== undefined && current?._tag === block._tag) {
-        blocks[index] = { ...current, ...block } as ViewState.TranscriptBlock
+        blocks[index] = { ...current, ...block } as TranscriptBlock
         continue
       }
       mutableBlocks.set(key, blocks.length)
@@ -389,26 +394,26 @@ const sourceBlockId = (event: TranscriptSourceEvent.SourceEvent, fallback: strin
 }
 
 const activityAfter = (
-  activity: ViewState.Activity | undefined,
+  activity: Activity | undefined,
   event: TranscriptSourceEvent.SourceEvent,
   projection: TranscriptProjectionModel.Projection,
-  model: ViewState.Model,
-): ViewState.Activity | undefined => {
-  const runningActivity = ViewState.runningToolsActivity(model)
+  model: Model,
+): Activity | undefined => {
+  const runningActivity = runningToolsActivity(model)
   const running =
     runningActivity._tag === "RunningTools" && (runningActivity.subagents ?? 0) + (runningActivity.tools ?? 0) > 0
   if (event.type.includes("reasoning"))
     return running
       ? runningActivity
-      : ViewState.streamActivity(activity, "Thinking", sourceText(event), `reasoning:${projection.modelPhase}`)
+      : streamActivity(activity, "Thinking", sourceText(event), `reasoning:${projection.modelPhase}`)
   if (event.type === "model.output.delta")
     return running
       ? runningActivity
-      : ViewState.streamActivity(activity, "Streaming", sourceText(event), `answer:${projection.modelPhase}`)
+      : streamActivity(activity, "Streaming", sourceText(event), `answer:${projection.modelPhase}`)
   if (event.type === "model.toolcall.delta")
     return running
       ? runningActivity
-      : ViewState.streamActivity(activity, "Streaming", sourceText(event), sourceBlockId(event, "tool"))
+      : streamActivity(activity, "Streaming", sourceText(event), sourceBlockId(event, "tool"))
   if (event.type === "tool.call.requested" || event.type === "tool.call.executing" || event.type === "tool.started")
     return runningActivity
   if (event.type === "tool.result.received") return running ? runningActivity : { _tag: "Waiting" }
@@ -431,12 +436,12 @@ const activityAfter = (
 }
 
 const activityAfterOrigin = (
-  activity: ViewState.Activity | undefined,
+  activity: Activity | undefined,
   origin: Extract<Operation.InteractiveEvent, { readonly _tag: "TranscriptProjectionPatched" }>["origin"],
   state: OpenProjectionStream["state"],
-  model: ViewState.Model,
-): ViewState.Activity | undefined => {
-  if (origin._tag === "Discovery") return ViewState.runningToolsActivity(model)
+  model: Model,
+): Activity | undefined => {
+  if (origin._tag === "Discovery") return runningToolsActivity(model)
   if (origin._tag === "RecordedShell") return activity
   return activityAfter(
     activity,
@@ -527,7 +532,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
     return {
       state: {
         ...state,
-        model: ViewState.update(state.model, {
+        model: updateModel(state.model, {
           _tag: "ThreadRefolding",
           threadId: String(event.threadId),
           refolding: event.refolding,
@@ -610,12 +615,10 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
         ...state.model.threadSidebar,
         selected: Math.max(
           0,
-          (state.model.threads as ReadonlyArray<ViewState.ThreadItem>).findIndex(
-            (thread) => thread.id === event.thread.id,
-          ),
+          (state.model.threads as ReadonlyArray<ThreadItem>).findIndex((thread) => thread.id === event.thread.id),
         ),
       },
-      threadPreview: ViewState.idle,
+      threadPreview: idle,
     })
     const selectedCostUsd =
       event.threadCostUsd ?? (sameThread ? (state.threadCostUsd ?? preservedUsageCost?.usd) : undefined)
@@ -863,7 +866,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       ...(state.projectionStreams ?? new Map<string, ProjectionStream>()),
       [rootTurnId, stream] as const,
     ])
-    let model = TranscriptPresenter.applyTurnDelta(state.model, rootTurnId, event.delta)
+    let model = applyTurnDelta(state.model, rootTurnId, event.delta)
     model = {
       ...model,
       activity: activityAfterOrigin(state.model.activity, event.origin, event.state, model),
@@ -873,7 +876,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       event.origin.type === "steering.delivered" &&
       event.origin.steeringSequences !== undefined
     )
-      model = ViewState.update(model, {
+      model = updateModel(model, {
         _tag: "SteeringDelivered",
         turnId: rootTurnId,
         sequences: event.origin.steeringSequences,

@@ -3,35 +3,11 @@ import { Function } from "effect"
 import type { Model } from "../../state/model/terminal-state"
 import { colors } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "./terminal-text-adapter"
-import {
-  orderedTranscriptItems,
-  rows as transcriptUnits,
-} from "../../presentation/transcript/terminal-transcript-presentation"
-import {
-  offsetUnitRange,
-  transcriptWrapWidth,
-  boundedTranscriptModel,
-  maxMountedTranscriptEntries,
-  maxBoundedTranscriptItems,
-  transcriptUnitRevision,
-} from "./opentui-render-window"
+import { orderedTranscriptItems, transcriptUnits } from "../../presentation/transcript/transcript-row"
+import { offsetUnitRange } from "./opentui-render-transcript-window"
 import { transcriptUnitBuilder } from "./opentui-render-unit"
 import { idleSpinnerFrame } from "./opentui-spinner"
-import type {
-  TranscriptUnitCacheEntry,
-  TranscriptRangeBundle,
-  TranscriptRenderableDescriptor,
-  UnitLineRange,
-} from "./opentui-render-window"
-export {
-  boundedTranscriptModel,
-  maxMountedTranscriptEntries,
-  maxBoundedTranscriptItems,
-  transcriptUnitRevision,
-  transcriptWrapWidth,
-}
-export { transcriptUnitBuilder }
-export type { TranscriptUnitCacheEntry, TranscriptRangeBundle, TranscriptRenderableDescriptor, UnitLineRange }
+import type { UnitLineRange } from "./opentui-render-transcript-window"
 export const buildTranscript: {
   (model: Model, spinnerFrame?: string): { styled: StyledText; ranges: ReadonlyArray<UnitLineRange> }
   (spinnerFrame?: string): (model: Model) => { styled: StyledText; ranges: ReadonlyArray<UnitLineRange> }

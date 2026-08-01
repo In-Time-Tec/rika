@@ -1,4 +1,5 @@
-import { TerminalStyledText, fg, type TerminalTextChunk } from "../markdown/styled-text"
+import { TerminalStyledText, type TerminalTextChunk } from "../markdown/styled-text"
+import { fg } from "../markdown/styled-text-effects"
 import { parsePatchFiles } from "@pierre/diffs"
 import { Function } from "effect"
 import { highlightLines, languageForPath } from "../markdown/syntax-highlighter"

@@ -3,13 +3,16 @@ import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-
 import * as TranscriptPresentationModel from "@rika/transcript/transcript-presentation-model"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { expect, it } from "vitest"
-import { ExecutionEvents, ViewState } from "../../src/state/model/terminal-state"
-import { renderTranscriptStyled } from "../../src/opentui/surface/opentui-surface"
 import {
-  unitId as transcriptUnitId,
-  rows as transcriptUnits,
-} from "../../src/presentation/transcript/terminal-transcript-presentation"
-import { event } from "./execution-events-characterization-1.test-support"
+  ExecutionEvents,
+  ViewState,
+  type Entry,
+  type TranscriptBlock,
+  type TranscriptItem,
+} from "../support/terminal-state-access"
+import { renderTranscriptStyled } from "../../src/opentui/rendering/opentui-renderer"
+import { transcriptUnitId, transcriptUnits } from "../../src/presentation/transcript/transcript-row"
+import { event } from "./execution-events-characterization-1-support"
 it("updates one stable tool row as input and output arrive", () => {
   let projection = TranscriptProjection.Projection.empty("turn", "prompt")
   let model = ExecutionEvents.projectUnits(ViewState.initial("/work"), projection.units)
@@ -46,7 +49,7 @@ it("keeps user, assistant, tool, and final assistant order", () => {
   ])
   const model = ExecutionEvents.projectUnits(ViewState.initial("/work"), projection.units)
 
-  expect(model.items.map((item) => (item as ViewState.TranscriptItem).id)).toEqual([
+  expect(model.items.map((item) => (item as TranscriptItem).id)).toEqual([
     "turn:turn:user",
     TranscriptIdentity.identityKey("assistant", "turn", 0),
     "tool:turn:call",
@@ -227,21 +230,17 @@ it("reconciles parallel subagents spawned by a child execution", () => {
   expect(orchestratorUnit.children).toHaveLength(4)
   expect(orchestratorUnit.children?.map((unit) => unit.children?.length)).toEqual([1, 1, 1, 1])
   const nestedToolIds = orchestratorUnit.children?.map(
-    (unit) =>
-      (unit.kind === "tool" ? model.blocks[unit.blocks[0]!] : undefined) as ViewState.TranscriptBlock | undefined,
+    (unit) => (unit.kind === "tool" ? model.blocks[unit.blocks[0]!] : undefined) as TranscriptBlock | undefined,
   )
-  const answerParentIds = (model.items as ReadonlyArray<ViewState.TranscriptItem>)
-    .filter(
-      (item) =>
-        item._tag === "Entry" && (model.entries[item.index] as ViewState.Entry | undefined)?.role === "assistant",
-    )
+  const answerParentIds = (model.items as ReadonlyArray<TranscriptItem>)
+    .filter((item) => item._tag === "Entry" && (model.entries[item.index] as Entry | undefined)?.role === "assistant")
     .map((item) => item.parentId)
   expect(
     nestedToolIds?.map(
       (block) => answerParentIds.filter((parentId) => parentId === (block as { id?: string })?.id).length,
     ),
   ).toEqual([1, 1, 1, 1])
-  expect(model.blocks.filter((block) => (block as ViewState.TranscriptBlock)._tag === "ChildAgent")).toHaveLength(0)
+  expect(model.blocks.filter((block) => (block as TranscriptBlock)._tag === "ChildAgent")).toHaveLength(0)
 })
 it("attaches each cross-scope child under its own turn's subagent when call ids collide", () => {
   const alpha = TranscriptProjection.Projection.project("alpha", "a", [
@@ -263,12 +262,12 @@ it("attaches each cross-scope child under its own turn's subagent when call ids 
   const model = ExecutionEvents.projectUnits(ViewState.initial("/work"), [...alpha.units, ...beta.units])
   const tools = model.blocks.filter(
     (block): block is Extract<TranscriptPresentationModel.Block, { _tag: "ToolCall" }> =>
-      (block as ViewState.TranscriptBlock)._tag === "ToolCall",
+      (block as TranscriptBlock)._tag === "ToolCall",
   )
 
   expect(tools.find((tool) => tool.id === "alpha:agent")?.childId).toBe("child:execution%3Aalpha:agent")
   expect(tools.find((tool) => tool.id === "beta:agent")?.childId).toBe("child:execution%3Abeta:agent")
-  expect(model.blocks.some((block) => (block as ViewState.TranscriptBlock)._tag === "ChildAgent")).toBe(false)
+  expect(model.blocks.some((block) => (block as TranscriptBlock)._tag === "ChildAgent")).toBe(false)
 })
 it("merges spawn and child lifecycle events into one named subagent with its prompt and tools", () => {
   const childId = "execution:child:turn:oracle"
@@ -303,7 +302,7 @@ it("merges spawn and child lifecycle events into one named subagent with its pro
 
   const units = transcriptUnits(model)
   expect(units).toHaveLength(2)
-  expect(model.blocks.filter((block) => (block as ViewState.TranscriptBlock)._tag === "ChildAgent")).toHaveLength(0)
+  expect(model.blocks.filter((block) => (block as TranscriptBlock)._tag === "ChildAgent")).toHaveLength(0)
   expect(model.blocks[0]).toMatchObject({
     _tag: "ToolCall",
     id: "turn:agent",
@@ -424,8 +423,8 @@ it("keeps nested reasoning and non-assistant entries out of a subagent projectio
   let model = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
   model = ExecutionEvents.projectChildUnits(model, "turn:agent", child.units)
 
-  expect(model.blocks.some((block) => (block as ViewState.TranscriptBlock)._tag === "Reasoning")).toBe(false)
-  expect(model.items.some((item) => (item as ViewState.TranscriptItem).id === "turn:child:turn:agent:user")).toBe(false)
+  expect(model.blocks.some((block) => (block as TranscriptBlock)._tag === "Reasoning")).toBe(false)
+  expect(model.items.some((item) => (item as TranscriptItem).id === "turn:child:turn:agent:user")).toBe(false)
   expect(model.items).toContainEqual(
     expect.objectContaining({
       _tag: "Block",
@@ -452,12 +451,11 @@ it("normalizes a lone nested child agent into an agent tool with a stable row ke
   model = ExecutionEvents.projectChildUnits(model, "turn:agent", child.units)
   model = { ...model, expandedRowKeys: ["tool:turn:agent"] }
 
-  expect(model.blocks.some((block) => (block as ViewState.TranscriptBlock)._tag === "ChildAgent")).toBe(false)
+  expect(model.blocks.some((block) => (block as TranscriptBlock)._tag === "ChildAgent")).toBe(false)
   expect(
     model.blocks.find(
       (block) =>
-        (block as ViewState.TranscriptBlock)._tag === "ToolCall" &&
-        (block as { childId?: string }).childId === "grandchild",
+        (block as TranscriptBlock)._tag === "ToolCall" && (block as { childId?: string }).childId === "grandchild",
     ),
   ).toMatchObject({
     _tag: "ToolCall",

@@ -3,14 +3,16 @@ import { createTestRenderer } from "@opentui/core/testing"
 import { expect, test } from "vitest"
 import { Effect } from "effect"
 import { Surface } from "../../src/opentui/surface/opentui-surface"
-import { initial, ready, type Model, update } from "../../src/state/model/terminal-state"
+import { initial, type Model } from "../../src/state/model/terminal-state"
+import { ready } from "../../src/state/model/terminal-loadable-state"
+import { update } from "../../src/state/reducer/terminal-state-reducer"
 import {
   openTui,
   _insertText,
   _streamingShell,
   _giantSubagentModel,
   _collapsedSubagentModel,
-} from "./opentui-surface-characterization-1.test-support"
+} from "./opentui-surface-characterization-1-support"
 test("converges the model to the physical terminal size when a resize event reports a stale size", () =>
   Effect.runPromise(
     Effect.gen(function* () {

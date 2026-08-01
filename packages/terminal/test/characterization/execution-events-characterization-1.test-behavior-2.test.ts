@@ -2,13 +2,10 @@ import * as TranscriptIdentity from "@rika/transcript/transcript-unit-identity"
 import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { expect, it } from "vitest"
-import { ExecutionEvents, ViewState } from "../../src/state/model/terminal-state"
-import { renderTranscriptStyled } from "../../src/opentui/surface/opentui-surface"
-import {
-  unitId as transcriptUnitId,
-  rows as transcriptUnits,
-} from "../../src/presentation/transcript/terminal-transcript-presentation"
-import { event } from "./execution-events-characterization-1.test-support"
+import { ExecutionEvents, ViewState, type Model, type TranscriptBlock } from "../support/terminal-state-access"
+import { renderTranscriptStyled } from "../../src/opentui/rendering/opentui-renderer"
+import { transcriptUnitId, transcriptUnits } from "../../src/presentation/transcript/transcript-row"
+import { event } from "./execution-events-characterization-1-support"
 it("dedupes a nested child agent into an existing matching agent tool across batches", () => {
   const parent = TranscriptProjection.Projection.project("turn", "delegate", [
     event("agent", 0, "tool.call.requested", {
@@ -33,23 +30,20 @@ it("dedupes a nested child agent into an existing matching agent tool across bat
   ])
   let model = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
   model = ExecutionEvents.projectChildUnits(model, "turn:agent", firstBatch.units)
-  const toolCount = model.blocks.filter((block) => (block as ViewState.TranscriptBlock)._tag === "ToolCall").length
+  const toolCount = model.blocks.filter((block) => (block as TranscriptBlock)._tag === "ToolCall").length
   model = ExecutionEvents.projectChildUnits(model, "turn:agent", secondBatch.units)
 
   const grandchildTools = model.blocks.filter(
     (block) =>
-      (block as ViewState.TranscriptBlock)._tag === "ToolCall" &&
-      (block as { childId?: string }).childId === "grandchild",
+      (block as TranscriptBlock)._tag === "ToolCall" && (block as { childId?: string }).childId === "grandchild",
   )
   expect(grandchildTools).toHaveLength(1)
   expect(grandchildTools[0]).toMatchObject({
     id: TranscriptIdentity.scopedIdentity("child:turn:agent", "gc"),
     status: "complete",
   })
-  expect(model.blocks.some((block) => (block as ViewState.TranscriptBlock)._tag === "ChildAgent")).toBe(false)
-  expect(model.blocks.filter((block) => (block as ViewState.TranscriptBlock)._tag === "ToolCall").length).toBe(
-    toolCount,
-  )
+  expect(model.blocks.some((block) => (block as TranscriptBlock)._tag === "ChildAgent")).toBe(false)
+  expect(model.blocks.filter((block) => (block as TranscriptBlock)._tag === "ToolCall").length).toBe(toolCount)
 })
 it("renders a completed child response from its parent result when child events are unavailable", () => {
   const childId = "execution:child:turn:complete"
@@ -223,7 +217,7 @@ it("projects a durable nested projection to the same tree as live child events",
   liveModel = ExecutionEvents.projectChildUnits(liveModel, "turn:agent", childProjection.units)
   const reloadedModel = ExecutionEvents.projectUnits(ViewState.initial("/work"), durable.units)
 
-  const shape = (model: ViewState.Model) =>
+  const shape = (model: Model) =>
     transcriptUnits(model).map((unit) => {
       if (unit.kind === "tool") {
         const response = unit.agentResponse

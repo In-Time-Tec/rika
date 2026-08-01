@@ -2,18 +2,11 @@ import { Renderable } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { expect, test } from "vitest"
 import { Effect } from "effect"
-import {
-  Surface,
-  maxMountedTranscriptEntries,
-  maxMountedTranscriptRows,
-} from "../../src/opentui/surface/opentui-surface"
+import { Surface } from "../../src/opentui/surface/opentui-surface"
+import { maxMountedTranscriptEntries } from "../../src/opentui/rendering/opentui-render-transcript-window"
+import { maxMountedTranscriptRows } from "../../src/presentation/transcript/terminal-transcript-window"
 
-import {
-  openTui,
-  _insertText,
-  _streamingShell,
-  giantSubagentModel,
-} from "./opentui-surface-characterization-2.test-support"
+import { openTui, _insertText, _streamingShell, giantSubagentModel } from "./opentui-surface-characterization-2-support"
 test("keeps a large expanded subagent tree in one mounted row window", () =>
   Effect.runPromise(
     Effect.gen(function* () {

@@ -5,8 +5,8 @@ import { Effect } from "effect"
 import {
   boundedTranscriptModel,
   maxMountedTranscriptEntries,
-  maxMountedTranscriptRows,
-} from "../../src/opentui/surface/opentui-surface"
+} from "../../src/opentui/rendering/opentui-render-transcript-window"
+import { maxMountedTranscriptRows } from "../../src/presentation/transcript/terminal-transcript-window"
 
 const opentuiValue = vi.hoisted(() => {
   const boxChildren: Array<object> = []
@@ -257,7 +257,7 @@ import {
   _nonEmptyLines,
   model,
   createScoped,
-} from "./adapter-characterization-1.test-support"
+} from "./adapter-characterization-1-support"
 test("keeps nested ancestors and the newest child suffix within the transcript limit", () => {
   const layout: ReadonlyArray<{
     readonly id: string

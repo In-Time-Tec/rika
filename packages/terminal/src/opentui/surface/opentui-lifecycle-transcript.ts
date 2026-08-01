@@ -1,5 +1,5 @@
-import type { TranscriptItem } from "../../state/model/terminal-state"
-import { classifyTranscriptContent } from "../../presentation/transcript/transcript-viewport"
+import type { TranscriptItem } from "../../state/model/terminal-transcript-state"
+import { classifyTranscriptContent } from "../../presentation/transcript/transcript-viewport-window"
 
 export const prependedTranscriptItems = (
   previousItems: ReadonlyArray<unknown>,

@@ -10,7 +10,7 @@ import {
   _streamingShell,
   _giantSubagentModel,
   _collapsedSubagentModel,
-} from "./opentui-surface-characterization-7.test-support"
+} from "./opentui-surface-characterization-7-support"
 test("ticks Amp status and running-tool spinners every 200ms without rebuilding transcript bodies", () =>
   Effect.runPromise(
     Effect.gen(function* () {

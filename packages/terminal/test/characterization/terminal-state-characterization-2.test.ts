@@ -1,8 +1,8 @@
 import { expect, test } from "vitest"
-import { ViewState } from "../../src/state/model/terminal-state"
-import { key, thread, readCall, editFile, busyQueueModel } from "./terminal-state-characterization-2.test-support"
+import { ViewState, type Model, type TranscriptBlock } from "../support/terminal-state-access"
+import { key, thread, readCall, editFile, busyQueueModel } from "./terminal-state-characterization-2-support"
 test("a stale terminal event for another turn does not clear the active turn", () => {
-  const busy: ViewState.Model = {
+  const busy: Model = {
     ...ViewState.initial("/work"),
     busy: true,
     activeTurnId: "turn-b",
@@ -14,7 +14,7 @@ test("a stale terminal event for another turn does not clear the active turn", (
   expect(afterStale.submittedDrafts).toHaveLength(1)
 })
 test("settles cancellation without adding a textual notice", () => {
-  const running: ViewState.Model = {
+  const running: Model = {
     ...ViewState.initial("/work"),
     busy: true,
     activeTurnId: "turn",
@@ -48,7 +48,7 @@ test("does not add a fallback marker when the parent cancellation event arrived 
     files: [],
   }
   const child = readCall("child", "src/a.ts")
-  const running: ViewState.Model = {
+  const running: Model = {
     ...ViewState.initial("/work"),
     busy: true,
     activeTurnId: "turn",
@@ -218,7 +218,7 @@ test("toggles every transcript detail as one reducer action", () => {
       readCall("read", "src/a.ts", "complete"),
       { _tag: "Diff", path: "src/a.ts", patch: "+a" },
     ],
-  } as ViewState.Model
+  } as Model
   model = ViewState.update(model, { _tag: "AllDetailsToggled" })
   expect(model.expandedRowKeys).toEqual(["block:Reasoning:0", "tool:read", "block:Diff:2"])
   model = ViewState.update(model, { _tag: "AllDetailsToggled" })
@@ -390,7 +390,7 @@ test("navigates transcript detail units with Tab and toggles the selected unit",
       readCall("1", "a", "complete"),
       { _tag: "Diff", path: "a", patch: "+a" },
     ],
-  } as ViewState.Model
+  } as Model
   model = ViewState.update({ ...model, detailSelection: "block:Diff:2" }, { _tag: "DetailToggled", id: "block:Diff:2" })
   expect(model).toMatchObject({
     detailSelection: "block:Diff:2",
@@ -432,7 +432,7 @@ test("click toggles do not move the Tab detail selection", () => {
   expect(tabbed.detailSelection).toBe("tool:1")
 })
 test("toggles an expanded edit group's file rows independently", () => {
-  const call: Extract<ViewState.TranscriptBlock, { _tag: "ToolCall" }> = {
+  const call: Extract<TranscriptBlock, { _tag: "ToolCall" }> = {
     _tag: "ToolCall",
     id: "patch",
     name: "edit",

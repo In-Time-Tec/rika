@@ -1,16 +1,20 @@
+import { nonSpaceBounds } from "./opentui-surface-characterization-2-geometry"
 import { Renderable } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { expect, test } from "vitest"
 import { Effect } from "effect"
 import stringWidth from "string-width"
+import { Surface } from "../../src/opentui/surface/opentui-surface"
 import {
-  Surface,
   boundedTranscriptModel,
   maxBoundedTranscriptItems,
   maxMountedTranscriptEntries,
-  maxMountedTranscriptRows,
-} from "../../src/opentui/surface/opentui-surface"
-import { initial, loading, ready, replaceQueue, type Model, update } from "../../src/state/model/terminal-state"
+} from "../../src/opentui/rendering/opentui-render-transcript-window"
+import { maxMountedTranscriptRows } from "../../src/presentation/transcript/terminal-transcript-window"
+import { initial, type Model } from "../../src/state/model/terminal-state"
+import { loading, ready } from "../../src/state/model/terminal-loadable-state"
+import { replaceQueue } from "../../src/state/model/terminal-queue-state"
+import { update } from "../../src/state/reducer/terminal-state-reducer"
 import {
   OpenTuiError,
   openTui,
@@ -20,8 +24,7 @@ import {
   thread,
   giantSubagentModel,
   collapsedSubagentModel,
-  nonSpaceBounds,
-} from "./opentui-surface-characterization-2.test-support"
+} from "./opentui-surface-characterization-2-support"
 for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
   test(`keeps composer updates bounded with ${historySize} transcript entries`, () =>
     Effect.runPromise(

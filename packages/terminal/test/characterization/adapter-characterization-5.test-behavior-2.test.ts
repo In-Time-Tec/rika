@@ -255,7 +255,7 @@ import {
   model,
   thread,
   createScoped,
-} from "./adapter-characterization-5.test-support"
+} from "./adapter-characterization-5-support"
 it.effect("clears usage hover when a narrower selector moves away from the pointer", () =>
   Effect.gen(function* () {
     const { surface } = yield* createScoped(handlers())

@@ -1,8 +1,8 @@
 import { expect, vi } from "vitest"
 import { it } from "@effect/vitest"
 import { Effect } from "effect"
-import { renderTranscriptStyled } from "../../src/opentui/surface/opentui-surface"
-import { type Mode } from "../../src/state/model/terminal-state"
+import { renderTranscriptStyled } from "../../src/opentui/rendering/opentui-renderer"
+import { type Mode } from "../support/terminal-state-access"
 const opentuiValue = vi.hoisted(() => {
   const boxChildren: Array<object> = []
   const keyHandlers = new Set<(key: object) => void>()
@@ -254,7 +254,7 @@ import {
   _nonEmptyLines,
   model,
   createScoped,
-} from "./adapter-characterization-5.test-support"
+} from "./adapter-characterization-5-support"
 it.effect("renders welcome, entries, modes, activity, cursor, and palette", () =>
   Effect.gen(function* () {
     const callbacks = handlers()

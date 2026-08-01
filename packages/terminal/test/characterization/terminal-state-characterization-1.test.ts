@@ -1,9 +1,9 @@
 import { expect, test } from "vitest"
 import { it } from "@effect/vitest"
 import { Duration, Effect } from "effect"
-import { Palette, ViewState } from "../../src/state/model/terminal-state"
-import * as Adapter from "../../src/opentui/surface/opentui-surface"
-import { key, _thread, readCall, _editFile, _busyQueueModel } from "./terminal-state-characterization-1.test-support"
+import { Palette, ViewState, type Model } from "../support/terminal-state-access"
+import { formatTokens } from "../../src/presentation/terminal/terminal-format"
+import { key, _thread, readCall, _editFile, _busyQueueModel } from "./terminal-state-characterization-1-support"
 test("cycles cost, tokens, and active time", () => {
   expect(ViewState.nextUsageDisplay("cost")).toBe("tokens")
   expect(ViewState.nextUsageDisplay("tokens")).toBe("time")
@@ -45,7 +45,7 @@ test("formats Amp activity counters with the singular tok unit", () => {
   expect(ViewState.formatActivityCounter(2_000)).toBe("2K tok")
   expect(ViewState.formatActivityCounter(12_345)).toBe("12.3K tok")
   expect(ViewState.formatActivityCounter(1_234_567)).toBe("1.2M tok")
-  expect(ViewState.formatActivityCounter(1_234)).toBe(Adapter.formatTokens(1_234))
+  expect(ViewState.formatActivityCounter(1_234)).toBe(formatTokens(1_234))
 })
 test("summarizes top-level subagents separately from all other running tools", () => {
   const rootAgent = {
@@ -308,7 +308,7 @@ test("keeps queue state outside the transcript and tracks reasoning and scroll f
   expect(model).toMatchObject({ scrollFollow: true, scrollOffset: 0 })
 })
 test("leaves transcript navigation keys to the viewport owner", () => {
-  let model: ViewState.Model = {
+  let model: Model = {
     ...ViewState.initial("/work"),
     height: 24,
     entries: Array.from({ length: 80 }, (_, index) => ({ role: "assistant" as const, text: `line ${index}` })),
@@ -375,7 +375,7 @@ test("cancels every running transcript unit once and leaves no global notice", (
     files: [],
   }
   const child = readCall("child", "src/a.ts")
-  const running: ViewState.Model = {
+  const running: Model = {
     ...ViewState.initial("/work"),
     busy: true,
     activeTurnId: "turn",
@@ -433,7 +433,7 @@ test("restores a submitted draft when cancellation arrives before an agent respo
   expect(repeated).toBe(cancelled)
 })
 test("submitting while a turn is active stays an ordinary submission", () => {
-  const busy: ViewState.Model = {
+  const busy: Model = {
     ...ViewState.initial("/work"),
     busy: true,
     activeTurnId: "turn-a",
@@ -449,7 +449,7 @@ test("submitting while a turn is active stays an ordinary submission", () => {
   ])
 })
 test("submitting while busy echoes a provisional queue row immediately", () => {
-  const busy: ViewState.Model = ViewState.resetQueue(
+  const busy: Model = ViewState.resetQueue(
     {
       ...ViewState.initial("/work"),
       busy: true,

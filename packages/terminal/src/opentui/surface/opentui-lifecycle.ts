@@ -9,32 +9,30 @@ import {
   type TextChunk,
 } from "@opentui/core"
 import stringWidth from "string-width"
+import { boundedThreadSidebarWidth } from "../../state/model/terminal-layout-state"
+import { isNarrow } from "../../state/model/terminal-layout-state"
+import type { Model } from "../../state/model/terminal-state"
+import { composerHeight, queueContentWidth, wrappedRowCount } from "../../state/model/terminal-layout-composer"
 import {
-  boundedThreadSidebarWidth,
-  composerHeight,
   contentColumnWidth,
-  displayInput,
   fileSidebarLayoutWidth,
-  formatActivity,
-  isNarrow,
-  queueContentWidth,
-  readyOr,
   threadSidebarLayoutWidth,
-  wrappedRowCount,
-  isThreadBusy,
-  type Model,
-  type QueueItem,
-  type ThreadItem,
-} from "../../state/model/terminal-state"
+} from "../../state/model/terminal-layout-state"
+import { displayInput } from "../../state/model/terminal-composer-state"
+import { formatActivity } from "../../state/model/terminal-activity-state"
+import { readyOr } from "../../state/model/terminal-loadable-state"
+import { isThreadBusy } from "../../state/model/terminal-thread-predicate"
+import { type QueueItem } from "../../state/model/terminal-queue-item"
+import { type ThreadItem } from "../../state/model/terminal-thread-state"
 import { colors, spacing } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
 import {
-  includeRowEnd,
   maxMountedTranscriptRows,
-  pinnedRowWindow,
   relocateRowEnd,
   rowWindowStart,
-} from "../../presentation/transcript/terminal-transcript-presentation"
+} from "../../presentation/transcript/terminal-transcript-window"
+import { pinnedRowWindow } from "../../presentation/transcript/transcript-row-window-state"
+import { includeRowEnd } from "../../presentation/transcript/transcript-row-window-include"
 import { isFollowing } from "../../presentation/transcript/transcript-viewport"
 import { prependedTranscriptItems } from "./opentui-lifecycle-transcript"
 import { truncateToWidth } from "../../presentation/terminal/terminal-format"
@@ -45,25 +43,19 @@ import {
   queueNavigationHint,
   queueHintWidth,
   queueItemLabel,
-} from "./opentui-surface-construction"
-import {
-  unitId as transcriptUnitId,
-  rows as transcriptUnits,
-} from "../../presentation/transcript/terminal-transcript-presentation"
-import {
-  boundedTranscriptModel,
-  transcriptUnitBuilder,
-  transcriptUnitRevision,
-  maxMountedTranscriptEntries,
-  type TranscriptRangeBundle,
-  type TranscriptUnitCacheEntry,
-} from "../rendering/opentui-renderer"
+} from "./opentui-queue-presentation"
+import { transcriptUnitId, transcriptUnits } from "../../presentation/transcript/transcript-row"
+import { boundedTranscriptModel, maxMountedTranscriptEntries } from "../rendering/opentui-render-transcript-window"
+import { transcriptUnitRevision } from "../rendering/opentui-render-transcript-revision"
+import { transcriptUnitBuilder } from "../rendering/opentui-render-unit"
+import type { TranscriptRangeBundle, TranscriptUnitCacheEntry } from "../rendering/opentui-render-transcript-revision"
 import { idleSpinnerFrame, loaderFrame, spinnerFrames, spinnerInterval } from "../rendering/opentui-spinner"
 import { SurfaceInput } from "./opentui-input"
 import { shortcutsContent } from "./opentui-composer-region"
 import { panelLoading, compactWorkspace, welcomeContent, welcomeMarkFrames } from "./opentui-surface-content"
-import { cutoutBackground, displayCursorOffset } from "./opentui-surface-construction"
-import type { TranscriptRenderableDescriptor } from "./opentui-surface-state"
+import { cutoutBackground } from "./opentui-surface-construction"
+import { displayCursorOffset } from "./opentui-queue-presentation"
+import type { TranscriptRenderableDescriptor } from "./opentui-surface-transcript-types"
 
 export abstract class SurfaceLifecycle extends SurfaceInput {
   showToast(message: string, color: ColorInput = toOpenColor(colors.green)): void {
