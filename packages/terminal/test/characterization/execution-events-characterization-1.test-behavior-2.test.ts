@@ -2,7 +2,10 @@ import * as TranscriptIdentity from "@rika/transcript/transcript-unit-identity"
 import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { expect, it } from "vitest"
-import { ExecutionEvents, ViewState, type Model, type TranscriptBlock } from "../support/terminal-state-access"
+import { projectChildUnits, projectUnits } from "../../src/presentation/transcript/terminal-transcript-projection"
+import { initial, type Model } from "../../src/state/model/terminal-state"
+import { type TranscriptBlock } from "../../src/state/model/terminal-transcript-state"
+
 import { renderTranscriptStyled } from "../../src/opentui/rendering/opentui-renderer"
 import { transcriptUnitId, transcriptUnits } from "../../src/presentation/transcript/transcript-row"
 import { event } from "./execution-events-characterization-1-support"
@@ -28,10 +31,10 @@ it("dedupes a nested child agent into an existing matching agent tool across bat
       data: { child_execution_id: "grandchild", profile: "task" },
     }),
   ])
-  let model = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
-  model = ExecutionEvents.projectChildUnits(model, "turn:agent", firstBatch.units)
+  let model = projectUnits(initial("/work"), parent.units)
+  model = projectChildUnits(model, "turn:agent", firstBatch.units)
   const toolCount = model.blocks.filter((block) => (block as TranscriptBlock)._tag === "ToolCall").length
-  model = ExecutionEvents.projectChildUnits(model, "turn:agent", secondBatch.units)
+  model = projectChildUnits(model, "turn:agent", secondBatch.units)
 
   const grandchildTools = model.blocks.filter(
     (block) =>
@@ -65,7 +68,7 @@ it("renders a completed child response from its parent result when child events 
       },
     }),
   ])
-  const projected = ExecutionEvents.projectUnits(ViewState.initial("/work"), projection.units)
+  const projected = projectUnits(initial("/work"), projection.units)
   const model = { ...projected, expandedRowKeys: ["tool:turn:agent"] }
   const rendered = renderTranscriptStyled(model)
     .chunks.map((chunk) => chunk.text)
@@ -95,7 +98,7 @@ it("presents a subagent as finished when its durable child lifecycle completes a
     }),
   ])
 
-  const model = ExecutionEvents.projectUnits(ViewState.initial("/work"), projection.units)
+  const model = projectUnits(initial("/work"), projection.units)
 
   expect(model.blocks).toEqual([
     expect.objectContaining({
@@ -120,7 +123,7 @@ it("merges Relay child ids that encode the uncorrelated tool call", () => {
     event("spawned", 1, "child_run.spawned", { data: { child_execution_id: childId } }),
   ])
 
-  const model = ExecutionEvents.projectUnits(ViewState.initial("/work"), projection.units)
+  const model = projectUnits(initial("/work"), projection.units)
 
   expect(model.blocks).toEqual([
     expect.objectContaining({
@@ -149,7 +152,7 @@ it("uses Subagent as the fallback descriptor instead of Task", () => {
     }),
   ])
 
-  const model = ExecutionEvents.projectUnits(ViewState.initial("/work"), projection.units)
+  const model = projectUnits(initial("/work"), projection.units)
 
   expect(model.blocks).toEqual([
     expect.objectContaining({
@@ -173,7 +176,7 @@ it("moves a live child row expansion onto the stable subagent unit key", () => {
       data: { child_execution_id: childId, profile: "task" },
     }),
   ])
-  let model = ExecutionEvents.projectUnits(ViewState.initial("/work"), projection.units)
+  let model = projectUnits(initial("/work"), projection.units)
   const childRow = transcriptUnitId(model, transcriptUnits(model)[1]!)
   model = { ...model, detailSelection: childRow, expandedRowKeys: [childRow] }
   projection = TranscriptProjection.Projection.applyEvent(
@@ -183,7 +186,7 @@ it("moves a live child row expansion onto the stable subagent unit key", () => {
     }),
   )
 
-  model = ExecutionEvents.projectUnits(model, projection.units)
+  model = projectUnits(model, projection.units)
 
   expect(transcriptUnits(model)).toHaveLength(2)
   expect(model.detailSelection).toBe("tool:turn:agent")
@@ -213,9 +216,9 @@ it("projects a durable nested projection to the same tree as live child events",
     { parentId: "turn:agent", projection: childProjection },
   ])
 
-  let liveModel = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
-  liveModel = ExecutionEvents.projectChildUnits(liveModel, "turn:agent", childProjection.units)
-  const reloadedModel = ExecutionEvents.projectUnits(ViewState.initial("/work"), durable.units)
+  let liveModel = projectUnits(initial("/work"), parent.units)
+  liveModel = projectChildUnits(liveModel, "turn:agent", childProjection.units)
+  const reloadedModel = projectUnits(initial("/work"), durable.units)
 
   const shape = (model: Model) =>
     transcriptUnits(model).map((unit) => {
@@ -256,8 +259,8 @@ it("replays a child with an internal tool error and completed final response as 
     event("failed", 3, "execution.failed", { text: "internal tool failed" }),
   ])
 
-  const projected = ExecutionEvents.projectUnits(
-    ViewState.initial("/work"),
+  const projected = projectUnits(
+    initial("/work"),
     TranscriptNestedProjection.withNestedProjections(parent, [{ parentId: "turn:agent", projection: child }]).units,
   )
   const rendered = renderTranscriptStyled({ ...projected, expandedRowKeys: ["tool:turn:agent"] })

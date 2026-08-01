@@ -5,7 +5,9 @@ import * as TranscriptRecordedShell from "@rika/transcript/recorded-shell-presen
 import { expect, test } from "vitest"
 import { Effect } from "effect"
 import stringWidth from "string-width"
-import { TranscriptPresenter, type Model } from "../support/terminal-state-access"
+import { applyRootUnits, applyTurnDelta } from "../../src/presentation/transcript/terminal-transcript-presentation"
+import { type Model } from "../../src/state/model/terminal-state"
+
 import { Surface } from "../../src/opentui/surface/opentui-surface"
 import { maxMountedTranscriptEntries } from "../../src/opentui/rendering/opentui-render-transcript-window"
 import { initial } from "../../src/state/model/terminal-state"
@@ -378,7 +380,7 @@ test("shows recorded shell output when the same transcript unit settles", () =>
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
       const id = "recorded-shell-turn"
       const running = TranscriptRecordedShell.recordedShellProjection({ id, command: "printf done", status: "running" })
-      let model = TranscriptPresenter.applyRootUnits(initial("/work", "high"), id, running.units)
+      let model = applyRootUnits(initial("/work", "high"), id, running.units)
       const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
       try {
         surface.update(model)
@@ -391,7 +393,7 @@ test("shows recorded shell output when the same transcript unit settles", () =>
           status: "completed",
           result: { text: "RECORDED_SHELL_OUTPUT", truncated: false, exitCode: 0 },
         })
-        model = TranscriptPresenter.applyTurnDelta(model, id, { upsert: settled.units, remove: [] })
+        model = applyTurnDelta(model, id, { upsert: settled.units, remove: [] })
         surface.update(model)
         yield* openTui(() => setup.flush())
 

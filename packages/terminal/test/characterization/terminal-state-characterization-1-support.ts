@@ -1,4 +1,7 @@
-import { type Model, type ThreadItem, type TranscriptBlock, type Key } from "../support/terminal-state-access"
+import { type Key } from "../../src/presentation/terminal/terminal-keymap"
+import { type Model } from "../../src/state/model/terminal-state"
+import { type ThreadItem } from "../../src/state/model/terminal-thread-state"
+import { type TranscriptBlock } from "../../src/state/model/terminal-transcript-state"
 
 export const key = (input: Partial<Key> & Pick<Key, "name">): Key => ({
   name: input.name,

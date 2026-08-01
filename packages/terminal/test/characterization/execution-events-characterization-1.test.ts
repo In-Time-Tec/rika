@@ -3,33 +3,31 @@ import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-
 import * as TranscriptPresentationModel from "@rika/transcript/transcript-presentation-model"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { expect, it } from "vitest"
-import {
-  ExecutionEvents,
-  ViewState,
-  type Entry,
-  type TranscriptBlock,
-  type TranscriptItem,
-} from "../support/terminal-state-access"
+import { projectChildUnits, projectUnits } from "../../src/presentation/transcript/terminal-transcript-projection"
+import { type Entry } from "../../src/state/model/terminal-message"
+import { initial } from "../../src/state/model/terminal-state"
+import { type TranscriptBlock, type TranscriptItem } from "../../src/state/model/terminal-transcript-state"
+
 import { renderTranscriptStyled } from "../../src/opentui/rendering/opentui-renderer"
 import { transcriptUnitId, transcriptUnits } from "../../src/presentation/transcript/transcript-row"
 import { event } from "./execution-events-characterization-1-support"
 it("updates one stable tool row as input and output arrive", () => {
   let projection = TranscriptProjection.Projection.empty("turn", "prompt")
-  let model = ExecutionEvents.projectUnits(ViewState.initial("/work"), projection.units)
+  let model = projectUnits(initial("/work"), projection.units)
   projection = TranscriptProjection.Projection.applyEvent(
     projection,
     event("call", 0, "tool.call.requested", {
       data: { tool_call_id: "call", tool_name: "read", input: { path: "src/a.ts" } },
     }),
   )
-  model = ExecutionEvents.projectUnits(model, projection.units)
+  model = projectUnits(model, projection.units)
   projection = TranscriptProjection.Projection.applyEvent(
     projection,
     event("result", 1, "tool.result.received", {
       data: { tool_call_id: "call", output: "contents" },
     }),
   )
-  model = ExecutionEvents.projectUnits(model, projection.units)
+  model = projectUnits(model, projection.units)
 
   expect(model.blocks).toEqual([
     expect.objectContaining({ _tag: "ToolCall", id: "turn:call", status: "complete", output: "contents" }),
@@ -47,7 +45,7 @@ it("keeps user, assistant, tool, and final assistant order", () => {
     event("input-1", 4, "model.input.prepared"),
     event("assistant-1", 5, "model.output.completed", { text: "Done." }),
   ])
-  const model = ExecutionEvents.projectUnits(ViewState.initial("/work"), projection.units)
+  const model = projectUnits(initial("/work"), projection.units)
 
   expect(model.items.map((item) => (item as TranscriptItem).id)).toEqual([
     "turn:turn:user",
@@ -67,7 +65,7 @@ it("keeps overlapping tool ids separate across turns", () => {
       data: { tool_call_id: "call", tool_name: "read", input: { path: "b.ts" } },
     }),
   ])
-  const model = ExecutionEvents.projectUnits(ViewState.initial("/work"), [...first.units, ...second.units])
+  const model = projectUnits(initial("/work"), [...first.units, ...second.units])
 
   expect(model.blocks).toEqual([
     expect.objectContaining({ id: "turn-1:call", detail: "a.ts" }),
@@ -82,14 +80,14 @@ it("updates one child row through its lifecycle", () => {
       data: { child_run_id: "child", profile: "oracle", summary: "Inspecting" },
     }),
   )
-  let model = ExecutionEvents.projectUnits(ViewState.initial("/work"), projection.units)
+  let model = projectUnits(initial("/work"), projection.units)
   projection = TranscriptProjection.Projection.applyEvent(
     projection,
     event("child-done", 1, "child_run.completed", {
       data: { child_run_id: "child", profile: "oracle", summary: "Finished" },
     }),
   )
-  model = ExecutionEvents.projectUnits(model, projection.units)
+  model = projectUnits(model, projection.units)
 
   expect(model.blocks).toEqual([expect.objectContaining({ _tag: "ChildAgent", id: "child", status: "complete" })])
 })
@@ -106,8 +104,8 @@ it("renders a subagent answer while streaming and keeps it once after settlement
   let child = TranscriptProjection.Projection.project(childId, "", [
     event("hel", 0, "model.output.delta", { text: "hel" }),
   ])
-  let model = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
-  model = ExecutionEvents.projectChildUnits(model, "turn:agent", child.units)
+  let model = projectUnits(initial("/work"), parent.units)
+  model = projectChildUnits(model, "turn:agent", child.units)
   model = { ...model, expandedRowKeys: ["tool:turn:agent"] }
 
   expect(
@@ -117,14 +115,14 @@ it("renders a subagent answer while streaming and keeps it once after settlement
   ).toContain("hel")
 
   child = TranscriptProjection.Projection.applyEvent(child, event("lo", 1, "model.output.delta", { text: "lo" }))
-  model = ExecutionEvents.projectChildUnits(model, "turn:agent", child.units)
+  model = projectChildUnits(model, "turn:agent", child.units)
   const streaming = renderTranscriptStyled(model)
     .chunks.map((chunk) => chunk.text)
     .join("")
   expect(streaming).toContain("hello")
 
   child = TranscriptProjection.Projection.applyEvent(child, event("done", 2, "execution.completed"))
-  model = ExecutionEvents.projectChildUnits(model, "turn:agent", child.units)
+  model = projectChildUnits(model, "turn:agent", child.units)
   const settled = renderTranscriptStyled(model)
     .chunks.map((chunk) => chunk.text)
     .join("")
@@ -153,8 +151,8 @@ it("projects child execution tools beneath their subagent with stable nested key
       data: { tool_call_id: "shell", output: { text: "passed", exitCode: 0 } },
     }),
   ])
-  let model = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
-  model = ExecutionEvents.projectChildUnits(model, "turn:agent", child.units)
+  let model = projectUnits(initial("/work"), parent.units)
+  model = projectChildUnits(model, "turn:agent", child.units)
   model = { ...model, expandedRowKeys: ["tool:turn:agent"] }
 
   const units = transcriptUnits(model)
@@ -207,8 +205,8 @@ it("reconciles parallel subagents spawned by a child execution", () => {
     ]),
   )
 
-  let model = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
-  model = ExecutionEvents.projectChildUnits(model, "turn:call-orchestrator", orchestrator.units)
+  let model = projectUnits(initial("/work"), parent.units)
+  model = projectChildUnits(model, "turn:call-orchestrator", orchestrator.units)
   for (const [index, childId] of nestedIds.entries()) {
     const child = TranscriptProjection.Projection.project(childId, "", [
       event(`read-${index}`, 0, "tool.call.requested", {
@@ -218,7 +216,7 @@ it("reconciles parallel subagents spawned by a child execution", () => {
         text: `## Area ${index + 1}\n\n**Complete.**`,
       }),
     ])
-    model = ExecutionEvents.projectChildUnits(
+    model = projectChildUnits(
       model,
       TranscriptIdentity.scopedIdentity(orchestratorId, ["one", "two", "three", "four"][index]!),
       child.units,
@@ -259,7 +257,7 @@ it("attaches each cross-scope child under its own turn's subagent when call ids 
       data: { child_execution_id: "child:execution%3Abeta:agent", profile: "task" },
     }),
   ])
-  const model = ExecutionEvents.projectUnits(ViewState.initial("/work"), [...alpha.units, ...beta.units])
+  const model = projectUnits(initial("/work"), [...alpha.units, ...beta.units])
   const tools = model.blocks.filter(
     (block): block is Extract<TranscriptPresentationModel.Block, { _tag: "ToolCall" }> =>
       (block as TranscriptBlock)._tag === "ToolCall",
@@ -296,8 +294,8 @@ it("merges spawn and child lifecycle events into one named subagent with its pro
     event("answer", 1, "model.output.completed", { text: "## Projection fixed\n\n**All checks pass.**" }),
   ])
 
-  let model = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
-  model = ExecutionEvents.projectChildUnits(model, "turn:agent", child.units)
+  let model = projectUnits(initial("/work"), parent.units)
+  model = projectChildUnits(model, "turn:agent", child.units)
   model = { ...model, expandedRowKeys: ["tool:turn:agent"] }
 
   const units = transcriptUnits(model)
@@ -344,7 +342,7 @@ it("renders a failed linked child as failed instead of finished", () => {
       },
     }),
   ])
-  const model = ExecutionEvents.projectUnits(ViewState.initial("/work"), projection.units)
+  const model = projectUnits(initial("/work"), projection.units)
   const rendered = renderTranscriptStyled(model)
     .chunks.map((chunk) => chunk.text)
     .join("")
@@ -372,10 +370,10 @@ it("shows the durable execution failure on a nested subagent instead of a failed
       data: { message: "Model route luna-low was not registered" },
     }),
   ])
-  let live = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
-  live = ExecutionEvents.projectChildUnits(live, "turn:agent", child.units)
-  const durable = ExecutionEvents.projectUnits(
-    ViewState.initial("/work"),
+  let live = projectUnits(initial("/work"), parent.units)
+  live = projectChildUnits(live, "turn:agent", child.units)
+  const durable = projectUnits(
+    initial("/work"),
     TranscriptNestedProjection.withNestedProjections(parent, [{ parentId: "turn:agent", projection: child }]).units,
   )
 
@@ -420,8 +418,8 @@ it("keeps nested reasoning and non-assistant entries out of a subagent projectio
       data: { tool_call_id: "nested", tool_name: "read", input: { path: "src/a.ts" } },
     }),
   ])
-  let model = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
-  model = ExecutionEvents.projectChildUnits(model, "turn:agent", child.units)
+  let model = projectUnits(initial("/work"), parent.units)
+  model = projectChildUnits(model, "turn:agent", child.units)
 
   expect(model.blocks.some((block) => (block as TranscriptBlock)._tag === "Reasoning")).toBe(false)
   expect(model.items.some((item) => (item as TranscriptItem).id === "turn:child:turn:agent:user")).toBe(false)
@@ -447,8 +445,8 @@ it("normalizes a lone nested child agent into an agent tool with a stable row ke
       data: { child_execution_id: "grandchild", profile: "oracle" },
     }),
   ])
-  let model = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
-  model = ExecutionEvents.projectChildUnits(model, "turn:agent", child.units)
+  let model = projectUnits(initial("/work"), parent.units)
+  model = projectChildUnits(model, "turn:agent", child.units)
   model = { ...model, expandedRowKeys: ["tool:turn:agent"] }
 
   expect(model.blocks.some((block) => (block as TranscriptBlock)._tag === "ChildAgent")).toBe(false)

@@ -5,13 +5,12 @@ import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 
-import {
-  TranscriptPresenter,
-  ViewState,
-  type Model,
-  type Entry,
-  type TranscriptItem,
-} from "./support/terminal-state-access"
+import { applyChildUnits, applyTurnUnits } from "../src/presentation/transcript/terminal-transcript-presentation"
+import { attachChildProjections } from "../src/presentation/transcript/transcript-attachment"
+import { type Entry } from "../src/state/model/terminal-message"
+import { initial, type Model } from "../src/state/model/terminal-state"
+import { type TranscriptItem } from "../src/state/model/terminal-transcript-state"
+
 import { agentResponseState } from "../src/presentation/transcript/transcript-agent-response"
 
 const event = (
@@ -60,9 +59,9 @@ const entryUnit = (key: string, sequence: number, text: string): TranscriptUnit.
 })
 
 const nestedModel = () => {
-  let model = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), parentProjection.units)
-  model = TranscriptPresenter.applyChildUnits(model, "turn:agent", childProjection.units)
-  model = TranscriptPresenter.applyChildUnits(
+  let model = applyTurnUnits(initial("/work"), parentProjection.units)
+  model = applyChildUnits(model, "turn:agent", childProjection.units)
+  model = applyChildUnits(
     model,
     TranscriptIdentity.scopedIdentity("child:turn:oracle", "nested"),
     grandchildProjection.units,
@@ -114,8 +113,8 @@ const childProjections = new Map(
   }),
 )
 const attachedSession = () => {
-  const base = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), largeParent.units)
-  return TranscriptPresenter.attachChildProjections(base, new Set<string>(), childProjections)
+  const base = applyTurnUnits(initial("/work"), largeParent.units)
+  return attachChildProjections(base, new Set<string>(), childProjections)
 }
 
 const agentTool = (
@@ -173,7 +172,7 @@ const agentScenario = (opts: {
     children.push(item)
   }
   const model: Model = {
-    ...ViewState.initial("/work"),
+    ...initial("/work"),
     entries,
     blocks,
     items,

@@ -1,20 +1,24 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Session, ViewState, type PromptPart } from "./support/terminal-state-access"
+import { expandPastedText, pastedTextTokenAt } from "../src/state/model/terminal-composer-paste"
+import { displayInput, promptParts, type PromptPart } from "../src/state/model/terminal-composer-state"
+import { initial } from "../src/state/model/terminal-state"
+import { update } from "../src/state/reducer/terminal-state-reducer"
+import { execute } from "../src/terminal-session"
 
 describe("pasted text attachments", () => {
   it("collapses multiline, carriage-return, and long paste while preserving short paste", () => {
     const values = ["first\nsecond", "first\rsecond", "x".repeat(121)]
     for (const value of values) {
-      const model = ViewState.update(ViewState.initial("/work"), { _tag: "Pasted", text: value })
+      const model = update(initial("/work"), { _tag: "Pasted", text: value })
       expect(model.input).toHaveLength(1)
       expect(model.pastedText[0]?.type === "text" ? model.pastedText[0].value : undefined).toBe(value)
-      expect(ViewState.displayInput(model)).toContain("[Pasted text #1")
+      expect(displayInput(model)).toContain("[Pasted text #1")
     }
-    const short = ViewState.update(ViewState.initial("/work"), { _tag: "Pasted", text: "short paste" })
+    const short = update(initial("/work"), { _tag: "Pasted", text: "short paste" })
     expect(short.input).toBe("short paste")
     expect(short.pastedText).toEqual([])
 
-    const unicodeBoundary = ViewState.update(ViewState.initial("/work"), {
+    const unicodeBoundary = update(initial("/work"), {
       _tag: "Pasted",
       text: "😀".repeat(120),
     })
@@ -23,46 +27,46 @@ describe("pasted text attachments", () => {
   })
 
   it("collapses a short paste that looks like a mention and marks its prompt parts pasted", () => {
-    const model = ViewState.update(ViewState.initial("/work"), { _tag: "Pasted", text: "thanks @Copilot and @ipedro" })
+    const model = update(initial("/work"), { _tag: "Pasted", text: "thanks @Copilot and @ipedro" })
     expect(model.input).toHaveLength(1)
-    expect(ViewState.displayInput(model)).toBe("[Pasted text #1]")
-    expect(ViewState.promptParts(model.input, model.pastedText)).toEqual([
+    expect(displayInput(model)).toBe("[Pasted text #1]")
+    expect(promptParts(model.input, model.pastedText)).toEqual([
       { type: "text", text: "thanks @Copilot and @ipedro", pasted: true },
     ])
 
-    const address = ViewState.update(ViewState.initial("/work"), { _tag: "Pasted", text: "mail dallen@example.com" })
+    const address = update(initial("/work"), { _tag: "Pasted", text: "mail dallen@example.com" })
     expect(address.input).toBe("mail dallen@example.com")
     expect(address.pastedText).toEqual([])
   })
 
   it("does not reuse a pasted-text token after an earlier token is deleted", () => {
-    let model = ViewState.update(ViewState.initial("/work"), { _tag: "Pasted", text: "delete\nthis" })
-    model = ViewState.update(model, { _tag: "Pasted", text: "keep\nthis" })
+    let model = update(initial("/work"), { _tag: "Pasted", text: "delete\nthis" })
+    model = update(model, { _tag: "Pasted", text: "keep\nthis" })
     model = { ...model, input: model.input.slice(1), cursor: 1 }
-    model = ViewState.update(model, { _tag: "Pasted", text: "add\nthis" })
+    model = update(model, { _tag: "Pasted", text: "add\nthis" })
 
     expect(model.pastedText.map((attachment) => attachment.token)).toEqual([
       String.fromCharCode(0xe000),
       String.fromCharCode(0xe001),
       String.fromCharCode(0xe002),
     ])
-    expect(ViewState.displayInput(model)).toBe("[Pasted text #2 +2 lines][Pasted text #3 +2 lines]")
-    expect(ViewState.expandPastedText(model.input, model.pastedText)).toBe("keep\nthisadd\nthis")
+    expect(displayInput(model)).toBe("[Pasted text #2 +2 lines][Pasted text #3 +2 lines]")
+    expect(expandPastedText(model.input, model.pastedText)).toBe("keep\nthisadd\nthis")
   })
 
   it("preserves surrounding typed text and pasted content through submission", () => {
-    let model = { ...ViewState.initial("/work"), input: "before ", cursor: 7 }
-    model = ViewState.update(model, { _tag: "Pasted", text: "line one\r\nline two" })
-    model = ViewState.update(model, {
+    let model = { ...initial("/work"), input: "before ", cursor: 7 }
+    model = update(model, { _tag: "Pasted", text: "line one\r\nline two" })
+    model = update(model, {
       _tag: "KeyPressed",
       key: { name: "x", sequence: " after", ctrl: false, alt: false, meta: false, shift: false, eventType: "press" },
     })
-    const parts = ViewState.promptParts(model.input, model.pastedText)
+    const parts = promptParts(model.input, model.pastedText)
     const submitted: Array<{ readonly prompt: string; readonly parts?: ReadonlyArray<PromptPart> }> = []
-    Session.execute(
+    execute(
       {
-        submit: (prompt, promptParts) =>
-          submitted.push(promptParts === undefined ? { prompt } : { prompt, parts: promptParts }),
+        submit: (prompt, submittedParts) =>
+          submitted.push(submittedParts === undefined ? { prompt } : { prompt, parts: submittedParts }),
         quit: () => undefined,
       },
       { _tag: "Submit", prompt: model.input, parts, mode: "ultra" },
@@ -76,30 +80,30 @@ describe("pasted text attachments", () => {
   })
 
   it("expands pasted text for editing and stores expanded transcript history", () => {
-    const collapsed = ViewState.update(ViewState.initial("/work"), { _tag: "Pasted", text: "line one\nline two" })
+    const collapsed = update(initial("/work"), { _tag: "Pasted", text: "line one\nline two" })
     const attachment = collapsed.pastedText[0]!
-    expect(ViewState.pastedTextTokenAt(collapsed, 2)).toBe(attachment.token)
+    expect(pastedTextTokenAt(collapsed, 2)).toBe(attachment.token)
 
-    const expanded = ViewState.update(collapsed, { _tag: "PastedTextExpanded", token: attachment.token })
+    const expanded = update(collapsed, { _tag: "PastedTextExpanded", token: attachment.token })
     expect(expanded.input).toBe("line one\nline two")
     expect(expanded.cursor).toBe(expanded.input.length)
     expect(expanded.pastedText).toEqual([])
 
-    const submitted = ViewState.update(collapsed, { _tag: "Submitted" })
+    const submitted = update(collapsed, { _tag: "Submitted" })
     expect(submitted.history.at(-1)).toBe("line one\nline two")
-    const started = ViewState.update(submitted, { _tag: "TurnStarted", turnId: "turn-1", prompt: "line one\nline two" })
+    const started = update(submitted, { _tag: "TurnStarted", turnId: "turn-1", prompt: "line one\nline two" })
     expect(started.entries.at(-1)?.text).toBe("line one\nline two")
   })
 
   it("expands pasted attachment tokens before identifying image prompt parts", () => {
-    let model = ViewState.update(ViewState.initial("/work"), {
+    let model = update(initial("/work"), {
       _tag: "Pasted",
       text: "inspect [screen shot.png] and file:///tmp/other%20shot.webp",
     })
-    model = ViewState.update(model, { _tag: "Pasted", text: "x".repeat(121) })
+    model = update(model, { _tag: "Pasted", text: "x".repeat(121) })
 
-    expect(ViewState.displayInput(model)).toContain("[Pasted text #1]")
-    expect(ViewState.promptParts(model.input, model.pastedText)).toEqual([
+    expect(displayInput(model)).toContain("[Pasted text #1]")
+    expect(promptParts(model.input, model.pastedText)).toEqual([
       { type: "text", text: "inspect " },
       { type: "image", path: "screen shot.png" },
       { type: "text", text: " and " },
@@ -111,9 +115,7 @@ describe("pasted text attachments", () => {
   it("keeps typed image attachments structured without reparsing their paths", () => {
     const token = String.fromCharCode(0xe000)
     expect(
-      ViewState.promptParts(`before ${token} after`, [
-        { type: "image", token, path: "odd [name].png", label: "[Image #1]" },
-      ]),
+      promptParts(`before ${token} after`, [{ type: "image", token, path: "odd [name].png", label: "[Image #1]" }]),
     ).toEqual([
       { type: "text", text: "before " },
       { type: "image", path: "odd [name].png" },
@@ -122,35 +124,35 @@ describe("pasted text attachments", () => {
   })
 
   it("removes only the failed image attachment while preserving later input", () => {
-    let model = ViewState.update(ViewState.initial("/work"), { _tag: "ImageInserted", path: "failed.png" })
-    model = ViewState.update(model, {
+    let model = update(initial("/work"), { _tag: "ImageInserted", path: "failed.png" })
+    model = update(model, {
       _tag: "KeyPressed",
       key: { name: "x", sequence: "after", ctrl: false, alt: false, meta: false, shift: false, eventType: "press" },
     })
-    model = ViewState.update(model, { _tag: "ImageRemoved", path: "failed.png" })
+    model = update(model, { _tag: "ImageRemoved", path: "failed.png" })
     expect(model.input).toBe("after")
     expect(model.cursor).toBe(5)
     expect(model.pastedText).toEqual([])
   })
 
   it("handles image-only, escaped, and malformed file image references", () => {
-    expect(ViewState.promptParts("only\\ image.png")).toEqual([{ type: "image", path: "only image.png" }])
-    expect(ViewState.promptParts("file:///tmp/bad%ZZ.png")).toEqual([{ type: "image", path: "file:///tmp/bad%ZZ.png" }])
+    expect(promptParts("only\\ image.png")).toEqual([{ type: "image", path: "only image.png" }])
+    expect(promptParts("file:///tmp/bad%ZZ.png")).toEqual([{ type: "image", path: "file:///tmp/bad%ZZ.png" }])
   })
 
   it("inserts a terminal-pasted absolute image path containing spaces as one attachment", () => {
     const path = "/var/folders/example/T/Screen Shot 2026-07-12 at 10.00.00 PM.png"
-    const model = ViewState.update(ViewState.initial("/work"), { _tag: "Pasted", text: `${path}\n` })
-    expect(ViewState.displayInput(model)).toBe("[Image #1]")
-    expect(ViewState.promptParts(model.input, model.pastedText)).toEqual([{ type: "image", path }])
+    const model = update(initial("/work"), { _tag: "Pasted", text: `${path}\n` })
+    expect(displayInput(model)).toBe("[Image #1]")
+    expect(promptParts(model.input, model.pastedText)).toEqual([{ type: "image", path }])
   })
 
   it("keeps empty and incomplete shell submissions idle", () => {
-    const empty = ViewState.initial("/work")
-    expect(ViewState.update(empty, { _tag: "Submitted" })).toBe(empty)
+    const empty = initial("/work")
+    expect(update(empty, { _tag: "Submitted" })).toBe(empty)
 
     const shell = { ...empty, input: "$   ", cursor: 4 }
-    expect(ViewState.update(shell, { _tag: "Submitted" })).toBe(shell)
+    expect(update(shell, { _tag: "Submitted" })).toBe(shell)
   })
 
   it("opens the mode picker without exposing direct mode actions", () => {
@@ -163,21 +165,21 @@ describe("pasted text attachments", () => {
       shift: false,
       eventType: "press" as const,
     }
-    const picker = ViewState.update(
-      { ...ViewState.initial("/work"), palette: { open: true, query: "mode Change", selected: 0 } },
+    const picker = update(
+      { ...initial("/work"), palette: { open: true, query: "mode Change", selected: 0 } },
       { _tag: "KeyPressed", key },
     )
     expect(picker.modePicker.open).toBe(true)
 
-    const removed = ViewState.update(
-      { ...ViewState.initial("/work"), palette: { open: true, query: "mode low", selected: 0 } },
+    const removed = update(
+      { ...initial("/work"), palette: { open: true, query: "mode low", selected: 0 } },
       { _tag: "KeyPressed", key },
     )
     expect(removed.mode).toBe("medium")
     expect(removed.palette.open).toBe(true)
 
-    const unmatched = ViewState.update(
-      { ...ViewState.initial("/work"), palette: { open: true, query: "no matching command", selected: 0 } },
+    const unmatched = update(
+      { ...initial("/work"), palette: { open: true, query: "no matching command", selected: 0 } },
       { _tag: "KeyPressed", key },
     )
     expect(unmatched.palette.open).toBe(true)
