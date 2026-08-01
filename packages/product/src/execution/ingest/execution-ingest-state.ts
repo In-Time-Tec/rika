@@ -1,16 +1,94 @@
-import type { ThreadId } from "../../thread/model/thread-record"
-import type { TurnId } from "../../thread/model/turn-record"
+import type * as Thread from "@rika/product/thread-record"
+import type * as Turn from "@rika/product/turn-record"
+import type * as TranscriptRepository from "@rika/product/transcript-repository"
+import type * as ExecutionBackend from "@rika/product/execution-service"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
+import type * as IngestProjectionTypes from "./execution-projection-types"
+import type * as UsageCost from "../../usage/usage-projection"
+import type { Failure } from "./execution-ingest-service"
+import type { Cause, Deferred, Latch, Queue, Semaphore } from "effect"
+import type { ProjectionChange, ProjectionWatchOverflow } from "./execution-ingest-service"
 
-export interface ExecutionIngestState {
-  readonly threadId: ThreadId
-  readonly rootTurnId: TurnId
-  readonly streamId: string
-  readonly patchRevision: number
-  readonly terminal: boolean
+export type Settled = NonNullable<TranscriptRepository.ExecutionCheckpoint["status"]>
+export type InterruptedOutcome = NonNullable<TranscriptUnit.Unit["executionOutcome"]> & {
+  readonly status: "failed" | "cancelled"
 }
 
-export const initialExecutionIngestState = (
-  threadId: ThreadId,
-  rootTurnId: TurnId,
-  streamId: string,
-): ExecutionIngestState => ({ threadId, rootTurnId, streamId, patchRevision: 0, terminal: false })
+export interface Node {
+  readonly executionId: string
+  readonly key: string
+  readonly parentKey: string | undefined
+  readonly fold: TranscriptProjection.ProjectionFold
+  readonly durableCursors: Map<string, number>
+  cursor: string | undefined
+  sequence: number
+  status: Settled | undefined
+  resumed: boolean
+  caught: boolean
+  attachment: IngestProjectionTypes.Attachment | undefined
+}
+
+export interface Pipeline {
+  readonly threadId: Thread.ThreadId
+  readonly turnId: Turn.TurnId
+  readonly rootKey: string
+  readonly streamId: string
+  readonly nodes: Map<string, Node>
+  readonly order: Array<string>
+  readonly finished: Deferred.Deferred<void, Failure>
+  readonly rootSettled: Latch.Latch
+  readonly rootCommitted: Deferred.Deferred<void, Failure>
+  readonly readersFinished: Latch.Latch
+  readonly abandoned: Latch.Latch
+  readonly wake: Queue.Queue<void>
+  readonly committing: Semaphore.Semaphore
+  readonly catchUp: boolean
+  readonly refolding: boolean
+  readonly refoldFromVersion: number | undefined
+  fork: (effect: import("effect").Effect.Effect<void>) => void
+  persistedGeneration: number | undefined
+  turn: Turn.AgentExecutionTurn
+  active: number
+  pending: number
+  accepting: boolean
+  stopped: boolean
+  reading: number
+  delivered: Array<ExecutionBackend.Event> | undefined
+  usageSnapshot: UsageCost.Snapshot
+  usageRevision: number
+  usageSourceComplete: boolean
+  usageRefoldFromVersion: number | undefined
+  usagePending: Array<UsageCost.RootExecution & { readonly event: ExecutionBackend.Event }>
+  usageFold: UsageCost.UsageFold
+  usageNotificationPending: boolean
+  delta: IngestProjectionTypes.ProjectionDelta
+  failure: Failure | undefined
+  patchRevision: number
+  streamClosed: boolean
+  changeVersion: number
+  pendingVersion: number
+  persistedVersion: number
+  readonly flushWaiters: Array<{
+    readonly version: number
+    readonly deferred: Deferred.Deferred<void, Failure>
+  }>
+  readonly unitIndex: Map<string, TranscriptUnit.Unit>
+  readonly unitOwners: Map<string, string>
+  readonly unresolvedByParent: Map<string, Set<string>>
+  readonly runningNodes: Set<string>
+}
+
+export interface Watcher {
+  readonly id: number
+  readonly queue: Queue.Queue<ProjectionChange, ProjectionWatchOverflow | Cause.Done>
+}
+
+export const recordChange = (pipeline: Pipeline): void => {
+  pipeline.changeVersion += 1
+  pipeline.pendingVersion = pipeline.changeVersion
+}
+
+export const finishReaders = (pipeline: Pipeline): void => {
+  if (pipeline.active <= 0) pipeline.readersFinished.openUnsafe()
+}
