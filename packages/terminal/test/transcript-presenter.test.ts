@@ -5,13 +5,17 @@ import * as TranscriptPresentationModel from "@rika/transcript/transcript-presen
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { expect, it } from "vitest"
-import { ExecutionEvents, TranscriptPresenter, ViewState } from "../src/state/model/terminal-state"
 import {
-  agentOutputText,
-  unitId as transcriptUnitId,
-  rows as transcriptUnits,
-} from "../src/presentation/transcript/terminal-transcript-presentation"
-import {
+  ExecutionEvents,
+  TranscriptPresenter,
+  ViewState,
+  type Model,
+  type TranscriptItem,
+} from "./support/terminal-state-access"
+import { agentOutputText } from "../src/presentation/transcript/transcript-agent-response"
+import { transcriptUnitId, transcriptUnits } from "../src/presentation/transcript/transcript-row"
+import { transcriptFixtures } from "./transcript-presenter-support"
+const {
   event,
   parentProjection,
   childProjection,
@@ -31,7 +35,7 @@ import {
   settled,
   limit,
   noReport,
-} from "./transcript-presenter.test-support"
+} = transcriptFixtures
 it("projects turn units identically to the legacy projection", () => {
   const legacy = ExecutionEvents.projectUnits(ViewState.initial("/work"), parentProjection.units)
   const presenter = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), parentProjection.units)
@@ -104,7 +108,7 @@ it("inserts a new unit at its stable intrinsic order", () => {
   const earlier = entryUnit("ordered:earlier", 1, "earlier")
   const base = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), [later])
   const inserted = TranscriptPresenter.applyTurnUnits(base, [earlier])
-  const orderedText = (inserted.items as ReadonlyArray<ViewState.TranscriptItem>).map((item) =>
+  const orderedText = (inserted.items as ReadonlyArray<TranscriptItem>).map((item) =>
     item._tag === "Entry" ? inserted.entries[item.index]?.text : undefined,
   )
   expect(orderedText).toEqual(["earlier", "later"])
@@ -127,7 +131,7 @@ it("orders one reverse delta across nested executions by the root projection ord
     upsert: [later, earlier],
     remove: [],
   })
-  const orderedText = (inserted.items as ReadonlyArray<ViewState.TranscriptItem>).map((item) =>
+  const orderedText = (inserted.items as ReadonlyArray<TranscriptItem>).map((item) =>
     item._tag === "Entry" ? inserted.entries[item.index]?.text : undefined,
   )
 
@@ -139,10 +143,7 @@ it("applies removals without rebuilding unaffected transcript storage", () => {
   const last = entryUnit("remove:last", 3, "last")
   const base = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), [first, removed, last])
   const updated = TranscriptPresenter.applyTurnDelta(base, "ordered-turn", { upsert: [], remove: [removed.key] })
-  expect((updated.items as ReadonlyArray<ViewState.TranscriptItem>).map((item) => item.id)).toEqual([
-    first.key,
-    last.key,
-  ])
+  expect((updated.items as ReadonlyArray<TranscriptItem>).map((item) => item.id)).toEqual([first.key, last.key])
   expect(updated.entries.map((entry) => entry.text)).toEqual(["first", "last"])
   expect(updated.blocks).toBe(base.blocks)
 })
@@ -165,9 +166,7 @@ it("removes nested child rows without disturbing their parent tool", () => {
   const base = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), nested.units)
   const updated = TranscriptPresenter.applyTurnDelta(base, "turn", { upsert: [], remove: childKeys })
   const itemIds = new Set(
-    (updated.items as ReadonlyArray<ViewState.TranscriptItem>).flatMap((item) =>
-      item.id === undefined ? [] : [item.id],
-    ),
+    (updated.items as ReadonlyArray<TranscriptItem>).flatMap((item) => (item.id === undefined ? [] : [item.id])),
   )
   expect(childKeys.some((key) => itemIds.has(key))).toBe(false)
   expect(updated.blocks).toContainEqual(expect.objectContaining({ _tag: "ToolCall", id: "turn:agent" }))
@@ -220,7 +219,7 @@ it("keeps an applied child outcome when the parent's stale units reproject", () 
   ])
   let model = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), parentProjection.units)
   model = TranscriptPresenter.applyChildUnits(model, "turn:agent", failedChild.units)
-  const parentTool = (candidate: ViewState.Model) =>
+  const parentTool = (candidate: Model) =>
     (candidate.blocks as ReadonlyArray<TranscriptPresentationModel.Block>).find(
       (block) => block._tag === "ToolCall" && block.id === "turn:agent",
     ) as Extract<TranscriptPresentationModel.Block, { _tag: "ToolCall" }>
@@ -420,7 +419,7 @@ it("emits only ToolCall children as rows while assistant and error children feed
     detail: "src/a.ts",
     files: [],
   }
-  const model: ViewState.Model = {
+  const model: Model = {
     ...ViewState.initial("/work"),
     entries: [{ role: "assistant", text: "child answer" }],
     blocks: [parent, nested, { _tag: "Error", title: "warn", detail: "a soft error" }],

@@ -1,19 +1,17 @@
 import { bg, dim, fg, StyledText, type TextChunk, type ColorInput } from "@opentui/core"
 import stringWidth from "string-width"
-import type { Model, ThreadItem } from "../../state/model/terminal-state"
+import type { Model } from "../../state/model/terminal-state"
+import type { ThreadItem } from "../../state/model/terminal-thread-state"
 import { Clock, Effect, Function } from "effect"
-import {
-  initial,
-  isLoading,
-  selectedThreadMetadata,
-  filteredThreads,
-  type Mode,
-} from "../../state/model/terminal-state"
-import { escapeControlCharacters, relativeTime } from "../../presentation/terminal/terminal-format"
+import { initial, type Mode } from "../../state/model/terminal-state"
+import { isLoading } from "../../state/model/terminal-loadable-state"
+import { selectedThreadMetadata, filteredThreads } from "../../state/model/terminal-thread-navigation"
+import { escapeControlCharacters } from "../../presentation/terminal/terminal-format"
+import { relativeTime } from "../../presentation/terminal/terminal-relative-time"
 import { colors } from "../../presentation/terminal/terminal-theme"
 import { truncateToWidth } from "../../presentation/terminal/terminal-format"
 import { renderTranscriptStyled } from "../rendering/opentui-renderer"
-import { applyTurnUnits as projectUnits } from "../../presentation/transcript/terminal-transcript-presentation"
+import { projectUnits } from "../../presentation/transcript/terminal-transcript-projection"
 type ThreadPreviewValue = Extract<Model["threadPreview"], { _tag: "Ready" }>["value"]
 const threadAge = (updatedAt: number | undefined, now: number): string =>
   updatedAt === undefined || updatedAt <= 0 ? "" : relativeTime(now - updatedAt)

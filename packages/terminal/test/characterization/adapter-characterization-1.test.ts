@@ -3,14 +3,12 @@ import { expect, test, vi } from "vitest"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Effect } from "effect"
 import stringWidth from "string-width"
-import {
-  clipStyledLine,
-  formatTokens,
-  previewBoxRows,
-  renderChangedFiles,
-  renderTranscriptStyled,
-} from "../../src/opentui/surface/opentui-surface"
-import { ready, update } from "../../src/state/model/terminal-state"
+import { clipStyledLine, previewBoxRows } from "../../src/opentui/surface/opentui-overlay-content"
+import { formatTokens } from "../../src/presentation/terminal/terminal-format"
+import { renderChangedFiles } from "../../src/opentui/rendering/opentui-render-block"
+import { renderTranscriptStyled } from "../../src/opentui/rendering/opentui-renderer"
+import { ready } from "../../src/state/model/terminal-loadable-state"
+import { update } from "../../src/state/reducer/terminal-state-reducer"
 const opentuiValue = vi.hoisted(() => {
   const boxChildren: Array<object> = []
   const keyHandlers = new Set<(key: object) => void>()
@@ -254,7 +252,7 @@ vi.mock("@opentui/core", () => ({
   },
   stripAnsiSequences: (text: string) => text,
 }))
-import { _shell, _agentToolBlock, _nonEmptyLines, model, thread } from "./adapter-characterization-1.test-support"
+import { _shell, _agentToolBlock, _nonEmptyLines, model, thread } from "./adapter-characterization-1-support"
 test("formats compact token totals", () => {
   expect(formatTokens(999)).toBe("999 tok")
   expect(formatTokens(40_100_000)).toBe("40.1M tok")

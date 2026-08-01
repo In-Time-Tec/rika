@@ -1,6 +1,7 @@
 import { Function } from "effect"
-import type { Model, TranscriptBlock, TranscriptItem } from "../../state/model/terminal-state"
-import type { AgentResponseState } from "./transcript-tool-detail"
+import type { Model } from "../../state/model/terminal-state"
+import type { TranscriptBlock, TranscriptItem } from "../../state/model/terminal-transcript-state"
+import type { AgentResponseState } from "./transcript-tool-types"
 
 export const isToolOutputDisplayed = (block: Extract<TranscriptBlock, { _tag: "ToolCall" }>): boolean =>
   block.status === "failed" || block.presentation.outputDisplay !== "hidden"

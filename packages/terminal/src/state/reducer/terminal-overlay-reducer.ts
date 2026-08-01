@@ -1,13 +1,10 @@
 import type { Message } from "../model/terminal-message"
-import type { Model, TranscriptBlock, TranscriptItem } from "../model/terminal-state"
+import type { Model } from "../model/terminal-state"
+import type { TranscriptBlock, TranscriptItem } from "../model/terminal-transcript-state"
 import { ready, loading } from "../model/terminal-loadable-state"
 import { streamActivity } from "../model/terminal-activity-state"
 import { dropSubmittedDrafts, settleSteering, takeSubmittedDraft } from "../model/terminal-queue-state"
-import {
-  expandableRowIds,
-  rows as transcriptUnits,
-  unitId as transcriptUnitId,
-} from "../../presentation/transcript/terminal-transcript-presentation"
+import { expandableRowIds, transcriptUnits, transcriptUnitId } from "../../presentation/transcript/transcript-row"
 import { context } from "./terminal-state-reducer"
 
 export const reduceOverlay = (

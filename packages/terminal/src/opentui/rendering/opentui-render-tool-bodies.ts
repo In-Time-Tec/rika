@@ -1,32 +1,30 @@
 import { bold, dim, fg, italic, strikethrough, StyledText, type TextChunk } from "@opentui/core"
 import stringWidth from "string-width"
-import type { Model, TranscriptBlock } from "../../state/model/terminal-state"
+import type { Model } from "../../state/model/terminal-state"
+import type { TranscriptBlock } from "../../state/model/terminal-transcript-state"
 import { colors } from "../../presentation/terminal/terminal-theme"
 import { plural } from "../../presentation/terminal/terminal-format"
+import { highlightShellCommand, wrapStyledLine } from "./terminal-text-adapter"
 import {
-  highlightShellCommand,
-  wrapStyledLine,
   renderDiffStyled,
   renderPartialDiffStyled,
   renderPierreDiff,
   renderToolSummary,
-} from "./terminal-text-adapter"
+} from "./terminal-diff-text-adapter"
+import { transcriptWrapWidth } from "./opentui-render-transcript-window"
+import { wrapTextToWidth, wrapBodyText, iconChar, markerText } from "./opentui-render-window"
 import {
-  transcriptWrapWidth,
-  type ToolUnit,
-  wrapTextToWidth,
-  wrapBodyText,
-  iconChar,
-  markerText,
   inputString,
   toolInputValue,
   diffCounts,
   shellCommandText,
   shellExitCode,
   exploreChildLabel,
-} from "./opentui-render-window"
-import { isToolOutputDisplayed, toolDetails } from "../../presentation/transcript/terminal-transcript-presentation"
-import type { UnitLineRange } from "./opentui-render-window"
+  type ToolUnit,
+} from "./opentui-render-tool-detail"
+import { toolDetails } from "../../presentation/transcript/transcript-tool-detail"
+import { isToolOutputDisplayed } from "../../presentation/transcript/transcript-agent-response"
+import type { UnitLineRange } from "./opentui-render-transcript-window"
 
 export interface ToolBodyContext {
   readonly model: Model

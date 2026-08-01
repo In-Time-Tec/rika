@@ -2,14 +2,15 @@ import { createTestRenderer } from "@opentui/core/testing"
 import { expect, test } from "vitest"
 import { Effect } from "effect"
 import { Surface } from "../../src/opentui/surface/opentui-surface"
-import { initial, type Model, update } from "../../src/state/model/terminal-state"
+import { initial, type Model } from "../../src/state/model/terminal-state"
+import { update } from "../../src/state/reducer/terminal-state-reducer"
 import {
   openTui,
   _insertText,
   _streamingShell,
   _giantSubagentModel,
   _collapsedSubagentModel,
-} from "./opentui-surface-characterization-5.test-support"
+} from "./opentui-surface-characterization-5-support"
 test("keeps a followed transcript pinned to the bottom after markdown reflows", () =>
   Effect.runPromise(
     Effect.gen(function* () {

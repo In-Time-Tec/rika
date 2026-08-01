@@ -6,9 +6,12 @@ import { expect, test } from "vitest"
 
 import { Data, Effect } from "effect"
 
-import { Surface, maxMountedTranscriptEntries } from "../../src/opentui/surface/opentui-surface"
+import { Surface } from "../../src/opentui/surface/opentui-surface"
+import { maxMountedTranscriptEntries } from "../../src/opentui/rendering/opentui-render-transcript-window"
 
-import { initial, ready, type Model, update } from "../../src/state/model/terminal-state"
+import { initial, type Model } from "../../src/state/model/terminal-state"
+import { ready } from "../../src/state/model/terminal-loadable-state"
+import { update } from "../../src/state/reducer/terminal-state-reducer"
 
 class OpenTuiError extends Data.TaggedError("OpenTuiError")<{ readonly cause: unknown }> {}
 

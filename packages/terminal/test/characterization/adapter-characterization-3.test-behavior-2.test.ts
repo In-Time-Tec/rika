@@ -1,7 +1,7 @@
 import { expect, test, vi } from "vitest"
 import { Effect } from "effect"
 import stringWidth from "string-width"
-import { buildTranscript } from "../../src/opentui/surface/opentui-surface"
+import { buildTranscript } from "../../src/opentui/rendering/opentui-renderer"
 
 const opentuiValue = vi.hoisted(() => {
   const boxChildren: Array<object> = []
@@ -244,7 +244,8 @@ vi.mock("@opentui/core", () => ({
   },
   stripAnsiSequences: (text: string) => text,
 }))
-import {
+import { adapterFixtures3 } from "./adapter-characterization-3-support"
+const {
   shell,
   _windowUnitToolCall,
   _agentToolBlock,
@@ -256,7 +257,7 @@ import {
   model,
   _thread,
   _createScoped,
-} from "./adapter-characterization-3.test-support"
+} = adapterFixtures3
 test("closes an expanded settled subagent's nested tree with the terminal connector", () => {
   const state = model({
     entries: [{ role: "assistant", text: "All checks passed." }],

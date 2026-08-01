@@ -1,4 +1,5 @@
-import type { Model, ThreadItem } from "./terminal-state"
+import type { Model } from "./terminal-state"
+import type { ThreadItem } from "./terminal-thread-state"
 import { readyOr } from "./terminal-loadable-state"
 
 export const filteredFiles = (model: Model): ReadonlyArray<string> => {

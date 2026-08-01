@@ -104,5 +104,6 @@ export const renderPartialDiffStyled: {
   })
   return chunks === null ? undefined : new TerminalStyledText([...chunks])
 })
-import { TerminalStyledText, bold, fg, type TerminalTextChunk } from "../markdown/styled-text"
+import { TerminalStyledText, type TerminalTextChunk } from "../markdown/styled-text"
+import { bold, fg } from "../markdown/styled-text-effects"
 import { colors } from "../terminal/terminal-theme"

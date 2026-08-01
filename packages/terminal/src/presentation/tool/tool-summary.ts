@@ -1,8 +1,9 @@
-import { bold, fg, type TerminalTextChunk } from "../markdown/styled-text"
+import { bold, fg } from "../markdown/styled-text-effects"
+import type { TerminalTextChunk } from "../markdown/styled-text"
 import { Function } from "effect"
 import { colors } from "../terminal/terminal-theme"
-import { wrapStyledChunks } from "../markdown/styled-text"
-import type { ToolSummary } from "../transcript/terminal-transcript-presentation"
+import { wrapStyledChunks } from "../markdown/styled-text-wrapping"
+import type { ToolSummary } from "../transcript/transcript-tool-detail-types"
 
 export const joinToolSummary = (summary: ToolSummary): string => summary.primary + (summary.secondary ?? "")
 

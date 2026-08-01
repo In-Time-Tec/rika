@@ -2,7 +2,7 @@ import { expect, vi } from "vitest"
 import { it } from "@effect/vitest"
 import { Effect } from "effect"
 
-import { ready } from "../../src/state/model/terminal-state"
+import { ready } from "../../src/state/model/terminal-loadable-state"
 const opentuiValue = vi.hoisted(() => {
   const boxChildren: Array<object> = []
   const keyHandlers = new Set<(key: object) => void>()
@@ -246,14 +246,8 @@ vi.mock("@opentui/core", () => ({
   },
   stripAnsiSequences: (text: string) => text,
 }))
-import {
-  _windowUnitToolCall,
-  _agentToolBlock,
-  handlers,
-  model,
-  _thread,
-  createScoped,
-} from "./adapter-characterization-4.test-support"
+import { adapterFixtures4 } from "./adapter-characterization-4-support"
+const { _windowUnitToolCall, _agentToolBlock, handlers, model, _thread, createScoped } = adapterFixtures4
 it.effect("registers no SIGWINCH handler and relies on OpenTUI's debounced resize", () =>
   Effect.gen(function* () {
     const before = process.listenerCount("SIGWINCH")

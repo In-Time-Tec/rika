@@ -7,8 +7,8 @@ import {
   formatTokens,
   homeRelativePath,
   plural,
-  relativeTime,
 } from "../src/presentation/terminal/terminal-format"
+import { relativeTime } from "../src/presentation/terminal/terminal-relative-time"
 
 describe("format", () => {
   test("abbreviates token counts with one owner", () => {

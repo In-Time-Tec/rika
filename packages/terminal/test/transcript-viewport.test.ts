@@ -1,35 +1,39 @@
 import { describe, expect, test } from "vitest"
 import {
   advanceWindow,
-  anchorOf,
-  atBottom,
-  atBottomWithin,
   atWindowBottom,
   atWindowTop,
-  clampScrollTop,
   clampWindow,
   classifyTranscriptContent,
-  contentChanged,
+  initialWindow,
+  windowStart,
+} from "../src/presentation/transcript/transcript-viewport-window"
+import {
+  anchorOf,
+  clampScrollTop,
   detach,
   follow,
-  following,
-  initialWindow,
   isAnchored,
   isFollowing,
-  maxScrollTop,
+} from "../src/presentation/transcript/transcript-viewport"
+import { atBottomWithin, atBottom, maxScrollTop } from "../src/presentation/transcript/transcript-viewport-metrics"
+import {
+  contentChanged,
   reanchor,
-  reduceViewport,
   resized,
   settle,
   toggled,
+} from "../src/presentation/transcript/transcript-viewport-reducer"
+import {
+  following,
   wheelIdle,
-  windowStart,
   type TranscriptViewport,
   type ViewportAnchor,
-  type ViewportEvent,
   type ViewportState,
   type WheelPhase,
-} from "../src/presentation/transcript/transcript-viewport"
+} from "../src/presentation/transcript/transcript-viewport-state"
+import { reduceViewport } from "../src/presentation/transcript/transcript-viewport-reducer"
+import { type ViewportEvent } from "../src/presentation/transcript/transcript-viewport-events"
 
 const anchor = (unitId: string, offset: number): ViewportAnchor => ({ unitId, offset })
 const metrics = (scrollTop: number, scrollHeight: number, viewportHeight: number) => ({

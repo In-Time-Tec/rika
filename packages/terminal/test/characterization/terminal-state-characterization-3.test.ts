@@ -4,9 +4,16 @@ import { it } from "@effect/vitest"
 
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 
-import { Keys, ViewState } from "../../src/state/model/terminal-state"
+import {
+  Keys,
+  ViewState,
+  type Model,
+  type ThreadItem,
+  type TranscriptBlock,
+  type Key,
+} from "../support/terminal-state-access"
 
-const key = (input: Partial<Keys.Key> & Pick<Keys.Key, "name">): Keys.Key => ({
+const key = (input: Partial<Key> & Pick<Key, "name">): Key => ({
   name: input.name,
   ctrl: input.ctrl ?? false,
   alt: input.alt ?? false,
@@ -16,9 +23,7 @@ const key = (input: Partial<Keys.Key> & Pick<Keys.Key, "name">): Keys.Key => ({
   eventType: input.eventType ?? "press",
 })
 
-const _thread = (
-  input: Partial<ViewState.ThreadItem> & Pick<ViewState.ThreadItem, "id" | "title">,
-): ViewState.ThreadItem => ({
+const _thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
   workspace: "/work",
   pinned: false,
   archived: false,
@@ -32,7 +37,7 @@ const _readCall = (
   id: string,
   detail: string,
   status: "running" | "complete" = "running",
-): Extract<ViewState.TranscriptBlock, { _tag: "ToolCall" }> => ({
+): Extract<TranscriptBlock, { _tag: "ToolCall" }> => ({
   _tag: "ToolCall",
   id,
   name: "read",
@@ -60,7 +65,7 @@ const _editFile = (id: string, path: string) => ({
   status: "complete" as const,
 })
 
-const _busyQueueModel = (model: ViewState.Model): ViewState.Model => ({
+const _busyQueueModel = (model: Model): Model => ({
   ...model,
   busy: true,
   currentThreadId: "t",
@@ -112,7 +117,7 @@ test("replaces queue state without changing transcript blocks and covers remaini
     ...ViewState.initial("/work"),
     blocks: [{ _tag: "Notification", title: "N", detail: "d" }],
     history: ["alpha", "beta"],
-  } as ViewState.Model
+  } as Model
   const replaced = ViewState.replaceQueue(base, [
     { id: "new", prompt: "new" },
     { id: "next", prompt: "next" },

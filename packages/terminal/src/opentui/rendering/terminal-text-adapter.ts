@@ -4,18 +4,10 @@ import {
   renderMarkdownStyled as markdownStyled,
 } from "../../presentation/markdown/markdown-renderer"
 import { highlightShellCommand as highlightCommand } from "../../presentation/markdown/syntax-highlighter"
-import { wrapStyledLine as wrapLine } from "../../presentation/markdown/styled-text"
-import {
-  renderDiffStyled as diffStyled,
-  renderPartialDiffStyled as partialDiffStyled,
-} from "../../presentation/tool/diff-renderer"
-import { renderPierreDiff as pierreDiff, type DiffRenderOptions } from "../../presentation/tool/pierre-diff-adapter"
-import { renderToolSummary as toolSummary } from "../../presentation/tool/tool-summary"
+import { wrapStyledLine as wrapLine } from "../../presentation/markdown/styled-text-wrapping"
 import type { TerminalColor, TerminalStyledText, TerminalTextChunk } from "../../presentation/markdown/styled-text"
 
-export function toOpenColor(value: TerminalColor | RGBA): RGBA
-export function toOpenColor(value: TerminalColor | RGBA | undefined): RGBA | undefined
-export function toOpenColor(value: TerminalColor | RGBA | undefined): RGBA | undefined {
+const toOpenColorImpl = (value: TerminalColor | RGBA | undefined): RGBA | undefined => {
   if (value === undefined || value instanceof RGBA) return value
   if (typeof value === "string") {
     const indexes: Record<string, number> = {
@@ -46,6 +38,13 @@ export function toOpenColor(value: TerminalColor | RGBA | undefined): RGBA | und
   if ("_tag" in value && value._tag === "Indexed" && typeof (value as { readonly index?: unknown }).index === "number")
     return RGBA.fromIndex((value as unknown as { readonly index: number }).index)
   return RGBA.defaultBackground()
+}
+export const toOpenColor: {
+  (value: TerminalColor | RGBA): RGBA
+  (value: TerminalColor | RGBA | undefined): RGBA | undefined
+} = toOpenColorImpl as {
+  (value: TerminalColor | RGBA): RGBA
+  (value: TerminalColor | RGBA | undefined): RGBA | undefined
 }
 export const toOpenChunk = (chunk: TerminalTextChunk | TextChunk): TextChunk => {
   const fg = chunk.fg as TextChunk["fg"],
@@ -79,20 +78,3 @@ export const wrapStyledLine = (
   width: number,
 ): ReadonlyArray<ReadonlyArray<TextChunk>> =>
   wrapLine(line.map(terminalChunk), width).map((row) => row.map(toOpenChunk))
-export const renderDiffStyled = (patch: string, options: Parameters<typeof diffStyled>[1]): StyledText =>
-  toOpenText(diffStyled(patch, options))
-export const renderPartialDiffStyled = (
-  patch: string,
-  options: Parameters<typeof partialDiffStyled>[1],
-): StyledText | undefined => {
-  const result = partialDiffStyled(patch, options)
-  return result === undefined ? undefined : toOpenText(result)
-}
-export const renderPierreDiff = (patch: string, options: DiffRenderOptions): StyledText | undefined => {
-  const result = pierreDiff(options)(patch)
-  return result === undefined ? undefined : toOpenText(result)
-}
-export const renderToolSummary = (
-  summary: Parameters<typeof toolSummary>[0],
-  options?: Parameters<typeof toolSummary>[1],
-): ReadonlyArray<ReadonlyArray<TextChunk>> => toolSummary(summary, options).map((line) => line.map(toOpenChunk))

@@ -2,8 +2,11 @@ import { expect, test, vi } from "vitest"
 import { it } from "@effect/vitest"
 import { Effect } from "effect"
 import stringWidth from "string-width"
-import { boundedTranscriptModel, maxMountedTranscriptEntries } from "../../src/opentui/surface/opentui-surface"
-import { update } from "../../src/state/model/terminal-state"
+import {
+  boundedTranscriptModel,
+  maxMountedTranscriptEntries,
+} from "../../src/opentui/rendering/opentui-render-transcript-window"
+import { update } from "../../src/state/reducer/terminal-state-reducer"
 const opentuiValue = vi.hoisted(() => {
   const boxChildren: Array<object> = []
   const keyHandlers = new Set<(key: object) => void>()
@@ -254,7 +257,7 @@ import {
   _nonEmptyLines,
   model,
   createScoped,
-} from "./adapter-characterization-1.test-support"
+} from "./adapter-characterization-1-support"
 it.effect("reflows mounted assistant markdown when the terminal width shrinks", () =>
   Effect.gen(function* () {
     const { surface } = yield* createScoped(handlers())

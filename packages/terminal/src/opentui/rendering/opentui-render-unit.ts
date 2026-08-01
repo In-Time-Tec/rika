@@ -1,7 +1,8 @@
 import { bold, dim, fg, italic, strikethrough, StyledText, type TextChunk } from "@opentui/core"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import stringWidth from "string-width"
-import type { Model, TranscriptBlock } from "../../state/model/terminal-state"
+import type { Model } from "../../state/model/terminal-state"
+import type { TranscriptBlock } from "../../state/model/terminal-transcript-state"
 import { colors } from "../../presentation/terminal/terminal-theme"
 import { truncateToWidth } from "../../presentation/terminal/terminal-format"
 import {
@@ -9,43 +10,37 @@ import {
   renderMarkdownStyled,
   highlightShellCommand,
   wrapStyledLine,
-  renderDiffStyled,
-  renderPierreDiff,
-  renderToolSummary,
   toOpenChunk,
 } from "./terminal-text-adapter"
+import { renderDiffStyled, renderPierreDiff, renderToolSummary } from "./terminal-diff-text-adapter"
 import type { TerminalTextChunk } from "../../presentation/markdown/styled-text"
 import { renderBlock } from "./opentui-render-block"
 import { idleSpinnerFrame } from "./opentui-spinner"
+import { agentToolSummary, toolDetail, toolDetails } from "../../presentation/transcript/transcript-tool-detail"
+import { isToolOutputDisplayed } from "../../presentation/transcript/transcript-agent-response"
 import {
-  agentToolSummary,
   isExpandableUnit,
-  isToolOutputDisplayed,
   orderedTranscriptItems,
-  toolDetail,
-  unitId as transcriptUnitId,
-  toolDetails,
-  type AgentOutcome,
-  type PathTarget,
-  type ToolTranscriptUnit,
-  type TranscriptUnit,
-} from "../../presentation/transcript/terminal-transcript-presentation"
+  transcriptUnitId,
+} from "../../presentation/transcript/transcript-row"
+import type {
+  AgentOutcome,
+  ToolTranscriptUnit,
+  TranscriptUnit,
+} from "../../presentation/transcript/transcript-tool-types"
+import type { PathTarget } from "../../presentation/transcript/transcript-tool-detail-types"
 import {
-  transcriptWrapWidth,
-  type ToolUnit,
   wrapTextToWidth,
   wrapBodyText,
   iconChar,
   markerText,
   cancelledAgentLabel,
   failedAgentLabel,
-  toolUnitsFor,
-  agentResponseOutcome,
-  diffCounts,
-  shellCommandText,
-  shellExitCode,
 } from "./opentui-render-window"
-import type { TranscriptUnitBuild, UnitLineRange } from "./opentui-render-window"
+import { transcriptWrapWidth } from "./opentui-render-transcript-window"
+import { toolUnitsFor, diffCounts, shellCommandText, shellExitCode, type ToolUnit } from "./opentui-render-tool-detail"
+import type { TranscriptUnitBuild, UnitLineRange } from "./opentui-render-transcript-window"
+import { agentResponseOutcome } from "./opentui-render-transcript-revision"
 import { createToolBodyRenderer } from "./opentui-render-tool-bodies"
 
 export const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) => {

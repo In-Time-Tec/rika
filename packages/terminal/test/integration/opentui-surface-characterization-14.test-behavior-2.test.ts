@@ -2,14 +2,16 @@ import { createTestRenderer } from "@opentui/core/testing"
 import { expect, test } from "vitest"
 import { Effect } from "effect"
 import { Surface } from "../../src/opentui/surface/opentui-surface"
-import { applyQueueDelta, initial, replaceQueue, resetQueue, update } from "../../src/state/model/terminal-state"
+import { applyQueueDelta, replaceQueue, resetQueue } from "../../src/state/model/terminal-queue-state"
+import { initial } from "../../src/state/model/terminal-state"
+import { update } from "../../src/state/reducer/terminal-state-reducer"
 import {
   openTui,
   _insertText,
   _streamingShell,
   _giantSubagentModel,
   _collapsedSubagentModel,
-} from "./opentui-surface-characterization-14.test-support"
+} from "./opentui-surface-characterization-14-support"
 test("renders an inline hint on the selected queued row as the queue window moves", () =>
   Effect.runPromise(
     Effect.gen(function* () {

@@ -1,12 +1,9 @@
 import { expect, test } from "vitest"
 
-import {
-  expandableRowIds,
-  toolDetail,
-  rows as transcriptUnits,
-} from "../src/presentation/transcript/terminal-transcript-presentation"
-
-import { call, model, text, streamingBlock } from "./tool-presentation.test-support"
+import { expandableRowIds, transcriptUnits } from "../src/presentation/transcript/transcript-row"
+import { toolDetail } from "../src/presentation/transcript/transcript-tool-detail"
+import { toolFixtures } from "./tool-presentation-support"
+const { call, model, text, streamingBlock } = toolFixtures
 test("does not navigate to an expandable direct tool until it has output", () => {
   const direct = call(
     "direct",

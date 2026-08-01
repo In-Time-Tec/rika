@@ -2,13 +2,15 @@ import { createTestRenderer } from "@opentui/core/testing"
 import { expect, test } from "vitest"
 import { Effect } from "effect"
 import { Surface } from "../../src/opentui/surface/opentui-surface"
-import { initial, ready, type Model, update } from "../../src/state/model/terminal-state"
+import { initial, type Model } from "../../src/state/model/terminal-state"
+import { ready } from "../../src/state/model/terminal-loadable-state"
+import { update } from "../../src/state/reducer/terminal-state-reducer"
 import {
   openTui,
   _streamingShell,
   _giantSubagentModel,
   _collapsedSubagentModel,
-} from "./opentui-surface-characterization-11.test-support"
+} from "./opentui-surface-characterization-11-support"
 test("loads the workspace file tree with Opt+T and keeps it separate from changed files", () =>
   Effect.runPromise(
     Effect.gen(function* () {

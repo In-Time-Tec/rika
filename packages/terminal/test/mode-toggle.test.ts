@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import * as ViewState from "../src/state/model/terminal-state"
+import { ViewState, type Mode } from "./support/terminal-state-access"
 
 describe("mode cycling", () => {
   it("advances through every mode and wraps", () => {
@@ -12,7 +12,7 @@ describe("mode cycling", () => {
   it("returns to the starting mode after a full cycle", () => {
     const modes = ["low", "medium", "high", "ultra"] as const
     for (const start of modes) {
-      let mode: ViewState.Mode = start
+      let mode: Mode = start
       for (let step = 0; step < modes.length; step += 1) mode = ViewState.nextMode(mode)
       expect(mode).toBe(start)
     }

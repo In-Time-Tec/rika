@@ -6,20 +6,22 @@ import type {
   TextRenderable,
   StyledText,
   CliRenderer,
-  TextChunk,
   TimerHandle,
   Clock as OpenTuiClock,
 } from "@opentui/core"
 import type { Fiber } from "effect"
 import type { Key } from "../../presentation/terminal/terminal-keymap"
-import type { Mode, Model, QueueItem, TranscriptItem } from "../../state/model/terminal-state"
-import type { PathTarget, TranscriptUnit } from "../../presentation/transcript/terminal-transcript-presentation"
-import {
-  initialViewport,
-  type TranscriptViewport,
-  type ViewportAnchor,
-} from "../../presentation/transcript/transcript-viewport"
-import type { RowWindowState } from "../../presentation/transcript/terminal-transcript-presentation"
+import type { Mode, Model } from "../../state/model/terminal-state"
+import { initialViewport, type TranscriptViewport } from "../../presentation/transcript/transcript-viewport-state"
+import type { RowWindowState } from "../../presentation/transcript/transcript-row-window-state"
+import type { PathTarget } from "../../presentation/transcript/transcript-tool-detail-types"
+import type {
+  ChangedFileRow,
+  PendingTranscriptPosition,
+  TranscriptRenderableRecord,
+  TranscriptRenderInput,
+} from "./opentui-surface-transcript-types"
+import type { TranscriptUnitCacheEntry } from "../rendering/opentui-render-transcript-revision"
 
 export interface Handlers {
   readonly key: (key: Key) => void
@@ -47,61 +49,6 @@ export interface SurfaceOptions {
   readonly clock?: OpenTuiClock
   readonly epochMillis?: number
   readonly currentTimeMillis?: () => number
-}
-
-export interface TranscriptRenderableRecord {
-  readonly key: string
-  revision: string
-  readonly renderable: TextRenderable
-  spinnerChunk?: number
-}
-
-export interface TranscriptRenderableDescriptor {
-  readonly key: string
-  readonly revision: string
-  readonly content: StyledText
-  readonly selectable?: boolean
-  readonly spinnerChunk?: number
-  readonly targets?: ReadonlyArray<PathTarget>
-  readonly onMouseDown?: TextRenderable["onMouseDown"]
-}
-
-export interface TranscriptAnchor {
-  readonly key: string
-  readonly screenY: number
-}
-
-export type PendingTranscriptPosition =
-  | {
-      readonly _tag: "Anchor"
-      readonly token: number
-      readonly anchor: TranscriptAnchor | undefined
-      readonly threadId: string | undefined
-      readonly scrollHeight: number
-      readonly scrollBy: number
-      readonly nearBottom: boolean
-    }
-  | {
-      readonly _tag: "Follow"
-      readonly token: number
-      readonly threadId: string | undefined
-    }
-
-export interface TranscriptRenderInput {
-  readonly entries: Model["entries"]
-  readonly blocks: Model["blocks"]
-  readonly items: Model["items"]
-  readonly expandedRowKeys: Model["expandedRowKeys"]
-  readonly detailSelection: Model["detailSelection"]
-  readonly width: number
-  readonly windowEnd: number
-  readonly rowWindowEnd: number
-}
-
-export interface ChangedFileRow {
-  readonly chunks: ReadonlyArray<TextChunk>
-  readonly file?: import("../../state/model/terminal-state").ChangedFile
-  readonly nameIndex?: number
 }
 
 export class SurfaceState {
@@ -149,7 +96,7 @@ export class SurfaceState {
   protected model: Model | undefined
   protected transcriptChildren: Array<TextRenderable> = []
   protected transcriptRecords = new Map<string, TranscriptRenderableRecord>()
-  protected transcriptUnitCache = new Map<string, import("../rendering/opentui-renderer").TranscriptUnitCacheEntry>()
+  protected transcriptUnitCache = new Map<string, TranscriptUnitCacheEntry>()
   protected transcriptRenderInput: TranscriptRenderInput | undefined
   protected threadSwitcherContentCache:
     | {
@@ -216,11 +163,3 @@ export class SurfaceState {
     this.transcriptViewport = initialViewport
   }
 }
-
-export type SurfaceModel = Model
-export type SurfaceQueueItem = QueueItem
-export type SurfaceTranscriptItem = TranscriptItem
-export type SurfaceUnit = TranscriptUnit
-export type SurfaceViewportAnchor = ViewportAnchor
-export type SurfaceMode = Mode
-export type SurfaceTextChunk = TextChunk

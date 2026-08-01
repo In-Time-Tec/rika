@@ -1,11 +1,16 @@
-import { createTestRenderer } from "../opentui/rendering/terminal-test-renderer"
+import { createTestRenderer } from "@opentui/core/testing"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
 import { Effect } from "effect"
 import { Surface } from "../opentui/surface/opentui-surface"
 import type { Key } from "../presentation/terminal/terminal-keymap"
-import * as TranscriptPresenter from "../presentation/transcript/terminal-transcript-presentation"
-import * as ViewState from "../state/model/terminal-state"
+import { projectUnits as applyTurnUnits } from "../presentation/transcript/terminal-transcript-projection"
+import { attachChildProjections } from "../presentation/transcript/transcript-attachment"
+import { expandableRowIds } from "../presentation/transcript/transcript-row"
+import { maxMountedTranscriptRows } from "../presentation/transcript/terminal-transcript-window"
+import { initial, type Model } from "../state/model/terminal-state"
+import { update } from "../state/reducer/terminal-state-reducer"
+import type { ThreadItem } from "../state/model/terminal-thread-state"
 
 export interface PerformanceMetric {
   readonly id: string
@@ -113,19 +118,16 @@ const evaluate = Effect.fn("TuiPerformance.evaluate")(function* (options: {
   let projections = new Map(
     Array.from({ length: childRuns }, (_, child) => [childTurnId(child), childProjection(child)] as const),
   )
-  const base = TranscriptPresenter.applyTurnUnits(
-    { ...ViewState.initial("/work", "high"), width: 120, height: 36 },
-    parentProjection().units,
-  )
-  const attached = TranscriptPresenter.attachChildProjections(base, new Set<string>(), projections)
+  const base = applyTurnUnits({ ...initial("/work", "high"), width: 120, height: 36 }, parentProjection().units)
+  const attached = attachChildProjections(base, new Set<string>(), projections)
   let attachments = attached.attachments
-  let model: ViewState.Model = {
+  let model: Model = {
     ...attached.model,
     currentThreadId: "performance",
     currentThreadTitle: "Performance",
     threads: Array.from(
       { length: 100 },
-      (_, index): ViewState.ThreadItem => ({
+      (_, index): ThreadItem => ({
         id: index === 0 ? "performance" : `thread-${index}`,
         title: index === 0 ? "Performance" : `Thread ${index}`,
         workspace: "/work",
@@ -136,7 +138,7 @@ const evaluate = Effect.fn("TuiPerformance.evaluate")(function* (options: {
         lastActivityAt: 100 - index,
       }),
     ),
-    expandedRowKeys: [...TranscriptPresenter.expandableRowIds(attached.model)],
+    expandedRowKeys: [...expandableRowIds(attached.model)],
   }
   const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
   return yield* Effect.gen(function* () {
@@ -145,9 +147,9 @@ const evaluate = Effect.fn("TuiPerformance.evaluate")(function* (options: {
     yield* Effect.promise(() => setup.renderOnce())
     const initialMilliseconds = performance.now() - initialStartedAt
     for (let sample = 0; sample < warmupInteractions; sample += 1) {
-      model = ViewState.update(model, { _tag: "KeyPressed", key: key("t", { ctrl: true }) })
+      model = update(model, { _tag: "KeyPressed", key: key("t", { ctrl: true }) })
       surface.update(model)
-      model = ViewState.update(model, { _tag: "KeyPressed", key: key("return") })
+      model = update(model, { _tag: "KeyPressed", key: key("return") })
       surface.update(model)
       yield* Effect.promise(() => setup.renderOnce())
     }
@@ -158,23 +160,23 @@ const evaluate = Effect.fn("TuiPerformance.evaluate")(function* (options: {
     const scroll: Array<number> = []
     for (let sample = 0; sample < interactionSamples; sample += 1) {
       let startedAt = performance.now()
-      model = ViewState.update(model, { _tag: "KeyPressed", key: key("t", { ctrl: true }) })
+      model = update(model, { _tag: "KeyPressed", key: key("t", { ctrl: true }) })
       surface.update(model)
       yield* Effect.promise(() => setup.renderOnce())
       pickerOpen.push(performance.now() - startedAt)
       startedAt = performance.now()
-      model = ViewState.update(model, { _tag: "KeyPressed", key: key("down") })
-      model = ViewState.update(model, { _tag: "KeyPressed", key: key("up") })
+      model = update(model, { _tag: "KeyPressed", key: key("down") })
+      model = update(model, { _tag: "KeyPressed", key: key("up") })
       surface.update(model)
       yield* Effect.promise(() => setup.renderOnce())
       pickerNavigation.push(performance.now() - startedAt)
       startedAt = performance.now()
-      model = ViewState.update(model, { _tag: "KeyPressed", key: key("return") })
+      model = update(model, { _tag: "KeyPressed", key: key("return") })
       surface.update(model)
       yield* Effect.promise(() => setup.renderOnce())
       currentSelection.push(performance.now() - startedAt)
       startedAt = performance.now()
-      model = ViewState.update(model, { _tag: "ScrollMoved", offset: sample % 2 === 0 ? -1 : 1 })
+      model = update(model, { _tag: "ScrollMoved", offset: sample % 2 === 0 ? -1 : 1 })
       surface.update(model)
       yield* Effect.promise(() => setup.renderOnce())
       scroll.push(performance.now() - startedAt)
@@ -194,9 +196,9 @@ const evaluate = Effect.fn("TuiPerformance.evaluate")(function* (options: {
       )
       projections = new Map(projections)
       projections.set(turnId, bumped)
-      const next = TranscriptPresenter.attachChildProjections(model, new Set<string>(), projections, attachments)
+      const next = attachChildProjections(model, new Set<string>(), projections, attachments)
       attachments = next.attachments
-      model = next.model as ViewState.Model
+      model = next.model as Model
       surface.update(model)
       const renderStartedAt = performance.now()
       yield* Effect.promise(() => setup.renderOnce())
@@ -232,7 +234,7 @@ const evaluate = Effect.fn("TuiPerformance.evaluate")(function* (options: {
       }),
       measured("tui.mounted-rows", "count", state.transcriptChildren.length, {
         operator: "lte",
-        value: TranscriptPresenter.maxMountedTranscriptRows * 2,
+        value: maxMountedTranscriptRows * 2,
       }),
     ]
     return {

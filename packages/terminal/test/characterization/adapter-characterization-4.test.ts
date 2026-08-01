@@ -1,7 +1,7 @@
 import { expect, test, vi } from "vitest"
 import { it } from "@effect/vitest"
 import { Effect } from "effect"
-import { buildTranscript } from "../../src/opentui/surface/opentui-surface"
+import { buildTranscript } from "../../src/opentui/rendering/opentui-renderer"
 
 const opentuiValue = vi.hoisted(() => {
   const boxChildren: Array<object> = []
@@ -246,7 +246,8 @@ vi.mock("@opentui/core", () => ({
   },
   stripAnsiSequences: (text: string) => text,
 }))
-import {
+import { adapterFixtures4 } from "./adapter-characterization-4-support"
+const {
   shell,
   _windowUnitToolCall,
   _agentToolBlock,
@@ -257,7 +258,7 @@ import {
   model,
   _thread,
   createScoped,
-} from "./adapter-characterization-4.test-support"
+} = adapterFixtures4
 test("keeps wrapped response continuations inside the rail and curls the final row", () => {
   const state = model({
     width: 60,

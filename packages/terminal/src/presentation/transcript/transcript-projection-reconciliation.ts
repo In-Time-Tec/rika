@@ -3,7 +3,8 @@ import { childParentMatch, executionKey } from "@rika/transcript/child-parent-co
 import { Function } from "effect"
 import type { Block } from "@rika/transcript/transcript-presentation-model"
 import type { Unit } from "@rika/transcript/transcript-unit"
-import type { Model, TranscriptItem } from "../../state/model/terminal-state"
+import type { Model } from "../../state/model/terminal-state"
+import type { TranscriptItem } from "../../state/model/terminal-transcript-state"
 
 type ToolCall = Extract<Block, { readonly _tag: "ToolCall" }>
 

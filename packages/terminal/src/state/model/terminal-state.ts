@@ -1,36 +1,13 @@
-import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
-import * as SettingsDefaults from "@rika/configuration/configuration-settings"
-import * as TranscriptPresentationModel from "@rika/transcript/transcript-presentation-model"
-import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Function, Schema } from "effect"
-import { ModeId, modeIds } from "@rika/configuration/behavior-mode"
-import {
-  idle as loadableIdle,
-  ready as loadableReady,
-  readyOr as loadableReadyOr,
-  type Loadable,
-  loadableSchemas,
-} from "./terminal-loadable-state"
+import { ModeId } from "@rika/configuration/behavior-mode"
+import { idle as loadableIdle, loadableSchemas } from "./terminal-loadable-state"
 import { Activity } from "./terminal-activity-state"
 import { UsageDisplay, UsageTime } from "./terminal-usage-state"
-import * as ActivityState from "./terminal-activity-state"
-import * as ComposerState from "./terminal-composer-state"
-import * as LayoutState from "./terminal-layout-state"
-import * as QueueState from "./terminal-queue-state"
-import * as ThreadNavigation from "./terminal-thread-navigation"
-import { update as reduceState } from "../reducer/terminal-state-reducer"
-export { update } from "../reducer/terminal-state-reducer"
-import * as KeysModule from "../../presentation/terminal/terminal-keymap"
-import * as PaletteModule from "../../presentation/terminal/command-palette"
-import * as TranscriptPresenterModule from "../../presentation/transcript/terminal-transcript-presentation"
-import * as ExecutionEventsModule from "../../presentation/transcript/execution-event-presentation"
-import * as SessionModule from "../../terminal-session"
-import * as FormatModule from "../../presentation/terminal/terminal-format"
-import * as ThemeModule from "../../presentation/terminal/terminal-theme"
-export { idle, isLoading, isReady, loading, ready, readyOr } from "./terminal-loadable-state"
-export type { Activity } from "./terminal-activity-state"
-export type { UsageDisplay, UsageTime } from "./terminal-usage-state"
-export type { ComposerAttachment, ComposerDraft, PendingSteering, PromptPart } from "./terminal-composer-state"
+import { defaultModeRouteMap, modeRouteMapSchema, type ModeRouteMap } from "./terminal-mode-route"
+import { ChangedFile as ChangedFileSchema } from "./terminal-changed-file"
+import { QueueItem as QueueItemSchema } from "./terminal-queue-item"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
+
 export const Mode = ModeId
 export type Mode = typeof Mode.Type
 export const Entry = Schema.Struct({
@@ -39,66 +16,6 @@ export const Entry = Schema.Struct({
   turnId: Schema.optionalKey(Schema.String),
 })
 export type Entry = typeof Entry.Type
-type TranscriptBlockModel = TranscriptPresentationModel.Block
-interface ThreadItemModel {
-  readonly id: string
-  readonly title: string
-  readonly workspace: string
-  readonly pinned: boolean
-  readonly archived: boolean
-  readonly status: "idle" | "error" | "queued" | "running"
-  readonly unread: boolean
-  readonly lastActivityAt: number
-  readonly editTotals?: { readonly added: number; readonly modified: number; readonly removed: number }
-}
-type TranscriptItemModel =
-  | {
-      readonly _tag: "Entry"
-      readonly index: number
-      readonly id?: string
-      readonly turnId?: string
-      readonly rootTurnId?: string
-      readonly parentId?: string
-      readonly order?: TranscriptUnit.UnitOrder
-    }
-  | {
-      readonly _tag: "Block"
-      readonly index: number
-      readonly id?: string
-      readonly turnId?: string
-      readonly rootTurnId?: string
-      readonly parentId?: string
-      readonly order?: TranscriptUnit.UnitOrder
-    }
-export interface PaletteState {
-  readonly open: boolean
-  readonly query: string
-  readonly selected: number
-}
-export interface ModePickerState {
-  readonly open: boolean
-  readonly selected: number
-}
-export interface FilePickerState {
-  readonly open: boolean
-  readonly query: string
-  readonly selected: number
-  readonly items: Loadable<ReadonlyArray<string>>
-  readonly error?: string
-}
-export interface ThreadSwitcherState {
-  readonly open: boolean
-  readonly query: string
-  readonly selected: number
-  readonly kind: "switch" | "mention"
-  readonly previewScroll: number
-}
-export interface ThreadSidebarState {
-  readonly open: boolean
-  readonly focused: boolean
-  readonly selected: number
-  readonly scrollTop: number
-}
 const WorkspaceFilesSchema = Schema.Union([
   loadableSchemas.idle,
   loadableSchemas.loading,
@@ -106,24 +23,6 @@ const WorkspaceFilesSchema = Schema.Union([
 ])
 const PaletteStateSchema = Schema.Struct({ open: Schema.Boolean, query: Schema.String, selected: Schema.Finite })
 const ModePickerStateSchema = Schema.Struct({ open: Schema.Boolean, selected: Schema.Finite })
-const ModeRouteLabelSchema = Schema.Struct({ name: Schema.String, effort: Schema.String, fast: Schema.Boolean })
-const ModeRouteMapSchema = Schema.Record(
-  Schema.String,
-  Schema.Struct({ main: ModeRouteLabelSchema, oracle: ModeRouteLabelSchema }),
-)
-export type ModeRouteLabel = typeof ModeRouteLabelSchema.Type
-export type ModeRouteMap = typeof ModeRouteMapSchema.Type
-const modeLabel = (route: { readonly displayName: string; readonly effort: string; readonly fast: boolean }) =>
-  ({ name: route.displayName, effort: route.effort, fast: route.fast }) satisfies ModeRouteLabel
-export const defaultModeRouteMap: ModeRouteMap = Object.fromEntries(
-  modeIds.map((mode) => [
-    mode,
-    {
-      main: modeLabel(ModelRouteResolution.resolveModelRoute(SettingsDefaults.Defaults.defaults, mode, "main")),
-      oracle: modeLabel(ModelRouteResolution.resolveModelRoute(SettingsDefaults.Defaults.defaults, mode, "oracle")),
-    },
-  ]),
-)
 const FilePickerStateSchema = Schema.Struct({
   open: Schema.Boolean,
   query: Schema.String,
@@ -152,17 +51,10 @@ const ComposerDraftSchema = Schema.Struct({
   input: Schema.String,
   attachments: Schema.Array(PastedTextAttachmentSchema),
 })
-export const ChangedFile = Schema.Struct({
-  path: Schema.String,
-  status: Schema.String,
-  added: Schema.optional(Schema.Finite),
-  removed: Schema.optional(Schema.Finite),
-})
-export type ChangedFile = typeof ChangedFile.Type
 const ChangedFilesSchema = Schema.Union([
   loadableSchemas.idle,
   loadableSchemas.loading,
-  Schema.TaggedStruct("Ready", { value: Schema.Array(ChangedFile) }),
+  Schema.TaggedStruct("Ready", { value: Schema.Array(ChangedFileSchema) }),
 ])
 const ThreadPreviewValueSchema = Schema.Struct({
   threadId: Schema.String,
@@ -173,22 +65,11 @@ const ThreadPreviewSchema = Schema.Union([
   Schema.TaggedStruct("Loading", { previous: Schema.optionalKey(ThreadPreviewValueSchema) }),
   Schema.TaggedStruct("Ready", { value: ThreadPreviewValueSchema }),
 ])
-export const QueueItem = Schema.Struct({
-  id: Schema.String,
-  prompt: Schema.String,
-  attachments: Schema.optionalKey(Schema.Array(Schema.String)),
-  provisional: Schema.optionalKey(Schema.Literal(true)),
-})
-export type QueueItem = typeof QueueItem.Type
-export type QueueChange =
-  | { readonly _tag: "Added"; readonly item: QueueItem }
-  | { readonly _tag: "Updated"; readonly item: QueueItem }
-  | { readonly _tag: "Removed"; readonly turnId: string }
 export const Model = Schema.Struct({
   workspace: Schema.String,
   branch: Schema.optional(Schema.String),
   mode: Mode,
-  modeRoutes: ModeRouteMapSchema,
+  modeRoutes: modeRouteMapSchema,
   entries: Schema.Array(Entry),
   blocks: Schema.Array(Schema.Unknown),
   items: Schema.Array(Schema.Unknown),
@@ -253,7 +134,7 @@ export const Model = Schema.Struct({
   workspaceFilesOpen: Schema.Boolean,
   threadSidebar: ThreadSidebarStateSchema,
   queueSelection: Schema.optional(Schema.String),
-  queue: Schema.Array(QueueItem),
+  queue: Schema.Array(QueueItemSchema),
   queueThreadId: Schema.optional(Schema.String),
   queueRevision: Schema.optional(Schema.Int),
   editingTurnId: Schema.optional(Schema.String),
@@ -334,160 +215,4 @@ export const withModeRouteMap: {
   (routes: ModeRouteMap): (model: Model) => Model
   (model: Model, routes: ModeRouteMap): Model
 } = Function.dual(2, (model: Model, routes: ModeRouteMap): Model => ({ ...model, modeRoutes: routes }))
-const nextModeImpl = (mode: Mode): Mode => modeIds[(modeIds.indexOf(mode) + 1) % modeIds.length]!
-const nextUsageDisplayImpl = (display: UsageDisplay | undefined): UsageDisplay => {
-  if (display === undefined || display === "cost") return "tokens"
-  if (display === "tokens") return "time"
-  return "cost"
-}
-export const isThreadBusy = (status: ThreadItemModel["status"]): boolean => status !== "idle" && status !== "error"
-export const formatActiveTime = ActivityState.formatActiveTime
-const activeTimeAtImpl = ActivityState.activeTimeAt
-export const activeTimeIcon = ActivityState.activeTimeIcon
-const formatActivityImpl = ActivityState.formatActivity
-const replaceQueueImpl = QueueState.replaceQueue
-const resetQueueImpl = QueueState.resetQueue
-const applyQueueDeltaImpl = QueueState.applyQueueDelta
-const replaceTurnPromptImpl = QueueState.replaceTurnPrompt
-const composerHeightImpl = LayoutState.composerHeight
-const contentColumnWidthImpl = LayoutState.contentColumnWidth
-const boundedThreadSidebarWidthImpl = LayoutState.boundedThreadSidebarWidth
-const fileSidebarLayoutWidthImpl = LayoutState.fileSidebarLayoutWidth
-const isNarrowImpl = LayoutState.isNarrow
-const queueContentWidthImpl = LayoutState.queueContentWidth
-const wrappedRowCountImpl = LayoutState.wrappedRowCount
-const threadSidebarLayoutWidthImpl = LayoutState.threadSidebarLayoutWidth
-const inputRowsImpl = LayoutState.inputRows
-const filteredFilesImpl = ThreadNavigation.filteredFiles
-const filteredThreadsImpl = ThreadNavigation.filteredThreads
-const selectedThreadMetadataImpl = ThreadNavigation.selectedThreadMetadata
-const displayInputImpl = ComposerState.displayInput
-const expandPastedTextImpl = ComposerState.expandPastedText
-const promptPartsImpl = ComposerState.promptParts
-const pastedTextTokenAtImpl = ComposerState.pastedTextTokenAt
-export { initialImpl as initial, nextModeImpl as nextMode, nextUsageDisplayImpl as nextUsageDisplay }
-export { activeTimeAtImpl as activeTimeAt, formatActivityImpl as formatActivity }
-export { replaceQueueImpl as replaceQueue, resetQueueImpl as resetQueue, applyQueueDeltaImpl as applyQueueDelta }
-export { replaceTurnPromptImpl as replaceTurnPrompt, composerHeightImpl as composerHeight }
-export { contentColumnWidthImpl as contentColumnWidth, boundedThreadSidebarWidthImpl as boundedThreadSidebarWidth }
-export { fileSidebarLayoutWidthImpl as fileSidebarLayoutWidth, isNarrowImpl as isNarrow }
-export { queueContentWidthImpl as queueContentWidth, wrappedRowCountImpl as wrappedRowCount }
-export { threadSidebarLayoutWidthImpl as threadSidebarLayoutWidth, inputRowsImpl as inputRows }
-export { filteredFilesImpl as filteredFiles, filteredThreadsImpl as filteredThreads }
-export { selectedThreadMetadataImpl as selectedThreadMetadata, displayInputImpl as displayInput }
-export { expandPastedTextImpl as expandPastedText, promptPartsImpl as promptParts }
-export { pastedTextTokenAtImpl as pastedTextTokenAt }
-export type {
-  TranscriptBlockModel as TranscriptBlock,
-  TranscriptItemModel as TranscriptItem,
-  ThreadItemModel as ThreadItem,
-}
-namespace ViewStateExports {
-  export type Model = typeof Model.Type
-  export type Mode = typeof Mode.Type
-  export type Entry = typeof Entry.Type
-  export type Activity = ActivityState.Activity
-  export type ChangedFile = typeof ChangedFile.Type
-  export type ModeRoutes = typeof ModeRouteMapSchema.Type
-  export type TranscriptBlock = import("./terminal-state").TranscriptBlock
-  export type TranscriptItem = import("./terminal-state").TranscriptItem
-  export type PromptPart = import("./terminal-composer-state").PromptPart
-  export type ComposerAttachment = import("./terminal-composer-state").ComposerAttachment
-  export type ThreadItem = import("./terminal-state").ThreadItem
-  export const initial = (workspace: string, mode?: Mode): Model => initialImpl(workspace, mode)
-  export const update = (model: Model, message: import("../model/terminal-message").Message): Model =>
-    reduceState(model, message)
-  export const idle = loadableIdle
-  export const streamActivity = ActivityState.streamActivity
-  export const replaceQueue = QueueState.replaceQueue
-  export const resetQueue = QueueState.resetQueue
-  export const applyQueueDelta = QueueState.applyQueueDelta
-  export const replaceTurnPrompt = QueueState.replaceTurnPrompt
-  export const nextMode = (mode: Mode): Mode => modeIds[(modeIds.indexOf(mode) + 1) % modeIds.length]!
-  export const nextUsageDisplay = (display: UsageDisplay | undefined): UsageDisplay => {
-    if (display === undefined || display === "cost") return "tokens"
-    if (display === "tokens") return "time"
-    return "cost"
-  }
-  export const activeTimeAt = ActivityState.activeTimeAt
-  export const formatActivity = ActivityState.formatActivity
-  export const formatActivityCounter = ActivityState.formatActivityCounter
-  export const runningToolsActivity = ActivityState.runningToolsActivity
-  export const classifyPrompt = ComposerState.classifyPrompt
-  export const wrappedRowCount = LayoutState.wrappedRowCount
-  export const ready = loadableReady
-  export const canSubmit = (model: Model): boolean =>
-    model.editingTurnId === undefined &&
-    !model.threadSwitcher.open &&
-    !model.threadSidebar.focused &&
-    !model.paletteOpen &&
-    !model.palette.open &&
-    !model.modePicker.open &&
-    !model.filePicker.open &&
-    !model.shortcutsOpen &&
-    !(model.cursor > 0 && model.input[model.cursor - 1] === "\\")
-  export const inputRows = LayoutState.inputRows
-  export const composerHeight = LayoutState.composerHeight
-  export const isNarrow = LayoutState.isNarrow
-  export const readyOr = loadableReadyOr
-  export const filteredThreads = ThreadNavigation.filteredThreads
-  const withModeRoutesView = (model: Model, routes: ModeRoutes): Model => ({ ...model, modeRoutes: routes })
-  export const withModeRoutes = withModeRoutesView
-  export const filteredFiles = ThreadNavigation.filteredFiles
-  export const selectedThreadMetadata = ThreadNavigation.selectedThreadMetadata
-  export const boundedThreadSidebarWidth = LayoutState.boundedThreadSidebarWidth
-  export const threadSidebarLayoutWidth = LayoutState.threadSidebarLayoutWidth
-  export const fileSidebarLayoutWidth = LayoutState.fileSidebarLayoutWidth
-  export const contentColumnWidth = LayoutState.contentColumnWidth
-  export const queueContentWidth = LayoutState.queueContentWidth
-  export const displayInput = ComposerState.displayInput
-  export const expandPastedText = ComposerState.expandPastedText
-  export const promptParts = ComposerState.promptParts
-  export const pastedTextTokenAt = ComposerState.pastedTextTokenAt
-}
-export namespace Keys {
-  export type Key = KeysModule.Key
-  export const fromOpenTui = KeysModule.fromOpenTui
-  export const isPrintable = KeysModule.isPrintable
-}
-export namespace Palette {
-  export type PaletteAction = PaletteModule.PaletteAction
-  export const filter = PaletteModule.filter
-  export const commands = PaletteModule.commands
-}
-export namespace Theme {
-  export const colors = ThemeModule.colors
-  export const spacing = ThemeModule.spacing
-}
-export namespace Format {
-  export const formatTokens = FormatModule.formatTokens
-  export const formatBytes = FormatModule.formatBytes
-  export const homeRelativePath = FormatModule.homeRelativePath
-}
-export namespace TranscriptPresenter {
-  export const applyTurnUnits = TranscriptPresenterModule.applyTurnUnits
-  export const applyTurnDelta = TranscriptPresenterModule.applyTurnDelta
-  export const applyRootUnits = TranscriptPresenterModule.applyRootUnits
-  export const applyChildUnits = TranscriptPresenterModule.applyChildUnits
-  export const attachChildProjections = TranscriptPresenterModule.attachChildProjections
-  export const emptyAttachments = TranscriptPresenterModule.emptyAttachments
-  export const rows = TranscriptPresenterModule.rows
-  export const unitId = TranscriptPresenterModule.unitId
-  export const expandableRowIds = TranscriptPresenterModule.expandableRowIds
-  export const pinnedRowWindow = TranscriptPresenterModule.pinnedRowWindow
-  export const resolveRowEnd = TranscriptPresenterModule.resolveRowEnd
-  export const shiftRowEnd = TranscriptPresenterModule.shiftRowEnd
-  export const relocateRowEnd = TranscriptPresenterModule.relocateRowEnd
-  export const includeRowEnd = TranscriptPresenterModule.includeRowEnd
-}
-export namespace ExecutionEvents {
-  export const projectUnits = ExecutionEventsModule.projectUnits
-  export const projectChildUnits = ExecutionEventsModule.projectChildUnits
-}
-export namespace Session {
-  export type ModelTuning = SessionModule.ModelTuning
-  export type Action = SessionModule.Action
-  export type Adapter = SessionModule.Adapter
-  export const execute = SessionModule.execute
-}
-export { ViewStateExports as ViewState }
+export const initial = (workspace: string, mode: Mode = "medium"): Model => initialImpl(workspace, mode)

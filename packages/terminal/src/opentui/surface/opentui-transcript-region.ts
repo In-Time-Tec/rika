@@ -1,39 +1,33 @@
 import { CliRenderEvents, TextRenderable, StyledText, fg, type MouseEvent, type TextChunk } from "@opentui/core"
 import {
   maxMountedTranscriptRows,
-  pinnedRowWindow,
   resolveRowEnd,
   shiftRowEnd,
-} from "../../presentation/transcript/terminal-transcript-presentation"
-import {
-  atBottomWithin,
-  clampScrollTop,
-  isFollowing,
-  maxScrollTop,
-  reduceViewport,
-  type ViewportAnchor,
-  type ViewportEvent,
-  type ViewportMetrics,
-} from "../../presentation/transcript/transcript-viewport"
+} from "../../presentation/transcript/terminal-transcript-window"
+import { pinnedRowWindow } from "../../presentation/transcript/transcript-row-window-state"
+import { clampScrollTop, isFollowing } from "../../presentation/transcript/transcript-viewport"
+import { maxScrollTop } from "../../presentation/transcript/transcript-viewport-metrics"
+import { atBottomWithin } from "../../presentation/transcript/transcript-viewport-metrics"
+import { reduceViewport } from "../../presentation/transcript/transcript-viewport-reducer"
+import type { ViewportAnchor } from "../../presentation/transcript/transcript-viewport-state"
+import type { ViewportEvent } from "../../presentation/transcript/transcript-viewport-events"
+import type { ViewportMetrics } from "../../presentation/transcript/transcript-viewport-metrics"
 import { colors } from "../../presentation/terminal/terminal-theme"
-import { escapePathTarget } from "../../presentation/transcript/terminal-transcript-presentation"
-import {
-  transcriptUnitBuilder,
-  maxMountedTranscriptEntries,
-  type TranscriptRangeBundle,
-  type TranscriptUnitCacheEntry,
-} from "../rendering/opentui-renderer"
-import { type TranscriptUnit } from "../../presentation/transcript/terminal-transcript-presentation"
+import { escapePathTarget } from "../../presentation/transcript/transcript-tool-detail"
+import { transcriptUnitBuilder } from "../rendering/opentui-render-unit"
+import { maxMountedTranscriptEntries } from "../rendering/opentui-render-transcript-window"
+import type { TranscriptRangeBundle, TranscriptUnitCacheEntry } from "../rendering/opentui-render-transcript-revision"
+import type { TranscriptUnit } from "../../presentation/transcript/transcript-tool-types"
 import stringWidth from "string-width"
 import { splitStyledLines } from "./opentui-overlay-content"
 import type { Model } from "../../state/model/terminal-state"
-import {
-  SurfaceState,
-  type PendingTranscriptPosition,
-  type TranscriptAnchor,
-  type TranscriptRenderableDescriptor,
-  type TranscriptRenderInput,
-} from "./opentui-surface-state"
+import { SurfaceState } from "./opentui-surface-state"
+import type {
+  PendingTranscriptPosition,
+  TranscriptAnchor,
+  TranscriptRenderableDescriptor,
+  TranscriptRenderInput,
+} from "./opentui-surface-transcript-types"
 
 export abstract class SurfaceTranscriptRegion extends SurfaceState {
   protected abstract update(model: Model, preserveTranscriptAnchor?: boolean): void

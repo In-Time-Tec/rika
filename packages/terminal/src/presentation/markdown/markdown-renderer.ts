@@ -1,14 +1,5 @@
-import {
-  TerminalStyledText,
-  bold,
-  dim,
-  fg,
-  italic,
-  link,
-  strikethrough,
-  underline,
-  type TerminalTextChunk,
-} from "./styled-text"
+import { TerminalStyledText, type TerminalTextChunk } from "./styled-text"
+import { bold, dim, fg, italic, link, strikethrough, underline } from "./styled-text-effects"
 import { Function } from "effect"
 import { Lexer, type Token, type Tokens } from "marked"
 import stringWidth from "string-width"
@@ -20,7 +11,7 @@ import {
   wrapStyledChunks as wrapChunks,
   wrapStyledLine as wrapChunkLine,
   type StyledLines as Lines,
-} from "./styled-text"
+} from "./styled-text-wrapping"
 import { highlightLines } from "./syntax-highlighter"
 import { colors } from "../terminal/terminal-theme"
 

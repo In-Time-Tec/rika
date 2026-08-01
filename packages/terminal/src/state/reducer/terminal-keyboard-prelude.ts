@@ -1,8 +1,9 @@
 import type { Message } from "../model/terminal-message"
-import type { Model, ThreadItem } from "../model/terminal-state"
+import type { Model } from "../model/terminal-state"
+import type { ThreadItem } from "../model/terminal-thread-state"
 import type { Key } from "../../presentation/terminal/terminal-keymap"
 import { filteredThreads } from "../model/terminal-thread-navigation"
-import { expandPastedText } from "../model/terminal-composer-state"
+import { expandPastedText } from "../model/terminal-composer-paste"
 import { idle } from "../model/terminal-loadable-state"
 
 export const reduceKeyboardPrelude = (

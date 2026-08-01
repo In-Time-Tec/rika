@@ -1,8 +1,8 @@
 import { fg, bold, StyledText, type TextChunk } from "@opentui/core"
 import stringWidth from "string-width"
 import type { Model, Mode } from "../../state/model/terminal-state"
-import { isLoading } from "../../state/model/terminal-state"
-import { activeTimeIcon } from "../../state/model/terminal-state"
+import { isLoading } from "../../state/model/terminal-loadable-state"
+import { activeTimeIcon } from "../../state/model/terminal-activity-time"
 import { colors, spacing } from "../../presentation/terminal/terminal-theme"
 import { homeRelativePath } from "../../presentation/terminal/terminal-format"
 export const panelLoading = (model: Model): string | undefined => {
@@ -30,8 +30,6 @@ export const formatCost = (usd: number): string =>
   })
 
 export const modeLabelWidth = (text: string): number => stringWidth(text.replaceAll(activeTimeIcon, "x"))
-
-export { formatTokens } from "../../presentation/terminal/terminal-format"
 
 const welcomeMarkFrame = (rows: ReadonlyArray<string>): ReadonlyArray<string> => [
   "                                        ",

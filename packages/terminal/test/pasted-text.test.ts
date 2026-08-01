@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Session, ViewState } from "../src/state/model/terminal-state"
+import { Session, ViewState, type PromptPart } from "./support/terminal-state-access"
 
 describe("pasted text attachments", () => {
   it("collapses multiline, carriage-return, and long paste while preserving short paste", () => {
@@ -58,7 +58,7 @@ describe("pasted text attachments", () => {
       key: { name: "x", sequence: " after", ctrl: false, alt: false, meta: false, shift: false, eventType: "press" },
     })
     const parts = ViewState.promptParts(model.input, model.pastedText)
-    const submitted: Array<{ readonly prompt: string; readonly parts?: ReadonlyArray<ViewState.PromptPart> }> = []
+    const submitted: Array<{ readonly prompt: string; readonly parts?: ReadonlyArray<PromptPart> }> = []
     Session.execute(
       {
         submit: (prompt, promptParts) =>

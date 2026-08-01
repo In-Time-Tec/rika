@@ -6,7 +6,8 @@ import type { UnitDelta } from "@rika/transcript/transcript-projection"
 import { isInternalOutcome, nestedChildUnit, reconcileSubagentUnits } from "./transcript-projection-reconciliation"
 import { outcomeShadow, updateExecutionOutcomes } from "./transcript-projection-outcomes"
 import { Function } from "effect"
-import type { Model, TranscriptItem } from "../../state/model/terminal-state"
+import type { Model } from "../../state/model/terminal-state"
+import type { TranscriptItem } from "../../state/model/terminal-transcript-state"
 
 type ToolCall = Extract<Block, { readonly _tag: "ToolCall" }>
 

@@ -1,9 +1,9 @@
 import { expect, test } from "vitest"
 
-import { ViewState } from "../../src/state/model/terminal-state"
-import { key, _thread, _editFile, _busyQueueModel } from "./terminal-state-characterization-1.test-support"
+import { ViewState, type Model } from "../support/terminal-state-access"
+import { key, _thread, _editFile, _busyQueueModel } from "./terminal-state-characterization-1-support"
 test("admission rebinds a queued provisional row and the real delta replaces it without resync", () => {
-  const busy: ViewState.Model = ViewState.resetQueue(
+  const busy: Model = ViewState.resetQueue(
     {
       ...ViewState.initial("/work"),
       busy: true,
@@ -32,7 +32,7 @@ test("admission rebinds a queued provisional row and the real delta replaces it 
   expect(applied.model.queueRevision).toBe(4)
 })
 test("admission that starts immediately removes the provisional row", () => {
-  const busy: ViewState.Model = ViewState.resetQueue(
+  const busy: Model = ViewState.resetQueue(
     { ...ViewState.initial("/work"), busy: true, activeTurnId: "turn-a", currentThreadId: "thread", input: "prompt" },
     "thread",
     3,
@@ -48,7 +48,7 @@ test("admission that starts immediately removes the provisional row", () => {
   expect(admitted.queue).toEqual([])
 })
 test("provisional queue rows ignore edit, steer, and dequeue keys", () => {
-  const busy: ViewState.Model = ViewState.resetQueue(
+  const busy: Model = ViewState.resetQueue(
     { ...ViewState.initial("/work"), busy: true, activeTurnId: "turn-a", currentThreadId: "thread", input: "prompt" },
     "thread",
     3,
@@ -64,7 +64,7 @@ test("provisional queue rows ignore edit, steer, and dequeue keys", () => {
   expect(edited.editingTurnId).toBeUndefined()
 })
 test("steering a selected queued message opens a pending steering row", () => {
-  const busy: ViewState.Model = ViewState.resetQueue(
+  const busy: Model = ViewState.resetQueue(
     {
       ...ViewState.initial("/work"),
       busy: true,
@@ -81,7 +81,7 @@ test("steering a selected queued message opens a pending steering row", () => {
   expect(steered.pendingAction).toEqual({ _tag: "SteerQueued", id: "queued-1", prompt: "steer me please" })
 })
 test("binds an accepted steering sequence and removes it on delivery", () => {
-  const busy: ViewState.Model = {
+  const busy: Model = {
     ...ViewState.initial("/work"),
     busy: true,
     activeTurnId: "turn-a",
@@ -100,7 +100,7 @@ test("binds an accepted steering sequence and removes it on delivery", () => {
   expect(foreign.pendingSteering).toHaveLength(1)
 })
 test("keeps the active turn running and restores text when steering fails", () => {
-  const busy: ViewState.Model = {
+  const busy: Model = {
     ...ViewState.initial("/work"),
     busy: true,
     activeTurnId: "turn-a",
@@ -121,7 +121,7 @@ test("keeps the active turn running and restores text when steering fails", () =
   )
 })
 test("ignores steering receipts that arrive after another turn becomes active", () => {
-  const active: ViewState.Model = {
+  const active: Model = {
     ...ViewState.initial("/work"),
     busy: true,
     activeTurnId: "turn-b",
@@ -143,7 +143,7 @@ test("ignores steering receipts that arrive after another turn becomes active", 
   expect(failed).toEqual(active)
 })
 test("does not issue another cancel while cancellation is pending", () => {
-  const pending: ViewState.Model = {
+  const pending: Model = {
     ...ViewState.initial("/work"),
     busy: true,
     activeTurnId: "turn-a",
@@ -152,7 +152,7 @@ test("does not issue another cancel while cancellation is pending", () => {
   expect(ViewState.update(pending, { _tag: "KeyPressed", key: key({ name: "c", ctrl: true }) })).toEqual(pending)
 })
 test("restores undelivered steering text into an empty composer when the turn settles", () => {
-  const busy: ViewState.Model = {
+  const busy: Model = {
     ...ViewState.initial("/work"),
     busy: true,
     activeTurnId: "turn-a",
@@ -166,7 +166,7 @@ test("restores undelivered steering text into an empty composer when the turn se
   expect(occupied.input).toBe("typing")
 })
 test("keeps steering rows for other turns when one turn settles", () => {
-  const busy: ViewState.Model = {
+  const busy: Model = {
     ...ViewState.initial("/work"),
     busy: true,
     activeTurnId: "turn-a",
