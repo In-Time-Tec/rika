@@ -1,10 +1,10 @@
-╭──────────────────────────────╮
+╭─ Mode ───────────────────────╮
 │ medium                       │
-│ Balanced intelligence, speed │
+│ Balanced default for everyda │
 │                              │
 │                              │
 │                              │
-╰─────────────── ←→ turn · esc─╯
+╰────────────── ↔ turn ── esc ─╯
 ╭─────────────────────── high ─╮
 │                              │
 │                              │
