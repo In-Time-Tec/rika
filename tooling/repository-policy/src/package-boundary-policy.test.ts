@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest"
-import {
+import { repositoryPolicy } from "./package-boundary-policy"
+
+const {
   checkDependencyManifests,
   checkExportMaps,
   checkManifests,
@@ -7,9 +9,9 @@ import {
   checkScriptBoundaries,
   checkSourceMetrics,
   checkTestTopology,
-  validateWaivers,
-  applyBaselineAndWaivers,
-} from "./package-boundary-policy"
+  applyBaseline,
+  checkMigrationIdentity,
+} = repositoryPolicy
 
 const manifest = (name: string, dependencies: Record<string, string>, extra: Record<string, unknown> = {}) => ({
   path: `${name}/package.json`,
@@ -96,10 +98,20 @@ describe("repository policy", () => {
     ).toEqual([])
   })
 
-  test("validates exact path waivers and suppresses only matching baseline diagnostics", () => {
-    expect(() =>
-      validateWaivers([{ rule: "file-size", paths: ["packages/*"], removalSlice: 2, reason: "bad" }]),
-    ).toThrow()
+  test("enforces unique product migration IDs", () => {
+    expect(checkMigrationIdentity(["packages/a/product-migration-007-route-pins.ts"])).toEqual([])
+    expect(
+      checkMigrationIdentity([
+        "packages/a/product-migration-007-route-pins.ts",
+        "packages/b/product-migration-007-other-pins.ts",
+      ]),
+    ).toEqual([
+      expect.objectContaining({ path: "packages/a/product-migration-007-route-pins.ts", rule: "migration-identity" }),
+      expect.objectContaining({ path: "packages/b/product-migration-007-other-pins.ts", rule: "migration-identity" }),
+    ])
+  })
+
+  test("suppresses only diagnostics recorded in the baseline", () => {
     const diagnostic = {
       path: "packages/legacy.ts",
       rule: "file-size",
@@ -108,17 +120,15 @@ describe("repository policy", () => {
       remediation: "split",
     }
     expect(
-      applyBaselineAndWaivers({
+      applyBaseline({
         diagnostics: [diagnostic],
         baseline: { base: "19a8a4b", paths: [], entries: [{ ...diagnostic }] },
-        waivers: [],
       }),
     ).toEqual([])
     expect(
-      applyBaselineAndWaivers({
+      applyBaseline({
         diagnostics: [diagnostic],
         baseline: { base: "19a8a4b", paths: [], entries: [] },
-        waivers: [],
       }),
     ).toEqual([diagnostic])
   })

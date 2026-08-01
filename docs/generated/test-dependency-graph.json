@@ -3,16 +3,6 @@
   "graphKind": "test",
   "nodes": [
     {
-      "id": "apps/rika/test/anthropic-prompt-cache.test.ts",
-      "path": "apps/rika/test/anthropic-prompt-cache.test.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
       "id": "apps/rika/test/app.tui.test.ts",
       "path": "apps/rika/test/app.tui.test.ts",
       "workspace": "@rika/cli",
@@ -21,16 +11,6 @@
       "production": false,
       "publicExports": [],
       "testKind": "tui-test"
-    },
-    {
-      "id": "apps/rika/test/bedrock-auth-refresh.test.ts",
-      "path": "apps/rika/test/bedrock-auth-refresh.test.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
     },
     {
       "id": "apps/rika/test/cli-operations.test.ts",
@@ -243,16 +223,6 @@
       "testKind": "unit-test"
     },
     {
-      "id": "apps/rika/test/model-provider-runtime.test.ts",
-      "path": "apps/rika/test/model-provider-runtime.test.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
       "id": "apps/rika/test/openai-auth-adapter.test.ts",
       "path": "apps/rika/test/openai-auth-adapter.test.ts",
       "workspace": "@rika/cli",
@@ -265,16 +235,6 @@
     {
       "id": "apps/rika/test/openai-credential-store.native.test.ts",
       "path": "apps/rika/test/openai-credential-store.native.test.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "apps/rika/test/openai-prompt-cache.test.ts",
-      "path": "apps/rika/test/openai-prompt-cache.test.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -2371,6 +2331,16 @@
       "testKind": "contract-test"
     },
     {
+      "id": "packages/product/src/operation/contract/product-operation-errors.ts",
+      "path": "packages/product/src/operation/contract/product-operation-errors.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "contract-test"
+    },
+    {
       "id": "packages/product/src/operation/contract/product-operation-service.ts",
       "path": "packages/product/src/operation/contract/product-operation-service.ts",
       "workspace": "@rika/product",
@@ -2913,6 +2883,56 @@
     {
       "id": "packages/relay-execution/test/media-analyzer.test.ts",
       "path": "packages/relay-execution/test/media-analyzer.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/relay-execution/test/model/provider/anthropic-prompt-cache.test.ts",
+      "path": "packages/relay-execution/test/model/provider/anthropic-prompt-cache.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/relay-execution/test/model/provider/bedrock-auth-refresh.test.ts",
+      "path": "packages/relay-execution/test/model/provider/bedrock-auth-refresh.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/relay-execution/test/model/provider/model-provider-lifecycle.test.ts",
+      "path": "packages/relay-execution/test/model/provider/model-provider-lifecycle.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/relay-execution/test/model/provider/model-provider-runtime.test.ts",
+      "path": "packages/relay-execution/test/model/provider/model-provider-runtime.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/relay-execution/test/model/provider/openai-prompt-cache.test.ts",
+      "path": "packages/relay-execution/test/model/provider/openai-prompt-cache.test.ts",
       "workspace": "@rika/relay-execution",
       "package": "@rika/relay-execution",
       "kind": "source",
@@ -4276,38 +4296,6 @@
   ],
   "edges": [
     {
-      "from": "apps/rika/test/anthropic-prompt-cache.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/anthropic-prompt-cache.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/anthropic-prompt-cache.test.ts",
-      "to": "external:effect/unstable/ai",
-      "specifier": "effect/unstable/ai",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/anthropic-prompt-cache.test.ts",
-      "to": "external:effect/unstable/http",
-      "specifier": "effect/unstable/http",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
       "from": "apps/rika/test/app.tui.test.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -4319,38 +4307,6 @@
       "from": "apps/rika/test/app.tui.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/bedrock-auth-refresh.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/bedrock-auth-refresh.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/bedrock-auth-refresh.test.ts",
-      "to": "external:effect/testing",
-      "specifier": "effect/testing",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/bedrock-auth-refresh.test.ts",
-      "to": "external:effect/unstable/process",
-      "specifier": "effect/unstable/process",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -4389,8 +4345,8 @@
     },
     {
       "from": "apps/rika/test/cli-operations.test.ts",
-      "to": "packages/product/src/operation/contract/product-operation.ts",
-      "specifier": "@rika/product/product-operation",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -4501,8 +4457,8 @@
     },
     {
       "from": "apps/rika/test/command.test.ts",
-      "to": "packages/product/src/operation/contract/product-operation.ts",
-      "specifier": "@rika/product/product-operation",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -4525,8 +4481,8 @@
     },
     {
       "from": "apps/rika/test/dependency-boundary.test.ts",
-      "to": "packages/product/src/operation/contract/product-operation.ts",
-      "specifier": "@rika/product/product-operation",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
       "kind": "dynamic-import",
       "relationship": "test",
       "production": false
@@ -4661,8 +4617,8 @@
     },
     {
       "from": "apps/rika/test/fixtures/resident-host.ts",
-      "to": "packages/product/src/operation/contract/product-operation.ts",
-      "specifier": "@rika/product/product-operation",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -4813,8 +4769,8 @@
     },
     {
       "from": "apps/rika/test/interactive-controller.test.ts",
-      "to": "packages/product/src/operation/contract/product-operation.ts",
-      "specifier": "@rika/product/product-operation",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -4924,62 +4880,6 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/model-provider-runtime.test.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/model-provider-runtime.test.ts",
-      "to": "external:bun:sqlite",
-      "specifier": "bun:sqlite",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/model-provider-runtime.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/model-provider-runtime.test.ts",
-      "to": "external:effect/unstable/ai",
-      "specifier": "effect/unstable/ai",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/model-provider-runtime.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/model-provider-runtime.test.ts",
-      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
-      "specifier": "@rika/product/execution-route-snapshot",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/model-provider-runtime.test.ts",
-      "to": "packages/product/src/operation/contract/product-operation.ts",
-      "specifier": "@rika/product/product-operation",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
       "from": "apps/rika/test/openai-auth-adapter.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
@@ -5021,8 +4921,8 @@
     },
     {
       "from": "apps/rika/test/openai-auth-adapter.test.ts",
-      "to": "packages/product/src/operation/contract/product-operation.ts",
-      "specifier": "@rika/product/product-operation",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -5045,40 +4945,8 @@
     },
     {
       "from": "apps/rika/test/openai-credential-store.native.test.ts",
-      "to": "packages/product/src/operation/contract/product-operation.ts",
-      "specifier": "@rika/product/product-operation",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/openai-prompt-cache.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/openai-prompt-cache.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/openai-prompt-cache.test.ts",
-      "to": "external:effect/unstable/ai",
-      "specifier": "effect/unstable/ai",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/openai-prompt-cache.test.ts",
-      "to": "external:effect/unstable/http",
-      "specifier": "effect/unstable/http",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -5469,8 +5337,8 @@
     },
     {
       "from": "apps/rika/test/shell-session.test.ts",
-      "to": "packages/product/src/operation/contract/product-operation.ts",
-      "specifier": "@rika/product/product-operation",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -5565,8 +5433,8 @@
     },
     {
       "from": "apps/rika/test/test-model-script.test.ts",
-      "to": "packages/product/src/operation/contract/product-operation.ts",
-      "specifier": "@rika/product/product-operation",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -6404,9 +6272,25 @@
       "production": false
     },
     {
+      "from": "packages/product-store/test/product-operation/interactive-session-controls-1.test.ts",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/product-store/test/product-operation/interactive-session-controls-2.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/interactive-session-controls-2.test.ts",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -6487,14 +6371,6 @@
       "from": "packages/product-store/test/product-operation/operation-active-controls.test.ts",
       "to": "packages/product/src/execution/contract/execution-service.ts",
       "specifier": "@rika/product/execution-service",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-active-controls.test.ts",
-      "to": "packages/product/src/operation/contract/product-operation-service.ts",
-      "specifier": "@rika/product/product-operation-service",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -6652,9 +6528,25 @@
       "production": false
     },
     {
+      "from": "packages/product-store/test/product-operation/operation-interactive-extensions-1.test.ts",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/product-store/test/product-operation/operation-interactive-extensions-2.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-interactive-extensions-2.test.ts",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -6668,6 +6560,14 @@
       "production": false
     },
     {
+      "from": "packages/product-store/test/product-operation/operation-interactive-extensions-3.test.ts",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/product-store/test/product-operation/operation-interactive-extensions-4.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -6676,9 +6576,25 @@
       "production": false
     },
     {
+      "from": "packages/product-store/test/product-operation/operation-interactive-extensions-4.test.ts",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/product-store/test/product-operation/operation-interactive-extensions-5.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-interactive-extensions-5.test.ts",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -6997,6 +6913,14 @@
     },
     {
       "from": "packages/product-store/test/product-operation/operation-recovery-authority.test.ts",
+      "to": "packages/product/src/execution/contract/execution-status.ts",
+      "specifier": "@rika/product/execution-status",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-recovery-authority.test.ts",
       "to": "packages/product/src/operation/contract/product-operation-service.ts",
       "specifier": "@rika/product/product-operation-service",
       "kind": "import",
@@ -7031,6 +6955,14 @@
       "from": "packages/product-store/test/product-operation/operation-recovery-restore.test.ts",
       "to": "packages/product/src/execution/contract/execution-service.ts",
       "specifier": "@rika/product/execution-service",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-recovery-restore.test.ts",
+      "to": "packages/product/src/execution/contract/execution-status.ts",
+      "specifier": "@rika/product/execution-status",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -7100,6 +7032,14 @@
       "production": false
     },
     {
+      "from": "packages/product-store/test/product-operation/operation-review.test.ts",
+      "to": "packages/product/src/operation/contract/product-operation.ts",
+      "specifier": "@rika/product/product-operation",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/product-store/test/product-operation/operation-routing.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -7276,14 +7216,6 @@
       "production": false
     },
     {
-      "from": "packages/product-store/test/product-operation/operation-session-controls.test.ts",
-      "to": "packages/product/src/operation/contract/product-operation-service.ts",
-      "specifier": "@rika/product/product-operation-service",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
       "from": "packages/product-store/test/product-operation/operation-submission-failures.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -7311,14 +7243,6 @@
       "from": "packages/product-store/test/product-operation/operation-submission-failures.test.ts",
       "to": "packages/product/src/execution/contract/execution-service.ts",
       "specifier": "@rika/product/execution-service",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-submission-failures.test.ts",
-      "to": "packages/product/src/operation/contract/product-operation-service.ts",
-      "specifier": "@rika/product/product-operation-service",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -7364,6 +7288,14 @@
       "production": false
     },
     {
+      "from": "packages/product-store/test/product-operation/operation-summary-repair.test.ts",
+      "to": "packages/product/src/operation/contract/product-operation.ts",
+      "specifier": "@rika/product/product-operation",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/product-store/test/product-operation/operation-terminal-interactive.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -7391,6 +7323,14 @@
       "from": "packages/product-store/test/product-operation/operation-terminal-interactive.test.ts",
       "to": "packages/product/src/execution/contract/execution-service.ts",
       "specifier": "@rika/product/execution-service",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-terminal-interactive.test.ts",
+      "to": "packages/product/src/execution/contract/execution-status.ts",
+      "specifier": "@rika/product/execution-status",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -7535,6 +7475,14 @@
       "from": "packages/product-store/test/product-operation/operation-workflow.test.ts",
       "to": "packages/product/src/operation/contract/product-operation-service.ts",
       "specifier": "@rika/product/product-operation-service",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-workflow.test.ts",
+      "to": "packages/product/src/operation/contract/product-operation.ts",
+      "specifier": "@rika/product/product-operation",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -7756,6 +7704,14 @@
       "production": false
     },
     {
+      "from": "packages/product-store/test/sqlite-preflight.integration.test.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/product-store/test/sqlite-repository.integration.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
@@ -7791,6 +7747,22 @@
       "from": "packages/product-store/test/sqlite-repository.integration.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/sqlite-repository.integration.test.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/sqlite-repository.integration.test.ts",
+      "to": "packages/product/src/execution/contract/execution-status.ts",
+      "specifier": "@rika/product/execution-status",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -7951,6 +7923,14 @@
       "from": "packages/product-store/test/transcript-repository.test.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/turn-repository-behavior-1.test.ts",
+      "to": "packages/product/src/execution/contract/execution-status.ts",
+      "specifier": "@rika/product/execution-status",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -8213,8 +8193,8 @@
     },
     {
       "from": "packages/product/src/operation/contract/configuration-operation.ts",
-      "to": "packages/product/src/operation/contract/product-operation-service.ts",
-      "specifier": "./product-operation-service",
+      "to": "packages/product/src/operation/contract/product-operation-errors.ts",
+      "specifier": "./product-operation-errors",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -8229,8 +8209,8 @@
     },
     {
       "from": "packages/product/src/operation/contract/extension-operation.ts",
-      "to": "packages/product/src/operation/contract/product-operation-service.ts",
-      "specifier": "./product-operation-service",
+      "to": "packages/product/src/operation/contract/product-operation-errors.ts",
+      "specifier": "./product-operation-errors",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -8245,8 +8225,16 @@
     },
     {
       "from": "packages/product/src/operation/contract/interactive-operation.ts",
-      "to": "packages/product/src/operation/contract/product-operation-service.ts",
-      "specifier": "./product-operation-service",
+      "to": "packages/product/src/operation/contract/product-operation-errors.ts",
+      "specifier": "./product-operation-errors",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/operation/contract/product-operation-errors.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -8255,6 +8243,14 @@
       "from": "packages/product/src/operation/contract/product-operation-service.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/operation/contract/product-operation-service.ts",
+      "to": "packages/product/src/operation/contract/product-operation-errors.ts",
+      "specifier": "./product-operation-errors",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -8277,8 +8273,8 @@
     },
     {
       "from": "packages/product/src/operation/contract/thread-operation.ts",
-      "to": "packages/product/src/operation/contract/product-operation-service.ts",
-      "specifier": "./product-operation-service",
+      "to": "packages/product/src/operation/contract/product-operation-errors.ts",
+      "specifier": "./product-operation-errors",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -8293,8 +8289,8 @@
     },
     {
       "from": "packages/product/src/operation/contract/workflow-operation.ts",
-      "to": "packages/product/src/operation/contract/product-operation-service.ts",
-      "specifier": "./product-operation-service",
+      "to": "packages/product/src/operation/contract/product-operation-errors.ts",
+      "specifier": "./product-operation-errors",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -8476,6 +8472,14 @@
       "production": false
     },
     {
+      "from": "packages/product/test/openai-auth-browser.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/product/test/openai-auth-device.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -8484,9 +8488,33 @@
       "production": false
     },
     {
+      "from": "packages/product/test/openai-auth-device.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/openai-auth-device.test.ts",
+      "to": "external:effect/testing",
+      "specifier": "effect/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/product/test/openai-auth-flow.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/openai-auth-flow.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -8508,9 +8536,25 @@
       "production": false
     },
     {
+      "from": "packages/product/test/openai-auth-store.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/product/test/openai-auth-token.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/openai-auth-token.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -9647,6 +9691,222 @@
       "from": "packages/relay-execution/test/media-analyzer.test.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/anthropic-prompt-cache.test.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/anthropic-prompt-cache.test.ts",
+      "to": "external:@batonfx/providers/anthropic",
+      "specifier": "@batonfx/providers/anthropic",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/anthropic-prompt-cache.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/anthropic-prompt-cache.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/anthropic-prompt-cache.test.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/anthropic-prompt-cache.test.ts",
+      "to": "external:effect/unstable/http",
+      "specifier": "effect/unstable/http",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/bedrock-auth-refresh.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/bedrock-auth-refresh.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/bedrock-auth-refresh.test.ts",
+      "to": "external:effect/testing",
+      "specifier": "effect/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/bedrock-auth-refresh.test.ts",
+      "to": "external:effect/unstable/process",
+      "specifier": "effect/unstable/process",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/model-provider-lifecycle.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/model-provider-lifecycle.test.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/model-provider-lifecycle.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/model-provider-lifecycle.test.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/model-provider-runtime.test.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/model-provider-runtime.test.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/model-provider-runtime.test.ts",
+      "to": "external:bun:sqlite",
+      "specifier": "bun:sqlite",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/model-provider-runtime.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/model-provider-runtime.test.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/model-provider-runtime.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/model-provider-runtime.test.ts",
+      "to": "packages/product/src/execution/contract/execution-service.ts",
+      "specifier": "@rika/product/execution-service",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/openai-prompt-cache.test.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/openai-prompt-cache.test.ts",
+      "to": "external:@batonfx/providers/openai",
+      "specifier": "@batonfx/providers/openai",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/openai-prompt-cache.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/openai-prompt-cache.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/openai-prompt-cache.test.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/openai-prompt-cache.test.ts",
+      "to": "external:effect/unstable/http",
+      "specifier": "effect/unstable/http",
       "kind": "import",
       "relationship": "test",
       "production": false

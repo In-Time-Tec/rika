@@ -5,8 +5,8 @@ import { FileSystem } from "effect/FileSystem"
 import { Path } from "effect/Path"
 
 export type GraphKind = "all" | "production" | "test" | "package"
-export type TestKind = "unit-test" | "integration-test" | "contract-test" | "tui-test" | "process-test" | "fixture"
-export type GraphNode = {
+type TestKind = "unit-test" | "integration-test" | "contract-test" | "tui-test" | "process-test" | "fixture"
+type GraphNode = {
   readonly id: string
   readonly path?: string
   readonly workspace?: string
@@ -16,8 +16,8 @@ export type GraphNode = {
   readonly publicExports: ReadonlyArray<string>
   readonly testKind?: TestKind
 }
-export type GraphRelationship = "runtime" | "type" | "test" | "asset"
-export type GraphEdge = {
+type GraphRelationship = "runtime" | "type" | "test" | "asset"
+type GraphEdge = {
   readonly from: string
   readonly to: string
   readonly relationship: GraphRelationship
@@ -423,5 +423,3 @@ export const readGraph = Effect.fn("RepositoryGraph.readGraph")(function* (
     yield* fileSystem.readFileString(graphFilePath.resolve(kind, inputDirectory)),
   )) as GraphArtifact
 })
-
-export const sourceFileExtension = (path: string) => path.slice(path.lastIndexOf("."))
