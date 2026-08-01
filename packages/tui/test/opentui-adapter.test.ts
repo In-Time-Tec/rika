@@ -3035,8 +3035,9 @@ test("keeps the context meter and every compact usage metric visible at 24x12", 
         const details = styledTextValue(surface.palette.content)
         expect(details).toContain("23%")
         expect(details).toContain("56.1K / 244K")
-        expect(details).toContain("372K window")
-        expect(details).toContain("$1.25 ◷1m43s 6.81M")
+        expect(details).toContain("372K window — 128K")
+        expect(details).toContain("$1.25 — ◷1m43s")
+        expect(details).toContain("6.8M processed")
       } finally {
         surface.destroy()
         setup.renderer.destroy()

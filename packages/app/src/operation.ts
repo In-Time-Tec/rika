@@ -1328,30 +1328,31 @@ export const productLayer = <
       let backfillThreadUsage = (_root: ExecutionIngest.Root): Effect.Effect<void> => Effect.void
       const readThreadContext = Effect.fn("Operation.readThreadContext")(function* (threadId: string) {
         const turns = yield* turnRepository.list(Thread.ThreadId.make(threadId))
-        const turn = turns
+        const candidates = turns
           .filter(Turn.isAgentExecution)
           .filter((candidate) => candidate.status !== "queued")
           .toSorted(
             (left, right) => right.createdAt - left.createdAt || String(right.id).localeCompare(String(left.id)),
-          )[0]
-        if (turn === undefined) return { _tag: "Unavailable" as const }
-        let source = yield* usageRepository.loadSourceFold(String(turn.id), String(turn.id))
-        if (source !== undefined && source.projectionVersion < UsageRepository.projectionVersion) {
-          yield* backfillThreadUsage({ threadId: turn.threadId, turnId: turn.id })
-          source = yield* usageRepository.loadSourceFold(String(turn.id), String(turn.id))
+          )
+        for (const turn of candidates) {
+          let source = yield* usageRepository.loadSourceFold(String(turn.id), String(turn.id))
+          if (source !== undefined && source.projectionVersion < UsageRepository.projectionVersion) {
+            yield* backfillThreadUsage({ threadId: turn.threadId, turnId: turn.id })
+            source = yield* usageRepository.loadSourceFold(String(turn.id), String(turn.id))
+          }
+          if (source?.foldJson === undefined || source.projectionVersion !== UsageRepository.projectionVersion) continue
+          const decoded = UsageCost.deserialize(source.foldJson)
+          if (Result.isFailure(decoded)) continue
+          const reading = UsageCost.executionContext(decoded.success, String(turn.id))
+          if (reading === undefined) continue
+          return {
+            _tag: "Available" as const,
+            inputTokens: reading.inputTokens,
+            contextWindow: turn.executionRoute.main.compaction.contextWindow,
+            reserveTokens: turn.executionRoute.main.compaction.reserveTokens,
+          }
         }
-        if (source?.foldJson === undefined || source.projectionVersion !== UsageRepository.projectionVersion)
-          return { _tag: "Unavailable" as const }
-        const decoded = UsageCost.deserialize(source.foldJson)
-        if (Result.isFailure(decoded)) return { _tag: "Unavailable" as const }
-        const reading = UsageCost.executionContext(decoded.success, String(turn.id))
-        if (reading === undefined) return { _tag: "Unavailable" as const }
-        return {
-          _tag: "Available" as const,
-          inputTokens: reading.inputTokens,
-          contextWindow: turn.executionRoute.main.compaction.contextWindow,
-          reserveTokens: turn.executionRoute.main.compaction.reserveTokens,
-        }
+        return { _tag: "Unavailable" as const }
       })
       const publishThreadUsage = Effect.fn("Operation.publishThreadUsage")(function* (
         value: UsageRepository.TurnUsage | undefined,

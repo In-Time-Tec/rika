@@ -76,6 +76,6 @@ export const loadingMeter: {
   (phase: number, options: LoadingMeterOptions = {}): ReadonlyArray<string> => {
     const width = Math.max(1, Math.floor(options.cells ?? 8))
     const highlight = Math.abs(Math.floor(phase)) % width
-    return Array.from({ length: width }, (_, index) => (index === highlight ? "◆" : "·"))
+    return Array.from({ length: width }, (_, index) => (index === highlight ? "▓" : "░"))
   },
 )

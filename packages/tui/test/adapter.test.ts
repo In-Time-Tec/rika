@@ -2133,10 +2133,18 @@ describe("Surface", () => {
         }),
       )
       expect(modeLabelText()).toBe(" ctx █▊░░░░░░ 23% ─ medium ")
+      surface.update(
+        model({
+          currentThreadId: "thread",
+          mode: "medium",
+          contextUsage: { _tag: "Available", inputTokens: 4_400, contextWindow: 1_050_000, reserveTokens: 128_000 },
+        }),
+      )
+      expect(modeLabelText()).toBe(" ctx ░░░░░░░░ 0%  ─ medium ")
       surface.update(model({ currentThreadId: "thread", mode: "medium", contextUsage: { _tag: "Loading" } }))
-      expect(modeLabelText()).toBe(" ctx ◆·······   — ─ medium ")
+      expect(modeLabelText()).toBe(" ctx ▓░░░░░░░     ─ medium ")
       surface.update(model({ currentThreadId: "thread", mode: "medium", contextUsage: { _tag: "Unavailable" } }))
-      expect(modeLabelText()).toBe(" ctx ░░░░░░░░   — ─ medium ")
+      expect(modeLabelText()).toBe(" ctx ░░░░░░░░     ─ medium ")
       surface.update(
         model({
           currentThreadId: "thread",
@@ -2150,7 +2158,7 @@ describe("Surface", () => {
           },
         }),
       )
-      expect(modeLabelText()).toBe(" ctx ▓▒▓▒▓▒▓▒   ↻ ─ medium ")
+      expect(modeLabelText()).toBe(" ctx ▓▒▓▒▓▒▓▒  ↻  ─ medium ")
 
       surface.update(
         model({
@@ -2261,7 +2269,8 @@ describe("Surface", () => {
 
       expect(surface.paletteBox.visible).toBe(true)
       expect(surface.paletteBox.title).toBe(" Context & Usage ")
-      expect(surface.paletteBox.bottomTitle).toBe(" Ctrl+Y toggle · esc ")
+      expect(surface.paletteBox.titleColor).toBe(colors.medium)
+      expect(surface.paletteBox.bottomTitle).toBe(" Ctrl+Y toggle - esc ")
       const content = (surface.palette.content as { chunks: ReadonlyArray<{ text: string }> }).chunks
         .map((chunk) => chunk.text)
         .join("")
@@ -2269,25 +2278,53 @@ describe("Surface", () => {
       expect(content).toContain("208.3K used")
       expect(content).toContain("$1.25")
       expect(content).toContain("◷ 1m 43s")
-      expect(content).toContain("40.1M processed")
-      const contextGeometry = {
-        x: surface.paletteBox.x,
-        y: surface.paletteBox.y,
-        width: surface.paletteBox.width,
-        height: surface.paletteBox.height,
-      }
+      expect(content).toContain("208.3K used — 713.7K available")
+      expect(content).toContain("922K usable — 1.05M window — 128K reserved")
+      expect(content).toContain("Processed  40.1M")
+      expect(content).not.toContain(" · ")
+      const contextRight = surface.paletteBox.x + surface.paletteBox.width
+      const contextBottom = surface.paletteBox.y + surface.paletteBox.height
+      const contextWidth = surface.paletteBox.width
       surface.update(
         model({
           contextDetailsOpen: false,
           modePicker: { open: true, selected: 1 },
         }),
       )
-      expect({
-        x: surface.paletteBox.x,
-        y: surface.paletteBox.y,
-        width: surface.paletteBox.width,
-        height: surface.paletteBox.height,
-      }).toEqual(contextGeometry)
+      expect(surface.paletteBox.x + surface.paletteBox.width).toBe(contextRight)
+      expect(surface.paletteBox.y + surface.paletteBox.height).toBe(contextBottom)
+      expect(surface.paletteBox.width).toBeLessThan(contextWidth)
+    }),
+  )
+
+  it.effect("shows an active mode-colored context bar without placeholder percentages or costs", () =>
+    Effect.gen(function* () {
+      const { surface } = yield* createScoped(handlers())
+      surface.update(
+        model({
+          currentThreadId: "thread",
+          mode: "low",
+          contextDetailsOpen: true,
+          contextUsage: { _tag: "Unavailable" },
+          usageCost: { _tag: "Unavailable" },
+          usageTime: { _tag: "Unavailable" },
+          usageTokens: { _tag: "Unavailable" },
+        }),
+      )
+
+      const footer = (surface.modeLabel.content as { chunks: ReadonlyArray<{ text: string }> }).chunks
+        .map((chunk) => chunk.text)
+        .join("")
+      expect(footer).toBe(" ctx ░░░░░░░░     ─ low ")
+      expect(surface.paletteBox.titleColor).toBe(colors.low)
+      const content = (surface.palette.content as { chunks: ReadonlyArray<{ text: string }> }).chunks
+        .map((chunk) => chunk.text)
+        .join("")
+      expect(content.split("\n")[0]).toBe("░░░░░░░░░░░░░░░░")
+      expect(content.split("\n")[0]).not.toContain("—")
+      expect(content.split("\n")[0]).not.toContain("%")
+      expect(content).toContain("Cost       Unknown")
+      expect(content).not.toContain(" · ")
     }),
   )
 
@@ -2304,8 +2341,11 @@ describe("Surface", () => {
       expect(surface.modeLabel.width).toBe(27)
       Object.assign(surface.modeLabel, { screenX: 20 })
       expect(
+        (surface.modeLabel.content as { chunks: ReadonlyArray<{ attributes?: number; fg?: unknown }> }).chunks[0],
+      ).toMatchObject({ fg: colors.medium })
+      expect(
         (surface.modeLabel.content as { chunks: ReadonlyArray<{ attributes?: number }> }).chunks[0]?.attributes,
-      ).toBe(2)
+      ).toBeUndefined()
 
       surface.modeLabel.onMouseOver?.({ x: 20 } as never)
       expect(opentui.renderer.setMousePointer).toHaveBeenLastCalledWith("pointer")
@@ -2381,7 +2421,7 @@ describe("Surface", () => {
       expect(opentui.renderer.setMousePointer).toHaveBeenLastCalledWith("default")
       expect(
         (surface.modeLabel.content as { chunks: ReadonlyArray<{ attributes?: number }> }).chunks[0]?.attributes,
-      ).toBe(2)
+      ).toBeUndefined()
     }),
   )
 

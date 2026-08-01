@@ -86,7 +86,7 @@ test(
         yield* app.settled
         app.pressKey("y", { ctrl: true })
         const priced = yield* app.waitFrame("$0.00")
-        expect(priced).not.toContain("$\u2014")
+        expect(priced).not.toContain("Unknown")
         app.pressEscape()
         yield* app.waitGone("Context & Usage")
 
@@ -95,8 +95,8 @@ test(
         yield* app.waitFrame("UNPRICED_TURN_FAILED")
         yield* app.settled
         app.pressKey("y", { ctrl: true })
-        const settledFrame = yield* app.waitFrame("$\u2014")
-        expect(settledFrame).not.toMatch(/\$[0-9]/u)
+        const settledFrame = yield* app.waitFrame("Cost       Unknown")
+        expect(settledFrame).not.toMatch(/Cost\s+\$[0-9]/u)
         yield* app.quit
       }),
     ),
@@ -127,20 +127,23 @@ test(
 )
 
 test(
-  "shows exact context pressure and opens its details command",
+  "shows exact context pressure and retains it while the next turn starts",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
-          script: [TuiApp.model.text("CONTEXT_METER_COMPLETE")],
+          script: [
+            TuiApp.model.text("CONTEXT_METER_COMPLETE"),
+            TuiApp.model.text("CONTEXT_METER_SECOND_COMPLETE", 1_500),
+          ],
           mapExecutionEvent: (event) =>
             event.type === "model.usage.reported"
               ? {
                   ...event,
                   data: {
                     ...event.data,
-                    input_tokens: 56_120,
-                    input_tokens_uncached: 56_120,
+                    input_tokens: event.executionId.includes("tui-turn-1") ? 100_000 : 56_120,
+                    input_tokens_uncached: event.executionId.includes("tui-turn-1") ? 100_000 : 56_120,
                     input_tokens_cache_read: 0,
                     input_tokens_cache_write: 0,
                     output_tokens: 100,
@@ -161,6 +164,16 @@ test(
         expect(details).toContain("244K usable")
         expect(details).toContain("372K window")
         expect(details).toContain("128K reserved")
+        app.pressKey("y", { ctrl: true })
+        yield* app.waitGone("Context & Usage")
+
+        yield* Effect.promise(() => app.type("Measure context again."))
+        app.pressEnter()
+        const pending = yield* app.waitFrame("Measure context again.")
+        expect(pending).toContain("ctx █▊░░░░░░ 23%")
+        yield* app.waitFrame("CONTEXT_METER_SECOND_COMPLETE")
+        yield* app.settled
+        expect(yield* app.waitFrame("ctx ███▎░░░░ 41%")).toContain("medium")
         yield* app.quit
       }),
     ),
@@ -518,7 +531,7 @@ test(
         const context = yield* app.waitFrame("Context & Usage")
         expect(context).toContain("Cost")
         expect(context).toContain("Active")
-        expect(context).toContain("Tokens")
+        expect(context).toContain("Processed")
         expect(context).toContain("Ctrl+Y toggle")
         app.pressEscape()
         yield* app.waitGone("Context & Usage")

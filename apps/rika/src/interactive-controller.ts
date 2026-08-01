@@ -535,6 +535,10 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
     if (state.usageRevision !== undefined && event.revision < state.usageRevision)
       return { state, preserveAnchor: false }
     const threadCostUsd = event.cost._tag === "Available" ? event.cost.usd : state.threadCostUsd
+    const contextUsage =
+      event.context._tag === "Unavailable" && state.model.contextUsage?._tag === "Available"
+        ? state.model.contextUsage
+        : event.context
     const { costUsd: _, ...withoutCost } = state.model
     return {
       state: {
@@ -543,7 +547,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
         ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
         model: {
           ...withoutCost,
-          contextUsage: event.context,
+          contextUsage,
           usageCost: event.cost,
           usageTokens: event.tokens,
           usageTime: event.time,

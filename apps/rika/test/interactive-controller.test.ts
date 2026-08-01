@@ -1859,7 +1859,7 @@ it("keeps the authoritative thread cost stable while older pages are prepended",
   expect(prepended.state.model.costUsd).toBe(3.75)
 })
 
-it("projects selected-thread active time and ignores stale selection updates", () => {
+it("keeps known context through transient unavailable updates and ignores stale selections", () => {
   const page = InteractiveController.update(initialState(), {
     _tag: "SelectionLoaded",
     selectionEpoch: 1,
@@ -1880,11 +1880,21 @@ it("projects selected-thread active time and ignores stale selection updates", (
     tokens: { _tag: "Unavailable" },
     time: { _tag: "Available", accumulatedMillis: 5_000, activeSince: 10_000 },
   })
-  const stale = InteractiveController.update(active.state, {
+  const transient = InteractiveController.update(active.state, {
+    _tag: "ThreadUsageUpdated",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    revision: 2,
+    context: { _tag: "Unavailable" },
+    cost: { _tag: "Unavailable" },
+    tokens: { _tag: "Unavailable" },
+    time: { _tag: "Available", accumulatedMillis: 6_000, activeSince: 10_000 },
+  })
+  const stale = InteractiveController.update(transient.state, {
     _tag: "ThreadUsageUpdated",
     selectionEpoch: 0,
     threadId: thread.id,
-    revision: 2,
+    revision: 3,
     context: { _tag: "Unavailable" },
     cost: { _tag: "Unavailable" },
     tokens: { _tag: "Unavailable" },
@@ -1897,12 +1907,13 @@ it("projects selected-thread active time and ignores stale selection updates", (
     contextWindow: 1_050_000,
     reserveTokens: 128_000,
   })
+  expect(transient.state.model.contextUsage).toBe(active.state.model.contextUsage)
   expect(active.state.model.usageTime).toEqual({
     _tag: "Available",
     accumulatedMillis: 5_000,
     activeSince: 10_000,
   })
-  expect(stale.state.model.usageTime).toBe(active.state.model.usageTime)
+  expect(stale.state.model.usageTime).toBe(transient.state.model.usageTime)
 })
 
 it("keeps the newest committed usage revision and drops older ones", () => {

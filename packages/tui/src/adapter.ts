@@ -124,12 +124,6 @@ import {
 
 export const spinnerFrames: ReadonlyArray<string> = cliSpinners.dots.frames
 
-const contextToneColor = (tone: ContextMeter.Tone) => {
-  if (tone === "critical") return colors.red
-  if (tone === "warning") return colors.amber
-  return colors.teal
-}
-
 export const probeNativeAsset = (): string => {
   const buffer = OptimizedBuffer.create(1, 1, "wcwidth")
   buffer.destroy()
@@ -2452,22 +2446,20 @@ export class Surface {
     const contextVisible = model.currentThreadId !== undefined && availableWidth >= 24
     const contextCells = availableWidth < 40 ? 4 : 8
     const contextPrefix = availableWidth < 40 ? " " : " ctx "
-    const buildContextChunks = (hovered: boolean): Array<TextChunk> => {
+    const buildContextChunks = (_hovered: boolean): Array<TextChunk> => {
       if (!contextVisible) return []
       const chunks: Array<TextChunk> = []
       const context = model.contextUsage
       const compacting = model.activity?._tag === "Compacting"
-      const decorate = (chunk: TextChunk, highlighted = false) => {
-        if (highlighted) return bold(chunk)
-        return hovered ? chunk : dim(chunk)
-      }
-      chunks.push(decorate(fg(colors.text)(contextPrefix)))
+      const activeColor = colors[model.mode]
+      const decorate = (chunk: TextChunk, highlighted = false) => (highlighted ? bold(chunk) : chunk)
+      chunks.push(decorate(fg(activeColor)(contextPrefix)))
       if (compacting) {
         for (let index = 0; index < contextCells; index += 1) {
           const glyph = (index + this.loaderPhase) % 2 === 0 ? "▓" : "▒"
-          chunks.push(decorate(fg(colors.amber)(glyph), index === this.loaderPhase % contextCells))
+          chunks.push(decorate(fg(activeColor)(glyph), index === this.loaderPhase % contextCells))
         }
-        chunks.push(decorate(fg(colors.amber)(`${"↻".padStart(4)} `)))
+        chunks.push(decorate(fg(activeColor)("  ↻  ")))
         return chunks
       }
       if (context?._tag === "Available") {
@@ -2476,10 +2468,10 @@ export class Surface {
           phase: this.loaderPhase,
           animated: model.busy || model.activity !== undefined,
         })
-        const tone = contextToneColor(value.tone)
         for (const [index, glyph] of value.glyphs.entries())
-          chunks.push(decorate(fg(index === value.highlight ? colors.text : tone)(glyph), index === value.highlight))
-        chunks.push(decorate(fg(tone)(`${`${value.percent}%`.padStart(4)} `)))
+          chunks.push(decorate(fg(activeColor)(glyph), index === value.highlight))
+        const percent = `${value.percent}%`
+        chunks.push(decorate(fg(activeColor)(` ${percent}${" ".repeat(Math.max(0, 4 - percent.length))}`)))
         return chunks
       }
       const glyphs =
@@ -2487,10 +2479,8 @@ export class Surface {
           ? ContextMeter.loadingMeter(this.loaderPhase, { cells: contextCells })
           : Array(contextCells).fill("░")
       for (const [index, glyph] of glyphs.entries())
-        chunks.push(
-          decorate(fg(index === this.loaderPhase % contextCells ? colors.text : colors.muted)(glyph), glyph === "◆"),
-        )
-      chunks.push(decorate(fg(colors.muted)(`${"—".padStart(4)} `)))
+        chunks.push(decorate(fg(activeColor)(glyph), index === this.loaderPhase % contextCells))
+      chunks.push(decorate(fg(activeColor)("     ")))
       return chunks
     }
     const buildModeChunks = (hovered: boolean): Array<TextChunk> => {
@@ -3429,16 +3419,16 @@ export class Surface {
       this.syncOverlayEditor(`> ${model.palette.query}`, 2 + model.palette.query.length, 0, boxHeight - 2, boxWidth - 4)
       cursorEditor = this.overlayEditor
     } else if (overlay === "context") {
-      const boxWidth = Math.min(58, contentWidth)
-      const boxHeight = Math.min(9, Math.max(1, composerTop))
+      const boxWidth = Math.min(68, contentWidth)
+      const boxHeight = Math.min(12, Math.max(1, composerTop))
       this.paletteBox.width = boxWidth
       this.paletteBox.height = boxHeight
       this.paletteBox.left = contentLeft + Math.max(0, contentWidth - boxWidth)
       this.paletteBox.top = Math.max(0, composerTop - boxHeight)
       this.paletteBox.title = " Context & Usage "
-      this.paletteBox.titleColor = colors.teal
+      this.paletteBox.titleColor = colors[model.mode]
       this.paletteBox.titleAlignment = "left"
-      this.paletteBox.bottomTitle = " Ctrl+Y toggle · esc "
+      this.paletteBox.bottomTitle = " Ctrl+Y toggle - esc "
       this.paletteBox.bottomTitleAlignment = "right"
       this.palette.content = contextDetailsContent(
         model,
@@ -3742,10 +3732,10 @@ const paletteContent = (
 }
 
 const usageCostText = (model: Model): string => {
-  if (model.usageCost?._tag === "Available" && model.usageCost.unpricedAttempts > 0) return "$—"
-  if (model.usageCost?._tag === "Available") return formatCost(model.usageCost.usd)
-  if (model.costUsd !== undefined) return formatCost(model.costUsd)
-  return model.usageCost?._tag === "Loading" ? "$···" : "$—"
+  if (model.usageCost?._tag === "Available" && model.usageCost.unpricedAttempts === 0)
+    return formatCost(model.usageCost.usd)
+  if (model.usageCost === undefined && model.costUsd !== undefined) return formatCost(model.costUsd)
+  return "Unknown"
 }
 
 const usageTimeText = (model: Model, now: number): string => {
@@ -3754,9 +3744,9 @@ const usageTimeText = (model: Model, now: number): string => {
 }
 
 const processedTokensText = (model: Model): string => {
-  if (model.usageTokens?._tag === "Available")
-    return `${formatTokens(model.usageTokens.total).replace(/ tok$/, model.usageTokens.uncountedAttempts > 0 ? "+" : "")} processed`
-  return model.usageTokens?._tag === "Loading" ? "··· processed" : "— processed"
+  if (model.usageTokens?._tag !== "Available") return "Unknown"
+  const value = formatTokens(model.usageTokens.total).replace(/ tok$/, "")
+  return `${value}${model.usageTokens.uncountedAttempts > 0 ? "+" : ""}`
 }
 
 const contextDetailsContent = (model: Model, innerWidth: number, innerHeight: number, now: number): StyledText => {
@@ -3766,61 +3756,61 @@ const contextDetailsContent = (model: Model, innerWidth: number, innerHeight: nu
     chunks.push(style(truncateToWidth(text, innerWidth)))
   }
   const context = model.contextUsage
-  const compact = innerWidth < 40 || innerHeight < 6
+  const activeColor = colors[model.mode]
+  const compact = innerWidth < 40 || innerHeight < 8
   if (compact) {
     if (context?._tag === "Available") {
       const cells = Math.max(4, Math.min(12, innerWidth - 5))
       const value = ContextMeter.meter(context, { cells })
-      const tone = contextToneColor(value.tone)
-      chunks.push(fg(tone)(value.glyphs.join("")))
-      chunks.push(bold(fg(tone)(` ${value.percent}%`)))
+      chunks.push(fg(activeColor)(value.glyphs.join("")))
+      chunks.push(bold(fg(activeColor)(` ${value.percent}%`)))
       const usable = ContextMeter.usableTokens(context)
-      if (innerHeight >= 3) line(`${formatContextTokens(context.inputTokens)} / ${formatContextTokens(usable)} usable`)
-      if (innerHeight >= 4)
+      if (innerHeight >= 4) line(`${formatContextTokens(context.inputTokens)} / ${formatContextTokens(usable)} usable`)
+      if (innerHeight >= 5)
         line(
-          `${formatContextTokens(context.contextWindow)} window · ${formatContextTokens(context.reserveTokens)} reserve`,
+          `${formatContextTokens(context.contextWindow)} window — ${formatContextTokens(context.reserveTokens)} reserve`,
           fg(colors.muted),
         )
     } else {
       const loading = context?._tag === "Loading"
-      chunks.push(fg(colors.muted)(`${loading ? "········" : "░░░░░░░░"} —`))
-      if (innerHeight >= 3) line(loading ? "Waiting for model usage" : "Context unavailable", fg(colors.muted))
-      if (innerHeight >= 4) line("Output capacity is reserved", fg(colors.muted))
+      const glyphs = loading ? ContextMeter.loadingMeter(0) : Array(8).fill("░")
+      chunks.push(fg(activeColor)(glyphs.join("")))
+      if (innerHeight >= 4) line(loading ? "Waiting for model usage" : "Context unavailable", fg(colors.muted))
+      if (innerHeight >= 5) line("Output capacity is reserved", fg(colors.muted))
     }
     if (innerHeight >= 2) {
-      let tokens = "—"
-      if (model.usageTokens?._tag === "Available") {
-        tokens = formatContextTokens(model.usageTokens.total)
-        if (model.usageTokens.uncountedAttempts > 0) tokens += "+"
-      }
       const time = usageTimeText(model, now).replaceAll(" ", "")
-      line(`${usageCostText(model)} ${time} ${tokens}`)
+      line(`${usageCostText(model)} — ${time}`)
     }
+    if (innerHeight >= 3) line(`${processedTokensText(model)} processed`, fg(colors.muted))
     return new StyledText(chunks)
   }
   if (context?._tag === "Available") {
-    const cells = Math.max(8, Math.min(28, innerWidth - 7))
+    const cells = Math.max(8, Math.min(16, innerWidth - 7))
     const value = ContextMeter.meter(context, { cells })
-    const tone = contextToneColor(value.tone)
-    chunks.push(fg(tone)(value.glyphs.join("")))
-    chunks.push(bold(fg(tone)(` ${value.percent}%`)))
+    chunks.push(fg(activeColor)(value.glyphs.join("")))
+    chunks.push(bold(fg(activeColor)(` ${value.percent}%`)))
     const usable = ContextMeter.usableTokens(context)
+    line("")
     line(
-      `${formatContextTokens(context.inputTokens)} used  ·  ${formatContextTokens(Math.max(0, usable - context.inputTokens))} available`,
+      `${formatContextTokens(context.inputTokens)} used — ${formatContextTokens(Math.max(0, usable - context.inputTokens))} available`,
     )
     line(
-      `${formatContextTokens(usable)} usable  ·  ${formatContextTokens(context.contextWindow)} window  ·  ${formatContextTokens(context.reserveTokens)} reserved`,
+      `${formatContextTokens(usable)} usable — ${formatContextTokens(context.contextWindow)} window — ${formatContextTokens(context.reserveTokens)} reserved`,
       fg(colors.muted),
     )
   } else {
     const loading = context?._tag === "Loading"
-    chunks.push(fg(colors.muted)(`${loading ? "········" : "░░░░░░░░"} —`))
+    const glyphs = loading ? ContextMeter.loadingMeter(0, { cells: 16 }) : Array(16).fill("░")
+    chunks.push(fg(activeColor)(glyphs.join("")))
+    line("")
     line(loading ? "Waiting for the first model usage report" : "Context is unavailable", fg(colors.muted))
     line("Usable context reserves the model's output allowance", fg(colors.muted))
   }
   line("")
-  line(`Cost  ${usageCostText(model)}     Active  ${usageTimeText(model, now)}`)
-  line(`Tokens  ${processedTokensText(model)}`, fg(colors.muted))
+  line(`Cost       ${usageCostText(model)}`)
+  line(`Active     ${usageTimeText(model, now)}`)
+  line(`Processed  ${processedTokensText(model)}`, fg(colors.muted))
   return new StyledText(chunks)
 }
 

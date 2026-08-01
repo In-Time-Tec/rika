@@ -1277,15 +1277,9 @@ describe("InteractiveSession controls", () => {
     }),
   )
 
-  it.effect("keeps queued turns in the queue and out of the transcript when selecting a thread", () =>
+  it.effect("keeps prior context while newer queued and executed turns have no usage report", () =>
     Effect.gen(function* () {
       const { session, turns, transcripts, usage, controls, older } = yield* makeHarness()
-      const queued = yield* createTurn(turns, {
-        id: Turn.TurnId.make("queued-selection"),
-        threadId: older.id,
-        prompt: "queued prompt",
-        now: 2,
-      })
       const shell: Turn.TerminalRecordedShellTurn = {
         _tag: "RecordedShell",
         id: Turn.TurnId.make("recorded-shell"),
@@ -1360,22 +1354,40 @@ describe("InteractiveSession controls", () => {
         UsageCost.serialize(contextFold.success),
         UsageCost.materialize(contextFold.success, "active", String(older.id)),
       )
+      const withoutUsage = yield* createTurn(turns, {
+        id: Turn.TurnId.make("newer-without-usage"),
+        threadId: older.id,
+        prompt: "newer prompt",
+        now: 6,
+      })
+      expect(yield* turns.startAccepted(withoutUsage.id, 6)).toBe(true)
+      const queued = yield* createTurn(turns, {
+        id: Turn.TurnId.make("queued-selection"),
+        threadId: older.id,
+        prompt: "queued prompt",
+        now: 7,
+      })
+      const completedWithoutUsage = yield* turns.setStatus(withoutUsage.id, "completed", "done", 8)
+      yield* storeCompletedTranscript(transcripts, completedWithoutUsage, "newer-done")
       const events: Array<Operation.InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
       yield* Effect.yieldNow
 
       expect(events.find((event) => event._tag === "SelectionLoaded")).toMatchObject({ queue: [{ id: queued.id }] })
-      const entries = yield* awaitSelectionEntries(events, (loaded) => loaded.length >= 2)
-      expect(entries).toMatchObject([
-        { turn: { id: "active" }, unit: { content: { _tag: "Entry" } } },
-        {
-          turn: { id: shell.id },
-          unit: { content: { _tag: "Block", block: { _tag: "ToolCall", output: "output:recorded" } } },
-        },
-      ])
+      const entries = yield* awaitSelectionEntries(events, (loaded) => loaded.length >= 3)
+      expect(entries.some((entry) => entry.turn.id === "active" && entry.unit.content._tag === "Entry")).toBe(true)
       expect(entries.some((entry) => entry.turn.id === queued.id)).toBe(false)
-      expect(entries.some((entry) => entry.turn.id === shell.id)).toBe(true)
+      expect(
+        entries.some(
+          (entry) =>
+            entry.turn.id === shell.id &&
+            entry.unit.content._tag === "Block" &&
+            entry.unit.content.block._tag === "ToolCall" &&
+            entry.unit.content.block.output === "output:recorded",
+        ),
+      ).toBe(true)
+      expect(entries.some((entry) => entry.turn.id === withoutUsage.id)).toBe(true)
       while (!events.some((event) => event._tag === "ThreadUsageUpdated")) yield* Effect.yieldNow
       expect(events.find((event) => event._tag === "ThreadUsageUpdated")).toMatchObject({
         context: { _tag: "Available", inputTokens: 100 },
