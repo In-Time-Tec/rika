@@ -1,6 +1,9 @@
-import { AiError, Response as AiResponse } from "@batonfx/core"
+import { AiError, ModelRegistry, Response as AiResponse } from "@batonfx/core"
 import { Layer, Effect, FileSystem, Schema } from "effect"
+import { TestModel } from "@batonfx/test"
 import type { TestModel as TestModelTypes } from "@batonfx/test"
+
+export { ModelRegistry, TestModel }
 
 class ExternalBoundaryError extends Schema.TaggedErrorClass<ExternalBoundaryError>()("ExternalBoundaryError", {
   operation: Schema.String,
@@ -52,7 +55,7 @@ export const buildTestModelScript: (
   "Main.buildTestModelScript",
 )(function* (json: string) {
   const script = yield* parseTestModelScript(json)
-  const { TestModel } = yield* Effect.tryPromise({
+  const { TestModel: RuntimeTestModel } = yield* Effect.tryPromise({
     try: () => import("@batonfx/test"),
     catch: (cause) => ExternalBoundaryError.make({ operation: "load test model", message: String(cause) }),
   })
@@ -77,9 +80,9 @@ export const buildTestModelScript: (
             }),
           }),
     }
-    if ("object" in turn) return TestModel.object(turn.object, options)
+    if ("object" in turn) return RuntimeTestModel.object(turn.object, options)
     if ("failure" in turn)
-      return TestModel.failure(
+      return RuntimeTestModel.failure(
         AiError.make({
           module: "rika/test-model",
           method: "streamText",
@@ -87,11 +90,11 @@ export const buildTestModelScript: (
         }),
         options,
       )
-    return TestModel.turn(
+    return RuntimeTestModel.turn(
       turn.parts.map((part) => {
-        if (part.type === "text") return TestModel.text(part.text)
-        if (part.type === "reasoning") return TestModel.reasoning(part.text)
-        return TestModel.toolCall(part.name, part.params, part.id === undefined ? {} : { id: part.id })
+        if (part.type === "text") return RuntimeTestModel.text(part.text)
+        if (part.type === "reasoning") return RuntimeTestModel.reasoning(part.text)
+        return RuntimeTestModel.toolCall(part.name, part.params, part.id === undefined ? {} : { id: part.id })
       }),
       options,
     )
@@ -102,14 +105,14 @@ export const makeReloadingTestModel: (
   path: string,
 ) => Effect.Effect<TestModelTypes.Fixture, ExternalBoundaryError | Schema.SchemaError, FileSystem.FileSystem> =
   Effect.fn("Main.makeReloadingTestModel")(function* (path: string) {
-    const { TestModel } = yield* Effect.tryPromise({
+    const { TestModel: RuntimeTestModel } = yield* Effect.tryPromise({
       try: () => import("@batonfx/test"),
       catch: (cause) => ExternalBoundaryError.make({ operation: "load test model", message: String(cause) }),
     })
     const load = Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
       const script = yield* fileSystem.readFileString(path)
-      return yield* TestModel.make(yield* buildTestModelScript(script), {
+      return yield* RuntimeTestModel.make(yield* buildTestModelScript(script), {
         metadata: { pricing: { inputPerMTok: 0, outputPerMTok: 0 } },
       })
     })
@@ -136,22 +139,22 @@ export const makeReloadingTestModel: (
   })
 
 export const makeScriptedModel = Effect.fn("ScriptedModelRuntime.makeScriptedModel")(function* (script: string) {
-  const { TestModel } = yield* Effect.tryPromise({
+  const { TestModel: RuntimeTestModel } = yield* Effect.tryPromise({
     try: () => import("@batonfx/test"),
     catch: (cause) => ExternalBoundaryError.make({ operation: "load test model", message: String(cause) }),
   })
-  return yield* TestModel.make(yield* buildTestModelScript(script), {
+  return yield* RuntimeTestModel.make(yield* buildTestModelScript(script), {
     metadata: { pricing: { inputPerMTok: 0, outputPerMTok: 0 } },
   })
 })
 
 export const makeConstantModel = Effect.fn("ScriptedModelRuntime.makeConstantModel")(function* (text: string) {
-  const { TestModel } = yield* Effect.tryPromise({
+  const { TestModel: RuntimeTestModel } = yield* Effect.tryPromise({
     try: () => import("@batonfx/test"),
     catch: (cause) => ExternalBoundaryError.make({ operation: "load test model", message: String(cause) }),
   })
-  return yield* TestModel.make(
-    Array.from({ length: 4 }, () => TestModel.text(text)),
+  return yield* RuntimeTestModel.make(
+    Array.from({ length: 4 }, () => RuntimeTestModel.text(text)),
     {
       metadata: { pricing: { inputPerMTok: 0, outputPerMTok: 0 } },
     },
