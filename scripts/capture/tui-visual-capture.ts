@@ -1,7 +1,7 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Effect, FileSystem, Layer, Path } from "effect"
-import { captureVisuals } from "../packages/terminal/test/visual-capture-support"
+import { captureVisuals } from "../../packages/terminal/test/visual-capture-support"
 
 const program = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem
@@ -12,7 +12,7 @@ const program = Effect.gen(function* () {
     : fileSystem.makeTempDirectory({ prefix: "rika-visual-candidate-" })
   yield* captureVisuals(candidate)
   if (approve) {
-    const approved = path.join(import.meta.dir, "../packages/terminal/test/fixtures/visual")
+    const approved = path.join(import.meta.dir, "../../packages/terminal/test/fixtures/visual")
     yield* fileSystem.remove(approved, { recursive: true, force: true })
     yield* fileSystem.copy(candidate, approved)
     yield* Effect.log(`Approved visual baseline: ${approved}`)

@@ -3,7 +3,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { Data, Effect, FileSystem, Layer, Path, Schema } from "effect"
 import { dual } from "effect/Function"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { archiveName, archiveRoot, targetNames, type PackageTarget } from "./package"
+import { archiveName, archiveRoot, targetNames, type PackageTarget } from "./package-target"
 
 export const scope = "@rikafx"
 
@@ -101,7 +101,7 @@ export const buildNpmPackages = Effect.fn("NpmPackage.build")(function* () {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const root = path.resolve(import.meta.dir, "..")
+  const root = path.resolve(import.meta.dir, "../..")
   const artifacts = path.join(root, "artifacts")
   const output = path.join(artifacts, "npm")
   const manifest = yield* fileSystem

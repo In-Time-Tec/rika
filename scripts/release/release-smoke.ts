@@ -2,7 +2,7 @@ import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Data, Effect, FileSystem, Layer, Path, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { validatePackageArchive } from "./archive-contract"
+import { validatePackageArchive } from "../packaging/archive-contract"
 
 class ReleaseSmokeError extends Data.TaggedError("ReleaseSmokeError")<{
   readonly step: string
@@ -23,7 +23,7 @@ const program = Effect.scoped(
     const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const root = yield* path.fromFileUrl(new URL("..", import.meta.url)).pipe(mapFailure("resolve project root"))
+    const root = yield* path.fromFileUrl(new URL("../..", import.meta.url)).pipe(mapFailure("resolve project root"))
     const targetIndex = Bun.argv.indexOf("--target")
     const kernel = process.platform === "darwin" ? "darwin" : "linux"
     const architecture = process.arch === "x64" ? "x64" : "arm64"

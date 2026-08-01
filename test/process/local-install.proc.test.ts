@@ -56,7 +56,7 @@ test("installs, upgrades, and uninstalls a versioned split-runtime package witho
   await writeFile(state, "preserve")
   try {
     await makeArchive(home, "first")
-    await run("scripts/install-local.ts", environment)
+    await run("scripts/installation/install-local.ts", environment)
     expect(await readlink(join(binDir, "rika-dev"))).toBe(join(installRoot, "bin", "rika"))
     expect(await readFile(join(installRoot, "bin", "rika"), "utf8")).toBe("first")
     expect(await readFile(join(installRoot, "bin", ".rika-performance"), "utf8")).toBe("performance-first")
@@ -64,11 +64,11 @@ test("installs, upgrades, and uninstalls a versioned split-runtime package witho
     expect(await readFile(join(installRoot, "bin", ".rika-resident"), "utf8")).toBe("resident-first")
 
     await makeArchive(home, "second")
-    await run("scripts/install-local.ts", environment)
+    await run("scripts/installation/install-local.ts", environment)
     expect(await readFile(join(installRoot, "bin", "rika"), "utf8")).toBe("second")
     expect(await readFile(state, "utf8")).toBe("preserve")
 
-    await run("scripts/uninstall-local.ts", environment)
+    await run("scripts/installation/uninstall-local.ts", environment)
     await expect(stat(join(binDir, "rika-dev"))).rejects.toThrow()
     await expect(stat(installRoot)).rejects.toThrow()
     expect(await readFile(state, "utf8")).toBe("preserve")

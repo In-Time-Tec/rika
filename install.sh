@@ -11,7 +11,7 @@
 #   RIKA_RELEASE_API_URL   override the latest-release lookup (used by tests)
 #   RIKA_RELEASE_BASE_URL  override the release download location (used by tests)
 #
-# These defaults match scripts/local-install.ts so a curl install and a
+# These defaults match scripts/installation/local-install.ts so a curl install and a
 # build-from-source install land in the same place.
 
 set -eu

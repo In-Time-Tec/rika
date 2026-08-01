@@ -10844,132 +10844,166 @@
       "testKind": "unit-test"
     },
     {
-      "id": "scripts/archive-contract.ts",
-      "path": "scripts/archive-contract.ts",
+      "id": "scripts/benchmark/benchmark-baseline.ts",
+      "path": "scripts/benchmark/benchmark-baseline.ts",
       "workspace": "root",
       "kind": "source",
       "production": true,
       "publicExports": []
     },
     {
-      "id": "scripts/bench/baseline.ts",
-      "path": "scripts/bench/baseline.ts",
+      "id": "scripts/benchmark/benchmark-runner.ts",
+      "path": "scripts/benchmark/benchmark-runner.ts",
       "workspace": "root",
       "kind": "source",
       "production": true,
       "publicExports": []
     },
     {
-      "id": "scripts/bench/fold-persistence.ts",
-      "path": "scripts/bench/fold-persistence.ts",
+      "id": "scripts/benchmark/benchmark-statistics.ts",
+      "path": "scripts/benchmark/benchmark-statistics.ts",
       "workspace": "root",
       "kind": "source",
       "production": true,
       "publicExports": []
     },
     {
-      "id": "scripts/bench/run.ts",
-      "path": "scripts/bench/run.ts",
+      "id": "scripts/benchmark/fold-persistence-benchmark.ts",
+      "path": "scripts/benchmark/fold-persistence-benchmark.ts",
       "workspace": "root",
       "kind": "source",
       "production": true,
       "publicExports": []
     },
     {
-      "id": "scripts/bench/seed-populated-root.ts",
-      "path": "scripts/bench/seed-populated-root.ts",
+      "id": "scripts/benchmark/performance-comparison.ts",
+      "path": "scripts/benchmark/performance-comparison.ts",
       "workspace": "root",
       "kind": "source",
       "production": true,
       "publicExports": []
     },
     {
-      "id": "scripts/bench/stats.ts",
-      "path": "scripts/bench/stats.ts",
+      "id": "scripts/benchmark/performance-metric-policy.ts",
+      "path": "scripts/benchmark/performance-metric-policy.ts",
       "workspace": "root",
       "kind": "source",
       "production": true,
       "publicExports": []
     },
     {
-      "id": "scripts/bench/warm-populated-resident.ts",
-      "path": "scripts/bench/warm-populated-resident.ts",
+      "id": "scripts/benchmark/populated-root-seed.ts",
+      "path": "scripts/benchmark/populated-root-seed.ts",
       "workspace": "root",
       "kind": "source",
       "production": true,
       "publicExports": []
     },
     {
-      "id": "scripts/capture-tui-visuals.ts",
-      "path": "scripts/capture-tui-visuals.ts",
+      "id": "scripts/benchmark/warm-resident-benchmark.ts",
+      "path": "scripts/benchmark/warm-resident-benchmark.ts",
       "workspace": "root",
       "kind": "source",
       "production": true,
       "publicExports": []
     },
     {
-      "id": "scripts/install-contract.ts",
-      "path": "scripts/install-contract.ts",
+      "id": "scripts/capture/tui-visual-capture.ts",
+      "path": "scripts/capture/tui-visual-capture.ts",
       "workspace": "root",
       "kind": "source",
       "production": true,
       "publicExports": []
     },
     {
-      "id": "scripts/install-local.ts",
-      "path": "scripts/install-local.ts",
+      "id": "scripts/installation/install-contract.ts",
+      "path": "scripts/installation/install-contract.ts",
       "workspace": "root",
       "kind": "source",
       "production": true,
       "publicExports": []
     },
     {
-      "id": "scripts/local-install.ts",
-      "path": "scripts/local-install.ts",
+      "id": "scripts/installation/install-local.ts",
+      "path": "scripts/installation/install-local.ts",
       "workspace": "root",
       "kind": "source",
       "production": true,
       "publicExports": []
     },
     {
-      "id": "scripts/npm-package.ts",
-      "path": "scripts/npm-package.ts",
+      "id": "scripts/installation/local-install.ts",
+      "path": "scripts/installation/local-install.ts",
       "workspace": "root",
       "kind": "source",
       "production": true,
       "publicExports": []
     },
     {
-      "id": "scripts/package.ts",
-      "path": "scripts/package.ts",
+      "id": "scripts/installation/uninstall-local.ts",
+      "path": "scripts/installation/uninstall-local.ts",
       "workspace": "root",
       "kind": "source",
       "production": true,
       "publicExports": []
     },
     {
-      "id": "scripts/release-smoke.ts",
-      "path": "scripts/release-smoke.ts",
+      "id": "scripts/packaging/archive-contract.ts",
+      "path": "scripts/packaging/archive-contract.ts",
       "workspace": "root",
       "kind": "source",
       "production": true,
       "publicExports": []
     },
     {
-      "id": "scripts/uninstall-local.ts",
-      "path": "scripts/uninstall-local.ts",
+      "id": "scripts/packaging/npm-package.ts",
+      "path": "scripts/packaging/npm-package.ts",
       "workspace": "root",
       "kind": "source",
       "production": true,
       "publicExports": []
     },
     {
-      "id": "scripts/upstream.ts",
-      "path": "scripts/upstream.ts",
+      "id": "scripts/packaging/package-target.ts",
+      "path": "scripts/packaging/package-target.ts",
       "workspace": "root",
       "kind": "source",
       "production": true,
       "publicExports": []
+    },
+    {
+      "id": "scripts/release/release-smoke.ts",
+      "path": "scripts/release/release-smoke.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "scripts/upstream/upstream-source.ts",
+      "path": "scripts/upstream/upstream-source.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "test/benchmark/performance-metric-policy.test.ts",
+      "path": "test/benchmark/performance-metric-policy.test.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "test/command-entrypoint.test.ts",
+      "path": "test/command-entrypoint.test.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
     },
     {
       "id": "test/live/live-model.test.ts",
@@ -10989,26 +11023,8 @@
       "publicExports": []
     },
     {
-      "id": "test/scripts/archive-contract.test.ts",
-      "path": "test/scripts/archive-contract.test.ts",
-      "workspace": "root",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "test/scripts/install-contract.test.ts",
-      "path": "test/scripts/install-contract.test.ts",
-      "workspace": "root",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "test/scripts/install-upgrade.proc.test.ts",
-      "path": "test/scripts/install-upgrade.proc.test.ts",
+      "id": "test/process/install-upgrade.proc.test.ts",
+      "path": "test/process/install-upgrade.proc.test.ts",
       "workspace": "root",
       "kind": "source",
       "production": false,
@@ -11016,8 +11032,8 @@
       "testKind": "process-test"
     },
     {
-      "id": "test/scripts/local-install.proc.test.ts",
-      "path": "test/scripts/local-install.proc.test.ts",
+      "id": "test/process/local-install.proc.test.ts",
+      "path": "test/process/local-install.proc.test.ts",
       "workspace": "root",
       "kind": "source",
       "production": false,
@@ -11025,8 +11041,8 @@
       "testKind": "process-test"
     },
     {
-      "id": "test/scripts/package.test.ts",
-      "path": "test/scripts/package.test.ts",
+      "id": "test/release/archive-contract.test.ts",
+      "path": "test/release/archive-contract.test.ts",
       "workspace": "root",
       "kind": "source",
       "production": false,
@@ -11034,8 +11050,8 @@
       "testKind": "unit-test"
     },
     {
-      "id": "test/scripts/release-workflow.test.ts",
-      "path": "test/scripts/release-workflow.test.ts",
+      "id": "test/release/install-contract.test.ts",
+      "path": "test/release/install-contract.test.ts",
       "workspace": "root",
       "kind": "source",
       "production": false,
@@ -11043,8 +11059,26 @@
       "testKind": "unit-test"
     },
     {
-      "id": "test/unit/setup-relay-polling.ts",
-      "path": "test/unit/setup-relay-polling.ts",
+      "id": "test/release/package-target.test.ts",
+      "path": "test/release/package-target.test.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "test/release/release-workflow.test.ts",
+      "path": "test/release/release-workflow.test.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "test/support/relay-polling-setup.ts",
+      "path": "test/support/relay-polling-setup.ts",
       "workspace": "root",
       "kind": "source",
       "production": true,
@@ -62617,15 +62651,7 @@
       "production": false
     },
     {
-      "from": "scripts/archive-contract.ts",
-      "to": "external:effect/Function",
-      "specifier": "effect/Function",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/bench/baseline.ts",
+      "from": "scripts/benchmark/benchmark-baseline.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -62633,7 +62659,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/baseline.ts",
+      "from": "scripts/benchmark/benchmark-baseline.ts",
       "to": "external:effect/PlatformError",
       "specifier": "effect/PlatformError",
       "kind": "dynamic-import",
@@ -62641,7 +62667,23 @@
       "production": true
     },
     {
-      "from": "scripts/bench/fold-persistence.ts",
+      "from": "scripts/benchmark/benchmark-runner.ts",
+      "to": "external:@effect/platform-bun/BunRuntime",
+      "specifier": "@effect/platform-bun/BunRuntime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/benchmark-runner.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/benchmark-runner.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -62649,7 +62691,47 @@
       "production": true
     },
     {
-      "from": "scripts/bench/fold-persistence.ts",
+      "from": "scripts/benchmark/benchmark-runner.ts",
+      "to": "external:effect/unstable/cli",
+      "specifier": "effect/unstable/cli",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/benchmark-runner.ts",
+      "to": "scripts/benchmark/benchmark-baseline.ts",
+      "specifier": "./benchmark-baseline",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/benchmark-runner.ts",
+      "to": "scripts/benchmark/benchmark-statistics.ts",
+      "specifier": "./benchmark-statistics",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/benchmark-runner.ts",
+      "to": "scripts/benchmark/fold-persistence-benchmark.ts",
+      "specifier": "./fold-persistence-benchmark",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/fold-persistence-benchmark.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/fold-persistence-benchmark.ts",
       "to": "packages/product-store/src/database/product-database-layer.ts",
       "specifier": "@rika/product-store/product-database-layer",
       "kind": "import",
@@ -62657,7 +62739,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/fold-persistence.ts",
+      "from": "scripts/benchmark/fold-persistence-benchmark.ts",
       "to": "packages/product-store/src/thread/sqlite-thread-repository.ts",
       "specifier": "@rika/product-store/sqlite-thread-repository",
       "kind": "import",
@@ -62665,7 +62747,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/fold-persistence.ts",
+      "from": "scripts/benchmark/fold-persistence-benchmark.ts",
       "to": "packages/product-store/src/transcript/sqlite-transcript-repository.ts",
       "specifier": "@rika/product-store/sqlite-transcript-repository",
       "kind": "import",
@@ -62673,7 +62755,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/fold-persistence.ts",
+      "from": "scripts/benchmark/fold-persistence-benchmark.ts",
       "to": "packages/product-store/src/turn/sqlite-turn-repository.ts",
       "specifier": "@rika/product-store/sqlite-turn-repository",
       "kind": "import",
@@ -62681,7 +62763,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/fold-persistence.ts",
+      "from": "scripts/benchmark/fold-persistence-benchmark.ts",
       "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
       "specifier": "@rika/product/execution-route-snapshot",
       "kind": "import",
@@ -62689,15 +62771,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/fold-persistence.ts",
-      "to": "packages/product/src/operation/contract/product-operation-service.ts",
-      "specifier": "@rika/product/product-operation-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/bench/fold-persistence.ts",
+      "from": "scripts/benchmark/fold-persistence-benchmark.ts",
       "to": "packages/product/src/thread/model/thread-record.ts",
       "specifier": "@rika/product/thread-record",
       "kind": "import",
@@ -62705,7 +62779,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/fold-persistence.ts",
+      "from": "scripts/benchmark/fold-persistence-benchmark.ts",
       "to": "packages/product/src/thread/model/transcript-page.ts",
       "specifier": "@rika/product/transcript-page",
       "kind": "import",
@@ -62713,7 +62787,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/fold-persistence.ts",
+      "from": "scripts/benchmark/fold-persistence-benchmark.ts",
       "to": "packages/product/src/thread/model/turn-record.ts",
       "specifier": "@rika/product/turn-record",
       "kind": "import",
@@ -62721,7 +62795,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/fold-persistence.ts",
+      "from": "scripts/benchmark/fold-persistence-benchmark.ts",
       "to": "packages/transcript/src/ordering/child-parent-correlation.ts",
       "specifier": "@rika/transcript/child-parent-correlation",
       "kind": "import",
@@ -62729,7 +62803,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/fold-persistence.ts",
+      "from": "scripts/benchmark/fold-persistence-benchmark.ts",
       "to": "packages/transcript/src/projection/transcript-projection.ts",
       "specifier": "@rika/transcript/transcript-projection",
       "kind": "import",
@@ -62737,7 +62811,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/fold-persistence.ts",
+      "from": "scripts/benchmark/fold-persistence-benchmark.ts",
       "to": "packages/transcript/src/schema/transcript-projection-model.ts",
       "specifier": "@rika/transcript/transcript-projection-model",
       "kind": "import",
@@ -62745,7 +62819,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/fold-persistence.ts",
+      "from": "scripts/benchmark/fold-persistence-benchmark.ts",
       "to": "packages/transcript/src/schema/transcript-source-event.ts",
       "specifier": "@rika/transcript/transcript-source-event",
       "kind": "import",
@@ -62753,7 +62827,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/fold-persistence.ts",
+      "from": "scripts/benchmark/fold-persistence-benchmark.ts",
       "to": "packages/transcript/src/schema/transcript-unit.ts",
       "specifier": "@rika/transcript/transcript-unit",
       "kind": "import",
@@ -62761,23 +62835,23 @@
       "production": true
     },
     {
-      "from": "scripts/bench/fold-persistence.ts",
-      "to": "scripts/bench/baseline.ts",
-      "specifier": "./baseline",
+      "from": "scripts/benchmark/fold-persistence-benchmark.ts",
+      "to": "scripts/benchmark/benchmark-baseline.ts",
+      "specifier": "./benchmark-baseline",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "scripts/bench/fold-persistence.ts",
-      "to": "scripts/bench/stats.ts",
-      "specifier": "./stats",
+      "from": "scripts/benchmark/fold-persistence-benchmark.ts",
+      "to": "scripts/benchmark/benchmark-statistics.ts",
+      "specifier": "./benchmark-statistics",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "scripts/bench/run.ts",
+      "from": "scripts/benchmark/performance-comparison.ts",
       "to": "external:@effect/platform-bun/BunRuntime",
       "specifier": "@effect/platform-bun/BunRuntime",
       "kind": "import",
@@ -62785,7 +62859,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/run.ts",
+      "from": "scripts/benchmark/performance-comparison.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -62793,7 +62867,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/run.ts",
+      "from": "scripts/benchmark/performance-comparison.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -62801,7 +62875,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/run.ts",
+      "from": "scripts/benchmark/performance-comparison.ts",
       "to": "external:effect/unstable/cli",
       "specifier": "effect/unstable/cli",
       "kind": "import",
@@ -62809,31 +62883,15 @@
       "production": true
     },
     {
-      "from": "scripts/bench/run.ts",
-      "to": "scripts/bench/baseline.ts",
-      "specifier": "./baseline",
+      "from": "scripts/benchmark/performance-comparison.ts",
+      "to": "scripts/benchmark/performance-metric-policy.ts",
+      "specifier": "./performance-metric-policy",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "scripts/bench/run.ts",
-      "to": "scripts/bench/fold-persistence.ts",
-      "specifier": "./fold-persistence",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/bench/run.ts",
-      "to": "scripts/bench/stats.ts",
-      "specifier": "./stats",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/bench/seed-populated-root.ts",
+      "from": "scripts/benchmark/populated-root-seed.ts",
       "to": "external:@effect/platform-bun/BunRuntime",
       "specifier": "@effect/platform-bun/BunRuntime",
       "kind": "import",
@@ -62841,7 +62899,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/seed-populated-root.ts",
+      "from": "scripts/benchmark/populated-root-seed.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -62849,7 +62907,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/seed-populated-root.ts",
+      "from": "scripts/benchmark/populated-root-seed.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -62857,7 +62915,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/seed-populated-root.ts",
+      "from": "scripts/benchmark/populated-root-seed.ts",
       "to": "external:effect/Config",
       "specifier": "effect/Config",
       "kind": "import",
@@ -62865,7 +62923,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/seed-populated-root.ts",
+      "from": "scripts/benchmark/populated-root-seed.ts",
       "to": "external:effect/PlatformError",
       "specifier": "effect/PlatformError",
       "kind": "import",
@@ -62873,7 +62931,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/seed-populated-root.ts",
+      "from": "scripts/benchmark/populated-root-seed.ts",
       "to": "external:effect/unstable/sql/SqlError",
       "specifier": "effect/unstable/sql/SqlError",
       "kind": "import",
@@ -62881,7 +62939,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/seed-populated-root.ts",
+      "from": "scripts/benchmark/populated-root-seed.ts",
       "to": "packages/product-store/src/database/product-database-layer.ts",
       "specifier": "@rika/product-store/product-database-layer",
       "kind": "import",
@@ -62889,7 +62947,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/seed-populated-root.ts",
+      "from": "scripts/benchmark/populated-root-seed.ts",
       "to": "packages/product-store/src/thread/sqlite-thread-repository.ts",
       "specifier": "@rika/product-store/sqlite-thread-repository",
       "kind": "import",
@@ -62897,7 +62955,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/seed-populated-root.ts",
+      "from": "scripts/benchmark/populated-root-seed.ts",
       "to": "packages/product-store/src/turn/sqlite-turn-repository.ts",
       "specifier": "@rika/product-store/sqlite-turn-repository",
       "kind": "import",
@@ -62905,7 +62963,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/seed-populated-root.ts",
+      "from": "scripts/benchmark/populated-root-seed.ts",
       "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
       "specifier": "@rika/product/execution-route-snapshot",
       "kind": "import",
@@ -62913,7 +62971,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/seed-populated-root.ts",
+      "from": "scripts/benchmark/populated-root-seed.ts",
       "to": "packages/product/src/thread/model/thread-record.ts",
       "specifier": "@rika/product/thread-record",
       "kind": "import",
@@ -62921,7 +62979,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/seed-populated-root.ts",
+      "from": "scripts/benchmark/populated-root-seed.ts",
       "to": "packages/product/src/thread/model/turn-record.ts",
       "specifier": "@rika/product/turn-record",
       "kind": "import",
@@ -62929,7 +62987,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/warm-populated-resident.ts",
+      "from": "scripts/benchmark/warm-resident-benchmark.ts",
       "to": "apps/rika/src/transport/client/resident-client-transport.ts",
       "specifier": "../../apps/rika/src/transport/client/resident-client-transport",
       "kind": "import",
@@ -62937,7 +62995,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/warm-populated-resident.ts",
+      "from": "scripts/benchmark/warm-resident-benchmark.ts",
       "to": "external:@effect/platform-bun/BunCrypto",
       "specifier": "@effect/platform-bun/BunCrypto",
       "kind": "import",
@@ -62945,7 +63003,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/warm-populated-resident.ts",
+      "from": "scripts/benchmark/warm-resident-benchmark.ts",
       "to": "external:@effect/platform-bun/BunRuntime",
       "specifier": "@effect/platform-bun/BunRuntime",
       "kind": "import",
@@ -62953,7 +63011,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/warm-populated-resident.ts",
+      "from": "scripts/benchmark/warm-resident-benchmark.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -62961,7 +63019,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/warm-populated-resident.ts",
+      "from": "scripts/benchmark/warm-resident-benchmark.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -62969,7 +63027,7 @@
       "production": true
     },
     {
-      "from": "scripts/bench/warm-populated-resident.ts",
+      "from": "scripts/benchmark/warm-resident-benchmark.ts",
       "to": "packages/product/src/resident/resident-service.ts",
       "specifier": "@rika/product/resident-service",
       "kind": "import",
@@ -62977,7 +63035,7 @@
       "production": true
     },
     {
-      "from": "scripts/capture-tui-visuals.ts",
+      "from": "scripts/capture/tui-visual-capture.ts",
       "to": "external:@effect/platform-bun/BunRuntime",
       "specifier": "@effect/platform-bun/BunRuntime",
       "kind": "import",
@@ -62985,7 +63043,7 @@
       "production": true
     },
     {
-      "from": "scripts/capture-tui-visuals.ts",
+      "from": "scripts/capture/tui-visual-capture.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -62993,7 +63051,7 @@
       "production": true
     },
     {
-      "from": "scripts/capture-tui-visuals.ts",
+      "from": "scripts/capture/tui-visual-capture.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -63001,15 +63059,15 @@
       "production": true
     },
     {
-      "from": "scripts/capture-tui-visuals.ts",
+      "from": "scripts/capture/tui-visual-capture.ts",
       "to": "packages/terminal/test/visual-capture-support.ts",
-      "specifier": "../packages/terminal/test/visual-capture-support",
+      "specifier": "../../packages/terminal/test/visual-capture-support",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "scripts/install-local.ts",
+      "from": "scripts/installation/install-local.ts",
       "to": "external:@effect/platform-bun/BunRuntime",
       "specifier": "@effect/platform-bun/BunRuntime",
       "kind": "import",
@@ -63017,7 +63075,7 @@
       "production": true
     },
     {
-      "from": "scripts/install-local.ts",
+      "from": "scripts/installation/install-local.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -63025,7 +63083,7 @@
       "production": true
     },
     {
-      "from": "scripts/install-local.ts",
+      "from": "scripts/installation/install-local.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -63033,15 +63091,15 @@
       "production": true
     },
     {
-      "from": "scripts/install-local.ts",
-      "to": "scripts/local-install.ts",
+      "from": "scripts/installation/install-local.ts",
+      "to": "scripts/installation/local-install.ts",
       "specifier": "./local-install",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "scripts/local-install.ts",
+      "from": "scripts/installation/local-install.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -63049,7 +63107,7 @@
       "production": true
     },
     {
-      "from": "scripts/local-install.ts",
+      "from": "scripts/installation/local-install.ts",
       "to": "external:effect/unstable/process",
       "specifier": "effect/unstable/process",
       "kind": "import",
@@ -63057,23 +63115,23 @@
       "production": true
     },
     {
-      "from": "scripts/local-install.ts",
-      "to": "scripts/archive-contract.ts",
-      "specifier": "./archive-contract",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/local-install.ts",
-      "to": "scripts/install-contract.ts",
+      "from": "scripts/installation/local-install.ts",
+      "to": "scripts/installation/install-contract.ts",
       "specifier": "./install-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "scripts/npm-package.ts",
+      "from": "scripts/installation/local-install.ts",
+      "to": "scripts/packaging/archive-contract.ts",
+      "specifier": "../packaging/archive-contract",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/installation/uninstall-local.ts",
       "to": "external:@effect/platform-bun/BunRuntime",
       "specifier": "@effect/platform-bun/BunRuntime",
       "kind": "import",
@@ -63081,7 +63139,7 @@
       "production": true
     },
     {
-      "from": "scripts/npm-package.ts",
+      "from": "scripts/installation/uninstall-local.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -63089,7 +63147,7 @@
       "production": true
     },
     {
-      "from": "scripts/npm-package.ts",
+      "from": "scripts/installation/uninstall-local.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -63097,143 +63155,23 @@
       "production": true
     },
     {
-      "from": "scripts/npm-package.ts",
-      "to": "external:effect/Function",
-      "specifier": "effect/Function",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/npm-package.ts",
-      "to": "external:effect/unstable/process",
-      "specifier": "effect/unstable/process",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/npm-package.ts",
-      "to": "scripts/package.ts",
-      "specifier": "./package",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/package.ts",
-      "to": "external:@effect/platform-bun/BunRuntime",
-      "specifier": "@effect/platform-bun/BunRuntime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/package.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/package.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/package.ts",
-      "to": "external:effect/Function",
-      "specifier": "effect/Function",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/package.ts",
-      "to": "external:effect/unstable/process",
-      "specifier": "effect/unstable/process",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/release-smoke.ts",
-      "to": "external:@effect/platform-bun/BunRuntime",
-      "specifier": "@effect/platform-bun/BunRuntime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/release-smoke.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/release-smoke.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/release-smoke.ts",
-      "to": "external:effect/unstable/process",
-      "specifier": "effect/unstable/process",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/release-smoke.ts",
-      "to": "scripts/archive-contract.ts",
-      "specifier": "./archive-contract",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/uninstall-local.ts",
-      "to": "external:@effect/platform-bun/BunRuntime",
-      "specifier": "@effect/platform-bun/BunRuntime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/uninstall-local.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/uninstall-local.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/uninstall-local.ts",
-      "to": "scripts/local-install.ts",
+      "from": "scripts/installation/uninstall-local.ts",
+      "to": "scripts/installation/local-install.ts",
       "specifier": "./local-install",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "scripts/upstream.ts",
+      "from": "scripts/packaging/archive-contract.ts",
+      "to": "external:effect/Function",
+      "specifier": "effect/Function",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/packaging/npm-package.ts",
       "to": "external:@effect/platform-bun/BunRuntime",
       "specifier": "@effect/platform-bun/BunRuntime",
       "kind": "import",
@@ -63241,7 +63179,7 @@
       "production": true
     },
     {
-      "from": "scripts/upstream.ts",
+      "from": "scripts/packaging/npm-package.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -63249,7 +63187,7 @@
       "production": true
     },
     {
-      "from": "scripts/upstream.ts",
+      "from": "scripts/packaging/npm-package.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -63257,7 +63195,135 @@
       "production": true
     },
     {
-      "from": "scripts/upstream.ts",
+      "from": "scripts/packaging/npm-package.ts",
+      "to": "external:effect/Function",
+      "specifier": "effect/Function",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/packaging/npm-package.ts",
+      "to": "external:effect/unstable/process",
+      "specifier": "effect/unstable/process",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/packaging/npm-package.ts",
+      "to": "scripts/packaging/package-target.ts",
+      "specifier": "./package-target",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/packaging/package-target.ts",
+      "to": "external:@effect/platform-bun/BunRuntime",
+      "specifier": "@effect/platform-bun/BunRuntime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/packaging/package-target.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/packaging/package-target.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/packaging/package-target.ts",
+      "to": "external:effect/Function",
+      "specifier": "effect/Function",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/packaging/package-target.ts",
+      "to": "external:effect/unstable/process",
+      "specifier": "effect/unstable/process",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/release/release-smoke.ts",
+      "to": "external:@effect/platform-bun/BunRuntime",
+      "specifier": "@effect/platform-bun/BunRuntime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/release/release-smoke.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/release/release-smoke.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/release/release-smoke.ts",
+      "to": "external:effect/unstable/process",
+      "specifier": "effect/unstable/process",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/release/release-smoke.ts",
+      "to": "scripts/packaging/archive-contract.ts",
+      "specifier": "../packaging/archive-contract",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/upstream/upstream-source.ts",
+      "to": "external:@effect/platform-bun/BunRuntime",
+      "specifier": "@effect/platform-bun/BunRuntime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/upstream/upstream-source.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/upstream/upstream-source.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/upstream/upstream-source.ts",
       "to": "external:effect/unstable/cli",
       "specifier": "effect/unstable/cli",
       "kind": "import",
@@ -63265,12 +63331,44 @@
       "production": true
     },
     {
-      "from": "scripts/upstream.ts",
+      "from": "scripts/upstream/upstream-source.ts",
       "to": "external:effect/unstable/process",
       "specifier": "effect/unstable/process",
       "kind": "import",
       "relationship": "runtime",
       "production": true
+    },
+    {
+      "from": "test/benchmark/performance-metric-policy.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/benchmark/performance-metric-policy.test.ts",
+      "to": "scripts/benchmark/performance-comparison.ts",
+      "specifier": "../../scripts/benchmark/performance-comparison",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/benchmark/performance-metric-policy.test.ts",
+      "to": "scripts/benchmark/performance-metric-policy.ts",
+      "specifier": "../../scripts/benchmark/performance-metric-policy",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/command-entrypoint.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
     },
     {
       "from": "test/live/live-model.test.ts",
@@ -63329,7 +63427,39 @@
       "production": true
     },
     {
-      "from": "test/scripts/archive-contract.test.ts",
+      "from": "test/process/install-upgrade.proc.test.ts",
+      "to": "external:fs/promises",
+      "specifier": "fs/promises",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/process/install-upgrade.proc.test.ts",
+      "to": "external:os",
+      "specifier": "os",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/process/install-upgrade.proc.test.ts",
+      "to": "external:path",
+      "specifier": "path",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/process/install-upgrade.proc.test.ts",
+      "to": "external:url",
+      "specifier": "url",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/process/install-upgrade.proc.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -63337,15 +63467,63 @@
       "production": false
     },
     {
-      "from": "test/scripts/archive-contract.test.ts",
-      "to": "scripts/archive-contract.ts",
-      "specifier": "../../scripts/archive-contract",
+      "from": "test/process/local-install.proc.test.ts",
+      "to": "external:fs/promises",
+      "specifier": "fs/promises",
       "kind": "import",
       "relationship": "test",
       "production": false
     },
     {
-      "from": "test/scripts/install-contract.test.ts",
+      "from": "test/process/local-install.proc.test.ts",
+      "to": "external:os",
+      "specifier": "os",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/process/local-install.proc.test.ts",
+      "to": "external:path",
+      "specifier": "path",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/process/local-install.proc.test.ts",
+      "to": "external:url",
+      "specifier": "url",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/process/local-install.proc.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/release/archive-contract.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/release/archive-contract.test.ts",
+      "to": "scripts/packaging/archive-contract.ts",
+      "specifier": "../../scripts/packaging/archive-contract",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/release/install-contract.test.ts",
       "to": "apps/rika/src/release/release-download.ts",
       "specifier": "../../apps/rika/src/release/release-download",
       "kind": "import",
@@ -63353,7 +63531,7 @@
       "production": false
     },
     {
-      "from": "test/scripts/install-contract.test.ts",
+      "from": "test/release/install-contract.test.ts",
       "to": "apps/rika/src/release/release-install.ts",
       "specifier": "../../apps/rika/src/release/release-install",
       "kind": "import",
@@ -63361,7 +63539,7 @@
       "production": false
     },
     {
-      "from": "test/scripts/install-contract.test.ts",
+      "from": "test/release/install-contract.test.ts",
       "to": "apps/rika/src/release/release-update.ts",
       "specifier": "../../apps/rika/src/release/release-update",
       "kind": "import",
@@ -63369,7 +63547,7 @@
       "production": false
     },
     {
-      "from": "test/scripts/install-contract.test.ts",
+      "from": "test/release/install-contract.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -63377,31 +63555,31 @@
       "production": false
     },
     {
-      "from": "test/scripts/install-contract.test.ts",
-      "to": "scripts/install-contract.ts",
-      "specifier": "../../scripts/install-contract",
+      "from": "test/release/install-contract.test.ts",
+      "to": "scripts/installation/install-contract.ts",
+      "specifier": "../../scripts/installation/install-contract",
       "kind": "import",
       "relationship": "test",
       "production": false
     },
     {
-      "from": "test/scripts/install-contract.test.ts",
-      "to": "scripts/npm-package.ts",
-      "specifier": "../../scripts/npm-package",
+      "from": "test/release/install-contract.test.ts",
+      "to": "scripts/packaging/npm-package.ts",
+      "specifier": "../../scripts/packaging/npm-package",
       "kind": "import",
       "relationship": "test",
       "production": false
     },
     {
-      "from": "test/scripts/install-contract.test.ts",
-      "to": "scripts/package.ts",
-      "specifier": "../../scripts/package",
+      "from": "test/release/install-contract.test.ts",
+      "to": "scripts/packaging/package-target.ts",
+      "specifier": "../../scripts/packaging/package-target",
       "kind": "import",
       "relationship": "test",
       "production": false
     },
     {
-      "from": "test/scripts/install-upgrade.proc.test.ts",
+      "from": "test/release/package-target.test.ts",
       "to": "external:fs/promises",
       "specifier": "fs/promises",
       "kind": "import",
@@ -63409,15 +63587,7 @@
       "production": false
     },
     {
-      "from": "test/scripts/install-upgrade.proc.test.ts",
-      "to": "external:os",
-      "specifier": "os",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "test/scripts/install-upgrade.proc.test.ts",
+      "from": "test/release/package-target.test.ts",
       "to": "external:path",
       "specifier": "path",
       "kind": "import",
@@ -63425,7 +63595,7 @@
       "production": false
     },
     {
-      "from": "test/scripts/install-upgrade.proc.test.ts",
+      "from": "test/release/package-target.test.ts",
       "to": "external:url",
       "specifier": "url",
       "kind": "import",
@@ -63433,7 +63603,7 @@
       "production": false
     },
     {
-      "from": "test/scripts/install-upgrade.proc.test.ts",
+      "from": "test/release/package-target.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -63441,87 +63611,15 @@
       "production": false
     },
     {
-      "from": "test/scripts/local-install.proc.test.ts",
-      "to": "external:fs/promises",
-      "specifier": "fs/promises",
+      "from": "test/release/package-target.test.ts",
+      "to": "scripts/packaging/package-target.ts",
+      "specifier": "../../scripts/packaging/package-target",
       "kind": "import",
       "relationship": "test",
       "production": false
     },
     {
-      "from": "test/scripts/local-install.proc.test.ts",
-      "to": "external:os",
-      "specifier": "os",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "test/scripts/local-install.proc.test.ts",
-      "to": "external:path",
-      "specifier": "path",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "test/scripts/local-install.proc.test.ts",
-      "to": "external:url",
-      "specifier": "url",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "test/scripts/local-install.proc.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "test/scripts/package.test.ts",
-      "to": "external:fs/promises",
-      "specifier": "fs/promises",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "test/scripts/package.test.ts",
-      "to": "external:path",
-      "specifier": "path",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "test/scripts/package.test.ts",
-      "to": "external:url",
-      "specifier": "url",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "test/scripts/package.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "test/scripts/package.test.ts",
-      "to": "scripts/package.ts",
-      "specifier": "../../scripts/package",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "test/scripts/release-workflow.test.ts",
+      "from": "test/release/release-workflow.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",

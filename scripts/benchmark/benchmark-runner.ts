@@ -9,9 +9,14 @@ import {
   measurementToBaseline,
   saveBaseline,
   type BenchMeasurement,
-} from "./baseline"
-import { defaultCommitBatch, defaultEventCount, MonotonicClock, runFoldPersistenceBench } from "./fold-persistence"
-import { median } from "./stats"
+} from "./benchmark-baseline"
+import {
+  defaultCommitBatch,
+  defaultEventCount,
+  MonotonicClock,
+  runFoldPersistenceBench,
+} from "./fold-persistence-benchmark"
+import { median } from "./benchmark-statistics"
 
 const processMonotonicClock = { now: () => process.hrtime.bigint() }
 

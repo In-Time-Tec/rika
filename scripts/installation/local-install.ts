@@ -1,6 +1,6 @@
 import { Config, Console, Data, Effect, FileSystem, Option, Path, Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { validatePackageArchive } from "./archive-contract"
+import { validatePackageArchive } from "../packaging/archive-contract"
 import {
   archiveCommandName,
   binDirEnv,
@@ -116,7 +116,9 @@ export const installLocal = Effect.fn("LocalInstall.installLocal")(() =>
       if (commandExists && !(yield* ownsCommand(command, binary)) && !(yield* isLegacyRikaCommand(command))) {
         return yield* installFailure("validate command", `Refusing to overwrite existing command: ${command}`)
       }
-      const root = yield* path.fromFileUrl(new URL("..", import.meta.url)).pipe(mapInstallError("resolve project root"))
+      const root = yield* path
+        .fromFileUrl(new URL("../..", import.meta.url))
+        .pipe(mapInstallError("resolve project root"))
       const platform = yield* packageTarget()
       const manifest = yield* fileSystem
         .readFileString(path.join(root, "apps", "rika", "package.json"))

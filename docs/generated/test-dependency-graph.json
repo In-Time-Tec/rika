@@ -4141,6 +4141,24 @@
       "testKind": "unit-test"
     },
     {
+      "id": "test/benchmark/performance-metric-policy.test.ts",
+      "path": "test/benchmark/performance-metric-policy.test.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "test/command-entrypoint.test.ts",
+      "path": "test/command-entrypoint.test.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "test/live/live-model.test.ts",
       "path": "test/live/live-model.test.ts",
       "workspace": "root",
@@ -4150,26 +4168,8 @@
       "testKind": "unit-test"
     },
     {
-      "id": "test/scripts/archive-contract.test.ts",
-      "path": "test/scripts/archive-contract.test.ts",
-      "workspace": "root",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "test/scripts/install-contract.test.ts",
-      "path": "test/scripts/install-contract.test.ts",
-      "workspace": "root",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "test/scripts/install-upgrade.proc.test.ts",
-      "path": "test/scripts/install-upgrade.proc.test.ts",
+      "id": "test/process/install-upgrade.proc.test.ts",
+      "path": "test/process/install-upgrade.proc.test.ts",
       "workspace": "root",
       "kind": "source",
       "production": false,
@@ -4177,8 +4177,8 @@
       "testKind": "process-test"
     },
     {
-      "id": "test/scripts/local-install.proc.test.ts",
-      "path": "test/scripts/local-install.proc.test.ts",
+      "id": "test/process/local-install.proc.test.ts",
+      "path": "test/process/local-install.proc.test.ts",
       "workspace": "root",
       "kind": "source",
       "production": false,
@@ -4186,8 +4186,8 @@
       "testKind": "process-test"
     },
     {
-      "id": "test/scripts/package.test.ts",
-      "path": "test/scripts/package.test.ts",
+      "id": "test/release/archive-contract.test.ts",
+      "path": "test/release/archive-contract.test.ts",
       "workspace": "root",
       "kind": "source",
       "production": false,
@@ -4195,8 +4195,26 @@
       "testKind": "unit-test"
     },
     {
-      "id": "test/scripts/release-workflow.test.ts",
-      "path": "test/scripts/release-workflow.test.ts",
+      "id": "test/release/install-contract.test.ts",
+      "path": "test/release/install-contract.test.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "test/release/package-target.test.ts",
+      "path": "test/release/package-target.test.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "test/release/release-workflow.test.ts",
+      "path": "test/release/release-workflow.test.ts",
       "workspace": "root",
       "kind": "source",
       "production": false,
@@ -12926,6 +12944,22 @@
       "production": false
     },
     {
+      "from": "test/benchmark/performance-metric-policy.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/command-entrypoint.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "test/live/live-model.test.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
@@ -12966,23 +13000,7 @@
       "production": false
     },
     {
-      "from": "test/scripts/archive-contract.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "test/scripts/install-contract.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "test/scripts/install-upgrade.proc.test.ts",
+      "from": "test/process/install-upgrade.proc.test.ts",
       "to": "external:fs/promises",
       "specifier": "fs/promises",
       "kind": "import",
@@ -12990,7 +13008,7 @@
       "production": false
     },
     {
-      "from": "test/scripts/install-upgrade.proc.test.ts",
+      "from": "test/process/install-upgrade.proc.test.ts",
       "to": "external:os",
       "specifier": "os",
       "kind": "import",
@@ -12998,7 +13016,7 @@
       "production": false
     },
     {
-      "from": "test/scripts/install-upgrade.proc.test.ts",
+      "from": "test/process/install-upgrade.proc.test.ts",
       "to": "external:path",
       "specifier": "path",
       "kind": "import",
@@ -13006,7 +13024,7 @@
       "production": false
     },
     {
-      "from": "test/scripts/install-upgrade.proc.test.ts",
+      "from": "test/process/install-upgrade.proc.test.ts",
       "to": "external:url",
       "specifier": "url",
       "kind": "import",
@@ -13014,7 +13032,7 @@
       "production": false
     },
     {
-      "from": "test/scripts/install-upgrade.proc.test.ts",
+      "from": "test/process/install-upgrade.proc.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -13022,7 +13040,7 @@
       "production": false
     },
     {
-      "from": "test/scripts/local-install.proc.test.ts",
+      "from": "test/process/local-install.proc.test.ts",
       "to": "external:fs/promises",
       "specifier": "fs/promises",
       "kind": "import",
@@ -13030,7 +13048,7 @@
       "production": false
     },
     {
-      "from": "test/scripts/local-install.proc.test.ts",
+      "from": "test/process/local-install.proc.test.ts",
       "to": "external:os",
       "specifier": "os",
       "kind": "import",
@@ -13038,7 +13056,7 @@
       "production": false
     },
     {
-      "from": "test/scripts/local-install.proc.test.ts",
+      "from": "test/process/local-install.proc.test.ts",
       "to": "external:path",
       "specifier": "path",
       "kind": "import",
@@ -13046,7 +13064,7 @@
       "production": false
     },
     {
-      "from": "test/scripts/local-install.proc.test.ts",
+      "from": "test/process/local-install.proc.test.ts",
       "to": "external:url",
       "specifier": "url",
       "kind": "import",
@@ -13054,7 +13072,7 @@
       "production": false
     },
     {
-      "from": "test/scripts/local-install.proc.test.ts",
+      "from": "test/process/local-install.proc.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -13062,7 +13080,23 @@
       "production": false
     },
     {
-      "from": "test/scripts/package.test.ts",
+      "from": "test/release/archive-contract.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/release/install-contract.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/release/package-target.test.ts",
       "to": "external:fs/promises",
       "specifier": "fs/promises",
       "kind": "import",
@@ -13070,7 +13104,7 @@
       "production": false
     },
     {
-      "from": "test/scripts/package.test.ts",
+      "from": "test/release/package-target.test.ts",
       "to": "external:path",
       "specifier": "path",
       "kind": "import",
@@ -13078,7 +13112,7 @@
       "production": false
     },
     {
-      "from": "test/scripts/package.test.ts",
+      "from": "test/release/package-target.test.ts",
       "to": "external:url",
       "specifier": "url",
       "kind": "import",
@@ -13086,7 +13120,7 @@
       "production": false
     },
     {
-      "from": "test/scripts/package.test.ts",
+      "from": "test/release/package-target.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -13094,7 +13128,7 @@
       "production": false
     },
     {
-      "from": "test/scripts/release-workflow.test.ts",
+      "from": "test/release/release-workflow.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",

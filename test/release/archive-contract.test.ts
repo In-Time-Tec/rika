@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { packageEntries, validatePackageArchive } from "../../scripts/archive-contract"
+import { packageEntries, validatePackageArchive } from "../../scripts/packaging/archive-contract"
 
 const root = "rika-1.2.3-linux-x64"
 const entries = packageEntries(root)

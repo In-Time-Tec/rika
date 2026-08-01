@@ -32,7 +32,7 @@ const run = Effect.fn("Upstream.run")((command: string, args: ReadonlyArray<stri
 
 const roots = Effect.gen(function* () {
   const path = yield* Path.Path
-  const project = yield* path.fromFileUrl(new URL("..", import.meta.url))
+  const project = yield* path.fromFileUrl(new URL("../..", import.meta.url))
   const projects = path.resolve(project, "..")
   return { path, project, projects }
 })

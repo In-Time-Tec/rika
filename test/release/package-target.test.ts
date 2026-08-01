@@ -10,7 +10,7 @@ import {
   ownedTargetEntries,
   targets,
   validateArchiveSet,
-} from "../../scripts/package"
+} from "../../scripts/packaging/package-target"
 
 const sourceImports = (source: string) => {
   const imports = new Set<string>()

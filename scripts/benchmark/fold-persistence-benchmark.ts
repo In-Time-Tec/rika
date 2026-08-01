@@ -11,10 +11,9 @@ import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
 import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import { ExecutionIngest } from "@rika/product/product-operation-service"
 import { Context, Effect, FileSystem, Layer } from "effect"
-import type { BenchMeasurement } from "./baseline"
-import { cpuSample, summarizeLatencies } from "./stats"
+import type { BenchMeasurement } from "./benchmark-baseline"
+import { cpuSample, summarizeLatencies } from "./benchmark-statistics"
 
 const cpuElapsedSeconds = (before: ReturnType<typeof cpuSample>, after: ReturnType<typeof cpuSample>): number =>
   (after.userMicros - before.userMicros + after.systemMicros - before.systemMicros) / 1_000_000
@@ -24,13 +23,14 @@ interface MonotonicClockShape {
 }
 
 export class MonotonicClock extends Context.Service<MonotonicClock, MonotonicClockShape>()(
-  "rika/scripts/bench/fold-persistence/MonotonicClock",
+  "rika/scripts/benchmark/fold-persistence-benchmark/MonotonicClock",
 ) {}
 
 const monotonicMillis = (start: bigint, end: bigint): number => Number(end - start) / 1_000_000
 
 export const defaultEventCount = 50_000
 export const defaultCommitBatch = 64
+const projectionVersion = 4
 const debounceWindowMs = 1
 const debounceBurst = 32
 
@@ -102,7 +102,7 @@ const prepareTurn = Effect.fn("Bench.prepareTurn")(function* (
     { upsert: empty.units, remove: [] },
     {
       executionCheckpoints: [executionCheckpoint(turn, TranscriptProjection.Projection.projectionState(empty))],
-      projectionVersion: ExecutionIngest.projectionVersion,
+      projectionVersion,
       expectedGeneration: undefined,
     },
   )
@@ -126,7 +126,7 @@ const commitBatch = Effect.fn("Bench.commitBatch")(function* (
     { upsert, remove },
     {
       executionCheckpoints: [executionCheckpoint(turn, state)],
-      projectionVersion: ExecutionIngest.projectionVersion,
+      projectionVersion,
       expectedGeneration,
     },
   )

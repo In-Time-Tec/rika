@@ -10,9 +10,14 @@ import {
   releaseCommandName,
   releaseRootSegments,
   validateInstallerScript,
-} from "../../scripts/install-contract"
-import { launcherManifest, packedName, platformConstraints, platformPackageName } from "../../scripts/npm-package"
-import { archiveName, archiveRoot, targetNames } from "../../scripts/package"
+} from "../../scripts/installation/install-contract"
+import {
+  launcherManifest,
+  packedName,
+  platformConstraints,
+  platformPackageName,
+} from "../../scripts/packaging/npm-package"
+import { archiveName, archiveRoot, targetNames } from "../../scripts/packaging/package-target"
 import * as ReleaseDownload from "../../apps/rika/src/release/release-download"
 import * as ReleaseInstall from "../../apps/rika/src/release/release-install"
 import * as ReleaseUpdate from "../../apps/rika/src/release/release-update"

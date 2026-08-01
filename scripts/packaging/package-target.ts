@@ -74,7 +74,7 @@ const program = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const root = yield* path.fromFileUrl(new URL("..", import.meta.url))
+  const root = yield* path.fromFileUrl(new URL("../..", import.meta.url))
   const artifacts = path.join(root, "artifacts")
   const manifest = yield* fileSystem
     .readFileString(path.join(root, "apps/rika/package.json"))
