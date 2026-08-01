@@ -4,7 +4,11 @@ import { MediaAnalysisError } from "@rika/coding-tools/media-view-service"
 import { analyzerTestLayer } from "@rika/coding-tools/media-view-service"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { createTestRenderer } from "@opentui/core/testing"
-import { productLayer, Service } from "@rika/product/product-operation-service"
+import {
+  productLayer,
+  Service,
+  type Interface as OperationServiceInterface,
+} from "@rika/product/product-operation-service"
 import * as Database from "@rika/product-store/product-database-layer"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -149,7 +153,7 @@ test("awaits delayed TUI initialization and tears down its renderer before lease
 })
 
 test("drives bypassed recorded and incognito shell commands through Operation and native OpenTUI", () => {
-  const program = Effect.scoped(
+  const program: Effect.Effect<void, never, BunServices.BunServices> = Effect.scoped(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -160,13 +164,19 @@ test("drives bypassed recorded and incognito shell commands through Operation an
       })
       const filename = path.join(workspace, "rika.db")
       const database = Database.layer(filename)
-      const repositoryLayer = ThreadRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
-      const turnRepositoryLayer = TurnRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
-      const transcriptRepositoryLayer = TranscriptRepository.layer.pipe(
+      const repositoryLayer: Layer.Layer<ThreadRepository.Service, never, never> = ThreadRepository.layer.pipe(
         Layer.provide(database),
         Layer.provide(BunServices.layer),
+        Layer.orDie,
       )
-      const sessionReady = yield* Deferred.make<InteractiveSession>()
+      const turnRepositoryLayer: Layer.Layer<TurnRepository.Service, never, never> = TurnRepository.layer.pipe(
+        Layer.provide(database),
+        Layer.provide(BunServices.layer),
+        Layer.orDie,
+      )
+      const transcriptRepositoryLayer: Layer.Layer<TranscriptRepository.Service, never, never> =
+        TranscriptRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer), Layer.orDie)
+      const sessionReady = yield* Deferred.make<InteractiveSession.InteractiveSession>()
       const releaseSession = yield* Deferred.make<void>()
       let nextTurn = 0
       const relayReads: Array<"inspect" | "replay"> = []
@@ -194,7 +204,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
         steer: () => Effect.die("unused"),
         cancel: () => Effect.die("unused"),
       })
-      const operationLayer = productLayer({
+      const operationLayer: Layer.Layer<Service, never, never> = productLayer({
         repositoryLayer,
         turnRepositoryLayer,
         transcriptRepositoryLayer,
@@ -217,8 +227,11 @@ test("drives bypassed recorded and incognito shell commands through Operation an
         makeTurnId: Effect.sync(() => Turn.TurnId.make(`shell-turn-${nextTurn++}`)),
         interactive: (_, session) =>
           Deferred.succeed(sessionReady, session).pipe(Effect.andThen(Deferred.await(releaseSession))),
-      })
-      const operation = Context.get(yield* Layer.buildWithScope(operationLayer, yield* Effect.scope), Service)
+      }).pipe(Layer.orDie)
+      const operation: OperationServiceInterface = Context.get(
+        yield* Layer.buildWithScope(operationLayer, yield* Effect.scope),
+        Service,
+      )
       const repositories = yield* Layer.buildWithScope(
         Layer.mergeAll(repositoryLayer, turnRepositoryLayer, transcriptRepositoryLayer),
         yield* Effect.scope,
@@ -244,7 +257,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
       const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
       yield* Effect.addFinalizer(() => Effect.sync(() => surface.destroy()))
       const completedShells = yield* Queue.unbounded<string>()
-      const dispatch = (event: InteractiveEvent) => {
+      const dispatch = (event: InteractiveEvent.InteractiveEvent) => {
         if (event._tag === "ShellCompleted") {
           if (event.incognito) model = TerminalReducer.update(model, { _tag: "AssistantCompleted", text: event.text })
           model = TerminalReducer.update(model, { _tag: "ExecutionCompleted" })
@@ -380,7 +393,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
       yield* Deferred.succeed(releaseSession, undefined)
       yield* Fiber.join(operationFiber)
     }),
-  )
+  ).pipe(Effect.orDie)
   return Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {

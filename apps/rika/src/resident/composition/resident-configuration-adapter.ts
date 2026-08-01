@@ -5,7 +5,9 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import * as WorkspaceIndex from "@rika/coding-tools/workspace-file-search"
 import * as WebSearchProvider from "@rika/coding-tools/web-search-provider"
 import * as RelayExecution from "@rika/relay-execution/relay-execution-layer"
-import { Cause, Context, Effect, FileSystem, Layer, PlatformError, Redacted, Schema } from "effect"
+import { Cause, Context, Effect, FileSystem, Function, Layer, PlatformError, Redacted, Schema } from "effect"
+
+export { adapter as productConfigAdapter } from "./resident-product-config"
 
 export const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -20,8 +22,12 @@ export const provideLayerScoped =
       ),
     )
 
-export const mkdir = (path: string, options?: { readonly recursive?: boolean }) =>
+const mkdirImpl = (path: string, options?: { readonly recursive?: boolean }) =>
   FileSystem.FileSystem.pipe(Effect.flatMap((fileSystem) => fileSystem.makeDirectory(path, options)))
+export const mkdir: {
+  (): (path: string) => ReturnType<typeof mkdirImpl>
+  (path: string, options?: { readonly recursive?: boolean }): ReturnType<typeof mkdirImpl>
+} = Function.dual((args) => args.length >= 1, mkdirImpl)
 
 const workspaceGlobError = (workspace: string, method: string, cause: unknown) =>
   PlatformError.systemError({
@@ -33,17 +39,17 @@ const workspaceGlobError = (workspace: string, method: string, cause: unknown) =
     cause,
   })
 
-export const workspaceGlob = (workspace: string, pattern: string, maximumFiles: number) =>
+const workspaceGlobImpl = (workspace: string, pattern: string, maximumFiles: number) =>
   provideLayerScoped(BunServices.layer)(
     WorkspaceIndex.globOnce({ workspace, pattern, options: { pageSize: maximumFiles } }).pipe(
       Effect.map((result) => result.items.map((item) => item.relativePath)),
       Effect.mapError((error) => workspaceGlobError(workspace, error.operation, error)),
     ),
   )
-
-class ModelConfigurationError extends Schema.TaggedErrorClass<ModelConfigurationError>()("ModelConfigurationError", {
-  message: Schema.String,
-}) {}
+export const workspaceGlob: {
+  (pattern: string, maximumFiles: number): (workspace: string) => ReturnType<typeof workspaceGlobImpl>
+  (workspace: string, pattern: string, maximumFiles: number): ReturnType<typeof workspaceGlobImpl>
+} = Function.dual(3, workspaceGlobImpl)
 
 const webSearchProviderRegistry = WebSearchProvider.providerRegistry
 
@@ -51,7 +57,7 @@ export const validateWebSearchProviders = (credentials: Readonly<Record<string, 
   const unsupportedIds = WebSearchProvider.configuredProviderFactories(credentials).unsupportedIds
   return unsupportedIds.length === 0
     ? Effect.void
-    : ModelConfigurationError.make({
+    : ConfigurationService.WebProviderConfigurationError.make({
         message: `Unknown web search provider ${unsupportedIds.map((id) => `'${id}'`).join(", ")}`,
       })
 }

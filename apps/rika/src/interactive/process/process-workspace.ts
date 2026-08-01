@@ -26,11 +26,7 @@ export const gitOutput = (arguments_: ReadonlyArray<string>) => {
   )
 }
 
-export const childExit = (
-  operation: string,
-  arguments_: ReadonlyArray<string>,
-  options: ChildProcess.CommandOptions,
-) => {
+const childExitImpl = (operation: string, arguments_: ReadonlyArray<string>, options: ChildProcess.CommandOptions) => {
   const [executable, ...args] = arguments_
   if (executable === undefined)
     return Effect.fail(ExternalBoundaryError.make({ operation, message: "Missing command" }))
@@ -42,6 +38,18 @@ export const childExit = (
     ),
   )
 }
+
+export const childExit: {
+  (
+    arguments_: ReadonlyArray<string>,
+    options: ChildProcess.CommandOptions,
+  ): (operation: string) => ReturnType<typeof childExitImpl>
+  (
+    operation: string,
+    arguments_: ReadonlyArray<string>,
+    options: ChildProcess.CommandOptions,
+  ): ReturnType<typeof childExitImpl>
+} = Function.dual(3, childExitImpl)
 
 export const readChangedFilesEffect = Effect.fn("Main.readChangedFiles")(function* (workspace: string) {
   const [statusText, statusExit] = yield* gitOutput([

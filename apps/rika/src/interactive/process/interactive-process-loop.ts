@@ -16,6 +16,7 @@ import { terminalTitleSequence, traceTuiModelEvent } from "./interactive-process
 import { makeEventRouter } from "./process-events"
 import { makeProcessRuntime } from "./process-runtime"
 import { initializeRenderer } from "./interactive-process-setup"
+import type { InteractiveLoop } from "./interactive-runtime-context"
 
 export interface InteractiveTuiOptions {
   readonly editor?: string | undefined
@@ -37,7 +38,7 @@ export const interactiveTui =
         const fork = Effect.runForkWith(context)
         const resolvedModeRoutes = options.modeRoutes?.()
         return yield* Effect.callback<void, ProductOperation.OperationUnavailable>((resume) => {
-          const loop = {
+          const loop: InteractiveLoop = {
             model: initial(input.workspace ?? process.cwd(), input.mode ?? "medium"),
             workingFrame: undefined as string | undefined,
             renderer: undefined as Effect.Success<ReturnType<typeof createTui>> | undefined,

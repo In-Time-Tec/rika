@@ -1,10 +1,11 @@
 import * as InteractiveFeed from "@rika/product/resident-interactive-feed"
-import * as InteractiveSession from "@rika/product/interactive-session"
+import * as InteractiveEvent from "@rika/product/interactive-event"
 import * as ProductOperation from "@rika/product/product-operation"
 import { create as createTui } from "@rika/terminal/opentui-surface"
 import { execute, type Adapter } from "@rika/terminal/terminal-session"
 import { update } from "@rika/terminal/terminal-state-reducer"
 import { Cause, Effect, Fiber } from "effect"
+import type { InteractiveInputContext } from "./interactive-runtime-context"
 import { initialSubmitAction } from "../input/command-input"
 import { createInputHandlers } from "./interactive-process-input"
 import { failureKind } from "./process-configuration"
@@ -12,34 +13,21 @@ import { settleTuiInitialization } from "./process-lifecycle"
 import { workspaceGlob } from "./process-files"
 import { gitOutput } from "./process-workspace"
 
-type StartupOptions = {
-  readonly makeRenderer?: NonNullable<Parameters<typeof createTui>[0]["makeRenderer"]>
-}
-
-type StartupContext = {
-  readonly loop: any
+type StartupContext = InteractiveInputContext & {
   readonly input: InteractiveFeed.InteractiveInput
-  readonly session: InteractiveSession.InteractiveSession
-  readonly options: StartupOptions
-  readonly fork: (effect: Effect.Effect<any, any, never>) => Fiber.Fiber<any, any>
-  readonly run: (effect: Effect.Effect<void, any, any>) => void
   readonly requestNewerPage: () => void
   readonly close: () => void
   readonly refreshTerminalTitle: () => void
   readonly openPath: Parameters<typeof createInputHandlers>[0]["openPath"]
-  readonly editComposer: () => Effect.Effect<void, any, any>
-  readonly recoverSession: <R>(effect: Effect.Effect<void, any, R>) => Effect.Effect<void, never, R>
-  readonly render: (immediate?: boolean) => void
   readonly consumePendingAction: () => void
-  readonly loadChangedFiles: () => Effect.Effect<void, any, any>
+  readonly loadChangedFiles: InteractiveInputContext["loadChangedFiles"]
   readonly adapter: Adapter
-  readonly feedBatcher: { readonly offer: (event: any) => void }
-  readonly watchChangedFiles: Effect.Effect<void, any, any>
+  readonly feedBatcher: { readonly offer: (event: InteractiveEvent.InteractiveEvent) => void }
+  readonly watchChangedFiles: InteractiveInputContext["loadChangedFiles"]
   readonly suspend: () => void
   readonly startSelection: (
     select: (epoch: number) => Effect.Effect<void, ProductOperation.OperationUnavailable>,
   ) => Fiber.Fiber<void, never>
-  readonly resume: (effect: Effect.Effect<void, ProductOperation.OperationUnavailable>) => void
 }
 
 export const initializeRenderer = (context: StartupContext): Fiber.Fiber<void, never> => {

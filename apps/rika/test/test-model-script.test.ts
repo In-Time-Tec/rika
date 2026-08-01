@@ -12,7 +12,11 @@ import type { ModelRegistry } from "@rika/relay-execution/model-provider-runtime
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { createTestRenderer } from "@opentui/core/testing"
 import { Cause, Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Redacted, Schema } from "effect"
-import { productLayer, Service } from "@rika/product/product-operation-service"
+import {
+  productLayer,
+  Service,
+  type Interface as OperationServiceInterface,
+} from "@rika/product/product-operation-service"
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import * as ThreadToolService from "@rika/product/thread-tool-service"
 import * as Database from "@rika/product-store/product-database-layer"
@@ -307,9 +311,9 @@ test("surfaces an unavailable tuned route as an interactive execution failure", 
   Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const sessions = yield* Deferred.make<InteractiveSession>()
+        const sessions = yield* Deferred.make<InteractiveSession.InteractiveSession>()
         const release = yield* Deferred.make<void>()
-        const events = new Array<InteractiveEvent>()
+        const events = new Array<InteractiveEvent.InteractiveEvent>()
         const settings: SettingsDefaults.ConfigurationSettings = {
           ...SettingsDefaults.Defaults.defaults,
           modes: {
@@ -320,7 +324,7 @@ test("surfaces an unavailable tuned route as an interactive execution failure", 
             },
           },
         }
-        const operationLayer = productLayer({
+        const operationLayer: Layer.Layer<Service, never, never> = productLayer({
           repositoryLayer: ThreadRepository.memoryLayer(),
           turnRepositoryLayer: TurnRepository.memoryLayer(),
           backendLayer: Layer.succeed(ExecutionBackend.Service, recordingBackend([])),
@@ -334,14 +338,17 @@ test("surfaces an unavailable tuned route as an interactive execution failure", 
           makeTurnId: Effect.succeed(Turn.TurnId.make("route-failure-turn")),
           interactive: (_, session) =>
             Deferred.succeed(sessions, session).pipe(Effect.andThen(Deferred.await(release))),
-        })
-        const operation = Context.get(yield* Layer.buildWithScope(operationLayer, yield* Effect.scope), Service)
+        }).pipe(Layer.orDie)
+        const operation: OperationServiceInterface = Context.get(
+          yield* Layer.buildWithScope(operationLayer, yield* Effect.scope),
+          Service,
+        )
         const operationFiber = yield* Effect.forkChild(
           operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }),
         )
         const session = yield* Deferred.await(sessions)
         const feed = yield* Effect.forkChild(
-          session.events((event) => {
+          session.events((event: InteractiveEvent.InteractiveEvent) => {
             events.push(event)
           }),
         )

@@ -4,7 +4,7 @@ import * as ProductOperation from "@rika/product/product-operation"
 import * as ResidentFeed from "@rika/product/resident-interactive-feed"
 import * as ResidentService from "@rika/product/resident-service"
 import { clientMessageFrames } from "../protocol/resident-message-codec"
-import { Deferred, Effect, Queue, Schema } from "effect"
+import { Deferred, Effect, Function, Queue, Schema } from "effect"
 
 const tracedEventTypes = new Set([
   "model.reasoning.delta",
@@ -14,11 +14,7 @@ const tracedEventTypes = new Set([
   "tool.result.received",
 ])
 
-export const traceInteractiveEvent = (
-  name: string,
-  seenDeltas: Set<string>,
-  event: InteractiveEvent.InteractiveEvent,
-) => {
+const traceInteractiveEventImpl = (name: string, seenDeltas: Set<string>, event: InteractiveEvent.InteractiveEvent) => {
   if (
     event._tag !== "TranscriptProjectionPatched" ||
     event.origin._tag !== "Event" ||
@@ -38,6 +34,18 @@ export const traceInteractiveEvent = (
     }),
   )
 }
+
+export const traceInteractiveEvent: {
+  (
+    seenDeltas: Set<string>,
+    event: InteractiveEvent.InteractiveEvent,
+  ): (name: string) => ReturnType<typeof traceInteractiveEventImpl>
+  (
+    name: string,
+    seenDeltas: Set<string>,
+    event: InteractiveEvent.InteractiveEvent,
+  ): ReturnType<typeof traceInteractiveEventImpl>
+} = Function.dual(3, traceInteractiveEventImpl)
 
 export type ClientRequest = {
   readonly done: Deferred.Deferred<void, ProductOperation.OperationUnavailable>
@@ -89,11 +97,7 @@ export const makeClientMessageWriter =
             }),
     }).pipe(Effect.flatMap(Effect.forEach((frame) => write(frame), { discard: true })))
 
-export const makePhysicalFeed = (
-  sessionId: string,
-  generation: string,
-  capacity: number,
-): Effect.Effect<PhysicalFeed> =>
+const makePhysicalFeedImpl = (sessionId: string, generation: string, capacity: number): Effect.Effect<PhysicalFeed> =>
   Effect.gen(function* () {
     return {
       sessionId,
@@ -104,3 +108,8 @@ export const makePhysicalFeed = (
       consumerAttached: false,
     }
   })
+
+export const makePhysicalFeed: {
+  (generation: string, capacity: number): (sessionId: string) => Effect.Effect<PhysicalFeed>
+  (sessionId: string, generation: string, capacity: number): Effect.Effect<PhysicalFeed>
+} = Function.dual(3, makePhysicalFeedImpl)

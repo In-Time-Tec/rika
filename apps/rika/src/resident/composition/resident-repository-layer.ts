@@ -11,9 +11,10 @@ import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ThreadResult from "@rika/product/thread-result"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
-import { Cause, Crypto, Duration, Effect, Layer, Schema, FileSystem } from "effect"
+import { Cause, Crypto, Duration, Effect, FileSystem, Function, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { execution as residentExecution } from "./resident-execution-layer"
+import { provideLayerScoped } from "./resident-configuration-adapter"
 const { executionModelRoutes } = residentExecution
 
 const dirname = process.getBuiltinModule("node:path").dirname
@@ -26,17 +27,17 @@ export const makeThreadId: Effect.Effect<Thread.ThreadId, never, never> = Crypto
   Effect.flatMap((crypto) => crypto.randomUUIDv4),
   Effect.map(Thread.ThreadId.make),
   Effect.orDie,
-  Effect.provide(BunServices.layer),
+  provideLayerScoped(BunServices.layer),
 )
 
 export const makeTurnId: Effect.Effect<Turn.TurnId, never, never> = Crypto.Crypto.pipe(
   Effect.flatMap((crypto) => crypto.randomUUIDv4),
   Effect.map(Turn.TurnId.make),
   Effect.orDie,
-  Effect.provide(BunServices.layer),
+  provideLayerScoped(BunServices.layer),
 )
 
-export const makeResidentRepositoryLayers = (database: string, executionDatabase: string) => {
+const makeResidentRepositoryLayersImpl = (database: string, executionDatabase: string) => {
   const productDatabase = Layer.unwrap(
     Effect.gen(function* () {
       yield* Effect.all([mkdir(dirname(database)), mkdir(dirname(executionDatabase))], { concurrency: 2 })
@@ -87,6 +88,11 @@ export const makeResidentRepositoryLayers = (database: string, executionDatabase
     threadSearchRepositoryLayer,
   }
 }
+
+export const makeResidentRepositoryLayers: {
+  (executionDatabase: string): (database: string) => ReturnType<typeof makeResidentRepositoryLayersImpl>
+  (database: string, executionDatabase: string): ReturnType<typeof makeResidentRepositoryLayersImpl>
+} = Function.dual(2, makeResidentRepositoryLayersImpl)
 
 export const persistedModelRoutesForStartup = (turns: ReadonlyArray<Turn.Turn>) =>
   turns.filter(ThreadResult.TurnResult.isAgentExecution).flatMap((turn) => executionModelRoutes(turn.executionRoute))

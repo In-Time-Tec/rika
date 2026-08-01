@@ -2,7 +2,11 @@
 import * as InteractiveEvent from "@rika/product/interactive-event"
 import { Effect, Function } from "effect"
 
-export const ignoreSelectionResync = (_threadId: string, _selectionEpoch: number) => {}
+const ignoreSelectionResyncImpl = (_threadId: string, _selectionEpoch: number) => {}
+export const ignoreSelectionResync: {
+  (_selectionEpoch: number): (threadId: string) => void
+  (threadId: string, selectionEpoch: number): void
+} = Function.dual(2, ignoreSelectionResyncImpl)
 
 const terminalTitleText = (value: string) =>
   value
@@ -30,7 +34,7 @@ const tuiTraceEventTypes = new Set([
   "tool.result.received",
 ])
 
-export const traceTuiModelEvent = (seenDeltas: Set<string>, event: InteractiveEvent.InteractiveEvent) => {
+const traceTuiModelEventImpl = (seenDeltas: Set<string>, event: InteractiveEvent.InteractiveEvent) => {
   if (
     event._tag !== "TranscriptProjectionPatched" ||
     event.origin._tag !== "Event" ||
@@ -50,3 +54,8 @@ export const traceTuiModelEvent = (seenDeltas: Set<string>, event: InteractiveEv
     }),
   )
 }
+
+export const traceTuiModelEvent: {
+  (event: InteractiveEvent.InteractiveEvent): (seenDeltas: Set<string>) => ReturnType<typeof traceTuiModelEventImpl>
+  (seenDeltas: Set<string>, event: InteractiveEvent.InteractiveEvent): ReturnType<typeof traceTuiModelEventImpl>
+} = Function.dual(2, traceTuiModelEventImpl)

@@ -14,7 +14,7 @@ import type { ResidentProductOptions } from "./resident-auth-layer"
 import * as ResidentRepository from "./resident-repository-layer"
 import * as ResidentProductContext from "./resident-product-context"
 import { resolveLegacyRouteForBackend } from "./resident-execution-recovery"
-import * as ResidentProductConfig from "./resident-product-config"
+import { BackendError } from "@rika/product/execution-service"
 import * as ThreadToolService from "@rika/product/thread-tool-service"
 import * as RelayExecution from "@rika/relay-execution/relay-execution-layer"
 import { defaultWorkspaceToolRuntimeLayer } from "./resident-runtime-tools"
@@ -92,7 +92,10 @@ const createOperationLayerImpl = (
               }),
             ),
           )
-        }).pipe(provideLayerScoped(BunServices.layer))
+        }).pipe(
+          provideLayerScoped(BunServices.layer),
+          Effect.mapError((error) => BackendError.make({ message: String(error) })),
+        )
       const workspaceExecutionRoutePlan = (
         mode: "low" | "medium" | "high" | "ultra",
         tuning: { readonly fastMode?: boolean } | undefined,
@@ -106,7 +109,10 @@ const createOperationLayerImpl = (
             tuning,
           )
           return { executionRoute }
-        }).pipe(provideLayerScoped(BunServices.layer))
+        }).pipe(
+          provideLayerScoped(BunServices.layer),
+          Effect.mapError((error) => BackendError.make({ message: String(error) })),
+        )
       const resolveWorkspaceExecutionRoute = (
         mode: "low" | "medium" | "high" | "ultra",
         tuning: { readonly fastMode?: boolean } | undefined,
@@ -148,7 +154,7 @@ const createOperationLayerImpl = (
         toolRuntimeLayerForWorkspace: (workspace) =>
           defaultWorkspaceToolRuntimeLayer(workspace, effectiveConfigForWorkspace),
       }).pipe(Layer.provide(openAiAuthLayer), Layer.provide(BunServices.layer))
-      const configAdapter = ResidentProductConfig.adapter(editor)
+      const configAdapter = ResidentConfiguration.productConfigAdapter(editor)
       const operationLayer = Operation.productLayer({
         repositoryLayer: repositories,
         turnRepositoryLayer: repositories,

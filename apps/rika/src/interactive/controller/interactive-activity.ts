@@ -2,6 +2,7 @@ import * as InteractiveEvent from "@rika/product/interactive-event"
 import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
 import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
 import type { Model } from "@rika/terminal/terminal-state"
+import { Function } from "effect"
 import { runningToolsActivity, streamActivity } from "@rika/terminal/terminal-message"
 import type { ProjectionStream } from "./interactive-controller"
 
@@ -61,7 +62,7 @@ const activityAfter = (
   return running ? runningActivity : activity
 }
 
-export const activityAfterOrigin = (
+const activityAfterOriginImpl = (
   activity: Activity | undefined,
   origin: Extract<InteractiveEvent.InteractiveEvent, { readonly _tag: "TranscriptProjectionPatched" }>["origin"],
   state: OpenProjectionState,
@@ -89,3 +90,17 @@ export const activityAfterOrigin = (
     model,
   )
 }
+
+export const activityAfterOrigin: {
+  (
+    activity: Activity | undefined,
+    origin: Extract<InteractiveEvent.InteractiveEvent, { readonly _tag: "TranscriptProjectionPatched" }>["origin"],
+    state: OpenProjectionState,
+  ): (model: Model) => Activity | undefined
+  (
+    activity: Activity | undefined,
+    origin: Extract<InteractiveEvent.InteractiveEvent, { readonly _tag: "TranscriptProjectionPatched" }>["origin"],
+    state: OpenProjectionState,
+    model: Model,
+  ): Activity | undefined
+} = Function.dual(4, activityAfterOriginImpl)

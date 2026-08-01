@@ -1,7 +1,7 @@
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as Turn from "@rika/product/turn-record"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
-import { HashMap } from "effect"
+import { Function, HashMap } from "effect"
 import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
 import type { ProjectionStream } from "./interactive-controller"
 
@@ -16,10 +16,15 @@ export const cursorForEntry = (entry: TranscriptPage.Entry | undefined): Transcr
         orderKey: TranscriptOrdering.encodeUnitOrder(entry.unit.order),
       }
 
-export const sameCursor = (left: TranscriptPage.PageCursor | undefined, right: TranscriptPage.PageCursor | undefined) =>
+const sameCursorImpl = (left: TranscriptPage.PageCursor | undefined, right: TranscriptPage.PageCursor | undefined) =>
   left?.createdAt === right?.createdAt && left?.turnId === right?.turnId && left?.orderKey === right?.orderKey
 
-export const boundWindow = (entries: ReadonlyArray<TranscriptPage.Entry>, edge: "oldest" | "newest") => {
+export const sameCursor: {
+  (right: TranscriptPage.PageCursor | undefined): (left: TranscriptPage.PageCursor | undefined) => boolean
+  (left: TranscriptPage.PageCursor | undefined, right: TranscriptPage.PageCursor | undefined): boolean
+} = Function.dual(2, sameCursorImpl)
+
+const boundWindowImpl = (entries: ReadonlyArray<TranscriptPage.Entry>, edge: "oldest" | "newest") => {
   const retained = [...entries]
   let bytes = retained.reduce((total, entry) => total + entryBytes(entry), 0)
   let evicted = false
@@ -31,6 +36,11 @@ export const boundWindow = (entries: ReadonlyArray<TranscriptPage.Entry>, edge: 
   }
   return { entries: retained, evicted }
 }
+
+export const boundWindow: {
+  (edge: "oldest" | "newest"): (entries: ReadonlyArray<TranscriptPage.Entry>) => ReturnType<typeof boundWindowImpl>
+  (entries: ReadonlyArray<TranscriptPage.Entry>, edge: "oldest" | "newest"): ReturnType<typeof boundWindowImpl>
+} = Function.dual(2, boundWindowImpl)
 
 const compareText = (left: string, right: string): number => {
   if (left < right) return -1
@@ -53,7 +63,7 @@ export const normalizeEntries = (entries: ReadonlyArray<TranscriptPage.Entry>): 
   )
 }
 
-export const revisionsForWindow = (
+const revisionsForWindowImpl = (
   entries: ReadonlyArray<TranscriptPage.Entry>,
   activeTurnId: string | undefined,
   current: ReadonlyMap<string, number>,
@@ -69,6 +79,20 @@ export const revisionsForWindow = (
   return revisions
 }
 
+export const revisionsForWindow: {
+  (
+    activeTurnId: string | undefined,
+    current: ReadonlyMap<string, number>,
+    projectionStreams: ReadonlyMap<string, ProjectionStream> | undefined,
+  ): (entries: ReadonlyArray<TranscriptPage.Entry>) => ReadonlyMap<string, number>
+  (
+    entries: ReadonlyArray<TranscriptPage.Entry>,
+    activeTurnId: string | undefined,
+    current: ReadonlyMap<string, number>,
+    projectionStreams: ReadonlyMap<string, ProjectionStream> | undefined,
+  ): ReadonlyMap<string, number>
+} = Function.dual(4, revisionsForWindowImpl)
+
 export const projectedRootIds = (
   projectionStreams: ReadonlyMap<string, ProjectionStream> | undefined,
 ): ReadonlySet<string> =>
@@ -76,7 +100,7 @@ export const projectedRootIds = (
     [...(projectionStreams ?? [])].flatMap(([rootTurnId, stream]) => (stream._tag === "Stopped" ? [] : [rootTurnId])),
   )
 
-export const replayTurnsForWindow = (
+const replayTurnsForWindowImpl = (
   entries: ReadonlyArray<TranscriptPage.Entry>,
   previous: ReadonlyMap<string, Turn.Turn>,
   projectionStreams: ReadonlyMap<string, ProjectionStream> | undefined,
@@ -89,6 +113,20 @@ export const replayTurnsForWindow = (
     ...[...previous].filter(([turnId]) => retained.has(turnId)),
   ])
 }
+
+export const replayTurnsForWindow: {
+  (
+    previous: ReadonlyMap<string, Turn.Turn>,
+    projectionStreams: ReadonlyMap<string, ProjectionStream> | undefined,
+    activeTurnId: string | undefined,
+  ): (entries: ReadonlyArray<TranscriptPage.Entry>) => ReadonlyMap<string, Turn.Turn>
+  (
+    entries: ReadonlyArray<TranscriptPage.Entry>,
+    previous: ReadonlyMap<string, Turn.Turn>,
+    projectionStreams: ReadonlyMap<string, ProjectionStream> | undefined,
+    activeTurnId: string | undefined,
+  ): ReadonlyMap<string, Turn.Turn>
+} = Function.dual(4, replayTurnsForWindowImpl)
 
 export const projectionFromStream = (
   stream: Extract<ProjectionStream, { readonly _tag: "Open" | "Failed" }>,

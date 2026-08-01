@@ -3,11 +3,50 @@ import * as InteractiveSession from "@rika/product/interactive-session"
 import * as Operation from "@rika/product/product-operation-service"
 import * as InteractiveFeedOverflow from "@rika/product/resident-interactive-feed"
 import * as ResidentService from "@rika/product/resident-service"
-import { Cause, Clock, Console, Deferred, Effect, Exit, Fiber, Queue, Ref, Schema, Scope } from "effect"
+import {
+  Cause,
+  Clock,
+  Console,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  FiberSet,
+  Queue,
+  Ref,
+  Schema,
+  Scope,
+  Semaphore,
+} from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
 import { failureKind, outputFrames } from "../protocol/resident-message-codec"
 import { json } from "../protocol/resident-protocol"
 import { formatOutput } from "./resident-host-command"
+import type { ResidentRoute } from "./resident-host-types"
+
+type Lifecycle = Effect.Success<ReturnType<typeof ResidentService.ServiceRuntime.makeLifecycle>>
+type OperationOptions = { readonly identity: string; readonly token: string; readonly outboundCapacity: number }
+type OperationContext = {
+  readonly message: Extract<ResidentService.ClientMessage, { readonly _tag: "operation" }>
+  readonly requests: Ref.Ref<
+    Map<string, Fiber.Fiber<void, ProductOperation.OperationUnavailable | ResidentService.ResidentServiceError>>
+  >
+  readonly close: (code: number, reason?: string) => Effect.Effect<void, ResidentService.ResidentServiceError>
+  readonly writer: (frame: string | Socket.CloseEvent) => Effect.Effect<void, ResidentService.ResidentServiceError>
+  readonly connectionId: string
+  readonly routeKey: (requestId: string) => string
+  readonly requestByInput: WeakMap<object, { readonly requestId: string; readonly routeKey: string }>
+  readonly outboundMessages: Semaphore.Semaphore
+  readonly routesRef: Ref.Ref<Map<string, ResidentRoute>>
+  readonly lifecycle: Lifecycle
+  readonly hostWork: FiberSet.FiberSet<void, never>
+  readonly options: OperationOptions
+  readonly baseConsole: Console.Console
+  readonly rawWriter: (frame: string | Socket.CloseEvent) => Effect.Effect<void, Socket.SocketError>
+  readonly operationReady: Deferred.Deferred<Operation.Interface>
+  readonly operationAdmission: Semaphore.Semaphore
+  readonly drainingFailure: (requestId: string, operation: string) => string
+}
 
 export type Owner = (
   interactive: (
@@ -66,7 +105,7 @@ export const makeExecutionControls = (operationReady: Deferred.Deferred<Operatio
   return { hasActiveExecutionWork, stopAbandonedExecutionWork }
 }
 
-export const handleOperation = (context: any): any => {
+export const handleOperation = (context: OperationContext) => {
   const {
     message,
     requests,
@@ -86,11 +125,11 @@ export const handleOperation = (context: any): any => {
     operationAdmission,
     drainingFailure,
   } = context
-  const requestsRef = requests as Ref.Ref<any>
-  const routesState = routesRef as Ref.Ref<any>
+  const requestsRef = requests
+  const routesState = routesRef
   return Effect.gen(function* () {
     if (message._tag === "operation") {
-      if ((yield* Ref.get<any>(requestsRef)).has(message.requestId)) return yield* close(4400)
+      if ((yield* Ref.get(requestsRef)).has(message.requestId)) return yield* close(4400)
       yield* Effect.logInfo("resident.operation.accepted").pipe(
         Effect.annotateLogs({
           "rika.operation": message.input._tag,
@@ -110,7 +149,7 @@ export const handleOperation = (context: any): any => {
         )
       const sendFrames = (frames: ReadonlyArray<string>) =>
         outboundMessages.withPermits(1)(Effect.forEach(frames, send, { discard: true }))
-      yield* Ref.update<any>(routesState, (current) =>
+      yield* Ref.update(routesState, (current) =>
         current.set(requestRouteKey, {
           connectionId,
           send,
@@ -154,7 +193,7 @@ export const handleOperation = (context: any): any => {
                   }
                 }),
               )
-              const operation = (yield* Deferred.await(operationReady)) as Operation.Interface
+              const operation = yield* Deferred.await(operationReady)
               const execution = operation
                 .run(message.input)
                 .pipe(Effect.provideService(Console.Console, requestConsole))
@@ -234,8 +273,8 @@ export const handleOperation = (context: any): any => {
                 "rika.resident.request.id": message.requestId,
               }),
               Effect.ensuring(
-                Ref.update<any>(requestsRef, (current) => (current.delete(message.requestId), current)).pipe(
-                  Effect.andThen(Ref.update<any>(routesState, (current) => (current.delete(requestRouteKey), current))),
+                Ref.update(requestsRef, (current) => (current.delete(message.requestId), current)).pipe(
+                  Effect.andThen(Ref.update(routesState, (current) => (current.delete(requestRouteKey), current))),
                   Effect.andThen(Effect.sync(() => requestByInput.delete(message.input))),
                 ),
               ),
@@ -246,12 +285,12 @@ export const handleOperation = (context: any): any => {
         message.input._tag !== "Interactive",
       )
       if (fiber === undefined) {
-        yield* Ref.update<any>(routesState, (current) => (current.delete(requestRouteKey), current))
+        yield* Ref.update(routesState, (current) => (current.delete(requestRouteKey), current))
         requestByInput.delete(message.input)
         yield* writer(drainingFailure(message.requestId, message.input._tag))
         return
       }
-      yield* Ref.update<any>(requestsRef, (current) => current.set(message.requestId, fiber))
+      yield* Ref.update(requestsRef, (current) => current.set(message.requestId, fiber))
       yield* Deferred.succeed(started, undefined)
     }
   })

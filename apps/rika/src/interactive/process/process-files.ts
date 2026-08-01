@@ -4,15 +4,23 @@ import type { ChangedFile } from "@rika/terminal/terminal-state"
 import type { PathTarget } from "@rika/terminal/terminal-transcript-presentation"
 import { Config, Effect, FileSystem, Function, Option, Path, PlatformError, Schema } from "effect"
 
-export const mkdir = (path: string, options?: { readonly recursive?: boolean }) =>
+const mkdirImpl = (path: string, options?: { readonly recursive?: boolean }) =>
   FileSystem.FileSystem.pipe(Effect.flatMap((fileSystem) => fileSystem.makeDirectory(path, options)))
+export const mkdir: {
+  (): (path: string) => ReturnType<typeof mkdirImpl>
+  (path: string, options?: { readonly recursive?: boolean }): ReturnType<typeof mkdirImpl>
+} = Function.dual((args) => args.length >= 1, mkdirImpl)
 const realpath = (path: string) => FileSystem.FileSystem.pipe(Effect.flatMap((fileSystem) => fileSystem.realPath(path)))
-export const rm = (path: string, options?: { readonly force?: boolean }) =>
+const rmImpl = (path: string, options?: { readonly force?: boolean }) =>
   FileSystem.FileSystem.pipe(
     Effect.flatMap((fileSystem) =>
       options?.force === true ? fileSystem.remove(path).pipe(Effect.ignore) : fileSystem.remove(path),
     ),
   )
+export const rm: {
+  (): (path: string) => ReturnType<typeof rmImpl>
+  (path: string, options?: { readonly force?: boolean }): ReturnType<typeof rmImpl>
+} = Function.dual((args) => args.length >= 1, rmImpl)
 const stat = (path: string) => FileSystem.FileSystem.pipe(Effect.flatMap((fileSystem) => fileSystem.stat(path)))
 
 const workspaceGlobError = (workspace: string, method: string, cause: unknown) =>
@@ -30,11 +38,15 @@ class WorkspaceFileError extends Schema.TaggedErrorClass<WorkspaceFileError>()("
   message: Schema.String,
 }) {}
 
-export const workspaceGlob = (workspace: string, pattern: string, maximumFiles: number) =>
+const workspaceGlobImpl = (workspace: string, pattern: string, maximumFiles: number) =>
   WorkspaceIndex.globOnce({ workspace, pattern, options: { pageSize: maximumFiles } }).pipe(
     Effect.map((result) => result.items.map((item) => item.relativePath)),
     Effect.mapError((error) => workspaceGlobError(workspace, error.operation, error)),
   )
+export const workspaceGlob: {
+  (pattern: string, maximumFiles: number): (workspace: string) => ReturnType<typeof workspaceGlobImpl>
+  (workspace: string, pattern: string, maximumFiles: number): ReturnType<typeof workspaceGlobImpl>
+} = Function.dual(3, workspaceGlobImpl)
 
 export const resolveLocalFileImpl = Effect.fn("Main.resolveLocalFile")(function* (
   workspace: string,

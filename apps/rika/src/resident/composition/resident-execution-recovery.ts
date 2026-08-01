@@ -3,6 +3,7 @@ import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ExecutionRequest from "@rika/product/execution-request"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as Thread from "@rika/product/thread-record"
 import * as RelayExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import { Effect, Layer, Schema } from "effect"
@@ -14,7 +15,7 @@ export const resolveLegacyRouteForBackend =
       mode: "low" | "medium" | "high" | "ultra",
       tuning: { readonly fastMode?: boolean } | undefined,
       workspace?: string,
-    ) => Effect.Effect<any, unknown, never>
+    ) => Effect.Effect<ExecutionRouteSnapshot.ExecutionRoutePin, ExecutionBackend.BackendError, never>
     readonly repositories: Layer.Layer<ThreadRepository.Service, ThreadRepository.RepositoryError, never>
   }) =>
   (input: ExecutionRequest.StartInput) =>
