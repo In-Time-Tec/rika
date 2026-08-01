@@ -2,6 +2,9 @@ import * as TranscriptPage from "@rika/product/transcript-page"
 import * as ExecutionEvent from "@rika/product/execution-event"
 import type * as Thread from "@rika/product/thread-record"
 import type * as Turn from "@rika/product/turn-record"
+import type * as ExecutionBackend from "@rika/product/execution-service"
+import type * as IngestEvent from "./execution-ingest-event"
+import type * as IngestCommit from "./execution-ingest-commit"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import type * as IngestProjectionTypes from "./execution-projection-types"
@@ -12,6 +15,20 @@ import type { Failure } from "./execution-ingest-failure"
 import type { ProjectionChange } from "./execution-ingest-event"
 import type { ProjectionWatchOverflow } from "./execution-ingest-watch"
 import type { Cause, Deferred, Latch, Queue, Semaphore } from "effect"
+
+export interface Options {
+  readonly backend: ExecutionBackend.Interface
+  readonly transcripts: import("@rika/product/transcript-repository").Interface
+  readonly turns: import("@rika/product/turn-repository").Interface
+  readonly usage: import("@rika/product/usage-repository").Interface
+  readonly commitWindow?: import("effect").Duration.Input
+  readonly commitEvents?: number
+  readonly watchCapacity?: number
+  readonly onDiscovered?: (discovery: IngestEvent.Discovery) => void
+  readonly onCommitted?: (commit: IngestCommit.Commit) => void
+  readonly onRefold?: (refold: IngestCommit.Refold) => void
+  readonly onFailure?: (failure: import("./execution-ingest-failure").Failure) => void
+}
 
 export type Settled = NonNullable<TranscriptPage.ExecutionCheckpoint["status"]>
 export type InterruptedOutcome = NonNullable<TranscriptUnit.Unit["executionOutcome"]> & {

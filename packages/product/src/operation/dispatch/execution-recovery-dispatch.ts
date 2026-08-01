@@ -9,8 +9,6 @@ import * as ThreadRepository from "../../thread/repository/thread-repository"
 import * as ThreadActivity from "../../thread/query/thread-activity"
 import * as Turn from "../../thread/model/turn-record"
 import * as ThreadResult from "@rika/product/thread-result"
-import * as ExecutionRequest from "@rika/product/execution-request"
-import * as ExecutionWorkflow from "@rika/product/execution-workflow"
 import * as TurnRepository from "../../thread/repository/turn-repository"
 import * as TurnQueuePromotion from "../../thread/queue/turn-queue-promotion"
 import { queuedTurnPromoteMaxAgeMs, staleQueuedTurnsError } from "../../thread/queue/pending-turn-policy"
@@ -32,8 +30,8 @@ export const reconcileInternal = Effect.fn("ProductOperation.reconcile")(functio
   ) => Effect.Effect<
     {
       readonly prompt: string
-      readonly promptParts: ReadonlyArray<ExecutionRequest.PromptPart> | undefined
-      readonly extensionPin: ExecutionWorkflow.ExecutionExtensionPin | undefined
+      readonly promptParts: ReadonlyArray<any> | undefined
+      readonly extensionPin: any
     },
     OperationError,
     | TurnRepository.Service
@@ -322,8 +320,8 @@ export const reconcile = Effect.fn("ProductOperation.reconcilePublic")(function*
   ) => Effect.Effect<
     {
       readonly prompt: string
-      readonly promptParts: ReadonlyArray<ExecutionRequest.PromptPart> | undefined
-      readonly extensionPin: ExecutionWorkflow.ExecutionExtensionPin | undefined
+      readonly promptParts: ReadonlyArray<any> | undefined
+      readonly extensionPin: any
     },
     OperationError,
     | TurnRepository.Service

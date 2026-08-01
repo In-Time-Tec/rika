@@ -1,8 +1,16 @@
+import * as Thread from "@rika/product/thread-record"
+import * as Turn from "@rika/product/turn-record"
+import * as UsageRepository from "@rika/product/usage-repository"
 import * as ExecutionEvent from "@rika/product/execution-event"
 import * as ExecutionIdentifier from "@rika/product/execution-identifier"
+import * as ExecutionStatus from "@rika/product/execution-status"
 import * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
+import * as UsageProjection from "../../usage/usage-projection"
+import * as UsageSnapshot from "../../usage/usage-snapshot"
+import * as UsageCodec from "../../usage/usage-snapshot-codec"
+import { persistedThreadUsage } from "../interactive/interactive-session-transcript-runtime"
 import type { Commit, Refold } from "../../execution/ingest/execution-ingest-commit"
-import { Cause, Effect, Queue } from "effect"
+import { Cause, Effect, Queue, Result } from "effect"
 import { failureKind, operationError } from "../operation-error"
 
 export const undeliveredEvents = (
@@ -13,16 +21,65 @@ export const undeliveredEvents = (
 
 export const makeProductOperationIngest = (input: any) =>
   Effect.gen(function* () {
-    const {
-      acquiredBackend,
-      usageRepository,
-      ownerScope,
-      publishInteractiveActivity,
-      titleExecutionId,
-      commitUsageSource,
-      isTerminalStatus,
-      ingestFailureMessage,
-    } = input
+    const { acquiredBackend, usageRepository, ownerScope, publishInteractiveActivity, ingestFailureMessage } = input
+    const titleExecutionId = (turnId: Turn.TurnId) =>
+      ExecutionIdentifier.AgentDepth.childExecutionId(String(turnId), "title")
+    const publishThreadUsage = Effect.fn("ProductOperation.publishThreadUsage")(function* (
+      value: UsageSnapshot.TurnUsage | undefined,
+    ) {
+      if (value === undefined) return
+      const thread = yield* usageRepository.readThread(value.threadId)
+      const global = yield* usageRepository.readGlobal
+      if (thread.costNanoUsd === undefined && thread.tokens === undefined && thread.activeMillis === undefined) return
+      publishInteractiveActivity(0, {
+        _tag: "ThreadUsageUpdated",
+        selectionEpoch: 0,
+        threadId: Thread.ThreadId.make(value.threadId),
+        revision: thread.revision,
+        ...persistedThreadUsage(thread),
+      })
+      if (value.costNanoUsd !== undefined && thread.costNanoUsd !== undefined && global.costNanoUsd !== undefined)
+        publishInteractiveActivity(0, {
+          _tag: "TitleCostUpdated",
+          threadId: Thread.ThreadId.make(value.threadId),
+          turnId: Turn.TurnId.make(value.turnId),
+          turnCostUsd: value.costNanoUsd / 1_000_000_000,
+          threadCostUsd: thread.costNanoUsd / 1_000_000_000,
+          globalCostUsd: global.costNanoUsd / 1_000_000_000,
+        })
+    })
+    const commitUsageSource = Effect.fn("ProductOperation.commitUsageSource")(function* (
+      sourceId: string,
+      threadId: string,
+      turnId: string,
+      events: ReadonlyArray<ExecutionEvent.Event>,
+      terminal: boolean,
+    ) {
+      yield* usageRepository.admitSource(sourceId, turnId, threadId)
+      while (true) {
+        const stored = yield* usageRepository.loadSourceFold(sourceId, turnId)
+        if (stored === undefined)
+          return yield* UsageRepository.RepositoryError.make({ message: `Usage source ${sourceId} was not admitted` })
+        const decoded =
+          stored.foldJson === undefined ? Result.succeed(UsageSnapshot.empty) : UsageCodec.deserialize(stored.foldJson)
+        if (Result.isFailure(decoded)) return yield* decoded.failure
+        const folded = UsageProjection.foldBatch(
+          decoded.success,
+          events.map((event) => ({ threadId, turnId, event })),
+          terminal ? new Set([sourceId]) : new Set(),
+        )
+        if (Result.isFailure(folded)) return yield* folded.failure
+        const foldJson = UsageCodec.serialize(folded.success)
+        const totals = { ...UsageProjection.materialize(folded.success, turnId, threadId), sourceComplete: terminal }
+        if (
+          foldJson === stored.foldJson &&
+          (yield* usageRepository.readSource(sourceId, turnId))?.sourceComplete === terminal
+        )
+          return yield* usageRepository.readSource(sourceId, turnId)
+        const committed = yield* usageRepository.commitSource(sourceId, turnId, stored.revision, foldJson, totals)
+        if (committed._tag === "Applied") return committed.value
+      }
+    })
     const usageCommits = yield* Queue.unbounded<Commit>()
     const refoldingRoots = new Map<string, number>()
     const executionIngest = yield* ExecutionIngest.make({
@@ -62,7 +119,7 @@ export const makeProductOperationIngest = (input: any) =>
             const sourceId = titleExecutionId(commit.rootTurnId)
             const inspection = yield* acquiredBackend.inspect(sourceId, ExecutionIdentifier.executionReference)
             if (inspection !== undefined) {
-              if (!isTerminalStatus(inspection.status))
+              if (!ExecutionStatus.isTerminalStatus(inspection.status))
                 return yield* operationError(`Title usage source ${sourceId} is nonterminal after root refold`)
               const replay = yield* acquiredBackend.replay(sourceId, undefined, ExecutionIdentifier.executionReference)
               if (replay.status !== inspection.status)
@@ -108,5 +165,14 @@ export const makeProductOperationIngest = (input: any) =>
     ) => {
       for (const event of undeliveredEvents(events, delivered)) executionIngest.deliver(turnId, event)
     }
-    return { executionIngest, ensureIngest, awaitIngestSettled, flushIngest, deliverResultEvents }
+    return {
+      executionIngest,
+      ensureIngest,
+      awaitIngestSettled,
+      flushIngest,
+      deliverResultEvents,
+      titleExecutionId,
+      commitUsageSource,
+      publishThreadUsage,
+    }
   })

@@ -5,15 +5,7 @@ import * as Thread from "../../thread/model/thread-record"
 import * as ThreadRepository from "../../thread/repository/thread-repository"
 import * as Turn from "../../thread/model/turn-record"
 import * as ExecutionStatus from "@rika/product/execution-status"
-import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as TurnRepository from "../../thread/repository/turn-repository"
-import * as TurnRepositoryContract from "../../thread/repository/turn-repository-contract"
-import * as ThreadSummaryRepository from "../../thread/repository/thread-summary-repository"
-import * as TranscriptRepository from "../../thread/repository/transcript-repository"
-import * as UsageRepository from "../../thread/repository/usage-repository"
-import * as ThreadInteractionRepository from "../../thread/repository/thread-interaction-repository"
-import * as ResolvedContext from "../../context/context-resolution-service"
-import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import { Input } from "../contract/product-operation"
 import { OperationUnavailable } from "../contract/product-operation-service"
@@ -29,25 +21,14 @@ export interface Dependencies {
     mode: "medium",
     tuning?: undefined,
     workspace?: string,
-  ) => Effect.Effect<ExecutionRouteSnapshot.ExecutionRoutePin, unknown, never>
+  ) => Effect.Effect<any, unknown, never>
   readonly toolRuntimeLayer: (workspace: string) => Layer.Layer<ToolRuntime.Service, OperationError, never>
   readonly productAgentLayer: Layer.Layer<ProductAgent.Service, OperationError, ExecutionBackend.Service> | undefined
   readonly backendLayer: Layer.Layer<ExecutionBackend.Service, unknown, never>
-  readonly acquiredDependencies: Layer.Layer<
-    | ThreadRepository.Service
-    | TurnRepository.Service
-    | ThreadSummaryRepository.Service
-    | TranscriptRepository.Service
-    | UsageRepository.Service
-    | ThreadInteractionRepository.Service
-    | ResolvedContext.Service
-    | ExecutionExtensions.ExecutionExtensionService,
-    never,
-    never
-  >
+  readonly acquiredDependencies: Layer.Layer<ThreadRepository.Service | TurnRepository.Service | any, never, never>
   readonly createObservedSubmission: (
     turns: TurnRepository.Interface,
-    input: TurnRepositoryContract.CreateInput,
+    input: any,
   ) => Effect.Effect<{ readonly turn: Turn.Turn; readonly claimed: boolean }, unknown, never>
   readonly ensureTurnSummary: (turn: Turn.Turn) => Effect.Effect<void, unknown, never>
   readonly setTurnStatus: (

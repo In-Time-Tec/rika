@@ -1,6 +1,6 @@
 import * as UsageEvent from "../../usage/usage-event"
 import { Deferred, Effect, Schema } from "effect"
-import type { Options } from "./execution-ingest-service"
+import type { Options } from "./execution-ingest-state"
 import type { ProjectionFailure } from "../../usage/usage-event"
 import type { Node, Pipeline } from "./execution-ingest-state"
 

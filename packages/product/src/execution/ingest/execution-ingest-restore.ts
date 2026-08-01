@@ -194,3 +194,14 @@ export const interruptedAncestorOutcome = (
   }
   return undefined
 }
+
+export const hasRunningUnits = (fold: TranscriptProjection.ProjectionFold): boolean =>
+  TranscriptProjection.Fold.foldHasRunningUnits(fold)
+export const executionOutcome = (fold: TranscriptProjection.ProjectionFold) =>
+  TranscriptProjection.Fold.foldExecutionOutcome(fold)
+export const applyChildOutcome = (
+  fold: TranscriptProjection.ProjectionFold,
+  childExecutionId: string,
+  outcome: NonNullable<TranscriptUnit.Unit["executionOutcome"]>,
+) => TranscriptProjection.Fold.applyChildOutcome(fold, childExecutionId, outcome)
+export const units = (fold: TranscriptProjection.ProjectionFold) => TranscriptProjection.Fold.foldUnits(fold)

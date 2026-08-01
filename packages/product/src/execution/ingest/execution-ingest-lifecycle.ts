@@ -1,5 +1,5 @@
 import { Effect, Exit, Fiber, Queue, Scope } from "effect"
-import type { Options } from "./execution-ingest-service"
+import type { Options } from "./execution-ingest-state"
 import type { Node, Pipeline } from "./execution-ingest-state"
 
 export interface LifecycleDependencies {

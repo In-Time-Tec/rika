@@ -3,19 +3,17 @@ import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import * as ExecutionEvent from "@rika/product/execution-event"
 import * as ExecutionIdentifier from "@rika/product/execution-identifier"
 import * as EventFamily from "./execution-ingest-event-family"
-import type { Node, InterruptedOutcome, Pipeline } from "./execution-ingest-state"
+import type { Node, InterruptedOutcome, Pipeline, Options } from "./execution-ingest-state"
 export const fullyConsumed = (nodes: ReadonlyMap<string, Node>): boolean =>
   [...nodes.values()].every((node) => node.status !== undefined)
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 export const executionKey = TranscriptCorrelation.executionKey
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
-import { ExecutionId } from "../contract/execution-identifier"
 import { Cause, Effect, Result } from "effect"
 import * as IngestProjection from "./execution-projection-state"
 import * as IngestState from "./execution-ingest-state"
 import type { VisibleDelta } from "./execution-projection-types"
 import * as IngestRestore from "./execution-ingest-restore"
-import type { Options } from "./execution-ingest-service"
 import type { IngestFailure, Failure } from "./execution-ingest-failure"
 import type * as IngestProjectionContract from "./execution-projection-contract"
 import type * as UsageEvent from "../../usage/usage-event"
@@ -226,7 +224,8 @@ export const make = (dependencies: EventDependencies) => {
   const accept = (pipeline: Pipeline, node: Node, event: ExecutionEvent.Event) => {
     if (pipeline.stopped || !pipeline.accepting) return
     try {
-      if (event.executionId.length > 0 && !ExecutionId.ownsExecution(node.key, event.executionId)) return
+      if (event.executionId.length > 0 && !ExecutionIdentifier.ExecutionId.ownsExecution(node.key, event.executionId))
+        return
       const visible: VisibleDelta = new Map()
       if (TranscriptProjection.Fold.isTransientEvent(event)) {
         const mutation = TranscriptProjection.Fold.applyFoldEvent(node.fold, event)

@@ -1,7 +1,5 @@
 import * as ThreadResult from "@rika/product/thread-result"
-import * as ExecutionBackend from "@rika/product/execution-service"
-import * as ExecutionEvent from "@rika/product/execution-event"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import type { Options } from "./execution-ingest-state"
 import { Cause, Deferred, Duration, Effect, FiberSet, Latch, Queue, Result, Scope, Semaphore } from "effect"
 import * as UsageFold from "../../usage/usage-fold"
 import * as UsageSnapshot from "../../usage/usage-snapshot"
@@ -15,8 +13,7 @@ import * as IngestCommit from "./execution-ingest-commit"
 import * as IngestWatch from "./execution-ingest-watch"
 import * as IngestLifecycle from "./execution-ingest-lifecycle"
 import * as IngestFailureRuntime from "./execution-ingest-failure"
-import { IngestFailure } from "./execution-ingest-failure"
-import type { Failure } from "./execution-ingest-failure"
+import { IngestFailure, type Failure } from "./execution-ingest-failure"
 import * as IngestStop from "./execution-ingest-stop"
 
 export const projectionVersion = 4
@@ -25,26 +22,12 @@ export const defaultCommitWindow = Duration.millis(250)
 export const defaultCommitEvents = 64
 export const defaultWatchCapacity = 2_048
 
-export interface Options {
-  readonly backend: ExecutionBackend.Interface
-  readonly transcripts: import("@rika/product/transcript-repository").Interface
-  readonly turns: import("@rika/product/turn-repository").Interface
-  readonly usage: import("@rika/product/usage-repository").Interface
-  readonly commitWindow?: Duration.Input
-  readonly commitEvents?: number
-  readonly watchCapacity?: number
-  readonly onDiscovered?: (discovery: IngestEvent.Discovery) => void
-  readonly onCommitted?: (commit: IngestCommit.Commit) => void
-  readonly onRefold?: (refold: IngestCommit.Refold) => void
-  readonly onFailure?: (failure: Failure) => void
-}
-
 export interface Interface {
   readonly ensure: (root: IngestEvent.Root) => Effect.Effect<void, Failure>
   readonly watchThread: (
     threadId: IngestEvent.Root["threadId"],
   ) => Effect.Effect<IngestWatch.ProjectionWatch, never, Scope.Scope>
-  readonly deliver: (turnId: IngestEvent.Root["turnId"], event: ExecutionEvent.Event) => void
+  readonly deliver: (turnId: IngestEvent.Root["turnId"], event: any) => void
   readonly consumed: (turnId: IngestEvent.Root["turnId"]) => Effect.Effect<void, Failure>
   readonly flush: (turnId: IngestEvent.Root["turnId"]) => Effect.Effect<void, Failure>
   readonly settled: (turnId: IngestEvent.Root["turnId"]) => Effect.Effect<void, Failure>
@@ -243,7 +226,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
             const node = restored.nodes.get(key)!
             if (node.parentKey === undefined) continue
             const ancestorOutcome = interruptedAncestorOutcome(restored.nodes, node)
-            if (ancestorOutcome !== undefined && TranscriptProjection.Fold.foldHasRunningUnits(node.fold))
+            if (ancestorOutcome !== undefined && IngestRestore.hasRunningUnits(node.fold))
               return yield* IngestFailure.make({
                 message: `Transcript ${root.turnId} has running descendant state beneath a ${ancestorOutcome.status} execution`,
                 threadId: String(root.threadId),
@@ -251,10 +234,10 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
                 executionId: node.executionId,
                 reason: "checkpoint",
               })
-            const outcome = TranscriptProjection.Fold.foldExecutionOutcome(node.fold)
+            const outcome = IngestRestore.executionOutcome(node.fold)
             if (outcome === undefined) continue
             const parent = restored.nodes.get(node.parentKey)!
-            const validation = TranscriptProjection.Fold.applyChildOutcome(parent.fold, node.executionId, outcome)
+            const validation = IngestRestore.applyChildOutcome(parent.fold, node.executionId, outcome)
             if (validation.stateChanged || validation.units.upsert.length > 0 || validation.units.remove.length > 0)
               return yield* IngestFailure.make({
                 message: `Transcript ${root.turnId} has a child outcome that contradicts its stored parent`,
@@ -270,7 +253,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
         const unitIndex = new Map<string, import("@rika/transcript/transcript-unit").Unit>()
         const unitOwners = new Map<string, string>()
         for (const [key, node] of restored.nodes)
-          for (const unit of TranscriptProjection.Fold.foldUnits(node.fold)) {
+          for (const unit of IngestRestore.units(node.fold)) {
             unitIndex.set(unit.key, unit)
             unitOwners.set(unit.key, key)
           }
@@ -328,9 +311,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
           unitOwners,
           unresolvedByParent: new Map(),
           runningNodes: new Set(
-            [...restored.nodes].flatMap(([key, node]) =>
-              TranscriptProjection.Fold.foldHasRunningUnits(node.fold) ? [key] : [],
-            ),
+            [...restored.nodes].flatMap(([key, node]) => (IngestRestore.hasRunningUnits(node.fold) ? [key] : [])),
           ),
         }
         pipeline.fork = yield* FiberSet.makeRuntime<never, void, never>().pipe(
