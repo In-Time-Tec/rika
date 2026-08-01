@@ -6,6 +6,7 @@ import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 import * as ModelProviderRuntime from "../../model/provider/model-provider-runtime"
 import { Cause, Context, Effect, Function, Layer, Schema } from "effect"
+import { BackendError } from "@rika/product/execution-service"
 import { ModelRegistry } from "@batonfx/core"
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import * as ScriptedModelRuntime from "../../model/provider/scripted-model-runtime"
@@ -171,6 +172,10 @@ const executionRoutePin: {
   ): ExecutionRouteSnapshot.ExecutionRoutePin
 } = Function.dual((args) => typeof args[0] === "object", executionRoutePinImpl)
 
+class RouteResolutionFailure extends Schema.TaggedErrorClass<RouteResolutionFailure>()("RouteResolutionFailure", {
+  message: Schema.String,
+}) {}
+
 const resolveExecutionRouteForSettings = Effect.fn("Relay.resolveExecutionRouteForSettings")(function* (
   settings: SettingsDefaults.ConfigurationSettings,
   mode: BehaviorMode.ModeId,
@@ -184,7 +189,7 @@ const resolveExecutionRouteForSettings = Effect.fn("Relay.resolveExecutionRouteF
     catch: (cause) =>
       Schema.is(ModelRouteResolution.ModelRouteError)(cause)
         ? cause
-        : new Error(`Could not resolve model route: ${String(cause)}`),
+        : RouteResolutionFailure.make({ message: `Could not resolve model route: ${String(cause)}` }),
   })
 })
 
@@ -220,8 +225,8 @@ interface PreparedExecutionRoutes {
 const prepareExecutionRoutes = (options: {
   readonly routes: ReadonlyArray<ModelRouteResolution.ResolvedModelRoute>
   readonly persisted: ReadonlyArray<ExecutionRouteSnapshot.ExecutionRouteModelSnapshot>
-  readonly providerAuthLayer?: Layer.Layer<OpenAiAuth.Service, unknown, never>
-}): Effect.Effect<PreparedExecutionRoutes, unknown, never> =>
+  readonly providerAuthLayer?: Layer.Layer<OpenAiAuth.Service>
+}): Effect.Effect<PreparedExecutionRoutes, BackendError, never> =>
   Effect.gen(function* () {
     const service =
       options.providerAuthLayer === undefined
@@ -235,7 +240,9 @@ const prepareExecutionRoutes = (options: {
             ),
             ModelProviderRuntime.Service,
           )
-    const prepared = yield* service.prepare(options.routes)
+    const prepared = yield* service
+      .prepare(options.routes)
+      .pipe(Effect.mapError((cause) => BackendError.make({ message: String(cause) })))
     const configured = new Set(prepared.registrations.map((registration) => registration.registrationKey))
     const restored = yield* Effect.forEach(
       options.persisted.filter((route) => !configured.has(route.registrationIdentity)),
@@ -263,11 +270,17 @@ const testModel = (options: {
   readonly response?: string
 }): Effect.Effect<
   { readonly registration: ModelRegistry.Registration; readonly selection: ModelRegistry.ModelSelection },
-  unknown
+  BackendError
 > => {
-  if (options.script !== undefined) return ScriptedModelRuntime.makeScriptedModel(options.script)
-  if (options.response !== undefined) return ScriptedModelRuntime.makeConstantModel(options.response)
-  return Effect.fail("A test model script or response is required")
+  if (options.script !== undefined)
+    return ScriptedModelRuntime.makeScriptedModel(options.script).pipe(
+      Effect.mapError((cause) => BackendError.make({ message: String(cause) })),
+    )
+  if (options.response !== undefined)
+    return ScriptedModelRuntime.makeConstantModel(options.response).pipe(
+      Effect.mapError((cause) => BackendError.make({ message: String(cause) })),
+    )
+  return BackendError.make({ message: "A test model script or response is required" })
 }
 export default {
   modelRoutesForExecutionImpl,

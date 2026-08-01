@@ -11,7 +11,7 @@ import * as ThreadInteractionRepository from "@rika/product/thread-interaction-r
 import * as ThreadToolService from "@rika/product/thread-tool-service"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import Route from "./relay-execution-route"
-import { Config, Effect, Layer, Schedule } from "effect"
+import { Config, Effect, Layer, PlatformError, Schedule } from "effect"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import ProductTools from "./relay-product-tools"
 import { ModelResilience } from "@batonfx/core"
@@ -52,7 +52,7 @@ export interface ConfiguredOptions {
   readonly webSearchCredentials?: Readonly<Record<string, import("effect").Redacted.Redacted<string>>>
   readonly repositories: RepositoryLayers
   readonly threadToolGateway: ThreadToolService.Gateway
-  readonly providerAuthLayer?: Layer.Layer<OpenAiAuth.Service, unknown, never>
+  readonly providerAuthLayer?: Layer.Layer<OpenAiAuth.Service>
   readonly resolveLegacyRoute?: (
     input: ExecutionRequest.StartInput,
   ) => Effect.Effect<LegacyRouteResolution, ExecutionBackend.BackendError>
@@ -135,7 +135,16 @@ const readEnvironment = Effect.gen(function* () {
   return undefined
 })
 
-const configuredLayer = (options: ConfiguredOptions) =>
+const configuredLayer: (
+  options: ConfiguredOptions,
+) => Layer.Layer<
+  ExecutionBackend.Service,
+  | ExecutionBackend.BackendError
+  | Config.ConfigError
+  | PlatformError.PlatformError
+  | import("@relayfx/sdk").Runtime.AcquisitionError,
+  import("./relay-execution-layer").ExternalToolRuntimeRequirements<never>
+> = (options) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const settings = options.settings ?? ConfigurationSettings.Defaults.defaults
@@ -221,7 +230,11 @@ const makeConfiguredRoute = (
   settings: ConfigurationSettings.ConfigurationSettings,
   mode: "low" | "medium" | "high" | "ultra",
   tuning?: { readonly fastMode?: boolean },
-) => Route.resolveExecutionRouteForSettings(settings, mode, tuning).pipe(Effect.map((result) => result.executionRoute))
+): Effect.Effect<ExecutionRouteSnapshot.ExecutionRoutePin, ExecutionBackend.BackendError> =>
+  Route.resolveExecutionRouteForSettings(settings, mode, tuning).pipe(
+    Effect.map((result) => result.executionRoute),
+    Effect.mapError((error) => ExecutionBackend.BackendError.make({ message: String(error) })),
+  )
 const configuredRoute = Route.executionRoutePin
 const configuredExecutionModelRoutes = executionModelRoutes
 const configuredWithPinnedRouteRegistration = withPinnedRouteRegistration

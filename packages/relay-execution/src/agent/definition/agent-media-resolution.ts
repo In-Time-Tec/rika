@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect, Function, Schema } from "effect"
 import type { ModelRegistry } from "@batonfx/core"
 import { resolve } from "./baton-agent-definition"
 
@@ -9,10 +9,7 @@ export class PainterUnavailableError extends Schema.TaggedErrorClass<PainterUnav
   { message: Schema.String, provider: Schema.String, model: Schema.String },
 ) {}
 
-export const resolvePainter: (
-  model: ModelRegistry.ModelSelection,
-  mediaAvailable: boolean,
-) => Effect.Effect<ResolvedProfile, PainterUnavailableError> = Effect.fn("AgentProfiles.resolvePainter")(function* (
+const resolvePainterEffect = Effect.fn("AgentProfiles.resolvePainter")(function* (
   model: ModelRegistry.ModelSelection,
   mediaAvailable: boolean,
 ): Effect.fn.Return<ResolvedProfile, PainterUnavailableError> {
@@ -25,3 +22,13 @@ export const resolvePainter: (
   }
   return resolve("Painter", model)
 })
+
+export const resolvePainter: {
+  (
+    model: ModelRegistry.ModelSelection,
+    mediaAvailable: boolean,
+  ): Effect.Effect<ResolvedProfile, PainterUnavailableError>
+  (
+    mediaAvailable: boolean,
+  ): (model: ModelRegistry.ModelSelection) => Effect.Effect<ResolvedProfile, PainterUnavailableError>
+} = Function.dual(2, resolvePainterEffect)

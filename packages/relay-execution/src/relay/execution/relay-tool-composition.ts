@@ -10,14 +10,30 @@ import * as WebSearch from "@rika/coding-tools/web-search-service"
 import * as MediaAnalyzerRuntime from "../../model/provider/media-analysis-adapter"
 import * as SubagentJoin from "./relay-child-result"
 import * as ChildResult from "./relay-child-result"
-import type { LayerOptions } from "./relay-execution-layer"
+import type { LayerOptions, ToolRuntimeRequirements } from "./relay-execution-layer"
 
-export const makeToolComposition = <AdditionalTools extends Record<string, Tool.Any>, RuntimeRequirements>(input: {
+type RikaToolRuntimeLayer<RuntimeRequirements> = Layer.Layer<
+  import("@rika/coding-tools/coding-tool-runtime").Service,
+  import("@rika/product/execution-service").BackendError,
+  ToolRuntimeRequirements | RuntimeRequirements
+>
+
+export const makeToolComposition = <
+  AdditionalTools extends Record<string, Tool.Any>,
+  RuntimeRequirements,
+  RunnerTools extends Record<string, Tool.Any>,
+  HandlerRequirements,
+  HandlerServices,
+>(input: {
   readonly relayClient: Deferred.Deferred<Client.Interface>
   readonly options: LayerOptions<AdditionalTools, RuntimeRequirements>
-  readonly runnerToolkit: Toolkit.Toolkit<Record<string, Tool.Any>>
-  readonly handlerLayer: Layer.Layer<any, any, any>
-  readonly rikaToolRuntimeLayer: Layer.Layer<any, any, any>
+  readonly runnerToolkit: Toolkit.Toolkit<RunnerTools>
+  readonly handlerLayer: Layer.Layer<
+    HandlerServices,
+    import("@rika/product/execution-service").BackendError,
+    HandlerRequirements
+  >
+  readonly rikaToolRuntimeLayer: RikaToolRuntimeLayer<RuntimeRequirements>
   readonly sharedModelRegistryLayer: Layer.Layer<ModelRegistry.ModelRegistry>
 }) => {
   const { relayClient, options, runnerToolkit, handlerLayer, rikaToolRuntimeLayer, sharedModelRegistryLayer } = input

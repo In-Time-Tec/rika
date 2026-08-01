@@ -9,7 +9,8 @@ import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import type { LayerOptions } from "./relay-execution-layer"
 import { makeRelayLayer } from "./relay-execution-composition"
-import { Cause, Crypto, Effect, Function, Layer } from "effect"
+import { Cause, Crypto, Effect, Function, Layer, PlatformError } from "effect"
+import { Runtime } from "@relayfx/sdk"
 import * as ExecutionBackend from "@rika/product/execution-service"
 
 type RelayOptions<RuntimeRequirements extends import("./relay-execution-layer").ToolRuntimeRequirements = never> = Omit<
@@ -34,7 +35,7 @@ const makeLayer = <RuntimeRequirements extends import("./relay-execution-layer")
   gateway: ThreadToolService.Gateway,
 ): Layer.Layer<
   ExecutionBackend.Service,
-  unknown,
+  ExecutionBackend.BackendError | PlatformError.PlatformError | Runtime.AcquisitionError,
   Crypto.Crypto | import("./relay-execution-layer").ExternalToolRuntimeRequirements<RuntimeRequirements>
 > =>
   makeRelayLayer({

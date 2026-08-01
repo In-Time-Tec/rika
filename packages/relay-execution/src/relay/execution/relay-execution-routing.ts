@@ -1,6 +1,6 @@
 import { withResilience } from "../../model/routing/relay-model-registry"
 import { Client, Ids } from "@relayfx/sdk"
-import { Effect } from "effect"
+import { Effect, Function } from "effect"
 import { ModelRegistry, type ModelResilience } from "@batonfx/core"
 import type { Tool } from "effect/unstable/ai"
 import type { LayerOptions } from "./relay-execution-layer"
@@ -15,17 +15,15 @@ export const registrationsFor = <AdditionalTools extends Record<string, Tool.Any
   ),
 ]
 
-export const registerModel: (
-  registry: ModelRegistry.Interface,
-  registration: ModelRegistry.Registration,
-  resilience: ModelResilience.Interface | undefined,
-) => Effect.Effect<void> = Effect.fn("RelayExecution.registerModel")(function* (
+const registerModelEffect = Effect.fn("RelayExecution.registerModel")(function* (
   registry: ModelRegistry.Interface,
   registration: ModelRegistry.Registration,
   resilience: ModelResilience.Interface | undefined,
 ): Effect.fn.Return<void> {
   yield* registry.register({ registration: withResilience({ registration, resilience }) })
 })
+
+export const registerModel = Function.dual(3, registerModelEffect)
 
 export const zeroPriceFromMetadata = (metadata: ModelRegistry.Metadata | undefined) =>
   metadata?.pricing !== undefined &&
