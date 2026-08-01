@@ -6,7 +6,8 @@ import { SQLite } from "@relayfx/sdk/sqlite"
 import { Config, Effect, FileSystem, Layer, Logger, Schema, Semaphore, Stdio, Stream } from "effect"
 import { Toolkit } from "effect/unstable/ai"
 import * as ExecutionBackend from "@rika/product/execution-service"
-import * as RelayExecutionBackend from "../src/execution-backend"
+import { layerFromClient } from "../src/relay/execution/relay-execution-client-layer"
+import { eventHistoryOption } from "../src/model/routing/relay-model-registry"
 
 class FixtureError extends Schema.TaggedErrorClass<FixtureError>()("WorkflowProcessFixtureError", {
   message: Schema.String,
@@ -81,13 +82,13 @@ const main = Effect.gen(function* () {
   })
   const fixture = yield* TestModel.make(Array.from({ length: 20 }, () => TestModel.text("unused")))
   const relayLayer = Runtime.layerEmbedded({
-    database: SQLite.database({ filename: database, ...RelayExecutionBackend.eventHistoryOption(database) }),
+    database: SQLite.database({ filename: database, ...eventHistoryOption(database) }),
     languageModelLayer: ModelHub.layer([fixture.registration]),
     toolRuntimeLayer: ToolRuntime.layerFromToolkit(Toolkit.make()).pipe(Layer.provide(Layer.empty)),
     childFanOutHostLayer: fanOutHandlers,
     workflowDefinitionHostLayer: workflowHandlers,
   })
-  const backendLayer = RelayExecutionBackend.layerFromClient({
+  const backendLayer = layerFromClient({
     selection: { provider: "test", model: "workflow" },
   }).pipe(Layer.provide(relayLayer))
   const services = yield* Layer.build(Layer.merge(backendLayer, relayLayer)).pipe(Effect.mapError(fixtureError))

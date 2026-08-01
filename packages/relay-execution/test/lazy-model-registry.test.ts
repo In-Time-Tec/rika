@@ -2,7 +2,7 @@ import { ModelRegistry } from "@batonfx/core"
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, Exit, Fiber, Layer, Ref, Scope } from "effect"
 import { LanguageModel, Model } from "effect/unstable/ai"
-import { lazyModelRegistryLayer } from "../src/execution-backend"
+import { lazyModelRegistryLayer } from "../src/model/routing/relay-model-registry"
 
 const registration = (
   provider: string,

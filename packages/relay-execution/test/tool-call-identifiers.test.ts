@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest"
 import { Prompt } from "effect/unstable/ai"
-import { durableToolCallId, providerPrompt } from "../src/tool-call-identifiers"
+import { durableToolCallId, providerPrompt } from "../src/relay/execution/tool-call-identifiers"
 
 it("prepares replayed tool calls and results with the original provider identifier", () => {
   const originalCallId = `call_${"a".repeat(59)}`

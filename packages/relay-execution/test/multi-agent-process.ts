@@ -3,12 +3,12 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { TestModel } from "@batonfx/test"
 import { ChildFanOutHost, Client, Content, Ids, ModelHub, Runtime, ToolRuntime } from "@relayfx/sdk"
 import { SQLite } from "@relayfx/sdk/sqlite"
-import * as RelayExecutionBackend from "@rika/relay-execution/relay-execution-layer"
-import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
+import { layerFromClient } from "../src/relay/execution/relay-execution-client-layer"
+import { eventHistoryOption } from "../src/model/routing/relay-model-registry"
+import type { ExecutionRoutePin } from "@rika/product/execution-route-snapshot"
 import { Config, Effect, FileSystem, Layer, Logger, Schedule, Schema, Semaphore, Stdio, Stream } from "effect"
 import { ProductAgent } from "@rika/product/product-operation"
 import * as Turn from "@rika/product/turn-record"
-import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 
 class FixtureError extends Schema.TaggedErrorClass<FixtureError>()("MultiAgentProcessFixtureError", {
   message: Schema.String,
@@ -42,7 +42,7 @@ const ChildResult = Schema.Struct({
   completedAt: Schema.optional(Schema.Finite),
 })
 
-const executionRoute: ExecutionRouteSnapshot.ExecutionRoutePin = ExecutionRouteSnapshot.testExecutionRoute()
+const executionRoute: ExecutionRoutePin = Turn.testExecutionRoute()
 const decodeMessage = Schema.decodeEffect(Schema.fromJsonString(Message))
 const decodeChildResult = Schema.decodeEffect(Schema.UnknownFromJsonString)
 const encodeLine = Schema.encodeEffect(Schema.UnknownFromJsonString)
@@ -107,12 +107,12 @@ const main = Effect.gen(function* () {
     },
   )
   const relayLayer = Runtime.layerEmbedded({
-    database: SQLite.database({ filename: database, ...RelayExecutionBackend.eventHistoryOption(database) }),
+    database: SQLite.database({ filename: database, ...eventHistoryOption(database) }),
     languageModelLayer: ModelHub.layer([fixture.registration]),
     toolRuntimeLayer: ToolRuntime.layer(),
     childFanOutHostLayer: handlers,
   })
-  const backendLayer = RelayExecutionBackend.layerFromClient({
+  const backendLayer = layerFromClient({
     selection: { provider: "test", model: "deterministic" },
   }).pipe(Layer.provide(relayLayer))
   const services = yield* Layer.build(

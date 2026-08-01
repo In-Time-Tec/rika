@@ -5,12 +5,12 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./baton-agent-definition": "./src/agent-profiles.ts",
-    "./media-analysis-adapter": "./src/media-analyzer.ts",
+    "./baton-agent-definition": "./src/agent/definition/baton-agent-definition.ts",
+    "./media-analysis-adapter": "./src/model/provider/media-analysis-adapter.ts",
     "./model-provider-runtime": "./src/model/provider/model-provider-runtime.ts",
     "./scripted-model-runtime": "./src/model/provider/scripted-model-runtime.ts",
-    "./relay-execution-layer": "./src/relay-execution-layer.ts",
-    "./relay-workflow-compiler": "./src/workflow-definitions.ts"
+    "./relay-execution-layer": "./src/relay/execution/relay-execution-layer.ts",
+    "./relay-workflow-compiler": "./src/relay/relay-workflow-compiler.ts"
   },
   "dependencies": {
     "@rika/configuration": "workspace:*",

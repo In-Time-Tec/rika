@@ -5,7 +5,7 @@ import * as Runtime from "@rika/coding-tools/coding-tool-runtime"
 import { Config, Context, Effect, Layer, Logger, Schema, Semaphore, Stdio, Stream } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import * as ExecutionBackend from "@rika/product/execution-service"
-import * as RelayExecutionBackend from "../src/execution-backend"
+import { layer } from "../src/relay/execution/relay-execution-layer"
 import { start } from "./current-execution-route"
 
 class FixtureError extends Schema.TaggedErrorClass<FixtureError>()("RecoveryProcessFixtureError", {
@@ -78,7 +78,7 @@ const main = Effect.gen(function* () {
     failureMode: "return",
   })
   const contextToolkit = Toolkit.make(contextProbe)
-  const backendLayer = RelayExecutionBackend.layer({
+  const backendLayer = layer({
     filename: database,
     workspace,
     registration: fixture.registration,

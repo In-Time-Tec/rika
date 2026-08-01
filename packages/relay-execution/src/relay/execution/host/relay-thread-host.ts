@@ -1,31 +1,16 @@
 import { ModelRegistry } from "@batonfx/core"
-import { Ids } from "@relayfx/sdk"
-import { Context, Crypto, Effect, Layer, Option, PlatformError, Ref, Schema, Stream } from "effect"
-import { LanguageModel, type Prompt, Response, Tool, Toolkit } from "effect/unstable/ai"
-
-export const hostAgentId = Ids.AgentId.make("agent:rika-thread-host")
-export const entityKind = Ids.ResidentKindName.make("rika-thread")
-export const continueAsNewAfterTurns = 32
-export const hostMaxWaitTurns = 1_000_000
-export const hostSelection: ModelRegistry.ModelSelection = { provider: "rika", model: "thread-host" }
+import { Client, Content, Ids, type Resident } from "@relayfx/sdk"
+import { BackendError, type ThreadQueueWake } from "@rika/product/execution-service"
+import { Cause, Crypto, Effect, Layer, PlatformError, Ref, Schema, Semaphore, Stream } from "effect"
+import { LanguageModel, Response, Tool, Toolkit } from "effect/unstable/ai"
+import { hostSelection, waitToolName } from "./relay-thread-host-constants"
+import { pendingQueueWakes } from "./relay-thread-host-queue"
 
 export class PromoteTurnError extends Schema.TaggedErrorClass<PromoteTurnError>()("PromoteTurnError", {
   message: Schema.String,
 }) {}
 
-const PromoteTurnFailure = Schema.Struct({
-  _tag: Schema.tag("PromoteTurnError"),
-  message: Schema.String,
-})
-
-const QueueReadyMessageJson = Schema.fromJsonString(
-  Schema.Struct({
-    kind: Schema.Literal("queue-ready"),
-    thread_id: Schema.String,
-    wake_generation: Schema.Int,
-    queue_revision: Schema.Int,
-  }),
-)
+const PromoteTurnFailure = Schema.Struct({ _tag: Schema.tag("PromoteTurnError"), message: Schema.String })
 
 export const promoteTurnTool = Tool.make("promote_turn", {
   description: "Claim and start every currently claimable queued Rika turn for a thread",
@@ -37,65 +22,11 @@ export const promoteTurnTool = Tool.make("promote_turn", {
 
 export const toolkit = Toolkit.make(promoteTurnTool)
 
-export type Promoter = (threadId: string, generation: number) => Effect.Effect<number>
-
-export interface RegistryInterface {
-  readonly register: (promoter: Promoter) => Effect.Effect<void>
-  readonly promote: (threadId: string, generation: number) => Effect.Effect<number>
-}
-
-export class Registry extends Context.Service<Registry, RegistryInterface>()(
-  "@rika/relay-execution/thread-host/Registry",
-) {}
-
-export const makeRegistry: Effect.Effect<RegistryInterface> = Effect.gen(function* () {
-  const slot = yield* Ref.make(Option.none<Promoter>())
-  return Registry.of({
-    register: (promoter) => Ref.set(slot, Option.some(promoter)),
-    promote: (threadId, generation) =>
-      Ref.get(slot).pipe(
-        Effect.flatMap(
-          Option.match({
-            onNone: () => Effect.succeed(0),
-            onSome: (promoter) => promoter(threadId, generation),
-          }),
-        ),
-      ),
-  })
-})
-
-export const handlerLayer = (registry: RegistryInterface) =>
+export const handlerLayer = (registry: import("./relay-thread-host-registry").RegistryInterface) =>
   toolkit.toLayer({
     promote_turn: ({ threadId, generation }) =>
       registry.promote(threadId, generation).pipe(Effect.map((promoted) => ({ promoted }))),
   })
-
-export const waitToolName = "wait_for_messages"
-
-export interface PendingQueueWake {
-  readonly threadId: string
-  readonly generation: number
-  readonly queueRevision: number
-}
-
-export const pendingQueueWakes = (prompt: Prompt.Prompt): ReadonlyArray<PendingQueueWake> => {
-  const last = prompt.content.at(-1)
-  if (last === undefined || last.role !== "tool") return []
-  const batch = last.content.findLast((part) => part.type === "tool-result" && part.name === waitToolName)
-  if (batch === undefined || batch.type !== "tool-result") return []
-  const text = JSON.stringify(batch.result ?? null)
-  const wakes = new Map<string, PendingQueueWake>()
-  for (const match of text.matchAll(/\{\\?"kind\\?"\s*:\s*\\?"queue-ready\\?"[^{}]*\}/g)) {
-    const payload = Schema.decodeUnknownOption(QueueReadyMessageJson)(match[0].replaceAll('\\"', '"'))
-    if (Option.isSome(payload) && payload.value.thread_id.length > 0)
-      wakes.set(payload.value.thread_id, {
-        threadId: payload.value.thread_id,
-        generation: payload.value.wake_generation,
-        queueRevision: payload.value.queue_revision,
-      })
-  }
-  return [...wakes.values()]
-}
 
 const usage = (): Response.Usage =>
   Response.Usage.make({
@@ -118,7 +49,7 @@ const respond = (
   Effect.gen(function* () {
     const request = yield* Ref.getAndUpdate(counter, (value) => value + 1)
     const wakes = pendingQueueWakes(options.prompt)
-    if (wakes.length === 0) {
+    if (wakes.length === 0)
       return [
         {
           type: "tool-call",
@@ -129,7 +60,6 @@ const respond = (
         },
         finish("tool-calls"),
       ]
-    }
     return [
       ...wakes.map(
         (wake, index): Response.PartEncoded => ({
@@ -172,4 +102,56 @@ export const hostRegistration: Effect.Effect<ModelRegistry.Registration, Platfor
       model: hostSelection.model,
       layer: Layer.succeed(LanguageModel.LanguageModel, service),
     })
+  })
+
+export const wakeThreadHost = (input: {
+  readonly client: Client.Interface
+  readonly addressId: Ids.AddressId
+  readonly hostGate: Semaphore.Semaphore
+  readonly hostInstance: (
+    threadId: string,
+    now: number,
+  ) => Effect.Effect<Resident.Instance, Client.ClientError | Client.ExecutionNotFound>
+  readonly awaitParkedHost: (
+    threadId: string,
+    instance: Resident.Instance,
+    now: number,
+  ) => Effect.Effect<Resident.Instance, Client.ClientError | Client.ExecutionNotFound>
+  readonly failureKind: (cause: Cause.Cause<unknown>) => string
+}) =>
+  Effect.fn("ExecutionBackend.wakeThreadHost")(function* (wake: ThreadQueueWake) {
+    yield* input.hostGate
+      .withPermits(1)(
+        Effect.gen(function* () {
+          const created = yield* input.hostInstance(wake.threadId, wake.now)
+          const instance = yield* input.awaitParkedHost(wake.threadId, created, wake.now)
+          const notification = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)({
+            kind: "queue-ready",
+            thread_id: wake.threadId,
+            wake_generation: wake.generation,
+            queue_revision: wake.queueRevision,
+          })
+          yield* input.client.envelopes.send({
+            from: input.addressId,
+            to: instance.address_id,
+            content: [Content.text(notification)],
+            idempotency_key: `rika:queue-wake:${wake.threadId}:${wake.generation}`,
+          })
+        }),
+      )
+      .pipe(
+        Effect.tapCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.void
+            : Effect.logError("thread_host.notification.failed").pipe(
+                Effect.annotateLogs({
+                  "rika.thread.id": wake.threadId,
+                  "rika.queue.wake_generation": wake.generation,
+                  "rika.queue.revision": wake.queueRevision,
+                  "rika.failure.kind": input.failureKind(cause),
+                }),
+              ),
+        ),
+        Effect.mapError((cause) => BackendError.make({ message: String(cause) })),
+      )
   })
