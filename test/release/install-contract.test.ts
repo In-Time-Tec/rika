@@ -1,23 +1,22 @@
 import { describe, expect, test } from "vitest"
 import {
   archiveCommandName,
+  devCommandName,
+  releaseCommandName,
+} from "../../scripts/installation/install-command-names"
+import {
   binDirEnv,
   defaultBinDir,
   defaultInstallRoot,
-  devCommandName,
   devRootSegments,
   installRootEnv,
-  releaseCommandName,
   releaseRootSegments,
-  validateInstallerScript,
-} from "../../scripts/installation/install-contract"
-import {
-  launcherManifest,
-  packedName,
-  platformConstraints,
-  platformPackageName,
-} from "../../scripts/packaging/npm-package"
-import { archiveName, archiveRoot, targetNames } from "../../scripts/packaging/package-target"
+} from "../../scripts/installation/install-paths"
+import { validateInstallerScript } from "../../scripts/installation/install-script-validation"
+import { launcherManifest } from "../../scripts/packaging/npm-launcher"
+import { packedName, platformConstraints, platformPackageName } from "../../scripts/packaging/npm-package-names"
+import { archiveName, archiveRoot } from "../../scripts/packaging/release-archive"
+import { targetNames } from "../../scripts/packaging/package-target-contract"
 import * as ReleaseDownload from "../../apps/rika/src/release/release-download"
 import * as ReleaseInstall from "../../apps/rika/src/release/release-install"
 import * as ReleaseUpdate from "../../apps/rika/src/release/release-update"

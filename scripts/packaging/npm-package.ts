@@ -1,25 +1,11 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Data, Effect, FileSystem, Layer, Path, Schema } from "effect"
-import { dual } from "effect/Function"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { archiveName, archiveRoot, targetNames, type PackageTarget } from "./package-target"
-
-export const scope = "@rikafx"
-
-export const launcherName = `${scope}/cli`
-
-export const platformPackageName = (target: PackageTarget): string => `${scope}/cli-${target}`
-
-export const platformConstraints = (target: PackageTarget): { readonly os: string; readonly cpu: string } => {
-  const [os, cpu] = target.split("-")
-  return { os: os!, cpu: cpu! }
-}
-
-export const packedName: {
-  (version: string): (name: string) => string
-  (name: string, version: string): string
-} = dual(2, (name: string, version: string): string => `${name.replace("@", "").replace("/", "-")}-${version}.tgz`)
+import { archiveName, archiveRoot } from "./release-archive"
+import { launcherManifest, launcherShim } from "./npm-launcher"
+import { platformManifest } from "./npm-platform-package"
+import { targetNames } from "./package-target-contract"
 
 export class NpmPackageError extends Data.TaggedError("NpmPackageError")<{
   readonly step: string
@@ -27,67 +13,6 @@ export class NpmPackageError extends Data.TaggedError("NpmPackageError")<{
 }> {}
 
 const npmPackageError = (step: string, message: string) => new NpmPackageError({ step, message })
-
-const shared = (version: string) => ({
-  version,
-  license: "MIT",
-  repository: { type: "git", url: "git+https://github.com/In-Time-Tec/rika.git" },
-  homepage: "https://github.com/In-Time-Tec/rika",
-  engines: { node: ">=18" },
-})
-
-export const launcherManifest = (version: string) => ({
-  name: launcherName,
-  description: "Rika — a local durable coding agent for your terminal",
-  ...shared(version),
-  bin: { rika: "bin/rika.js" },
-  files: ["bin/rika.js", "README.md"],
-  optionalDependencies: Object.fromEntries(
-    targetNames.map((target) => [platformPackageName(target), version] as const),
-  ),
-})
-
-export const platformManifest: {
-  (version: string): (target: PackageTarget) => Record<string, unknown>
-  (target: PackageTarget, version: string): Record<string, unknown>
-} = dual(2, (target: PackageTarget, version: string) => ({
-  name: platformPackageName(target),
-  description: `Rika binaries for ${target}`,
-  ...shared(version),
-  ...platformConstraints(target),
-  files: ["bin/"],
-  preferUnplugged: true,
-}))
-
-export const launcherShim = `#!/usr/bin/env node
-"use strict"
-
-const { spawnSync } = require("node:child_process")
-
-const target = \`\${process.platform}-\${process.arch}\`
-const packageName = "${scope}/cli-" + target
-
-let binary
-try {
-  binary = require.resolve(packageName + "/bin/rika")
-} catch {
-  console.error(
-    "rika: no binary for " +
-      target +
-      ".\\nSupported: ${targetNames.join(", ")}." +
-      "\\nIf your platform is supported, reinstall without --no-optional or --ignore-optional.",
-  )
-  process.exit(1)
-}
-
-const result = spawnSync(binary, process.argv.slice(2), { stdio: "inherit" })
-if (result.error !== undefined) {
-  console.error("rika: failed to start " + binary + ": " + result.error.message)
-  process.exit(1)
-}
-if (typeof result.signal === "string") process.kill(process.pid, result.signal)
-process.exit(result.status === null ? 1 : result.status)
-`
 
 const PackageManifestJson = Schema.fromJsonString(Schema.Struct({ version: Schema.String }))
 
