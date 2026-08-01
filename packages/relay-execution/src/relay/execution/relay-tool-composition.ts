@@ -10,7 +10,7 @@ import * as WebSearch from "@rika/coding-tools/web-search-service"
 import * as MediaAnalyzerRuntime from "../../model/provider/media-analysis-adapter"
 import * as SubagentJoin from "./relay-child-result"
 import * as ChildResult from "./relay-child-result"
-import type { LayerOptions } from "./relay-execution-adapter"
+import type { LayerOptions } from "./relay-execution-layer"
 
 export const makeToolComposition = <AdditionalTools extends Record<string, Tool.Any>, RuntimeRequirements>(input: {
   readonly relayClient: Deferred.Deferred<Client.Interface>

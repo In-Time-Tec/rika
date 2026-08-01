@@ -4,7 +4,7 @@ import { ChildFanOutHost, Client, Ids } from "@relayfx/sdk"
 import { Clock, Deferred, Effect, Layer, Stream } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import * as ToolAdapter from "../relay-tool-runtime"
-import type { LayerOptions } from "../relay-execution-adapter"
+import type { LayerOptions } from "../relay-execution-layer"
 import { parentPermissions } from "../../../agent/definition/agent-permissions"
 
 export const childResult = (input: { readonly client: Client.Interface; readonly childId: string }) => {

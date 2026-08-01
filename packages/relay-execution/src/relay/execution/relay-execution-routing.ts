@@ -3,7 +3,7 @@ import { Client, Ids } from "@relayfx/sdk"
 import { Effect } from "effect"
 import { ModelRegistry, type ModelResilience } from "@batonfx/core"
 import type { Tool } from "effect/unstable/ai"
-import type { LayerOptions } from "./relay-execution-adapter"
+import type { LayerOptions } from "./relay-execution-layer"
 import { decodeExecutionRouteMetadata } from "./relay-execution-id-codec"
 
 export const registrationsFor = <AdditionalTools extends Record<string, Tool.Any>, R>(

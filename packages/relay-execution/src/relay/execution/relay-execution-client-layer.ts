@@ -21,7 +21,7 @@ import { childExecutionMethods } from "./relay-child-execution-methods"
 import { controlMethods } from "./relay-execution-control-methods"
 import { makeThreadHostLifecycle } from "./relay-execution-host-lifecycle"
 import { makeStartMethod } from "./relay-execution-start-method"
-import type { LayerOptions } from "./relay-execution-adapter"
+import type { LayerOptions } from "./relay-execution-layer"
 import { childExecutionDepth, toolsAtDepth } from "../../agent-depth"
 
 const addressId = Ids.AddressId.make("address:rika")

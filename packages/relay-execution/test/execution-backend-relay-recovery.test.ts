@@ -13,7 +13,7 @@ import { start } from "./current-execution-route"
 
 import { layer as relayLayer } from "../src/relay/execution/relay-execution-layer"
 import { fixture as testSupport } from "./execution-backend-relay-fixture"
-import type { LayerOptions } from "../src/relay/execution/relay-execution-adapter"
+import type { LayerOptions } from "../src/relay/execution/relay-execution-layer"
 const { runNative, encodeJson } = testSupport
 const provide = <A, E, R, ROut, E2, RIn>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<ROut, E2, RIn>) =>
   Effect.scoped(

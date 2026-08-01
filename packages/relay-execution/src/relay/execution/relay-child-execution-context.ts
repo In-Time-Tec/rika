@@ -1,6 +1,6 @@
 import type { Tool } from "effect/unstable/ai"
 import type { Client, Ids } from "@relayfx/sdk"
-import type { LayerOptions } from "./relay-execution-adapter"
+import type { LayerOptions } from "./relay-execution-layer"
 import type { childExecutionDepth } from "../../agent-depth"
 
 export interface ChildExecutionMethodsInput<AdditionalTools extends Record<string, Tool.Any>> {
