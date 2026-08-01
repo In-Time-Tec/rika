@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { defaults } from "../src/config-contract"
 import {
   dataPaths,
+  dataRootPaths,
   executionEventHistoryFor,
   globalDirectory,
   globalPaths,
@@ -27,10 +28,11 @@ describe("on-disk layout", () => {
     expect(dataPaths("/home/ada/").database).toBe(dataPaths("/home/ada").database)
   })
 
-  it("derives one stable event history directory in the data root that holds execution.db", () => {
+  it("keeps the current execution schema generation separate from legacy execution state", () => {
     const paths = dataPaths("/home/ada")
-    expect(paths.executionDatabase).toBe("/home/ada/.rika/execution.db")
-    expect(executionEventHistoryFor(paths.executionDatabase)).toBe("/home/ada/.rika/execution-event-history")
+    expect(paths.executionDatabase).toBe("/home/ada/.rika/execution-v2.db")
+    expect(dataRootPaths("/home/ada/.rika")).toEqual(paths)
+    expect(executionEventHistoryFor(paths.executionDatabase)).toBe("/home/ada/.rika/execution-v2-event-history")
     expect(executionEventHistoryFor(paths.executionDatabase)).toBe(executionEventHistoryFor(paths.executionDatabase))
     expect(executionEventHistoryFor(dataPaths("/home/ada/").executionDatabase)).toBe(
       executionEventHistoryFor(paths.executionDatabase),

@@ -20,10 +20,14 @@ export const globalPaths = (home: string) => ({
   extensionRoot: under(home, globalDirectory, "extensions"),
 })
 
-export const dataPaths = (home: string) => ({
-  database: under(home, workspaceDirectory, "rika.db"),
-  executionDatabase: under(home, workspaceDirectory, "execution.db"),
+export const executionDatabaseName = "execution-v2.db"
+
+export const dataRootPaths = (root: string) => ({
+  database: under(root, "rika.db"),
+  executionDatabase: under(root, executionDatabaseName),
 })
+
+export const dataPaths = (home: string) => dataRootPaths(under(home, workspaceDirectory))
 
 const parentDirectory = (filename: string): string => {
   const separator = filename.lastIndexOf("/")
@@ -32,5 +36,11 @@ const parentDirectory = (filename: string): string => {
   return filename.slice(0, separator)
 }
 
+const filenameStem = (filename: string): string => {
+  const separator = filename.lastIndexOf("/")
+  const basename = separator < 0 ? filename : filename.slice(separator + 1)
+  return basename.endsWith(".db") ? basename.slice(0, -3) : basename
+}
+
 export const executionEventHistoryFor = (executionDatabase: string): string =>
-  under(parentDirectory(executionDatabase), "execution-event-history")
+  under(parentDirectory(executionDatabase), `${filenameStem(executionDatabase)}-event-history`)

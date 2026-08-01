@@ -47,7 +47,7 @@ import { layer as residentLayer } from "./resident-client-transport"
 import { maxClientMessageBytes } from "./resident-wire"
 import * as ResidentProcessStartup from "./resident-process-startup"
 import { Format } from "@rika/tui"
-import { globalPaths, workspaceDirectory, workspacePaths } from "@rika/config/paths"
+import { dataPaths, dataRootPaths, globalPaths, workspaceDirectory, workspacePaths } from "@rika/config/paths"
 
 InteractiveController.installPaletteCommands(Palette.commands as Array<InteractiveController.PaletteCommand>)
 
@@ -1773,18 +1773,20 @@ const start = () => {
   let runtimeRestartRequest: { readonly threadId?: string } | undefined
   const hostDataRoot = environment.hostDataRoot._tag === "Some" ? environment.hostDataRoot.value : undefined
   const home = environment.home._tag === "Some" ? environment.home.value : process.cwd()
-  const defaultDataRoot = `${home}/.rika`
+  const defaultPaths = dataPaths(home)
   let database: string
   let executionDatabase: string
   if (hostDataRoot === undefined) {
-    database = environment.database._tag === "Some" ? environment.database.value : `${defaultDataRoot}/rika.db`
+    database = environment.database._tag === "Some" ? environment.database.value : defaultPaths.database
     executionDatabase =
       environment.executionDatabase._tag === "Some"
         ? environment.executionDatabase.value
-        : `${defaultDataRoot}/execution.db`
+        : defaultPaths.executionDatabase
   } else {
-    database = join(hostDataRoot, "rika.db")
-    executionDatabase = join(hostDataRoot, "execution.db")
+    const hostPaths = dataRootPaths(hostDataRoot)
+    database = environment.database._tag === "Some" ? environment.database.value : hostPaths.database
+    executionDatabase =
+      environment.executionDatabase._tag === "Some" ? environment.executionDatabase.value : hostPaths.executionDatabase
   }
   const globalLayout = globalPaths(home)
   const workspaceLayout = workspacePaths(process.cwd())

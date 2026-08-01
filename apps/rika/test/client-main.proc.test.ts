@@ -1,9 +1,10 @@
 import { expect, test } from "vitest"
+import { Database as NativeDatabase } from "bun:sqlite"
 import { fileURLToPath } from "node:url"
 import { Effect, Fiber, FileSystem, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { interactiveRuntimeRestartLimit, interactiveRuntimeRestartPlan } from "../src/client-main"
-import { interactivePty, run } from "./client-main-harness"
+import { interactivePty, reapResidents, run } from "./client-main-harness"
 
 test("restart plan respawns on exit 75 with a restart message", () => {
   expect(
@@ -143,6 +144,76 @@ test(
       }),
     ),
   30_000,
+)
+
+test(
+  "starts with the current execution schema generation while preserving a legacy execution database",
+  () =>
+    run(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem
+          const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+          const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-execution-generation-" })
+          const home = `${root}/home`
+          const dataRoot = `${home}/.rika`
+          const workspace = `${root}/workspace`
+          yield* fs.makeDirectory(dataRoot, { recursive: true })
+          yield* fs.makeDirectory(workspace)
+          yield* Effect.addFinalizer(() => reapResidents(dataRoot))
+          const legacyDatabase = `${dataRoot}/execution.db`
+          yield* Effect.sync(() => {
+            const database = new NativeDatabase(legacyDatabase)
+            database.exec(`
+              CREATE TABLE relay_migrations (
+                migration_id INTEGER PRIMARY KEY NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                name TEXT NOT NULL
+              );
+              INSERT INTO relay_migrations (migration_id, name) VALUES (1, 'legacy_baseline');
+            `)
+            database.close()
+          })
+          const legacyBefore = yield* fs.readFile(legacyDatabase)
+          const entrypoint = fileURLToPath(new URL("../src/client-main.ts", import.meta.url))
+          const handle = yield* spawner.spawn(
+            ChildProcess.make(process.execPath, [entrypoint, "run", "verify the execution schema"], {
+              cwd: workspace,
+              stdin: "ignore",
+              stdout: "pipe",
+              stderr: "pipe",
+              extendEnv: true,
+              env: {
+                HOME: home,
+                RIKA_INTERNAL_RESIDENT_GRACE: "0",
+                RIKA_TEST_MODEL_SCRIPT: '[{"parts":[{"type":"text","text":"CURRENT_SCHEMA_OK"}]}]',
+              },
+            }),
+          )
+          const [stdout, stderr, exitCode] = yield* Effect.all(
+            [
+              Stream.mkString(Stream.decodeText(handle.stdout)),
+              Stream.mkString(Stream.decodeText(handle.stderr)),
+              handle.exitCode,
+            ],
+            { concurrency: 3 },
+          ).pipe(
+            Effect.timeoutOrElse({
+              duration: "120 seconds",
+              orElse: () =>
+                handle
+                  .kill({ killSignal: "SIGKILL" })
+                  .pipe(Effect.ignore, Effect.andThen(Effect.die("current execution schema process never exited"))),
+            }),
+          )
+          expect(Number(exitCode), `${stdout}\n${stderr}`).toBe(0)
+          expect(stdout).toContain("CURRENT_SCHEMA_OK")
+          expect(yield* fs.exists(`${dataRoot}/execution-v2.db`)).toBe(true)
+          expect([...(yield* fs.readFile(legacyDatabase))]).toEqual([...legacyBefore])
+        }),
+      ),
+    ),
+  180_000,
 )
 
 test(

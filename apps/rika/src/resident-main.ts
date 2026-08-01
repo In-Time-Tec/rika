@@ -6,32 +6,14 @@ import * as Operation from "@rika/app/operation-contract"
 import * as ResidentService from "@rika/app/resident-service"
 import { ConfigContract, ConfigService } from "@rika/config"
 import * as Diagnostic from "@rika/app/diagnostic-contract"
-import { globalPaths, workspacePaths } from "@rika/config/paths"
+import { dataPaths, dataRootPaths, globalPaths, workspacePaths } from "@rika/config/paths"
 import { FetchHttpClient } from "effect/unstable/http"
-import {
-  Cause,
-  Clock,
-  Config,
-  Context,
-  Deferred,
-  Effect,
-  FileSystem,
-  Layer,
-  Path,
-  Ref,
-  References,
-  Schema,
-} from "effect"
+import { Cause, Clock, Config, Context, Deferred, Effect, FileSystem, Layer, Ref, References, Schema } from "effect"
 import { createHash } from "node:crypto"
 import * as Logging from "./logging"
 import { serve as serveResident } from "./resident-host-transport"
 import * as ResidentProcessStartup from "./resident-process-startup"
 import { version } from "./version"
-
-const pathService = Effect.runSync(Effect.scoped(Layer.build(Path.layer))).pipe((context) =>
-  Context.get(context, Path.Path),
-)
-const join = pathService.join
 
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -84,18 +66,21 @@ const start = () => {
   )
   const hostDataRoot = environment.hostDataRoot._tag === "Some" ? environment.hostDataRoot.value : undefined
   const home = environment.home._tag === "Some" ? environment.home.value : process.cwd()
+  const defaultPaths = dataPaths(home)
   const defaultDataRoot = `${home}/.rika`
   let database: string
   let executionDatabase: string
   if (hostDataRoot === undefined) {
-    database = environment.database._tag === "Some" ? environment.database.value : `${defaultDataRoot}/rika.db`
+    database = environment.database._tag === "Some" ? environment.database.value : defaultPaths.database
     executionDatabase =
       environment.executionDatabase._tag === "Some"
         ? environment.executionDatabase.value
-        : `${defaultDataRoot}/execution.db`
+        : defaultPaths.executionDatabase
   } else {
-    database = join(hostDataRoot, "rika.db")
-    executionDatabase = join(hostDataRoot, "execution.db")
+    const hostPaths = dataRootPaths(hostDataRoot)
+    database = environment.database._tag === "Some" ? environment.database.value : hostPaths.database
+    executionDatabase =
+      environment.executionDatabase._tag === "Some" ? environment.executionDatabase.value : hostPaths.executionDatabase
   }
   const globalLayout = globalPaths(home)
   const workspaceLayout = workspacePaths(process.cwd())

@@ -2,6 +2,7 @@ import { Config, Console, Effect, Option, Path } from "effect"
 import { Argument, Command } from "effect/unstable/cli"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import * as DataRoot from "@rika/config/data-root"
+import { dataRootPaths } from "@rika/config/paths"
 import * as Logging from "../logging"
 
 const dataRoot = Effect.fn("DiagnosticsCommand.dataRoot")(function* () {
@@ -13,9 +14,10 @@ const dataRoot = Effect.fn("DiagnosticsCommand.dataRoot")(function* () {
     Option.getOrElse(home, () => "."),
     ".rika",
   )
+  const defaults = dataRootPaths(root)
   return yield* DataRoot.canonicalDataRoot(
-    Option.getOrElse(productDatabase, () => path.join(root, "rika.db")),
-    Option.getOrElse(executionDatabase, () => path.join(root, "execution.db")),
+    Option.getOrElse(productDatabase, () => defaults.database),
+    Option.getOrElse(executionDatabase, () => defaults.executionDatabase),
   )
 })
 
