@@ -1,5 +1,7 @@
 import * as TranscriptPage from "@rika/product/transcript-page"
-import * as InteractiveController from "../src/interactive-controller"
+import * as InteractiveController from "../src/interactive/controller/interactive-controller"
+import * as ThreadSelection from "../src/interactive/controller/terminal-thread-selection"
+import * as InteractiveFrameBatch from "../src/interactive/controller/interactive-frame-batch"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
@@ -14,6 +16,9 @@ import * as TranscriptRecordedShell from "@rika/transcript/recorded-shell-presen
 import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import * as ViewState from "@rika/terminal/terminal-state"
+import * as Reducer from "@rika/terminal/terminal-state-reducer"
+import * as Message from "@rika/terminal/terminal-message"
+import * as TranscriptPresentation from "@rika/terminal/terminal-transcript-presentation"
 import { renderTranscriptStyled } from "@rika/terminal/opentui-surface"
 import { HashMap } from "effect"
 import { expect, it } from "vitest"
@@ -381,14 +386,12 @@ it("maps the new-thread palette action to a command and resets the transcript fr
   InteractiveController.installPaletteCommands(palette)
   InteractiveController.installPaletteCommands(palette)
   expect(palette).toEqual(InteractiveController.paletteCommands)
-  InteractiveController.installPaletteCommands(
-    ViewState.Palette.commands as Array<InteractiveController.PaletteCommand>,
-  )
-  let paletteModel = ViewState.update(ViewState.initial("/work"), {
+  InteractiveController.installPaletteCommands(Reducer.commands as Array<InteractiveController.PaletteCommand>)
+  let paletteModel = Reducer.update(ViewState.initial("/work"), {
     _tag: "KeyPressed",
     key: key({ name: "o", ctrl: true }),
   })
-  paletteModel = ViewState.update(paletteModel, { _tag: "KeyPressed", key: key({ name: "return" }) })
+  paletteModel = Reducer.update(paletteModel, { _tag: "KeyPressed", key: key({ name: "return" }) })
   expect(paletteModel.pendingAction).toEqual({ _tag: "NewThread" })
   const freshThread = { ...thread, id: Thread.ThreadId.make("fresh"), title: "New thread" }
   const reset = InteractiveController.update(populated, {
@@ -980,8 +983,8 @@ it("reloads one completed subagent tree with rendered markdown and no serialized
     hasOlder: false,
     threadCostUsd: 0,
   })
-  let liveModel = ViewState.ExecutionEvents.projectUnits(ViewState.initial("/work", "medium"), parent.units)
-  liveModel = ViewState.ExecutionEvents.projectChildUnits(liveModel, `${target.id}:agent`, child.units)
+  let liveModel = TranscriptPresentation.applyTurnUnits(ViewState.initial("/work", "medium"), parent.units)
+  liveModel = TranscriptPresentation.applyChildUnits(liveModel, `${target.id}:agent`, child.units)
   liveModel = { ...liveModel, expandedRowKeys: [`tool:${target.id}:agent`] }
   const rendered = renderTranscriptStyled(loaded.state.model)
   const text = rendered.chunks.map((chunk) => chunk.text).join("")
@@ -1061,8 +1064,8 @@ it("keeps cancelled child tools terminal in live and reloaded projections", () =
     hasOlder: false,
     threadCostUsd: 0,
   }).state.model
-  let live = ViewState.ExecutionEvents.projectUnits(ViewState.initial("/work", "medium"), parent.units)
-  live = ViewState.ExecutionEvents.projectChildUnits(live, `${target.id}:agent`, child.units)
+  let live = TranscriptPresentation.applyTurnUnits(ViewState.initial("/work", "medium"), parent.units)
+  live = TranscriptPresentation.applyChildUnits(live, `${target.id}:agent`, child.units)
 
   for (const model of [live, loaded]) {
     expect(model.blocks).toEqual([
@@ -1743,7 +1746,7 @@ it("keeps live child patches rendering after a mid-turn selection reload", () =>
 
 it("keeps one of five status labels from submit until the turn completes", () => {
   const turn = { ...entries("active", 2)[0]!.turn, status: "running" as const }
-  const submitted = ViewState.update(
+  const submitted = Reducer.update(
     { ...ViewState.initial("/work", "medium"), input: "run it", cursor: 6 },
     { _tag: "Submitted" },
   )
@@ -1758,7 +1761,7 @@ it("keeps one of five status labels from submit until the turn completes", () =>
   state = feed.state
   const labels = ["Sending", "Waiting", "Thinking 2 tok", "Streaming 2 tok", "Running 1 tool", "Running 2 tools"]
   const expectStatus = (expected: string) => {
-    const label = ViewState.formatActivity(state.model.activity)
+    const label = Message.formatActivity(state.model.activity)
     expect(label).toBe(expected)
     expect(labels).toContain(label)
   }
@@ -1806,7 +1809,7 @@ it("keeps one of five status labels from submit until the turn completes", () =>
   expectStatus("Waiting")
   expect(state.model.busy).toBe(true)
   state = feed.stop("completed").state
-  expect(ViewState.formatActivity(state.model.activity)).toBeUndefined()
+  expect(Message.formatActivity(state.model.activity)).toBeUndefined()
   expect(state.model.busy).toBe(false)
 })
 
@@ -1833,12 +1836,12 @@ it("keeps 200ms tool lifecycle events in distinct TUI frames", () => {
   let now = 0
   const scheduled: Array<{ readonly at: number; readonly flush: () => void }> = []
   const applied: Array<{ readonly at: number; readonly type: string; readonly activity: string | undefined }> = []
-  const batcher = InteractiveController.makeFeedFrameBatcher<ProjectionPatched>({
+  const batcher = InteractiveFrameBatch.makeFeedFrameBatcher<ProjectionPatched>({
     schedule: (flush) => scheduled.push({ at: now + 16, flush }),
     apply: (events) => {
       for (const event of events) {
         state = InteractiveController.update(state, event).state
-        applied.push({ at: now, type: event.origin.type, activity: ViewState.formatActivity(state.model.activity) })
+        applied.push({ at: now, type: event.origin.type, activity: Message.formatActivity(state.model.activity) })
       }
     },
     render: () => {},
@@ -2214,7 +2217,7 @@ it("requests a queue resync when the durable count disagrees with an otherwise c
     queueThreadId: "thread-a",
     queueRevision: 1,
   }
-  const updated = InteractiveController.updateQueue(model, {
+  const updated = ThreadSelection.updateQueue(model, {
     _tag: "QueueUpdated",
     selectionEpoch: 1,
     threadId: Thread.ThreadId.make("thread-a"),
@@ -2228,11 +2231,11 @@ it("requests a queue resync when the durable count disagrees with an otherwise c
 })
 
 it("restores the rejected composer and reports the pending count when the queue is full", () => {
-  const submitted = ViewState.update(
-    ViewState.update(initialState().model, { _tag: "ComposerReplaced", text: "retry this prompt" }),
+  const submitted = Reducer.update(
+    Reducer.update(initialState().model, { _tag: "ComposerReplaced", text: "retry this prompt" }),
     { _tag: "Submitted" },
   )
-  const updated = InteractiveController.updateQueue(submitted, {
+  const updated = ThreadSelection.updateQueue(submitted, {
     _tag: "QueueFull",
     selectionEpoch: 0,
     threadId: Thread.ThreadId.make("thread-a"),
@@ -2248,7 +2251,7 @@ it("restores the rejected composer and reports the pending count when the queue 
 })
 
 it("removes a promoted turn and exits queue edit mode synchronously", () => {
-  const queued = ViewState.resetQueue(
+  const queued = Reducer.resetQueue(
     {
       ...initialState().model,
       currentThreadId: "thread-a",
@@ -2262,7 +2265,7 @@ it("removes a promoted turn and exits queue edit mode synchronously", () => {
     [{ id: "promoted", prompt: "edited queued prompt" }],
   )
 
-  const promoted = InteractiveController.removePromotedTurn(queued, "thread-a", "promoted")
+  const promoted = ThreadSelection.removePromotedTurn(queued, "thread-a", "promoted")
 
   expect(promoted.queue).toEqual([])
   expect(promoted.queueRevision).toBe(5)
@@ -2316,7 +2319,7 @@ it("eagerly consumes more than one frame of events while bounding reducer work p
     projection = next
     return event
   })
-  const batcher = InteractiveController.makeFeedFrameBatcher<ProjectionPatched>({
+  const batcher = InteractiveFrameBatch.makeFeedFrameBatcher<ProjectionPatched>({
     schedule: (flush) => scheduled.push(flush),
     apply: (batch) => {
       for (const event of batch) {
@@ -2359,7 +2362,7 @@ it("preserves feed order across lanes and batch boundaries", () => {
   }
   const scheduled: Array<() => void> = []
   const applied: Array<string> = []
-  const batcher = InteractiveController.makeFeedFrameBatcher<FeedEvent>({
+  const batcher = InteractiveFrameBatch.makeFeedFrameBatcher<FeedEvent>({
     schedule: (flush) => scheduled.push(flush),
     apply: (events) => applied.push(...events.map((event) => event.id)),
     render: () => undefined,

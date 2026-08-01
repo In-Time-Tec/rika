@@ -1,5 +1,5 @@
 import { expect, it } from "vitest"
-import { renderGoodbye } from "../src/goodbye"
+import { renderGoodbye } from "../src/interactive/input/goodbye-message"
 
 const esc = String.fromCharCode(27)
 

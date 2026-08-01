@@ -4,10 +4,10 @@ import { Config, Data, Effect, FileSystem, Layer, Path, Stream } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import * as ViewState from "@rika/terminal/terminal-state"
+import * as Reducer from "@rika/terminal/terminal-state-reducer"
+import * as Session from "@rika/terminal/terminal-session"
 import {
   defaultOpenArguments,
-  initialSubmitAction,
-  imagePasteBlockedNotice,
   materializePromptParts,
   parseChangedFiles,
   pasteClipboardPng,
@@ -16,7 +16,9 @@ import {
   readChangedFiles,
   refreshChangedFilesOn,
   resolveLocalFile,
-} from "../src/interactive-main"
+} from "../src/interactive/process/interactive-process"
+import { initialSubmitAction } from "../src/interactive/input/command-input"
+import { imagePasteBlockedNotice } from "../src/interactive/input/prompt-input"
 
 class TestFailure extends Data.TaggedError("TestFailure")<{ readonly operation: string; readonly cause: unknown }> {}
 
@@ -78,7 +80,7 @@ test("materializes ordered text and dropped image paths for submission", () =>
       yield* fileSystem.writeFile(path.join(root, "relative image.png"), Uint8Array.from([1, 2, 3]))
       yield* fileSystem.writeFile(path.join(root, "url image.webp"), Uint8Array.from([4, 5]))
       const prompt = `before relative\\ image.png middle file://${root}/url%20image.webp after`
-      expect(yield* materializePromptParts(ViewState.promptParts(prompt), root)).toEqual([
+      expect(yield* materializePromptParts(Session.promptParts(prompt), root)).toEqual([
         { type: "text", text: "before " },
         { type: "image", mediaType: "image/png", data: "AQID", filename: "relative image.png" },
         { type: "text", text: " middle " },
@@ -96,7 +98,7 @@ test("materializes typed image mentions in text order without retaining mention 
       const root = yield* workspace("rika-prompt-parts-")
       yield* fileSystem.writeFile(path.join(root, "diagram one.png"), Uint8Array.from([1, 2, 3]))
       const prompt = 'before @image:"diagram one.png" after'
-      expect(yield* materializePromptParts(ViewState.promptParts(prompt), root)).toEqual([
+      expect(yield* materializePromptParts(Session.promptParts(prompt), root)).toEqual([
         { type: "text", text: "before " },
         { type: "image", mediaType: "image/png", data: "AQID", filename: "diagram one.png" },
         { type: "text", text: " after" },
@@ -167,17 +169,17 @@ test("preserves expanded text-only paste parts instead of falling back to the co
   run(
     Effect.gen(function* () {
       const token = String.fromCharCode(0xe000)
-      const model = ViewState.update(
+      const model = Reducer.update(
         { ...ViewState.initial("/work"), input: "before ", cursor: 7 },
         { _tag: "Pasted", text: "first line\nsecond line" },
       )
-      const completed = ViewState.update(model, {
+      const completed = Reducer.update(model, {
         _tag: "KeyPressed",
         key: { name: "x", sequence: " after", ctrl: false, alt: false, meta: false, shift: false, eventType: "press" },
       })
       expect(completed.input).toBe(`before ${token} after`)
       expect(
-        yield* materializePromptParts(ViewState.promptParts(completed.input, completed.pastedText), "/work"),
+        yield* materializePromptParts(Session.promptParts(completed.input, completed.pastedText), "/work"),
       ).toEqual([
         { type: "text", text: "before " },
         { type: "text", text: "first line\nsecond line", pasted: true },

@@ -1,4 +1,6 @@
 import { Function } from "effect"
+import * as Composer from "./state/model/terminal-composer-state"
+import * as ComposerPaste from "./state/model/terminal-composer-paste"
 import type { Mode } from "./state/model/terminal-state"
 import type { PromptPart } from "./state/model/terminal-composer-state"
 
@@ -41,6 +43,11 @@ export interface Adapter {
   readonly cancel?: () => void
   readonly selectThread?: (id: string) => void
 }
+
+export const classifyPrompt = Composer.classifyPrompt
+export const promptParts = Composer.promptParts
+export const displayInput = Composer.displayInput
+export const expandPastedText = ComposerPaste.expandPastedText
 
 export const execute: {
   (action: Action): (adapter: Adapter) => boolean

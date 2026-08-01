@@ -1,9 +1,10 @@
 import { Schema } from "effect"
+import * as ActivityState from "./terminal-activity-state"
 import type { Unit } from "@rika/transcript/transcript-unit"
 import type { Key } from "../../presentation/terminal/terminal-keymap"
 import type { ChangedFile } from "./terminal-changed-file"
 import type { ThreadItem } from "./terminal-thread-state"
-import type { TranscriptBlock } from "./terminal-transcript-state"
+import type { TranscriptBlock, TranscriptItem } from "./terminal-transcript-state"
 
 export const Entry = Schema.Struct({
   role: Schema.Literals(["user", "assistant", "notice"]),
@@ -12,7 +13,7 @@ export const Entry = Schema.Struct({
 })
 export type Entry = typeof Entry.Type
 
-export interface PastedTextAttachment {
+interface PastedTextAttachment {
   readonly type: "text" | "image"
   readonly token: string
   readonly value?: string
@@ -20,14 +21,14 @@ export interface PastedTextAttachment {
   readonly label: string
 }
 
-export type UiEvent = {
+type UiEvent = {
   readonly id: string
   readonly cursor: string
   readonly turnId?: string
   readonly block: TranscriptBlock
 }
 
-export type Message =
+type Message =
   | { readonly _tag: "KeyPressed"; readonly key: Key }
   | { readonly _tag: "Pasted"; readonly text: string }
   | { readonly _tag: "ImageInserted"; readonly path: string }
@@ -94,3 +95,10 @@ export type Message =
       readonly threadId: string
       readonly turns: ReadonlyArray<{ readonly prompt: string; readonly units: ReadonlyArray<Unit> }>
     }
+
+export type { Message, UiEvent, PastedTextAttachment }
+export type { Activity } from "./terminal-activity-state"
+export const runningToolsActivity = ActivityState.runningToolsActivity
+export const streamActivity = ActivityState.streamActivity
+export const formatActivity = ActivityState.formatActivity
+export type { TranscriptBlock, TranscriptItem, ChangedFile, ThreadItem }

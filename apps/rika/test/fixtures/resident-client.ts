@@ -24,7 +24,7 @@ import {
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { make } from "../../src/resident-client-transport"
-import * as InteractiveController from "../../src/interactive-controller"
+import * as InteractiveController from "../../src/interactive/controller/interactive-controller"
 import * as ResidentProcessStartup from "../../src/resident-process-startup"
 
 const JsonLine = Schema.UnknownFromJsonString

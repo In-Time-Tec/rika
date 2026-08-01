@@ -1,4 +1,7 @@
 import { Function } from "effect"
+import * as QueueState from "../model/terminal-queue-state"
+import * as Palette from "../../presentation/terminal/command-palette"
+import * as ThreadNavigation from "../model/terminal-thread-navigation"
 import type { Key } from "../../presentation/terminal/terminal-keymap"
 import type { Message } from "../model/terminal-message"
 import type { Model } from "../model/terminal-state"
@@ -191,3 +194,7 @@ export const update: {
 )
 
 export const reduce = update
+export const applyQueueDelta = QueueState.applyQueueDelta
+export const resetQueue = QueueState.resetQueue
+export const commands = Palette.commands
+export const selectedThreadMetadata = ThreadNavigation.selectedThreadMetadata
