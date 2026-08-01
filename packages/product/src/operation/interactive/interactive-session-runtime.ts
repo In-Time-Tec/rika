@@ -56,6 +56,7 @@ export interface InteractiveSessionInput {
   readonly dispatchThreadSummaries: any
   readonly recordedShellStartedEvent: any
   readonly recordedShellSettledEvents: any
+  readonly executeShellCommand: typeof import("./interactive-operation-leaves").executeShellCommand
   readonly nextSessionId: () => number
   readonly activitySequence: number
 }
