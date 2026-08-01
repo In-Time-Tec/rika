@@ -9,7 +9,7 @@ const {
   checkScriptBoundaries,
   checkSourceMetrics,
   checkTestTopology,
-  applyBaseline,
+  checkSourceBasename,
   checkMigrationIdentity,
 } = repositoryPolicy
 
@@ -98,6 +98,14 @@ describe("repository policy", () => {
     ).toEqual([])
   })
 
+  test("allows maintained framework configuration basenames without path waivers", () => {
+    expect(checkSourceBasename("vitest.config.ts")).toBeUndefined()
+    expect(checkSourceBasename("test/live/vitest.config.ts")).toBeUndefined()
+    expect(checkSourceBasename("test/live/custom-vitest.config.ts")).toEqual(
+      expect.objectContaining({ rule: "basename", severity: "error" }),
+    )
+  })
+
   test("enforces unique product migration IDs", () => {
     expect(checkMigrationIdentity(["packages/a/product-migration-007-route-pins.ts"])).toEqual([])
     expect(
@@ -109,27 +117,5 @@ describe("repository policy", () => {
       expect.objectContaining({ path: "packages/a/product-migration-007-route-pins.ts", rule: "migration-identity" }),
       expect.objectContaining({ path: "packages/b/product-migration-007-other-pins.ts", rule: "migration-identity" }),
     ])
-  })
-
-  test("suppresses only diagnostics recorded in the baseline", () => {
-    const diagnostic = {
-      path: "packages/legacy.ts",
-      rule: "file-size",
-      severity: "error" as const,
-      message: "old",
-      remediation: "split",
-    }
-    expect(
-      applyBaseline({
-        diagnostics: [diagnostic],
-        baseline: { base: "19a8a4b", paths: [], entries: [{ ...diagnostic }] },
-      }),
-    ).toEqual([])
-    expect(
-      applyBaseline({
-        diagnostics: [diagnostic],
-        baseline: { base: "19a8a4b", paths: [], entries: [] },
-      }),
-    ).toEqual([diagnostic])
   })
 })
