@@ -1,10 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { assert, describe, it } from "@effect/vitest"
 import * as Diagnostic from "../src/diagnostic-file-logging-contract"
-import * as TurnRepository from "@rika/persistence/turn-repository"
-import * as ExecutionBackend from "@rika/runtime/contract"
 import { Cause, Duration, Effect, FileSystem, Layer, Path, Ref, Schema } from "effect"
-import { ModelConfigurationError } from "../src/resident-product"
 import { TestClock } from "effect/testing"
 import * as Logging from "../src/diagnostic-file-logging"
 
@@ -154,7 +151,7 @@ describe("Logging", () => {
                   taggedFailure("ExecutionIngestFollowFailure"),
                   Effect.logError("failure.tagged").pipe(
                     Effect.annotateLogs(
-                      Diagnostic.failureFrom(ModelConfigurationError.make({ message: "invalid model configuration" })),
+                      Diagnostic.failureFrom(new Error("invalid model configuration")),
                     ),
                   ),
                 ],
@@ -170,7 +167,7 @@ describe("Logging", () => {
             { "rika.model.backend.kind": "test-script" },
             { "rika.model.backend.kind": "test-response" },
             { "rika.failure.kind": "ExecutionIngestFollowFailure" },
-            { "rika.failure.kind": "ModelConfigurationError" },
+            { "rika.failure.kind": "Error" }
           ],
         )
       }),
@@ -241,38 +238,16 @@ describe("Logging", () => {
         const fs = yield* FileSystem.FileSystem
         const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-recovery-failure-" })
         const opaque = "sk-live-9a2f7c1e"
-        const turns = yield* TurnRepository.makeMemory([])
-        const backend = ExecutionBackend.Service.of({
-          invokeChild: () => Effect.die("unused"),
-          createFanOut: () => Effect.die("unused"),
-          inspectFanOut: () => Effect.die("unused"),
-          cancelFanOut: () => Effect.die("unused"),
-          registerWorkflows: () => Effect.die("unused"),
-          startWorkflow: () => Effect.die("unused"),
-          inspectWorkflow: () => Effect.die("unused"),
-          cancelWorkflow: () => Effect.die("unused"),
-          start: () => Effect.die("unused"),
-          replay: () => Effect.die("unused"),
-          inspect: () => Effect.die("unused"),
-          steer: () => Effect.die("unused"),
-          resolveInvocationSource: () => Effect.die("unused"),
-          listOpenRootExecutions: Effect.succeed([
-            { kind: "unrecognized" as const, executionId: "auxiliary:title:malformed", createdAt: 0 },
-          ]),
-          cancel: () => Effect.fail(ExecutionBackend.BackendError.make({ message: opaque })),
-        })
         yield* TestClock.adjust("1 minute")
         yield* Effect.scoped(
           Effect.flatMap(
             Layer.build(
               Layer.mergeAll(
                 Logging.layer({ dataRoot: root, role: "resident", version: "1", pid: 42 }),
-                Layer.succeed(TurnRepository.Service, turns),
-                Layer.succeed(ExecutionBackend.Service, backend),
               ),
             ),
             (context) =>
-              Effect.logError("execution.recovery.orphan_cancel_failed").pipe(
+              Effect.logError("execution.recovery.orphan_cancel_failed", opaque).pipe(
                 Effect.annotateLogs(Diagnostic.failure("RecoveredRootCancelFailure")),
                 Effect.provide(context),
               ),

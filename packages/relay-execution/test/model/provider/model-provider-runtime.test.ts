@@ -5,6 +5,7 @@ import * as ModelRouteResolution from "@rika/configuration/model-route-resolutio
 import * as SettingsDefaults from "@rika/configuration/configuration-settings"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { ModelRegistry } from "@batonfx/core"
+import { classifyFailure as classifyOpenAiFailure } from "@batonfx/providers/openai"
 import { expect, test } from "vitest"
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import * as OpenAiAuthContract from "@rika/product/openai-auth-contract"
@@ -317,16 +318,15 @@ test("classifies a nested OpenAI Responses context error without exposing the Ef
           const prepared = yield* runtime.prepare([route])
           const registration = prepared.registrations[0]!
           const context = yield* Layer.build(registration.layer)
-          const parts = yield* LanguageModel.streamText({ prompt: "overflow" }).pipe(
-            Stream.runCollect,
-            Effect.provide(context),
+          const exit = yield* Effect.exit(
+            LanguageModel.streamText({ prompt: "overflow" }).pipe(Stream.runCollect, Effect.provide(context)),
           )
-          const error = parts.find((part) => part.type === "error")
-          expect(error?.type).toBe("error")
-          if (error?.type !== "error") return
-          const rendered = encodeJson(error.error)
+          expect(exit._tag).toBe("Failure")
+          if (exit._tag !== "Failure") return
+          const failure = Cause.squash(exit.cause)
+          const rendered = encodeJson(failure)
 
-          expect(registration.classifyFailure?.(error.error)).toBe("context-overflow")
+          expect(classifyOpenAiFailure(failure)).toBe("context-overflow")
           expect(rendered).toContain("context_length_exceeded")
           expect(rendered).not.toContain("Invalid output: Missing key")
         }),
