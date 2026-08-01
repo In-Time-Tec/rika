@@ -12,7 +12,7 @@ import { FetchHttpClient } from "effect/unstable/http"
 import { Cause, Clock, Config, Context, Effect, FileSystem, Layer, Ref, References, Schema } from "effect"
 import { createHash } from "node:crypto"
 import * as Logging from "./logging"
-import { serve as serveResident } from "./resident-host-transport"
+import { serve as serveResident } from "./transport/host/resident-host-transport"
 import * as ResidentProcessStartup from "./resident-process-startup"
 import { version } from "./version"
 

@@ -6,11 +6,10 @@ import {
   makeClientMessageFrameDecoder,
   makeServerMessageFrameDecoder,
   maxClientMessageBytes,
-  maxFrameBytes,
   outputFrames,
-  parse,
   serverMessageFrames,
-} from "../src/resident-wire"
+} from "../src/transport/protocol/resident-message-codec"
+import { maxFrameBytes, parse } from "../src/transport/protocol/resident-protocol"
 
 const decode = Schema.decodeUnknownSync(ResidentService.ServerMessage)
 const encoder = new TextEncoder()

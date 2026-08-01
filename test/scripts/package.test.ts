@@ -120,7 +120,7 @@ describe("release target construction", () => {
     const files = [...graph.files].join("\n")
     const external = [...graph.external].join("\n")
     for (const forbidden of [
-      "/resident-host-transport.ts",
+      "/transport/host/resident-host-transport.ts",
       "/apps/rika/src/main.ts",
       "/product-database.ts",
       "/packages/product-store/src/thread-repository.ts",
@@ -133,7 +133,7 @@ describe("release target construction", () => {
     for (const forbidden of ["@batonfx/providers", "@relayfx/", "@opentui/", "@ff-labs/"])
       expect(external).not.toContain(forbidden)
     expect(files).toContain("/product-operation-service.ts")
-    expect(files).toContain("/resident-client-transport.ts")
+    expect(files).toContain("/transport/client/resident-client-transport.ts")
   })
 
   test("keeps executable dependency sets separated", async () => {
@@ -141,7 +141,7 @@ describe("release target construction", () => {
     const resident = await sourceGraph("resident-main.ts")
     const interactiveFiles = [...interactive.files].join("\n")
     const residentFiles = [...resident.files].join("\n")
-    expect(interactiveFiles).not.toContain("/resident-host-transport.ts")
+    expect(interactiveFiles).not.toContain("/transport/host/resident-host-transport.ts")
     expect(interactiveFiles).not.toContain("/model-provider-runtime.ts")
     expect([...interactive.external].join("\n")).not.toContain("@batonfx/providers")
     expect(residentFiles).not.toContain("/packages/terminal/")

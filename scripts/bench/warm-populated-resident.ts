@@ -3,7 +3,7 @@ import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as ResidentService from "@rika/product/resident-service"
 import { Config, Effect, Layer, Option, Schema } from "effect"
-import { layer as residentLayer } from "../../apps/rika/src/resident-client-transport"
+import { layer as residentLayer } from "../../apps/rika/src/transport/client/resident-client-transport"
 
 class WarmConfigurationError extends Schema.TaggedErrorClass<WarmConfigurationError>()("WarmConfigurationError", {
   message: Schema.String,

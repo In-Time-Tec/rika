@@ -23,7 +23,7 @@ import {
   Stream,
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { make } from "../../src/resident-client-transport"
+import { make } from "../../src/transport/client/resident-client-startup"
 import * as InteractiveController from "../../src/interactive/controller/interactive-controller"
 import * as ResidentProcessStartup from "../../src/resident-process-startup"
 
