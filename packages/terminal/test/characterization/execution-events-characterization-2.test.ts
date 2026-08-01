@@ -10,7 +10,8 @@ import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event
 
 import { expect, it } from "vitest"
 
-import { ExecutionEvents, ViewState, type Model } from "../support/terminal-state-access"
+import { projectChildUnits, projectUnits } from "../../src/presentation/transcript/terminal-transcript-projection"
+import { initial, type Model } from "../../src/state/model/terminal-state"
 
 import { renderTranscriptStyled } from "../../src/opentui/rendering/opentui-renderer"
 
@@ -60,8 +61,8 @@ const delegation = (
     "",
     childEvents.length === 0 ? [event("done", 0, "execution.completed")] : childEvents,
   )
-  let model = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
-  model = ExecutionEvents.projectChildUnits(model, "turn:agent", child.units)
+  let model = projectUnits(initial("/work"), parent.units)
+  model = projectChildUnits(model, "turn:agent", child.units)
   const tool = (model.blocks as ReadonlyArray<TranscriptPresentationModel.Block>).find(
     (block) => block._tag === "ToolCall" && block.id === "turn:agent",
   ) as Extract<TranscriptPresentationModel.Block, { _tag: "ToolCall" }>
@@ -97,13 +98,13 @@ it("projects cancelled root and child tools as terminal without a duplicate noti
   ])
   const root = TranscriptProjection.Projection.applyEvent(parent, event("root-cancelled", 2, "execution.cancelled"))
 
-  let live = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
-  live = ExecutionEvents.projectChildUnits(live, "turn:agent", child.units)
-  live = ExecutionEvents.projectUnits(live, root.units)
+  let live = projectUnits(initial("/work"), parent.units)
+  live = projectChildUnits(live, "turn:agent", child.units)
+  live = projectUnits(live, root.units)
   const durable = TranscriptNestedProjection.withNestedProjections(root, [
     { parentId: "turn:agent", projection: child },
   ])
-  const reloaded = ExecutionEvents.projectUnits(ViewState.initial("/work"), durable.units)
+  const reloaded = projectUnits(initial("/work"), durable.units)
 
   for (const model of [live, reloaded]) {
     expect(model.blocks).toEqual([
@@ -133,10 +134,10 @@ it("lets a reasoned nested cancellation override a stale failed parent in live a
     }),
     event("child-cancelled", 3, "execution.cancelled", { data: { reason: "parent stopped this child" } }),
   ])
-  let live = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
-  live = ExecutionEvents.projectChildUnits(live, "turn:agent", child.units)
-  const replay = ExecutionEvents.projectUnits(
-    ViewState.initial("/work"),
+  let live = projectUnits(initial("/work"), parent.units)
+  live = projectChildUnits(live, "turn:agent", child.units)
+  const replay = projectUnits(
+    initial("/work"),
     TranscriptNestedProjection.withNestedProjections(parent, [{ parentId: "turn:agent", projection: child }]).units,
   )
 
@@ -164,8 +165,8 @@ it("keeps an early durable cancellation as an invisible execution outcome", () =
   const projection = TranscriptProjection.Projection.project("turn", "wait", [
     event("cancelled", 0, "execution.cancelled"),
   ])
-  const once = ExecutionEvents.projectUnits(ViewState.initial("/work"), projection.units)
-  const twice = ExecutionEvents.projectUnits(once, projection.units)
+  const once = projectUnits(initial("/work"), projection.units)
+  const twice = projectUnits(once, projection.units)
 
   expect(projection.units.find((unit) => unit.executionOutcome !== undefined)?.executionOutcome).toEqual({
     status: "cancelled",
@@ -201,12 +202,12 @@ it("restores a recovered Report verdict when the child failure arrives before th
       data: { tool_call_id: "agent", child_execution_id: "execution:child" },
     }),
   )
-  let model = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
+  let model = projectUnits(initial("/work"), parent.units)
   const child = TranscriptProjection.Projection.project("child", "", [
     event("answer", 0, "model.output.completed", { text: "The finding" }),
     failedChildEvent(1),
   ])
-  model = ExecutionEvents.projectChildUnits(model, "turn:agent", child.units)
+  model = projectChildUnits(model, "turn:agent", child.units)
   const interim = (model.blocks as ReadonlyArray<TranscriptPresentationModel.Block>).find(
     (block) => block._tag === "ToolCall" && block.id === "turn:agent",
   ) as Extract<TranscriptPresentationModel.Block, { _tag: "ToolCall" }>
@@ -215,7 +216,7 @@ it("restores a recovered Report verdict when the child failure arrives before th
     parent,
     event("parent-result", 2, "tool.result.received", { data: { tool_call_id: "agent", output: recoveredReport } }),
   )
-  model = ExecutionEvents.projectUnits(model, parent.units)
+  model = projectUnits(model, parent.units)
   const settled = (model.blocks as ReadonlyArray<TranscriptPresentationModel.Block>).find(
     (block) => block._tag === "ToolCall" && block.id === "turn:agent",
   ) as Extract<TranscriptPresentationModel.Block, { _tag: "ToolCall" }>

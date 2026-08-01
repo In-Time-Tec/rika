@@ -6,12 +6,24 @@ import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { expect, it } from "vitest"
 import {
-  ExecutionEvents,
-  TranscriptPresenter,
-  ViewState,
-  type Model,
-  type TranscriptItem,
-} from "./support/terminal-state-access"
+  applyChildUnits,
+  applyRootUnits,
+  applyTurnDelta,
+  applyTurnUnits,
+} from "../src/presentation/transcript/terminal-transcript-presentation"
+import { projectUnits } from "../src/presentation/transcript/terminal-transcript-projection"
+import { relocateRowEnd, resolveRowEnd, shiftRowEnd } from "../src/presentation/transcript/terminal-transcript-window"
+import { attachChildProjections, emptyAttachments } from "../src/presentation/transcript/transcript-attachment"
+import {
+  expandableRowIds,
+  transcriptUnits as transcriptRows,
+  transcriptUnitId as unitId,
+} from "../src/presentation/transcript/transcript-row"
+import { includeRowEnd } from "../src/presentation/transcript/transcript-row-window-include"
+import { pinnedRowWindow } from "../src/presentation/transcript/transcript-row-window-state"
+import { initial, type Model } from "../src/state/model/terminal-state"
+import { type TranscriptItem } from "../src/state/model/terminal-transcript-state"
+
 import { agentOutputText } from "../src/presentation/transcript/transcript-agent-response"
 import { transcriptUnitId, transcriptUnits } from "../src/presentation/transcript/transcript-row"
 import { transcriptFixtures } from "./transcript-presenter-support"
@@ -37,22 +49,20 @@ const {
   noReport,
 } = transcriptFixtures
 it("projects turn units identically to the legacy projection", () => {
-  const legacy = ExecutionEvents.projectUnits(ViewState.initial("/work"), parentProjection.units)
-  const presenter = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), parentProjection.units)
+  const legacy = projectUnits(initial("/work"), parentProjection.units)
+  const presenter = applyTurnUnits(initial("/work"), parentProjection.units)
   expect(presenter).toEqual(legacy)
 })
 it("flattens nested rows identically to the legacy unit tree", () => {
   const model = nestedModel()
   const legacyUnits = transcriptUnits(model)
-  const rows = TranscriptPresenter.rows(model)
+  const rows = transcriptRows(model)
   expect(rows).toEqual(legacyUnits)
-  expect(rows.map((unit) => TranscriptPresenter.unitId(model, unit))).toEqual(
-    legacyUnits.map((unit) => transcriptUnitId(model, unit)),
-  )
+  expect(rows.map((unit) => unitId(model, unit))).toEqual(legacyUnits.map((unit) => transcriptUnitId(model, unit)))
 })
 it("keeps nested subagent rows at depth two with stable ids", () => {
   const model = nestedModel()
-  const units = TranscriptPresenter.rows(model)
+  const units = transcriptRows(model)
   const parent = units.find((unit) => unit.kind === "tool" && unit.children !== undefined)
   expect(parent?.kind).toBe("tool")
   const children = parent?.kind === "tool" ? (parent.children ?? []) : []
@@ -60,25 +70,25 @@ it("keeps nested subagent rows at depth two with stable ids", () => {
 })
 it("projects the same units twice into deep-equal models", () => {
   const once = nestedModel()
-  const twice = TranscriptPresenter.applyTurnUnits(once, parentProjection.units)
+  const twice = applyTurnUnits(once, parentProjection.units)
   expect(twice).toEqual(once)
 })
 it("attaches child projections to their parent rows and skips replay turns", () => {
-  const base = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), parentProjection.units)
+  const base = applyTurnUnits(initial("/work"), parentProjection.units)
   const projections = new Map([
     ["child:turn:oracle", childProjection],
     ["child:child:turn:oracle:nested", grandchildProjection],
     ["orphan-turn", grandchildProjection],
   ])
-  const attached = TranscriptPresenter.attachChildProjections(base, new Set<string>(), projections)
-  const expected = TranscriptPresenter.applyChildUnits(
-    TranscriptPresenter.applyChildUnits(base, "turn:agent", childProjection.units),
+  const attached = attachChildProjections(base, new Set<string>(), projections)
+  const expected = applyChildUnits(
+    applyChildUnits(base, "turn:agent", childProjection.units),
     TranscriptIdentity.scopedIdentity("child:turn:oracle", "nested"),
     grandchildProjection.units,
   )
   expect(attached.model).toEqual(expected)
   expect(attached.attachments.get("child:turn:oracle")).toBe(childProjection.revision)
-  const replaySkipped = TranscriptPresenter.attachChildProjections(
+  const replaySkipped = attachChildProjections(
     base,
     new Set(["child:turn:oracle", "child:child:turn:oracle:nested"]),
     projections,
@@ -87,15 +97,15 @@ it("attaches child projections to their parent rows and skips replay turns", () 
 })
 it("returns the same model object for a no-op projection", () => {
   const once = nestedModel()
-  expect(TranscriptPresenter.applyTurnUnits(once, parentProjection.units)).toBe(once)
+  expect(applyTurnUnits(once, parentProjection.units)).toBe(once)
 })
 it("preserves untouched array elements when one unit changes", () => {
-  const base = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), parentProjection.units)
+  const base = applyTurnUnits(initial("/work"), parentProjection.units)
   const next = TranscriptProjection.Projection.applyEvent(
     parentProjection,
     event("agent-result", 3, "tool.result.received", { data: { tool_call_id: "agent", output: "done" } }),
   )
-  const updated = TranscriptPresenter.applyTurnUnits(base, next.units)
+  const updated = applyTurnUnits(base, next.units)
   expect(updated).not.toBe(base)
   expect(updated.entries).toBe(base.entries)
   expect(updated.items).toBe(base.items)
@@ -106,8 +116,8 @@ it("preserves untouched array elements when one unit changes", () => {
 it("inserts a new unit at its stable intrinsic order", () => {
   const later = entryUnit("ordered:later", 2, "later")
   const earlier = entryUnit("ordered:earlier", 1, "earlier")
-  const base = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), [later])
-  const inserted = TranscriptPresenter.applyTurnUnits(base, [earlier])
+  const base = applyTurnUnits(initial("/work"), [later])
+  const inserted = applyTurnUnits(base, [earlier])
   const orderedText = (inserted.items as ReadonlyArray<TranscriptItem>).map((item) =>
     item._tag === "Entry" ? inserted.entries[item.index]?.text : undefined,
   )
@@ -127,7 +137,7 @@ it("orders one reverse delta across nested executions by the root projection ord
     parentId: "root:agent",
     order: TranscriptOrdering.childOrder(parentOrder, "child-z", TranscriptOrdering.unitOrder("child-z:answer", 1)),
   }
-  const inserted = TranscriptPresenter.applyTurnDelta(ViewState.initial("/work"), "root", {
+  const inserted = applyTurnDelta(initial("/work"), "root", {
     upsert: [later, earlier],
     remove: [],
   })
@@ -141,19 +151,19 @@ it("applies removals without rebuilding unaffected transcript storage", () => {
   const first = entryUnit("remove:first", 1, "first")
   const removed = entryUnit("remove:middle", 2, "middle")
   const last = entryUnit("remove:last", 3, "last")
-  const base = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), [first, removed, last])
-  const updated = TranscriptPresenter.applyTurnDelta(base, "ordered-turn", { upsert: [], remove: [removed.key] })
+  const base = applyTurnUnits(initial("/work"), [first, removed, last])
+  const updated = applyTurnDelta(base, "ordered-turn", { upsert: [], remove: [removed.key] })
   expect((updated.items as ReadonlyArray<TranscriptItem>).map((item) => item.id)).toEqual([first.key, last.key])
   expect(updated.entries.map((entry) => entry.text)).toEqual(["first", "last"])
   expect(updated.blocks).toBe(base.blocks)
 })
 it("lets an upsert win when one patch also removes the same unit key", () => {
-  const initial = entryUnit("collision", 1, "before")
-  const replacement = { ...initial, revision: 2, content: { ...initial.content, text: "after" } }
-  const base = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), [initial])
-  const updated = TranscriptPresenter.applyTurnDelta(base, "ordered-turn", {
+  const initialUnit = entryUnit("collision", 1, "before")
+  const replacement = { ...initialUnit, revision: 2, content: { ...initialUnit.content, text: "after" } }
+  const base = applyTurnUnits(initial("/work"), [initialUnit])
+  const updated = applyTurnDelta(base, "ordered-turn", {
     upsert: [replacement],
-    remove: [initial.key],
+    remove: [initialUnit.key],
   })
   expect(updated.items).toHaveLength(1)
   expect(updated.entries.map((entry) => entry.text)).toEqual(["after"])
@@ -163,14 +173,14 @@ it("removes nested child rows without disturbing their parent tool", () => {
     { parentId: "turn:agent", projection: childProjection },
   ])
   const childKeys = nested.units.filter((unit) => unit.turnId === "child:turn:oracle").map((unit) => unit.key)
-  const base = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), nested.units)
-  const updated = TranscriptPresenter.applyTurnDelta(base, "turn", { upsert: [], remove: childKeys })
+  const base = applyTurnUnits(initial("/work"), nested.units)
+  const updated = applyTurnDelta(base, "turn", { upsert: [], remove: childKeys })
   const itemIds = new Set(
     (updated.items as ReadonlyArray<TranscriptItem>).flatMap((item) => (item.id === undefined ? [] : [item.id])),
   )
   expect(childKeys.some((key) => itemIds.has(key))).toBe(false)
   expect(updated.blocks).toContainEqual(expect.objectContaining({ _tag: "ToolCall", id: "turn:agent" }))
-  const parent = TranscriptPresenter.rows(updated).find(
+  const parent = transcriptRows(updated).find(
     (row) =>
       row.kind === "tool" &&
       row.blocks.some((index) => {
@@ -197,12 +207,12 @@ it("removes every status derived from a hidden child outcome", () => {
     content: { _tag: "Entry", role: "notice", text: "" },
     executionOutcome: { status: "failed", reason: "child failed" },
   }
-  const projected = TranscriptPresenter.applyRootUnits(ViewState.initial("/work"), "turn", [tool, outcome])
-  const removed = TranscriptPresenter.applyTurnDelta(projected, "turn", {
+  const projected = applyRootUnits(initial("/work"), "turn", [tool, outcome])
+  const removed = applyTurnDelta(projected, "turn", {
     upsert: [],
     remove: [outcome.key],
   })
-  const fresh = TranscriptPresenter.applyRootUnits(ViewState.initial("/work"), "turn", [tool])
+  const fresh = applyRootUnits(initial("/work"), "turn", [tool])
 
   expect(projected.childExecutionOutcomes).toEqual({
     "turn:agent": { status: "failed", reason: "child failed" },
@@ -217,45 +227,40 @@ it("keeps an applied child outcome when the parent's stale units reproject", () 
     }),
     event("fail", 1, "execution.failed", { data: { reason: "boom" } }),
   ])
-  let model = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), parentProjection.units)
-  model = TranscriptPresenter.applyChildUnits(model, "turn:agent", failedChild.units)
+  let model = applyTurnUnits(initial("/work"), parentProjection.units)
+  model = applyChildUnits(model, "turn:agent", failedChild.units)
   const parentTool = (candidate: Model) =>
     (candidate.blocks as ReadonlyArray<TranscriptPresentationModel.Block>).find(
       (block) => block._tag === "ToolCall" && block.id === "turn:agent",
     ) as Extract<TranscriptPresentationModel.Block, { _tag: "ToolCall" }>
   expect(parentTool(model).status).toBe("failed")
-  const reprojected = TranscriptPresenter.applyTurnUnits(model, parentProjection.units)
+  const reprojected = applyTurnUnits(model, parentProjection.units)
   expect(parentTool(reprojected).status).toBe("failed")
-  expect(TranscriptPresenter.applyTurnUnits(reprojected, parentProjection.units)).toBe(reprojected)
+  expect(applyTurnUnits(reprojected, parentProjection.units)).toBe(reprojected)
 })
 it("rewrites running rows to cancelled when a cancellation notice projects", () => {
   const cancelled = TranscriptProjection.Projection.applyEvent(
     parentProjection,
     event("cancel", 3, "execution.cancelled", { data: { reason: "stop" } }),
   )
-  const model = TranscriptPresenter.applyTurnUnits(nestedModel(), cancelled.units)
+  const model = applyTurnUnits(nestedModel(), cancelled.units)
   const tool = (model.blocks as ReadonlyArray<TranscriptPresentationModel.Block>).find(
     (block) => block._tag === "ToolCall" && block.id === "turn:agent",
   ) as Extract<TranscriptPresentationModel.Block, { _tag: "ToolCall" }>
   expect(tool.status).toBe("cancelled")
 })
 it("skips attachments whose revision is unchanged and re-attaches on bump", () => {
-  const base = TranscriptPresenter.applyTurnUnits(ViewState.initial("/work"), parentProjection.units)
+  const base = applyTurnUnits(initial("/work"), parentProjection.units)
   const projections = new Map([["child:turn:oracle", childProjection]])
-  const first = TranscriptPresenter.attachChildProjections(base, new Set<string>(), projections)
-  const second = TranscriptPresenter.attachChildProjections(
-    first.model,
-    new Set<string>(),
-    projections,
-    first.attachments,
-  )
+  const first = attachChildProjections(base, new Set<string>(), projections)
+  const second = attachChildProjections(first.model, new Set<string>(), projections, first.attachments)
   expect(second.model).toBe(first.model)
   expect(second.attachments).toBe(first.attachments)
   const bumped = TranscriptProjection.Projection.applyEvent(
     childProjection,
     event("more", 4, "model.output.delta", { text: "hi" }),
   )
-  const third = TranscriptPresenter.attachChildProjections(
+  const third = attachChildProjections(
     second.model,
     new Set<string>(),
     new Map([["child:turn:oracle", bumped]]),
@@ -263,26 +268,26 @@ it("skips attachments whose revision is unchanged and re-attaches on bump", () =
   )
   expect(third.model).not.toBe(second.model)
   expect(third.attachments.get("child:turn:oracle")).toBe(bumped.revision)
-  const cleared = TranscriptPresenter.attachChildProjections(
+  const cleared = attachChildProjections(
     third.model,
     new Set<string>(),
     new Map([["child:turn:oracle", bumped]]),
-    TranscriptPresenter.emptyAttachments,
+    emptyAttachments,
   )
   expect(cleared.attachments.get("child:turn:oracle")).toBe(bumped.revision)
 })
 it("keeps expandable row ids stable across reprojection", () => {
   const model = nestedModel()
-  const before = TranscriptPresenter.expandableRowIds(model)
-  const after = TranscriptPresenter.expandableRowIds(TranscriptPresenter.applyTurnUnits(model, parentProjection.units))
+  const before = expandableRowIds(model)
+  const after = expandableRowIds(applyTurnUnits(model, parentProjection.units))
   expect(after).toEqual(before)
   expect(before.length).toBeGreaterThan(0)
 })
 it("re-applies every unchanged projection as a full no-op", () => {
   const session = attachedSession()
   expect(session.model.items.length).toBeGreaterThan(4000)
-  const reapplied = TranscriptPresenter.attachChildProjections(
-    TranscriptPresenter.applyTurnUnits(session.model, largeParent.units),
+  const reapplied = attachChildProjections(
+    applyTurnUnits(session.model, largeParent.units),
     new Set<string>(),
     childProjections,
     session.attachments,
@@ -298,7 +303,7 @@ it("changes only the dirty child's rows when one child streams a delta", () => {
       data: { tool_call_id: `tool-120-${toolsPerChild - 1}`, output: "late result" },
     }),
   )
-  const next = TranscriptPresenter.attachChildProjections(
+  const next = attachChildProjections(
     session.model,
     new Set<string>(),
     new Map([...childProjections, [childTurnId(120), bumped]]),
@@ -314,10 +319,10 @@ it("changes only the dirty child's rows when one child streams a delta", () => {
 })
 it("reuses the memoized row flattening for an identical model", () => {
   const session = attachedSession()
-  expect(TranscriptPresenter.rows(session.model)).toBe(TranscriptPresenter.rows(session.model))
-  const ids = TranscriptPresenter.expandableRowIds(session.model)
+  expect(transcriptRows(session.model)).toBe(transcriptRows(session.model))
+  const ids = expandableRowIds(session.model)
   expect(ids.length).toBeGreaterThanOrEqual(childCount)
-  expect(TranscriptPresenter.expandableRowIds(session.model)).toEqual(ids)
+  expect(expandableRowIds(session.model)).toEqual(ids)
 })
 it("exposes a growing answer while the agent remains running", () => {
   expect(responseStateOf({ status: "running", answer: "hel" })).toEqual({ _tag: "Streaming", answer: 0 })
@@ -420,7 +425,7 @@ it("emits only ToolCall children as rows while assistant and error children feed
     files: [],
   }
   const model: Model = {
-    ...ViewState.initial("/work"),
+    ...initial("/work"),
     entries: [{ role: "assistant", text: "child answer" }],
     blocks: [parent, nested, { _tag: "Error", title: "warn", detail: "a soft error" }],
     items: [
@@ -439,26 +444,26 @@ it("emits only ToolCall children as rows while assistant and error children feed
   expect(parentUnit.agentResponse).toEqual({ _tag: "Settled", outcome: { kind: "answer", entry: 0 } })
 })
 it("resolves a pinned window to the full total and clamps explicit ends", () => {
-  expect(TranscriptPresenter.resolveRowEnd(TranscriptPresenter.pinnedRowWindow, 500, limit)).toBe(500)
-  expect(TranscriptPresenter.resolveRowEnd({ end: 900, pendingDelta: 0 }, 500, limit)).toBe(500)
-  expect(TranscriptPresenter.resolveRowEnd({ end: 100, pendingDelta: 0 }, 500, limit)).toBe(240)
+  expect(resolveRowEnd(pinnedRowWindow, 500, limit)).toBe(500)
+  expect(resolveRowEnd({ end: 900, pendingDelta: 0 }, 500, limit)).toBe(500)
+  expect(resolveRowEnd({ end: 100, pendingDelta: 0 }, 500, limit)).toBe(240)
 })
 it("shifts within bounds and stops at the window minimum", () => {
-  expect(TranscriptPresenter.shiftRowEnd(TranscriptPresenter.pinnedRowWindow, -100, 500, limit)).toBe(400)
-  expect(TranscriptPresenter.shiftRowEnd({ end: 250, pendingDelta: 0 }, -100, 500, limit)).toBe(240)
-  expect(TranscriptPresenter.shiftRowEnd({ end: 400, pendingDelta: 0 }, 200, 500, limit)).toBe(500)
-  expect(TranscriptPresenter.shiftRowEnd(TranscriptPresenter.pinnedRowWindow, -100, 200, limit)).toBe(200)
+  expect(shiftRowEnd(pinnedRowWindow, -100, 500, limit)).toBe(400)
+  expect(shiftRowEnd({ end: 250, pendingDelta: 0 }, -100, 500, limit)).toBe(240)
+  expect(shiftRowEnd({ end: 400, pendingDelta: 0 }, 200, 500, limit)).toBe(500)
+  expect(shiftRowEnd(pinnedRowWindow, -100, 200, limit)).toBe(200)
 })
 it("relocates around the anchor row and applies the pending shift", () => {
-  expect(TranscriptPresenter.relocateRowEnd({ end: 301, pendingDelta: -100, anchorKey: "k" }, 61, 301, limit)).toBe(240)
-  expect(TranscriptPresenter.relocateRowEnd({ end: 400, pendingDelta: 0, anchorKey: "k" }, 200, 500, limit)).toBe(440)
-  expect(TranscriptPresenter.relocateRowEnd({ end: 400, pendingDelta: 0 }, -1, 500, limit)).toBe(400)
+  expect(relocateRowEnd({ end: 301, pendingDelta: -100, anchorKey: "k" }, 61, 301, limit)).toBe(240)
+  expect(relocateRowEnd({ end: 400, pendingDelta: 0, anchorKey: "k" }, 200, 500, limit)).toBe(440)
+  expect(relocateRowEnd({ end: 400, pendingDelta: 0 }, -1, 500, limit)).toBe(400)
 })
 it("includes an out-of-window selection and keeps an in-window one", () => {
-  expect(TranscriptPresenter.includeRowEnd(400, 380, 500, limit)).toBe(400)
-  expect(TranscriptPresenter.includeRowEnd(400, 450, 500, limit)).toBe(451)
-  expect(TranscriptPresenter.includeRowEnd(400, 10, 500, limit)).toBe(240)
-  expect(TranscriptPresenter.includeRowEnd(400, -1, 500, limit)).toBe(400)
+  expect(includeRowEnd(400, 380, 500, limit)).toBe(400)
+  expect(includeRowEnd(400, 450, 500, limit)).toBe(451)
+  expect(includeRowEnd(400, 10, 500, limit)).toBe(240)
+  expect(includeRowEnd(400, -1, 500, limit)).toBe(400)
 })
 it("renders a NoReport as its reason followed by its recovery", () => {
   expect(agentOutputText(noReport)).toBe(

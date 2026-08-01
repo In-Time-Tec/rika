@@ -2,7 +2,8 @@ import { expect, vi } from "vitest"
 import { it } from "@effect/vitest"
 import { Effect } from "effect"
 import { renderTranscriptStyled } from "../../src/opentui/rendering/opentui-renderer"
-import { type Mode } from "../support/terminal-state-access"
+import { type Mode } from "../../src/state/model/terminal-state"
+
 const opentuiValue = vi.hoisted(() => {
   const boxChildren: Array<object> = []
   const keyHandlers = new Set<(key: object) => void>()

@@ -1,5 +1,4 @@
 import { bold, dim, fg, italic, strikethrough, StyledText, type TextChunk } from "@opentui/core"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import stringWidth from "string-width"
 import type { Model } from "../../state/model/terminal-state"
 import type { TranscriptBlock } from "../../state/model/terminal-transcript-state"
@@ -12,12 +11,15 @@ import {
   wrapStyledLine,
   toOpenChunk,
 } from "./terminal-text-adapter"
-import { renderDiffStyled, renderPierreDiff, renderToolSummary } from "./terminal-diff-text-adapter"
+import { renderToolSummary } from "./terminal-diff-text-adapter"
 import type { TerminalTextChunk } from "../../presentation/markdown/styled-text"
-import { renderBlock } from "./opentui-render-block"
-import { idleSpinnerFrame } from "./opentui-spinner"
-import { agentToolSummary, toolDetail, toolDetails } from "../../presentation/transcript/transcript-tool-detail"
-import { isToolOutputDisplayed } from "../../presentation/transcript/transcript-agent-response"
+import {
+  renderChildAgentBody,
+  renderDiffBody,
+  renderPlainBody,
+  toolOutputDisplayed,
+} from "./opentui-render-unit-bodies"
+import { toolDetail, toolDetails } from "../../presentation/transcript/transcript-tool-detail"
 import {
   isExpandableUnit,
   orderedTranscriptItems,
@@ -28,7 +30,6 @@ import type {
   ToolTranscriptUnit,
   TranscriptUnit,
 } from "../../presentation/transcript/transcript-tool-types"
-import type { PathTarget } from "../../presentation/transcript/transcript-tool-detail-types"
 import {
   wrapTextToWidth,
   wrapBodyText,
@@ -38,12 +39,12 @@ import {
   failedAgentLabel,
 } from "./opentui-render-window"
 import { transcriptWrapWidth } from "./opentui-render-transcript-window"
-import { toolUnitsFor, diffCounts, shellCommandText, shellExitCode, type ToolUnit } from "./opentui-render-tool-detail"
+import { toolUnitsFor, shellCommandText, shellExitCode, type ToolUnit } from "./opentui-render-tool-detail"
 import type { TranscriptUnitBuild, UnitLineRange } from "./opentui-render-transcript-window"
 import { agentResponseOutcome } from "./opentui-render-transcript-revision"
 import { createToolBodyRenderer } from "./opentui-render-tool-bodies"
 
-export const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) => {
+export const transcriptUnitBuilder = (model: Model, spinnerFrame: string) => {
   let chunks: Array<TextChunk> = []
   let line = 0
   const append = (chunk: TextChunk | TerminalTextChunk) => {
@@ -202,7 +203,7 @@ export const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFr
     const agent = unit.block.presentation.family === "agent"
     const shellFailure =
       failed && unit.block.presentation.family === "shell" ? ` (exit code: ${shellExitCode(unit.block) ?? 1})` : ""
-    const output = agent || !isToolOutputDisplayed(unit.block) ? undefined : unit.block.output
+    const output = agent || !toolOutputDisplayed(unit.block) ? undefined : unit.block.output
     const expandable =
       hasChildren || hasTerminal || (agent ? unit.block.detail.length > 0 : output !== undefined && output.length > 0)
     if (selected)
@@ -238,7 +239,7 @@ export const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFr
     const detail = toolDetail(index, block)
     const children = unit.children ?? []
     const agent = block.presentation.family === "agent"
-    const output = agent || !isToolOutputDisplayed(block) ? undefined : block.output
+    const output = agent || !toolOutputDisplayed(block) ? undefined : block.output
     const expandable =
       children.length > 0 ||
       unit.agentResponse !== undefined ||
@@ -346,38 +347,12 @@ export const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFr
       end: children.length === 0 ? line : (nestedRanges[rangeIndex + 1]?.start ?? start + 1) - 1,
     }
   }
-  const renderChildAgentBody = (block: Extract<TranscriptBlock, { _tag: "ChildAgent" }>, expanded: boolean) => {
-    const running = block.status === "running"
-    const phrase = TranscriptProjection.Presentation.agentPhrase({ name: block.name, status: block.status })
-    append(statusIcon(block.status === "failed", running, block.status === "cancelled"))
-    for (const chunk of renderToolSummary(agentToolSummary(phrase), { leading: " " })[0]!) append(chunk)
-    append(marker(expanded))
-    if (expanded) {
-      const width = transcriptWrapWidth(model.width)
-      if (block.summary.length > 0) append(dim(fg(colors.text)(`\n${wrapBodyText(block.summary, width, "  ")}`)))
-      for (const activity of block.activity) append(dim(fg(colors.text)(`\n${wrapBodyText(activity, width, "  ")}`)))
-    }
+  const renderChildAgentUnitBody = (block: Extract<TranscriptBlock, { _tag: "ChildAgent" }>, expanded: boolean) => {
+    renderChildAgentBody(block, expanded, transcriptWrapWidth(model.width), statusIcon, marker, append)
   }
-  const renderDiffBody = (index: number, selected: boolean, expanded: boolean) => {
+  const renderDiffUnitBody = (index: number, selected: boolean, expanded: boolean) => {
     const block = model.blocks[index] as Extract<TranscriptBlock, { _tag: "Diff" }>
-    if (expanded) {
-      append(bold(fg(selected ? colors.blue : colors.muted)(`Δ ${block.path} ▾\n`)))
-      appendAll(
-        renderPierreDiff(block.patch, { width: transcriptWrapWidth(model.width) }) ??
-          renderDiffStyled(block.patch, { width: transcriptWrapWidth(model.width) }),
-      )
-      return
-    }
-    const [added, removed] = diffCounts(block.patch)
-    const verb = /^--- \/dev\/null$/m.test(block.patch) || /^new file mode /m.test(block.patch) ? "Created" : "Edited"
-    if (selected) highlight(`✓ ${verb} ${block.path} +${added} -${removed} ▸`)
-    else {
-      append(fg(colors.green)("✓"))
-      append(fg(colors.text)(` ${verb} ${block.path}`))
-      append(fg(colors.green)(` +${added}`))
-      append(fg(colors.red)(` -${removed}`))
-      append(marker(false))
-    }
+    renderDiffBody(block, selected, expanded, transcriptWrapWidth(model.width), append, appendAll)
   }
   const renderReasoningBody = (index: number, selected: boolean) => {
     const block = model.blocks[index] as Extract<TranscriptBlock, { _tag: "Reasoning" }>
@@ -385,11 +360,7 @@ export const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFr
     append(selected ? bold(fg(colors.blue)(text)) : dim(italic(fg(colors.text)(text))))
   }
   const renderPlainBlock = (index: number) => {
-    const block = model.blocks[index] as TranscriptBlock
-    let color = colors.text
-    if (block._tag === "ContextUsage") color = colors.muted
-    else if (block._tag === "Error") color = colors.red
-    append(fg(color)(renderBlock(block, transcriptWrapWidth(model.width))))
+    renderPlainBody(model.blocks[index] as TranscriptBlock, transcriptWrapWidth(model.width), append)
   }
   const isUnitVisible = (unit: TranscriptUnit): boolean =>
     unit.kind !== "reasoning" || rowExpanded(transcriptUnitId(model, unit))
@@ -412,8 +383,8 @@ export const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFr
     if (unit.kind === "entry") renderEntryBody(unit.entry)
     else if (unit.kind === "reasoning") renderReasoningBody(unit.block, selected)
     else if (unit.kind === "childAgent")
-      renderChildAgentBody(model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "ChildAgent" }>, expanded)
-    else if (unit.kind === "diff") renderDiffBody(unit.block, selected, expanded)
+      renderChildAgentUnitBody(model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "ChildAgent" }>, expanded)
+    else if (unit.kind === "diff") renderDiffUnitBody(unit.block, selected, expanded)
     else if (unit.kind === "block") renderPlainBlock(unit.block)
     else if (unit.children !== undefined || unit.agentResponse !== undefined) {
       renderOtherToolBody(
@@ -462,7 +433,7 @@ export const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFr
     } else if (unit.kind === "childAgent") {
       animated = (model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "ChildAgent" }>).status === "running"
     }
-    let targets: ReadonlyArray<PathTarget> | undefined
+    let targets: ReadonlyArray<{ readonly path: string; readonly line?: number; readonly column?: number }> | undefined
     if (unit.kind === "tool") {
       targets = toolDetails(model, unit).flatMap((detail) => (detail.target === undefined ? [] : [detail.target]))
     } else if (unit.kind === "diff") {

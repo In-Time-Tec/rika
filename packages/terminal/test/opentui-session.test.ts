@@ -1,6 +1,10 @@
 import { expect, test } from "vitest"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import { ExecutionEvents, Session, ViewState, type Adapter } from "./support/terminal-state-access"
+import { projectUnits } from "../src/presentation/transcript/terminal-transcript-projection"
+import { replaceQueue } from "../src/state/model/terminal-queue-state"
+import { initial } from "../src/state/model/terminal-state"
+import { update } from "../src/state/reducer/terminal-state-reducer"
+import { execute, type Adapter } from "../src/terminal-session"
 
 test("routes session actions only through available adapter callbacks", () => {
   const calls: Array<string> = []
@@ -14,19 +18,19 @@ test("routes session actions only through available adapter callbacks", () => {
     cancel: () => calls.push("cancel"),
   }
   expect(
-    Session.execute(adapter, {
+    execute(adapter, {
       _tag: "Submit",
       prompt: "one",
       parts: [{ type: "text", text: "one" }],
       mode: "high",
     }),
   ).toBe(true)
-  expect(Session.execute(adapter, { _tag: "EditQueued", id: "one", prompt: "changed" })).toBe(true)
-  expect(Session.execute(adapter, { _tag: "Dequeue", id: "one" })).toBe(true)
-  expect(Session.execute(adapter, { _tag: "Steer", prompt: "two" })).toBe(true)
-  expect(Session.execute(adapter, { _tag: "InterruptAndSend", prompt: "urgent" })).toBe(true)
-  expect(Session.execute(adapter, { _tag: "Cancel" })).toBe(true)
-  expect(Session.execute(adapter, { _tag: "Quit" })).toBe(true)
+  expect(execute(adapter, { _tag: "EditQueued", id: "one", prompt: "changed" })).toBe(true)
+  expect(execute(adapter, { _tag: "Dequeue", id: "one" })).toBe(true)
+  expect(execute(adapter, { _tag: "Steer", prompt: "two" })).toBe(true)
+  expect(execute(adapter, { _tag: "InterruptAndSend", prompt: "urgent" })).toBe(true)
+  expect(execute(adapter, { _tag: "Cancel" })).toBe(true)
+  expect(execute(adapter, { _tag: "Quit" })).toBe(true)
   expect(calls).toEqual([
     "submit:one",
     "edit:one:changed",
@@ -39,7 +43,7 @@ test("routes session actions only through available adapter callbacks", () => {
 })
 
 test("projects incremental replay by cursor without duplicates", () => {
-  let model = ViewState.initial("/work")
+  let model = initial("/work")
   const events = [
     {
       id: "1",
@@ -48,7 +52,7 @@ test("projects incremental replay by cursor without duplicates", () => {
     },
     { id: "2", cursor: "11", block: { _tag: "Workflow", name: "flow", step: "wait", status: "waiting" } },
   ] as const
-  for (const event of [...events, events[1]]) model = ViewState.update(model, { _tag: "EventReplayed", event })
+  for (const event of [...events, events[1]]) model = update(model, { _tag: "EventReplayed", event })
   expect(model.blocks).toHaveLength(2)
   expect(model.eventCursor).toBe("11")
 })
@@ -63,12 +67,12 @@ test("restarts through the shared event mapper and preserves transcript across q
   ] as const
   const source = events.map((event) => Object.assign({}, event, { createdAt: event.sequence }))
   let projection = TranscriptProjection.Projection.empty("turn", "prompt")
-  let live = ViewState.initial("/work")
+  let live = initial("/work")
   for (const event of source) {
     projection = TranscriptProjection.Projection.applyEvent(projection, event)
-    live = ExecutionEvents.projectUnits(live, projection.units)
+    live = projectUnits(live, projection.units)
   }
-  live = ViewState.replaceQueue(live, [{ id: "later", prompt: "later" }])
+  live = replaceQueue(live, [{ id: "later", prompt: "later" }])
   projection = TranscriptProjection.Projection.applyEvent(projection, {
     cursor: "6",
     sequence: 6,
@@ -76,9 +80,9 @@ test("restarts through the shared event mapper and preserves transcript across q
     createdAt: 6,
     content: [{ id: "t", name: "Read", input: "a.ts" }],
   })
-  live = ExecutionEvents.projectUnits(live, projection.units)
-  live = ViewState.replaceQueue(live, [])
-  const reopened = ExecutionEvents.projectUnits(ViewState.initial("/work"), projection.units)
+  live = projectUnits(live, projection.units)
+  live = replaceQueue(live, [])
+  const reopened = projectUnits(initial("/work"), projection.units)
   expect(live.entries).toEqual(reopened.entries)
   expect(live.blocks).toEqual(reopened.blocks)
   expect(live.blocks.at(-1)).toMatchObject({ _tag: "ToolCall", id: "turn:t" })

@@ -8,9 +8,6 @@ import { ChangedFile as ChangedFileSchema } from "./terminal-changed-file"
 import { QueueItem as QueueItemSchema } from "./terminal-queue-item"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Entry } from "./terminal-message"
-import * as Palette from "../../presentation/terminal/command-palette"
-import * as Keys from "../../presentation/terminal/terminal-keymap"
-import * as ExecutionEvents from "../../presentation/transcript/terminal-transcript-projection"
 
 export const Mode = ModeId
 export type Mode = typeof Mode.Type
@@ -214,45 +211,3 @@ export const withModeRouteMap: {
   (model: Model, routes: ModeRouteMap): Model
 } = Function.dual(2, (model: Model, routes: ModeRouteMap): Model => ({ ...model, modeRoutes: routes }))
 export const initial = (workspace: string, mode: Mode = "medium"): Model => initialImpl(workspace, mode)
-export { Activity, formatActivity, runningToolsActivity, streamActivity } from "./terminal-activity-state"
-export type { Activity as ActivityType } from "./terminal-activity-state"
-export { idle, loading, ready, readyOr, isReady, isLoading, loadableSchemas } from "./terminal-loadable-state"
-export {
-  applyQueueDelta,
-  resetQueue,
-  replaceQueue,
-  bindSubmittedDraft,
-  dropSubmittedDrafts,
-  takeSubmittedDraft,
-} from "./terminal-queue-state"
-export { ChangedFile } from "./terminal-changed-file"
-export type { ChangedFile as ChangedFileType } from "./terminal-changed-file"
-export type { ThreadItem } from "./terminal-thread-state"
-export type { TranscriptBlock, TranscriptItem } from "./terminal-transcript-state"
-export type {
-  PromptPart,
-  ComposerAttachment,
-  ComposerDraft,
-  PendingSteering,
-  PromptSubmission,
-} from "./terminal-composer-state"
-export { classifyPrompt, promptParts, displayInput } from "./terminal-composer-state"
-export { expandPastedText, pastedTextTokenAt } from "./terminal-composer-paste"
-export { nextMode, nextUsageDisplay } from "./terminal-mode-selection"
-export { filteredFiles, filteredThreads, selectedThreadMetadata, renameThread } from "./terminal-thread-navigation"
-export { Entry } from "./terminal-message"
-export type { PastedTextAttachment, UiEvent, Message } from "./terminal-message"
-export { commands, filter } from "../../presentation/terminal/command-palette"
-export { Palette, Keys, ExecutionEvents }
-export { canSubmit, context, update, reduce } from "../reducer/terminal-state-reducer"
-export type { Command, PaletteAction } from "../../presentation/terminal/command-palette"
-export {
-  formatTokens,
-  formatBytes,
-  pluralWord,
-  plural,
-  truncateToWidth,
-  clipToWidth,
-  escapeControlCharacters,
-  homeRelativePath,
-} from "../../presentation/terminal/terminal-format"
