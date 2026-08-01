@@ -17,7 +17,6 @@ import {
   ContextFileSystem,
   ExtensionOperations,
   Operation,
-  ResidentService,
   ResolvedContext,
   ThreadQuery,
   ThreadToolHandlers,

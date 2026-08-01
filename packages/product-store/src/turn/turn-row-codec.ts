@@ -6,7 +6,6 @@ import { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
 import { PromptPart } from "@rika/product/execution-request"
 import { Status } from "@rika/product/execution-status"
 import { TurnAuthor, TurnLineage } from "@rika/product/thread-relationship"
-import type { ExecutionRoutePin } from "@rika/product/execution-route-snapshot"
 import type { StopIntent } from "@rika/product/thread-state"
 import { RepositoryError } from "@rika/product/turn-repository"
 

@@ -1,6 +1,5 @@
 import * as TranscriptPage from "@rika/product/transcript-page"
 import type * as Operation from "@rika/product/product-operation-service"
-import type * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ThreadResult from "@rika/product/thread-result"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"

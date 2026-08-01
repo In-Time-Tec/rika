@@ -8,7 +8,6 @@ import { eventHistoryOption } from "../src/model/routing/relay-model-registry"
 import type { ExecutionRoutePin } from "@rika/product/execution-route-snapshot"
 import { Config, Effect, FileSystem, Layer, Logger, Schedule, Schema, Semaphore, Stdio, Stream } from "effect"
 import * as ProductAgent from "@rika/product/product-agent-service"
-import * as Turn from "@rika/product/turn-record"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 
 class FixtureError extends Schema.TaggedErrorClass<FixtureError>()("MultiAgentProcessFixtureError", {

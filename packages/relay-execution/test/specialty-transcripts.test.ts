@@ -7,7 +7,6 @@ import * as ExecutionChildRun from "@rika/product/execution-child-run"
 import { Catalog } from "@rika/coding-tools/coding-tool-catalog"
 import { Effect, Function, Layer, Schema } from "effect"
 import { ProductAgent } from "@rika/product/product-agent-service"
-import * as Turn from "@rika/product/turn-record"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 
 const provideLayer: {
