@@ -1,6 +1,6 @@
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as InteractiveController from "../src/interactive-controller"
-import type * as Operation from "@rika/product/product-operation"
+import type { InteractiveEvent } from "@rika/product/product-operation-service"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as ThreadResult from "@rika/product/thread-result"
@@ -119,7 +119,7 @@ const projectionOrigin = (
   event: TranscriptSourceEvent.SourceEvent,
   executionId: string,
 ): Extract<
-  Extract<Operation.InteractiveEvent, { readonly _tag: "TranscriptProjectionPatched" }>["origin"],
+  Extract<InteractiveEvent, { readonly _tag: "TranscriptProjectionPatched" }>["origin"],
   { readonly _tag: "Event" }
 > => {
   const blockId = event.data?.tool_call_id ?? event.data?.call_id ?? event.data?.id
@@ -1809,7 +1809,7 @@ it("keeps one of five status labels from submit until the turn completes", () =>
 })
 
 it("keeps 200ms tool lifecycle events in distinct TUI frames", () => {
-  type ProjectionPatchedEvent = Extract<Operation.InteractiveEvent, { readonly _tag: "TranscriptProjectionPatched" }>
+  type ProjectionPatchedEvent = Extract<InteractiveEvent, { readonly _tag: "TranscriptProjectionPatched" }>
   type ProjectionPatched = ProjectionPatchedEvent & {
     readonly origin: Extract<ProjectionPatchedEvent["origin"], { readonly _tag: "Event" }>
   }
@@ -2269,7 +2269,7 @@ it("removes a promoted turn and exits queue edit mode synchronously", () => {
 })
 
 it("eagerly consumes more than one frame of events while bounding reducer work per render frame", () => {
-  type ProjectionPatched = Extract<Operation.InteractiveEvent, { readonly _tag: "TranscriptProjectionPatched" }>
+  type ProjectionPatched = Extract<InteractiveEvent, { readonly _tag: "TranscriptProjectionPatched" }>
   const scheduled: Array<() => void> = []
   let received = 0
   let applied = 0

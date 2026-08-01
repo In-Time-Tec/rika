@@ -56,7 +56,7 @@ export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()(
 }) {}
 
 export type WriteResult = "committed" | "stale"
-export const invalidatedProjectionVersion = -1
+export const invalidatedProjectionVersion = 2
 export type RecordedShellWriteResult =
   | { readonly _tag: "Committed"; readonly projection: Projection }
   | { readonly _tag: "Stale" }

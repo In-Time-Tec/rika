@@ -1,7 +1,7 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Operation } from "@rika/product/product-operation"
+import { OperationUnavailable, Service, type InteractiveEvent } from "@rika/product/product-operation-service"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
@@ -39,7 +39,7 @@ const visibleProjectionState = (fold: TranscriptProjection.ProjectionFold) => {
 }
 
 const makeFixtureProjection = (
-  dispatch: (event: Operation.InteractiveEvent) => void,
+  dispatch: (event: InteractiveEvent) => void,
   threadId: Thread.ThreadId,
   turnId: Turn.TurnId,
   prompt: string,
@@ -147,7 +147,7 @@ const program = Effect.gen(function* () {
             ),
           ),
         )
-        return Operation.Service.of({
+        return Service.of({
           hasActiveExecutionWork: Effect.sync(() => activeWork > 0),
           authorizeResidentReplacement: Effect.sync(() => (activeWork > 0 ? "defer" : "supersede")),
           stopActiveExecutionWork: Effect.sync(() => {
@@ -185,7 +185,7 @@ const program = Effect.gen(function* () {
               })
             if (input.prompt[0] === "reject-before-start")
               return Effect.fail(
-                Operation.OperationUnavailable.make({
+                OperationUnavailable.make({
                   operation: "Interactive",
                   message: "Interactive setup rejected",
                 }),

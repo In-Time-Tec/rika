@@ -10,7 +10,14 @@ import type { ModelRegistry } from "@rika/relay-execution/model-provider-runtime
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { createTestRenderer } from "@opentui/core/testing"
 import { Cause, Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Redacted, Schema } from "effect"
-import { OpenAiAuth, Operation, ThreadToolService } from "@rika/product/product-operation"
+import {
+  OpenAiAuth,
+  productLayer,
+  Service,
+  ThreadToolService,
+  type InteractiveEvent,
+  type InteractiveSession,
+} from "@rika/product/product-operation-service"
 import * as Database from "@rika/product-store/product-database-layer"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as ThreadInteractionRepository from "@rika/product-store/sqlite-thread-interaction-repository"
@@ -303,9 +310,9 @@ test("surfaces an unavailable tuned route as an interactive execution failure", 
   Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const sessions = yield* Deferred.make<Operation.InteractiveSession>()
+        const sessions = yield* Deferred.make<InteractiveSession>()
         const release = yield* Deferred.make<void>()
-        const events = new Array<Operation.InteractiveEvent>()
+        const events = new Array<InteractiveEvent>()
         const settings: SettingsDefaults.ConfigurationSettings = {
           ...SettingsDefaults.Defaults.defaults,
           modes: {
@@ -316,7 +323,7 @@ test("surfaces an unavailable tuned route as an interactive execution failure", 
             },
           },
         }
-        const operationLayer = Operation.productLayer({
+        const operationLayer = productLayer({
           repositoryLayer: ThreadRepository.memoryLayer(),
           turnRepositoryLayer: TurnRepository.memoryLayer(),
           backendLayer: Layer.succeed(ExecutionBackend.Service, recordingBackend([])),
@@ -331,10 +338,7 @@ test("surfaces an unavailable tuned route as an interactive execution failure", 
           interactive: (_, session) =>
             Deferred.succeed(sessions, session).pipe(Effect.andThen(Deferred.await(release))),
         })
-        const operation = Context.get(
-          yield* Layer.buildWithScope(operationLayer, yield* Effect.scope),
-          Operation.Service,
-        )
+        const operation = Context.get(yield* Layer.buildWithScope(operationLayer, yield* Effect.scope), Service)
         const operationFiber = yield* Effect.forkChild(
           operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }),
         )

@@ -2,7 +2,13 @@ import * as ConfigurationService from "@rika/configuration/configuration-service
 import * as SettingsDecoder from "@rika/configuration/configuration-settings"
 import * as ConfigurationSettingsInput from "@rika/configuration/configuration-settings"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { ConfigOperations, Operation } from "@rika/product/product-operation"
+import {
+  ConfigOperations,
+  InvalidInput,
+  OperationUnavailable,
+  productLayer,
+  Service,
+} from "@rika/product/product-operation-service"
 import * as Database from "@rika/product-store/product-database-layer"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -131,7 +137,7 @@ const operationLayer = (
     Layer.provide(database),
     Layer.provide(BunServices.layer),
   )
-  return Operation.productLayer({
+  return productLayer({
     repositoryLayer,
     turnRepositoryLayer,
     transcriptRepositoryLayer,
@@ -158,7 +164,7 @@ interface CliResult {
   readonly errors: ReadonlyArray<string>
 }
 
-const openCli = <E>(layer: Layer.Layer<Operation.Service, E>) =>
+const openCli = <E>(layer: Layer.Layer<Service, E>) =>
   Effect.gen(function* () {
     const scope = yield* Effect.scope
     const context = yield* Layer.buildWithScope(Layer.mergeAll(BunServices.layer, TestConsole.layer, layer), scope)
@@ -188,7 +194,7 @@ const expectSuccess = (result: CliResult) => {
 const expectFailureMessage = (result: CliResult) => {
   expect(result.exit._tag).toBe("Failure")
   const failure = result.exit._tag === "Failure" ? Cause.squash(result.exit.cause) : undefined
-  return Schema.is(Operation.OperationUnavailable)(failure) || Schema.is(Operation.InvalidInput)(failure)
+  return Schema.is(OperationUnavailable)(failure) || Schema.is(InvalidInput)(failure)
     ? failure.message
     : String(failure)
 }

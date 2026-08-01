@@ -2,7 +2,12 @@ import { MediaAnalysisError } from "@rika/coding-tools/media-view-service"
 import { analyzerTestLayer } from "@rika/coding-tools/media-view-service"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { createTestRenderer } from "@opentui/core/testing"
-import { Operation } from "@rika/product/product-operation"
+import {
+  productLayer,
+  Service,
+  type InteractiveEvent,
+  type InteractiveSession,
+} from "@rika/product/product-operation-service"
 import * as Database from "@rika/product-store/product-database-layer"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -162,7 +167,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
         Layer.provide(database),
         Layer.provide(BunServices.layer),
       )
-      const sessionReady = yield* Deferred.make<Operation.InteractiveSession>()
+      const sessionReady = yield* Deferred.make<InteractiveSession>()
       const releaseSession = yield* Deferred.make<void>()
       let nextTurn = 0
       const relayReads: Array<"inspect" | "replay"> = []
@@ -190,7 +195,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
         steer: () => Effect.die("unused"),
         cancel: () => Effect.die("unused"),
       })
-      const operationLayer = Operation.productLayer({
+      const operationLayer = productLayer({
         repositoryLayer,
         turnRepositoryLayer,
         transcriptRepositoryLayer,
@@ -214,7 +219,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
         interactive: (_, session) =>
           Deferred.succeed(sessionReady, session).pipe(Effect.andThen(Deferred.await(releaseSession))),
       })
-      const operation = Context.get(yield* Layer.buildWithScope(operationLayer, yield* Effect.scope), Operation.Service)
+      const operation = Context.get(yield* Layer.buildWithScope(operationLayer, yield* Effect.scope), Service)
       const repositories = yield* Layer.buildWithScope(
         Layer.mergeAll(repositoryLayer, turnRepositoryLayer, transcriptRepositoryLayer),
         yield* Effect.scope,
@@ -240,7 +245,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
       const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
       yield* Effect.addFinalizer(() => Effect.sync(() => surface.destroy()))
       const completedShells = yield* Queue.unbounded<string>()
-      const dispatch = (event: Operation.InteractiveEvent) => {
+      const dispatch = (event: InteractiveEvent) => {
         if (event._tag === "ShellCompleted") {
           if (event.incognito) model = ViewState.update(model, { _tag: "AssistantCompleted", text: event.text })
           model = ViewState.update(model, { _tag: "ExecutionCompleted" })

@@ -61,6 +61,7 @@ it.effect("lists terminal roots whose current projection has an unfinished child
 
 it.effect("loads a migration-invalidated empty projection for authoritative refold", () =>
   Effect.gen(function* () {
+    expect(TranscriptRepository.invalidatedProjectionVersion).toBe(2)
     const target = turn(0)
     const invalidated: TranscriptRepository.Projection = {
       turn: target,

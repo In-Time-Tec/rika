@@ -5,7 +5,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { LanguageModel } from "effect/unstable/ai"
 import { ModelRegistry, TestModel } from "@rika/relay-execution/model-provider-runtime"
 import { createTestRenderer } from "@opentui/core/testing"
-import { Operation } from "@rika/product/product-operation"
+import { productLayer, Service, type InteractiveSession } from "@rika/product/product-operation-service"
 import * as Database from "@rika/product-store/product-database-layer"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -240,14 +240,14 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
   const terminalTitles: Array<string> = []
   let nextThread = options.idStart ?? 0
   let nextTurn = options.idStart ?? 0
-  let session: Operation.InteractiveSession | undefined
+  let session: InteractiveSession | undefined
   const reloadLoaded = yield* Deferred.make<void>()
   const runSync = Effect.runSyncWith(yield* Effect.context<never>())
   const runInteractive = interactiveTui({
     makeRenderer: () => Promise.resolve(setup.renderer),
     writeTerminalTitle: (sequence) => terminalTitles.push(sequence.slice(4, -1)),
   })
-  const operationLayer = Operation.productLayer({
+  const operationLayer = productLayer({
     repositoryLayer,
     turnRepositoryLayer,
     transcriptRepositoryLayer,
@@ -275,7 +275,7 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
       })
     },
   })
-  const operation = Context.get(yield* Layer.buildWithScope(operationLayer, yield* Effect.scope), Operation.Service)
+  const operation = Context.get(yield* Layer.buildWithScope(operationLayer, yield* Effect.scope), Service)
   const transcripts =
     options.inspectTranscript === true
       ? Context.get(

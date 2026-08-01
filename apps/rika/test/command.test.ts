@@ -1,5 +1,5 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Operation } from "@rika/product/product-operation"
+import { OperationUnavailable, Service, testLayer, type Input } from "@rika/product/product-operation-service"
 import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, Ref, Stream } from "effect"
 import { TestConsole } from "effect/testing"
 import { expect, it } from "@effect/vitest"
@@ -33,16 +33,16 @@ const execute = <A, E, R>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<R>)
 
 const capture = (argv: ReadonlyArray<string>) =>
   Effect.gen(function* () {
-    const calls = yield* Ref.make<ReadonlyArray<Operation.Input>>([])
-    const layer = Layer.mergeAll(BunServices.layer, TestConsole.layer, Operation.testLayer(calls))
+    const calls = yield* Ref.make<ReadonlyArray<Input>>([])
+    const layer = Layer.mergeAll(BunServices.layer, TestConsole.layer, testLayer(calls))
     yield* execute(run(argv), layer)
     return yield* Ref.get(calls)
   })
 
 const failsWithoutDispatch = (argv: ReadonlyArray<string>) =>
   Effect.gen(function* () {
-    const calls = yield* Ref.make<ReadonlyArray<Operation.Input>>([])
-    const layer = Layer.mergeAll(BunServices.layer, TestConsole.layer, Operation.testLayer(calls))
+    const calls = yield* Ref.make<ReadonlyArray<Input>>([])
+    const layer = Layer.mergeAll(BunServices.layer, TestConsole.layer, testLayer(calls))
     const exit = yield* Effect.exit(execute(run(argv), layer))
     expect(exit._tag).toBe("Failure")
     expect(yield* Ref.get(calls)).toEqual([])
@@ -85,10 +85,9 @@ it.effect("maps stdin failures and dispatch failures", () =>
       BunServices.layer,
       TestConsole.layer,
       Layer.succeed(
-        Operation.Service,
-        Operation.Service.of({
-          run: () =>
-            Effect.fail(Operation.OperationUnavailable.make({ operation: "Doctor", message: "dispatch failed" })),
+        Service,
+        Service.of({
+          run: () => Effect.fail(OperationUnavailable.make({ operation: "Doctor", message: "dispatch failed" })),
         }),
       ),
     )
@@ -98,8 +97,8 @@ it.effect("maps stdin failures and dispatch failures", () =>
 
 it.effect("renders help without dispatching an operation", () =>
   Effect.gen(function* () {
-    const calls = yield* Ref.make<ReadonlyArray<Operation.Input>>([])
-    const layer = Layer.mergeAll(BunServices.layer, TestConsole.layer, Operation.testLayer(calls))
+    const calls = yield* Ref.make<ReadonlyArray<Input>>([])
+    const layer = Layer.mergeAll(BunServices.layer, TestConsole.layer, testLayer(calls))
     const output = yield* execute(
       Effect.gen(function* () {
         yield* run(["--help"])
@@ -140,8 +139,8 @@ it.effect("renders client help without creating the configured data root", () =>
 
 it.effect("inspects and exports malformed crash evidence without dispatching an operation", () =>
   Effect.gen(function* () {
-    const calls = yield* Ref.make<ReadonlyArray<Operation.Input>>([])
-    const layer = Layer.mergeAll(BunServices.layer, TestConsole.layer, Operation.testLayer(calls))
+    const calls = yield* Ref.make<ReadonlyArray<Input>>([])
+    const layer = Layer.mergeAll(BunServices.layer, TestConsole.layer, testLayer(calls))
     yield* execute(
       Effect.scoped(
         Effect.gen(function* () {
@@ -183,8 +182,8 @@ it.effect("inspects and exports malformed crash evidence without dispatching an 
 
 it.effect("updates the install in this process instead of dispatching to the resident", () =>
   Effect.gen(function* () {
-    const calls = yield* Ref.make<ReadonlyArray<Operation.Input>>([])
-    const layer = Layer.mergeAll(BunServices.layer, TestConsole.layer, Operation.testLayer(calls))
+    const calls = yield* Ref.make<ReadonlyArray<Input>>([])
+    const layer = Layer.mergeAll(BunServices.layer, TestConsole.layer, testLayer(calls))
     yield* execute(
       Effect.scoped(
         Effect.gen(function* () {
@@ -283,7 +282,7 @@ it.effect("rejects an invalid interactive workspace before dispatch", () =>
 
 it.effect("dispatches every thread operation", () =>
   Effect.gen(function* () {
-    const cases: ReadonlyArray<readonly [ReadonlyArray<string>, Operation.Input]> = [
+    const cases: ReadonlyArray<readonly [ReadonlyArray<string>, Input]> = [
       [["threads", "create"], { _tag: "Thread", action: "new" }],
       [["threads", "continue", "--last"], { _tag: "Interactive", prompt: [], last: true, ephemeral: false }],
       [["threads", "continue", "a"], { _tag: "Interactive", prompt: [], threadId: "a", ephemeral: false }],
@@ -340,7 +339,7 @@ it.effect("rejects invalid thread relationships", () =>
 
 it.effect("dispatches catalog, extension, review, and maintenance operations", () =>
   Effect.gen(function* () {
-    const cases: ReadonlyArray<readonly [ReadonlyArray<string>, Operation.Input]> = [
+    const cases: ReadonlyArray<readonly [ReadonlyArray<string>, Input]> = [
       [["config", "list"], { _tag: "Config", action: "list" }],
       [["config", "edit", "--workspace"], { _tag: "Config", action: "edit", workspace: true }],
       [["config", "keymap"], { _tag: "Config", action: "keymap" }],
@@ -386,7 +385,7 @@ it.effect("dispatches catalog, extension, review, and maintenance operations", (
 
 it.effect("dispatches every MCP operation and validates add transport", () =>
   Effect.gen(function* () {
-    const cases: ReadonlyArray<readonly [ReadonlyArray<string>, Operation.Input]> = [
+    const cases: ReadonlyArray<readonly [ReadonlyArray<string>, Input]> = [
       [["mcp", "list"], { _tag: "Mcp", action: "list" }],
       [
         ["mcp", "add", "local", "bun", "server.ts"],
@@ -413,8 +412,8 @@ it.effect("dispatches every MCP operation and validates add transport", () =>
 
 it.effect("renders version and branch help without dispatching", () =>
   Effect.gen(function* () {
-    const calls = yield* Ref.make<ReadonlyArray<Operation.Input>>([])
-    const layer = Layer.mergeAll(BunServices.layer, TestConsole.layer, Operation.testLayer(calls))
+    const calls = yield* Ref.make<ReadonlyArray<Input>>([])
+    const layer = Layer.mergeAll(BunServices.layer, TestConsole.layer, testLayer(calls))
     const output = yield* execute(
       Effect.gen(function* () {
         yield* run(["version"])
