@@ -10,6 +10,12 @@ export const formatTokens = (tokens: number): string => {
   return `${(tokens / divisor).toFixed(1).replace(/\.0$/, "")}${suffix} tok`
 }
 
+export const formatContextTokens = (tokens: number): string => {
+  if (tokens < 1_000) return tokens.toLocaleString("en-US")
+  if (tokens < 1_000_000) return `${(tokens / 1_000).toFixed(tokens % 1_000 === 0 ? 0 : 1).replace(/\.0$/, "")}K`
+  return `${(tokens / 1_000_000).toFixed(2).replace(/0+$/, "").replace(/\.$/, "")}M`
+}
+
 export const formatBytes = (bytes: number): string => {
   if (bytes < 1_000) return `${bytes} B`
   if (bytes < 1_000_000) return `${(bytes / 1_000).toFixed(1).replace(/\.0$/, "")} KB`

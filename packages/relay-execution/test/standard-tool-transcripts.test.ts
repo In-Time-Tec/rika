@@ -151,7 +151,7 @@ for (const [name, parameters, malformedField] of cases) {
                   expect(failed?.text).toContain(malformedField)
                   expect(failed?.data?.message).toBe(failed?.text)
                   expect(failed?.content).toBeUndefined()
-                  expect(result.requests).toHaveLength(3)
+                  expect(result.requests).toHaveLength(1)
                 }),
               ),
             )

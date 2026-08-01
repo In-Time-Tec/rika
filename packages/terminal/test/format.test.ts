@@ -4,6 +4,7 @@ import {
   clipToWidth,
   escapeControlCharacters,
   formatBytes,
+  formatContextTokens,
   formatTokens,
   homeRelativePath,
   plural,
@@ -18,6 +19,12 @@ describe("format", () => {
     expect(formatTokens(2_000)).toBe("2K tok")
     expect(formatTokens(12_345)).toBe("12.3K tok")
     expect(formatTokens(1_234_567)).toBe("1.2M tok")
+  })
+
+  test("keeps context capacities precise", () => {
+    expect(formatContextTokens(56_120)).toBe("56.1K")
+    expect(formatContextTokens(922_000)).toBe("922K")
+    expect(formatContextTokens(1_050_000)).toBe("1.05M")
   })
 
   test("clips by terminal cell width, not code units", () => {

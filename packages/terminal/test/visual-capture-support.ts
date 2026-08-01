@@ -227,6 +227,40 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
       24,
     ],
     ["mode-picker", { ...base(), modePicker: { open: true, selected: 2 } }, 80, 24],
+    [
+      "context-meter",
+      {
+        ...base(),
+        currentThreadId: "context-thread",
+        contextUsage: {
+          _tag: "Available",
+          inputTokens: 208_294,
+          contextWindow: 1_050_000,
+          reserveTokens: 128_000,
+        },
+      },
+      80,
+      24,
+    ],
+    [
+      "context-details",
+      {
+        ...base(),
+        currentThreadId: "context-thread",
+        contextDetailsOpen: true,
+        contextUsage: {
+          _tag: "Available",
+          inputTokens: 208_294,
+          contextWindow: 1_050_000,
+          reserveTokens: 128_000,
+        },
+        usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 0 },
+        usageTime: { _tag: "Available", accumulatedMillis: 103_000 },
+        usageTokens: { _tag: "Available", total: 6_811_999, uncountedAttempts: 0 },
+      },
+      80,
+      24,
+    ],
     ["palette", { ...base(), paletteOpen: true, palette: { open: true, query: "", selected: 0 } }, 80, 24],
     ["shortcuts", { ...base(), shortcutsOpen: true }, 80, 24],
     [
