@@ -2270,7 +2270,9 @@ describe("Surface", () => {
       expect(surface.paletteBox.visible).toBe(true)
       expect(surface.paletteBox.title).toBe(" Context & Usage ")
       expect(surface.paletteBox.titleColor).toBe(colors.medium)
-      expect(surface.paletteBox.bottomTitle).toBe(" Ctrl+Y toggle ── esc ")
+      expect(surface.paletteBox.bottomTitle).toBe("")
+      expect(surface.paletteHint.content).toBe(" esc ")
+      expect(surface.paletteHintSecond.content).toBe(" Ctrl+Y toggle ")
       const content = (surface.palette.content as { chunks: ReadonlyArray<{ text: string }> }).chunks
         .map((chunk) => chunk.text)
         .join("")
@@ -2465,7 +2467,9 @@ describe("Surface", () => {
       surface.update(model({ modePicker: { open: true, selected: 2 } }))
       expect(paletteText()).toContain("high")
       expect(paletteText()).toContain("Deep reasoning for hard tasks")
-      expect(surface.paletteBox.bottomTitle).toBe(" ↔ turn ── esc ")
+      expect(surface.paletteBox.bottomTitle).toBe("")
+      expect(surface.paletteHint.content).toBe(" esc ")
+      expect(surface.paletteHintSecond.content).toBe(" ↔ turn ")
       surface.update(model({ palette: { open: true, query: "quit", selected: 0 } }))
       expect(paletteText()).toContain("quit")
       surface.update(

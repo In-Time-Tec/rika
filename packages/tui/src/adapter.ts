@@ -1770,6 +1770,7 @@ export class Surface {
   readonly paletteBox: BoxRenderable
   readonly palette: TextRenderable
   readonly paletteHint: TextRenderable
+  readonly paletteHintSecond: TextRenderable
   readonly paletteDividerOne: TextRenderable
   readonly paletteDividerTwo: TextRenderable
   readonly overlayEditor: ProjectedEditorRenderable
@@ -2065,11 +2066,19 @@ export class Surface {
     this.paletteHint = new TextRenderable(renderer, {
       content: "",
       position: "absolute",
-      bottom: -1,
-      right: 1,
       zIndex: 30,
       selectable: false,
       wrapMode: "none",
+      bg: colors.surface,
+      visible: false,
+    })
+    this.paletteHintSecond = new TextRenderable(renderer, {
+      content: "",
+      position: "absolute",
+      zIndex: 30,
+      selectable: false,
+      wrapMode: "none",
+      bg: colors.surface,
       visible: false,
     })
     this.paletteDividerOne = new TextRenderable(renderer, {
@@ -2206,6 +2215,7 @@ export class Surface {
     renderer.root.add(this.workspaceLabel)
     renderer.root.add(this.paletteBox)
     renderer.root.add(this.paletteHint)
+    renderer.root.add(this.paletteHintSecond)
     renderer.root.add(this.paletteDividerOne)
     renderer.root.add(this.paletteDividerTwo)
     renderer.root.add(this.toastBox)
@@ -2219,6 +2229,31 @@ export class Surface {
     renderer.on(CliRenderEvents.RESIZE, this.onResize)
     renderer.on(CliRenderEvents.SELECTION, this.onSelection)
     renderer.on(CliRenderEvents.FRAME, this.recordRenderedTranscriptScroll)
+  }
+
+  private renderOverlayHints(labels: readonly string[], color: string): void {
+    const hints = [this.paletteHint, this.paletteHintSecond]
+    for (const hint of hints) hint.visible = false
+    const boxLeft = Number(this.paletteBox.left)
+    const boxTop = Number(this.paletteBox.top)
+    const boxRight = Math.min(this.renderer.terminalWidth - 1, boxLeft + Number(this.paletteBox.width) - 1)
+    let cursor = boxRight
+    for (let index = labels.length - 1; index >= 0; index -= 1) {
+      const label = labels[index]!
+      const hint = hints[labels.length - 1 - index]
+      if (hint === undefined) continue
+      const width = stringWidth(label)
+      if (cursor - width < boxLeft + 1) continue
+      cursor -= width
+      hint.content = label
+      hint.width = width
+      hint.left = cursor
+      hint.top = boxTop + Number(this.paletteBox.height) - 1
+      hint.fg = color
+      hint.bg = colors.surface
+      hint.visible = true
+      cursor -= 2
+    }
   }
 
   private readonly onKey = (key: KeyEvent) => {
@@ -3457,6 +3492,7 @@ export class Surface {
     this.palette.onMouseDown = undefined
     this.paletteBox.bottomTitle = ""
     this.paletteHint.visible = false
+    this.paletteHintSecond.visible = false
     this.paletteDividerOne.visible = false
     this.paletteDividerTwo.visible = false
     let cursorEditor: ProjectedEditorRenderable | undefined =
@@ -3485,9 +3521,7 @@ export class Surface {
       this.paletteBox.title = " Context & Usage "
       this.paletteBox.titleColor = colors[model.mode]
       this.paletteBox.titleAlignment = "left"
-      this.paletteBox.bottomTitle = " Ctrl+Y toggle ── esc "
-      this.paletteHint.visible = false
-      this.paletteBox.bottomTitleAlignment = "right"
+      this.renderOverlayHints([" Ctrl+Y toggle ", " esc "], colors[model.mode])
       const compactContext = boxHeight <= 12 || boxWidth < 40
       this.paletteDividerOne.content = sectionDivider(boxWidth, "Window")
       this.paletteDividerOne.width = boxWidth
@@ -3517,9 +3551,7 @@ export class Surface {
       this.paletteBox.title = " Mode "
       this.paletteBox.titleColor = colors[hovered]
       this.paletteBox.titleAlignment = "left"
-      this.paletteBox.bottomTitle = " ↔ turn ── esc "
-      this.paletteHint.visible = false
-      this.paletteBox.bottomTitleAlignment = "right"
+      this.renderOverlayHints([" ↔ turn ", " esc "], colors[hovered])
       const modeContentWidth = Math.max(1, boxWidth - 4)
       const modeContentHeight = Math.max(1, boxHeight - 2)
       this.paletteDividerOne.content = sectionDivider(boxWidth, "Route")
@@ -3575,8 +3607,7 @@ export class Surface {
       this.paletteBox.top = Math.max(0, composerTop - overlayHeight)
       this.paletteBox.title = model.threadSwitcher.kind === "mention" ? " Mention Thread " : " Switch Thread "
       this.paletteBox.titleAlignment = "left"
-      this.paletteBox.bottomTitle = " Opt+W/Ctrl+T all workspaces ── Esc close "
-      this.paletteBox.bottomTitleAlignment = "right"
+      this.renderOverlayHints([" Opt+W/Ctrl+T all workspaces ", " Esc close "], colors[model.mode])
       const switcherContentWidth = Math.max(1, overlayWidth - 4)
       const contentHeight = Math.max(1, overlayHeight - 2)
       const minute = Math.floor(this.currentTimeMillis() / 60_000)
@@ -3845,15 +3876,6 @@ const usageTimeText = (model: Model, now: number): string => {
   if (model.usageTime?._tag === "Available") return formatActiveTime(activeTimeAt(model.usageTime, now))
   return model.usageTime?._tag === "Loading" ? `${activeTimeIcon} ···` : `${activeTimeIcon} —`
 }
-
-const panelHint = (accent: ColorInput, left: string, right: string): StyledText =>
-  new StyledText([
-    fg(colors.text)("── "),
-    fg(accent)(left),
-    fg(colors.text)(" ── "),
-    fg(accent)(right),
-    fg(colors.text)(" ─"),
-  ])
 
 const sectionDivider = (width: number, title: string): StyledText =>
   new StyledText([

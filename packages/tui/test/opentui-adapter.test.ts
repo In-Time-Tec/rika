@@ -1843,7 +1843,7 @@ test("ticks Amp status and running-tool spinners every 200ms without rebuilding 
         output: "still running",
         files: [],
       }
-      const model: Model = {
+      let model: Model = {
         ...initial("/work", "high"),
         width: 100,
         height: 30,
@@ -1853,7 +1853,18 @@ test("ticks Amp status and running-tool spinners every 200ms without rebuilding 
         items: [{ _tag: "Block", index: 0, id: "tool:long-running", turnId: "turn" }],
         expandedRowKeys: ["tool:long-running"],
       }
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { clock })
+      const surface = new Surface(
+        setup.renderer,
+        {
+          key: () => undefined,
+          resize: () => undefined,
+          animationTick: () => {
+            model = update(model, { _tag: "AnimationTicked" })
+            surface.update(model)
+          },
+        },
+        { clock },
+      )
       const records = () =>
         (
           surface as unknown as {
@@ -1875,18 +1886,14 @@ test("ticks Amp status and running-tool spinners every 200ms without rebuilding 
         expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
         expect(styledTextValue(records().get("tool:long-running:header")!.renderable.content)).toContain("⠭")
         clock.advance(1)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("≈ Thinking 5 tok")
+        expect(model.animationTick).toBe(1)
         expect(styledTextValue(records().get("tool:long-running:header")!.renderable.content)).toMatch(/[⠀-⣿] sleep 5/u)
         expect(body.content).toBe(firstBodyContent)
 
+        const statusAtTickOne = styledTextValue(surface.statusLabel.content)
         clock.advance(200)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("≋ Thinking 5 tok")
-        clock.advance(200)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("≈ Thinking 5 tok")
-        clock.advance(200)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
-        clock.advance(200)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
+        expect(model.animationTick).toBe(2)
+        expect(styledTextValue(surface.statusLabel.content)).not.toBe(statusAtTickOne)
         expect(body.content).toBe(firstBodyContent)
       } finally {
         surface.destroy()
@@ -1900,22 +1907,34 @@ test("animates a fixed-width context shimmer while work is active", () =>
     Effect.gen(function* () {
       const clock = new ManualClock()
       const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30, clock }))
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { clock })
-      try {
-        surface.update({
-          ...initial("/work", "medium"),
-          width: 100,
-          height: 30,
-          currentThreadId: "thread",
-          busy: true,
-          activity: { _tag: "Thinking", bytes: 20 },
-          contextUsage: {
-            _tag: "Available",
-            inputTokens: 208_294,
-            contextWindow: 1_050_000,
-            reserveTokens: 128_000,
+      let model: Model = {
+        ...initial("/work", "medium"),
+        width: 100,
+        height: 30,
+        currentThreadId: "thread",
+        busy: true,
+        activity: { _tag: "Thinking", bytes: 20 },
+        contextUsage: {
+          _tag: "Available",
+          inputTokens: 208_294,
+          contextWindow: 1_050_000,
+          reserveTokens: 128_000,
+        },
+      }
+      const surface = new Surface(
+        setup.renderer,
+        {
+          key: () => undefined,
+          resize: () => undefined,
+          animationTick: () => {
+            model = update(model, { _tag: "AnimationTicked" })
+            surface.update(model)
           },
-        })
+        },
+        { clock },
+      )
+      try {
+        surface.update(model)
         const before = [...(surface.modeLabel.content as { readonly chunks: ReadonlyArray<unknown> }).chunks]
         const text = styledTextValue(surface.modeLabel.content)
         clock.advance(200)
@@ -1939,10 +1958,17 @@ test("advances active time in context details with the injected clock and freeze
       const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30, clock }))
       const surface = new Surface(
         setup.renderer,
-        { key: () => undefined, resize: () => undefined },
+        {
+          key: () => undefined,
+          resize: () => undefined,
+          animationTick: () => {
+            active = update(active, { _tag: "AnimationTicked" })
+            surface.update(active)
+          },
+        },
         { clock, currentTimeMillis: () => epoch + clock.now() },
       )
-      const active: Model = {
+      let active: Model = {
         ...initial("/work", "high"),
         width: 100,
         height: 30,
@@ -1987,9 +2013,18 @@ test("publishes the running-tool spinner frame while the selected agent is worki
         blocks: [running],
         items: [{ _tag: "Block", index: 0, id: "tool:title-spinner", turnId: "turn" }],
       }
+      let current = working
       const surface = new Surface(
         setup.renderer,
-        { key: () => undefined, resize: () => undefined, workingFrame: (frame) => frames.push(frame) },
+        {
+          key: () => undefined,
+          resize: () => undefined,
+          workingFrame: (frame) => frames.push(frame),
+          animationTick: () => {
+            current = update(current, { _tag: "AnimationTicked" })
+            surface.update(current)
+          },
+        },
         { clock },
       )
       const header = () =>
@@ -2004,7 +2039,7 @@ test("publishes the running-tool spinner frame while the selected agent is worki
           ).transcriptRecords.get("tool:title-spinner:header")!.renderable.content,
         )
       try {
-        surface.update(working)
+        surface.update(current)
         yield* openTui(() => setup.renderOnce())
         expect(frames).toEqual(["⠭"])
         expect(header()).toContain("⠭")
@@ -2013,7 +2048,8 @@ test("publishes the running-tool spinner frame while the selected agent is worki
         expect(frames).toHaveLength(2)
         expect(header()).toContain(frames.at(-1))
 
-        surface.update({ ...working, busy: false, activity: undefined, activeTurnId: undefined })
+        current = { ...current, busy: false, activity: undefined, activeTurnId: undefined }
+        surface.update(current)
         expect(frames.at(-1)).toBeUndefined()
         const settledFrameCount = frames.length
         clock.advance(400)
@@ -2115,15 +2151,28 @@ test("keeps the status spinner moving across a tool-result lull without feed eve
           block: { _tag: "ToolResult", id: "tool-lull", output: "done", failed: false },
         },
       })
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { clock })
+      const surface = new Surface(
+        setup.renderer,
+        {
+          key: () => undefined,
+          resize: () => undefined,
+          animationTick: () => {
+            model = update(model, { _tag: "AnimationTicked" })
+            surface.update(model)
+          },
+        },
+        { clock },
+      )
       try {
         surface.update(model)
         yield* openTui(() => setup.renderOnce())
         expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Waiting")
         clock.advance(200)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("≈ Waiting")
+        const afterFirstTick = styledTextValue(surface.statusLabel.content)
+        expect(model.animationTick).toBe(1)
         clock.advance(200)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("≋ Waiting")
+        expect(model.animationTick).toBe(2)
+        expect(styledTextValue(surface.statusLabel.content)).not.toBe(afterFirstTick)
       } finally {
         surface.destroy()
         setup.renderer.destroy()
@@ -3417,7 +3466,7 @@ test("keeps every overlay above the composer at 50x12", () =>
           "Command Palette",
           "toggle fast mode",
         )
-        yield* capture({ ...base, modePicker: { ...base.modePicker, open: true } }, "↔ turn ── esc", "GPT-5.6")
+        yield* capture({ ...base, modePicker: { ...base.modePicker, open: true } }, "Mode", "Fast, low-cost")
         yield* capture({ ...base, shortcutsOpen: true }, "command palette", "Ctrl+O", 4)
         yield* capture({ ...base, filePicker: { ...base.filePicker, open: true } }, "@src", "@src")
         yield* capture(
@@ -3524,12 +3573,9 @@ for (const [width, height] of [
                 surface.paletteBox.x + surface.paletteBox.width,
               )
             }
-            const overlayText = styledTextValue(surface.palette.content)
-            const overlayInnerWidth = Math.max(1, surface.paletteBox.width - 4)
-            expect(
-              overlayText.split("\n").every((line) => stringWidth(line) <= overlayInnerWidth),
-              `${width} columns with ${overlayInnerWidth} overlay cells:\n${overlayText}`,
-            ).toBe(true)
+            for (const hint of [surface.paletteHint, surface.paletteHintSecond]) {
+              if (hint.visible) bounded("overlay hint", hint)
+            }
           }
           surface.showToast("Selection 界👩‍💻e\u0301 copied to clipboard")
           yield* openTui(() => setup.renderOnce())

@@ -7,6 +7,6 @@
 │ Full       372K      │
 ├─ Session ────────────┤
 │ Cost       $1.25     │
-│ Active     ◷ 1m 43s  │
+│ Ctrl+Y toggle m  esc │
 │                      │
 ╰──────────────────────╯

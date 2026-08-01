@@ -1178,10 +1178,9 @@ const turnModeSelector = (model: Model, offset: number): Model => {
 const contextPercent = (context: ContextUsage | undefined): number | undefined => {
   if (context?._tag !== "Available") return undefined
   const usable = Math.max(0, context.contextWindow - context.reserveTokens)
-  return Math.min(
-    100,
-    Math.round((usable === 0 ? (context.inputTokens > 0 ? 1 : 0) : context.inputTokens / usable) * 100),
-  )
+  let fraction = context.inputTokens / usable
+  if (usable === 0) fraction = context.inputTokens > 0 ? 1 : 0
+  return Math.min(100, Math.round(fraction * 100))
 }
 
 const replaceContextUsage = (model: Model, contextUsage: ContextUsage): Model => {
@@ -1265,20 +1264,24 @@ export const update: {
           : { ...model.modePicker, turnTick: model.modePicker.turnTick + 1 }
       const commitLength =
         model.modeCommit === undefined ? 0 : model.modeCommit.from.length + model.modeCommit.to.length
-      const modeCommit =
-        model.modeCommit === undefined
-          ? undefined
-          : model.modeCommit.tick > commitLength
-            ? undefined
-            : { ...model.modeCommit, tick: model.modeCommit.tick + 1 }
+      let modeCommit = model.modeCommit
+      if (modeCommit !== undefined) {
+        if (modeCommit.tick > commitLength) modeCommit = undefined
+        else modeCommit = { ...modeCommit, tick: modeCommit.tick + 1 }
+      }
+      let compactFromPercent = model.contextAnimation.compactFromPercent
+      let compactTick = model.contextAnimation.compactTick
+      if (compactTick !== undefined) {
+        if (compactTick >= 15) {
+          compactFromPercent = undefined
+          compactTick = undefined
+        } else compactTick += 1
+      }
       const contextAnimation = {
         ...model.contextAnimation,
+        compactFromPercent,
+        compactTick,
         flashTicks: Math.max(0, model.contextAnimation.flashTicks - 1),
-        ...(model.contextAnimation.compactTick === undefined
-          ? {}
-          : model.contextAnimation.compactTick >= 15
-            ? { compactFromPercent: undefined, compactTick: undefined }
-            : { compactTick: model.contextAnimation.compactTick + 1 }),
       }
       return { ...model, animationTick: model.animationTick + 1, modePicker, modeCommit, contextAnimation }
     }
