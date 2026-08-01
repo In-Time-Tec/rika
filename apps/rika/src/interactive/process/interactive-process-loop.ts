@@ -7,34 +7,15 @@ import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
 import { create as createTui } from "@rika/terminal/opentui-surface"
-import { Mode, Model, initial, withModeRouteMap } from "@rika/terminal/terminal-state"
-import { promptParts, expandPastedText, execute, type Action } from "@rika/terminal/terminal-session"
-import type { ThreadItem } from "@rika/terminal/terminal-message"
-import { selectedThreadMetadata } from "@rika/terminal/terminal-state-reducer"
+import { Model, initial, withModeRouteMap } from "@rika/terminal/terminal-state"
+import type { ThreadItem } from "@rika/terminal/terminal-state"
 type ModeRoutes = Model["modeRoutes"]
-const nextMode = (mode: Mode): Mode => {
-  const modes = Mode.literals
-  return modes[(modes.indexOf(mode) + 1) % modes.length]!
-}
-const nextUsageDisplay = (display: "cost" | "tokens" | "time" | undefined): "cost" | "tokens" | "time" => {
-  if (display === "cost") return "tokens"
-  if (display === "tokens") return "time"
-  return "cost"
-}
-
-import { canSubmit, update } from "@rika/terminal/terminal-state-reducer"
-import { Cause, Effect, Fiber } from "effect"
+import { Effect, Fiber } from "effect"
 import * as InteractiveController from "../controller/interactive-controller"
 import { terminalTitleSequence, traceTuiModelEvent } from "./interactive-process"
-import { settleTuiInitialization } from "./process-lifecycle"
-import { pasteClipboardPng, pastedImagePath, persistPastedImage, gitOutput } from "./process-workspace"
-import { workspaceGlob } from "./process-files"
-import { failureKind } from "./process-configuration"
-import { imagePasteBlockedNotice } from "../input/prompt-input"
-import { initialSubmitAction } from "../input/command-input"
-import { nextSubmissionId } from "../controller/terminal-turn-submission"
 import { makeEventRouter } from "./process-events"
 import { makeProcessRuntime } from "./process-runtime"
+import { initializeRenderer } from "./interactive-process-setup"
 
 export interface InteractiveTuiOptions {
   readonly editor?: string | undefined
@@ -176,301 +157,29 @@ export const interactiveTui =
             requestSelectionResync,
             requestQueueResync,
           })
-          loop.initialization = fork(
-            settleTuiInitialization(
-              createTui({
-                ...(options.makeRenderer === undefined ? {} : { makeRenderer: options.makeRenderer }),
-                workingFrame: (frame) => {
-                  if (loop.workingFrame === frame) return
-                  loop.workingFrame = frame
-                  refreshTerminalTitle()
-                },
-                openPath,
-                scroll: (offset) => {
-                  loop.model = update(loop.model, { _tag: "ScrollMoved", offset })
-                  if (offset <= 0 && !loop.loadingOlder) {
-                    const threadId = loop.model.currentThreadId
-                    const before = loop.transcriptOldestCursor
-                    if (!loop.transcriptHasOlder || threadId === undefined || before === undefined) return
-                    loop.loadingOlder = true
-                    run(
-                      session
-                        .loadOlder(
-                          threadId,
-                          loop.activeSelectionEpoch,
-                          before,
-                          loop.loadedTranscriptEntries.map((entry) => entry.unit.key),
-                        )
-                        .pipe(
-                          Effect.ensuring(
-                            Effect.sync(() => {
-                              loop.loadingOlder = false
-                            }),
-                          ),
-                        ),
-                    )
-                  }
-                  if (offset > 0 && !loop.loadingOlder) requestNewerPage()
-                },
-                scrollGeometry: (offset) => {
-                  loop.model = update(loop.model, { _tag: "ScrollMoved", offset })
-                },
-                scrollFollow: () => {
-                  loop.model = update(loop.model, { _tag: "ScrollFollowed" })
-                  requestNewerPage()
-                },
-                paste: (text) => {
-                  loop.model = update(loop.model, { _tag: "Pasted", text })
-                  loop.renderer?.surface.update(loop.model)
-                },
-                expandPaste: (token) => {
-                  loop.model = update(loop.model, { _tag: "PastedTextExpanded", token })
-                  loop.renderer?.surface.update(loop.model)
-                },
-                pasteImage: (image) => {
-                  const blocked = imagePasteBlockedNotice(loop.model)
-                  if (blocked !== undefined) {
-                    loop.renderer?.surface.showToast(blocked)
-                    return
-                  }
-                  if (image !== undefined) {
-                    const path = pastedImagePath(image.bytes, image.mediaType)
-                    if (path === undefined) {
-                      loop.renderer?.surface.showToast("Pasted image must be a non-empty PNG, JPEG, GIF, or WebP")
-                      return
-                    }
-                    loop.model = update(loop.model, { _tag: "ImageInserted", path })
-                    loop.renderer?.surface.update(loop.model)
-                    run(
-                      persistPastedImage(loop.model.workspace, path, image.bytes).pipe(
-                        Effect.tap((persisted) =>
-                          Effect.sync(() => {
-                            if (persisted) return
-                            loop.model = update(loop.model, { _tag: "ImageRemoved", path })
-                            loop.renderer?.surface.update(loop.model)
-                            loop.renderer?.surface.showToast("Pasted image could not be saved")
-                          }),
-                        ),
-                        Effect.asVoid,
-                      ),
-                    )
-                    return
-                  }
-                  run(
-                    pasteClipboardPng(loop.model.workspace).pipe(
-                      Effect.tap((path) =>
-                        Effect.sync(() => {
-                          if (path === undefined) {
-                            loop.renderer?.surface.showToast(
-                              "Clipboard does not contain a supported non-empty PNG image",
-                            )
-                            return
-                          }
-                          loop.model = update(loop.model, { _tag: "ImageInserted", path })
-                          loop.renderer?.surface.update(loop.model)
-                        }),
-                      ),
-                      Effect.asVoid,
-                    ),
-                  )
-                },
-                clickToggle: (unit) => {
-                  loop.model = update(loop.model, { _tag: "DetailToggled", id: unit })
-                  loop.renderer?.surface.update(loop.model)
-                },
-                usageToggle: () => {
-                  loop.model = {
-                    ...loop.model,
-                    usageDisplay: nextUsageDisplay(loop.model.usageDisplay),
-                  }
-                  render()
-                },
-                modeToggle: () => {
-                  if (loop.model.busy) return
-                  loop.model = { ...loop.model, mode: nextMode(loop.model.mode) }
-                  render()
-                },
-                key: (key) => {
-                  if (key.ctrl && key.name === "c" && !loop.model.busy) {
-                    close()
-                    return
-                  }
-                  if (key.ctrl && key.name === "g") {
-                    run(editComposer())
-                    return
-                  }
-                  const wasChangedFilesOpen = loop.model.changedFilesOpen
-                  const beforePreviewId = loop.model.threadSwitcher.open
-                    ? selectedThreadMetadata(loop.model)?.id
-                    : undefined
-                  const submitting = key.name === "return" && !key.shift && !key.ctrl && canSubmit(loop.model)
-                  const submission = submitting ? nextSubmissionId(loop.submissionSequence) : undefined
-                  if (submission !== undefined) loop.submissionSequence = submission.sequence
-                  const submissionId = submission?.id
-                  const prompt = submitting ? loop.model.input : undefined
-                  const parts = prompt === undefined ? undefined : promptParts(prompt, loop.model.pastedText)
-                  const submittedPrompt =
-                    prompt === undefined ? undefined : expandPastedText(prompt, loop.model.pastedText)
-                  loop.model = update(loop.model, { _tag: "KeyPressed", key })
-                  if (submitting)
-                    loop.model = update(loop.model, {
-                      _tag: "Submitted",
-                      ...(submissionId === undefined ? {} : { submissionId }),
-                    })
-                  if (!wasChangedFilesOpen && loop.model.changedFilesOpen)
-                    loop.model = update(loop.model, { _tag: "ChangedFilesRequested" })
-                  const afterPreviewId = loop.model.threadSwitcher.open
-                    ? selectedThreadMetadata(loop.model)?.id
-                    : undefined
-                  if (afterPreviewId !== undefined && afterPreviewId !== beforePreviewId)
-                    loop.model = update(loop.model, { _tag: "ThreadPreviewRequested" })
-                  loop.renderer?.surface.update(loop.model)
-                  if (!wasChangedFilesOpen && loop.model.changedFilesOpen) run(loadChangedFiles())
-                  if (afterPreviewId !== undefined && afterPreviewId !== beforePreviewId) {
-                    if (loop.previewTimer !== undefined) fork(Fiber.interrupt(loop.previewTimer))
-                    const selectedPreviewTimer = Effect.sleep("120 millis").pipe(
-                      Effect.andThen(session.previewThread(afterPreviewId)),
-                      Effect.ensuring(
-                        Effect.sync(() => {
-                          if (loop.previewTimer === selectedPreviewTimer) loop.previewTimer = undefined
-                        }),
-                      ),
-                      recoverSession,
-                      fork,
-                    )
-                    loop.previewTimer = selectedPreviewTimer
-                  }
-                  if (submittedPrompt !== undefined && submittedPrompt.length > 0 && parts !== undefined) {
-                    loop.submittedSinceIdle = true
-                    execute(adapter, {
-                      _tag: "Submit",
-                      prompt: submittedPrompt,
-                      parts,
-                      mode: loop.model.mode,
-                      tuning: { fastMode: loop.model.fastMode },
-                      ...(submissionId === undefined ? {} : { submissionId }),
-                    })
-                  }
-                  if (!loop.model.busy && loop.model.activeTurnId === undefined && loop.model.activity === undefined)
-                    loop.submittedSinceIdle = false
-                  const action = loop.model.pendingAction as Action | undefined
-                  if (action !== undefined) consumePendingAction()
-                },
-                resize: (width, height) => {
-                  loop.model = update(loop.model, { _tag: "Resized", width, height })
-                  loop.renderer?.surface.update(loop.model)
-                },
-                composerResize: (height) => {
-                  loop.model = update(loop.model, { _tag: "ComposerHeightChanged", height })
-                  loop.renderer?.surface.update(loop.model)
-                },
-                sidebarResize: (width) => {
-                  loop.model = update(loop.model, { _tag: "SidebarWidthChanged", width })
-                  loop.renderer?.surface.update(loop.model)
-                },
-                threadSidebarSelect: (index) => {
-                  loop.model = update(loop.model, { _tag: "ThreadSidebarSelectionConfirmed", index })
-                  loop.renderer?.surface.update(loop.model)
-                  const action = loop.model.pendingAction as Action | undefined
-                  if (action !== undefined) consumePendingAction()
-                },
-                threadPreviewScroll: (offset) => {
-                  loop.model = update(loop.model, { _tag: "ThreadPreviewScrolled", offset })
-                  loop.renderer?.surface.update(loop.model)
-                },
-              }),
-              () => loop.closed,
-              (created) => Effect.sync(() => created.releaseTerminal()),
-            ).pipe(
-              Effect.tap((created) =>
-                Effect.sync(() => {
-                  if (created === undefined) return
-                  loop.renderer = created
-                  if (loop.closed) {
-                    created.releaseTerminal()
-                    return
-                  }
-                  if (loop.pendingJobControlPause) {
-                    loop.pendingJobControlPause = false
-                    suspend()
-                  }
-                  loop.model = update(loop.model, { _tag: "FilesRequested" })
-                  created.surface.update(loop.model)
-                  run(Effect.logInfo("tui.renderer.started"))
-                  if (loop.closed) return
-                  run(session.events(feedBatcher.offer))
-                  run(watchChangedFiles)
-                  run(
-                    workspaceGlob(loop.model.workspace, "**/*", 10_000).pipe(
-                      Effect.tap((files) =>
-                        Effect.sync(() => {
-                          loop.model = update(loop.model, { _tag: "FilesReplaced", files: files.toSorted() })
-                          created.surface.update(loop.model)
-                        }),
-                      ),
-                      Effect.catch((error) =>
-                        Effect.sync(() => {
-                          loop.model = update(loop.model, { _tag: "FilesFailed", message: error.message })
-                          created.surface.update(loop.model)
-                        }).pipe(Effect.andThen(Effect.logWarning(`workspace file index failed: ${error.message}`))),
-                      ),
-                      Effect.asVoid,
-                    ),
-                  )
-                  run(
-                    gitOutput(["git", "-C", loop.model.workspace, "symbolic-ref", "--short", "HEAD"]).pipe(
-                      Effect.tap(([text, exit]) =>
-                        Effect.sync(() => {
-                          const branch = text.trim()
-                          if (exit === 0 && branch.length > 0 && branch !== "HEAD") {
-                            loop.model = update(loop.model, { _tag: "BranchDetected", branch })
-                            created.surface.update(loop.model)
-                          }
-                        }),
-                      ),
-                      Effect.asVoid,
-                    ),
-                  )
-                  const startInitialSelection = () => {
-                    if (input.threadId === undefined) return Effect.void
-                    return Effect.sync(() =>
-                      startSelection((epoch) => session.selectThread(input.threadId!, epoch)),
-                    ).pipe(Effect.flatMap(Fiber.join))
-                  }
-                  run(
-                    startInitialSelection().pipe(
-                      Effect.andThen(
-                        initialSubmitAction(input.prompt, loop.model.mode) === undefined
-                          ? Effect.void
-                          : Effect.sync(() => {
-                              execute(adapter, initialSubmitAction(input.prompt, loop.model.mode)!)
-                            }),
-                      ),
-                    ),
-                  )
-                }),
-              ),
-              Effect.catchCause((cause) =>
-                Effect.sync(() => {
-                  if (loop.closed) return
-                  resume(
-                    Effect.logError("tui.renderer.failed").pipe(
-                      Effect.annotateLogs("rika.failure.kind", failureKind(cause)),
-                      Effect.andThen(
-                        Effect.fail(
-                          ProductOperation.OperationUnavailable.make({
-                            operation: "Interactive",
-                            message: Cause.pretty(cause),
-                          }),
-                        ),
-                      ),
-                    ),
-                  )
-                }),
-              ),
-              Effect.asVoid,
-            ),
-          )
+          loop.initialization = initializeRenderer({
+            loop,
+            input,
+            session,
+            options,
+            fork,
+            run,
+            requestNewerPage,
+            close,
+            refreshTerminalTitle,
+            openPath,
+            editComposer,
+            recoverSession,
+            render,
+            consumePendingAction,
+            loadChangedFiles,
+            adapter,
+            feedBatcher,
+            watchChangedFiles,
+            suspend,
+            startSelection,
+            resume,
+          })
           return teardown(false)
         })
       }),

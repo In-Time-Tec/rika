@@ -3,10 +3,29 @@ import * as Turn from "@rika/product/turn-record"
 import * as ThreadResult from "@rika/product/thread-result"
 import { HashMap } from "effect"
 import { applyTurnDelta } from "@rika/terminal/terminal-transcript-presentation"
-import type { ThreadItem } from "@rika/terminal/terminal-message"
+import type { ThreadItem } from "@rika/terminal/terminal-state"
 import { update as updateModel } from "@rika/terminal/terminal-state-reducer"
 import type { State, ProjectionStream, Update } from "./interactive-controller"
-import { retaining } from "./interactive-event-dispatch"
+import {
+  retaining,
+  activeSeedEntries,
+  project,
+  projectionEntries,
+  projectionFromEntries,
+  displayedEntries,
+  reconcileTranscriptBlocks,
+} from "./interactive-transcript-projection"
+import {
+  boundWindow,
+  cursorForEntry,
+  normalizeEntries,
+  projectedRootIds,
+  replayTurnsForWindow,
+  projectionFromStream,
+  revisionsForWindow,
+  sameCursor,
+} from "./interactive-transcript-window"
+import { activityAfterOrigin } from "./interactive-activity"
 type TranscriptEvent = Extract<
   InteractiveEvent.InteractiveEvent,
   | { readonly _tag: "SelectionLoaded" }
@@ -20,24 +39,7 @@ type TranscriptEvent = Extract<
   | { readonly _tag: "ThreadUsageUpdated" }
   | { readonly _tag: "ThreadRefolding" }
 >
-import {
-  activeSeedEntries,
-  activityAfterOrigin,
-  boundWindow,
-  cleared,
-  cursorForEntry,
-  displayedEntries,
-  normalizeEntries,
-  project,
-  projectionEntries,
-  projectionFromEntries,
-  projectionFromStream,
-  projectedRootIds,
-  replayTurnsForWindow,
-  reconcileTranscriptBlocks,
-  revisionsForWindow,
-  sameCursor,
-} from "./interactive-event-dispatch"
+import { cleared } from "./interactive-transcript-projection"
 export const updateState = (state: State, event: TranscriptEvent): Update => {
   if (event._tag === "ThreadRefolding")
     return {

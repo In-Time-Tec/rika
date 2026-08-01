@@ -1,6 +1,5 @@
 import * as InteractiveEvent from "@rika/product/interactive-event"
 import * as TranscriptPage from "@rika/product/transcript-page"
-import type { InteractiveCommand } from "@rika/product/interactive-command"
 import * as Turn from "@rika/product/turn-record"
 import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
@@ -89,27 +88,6 @@ export const warnUnattached = (unattached: ReadonlyArray<string>): Effect.Effect
       Effect.logWarning("transcript.child.parent_missing").pipe(Effect.annotateLogs({ "rika.turn.id": turnId })),
     { discard: true },
   )
-
-export interface PaletteCommand {
-  readonly id: string
-  readonly category: string
-  readonly label: string
-  readonly action: unknown
-}
-
-export const paletteCommands = [
-  { id: "new-thread", category: "thread", label: "New thread", action: { _tag: "NewThread" as const } },
-] as const
-
-export const installPaletteCommands = (commands: Array<PaletteCommand>): void => {
-  for (const command of paletteCommands.toReversed())
-    if (!commands.some((candidate) => candidate.id === command.id)) commands.unshift(command)
-}
-
-export const paletteCommand = (action: unknown): InteractiveCommand | undefined =>
-  action !== null && typeof action === "object" && "_tag" in action && action._tag === "NewThread"
-    ? { _tag: "NewThread" }
-    : undefined
 
 export const update: {
   (event: TranscriptEvent): (state: State) => Update

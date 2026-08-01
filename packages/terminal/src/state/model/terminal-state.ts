@@ -5,12 +5,15 @@ import { Activity } from "./terminal-activity-state"
 import { UsageDisplay, UsageTime } from "./terminal-usage-state"
 import { defaultModeRouteMap, modeRouteMapSchema, type ModeRouteMap } from "./terminal-mode-route"
 import { ChangedFile as ChangedFileSchema } from "./terminal-changed-file"
+import type { ChangedFile } from "./terminal-changed-file"
+import type { ThreadItem } from "./terminal-thread-state"
 import { QueueItem as QueueItemSchema } from "./terminal-queue-item"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Entry } from "./terminal-message"
 
 export const Mode = ModeId
 export type Mode = typeof Mode.Type
+export type { ChangedFile, ThreadItem }
 const WorkspaceFilesSchema = Schema.Union([
   loadableSchemas.idle,
   loadableSchemas.loading,

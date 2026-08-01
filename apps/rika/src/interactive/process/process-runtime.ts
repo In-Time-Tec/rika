@@ -4,14 +4,14 @@ import * as ProcessLifecycle from "./process-lifecycle"
 import * as ProcessPrompt from "./process-prompt"
 import * as ProcessWorkspace from "./process-workspace"
 import * as ProcessLayer from "./process-layer"
-import * as InteractiveController from "../controller/interactive-controller"
+import { paletteCommand } from "../controller/interactive-palette-controller"
 import { classifyPrompt, displayInput, promptParts } from "@rika/terminal/terminal-session"
 import { execute, type Action, type Adapter, type ModelTuning } from "@rika/terminal/terminal-session"
 import { update } from "@rika/terminal/terminal-state-reducer"
 import type { PathTarget } from "@rika/terminal/terminal-transcript-presentation"
 import type { Model, Mode } from "@rika/terminal/terminal-state"
 type PromptPart = ReturnType<ReturnType<typeof promptParts>>[number]
-import type { ThreadItem } from "@rika/terminal/terminal-message"
+import type { ThreadItem } from "@rika/terminal/terminal-state"
 import * as Thread from "@rika/product/thread-record"
 import * as ProductOperation from "@rika/product/product-operation"
 import { Cause, Clock, Effect, Fiber, FileSystem } from "effect"
@@ -432,8 +432,8 @@ export const makeProcessRuntime = (runtime: Runtime) => {
   }
   const consumePendingAction = () => {
     const action = loop.model.pendingAction as Action | undefined
-    const paletteCommand = InteractiveController.paletteCommand(action)
-    if (paletteCommand?._tag === "NewThread") startSelection(() => session.newThread)
+    const command = paletteCommand(action)
+    if (command?._tag === "NewThread") startSelection(() => session.newThread)
     else if (action !== undefined) {
       execute(adapter, action)
     }

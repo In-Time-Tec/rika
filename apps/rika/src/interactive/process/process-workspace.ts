@@ -118,15 +118,6 @@ const runClipboardPngExtractor: ClipboardPngExtractor = (script, path) =>
     ),
   )
 
-const imageMediaType = (path: string) => {
-  const lower = path.toLowerCase()
-  if (lower.endsWith(".png")) return "image/png"
-  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg"
-  if (lower.endsWith(".gif")) return "image/gif"
-  if (lower.endsWith(".webp")) return "image/webp"
-  return "application/octet-stream"
-}
-
 const pastedImageFormat = (bytes: Uint8Array, declaredMediaType?: string) => {
   const prefix = (start: number, end: number) => new TextDecoder().decode(bytes.subarray(start, end))
   let signature: { readonly mediaType: string; readonly extension: string } | undefined

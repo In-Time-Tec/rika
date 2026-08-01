@@ -1,5 +1,6 @@
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as InteractiveController from "../src/interactive/controller/interactive-controller"
+import * as InteractivePalette from "../src/interactive/controller/interactive-palette-controller"
 import * as ThreadSelection from "../src/interactive/controller/terminal-thread-selection"
 import * as InteractiveFrameBatch from "../src/interactive/controller/interactive-frame-batch"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
@@ -375,18 +376,18 @@ it("maps the new-thread palette action to a command and resets the transcript fr
     threadCostUsd: 1,
   }).state
 
-  expect(InteractiveController.paletteCommand({ _tag: "NewThread" })).toEqual({ _tag: "NewThread" })
-  expect(InteractiveController.paletteCommands).toContainEqual({
+  expect(InteractivePalette.paletteCommand({ _tag: "NewThread" })).toEqual({ _tag: "NewThread" })
+  expect(InteractivePalette.paletteCommands).toContainEqual({
     id: "new-thread",
     category: "thread",
     label: "New thread",
     action: { _tag: "NewThread" },
   })
-  const palette: Array<InteractiveController.PaletteCommand> = []
-  InteractiveController.installPaletteCommands(palette)
-  InteractiveController.installPaletteCommands(palette)
-  expect(palette).toEqual(InteractiveController.paletteCommands)
-  InteractiveController.installPaletteCommands(Reducer.commands as Array<InteractiveController.PaletteCommand>)
+  const palette: Array<InteractivePalette.PaletteCommand> = []
+  InteractivePalette.installPaletteCommands(palette)
+  InteractivePalette.installPaletteCommands(palette)
+  expect(palette).toEqual(InteractivePalette.paletteCommands)
+  InteractivePalette.installPaletteCommands(Reducer.commands as Array<InteractivePalette.PaletteCommand>)
   let paletteModel = Reducer.update(ViewState.initial("/work"), {
     _tag: "KeyPressed",
     key: key({ name: "o", ctrl: true }),

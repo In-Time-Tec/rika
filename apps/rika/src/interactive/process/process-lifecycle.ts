@@ -1,4 +1,4 @@
-import { Cause, Duration, Effect, Fiber, Function } from "effect"
+import { Duration, Effect, Fiber, Function } from "effect"
 
 export const interruptTrackedFibers = (fibers: Iterable<Fiber.Fiber<void, never>>) =>
   Effect.forEach([...fibers], Fiber.interrupt, { concurrency: "unbounded", discard: true })

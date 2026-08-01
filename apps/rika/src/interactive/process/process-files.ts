@@ -1,9 +1,8 @@
 import * as LocalPath from "@rika/coding-tools/local-path"
 import * as WorkspaceIndex from "@rika/coding-tools/workspace-file-search"
-import type { ChangedFile } from "@rika/terminal/terminal-message"
+import type { ChangedFile } from "@rika/terminal/terminal-state"
 import type { PathTarget } from "@rika/terminal/terminal-transcript-presentation"
 import { Config, Effect, FileSystem, Function, Option, Path, PlatformError, Schema } from "effect"
-import { workspaceDirectory } from "@rika/configuration/configuration-paths"
 
 export const mkdir = (path: string, options?: { readonly recursive?: boolean }) =>
   FileSystem.FileSystem.pipe(Effect.flatMap((fileSystem) => fileSystem.makeDirectory(path, options)))
