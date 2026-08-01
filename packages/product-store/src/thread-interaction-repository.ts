@@ -1,10 +1,12 @@
+import * as ThreadResult from "@rika/product/thread-result"
+import type { ExecutionRoutePin } from "@rika/product/execution-route-snapshot"
 import { Service } from "@rika/product/thread-interaction-repository"
 export { Service }
 import { Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { Thread, ThreadId } from "@rika/product/thread-record"
 import * as TurnRepository from "./turn-repository"
-import { ExecutionRoutePin, Turn, TurnId, isAgentExecution } from "@rika/product/turn-record"
+import { Turn, TurnId } from "@rika/product/turn-record"
 import * as ExecutionStatus from "@rika/product/execution-status"
 
 export const ReceiptKind = Schema.Literals(["create", "message", "steer", "cancel", "stop"])
@@ -197,7 +199,8 @@ interface State {
 }
 const error = (cause: unknown) => RepositoryError.make({ message: String(cause) })
 const terminal = ExecutionStatus.isTerminalStatus
-const active = (turn: Turn) => isAgentExecution(turn) && !terminal(turn.status) && turn.status !== "queued"
+const active = (turn: Turn) =>
+  ThreadResult.TurnResult.isAgentExecution(turn) && !terminal(turn.status) && turn.status !== "queued"
 const clone = <A>(value: A): A => structuredClone(value)
 const initialState = (threads: ReadonlyArray<Thread>, turns: ReadonlyArray<Turn>): State => ({
   threads: new Map(threads.map((x) => [x.id, clone(x)])),
@@ -237,7 +240,7 @@ export const makeMemory = (seed: MemoryInput = {}) =>
           return [Effect.fail(reject("admission-limit", "Admission limit exceeded")), current]
         const workspaceActive = [...current.turns.values()].filter(
           (x) =>
-            isAgentExecution(x) &&
+            ThreadResult.TurnResult.isAgentExecution(x) &&
             x.author._tag === "Agent" &&
             !terminal(x.status) &&
             current.threads.get(x.threadId)?.workspace === source.workspace,
@@ -355,7 +358,7 @@ export const makeMemory = (seed: MemoryInput = {}) =>
         let next = current
         if (kind === "stop") {
           const stopped = [...current.turns.values()]
-            .filter(isAgentExecution)
+            .filter(ThreadResult.TurnResult.isAgentExecution)
             .filter((x) => x.threadId === input.targetThreadId && x.status === "queued")
           const revision = (current.revisions.get(input.targetThreadId) ?? 0) + (stopped.length > 0 ? 1 : 0)
           const changed = new Map(current.turns)
@@ -437,12 +440,12 @@ export const makeMemory = (seed: MemoryInput = {}) =>
           }
           const running = [...current.turns.values()].some((x) => x.threadId === source.id && active(x))
           const count = [...current.turns.values()].filter(
-            (x) => isAgentExecution(x) && x.threadId === source.id && x.status === "queued",
+            (x) => ThreadResult.TurnResult.isAgentExecution(x) && x.threadId === source.id && x.status === "queued",
           ).length
           if (running && count >= input.queueCapacity)
             return [Effect.fail(QueueFull.make({ threadId: source.id, capacity: input.queueCapacity, count })), current]
           const target = current.turns.get(input.targetTurnId)!
-          if (!isAgentExecution(target))
+          if (!ThreadResult.TurnResult.isAgentExecution(target))
             return [Effect.fail(ResultNotReady.make({ targetTurnId: input.targetTurnId })), current]
           const depth = target.author._tag === "Agent" ? target.author.threadCreationDepth : 0
           const turn: Turn = {

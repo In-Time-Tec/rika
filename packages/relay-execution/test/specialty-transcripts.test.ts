@@ -1,10 +1,12 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as AgentProfiles from "../src/agent-profiles"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionChildRun from "@rika/product/execution-child-run"
 import { Catalog } from "@rika/coding-tools/coding-tool-catalog"
 import { Effect, Function, Layer, Schema } from "effect"
 import { ProductAgent } from "@rika/product/product-operation"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 
 const provideLayer: {
   <RIn, E2, ROut>(
@@ -18,7 +20,7 @@ const provideLayer: {
   Effect.scoped(Effect.flatMap(Layer.build(layer), (context) => Effect.provide(effect, context))),
 )
 
-const executionRoute = () => Turn.testExecutionRoute()
+const executionRoute = () => ExecutionRouteSnapshot.testExecutionRoute()
 
 const model = { provider: "test", model: "deterministic" }
 const specialtyNames = ["task", "oracle", "librarian"] as const
@@ -49,7 +51,7 @@ const cases = [
   },
 ] as const
 
-const backendLayer = (failProfile?: ExecutionBackend.AgentProfile) =>
+const backendLayer = (failProfile?: ExecutionChildRun.AgentProfile) =>
   Layer.succeed(
     ExecutionBackend.Service,
     ExecutionBackend.Service.of({

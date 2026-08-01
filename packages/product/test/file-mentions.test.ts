@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Path } from "effect"
-import * as FileMentions from "../src/file-mentions"
+import * as FileMentions from "../src/context/file-mention-parser"
 import { provideLayer } from "./layer"
 
 describe("FileMentions", () => {

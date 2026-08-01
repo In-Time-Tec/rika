@@ -8,10 +8,11 @@ import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "../src/transcript-repository"
 import * as TurnRepository from "../src/turn-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
 import { projectionVersion, provideLayer, sqliteLayer } from "./transcript-repository-fixtures"
 
 const threadId = Thread.ThreadId.make("recorded-shell-thread")
-const running = (id: string): Turn.RunningRecordedShellTurn => ({
+const running = (id: string): ThreadResult.RunningRecordedShellTurn => ({
   _tag: "RecordedShell",
   id: Turn.TurnId.make(id),
   threadId,
@@ -25,7 +26,7 @@ const running = (id: string): Turn.RunningRecordedShellTurn => ({
   updatedAt: 10,
 })
 
-const terminal = (turn: Turn.RunningRecordedShellTurn): Turn.TerminalRecordedShellTurn => ({
+const terminal = (turn: ThreadResult.RunningRecordedShellTurn): ThreadResult.TerminalRecordedShellTurn => ({
   ...turn,
   status: "completed",
   result: { text: "shell", truncated: false, exitCode: 0 },
@@ -127,7 +128,7 @@ const exercise = Effect.fn("RecordedShellRepositoryTest.exercise")(function* (
   })
   expect(page.threadCostUsd).toBe(0)
 
-  const copiedTurn: Turn.TerminalRecordedShellTurn = {
+  const copiedTurn: ThreadResult.TerminalRecordedShellTurn = {
     ...completedTurn,
     id: Turn.TurnId.make("recorded-shell-copy"),
   }

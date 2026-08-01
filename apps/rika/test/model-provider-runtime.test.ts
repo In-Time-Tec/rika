@@ -8,6 +8,7 @@ import { ModelRegistry } from "@rika/relay-execution/model-provider-runtime"
 import { expect, test } from "vitest"
 import { OpenAiAuth } from "@rika/product/product-operation"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import * as RelayExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import * as RikaToolRuntime from "@rika/coding-tools/coding-tool-runtime"
@@ -649,7 +650,7 @@ test("pins provider runtime identity, roundtrips JSON, and normalizes old accoun
   expect(account.runtime).toEqual({ adapter: "openai-account", credentialIdentity: "account-a" })
   expect(account.registrationKey).not.toBe(api.registrationKey)
   const pin = executionRoutePin(SettingsDefaults.Defaults.defaults, "medium")
-  const encoded = Schema.decodeUnknownSync(Turn.ExecutionRoutePin)(JSON.parse(JSON.stringify(pin)))
+  const encoded = Schema.decodeUnknownSync(ExecutionRouteSnapshot.ExecutionRoutePin)(JSON.parse(JSON.stringify(pin)))
   expect(encoded.main.providerConnection).toEqual(pin.main.providerConnection)
   expect(
     ModelProviderRuntime.normalizePinnedRuntime({

@@ -4,6 +4,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { Operation } from "@rika/product/product-operation"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
 import { Config, Console, Effect, Exit, FileSystem, Layer, Logger, Path, Ref, Schema, Scope } from "effect"
@@ -19,7 +20,7 @@ const fixtureTurn = (threadId: Thread.ThreadId, turnId: Turn.TurnId, prompt: str
   prompt,
   author: { _tag: "Human" },
   lineage: { _tag: "Original" },
-  executionRoute: Turn.testExecutionRoute(),
+  executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
   status: "running",
   stopIntent: "none",
   createdAt: 0,

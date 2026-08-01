@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Operation from "@rika/product/product-operation"
+import * as ResidentHandshake from "@rika/product/resident-service-handshake"
 import * as ResidentService from "@rika/product/resident-service"
 import {
   Cause,
@@ -82,7 +83,7 @@ export const interactiveRuntimeRestartPlan = (input: {
   readonly attempt: number
   readonly limit: number
 }): InteractiveRuntimeRestartDecision => {
-  if (input.exitCode === ResidentService.runtimeRestartExitCode && input.restart !== undefined) {
+  if (input.exitCode === ResidentService.ServiceRuntime.runtimeRestartExitCode && input.restart !== undefined) {
     if (input.attempt >= input.limit)
       return {
         _tag: "fail",
@@ -253,7 +254,7 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                     restartEnvironment = decision.environment
                   }
                 }
-                let clientKind: ResidentService.Handshake["clientKind"]
+                let clientKind: ResidentHandshake.Handshake["clientKind"]
                 if (input._tag === "Thread") clientKind = "thread-continue"
                 else if (input._tag === "Run") clientKind = "run"
                 else if (input._tag === "Review") clientKind = "review"

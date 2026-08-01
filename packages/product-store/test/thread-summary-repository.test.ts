@@ -5,6 +5,7 @@ import * as Thread from "@rika/product/thread-record"
 import * as ThreadSummaryRepository from "../src/thread-summary-repository"
 import * as TurnRepository from "../src/turn-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 
 const provideLayer =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -22,7 +23,7 @@ const layer = Layer.merge(repositories, ThreadSummaryRepository.memoryLayer.pipe
 const create = (
   repository: TurnRepository.Interface,
   input: Omit<TurnRepository.CreateInput, "executionRoute" | "queueCapacity">,
-) => repository.createForSubmission({ ...input, executionRoute: Turn.testExecutionRoute(), queueCapacity: 128 })
+) => repository.createForSubmission({ ...input, executionRoute: ExecutionRouteSnapshot.testExecutionRoute(), queueCapacity: 128 })
 
 describe("memory thread summaries", () => {
   it.effect("orders recent activity and derives status, unread state, and edit totals", () =>

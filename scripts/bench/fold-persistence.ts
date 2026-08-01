@@ -1,9 +1,11 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
 import * as Database from "../../packages/product-store/src/product-database"
 import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "../../packages/product-store/src/thread-repository"
 import * as TranscriptRepository from "../../packages/product-store/src/transcript-repository"
 import * as TurnRepository from "../../packages/product-store/src/turn-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
@@ -66,7 +68,7 @@ const completeEvent = (sequence: number): TranscriptSourceEvent.SourceEvent => (
 const executionCheckpoint = (
   turn: Turn.AgentExecutionTurn,
   state: TranscriptProjectionModel.ProjectionState,
-): TranscriptRepository.ExecutionCheckpoint => ({
+): TranscriptPage.ExecutionCheckpoint => ({
   executionKey: TranscriptCorrelation.executionKey(String(turn.id)),
   executionId: String(turn.id),
   cursor: state.checkpointCursor ?? "",
@@ -88,7 +90,7 @@ const prepareTurn = Effect.fn("Bench.prepareTurn")(function* (
     id: turnId,
     threadId,
     prompt,
-    executionRoute: Turn.testExecutionRoute(),
+    executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
     queueCapacity: 128,
     now: 2,
   })

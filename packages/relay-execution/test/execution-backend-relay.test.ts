@@ -11,14 +11,16 @@ import { Database } from "bun:sqlite"
 import { Clock, Duration, Effect, Fiber, FileSystem, Layer, Schedule, Schema } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import * as ExecutionBackend from "@rika/product/execution-service"
-import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
+import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 import * as RelayExecutionBackend from "../src/execution-backend"
 import { createFanOut, start } from "./current-execution-route"
 
 const executionModelRoute = (
   role: "main" | "oracle",
   selection: { readonly provider: string; readonly model: string; readonly registrationKey?: string },
-): ExecutionBackend.ExecutionModelRoute => ({
+): ExecutionRouteSnapshot.ExecutionModelRoute => ({
   role,
   alias: role,
   model: selection.model,
@@ -98,12 +100,12 @@ test(
         const program = withBackend([TestModel.text("deterministic answer")], (fixture) =>
           Effect.gen(function* () {
             const backend = yield* ExecutionBackend.Service
-            const streamed: Array<ExecutionBackend.Event> = []
+            const streamed: Array<ExecutionEvent.Event> = []
             const input = {
               threadId: "thread-a",
               turnId: "turn-a",
               prompt: "hello",
-              onEvent: (event: ExecutionBackend.Event) => streamed.push(event),
+              onEvent: (event: ExecutionEvent.Event) => streamed.push(event),
             }
             const first = yield* start(backend, input)
             const { onEvent: _onEvent, ...duplicateInput } = input
@@ -167,12 +169,12 @@ test(
           () =>
             Effect.gen(function* () {
               const backend = yield* ExecutionBackend.Service
-              const streamed: Array<ExecutionBackend.Event> = []
+              const streamed: Array<ExecutionEvent.Event> = []
               const first = yield* start(backend, {
                 threadId: "thread-a",
                 turnId: "turn-a",
                 prompt: "hello",
-                onEvent: (event: ExecutionBackend.Event) => streamed.push(event),
+                onEvent: (event: ExecutionEvent.Event) => streamed.push(event),
               })
               const replay = yield* backend.replay("turn-a")
               return { first, replay, streamed }
@@ -361,7 +363,7 @@ test(
         (fixture) =>
           Effect.gen(function* () {
             const backend = yield* ExecutionBackend.Service
-            const executionRoute: ExecutionBackend.ExecutionRoutePin = {
+            const executionRoute: ExecutionRouteSnapshot.ExecutionRoutePin = {
               version: 1 as const,
               mode: "test",
               main: executionModelRoute("main", fixture.selection),
@@ -969,7 +971,7 @@ test(
               model: "oracle-model",
               registrationKey: "oracle",
             })
-            const executionRoute: ExecutionBackend.ExecutionRoutePin = {
+            const executionRoute: ExecutionRouteSnapshot.ExecutionRoutePin = {
               version: 1 as const,
               mode: "test",
               tokenBudget: 1_000,

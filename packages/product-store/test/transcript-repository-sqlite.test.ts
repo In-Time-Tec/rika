@@ -1,3 +1,4 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
@@ -13,6 +14,8 @@ import * as ThreadRepository from "../src/thread-repository"
 import * as TranscriptRepository from "../src/transcript-repository"
 import * as TurnRepository from "../src/turn-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import {
   attachedExecutionCheckpoint,
   commitAll,
@@ -30,8 +33,8 @@ import {
 const UnitJson = Schema.fromJsonString(TranscriptUnit.Unit)
 
 const compareExecutionCheckpoints = (
-  left: TranscriptRepository.ExecutionCheckpoint,
-  right: TranscriptRepository.ExecutionCheckpoint,
+  left: TranscriptPage.ExecutionCheckpoint,
+  right: TranscriptPage.ExecutionCheckpoint,
 ): number => {
   if (left.executionKey < right.executionKey) return -1
   if (left.executionKey > right.executionKey) return 1
@@ -51,7 +54,7 @@ const createTurn = Effect.fn("TranscriptRepositoryTest.createTurn")(function* (
     id: turnId,
     threadId,
     prompt,
-    executionRoute: Turn.testExecutionRoute(),
+    executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
     queueCapacity: 128,
     now: 2,
   })
@@ -352,7 +355,7 @@ it.effect("atomically couples an attached child to its parent SQLite unit", () =
       const filename = `${directory}/rika.db`
       const threadId = Thread.ThreadId.make("thread-nested")
       const turnId = Turn.TurnId.make("turn-nested")
-      let before: TranscriptRepository.Projection | undefined
+      let before: TranscriptPage.Projection | undefined
 
       yield* Effect.scoped(
         Effect.gen(function* () {
@@ -403,7 +406,7 @@ it.effect("requires a complete root-connected SQLite checkpoint graph for refold
       const filename = `${directory}/rika.db`
       const threadId = Thread.ThreadId.make("thread-refold-graph")
       const turnId = Turn.TurnId.make("turn-refold-graph")
-      let before: TranscriptRepository.Projection | undefined
+      let before: TranscriptPage.Projection | undefined
       let replacement: NestedProjectionFixture | undefined
 
       yield* Effect.scoped(
@@ -437,7 +440,7 @@ it.effect("requires a complete root-connected SQLite checkpoint graph for refold
         Effect.gen(function* () {
           if (before === undefined || replacement === undefined)
             return yield* Effect.die("refold graph fixture was not retained")
-          if (!Turn.isAgentExecution(before.turn))
+          if (!ThreadResult.TurnResult.isAgentExecution(before.turn))
             return yield* Effect.die("refold graph fixture did not retain an agent execution")
           const repository = yield* TranscriptRepository.Service
           const sql = yield* SqlClient
@@ -703,7 +706,7 @@ it.effect("persists a terminal outcome appended after the initial projection", (
           const repository = yield* TranscriptRepository.Service
           const reopened = yield* repository.get(turnId)
           if (reopened === undefined) return yield* Effect.die("terminal projection was not reopened")
-          if (!Turn.isAgentExecution(reopened.turn))
+          if (!ThreadResult.TurnResult.isAgentExecution(reopened.turn))
             return yield* Effect.die("terminal projection did not reopen an agent execution")
           expect(reopened?.units.find((candidate) => candidate.key === `turn:${turnId}:user`)).toMatchObject({
             revision: 2,
@@ -893,7 +896,7 @@ it.effect("keyset-paginates a reopened nested intrinsic-order transcript without
         Effect.gen(function* () {
           const repository = yield* TranscriptRepository.Service
           const keys: Array<string> = []
-          let before: TranscriptRepository.PageCursor | undefined
+          let before: TranscriptPage.PageCursor | undefined
           while (true) {
             const page = yield* repository.page(threadId, {
               ...(before === undefined ? {} : { before }),

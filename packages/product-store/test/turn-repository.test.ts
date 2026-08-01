@@ -1,6 +1,11 @@
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "../src/turn-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
+import * as ExecutionStatus from "@rika/product/execution-status"
+import * as ExecutionRequest from "@rika/product/execution-request"
+import * as ExecutionWorkflow from "@rika/product/execution-workflow"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import { expect, it } from "@effect/vitest"
 import { Effect, Layer, Schema } from "effect"
 import { makeRecordingSql } from "./recording-sql"
@@ -14,13 +19,13 @@ const provideLayer =
     })
 
 type CurrentCreateInput = Omit<TurnRepository.CreateInput, "executionRoute" | "queueCapacity"> & {
-  readonly executionRoute?: Turn.ExecutionRoutePin
+  readonly executionRoute?: ExecutionRouteSnapshot.ExecutionRoutePin
   readonly queueCapacity?: number
 }
 
 const create = (repository: TurnRepository.Interface, input: CurrentCreateInput) =>
   repository.createForSubmission({
-    executionRoute: Turn.testExecutionRoute(),
+    executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
     ...input,
     queueCapacity: input.queueCapacity ?? 128,
   })
@@ -81,7 +86,7 @@ it.effect("memory turns preserve structured image prompt parts", () =>
       now: 1,
     })
     const stored = yield* repository.get(created.id)
-    expect(stored !== undefined && Turn.isAgentExecution(stored) ? stored.promptParts : undefined).toEqual(
+    expect(stored !== undefined && ThreadResult.TurnResult.isAgentExecution(stored) ? stored.promptParts : undefined).toEqual(
       created.promptParts,
     )
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
@@ -90,11 +95,11 @@ it.effect("memory turns preserve structured image prompt parts", () =>
 it.effect("memory turns snapshot attachments and execution pins at the repository boundary", () =>
   Effect.gen(function* () {
     const repository = yield* TurnRepository.Service
-    const promptParts: Array<Turn.PromptPart> = [
+    const promptParts: Array<ExecutionRequest.PromptPart> = [
       { type: "text", text: "inspect " },
       { type: "image", mediaType: "image/png", data: "b3JpZ2luYWw=", filename: "original.png" },
     ]
-    const executionRoute = Turn.testExecutionRoute("high")
+    const executionRoute = ExecutionRouteSnapshot.testExecutionRoute("high")
     const created = yield* create(repository, {
       id: Turn.TurnId.make("snapshot-turn"),
       threadId: Thread.ThreadId.make("snapshot-thread"),
@@ -104,7 +109,7 @@ it.effect("memory turns snapshot attachments and execution pins at the repositor
       now: 1,
     })
     const mutableRoute = executionRoute.main as { model: string }
-    const mutableCreatedParts = created.promptParts as Array<Turn.PromptPart> | undefined
+    const mutableCreatedParts = created.promptParts as Array<ExecutionRequest.PromptPart> | undefined
     promptParts[0] = { type: "text", text: "mutated" }
     mutableRoute.model = "mutated"
     mutableCreatedParts?.splice(0)
@@ -150,7 +155,7 @@ it.effect("memory turns pin the execution route at creation", () =>
       id: Turn.TurnId.make("turn-route-pin"),
       threadId: Thread.ThreadId.make("thread-route-pin"),
       prompt: "pin route",
-      executionRoute: Turn.testExecutionRoute("low"),
+      executionRoute: ExecutionRouteSnapshot.testExecutionRoute("low"),
       now: 1,
     })
     expect(created.executionRoute.mode).toBe("low")
@@ -164,7 +169,7 @@ it.effect("memory turns preserve review fan-out route ownership while nontermina
       id: Turn.TurnId.make("review-owner"),
       threadId: Thread.ThreadId.make("review-thread"),
       prompt: "Review workspace changes",
-      executionRoute: Turn.testExecutionRoute("medium"),
+      executionRoute: ExecutionRouteSnapshot.testExecutionRoute("medium"),
       reviewFanOutId: "review:review-owner",
       now: 1,
     })
@@ -265,7 +270,7 @@ it.effect("memory terminal status is immutable against every stale lifecycle upd
       now: 1,
     })
     yield* repository.setStatus(created.id, "completed", "terminal-cursor", 2)
-    for (const [index, staleStatus] of Turn.Status.literals.filter((candidate) => candidate !== "queued").entries()) {
+    for (const [index, staleStatus] of ExecutionStatus.Status.literals.filter((candidate) => candidate !== "queued").entries()) {
       const unchanged = yield* repository.setStatus(created.id, staleStatus, `stale-${staleStatus}`, index + 3)
       expect(unchanged).toMatchObject({ status: "completed", lastCursor: "terminal-cursor", updatedAt: 2 })
     }
@@ -388,7 +393,7 @@ it.effect("memory claims stay queued and edit or dequeue invalidate preparation"
         id: Turn.TurnId.make("claimed"),
         threadId,
         prompt: "before",
-        executionRoute: Turn.testExecutionRoute(),
+        executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
         author: { _tag: "Human" },
         lineage: { _tag: "Original" },
         status: "queued",
@@ -524,7 +529,7 @@ it.effect("memory copies exact queue status and requeues an unowned accepted cla
         id: Turn.TurnId.make("copied-queued"),
         threadId,
         prompt: "copied",
-        executionRoute: Turn.testExecutionRoute(),
+        executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
         author: { _tag: "Human" },
         lineage: { _tag: "Original" },
         status: "queued",
@@ -542,7 +547,7 @@ it.effect("memory copies exact queue status and requeues an unowned accepted cla
           id: Turn.TurnId.make("copied-overflow"),
           threadId,
           prompt: "overflow",
-          executionRoute: Turn.testExecutionRoute(),
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
           status: "queued",
@@ -649,7 +654,7 @@ it.effect("memory lists nonterminal turns and rejects a missing extension pin", 
           id: Turn.TurnId.make("b"),
           threadId: Thread.ThreadId.make("thread-a"),
           prompt: "b",
-          executionRoute: Turn.testExecutionRoute(),
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
           status: "waiting",
@@ -662,7 +667,7 @@ it.effect("memory lists nonterminal turns and rejects a missing extension pin", 
           id: Turn.TurnId.make("a"),
           threadId: Thread.ThreadId.make("thread-a"),
           prompt: "a",
-          executionRoute: Turn.testExecutionRoute(),
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
           status: "running",
@@ -715,7 +720,7 @@ it.effect("memory editQueued replaces content and clears stale prompt parts", ()
     yield* repository.editQueued(queued.id, "edited", 3)
     const stored = yield* repository.get(queued.id)
     expect(stored?.prompt).toBe("edited")
-    expect(stored !== undefined && Turn.isAgentExecution(stored) ? stored.promptParts : undefined).toBeUndefined()
+    expect(stored !== undefined && ThreadResult.TurnResult.isAgentExecution(stored) ? stored.promptParts : undefined).toBeUndefined()
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
@@ -751,7 +756,7 @@ it.effect("memory seeds queue revision to match the seeded queued count", () =>
           prompt: "one",
           status: "queued",
           stopIntent: "none",
-          executionRoute: Turn.testExecutionRoute(),
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
           createdAt: 1,
@@ -764,7 +769,7 @@ it.effect("memory seeds queue revision to match the seeded queued count", () =>
           prompt: "two",
           status: "queued",
           stopIntent: "none",
-          executionRoute: Turn.testExecutionRoute(),
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
           createdAt: 2,
@@ -780,7 +785,7 @@ const row = (overrides: Partial<Record<string, unknown>> = {}) => ({
   thread_id: "thread-a",
   turn_kind: "AgentExecution",
   prompt: "hello",
-  execution_route_json: JSON.stringify(Turn.testExecutionRoute()),
+  execution_route_json: JSON.stringify(ExecutionRouteSnapshot.testExecutionRoute()),
   shell_command: null,
   shell_result_text: null,
   shell_result_truncated: null,
@@ -835,13 +840,13 @@ it.effect("sql turns create, get, list, and decode cursor variants", () =>
       const missing = yield* repository.get(Turn.TurnId.make("missing"))
       const listed = yield* repository.list(Thread.ThreadId.make("thread-a"))
       expect(created.lastCursor).toBeUndefined()
-      expect(found !== undefined && Turn.isAgentExecution(found) ? found.lastCursor : undefined).toBe("cursor-a")
+      expect(found !== undefined && ThreadResult.TurnResult.isAgentExecution(found) ? found.lastCursor : undefined).toBe("cursor-a")
       expect(missing).toBeUndefined()
-      expect(listed.filter(Turn.isAgentExecution).map((turn) => turn.lastCursor)).toEqual([undefined, "cursor-b"])
+      expect(listed.filter(ThreadResult.TurnResult.isAgentExecution).map((turn) => turn.lastCursor)).toEqual([undefined, "cursor-b"])
       const parameters = sql.statements[0]?.parameters ?? []
       expect(parameters.slice(0, 4)).toEqual(["turn-a", "thread-a", "hello", null])
       const executionRoute = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(String(parameters[4]))
-      expect(executionRoute).toEqual(Turn.testExecutionRoute())
+      expect(executionRoute).toEqual(ExecutionRouteSnapshot.testExecutionRoute())
       expect(parameters.slice(5)).toEqual([null, '{"_tag":"Human"}', '{"_tag":"Original"}', "thread-a", 1, 1])
       expect(sql.statements.at(-1)).toEqual({
         sql: "SELECT * FROM rika_turns WHERE thread_id = ? ORDER BY created_at ASC, rowid ASC",
@@ -854,11 +859,11 @@ it.effect("sql turns create, get, list, and decode cursor variants", () =>
 it.effect("sql turns encode and decode structured attachments", () =>
   sqlTest((sql) =>
     Effect.gen(function* () {
-      const promptParts: ReadonlyArray<Turn.PromptPart> = [
+      const promptParts: ReadonlyArray<ExecutionRequest.PromptPart> = [
         { type: "text", text: "inspect " },
         { type: "image", mediaType: "image/png", data: "cG5n", filename: "shot.png" },
       ]
-      const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(Turn.PromptPart)))(promptParts)
+      const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(ExecutionRequest.PromptPart)))(promptParts)
       sql.rows()
       sql.rows(row({ prompt: "inspect [Image 1]", prompt_parts_json: encoded }))
       const repository = yield* TurnRepository.Service
@@ -1101,7 +1106,7 @@ it.effect("sql lists nonterminal turns and mutates extension pins", () =>
         resolvedContextDigest: "context-a",
       }
       sql.rows(row(), row({ id: "turn-b", status: "waiting" }))
-      const encodedPin = yield* Schema.encodeEffect(Schema.fromJsonString(Turn.ExecutionExtensionPin))(pin)
+      const encodedPin = yield* Schema.encodeEffect(Schema.fromJsonString(ExecutionWorkflow.ExecutionExtensionPin))(pin)
       sql.rows(row({ extension_pin_json: encodedPin }))
       sql.rows()
       sql.error("list failed")

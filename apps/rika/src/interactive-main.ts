@@ -1,3 +1,4 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
 #!/usr/bin/env bun
 import * as ModelRouteLabel from "@rika/configuration/model-route-label"
 import * as ConfigurationService from "@rika/configuration/configuration-service"
@@ -6,12 +7,15 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Operation from "@rika/product/product-operation"
+import * as ResidentHandshake from "@rika/product/resident-service-handshake"
+import * as InteractiveFeed from "@rika/product/resident-interactive-feed"
 import * as ResidentService from "@rika/product/resident-service"
 import * as DataRoot from "@rika/configuration/canonical-data-root"
 import { resolveProfileDataPaths } from "@rika/configuration/profile-data-paths"
 import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRequest from "@rika/product/execution-request"
 import * as LocalPath from "@rika/coding-tools/local-path"
 import * as WorkspaceIndex from "@rika/coding-tools/workspace-file-search"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
@@ -269,7 +273,7 @@ const attachmentMegabytes = Format.formatBytes
 const materializePromptPartsImpl = (parts: ReadonlyArray<ViewState.PromptPart>, workspace: string) =>
   Effect.forEach(
     parts,
-    (part, index): Effect.Effect<Turn.PromptPart, PromptAttachmentError, FileSystem.FileSystem> => {
+    (part, index): Effect.Effect<ExecutionRequest.PromptPart, PromptAttachmentError, FileSystem.FileSystem> => {
       if (part.type === "text") return Effect.succeed(part)
       const path = part.path.startsWith("/") ? part.path : `${workspace}/${part.path}`
       const failure = (cause: unknown) =>
@@ -683,7 +687,7 @@ export interface InteractiveTuiOptions {
 export const interactiveTui =
   (options: InteractiveTuiOptions) =>
   (
-    input: ResidentService.InteractiveInput,
+    input: InteractiveFeed.InteractiveInput,
     session: Operation.InteractiveSession,
   ): Effect.Effect<void, Operation.OperationUnavailable> =>
     Effect.uninterruptible(
@@ -723,7 +727,7 @@ export const interactiveTui =
           let applyingFeedBatch = false
           let feedPreserveAnchor = false
           let replayTurns = new Map<string, Turn.Turn>()
-          let loadedTranscriptEntries: ReadonlyArray<TranscriptRepository.Entry> = []
+          let loadedTranscriptEntries: ReadonlyArray<TranscriptPage.Entry> = []
           let projectionRevisions = new Map<string, number>()
           let liveTranscriptProjections = new Map<string, TranscriptProjectionModel.Projection>()
           let projectionStreams = new Map<string, InteractiveController.ProjectionStream>()
@@ -731,8 +735,8 @@ export const interactiveTui =
           let lastAvailableUsageCost: Extract<ViewState.Model["usageCost"], { readonly _tag: "Available" }> | undefined
           let transcriptHasOlder = false
           let transcriptHasNewer = false
-          let transcriptOldestCursor: TranscriptRepository.PageCursor | undefined
-          let transcriptNewestCursor: TranscriptRepository.PageCursor | undefined
+          let transcriptOldestCursor: TranscriptPage.PageCursor | undefined
+          let transcriptNewestCursor: TranscriptPage.PageCursor | undefined
           const appliedDeltas = new Set<string>()
           let activeSelectionEpoch = 0
           let submissionSequence = 0
@@ -1910,7 +1914,7 @@ const start = () => {
                           }),
                         ),
                       )
-                    let clientKind: ResidentService.Handshake["clientKind"]
+                    let clientKind: ResidentHandshake.Handshake["clientKind"]
                     if (clientInput._tag === "Interactive") clientKind = "interactive"
                     else if (clientInput._tag === "Thread") clientKind = "thread-continue"
                     else if (clientInput._tag === "Run") clientKind = "run"
@@ -2061,7 +2065,7 @@ const start = () => {
           return onExit(2)
         }
       }
-      if (runtimeRestartRequest !== undefined) return onExit(ResidentService.runtimeRestartExitCode)
+      if (runtimeRestartRequest !== undefined) return onExit(ResidentService.ServiceRuntime.runtimeRestartExitCode)
       Runtime.defaultTeardown(exit, onExit)
     },
   })

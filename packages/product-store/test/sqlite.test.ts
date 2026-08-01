@@ -15,6 +15,9 @@ import * as ThreadSummaryRepository from "@rika/product-store/sqlite-thread-summ
 import * as TurnRepository from "../src/turn-repository"
 import * as TranscriptRepository from "../src/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
+import * as ExecutionStatus from "@rika/product/execution-status"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import {
   attachedExecutionCheckpoint,
   commitAll,
@@ -31,7 +34,7 @@ const create = (
   repository.createForSubmission({
     queueCapacity: 128,
     ...input,
-    executionRoute: Turn.testExecutionRoute(),
+    executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
   })
 
 const provideLayer =
@@ -42,7 +45,7 @@ const provideLayer =
       return yield* effect.pipe(Effect.provide(context))
     })
 
-const legacyModel = (model: Turn.ExecutionModelRoute) => {
+const legacyModel = (model: ExecutionRouteSnapshot.ExecutionModelRoute) => {
   const { providerConnection, registrationIdentity, ...rest } = model
   return {
     ...rest,
@@ -166,7 +169,7 @@ const createPreBranchDatabase = (filename: string) => {
   ]
   const insertMigration = database.query("INSERT INTO rika_migrations (migration_id, name) VALUES (?, ?)")
   for (const [index, name] of migrations.entries()) insertMigration.run(index + 1, name)
-  const currentRoute = Turn.testExecutionRoute()
+  const currentRoute = ExecutionRouteSnapshot.testExecutionRoute()
   const executionRoute = JSON.stringify({
     ...currentRoute,
     main: legacyModel(currentRoute.main),
@@ -263,7 +266,7 @@ test("migrates a pre-branch database while invalidating its rebuildable transcri
             pinned: true,
           })
           const storedTurns = yield* turns.list(id)
-          const storedAgentTurns = storedTurns.filter(Turn.isAgentExecution)
+          const storedAgentTurns = storedTurns.filter(ThreadResult.TurnResult.isAgentExecution)
           expect(storedTurns.map((turn) => String(turn.id))).toEqual([
             "completed-turn",
             "legacy-unpinned-turn",
@@ -479,7 +482,7 @@ test("creates, persists, and reopens the current schema", () => {
         })
         const transcript = yield* TranscriptRepository.Service
         const storedTurn = yield* turns.get(Turn.TurnId.make("turn-a"))
-        if (storedTurn === undefined || !Turn.isAgentExecution(storedTurn))
+        if (storedTurn === undefined || !ThreadResult.TurnResult.isAgentExecution(storedTurn))
           return yield* Effect.die("turn-a was not stored as an agent execution")
         const projection = TranscriptProjection.Projection.project(storedTurn.id, storedTurn.prompt, [
           { cursor: "cursor-a", sequence: 1, type: "execution.completed", createdAt: 4 },
@@ -589,10 +592,10 @@ test("creates, persists, and reopens the current schema", () => {
             expect(result.thread?.labels).toEqual(["local"])
             expect(result.turn?.status).toBe("completed")
             expect(
-              result.turn !== undefined && Turn.isAgentExecution(result.turn) ? result.turn.lastCursor : undefined,
+              result.turn !== undefined && ThreadResult.TurnResult.isAgentExecution(result.turn) ? result.turn.lastCursor : undefined,
             ).toBe("cursor-a")
             expect(
-              result.turn !== undefined && Turn.isAgentExecution(result.turn) ? result.turn.extensionPin : undefined,
+              result.turn !== undefined && ThreadResult.TurnResult.isAgentExecution(result.turn) ? result.turn.extensionPin : undefined,
             ).toEqual({
               generation: "generation-a",
               sourceDigest: "source-a",
@@ -980,7 +983,7 @@ test("turn SQL mutations, ordering, and rejection branches", () => {
         expect(yield* turns.cancelAccepted(active.id, 8)).toBe(false)
         expect(yield* turns.startAccepted(active.id, 9)).toBe(false)
         yield* turns.setStatus(active.id, "completed", "terminal-cursor", 7)
-        for (const [index, staleStatus] of Turn.Status.literals.filter((candidate) => candidate !== "queued").entries())
+        for (const [index, staleStatus] of ExecutionStatus.Status.literals.filter((candidate) => candidate !== "queued").entries())
           expect(yield* turns.setStatus(active.id, staleStatus, `stale-${staleStatus}`, index + 8)).toMatchObject({
             status: "completed",
             lastCursor: "terminal-cursor",
@@ -1163,7 +1166,7 @@ test("SQLite queue copy, take, and accepted rollback stay atomic", () => {
             id: Turn.TurnId.make("sqlite-copied-queued"),
             threadId: copyThread,
             prompt: "copied",
-            executionRoute: Turn.testExecutionRoute(),
+            executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
             author: { _tag: "Human" },
             lineage: { _tag: "Original" },
             status: "queued",
@@ -1183,7 +1186,7 @@ test("SQLite queue copy, take, and accepted rollback stay atomic", () => {
                 id: overflowId,
                 threadId: copyThread,
                 prompt: "overflow",
-                executionRoute: Turn.testExecutionRoute(),
+                executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
                 author: { _tag: "Human" },
                 lineage: { _tag: "Original" },
                 status: "queued",

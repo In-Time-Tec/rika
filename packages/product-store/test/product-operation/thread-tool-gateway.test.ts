@@ -4,7 +4,9 @@ import * as ThreadInteractionRepository from "@rika/product-store/sqlite-thread-
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionIdentifier from "@rika/product/execution-identifier"
 import { Effect, Exit, Ref, Scope } from "effect"
 import * as ToolInvocation from "@rika/coding-tools/tool-invocation"
 import * as ThreadToolService from "@rika/product/thread-tool-service"
@@ -39,14 +41,14 @@ const sourceTurn: Turn.Turn = {
   prompt: "Coordinate",
   status: "running",
   stopIntent: "none",
-  executionRoute: Turn.testExecutionRoute(),
+  executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
   author: { _tag: "Human" },
   lineage: { _tag: "Original" },
   createdAt: 1,
   updatedAt: 1,
 }
 
-const authority: ExecutionBackend.InvocationSource = {
+const authority: ExecutionIdentifier.InvocationSource = {
   rootTurnId: sourceTurn.id,
   threadId: sourceThread.id,
   callerProfile: "Root",
@@ -154,7 +156,7 @@ describe("ThreadToolService gateway", () => {
         id: Turn.TurnId.make(created.turnId),
         threadId: Thread.ThreadId.make(created.threadId),
         prompt: input.prompt,
-        executionRoute: Turn.testExecutionRoute(),
+        executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
         queueCapacity: 64,
         now: 1,
       })

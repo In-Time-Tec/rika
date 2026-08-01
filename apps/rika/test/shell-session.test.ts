@@ -9,6 +9,7 @@ import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import * as ReadWebPage from "@rika/coding-tools/read-web-page-service"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
@@ -337,7 +338,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
           id: Turn.TurnId.make("active"),
           threadId: Thread.ThreadId.make("shell-thread"),
           prompt: "active",
-          executionRoute: Turn.testExecutionRoute(),
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
           queueCapacity: 128,
           now,
         })

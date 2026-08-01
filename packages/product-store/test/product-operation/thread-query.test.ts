@@ -30,7 +30,7 @@ const storedTurn: Fixtures.Turn.Turn = {
   id: Fixtures.Turn.TurnId.make("turn-1"),
   threadId: storedThread.id,
   prompt: "fix auth",
-  executionRoute: Fixtures.Turn.testExecutionRoute(),
+  executionRoute: Fixtures.ExecutionRouteSnapshot.testExecutionRoute(),
   author: { _tag: "Human" },
   lineage: { _tag: "Original" },
   status: "completed",
@@ -126,7 +126,7 @@ const repositories = Layer.mergeAll(
     Fixtures.ThreadInteractionRepository.makeMemory({ threads: [storedThread, relatedThread], turns: [storedTurn] }),
   ),
 )
-const queryLayer = Layer.merge(ThreadQuery.layerForWorkspace(workspace).pipe(Layer.provide(repositories)), repositories)
+const queryLayer = Layer.merge(ThreadQuery.Runtime.layerForWorkspace(workspace).pipe(Layer.provide(repositories)), repositories)
 
 describe("ThreadQuery", () => {
   it.effect("finds metadata and file content only in the current workspace", () =>
@@ -181,7 +181,7 @@ describe("ThreadQuery", () => {
         Layer.succeed(Fixtures.ThreadInteractionRepository.Service, interactions),
       )
       const layer = Layer.merge(
-        ThreadQuery.layerForWorkspace(workspace).pipe(Layer.provide(dependencies)),
+        ThreadQuery.Runtime.layerForWorkspace(workspace).pipe(Layer.provide(dependencies)),
         dependencies,
       )
 
@@ -226,7 +226,7 @@ describe("ThreadQuery", () => {
         schemaVersion: 2,
         threadId: "one",
       })
-      expect(legacy.text.length).toBeLessThanOrEqual(ThreadQuery.transcriptBudget)
+      expect(legacy.text.length).toBeLessThanOrEqual(ThreadQuery.QueryPolicy.transcriptBudget)
     }).pipe(provideLayer(queryLayer)),
   )
 
@@ -476,10 +476,10 @@ describe("ThreadQuery", () => {
       expect(rendered).toContain("second-answer")
       expect(rendered).not.toContain("sibling-answer")
       expect(pages.at(-1)?.omissions).toEqual([])
-      expect(firstText.length).toBeLessThanOrEqual(ThreadQuery.transcriptBudget)
+      expect(firstText.length).toBeLessThanOrEqual(ThreadQuery.QueryPolicy.transcriptBudget)
       for (const page of pages)
         expect((yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(page)).length).toBeLessThanOrEqual(
-          ThreadQuery.transcriptBudget,
+          ThreadQuery.QueryPolicy.transcriptBudget,
         )
     }).pipe(provideLayer(queryLayer)),
   )
@@ -568,7 +568,7 @@ describe("ThreadQuery", () => {
       provideLayer(
         ThreadToolHandlers.findHandlerLayerForWorkspace((executionId) =>
           Effect.succeed(executionId === "acme-execution" ? workspace : "/work/other"),
-        ).pipe(Layer.provide(ThreadQuery.factoryLayer.pipe(Layer.provide(repositories)))),
+        ).pipe(Layer.provide(ThreadQuery.Runtime.factoryLayer.pipe(Layer.provide(repositories)))),
       ),
     ),
   )

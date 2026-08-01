@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import * as ThreadToolkits from "@rika/coding-tools/thread-tool-contract"
+import * as ResidentFeed from "@rika/product/resident-interactive-feed"
 import { MediaAnalysisError } from "@rika/coding-tools/media-view-service"
 import { analyzerTestLayer } from "@rika/coding-tools/media-view-service"
 import * as BehaviorMode from "@rika/configuration/behavior-mode"
@@ -34,8 +35,11 @@ import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
 import * as Turn from "@rika/product/turn-record"
-import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
+import * as ThreadResult from "@rika/product/thread-result"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
+import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
+import * as ExecutionRequest from "@rika/product/execution-request"
 import * as RelayExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import * as ReadWebPage from "@rika/coding-tools/read-web-page-service"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
@@ -172,7 +176,7 @@ const relayBackendLayerImpl = (
         ),
       ).pipe(
         Layer.provide(
-          ThreadQuery.factoryLayer.pipe(
+          ThreadQuery.Runtime.factoryLayer.pipe(
             Layer.provide(
               Layer.mergeAll(
                 repositoryLayer,
@@ -298,8 +302,8 @@ type PreparedPlan = ModelProviderRuntime.PreparedRoutes["plans"][number]
 const executionModelRoute = (
   route: ModelRouteResolution.ResolvedModelRoute,
   plan: PreparedPlan,
-  role: Turn.ExecutionModelRoute["role"],
-): Turn.ExecutionModelRoute => ({
+  role: ExecutionRouteSnapshot.ExecutionModelRoute["role"],
+): ExecutionRouteSnapshot.ExecutionModelRoute => ({
   role,
   alias: route.alias,
   model: plan.selection.model,
@@ -330,7 +334,7 @@ const executionModelRoute = (
 const executionRoutePinFromPreparedImpl = (
   mode: BehaviorMode.ModeId,
   prepared: Pick<ModelProviderRuntime.PreparedRoutes, "routes" | "plans">,
-): Turn.ExecutionRoutePin => {
+): ExecutionRouteSnapshot.ExecutionRoutePin => {
   const routes = prepared.routes
   const plans = prepared.plans
   if (routes.length !== 10 || plans.length !== routes.length)
@@ -363,18 +367,18 @@ const executionRoutePinFromPreparedImpl = (
 export const executionRoutePinFromPrepared: {
   (
     prepared: Pick<ModelProviderRuntime.PreparedRoutes, "routes" | "plans">,
-  ): (mode: BehaviorMode.ModeId) => Turn.ExecutionRoutePin
+  ): (mode: BehaviorMode.ModeId) => ExecutionRouteSnapshot.ExecutionRoutePin
   (
     mode: BehaviorMode.ModeId,
     prepared: Pick<ModelProviderRuntime.PreparedRoutes, "routes" | "plans">,
-  ): Turn.ExecutionRoutePin
+  ): ExecutionRouteSnapshot.ExecutionRoutePin
 } = Function.dual(2, executionRoutePinFromPreparedImpl)
 
 const executionRoutePinImpl = (
   settings: SettingsDefaults.ConfigurationSettings,
   mode: BehaviorMode.ModeId,
   tuning?: { readonly fastMode?: boolean },
-): Turn.ExecutionRoutePin => {
+): ExecutionRouteSnapshot.ExecutionRoutePin => {
   const routes = modelRoutesForExecution(settings, mode, tuning)
   return executionRoutePinFromPrepared(mode, {
     routes,
@@ -386,12 +390,12 @@ export const executionRoutePin: {
   (
     mode: BehaviorMode.ModeId,
     tuning?: { readonly fastMode?: boolean },
-  ): (settings: SettingsDefaults.ConfigurationSettings) => Turn.ExecutionRoutePin
+  ): (settings: SettingsDefaults.ConfigurationSettings) => ExecutionRouteSnapshot.ExecutionRoutePin
   (
     settings: SettingsDefaults.ConfigurationSettings,
     mode: BehaviorMode.ModeId,
     tuning?: { readonly fastMode?: boolean },
-  ): Turn.ExecutionRoutePin
+  ): ExecutionRouteSnapshot.ExecutionRoutePin
 } = Function.dual((args) => typeof args[0] === "object", executionRoutePinImpl)
 
 export const resolveExecutionRouteForSettings = Effect.fn("Main.resolveExecutionRouteForSettings")(function* (
@@ -424,14 +428,14 @@ export const productionCompaction = (
 const registrationTuple = (
   candidate:
     | { readonly provider: string; readonly model: string; readonly registrationKey?: string }
-    | Turn.ExecutionModelRoute,
+    | ExecutionRouteSnapshot.ExecutionModelRoute,
 ) =>
   "providerConnection" in candidate
     ? `${candidate.providerConnection.provider}\0${candidate.model}\0${candidate.registrationIdentity}`
     : `${candidate.provider}\0${candidate.model}\0${candidate.registrationKey ?? ""}`
 
 export interface PersistedRouteRegistrationFailure {
-  readonly route: Turn.ExecutionModelRoute
+  readonly route: ExecutionRouteSnapshot.ExecutionModelRoute
   readonly message: string
 }
 
@@ -440,7 +444,7 @@ const causeMessage = (cause: Cause.Cause<unknown>) => {
   return failure instanceof Error ? failure.message : String(failure)
 }
 
-export const executionModelRoutes = (route: Turn.ExecutionRoutePin): ReadonlyArray<Turn.ExecutionModelRoute> => [
+export const executionModelRoutes = (route: ExecutionRouteSnapshot.ExecutionRoutePin): ReadonlyArray<ExecutionRouteSnapshot.ExecutionModelRoute> => [
   route.main,
   route.oracle,
   ...(route.title === undefined ? [] : [route.title]),
@@ -448,7 +452,7 @@ export const executionModelRoutes = (route: Turn.ExecutionRoutePin): ReadonlyArr
   ...(route.agents === undefined ? [] : Object.values(route.agents)),
 ]
 
-export const isLegacyUnavailableExecutionRoute = (route: Turn.ExecutionRoutePin) =>
+export const isLegacyUnavailableExecutionRoute = (route: ExecutionRouteSnapshot.ExecutionRoutePin) =>
   executionModelRoutes(route).some(
     (candidate) => candidate.registrationIdentity === modelRegistrationIdentity("legacy-unavailable"),
   )
@@ -500,12 +504,12 @@ export const withPinnedRouteRegistration = Effect.fn("Main.withPinnedRouteRegist
   backend: ExecutionBackend.Interface,
   options: {
     readonly resolveLegacyRoute?: (
-      input: ExecutionBackend.StartInput,
-    ) => Effect.Effect<{ readonly executionRoute: Turn.ExecutionRoutePin }, ExecutionBackend.BackendError>
+      input: ExecutionRequest.StartInput,
+    ) => Effect.Effect<{ readonly executionRoute: ExecutionRouteSnapshot.ExecutionRoutePin }, ExecutionBackend.BackendError>
     readonly unavailable?: ReadonlyArray<PersistedRouteRegistrationFailure>
-    readonly registeredRoutes?: ReadonlyArray<Turn.ExecutionModelRoute>
+    readonly registeredRoutes?: ReadonlyArray<ExecutionRouteSnapshot.ExecutionModelRoute>
     readonly registerPinnedRoutes?: (
-      routes: ReadonlyArray<Turn.ExecutionModelRoute>,
+      routes: ReadonlyArray<ExecutionRouteSnapshot.ExecutionModelRoute>,
     ) => Effect.Effect<ReadonlyArray<unknown>, ExecutionBackend.BackendError>
   },
 ) {
@@ -560,11 +564,11 @@ export interface ConfiguredBackendOptions {
     never
   >
   readonly settings?: SettingsDefaults.ConfigurationSettings
-  readonly persistedModelRoutes?: ReadonlyArray<Turn.ExecutionModelRoute>
+  readonly persistedModelRoutes?: ReadonlyArray<ExecutionRouteSnapshot.ExecutionModelRoute>
   readonly webSearchCredentials?: Readonly<Record<string, Redacted.Redacted<string>>>
-  readonly resolveLegacyRoute?: (input: ExecutionBackend.StartInput) => Effect.Effect<
+  readonly resolveLegacyRoute?: (input: ExecutionRequest.StartInput) => Effect.Effect<
     {
-      readonly executionRoute: Turn.ExecutionRoutePin
+      readonly executionRoute: ExecutionRouteSnapshot.ExecutionRoutePin
       readonly registrations: ReadonlyArray<ModelProviderRuntime.ModelRegistration>
     },
     ExecutionBackend.BackendError
@@ -832,10 +836,10 @@ const failureKind = (cause: Cause.Cause<unknown>) => {
 }
 
 export const persistedModelRoutesForStartup = (turns: ReadonlyArray<Turn.Turn>) =>
-  turns.filter(Turn.isAgentExecution).flatMap((turn) => executionModelRoutes(turn.executionRoute))
+  turns.filter(ThreadResult.TurnResult.isAgentExecution).flatMap((turn) => executionModelRoutes(turn.executionRoute))
 
 const persistedExecutionRouteRow = Schema.Struct({ execution_route_json: Schema.String })
-const persistedExecutionRouteJson = Schema.fromJsonString(Turn.ExecutionRoutePin)
+const persistedExecutionRouteJson = Schema.fromJsonString(ExecutionRouteSnapshot.ExecutionRoutePin)
 
 export const persistedTitleModelRoutesForStartup = Effect.gen(function* () {
   const sql = yield* SqlClient
@@ -974,7 +978,7 @@ export const runResidentAuth: {
 const createOperationLayerImpl = (
   options: ResidentProductOptions,
   injectedInteractive: (
-    input: ResidentService.InteractiveInput,
+    input: ResidentFeed.InteractiveInput,
     session: Operation.InteractiveSession,
   ) => Effect.Effect<void, Operation.OperationUnavailable>,
 ) => {
@@ -1118,7 +1122,7 @@ const createOperationLayerImpl = (
         Effect.map((turns) => [...persistedModelRoutesForStartup(turns), ...persistedTitleRoutes]),
         provideLayerScoped(repositories),
       )
-      const resolveLegacyRoute = (input: ExecutionBackend.StartInput) =>
+      const resolveLegacyRoute = (input: ExecutionRequest.StartInput) =>
         Effect.gen(function* () {
           const threads = yield* ThreadRepository.Service
           const thread = yield* threads.get(Thread.ThreadId.make(input.threadId))
@@ -1327,14 +1331,14 @@ const createOperationLayerImpl = (
 export const createOperationLayer: {
   (
     injectedInteractive: (
-      input: ResidentService.InteractiveInput,
+      input: ResidentFeed.InteractiveInput,
       session: Operation.InteractiveSession,
     ) => Effect.Effect<void, Operation.OperationUnavailable>,
   ): (options: ResidentProductOptions) => ReturnType<typeof createOperationLayerImpl>
   (
     options: ResidentProductOptions,
     injectedInteractive: (
-      input: ResidentService.InteractiveInput,
+      input: ResidentFeed.InteractiveInput,
       session: Operation.InteractiveSession,
     ) => Effect.Effect<void, Operation.OperationUnavailable>,
   ): ReturnType<typeof createOperationLayerImpl>

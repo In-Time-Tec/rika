@@ -7,12 +7,13 @@ import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-rep
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionInspection from "@rika/product/execution-inspection"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import { Context, Deferred, Effect, Fiber, Layer, Ref } from "effect"
 import { ExecutionIngest } from "@rika/product/product-operation"
 import { Operation } from "@rika/product/product-operation"
 
-const noInspection = (): ExecutionBackend.Inspection | undefined => undefined
+const noInspection = (): ExecutionInspection.Inspection | undefined => undefined
 
 const backend = ExecutionBackend.Service.of({
   invokeChild: () => Effect.die("unused"),

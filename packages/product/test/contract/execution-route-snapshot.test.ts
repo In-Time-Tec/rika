@@ -1,5 +1,5 @@
 import { expect, test } from "vitest"
-import { toExecutionRouteSnapshot } from "../../src/execution-route-snapshot"
+import { toExecutionRouteSnapshot } from "../../src/execution/contract/execution-route-snapshot"
 
 const model = (role: string) => ({
   role,

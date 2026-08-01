@@ -4,6 +4,8 @@ import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionStatus from "@rika/product/execution-status"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Effect, Layer, Ref } from "effect"
 import { TestConsole } from "effect/testing"
@@ -53,7 +55,7 @@ describe("Operation thread actions", () => {
       const beta = thread("beta", { workspace: "/special/project", labels: ["blue"], updatedAt: 20 })
       const archived = thread("archived", { archived: true, updatedAt: 40 })
       const repository = yield* ThreadRepository.makeMemory([alpha, beta, archived])
-      const statuses: ReadonlyArray<Turn.Status> = [
+      const statuses: ReadonlyArray<ExecutionStatus.Status> = [
         "accepted",
         "queued",
         "running",
@@ -72,7 +74,7 @@ describe("Operation thread actions", () => {
             prompt: `${status} prompt`,
             author: { _tag: "Human" },
             lineage: { _tag: "Original" },
-            executionRoute: Turn.testExecutionRoute(),
+            executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
             status,
             createdAt: index + 1,
             updatedAt: index + 1,
@@ -158,7 +160,7 @@ describe("Operation thread actions", () => {
           prompt: "one",
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
-          executionRoute: Turn.testExecutionRoute(),
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
           status: "completed",
           stopIntent: "none",
           createdAt: 1,
@@ -172,7 +174,7 @@ describe("Operation thread actions", () => {
           prompt: "two",
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
-          executionRoute: Turn.testExecutionRoute(),
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
           status: "failed",
           stopIntent: "none",
           createdAt: 3,
@@ -227,7 +229,7 @@ describe("Operation thread actions", () => {
           prompt: "agent history",
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
-          executionRoute: Turn.testExecutionRoute(),
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
           status: "completed",
           stopIntent: "none",
           createdAt: 1,

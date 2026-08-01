@@ -7,6 +7,7 @@ import * as ThreadRepository from "../../src/thread-repository"
 import * as TranscriptRepository from "../../src/transcript-repository"
 import * as TurnRepository from "../../src/turn-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import {
   commitAll,
   nestedProjection,
@@ -25,7 +26,7 @@ const createTurn = Effect.fn("TranscriptCheckpointDeltaTest.createTurn")(functio
     id: turnId,
     threadId,
     prompt: "delegate",
-    executionRoute: Turn.testExecutionRoute(),
+    executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
     queueCapacity: 128,
     now: 2,
   })

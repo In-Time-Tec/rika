@@ -1,3 +1,4 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
 import { MediaAnalysisError } from "@rika/coding-tools/media-view-service"
 import { analyzerTestLayer } from "@rika/coding-tools/media-view-service"
 import * as BunServices from "@effect/platform-bun/BunServices"
@@ -12,6 +13,7 @@ import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-rep
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
 import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import * as RelayExecutionBackend from "@rika/relay-execution/relay-execution-layer"
@@ -117,7 +119,7 @@ export interface TuiApp {
   readonly spans: () => CapturedSpans
   readonly transcript: (
     turnId: Turn.TurnId,
-  ) => Effect.Effect<TranscriptRepository.Projection | undefined, TranscriptRepository.RepositoryError>
+  ) => Effect.Effect<TranscriptPage.Projection | undefined, TranscriptRepository.RepositoryError>
   readonly waitFrame: (marker: string, timeoutMillis?: number) => Effect.Effect<string>
   readonly waitFrameMatch: (predicate: (frame: string) => boolean, timeoutMillis?: number) => Effect.Effect<string>
   readonly waitCost: Effect.Effect<string>
@@ -257,7 +259,7 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
     makeTurnId: Effect.sync(() => Turn.TurnId.make(`tui-turn-${nextTurn++}`)),
     resolveExecutionRoute: (mode) =>
       Effect.sync(() => {
-        const { title: _title, ...pin } = Turn.testExecutionRoute(mode)
+        const { title: _title, ...pin } = ExecutionRouteSnapshot.testExecutionRoute(mode)
         return pin
       }),
     interactive: (settings, current) => {

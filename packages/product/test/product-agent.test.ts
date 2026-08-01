@@ -1,20 +1,22 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionStatus from "@rika/product/execution-status"
+import * as ExecutionChildRun from "@rika/product/execution-child-run"
 import { Effect, Exit, Layer, Schema } from "effect"
-import { ProductAgent } from "@rika/product/product-operation"
+import * as ProductAgent from "../src/agent/product-agent-service"
 import { provideLayer } from "./layer"
 import { executionRoute } from "./current-state"
 
 describe("ProductAgent", () => {
   it("accepts every canonical runtime Agent profile", () => {
-    expect(ProductAgent.Profile.literals).toEqual(ExecutionBackend.AgentProfile.literals)
+    expect(ProductAgent.Profile.literals).toEqual(ExecutionChildRun.AgentProfile.literals)
     expect(Schema.is(ProductAgent.Profile)("Surgeon")).toBe(true)
   })
 
   it.effect("delegates every service operation, maps failures, and selects every profile", () =>
     Effect.gen(function* () {
       const failure = ExecutionBackend.BackendError.make({ message: "nope" })
-      const inspection: ExecutionBackend.FanOutInspection = {
+      const inspection: ExecutionChildRun.FanOutInspection = {
         fanOutId: "fan",
         parentTurnId: "parent",
         state: "joining",
@@ -164,7 +166,7 @@ describe("ProductAgent", () => {
     Effect.gen(function* () {
       const parentTurnId = "turn-product-child-cancel"
       const childExecutionId = "execution:turn-product-child-cancel:child:Review:call-cancel-review"
-      let childStatus: ExecutionBackend.Status = "running"
+      let childStatus: ExecutionStatus.Status = "running"
       const backend = ExecutionBackend.Service.of({
         invokeChild: () => Effect.die("unused"),
         createFanOut: () => Effect.die("unused"),
@@ -284,7 +286,7 @@ describe("ProductAgent", () => {
 
   it.effect("selects subagents, bounds parallel Tasks, preserves partial failures, and projects ordered children", () =>
     Effect.gen(function* () {
-      let captured: ExecutionBackend.FanOutInput | undefined
+      let captured: ExecutionChildRun.FanOutInput | undefined
       const backend = ExecutionBackend.Service.of({
         invokeChild: () => Effect.die("unused"),
         createFanOut: (input) => {

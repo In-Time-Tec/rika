@@ -10,8 +10,17 @@ import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as ProductStoreUsageRepository from "@rika/product-store/sqlite-usage-repository"
 import * as ProductStoreSummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
+import * as ExecutionStatus from "@rika/product/execution-status"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionBackend from "@rika/product/execution-service"
-import { AgentDepth } from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionRequest from "@rika/product/execution-request"
+import * as ExecutionIdentifier from "@rika/product/execution-identifier"
+import * as ExecutionWorkflow from "@rika/product/execution-workflow"
+import * as ExecutionChildRun from "@rika/product/execution-child-run"
+import * as ExecutionInspection from "@rika/product/execution-inspection"
+import { AgentDepth } from "@rika/product/execution-identifier"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
@@ -121,7 +130,7 @@ const turnProvenance = {
 
 const threadLineage = { _tag: "Original" as const }
 
-const executionStarted = (executionId: string, cursor: string = `${executionId}:started`): ExecutionBackend.Event => ({
+const executionStarted = (executionId: string, cursor: string = `${executionId}:started`): ExecutionEvent.Event => ({
   executionId,
   cursor,
   sequence: 0,
@@ -209,7 +218,7 @@ const backend = ExecutionBackend.Service.of({
 
 const inspectFromTurns =
   (turns: TurnRepository.Interface) =>
-  (turnId: string): Effect.Effect<ExecutionBackend.Inspection | undefined, ExecutionBackend.BackendError> =>
+  (turnId: string): Effect.Effect<ExecutionInspection.Inspection | undefined, ExecutionBackend.BackendError> =>
     turns.get(Turn.TurnId.make(turnId)).pipe(
       Effect.map((turn) =>
         turn === undefined ? undefined : { turnId, status: turn.status, waits: [], pendingTools: [], children: [] },
@@ -260,7 +269,7 @@ const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarne
       return repository.get(id)
     },
   })
-  const streamed: ReadonlyArray<ExecutionBackend.Event> = Array.from({ length: eventCount }, (_, index) => ({
+  const streamed: ReadonlyArray<ExecutionEvent.Event> = Array.from({ length: eventCount }, (_, index) => ({
     executionId: "selection-live-turn",
     cursor: `selection-live-${index + 1}`,
     sequence: index + 1,
@@ -268,7 +277,7 @@ const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarne
     createdAt: index + 1,
     text: String(index + 1),
   }))
-  const usage: ExecutionBackend.Event = {
+  const usage: ExecutionEvent.Event = {
     executionId: "selection-live-turn",
     cursor: "selection-live-usage",
     sequence: eventCount + 1,
@@ -284,7 +293,7 @@ const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarne
       output_tokens: 10,
     },
   }
-  const completed: ExecutionBackend.Event = {
+  const completed: ExecutionEvent.Event = {
     executionId: "selection-live-turn",
     cursor: "selection-live-completed",
     sequence: eventCount + (deferredUsage ? 2 : 1),
@@ -292,7 +301,7 @@ const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarne
     timestampSource: "server",
     createdAt: eventCount + (deferredUsage ? 2 : 1),
   }
-  const started: ExecutionBackend.Event = {
+  const started: ExecutionEvent.Event = {
     executionId: "selection-live-turn",
     cursor: "selection-live-started",
     sequence: 0,
@@ -380,8 +389,8 @@ const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarne
 })
 
 const replacementWorkflow = (
-  status: ExecutionBackend.WorkflowInspection["status"],
-): ExecutionBackend.WorkflowInspection => ({
+  status: ExecutionWorkflow.WorkflowInspection["status"],
+): ExecutionWorkflow.WorkflowInspection => ({
   runId: "replacement-workflow",
   workflow: "delivery",
   revision: 1,
@@ -392,7 +401,7 @@ const replacementWorkflow = (
 })
 
 describe("Operation", () => {
-  const replacementTurn = (status: Turn.Status = "running"): Turn.Turn => ({
+  const replacementTurn = (status: ExecutionStatus.Status = "running"): Turn.Turn => ({
     ...turnProvenance,
     id: Turn.TurnId.make("replacement-turn"),
     threadId: Thread.ThreadId.make("replacement-thread"),
@@ -572,7 +581,7 @@ describe("Operation", () => {
         type: "execution.completed",
         timestampSource: "server",
         createdAt: 5,
-      } satisfies ExecutionBackend.Event
+      } satisfies ExecutionEvent.Event
       const started = { ...executionStarted(childId), sequence: 2, createdAt: 4 }
       const recoveryBackend = ExecutionBackend.Service.of({
         ...backend,
@@ -651,7 +660,7 @@ describe("Operation", () => {
 
   it.effect("records a stop intent for every nonterminal turn before settling it as cancelled", () =>
     Effect.gen(function* () {
-      const quitTurn = (id: string, status: Turn.Status): Turn.Turn => ({
+      const quitTurn = (id: string, status: ExecutionStatus.Status): Turn.Turn => ({
         ...turnProvenance,
         id: Turn.TurnId.make(id),
         threadId: Thread.ThreadId.make("quit-thread"),
@@ -802,8 +811,8 @@ describe("Operation", () => {
       const threads = yield* ThreadRepository.makeMemory([selectionThread(String(turn.threadId))])
       const child = AgentDepth.childExecutionId(turn.id, "task")
       const grandchild = AgentDepth.childExecutionId(child, "oracle")
-      const inspection = (turnId: string): ExecutionBackend.Inspection => {
-        let children: ExecutionBackend.Inspection["children"] = []
+      const inspection = (turnId: string): ExecutionInspection.Inspection => {
+        let children: ExecutionInspection.Inspection["children"] = []
         if (turnId === turn.id) children = [{ executionId: child, status: "completed" }]
         else if (turnId === child) children = [{ executionId: grandchild, status: "running" }]
         return { turnId, status: "completed", waits: [], pendingTools: [], children }
@@ -832,7 +841,7 @@ describe("Operation", () => {
         const turns = yield* TurnRepository.makeMemory([turn])
         const threads = yield* ThreadRepository.makeMemory([selectionThread(String(turn.threadId))])
         const child = AgentDepth.childExecutionId(turn.id, `terminal-${status}`)
-        const childStatus = yield* Ref.make<Turn.Status | "absent">("running")
+        const childStatus = yield* Ref.make<ExecutionStatus.Status | "absent">("running")
         const inspectedBackend = ExecutionBackend.Service.of({
           ...backend,
           inspect: (turnId) =>
@@ -873,7 +882,7 @@ describe("Operation", () => {
       const turn = replacementTurn()
       const turns = yield* TurnRepository.makeMemory([turn])
       const threads = yield* ThreadRepository.makeMemory([selectionThread(String(turn.threadId))])
-      const status = yield* Ref.make<Turn.Status>("running")
+      const status = yield* Ref.make<ExecutionStatus.Status>("running")
       const inspectedBackend = ExecutionBackend.Service.of({
         ...backend,
         inspect: (turnId) =>
@@ -1162,7 +1171,7 @@ describe("Operation", () => {
                     },
                   },
                 })
-                return Turn.testExecutionRoute("medium")
+                return ExecutionRouteSnapshot.testExecutionRoute("medium")
               }),
             defaultWorkspace: "/work",
             makeThreadId: Effect.succeed(Thread.ThreadId.make("thread-rejected-config")),
@@ -1230,10 +1239,10 @@ describe("Operation", () => {
       const firstTurn = yield* turns.get(Turn.TurnId.make("turn-1"))
       const secondTurn = yield* turns.get(Turn.TurnId.make("turn-2"))
       expect(
-        firstTurn !== undefined && Turn.isAgentExecution(firstTurn) ? firstTurn.executionRoute.mode : undefined,
+        firstTurn !== undefined && ThreadResult.TurnResult.isAgentExecution(firstTurn) ? firstTurn.executionRoute.mode : undefined,
       ).toBe("low")
       expect(
-        secondTurn !== undefined && Turn.isAgentExecution(secondTurn) ? secondTurn.executionRoute.mode : undefined,
+        secondTurn !== undefined && ThreadResult.TurnResult.isAgentExecution(secondTurn) ? secondTurn.executionRoute.mode : undefined,
       ).toBe("ultra")
       expect((yield* turns.get(Turn.TurnId.make("turn-2")))?.status).toBe("completed")
     }),
@@ -1258,7 +1267,7 @@ describe("Operation", () => {
           updatedAt: 2,
         },
       ])
-      const starts = yield* Ref.make<ReadonlyArray<ExecutionBackend.StartInput>>([])
+      const starts = yield* Ref.make<ReadonlyArray<ExecutionRequest.StartInput>>([])
       const preparations = yield* Ref.make(0)
       const restartBackend = ExecutionBackend.Service.of({
         ...backend,
@@ -1560,7 +1569,7 @@ describe("Operation", () => {
           prompt: "Review workspace changes",
           status: "running",
           stopIntent: "none",
-          executionRoute: Turn.testExecutionRoute("medium"),
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute("medium"),
           reviewFanOutId: "review:review-owner",
           createdAt: 1,
           updatedAt: 2,
@@ -1821,7 +1830,7 @@ describe("Operation", () => {
 
   it.effect("defers replacement for a running workflow and authorizes retry after Relay reports terminal", () =>
     Effect.gen(function* () {
-      const status = yield* Ref.make<ExecutionBackend.WorkflowInspection["status"]>("running")
+      const status = yield* Ref.make<ExecutionWorkflow.WorkflowInspection["status"]>("running")
       const workflowBackend = ExecutionBackend.Service.of({
         ...backend,
         registerWorkflows: () => Effect.succeed([]),
@@ -2663,13 +2672,13 @@ describe("Operation", () => {
             prompt: "queued",
             status: "queued",
             stopIntent: "none",
-            executionRoute: Turn.testExecutionRoute("medium"),
+            executionRoute: ExecutionRouteSnapshot.testExecutionRoute("medium"),
             createdAt: yield* Clock.currentTimeMillis,
             updatedAt: yield* Clock.currentTimeMillis,
           },
         ])
         const starts = yield* Ref.make<ReadonlyArray<string>>([])
-        const promoters = yield* Ref.make<ReadonlyArray<ExecutionBackend.TurnPromoter>>([])
+        const promoters = yield* Ref.make<ReadonlyArray<ExecutionIdentifier.TurnPromoter>>([])
         const wakes = yield* Ref.make<ReadonlyArray<ExecutionBackend.ThreadQueueWake>>([])
         const sessions = yield* Queue.unbounded<{
           readonly workspace: string
@@ -2776,11 +2785,11 @@ describe("Operation", () => {
       Effect.runPromise(
         Effect.gen(function* () {
           const eventCount = 8_300
-          const streamed: ReadonlyArray<ExecutionBackend.Event> = [
+          const streamed: ReadonlyArray<ExecutionEvent.Event> = [
             executionStarted("overflow-turn"),
             ...Array.from(
               { length: eventCount },
-              (_, index): ExecutionBackend.Event => ({
+              (_, index): ExecutionEvent.Event => ({
                 executionId: "overflow-turn",
                 cursor: `chunk-${index + 1}`,
                 sequence: index + 1,
@@ -3445,7 +3454,7 @@ describe("Operation", () => {
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const dispatch = (event: Operation.InteractiveEvent) => runSync(Ref.update(events, (all) => [...all, event]))
       const wakes = yield* Ref.make<ReadonlyArray<ExecutionBackend.ThreadQueueWake>>([])
-      const promoters = yield* Ref.make<ReadonlyArray<ExecutionBackend.TurnPromoter>>([])
+      const promoters = yield* Ref.make<ReadonlyArray<ExecutionIdentifier.TurnPromoter>>([])
       const started = yield* Ref.make<ReadonlyArray<string>>([])
       const turnSequence = yield* Ref.make(0)
       const thread: Thread.Thread = {
@@ -4427,8 +4436,8 @@ describe("Operation", () => {
       const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
-      const startInputs = yield* Ref.make<ReadonlyArray<ExecutionBackend.StartInput>>([])
-      const childInputs = yield* Ref.make<ReadonlyArray<ExecutionBackend.InvokeChildInput>>([])
+      const startInputs = yield* Ref.make<ReadonlyArray<ExecutionRequest.StartInput>>([])
+      const childInputs = yield* Ref.make<ReadonlyArray<ExecutionChildRun.InvokeChildInput>>([])
       const liveBackend = ExecutionBackend.Service.of({
         ...backend,
         invokeChild: (input) =>
@@ -4436,7 +4445,7 @@ describe("Operation", () => {
         follow: (executionId, afterCursor, onEvent, reference) => {
           if (executionId !== "child:turn-interactive:title")
             return backend.follow!(executionId, afterCursor, onEvent, reference)
-          if (reference !== ExecutionBackend.executionReference)
+          if (reference !== ExecutionIdentifier.executionReference)
             return Effect.die(new Error("title execution addressed without the execution reference"))
           return Effect.succeed({
             turnId: executionId,
@@ -4734,9 +4743,9 @@ describe("Operation", () => {
       const turns = yield* TurnRepository.makeMemory()
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
       const starts = yield* Ref.make<ReadonlyArray<string>>([])
-      const titleInvocations = yield* Ref.make<ReadonlyArray<ExecutionBackend.InvokeChildInput>>([])
+      const titleInvocations = yield* Ref.make<ReadonlyArray<ExecutionChildRun.InvokeChildInput>>([])
       const titleRoute = {
-        ...Turn.testExecutionRoute("low").main,
+        ...ExecutionRouteSnapshot.testExecutionRoute("low").main,
         role: "title" as const,
         model: "gpt-5.6-luna",
         effort: "low",
@@ -4811,7 +4820,7 @@ describe("Operation", () => {
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(ExecutionBackend.Service, routedBackend),
         resolveExecutionRoute: (mode) => {
-          const route = Turn.testExecutionRoute(mode)
+          const route = ExecutionRouteSnapshot.testExecutionRoute(mode)
           return Effect.succeed({
             ...route,
             main: { ...route.main, model: `${mode}-model` },
@@ -4898,7 +4907,7 @@ describe("Operation", () => {
         prompt,
         stopIntent: "none",
         status: "completed",
-        executionRoute: Turn.testExecutionRoute("medium"),
+        executionRoute: ExecutionRouteSnapshot.testExecutionRoute("medium"),
         createdAt: 1,
         updatedAt: 2,
       }
@@ -5154,8 +5163,8 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const repository = yield* ThreadRepository.makeMemory()
       const turns = yield* TurnRepository.makeMemory()
-      const starts = yield* Ref.make<ReadonlyArray<ExecutionBackend.StartInput>>([])
-      const runningStatuses = yield* Ref.make<ReadonlyArray<Turn.Status>>([])
+      const starts = yield* Ref.make<ReadonlyArray<ExecutionRequest.StartInput>>([])
+      const runningStatuses = yield* Ref.make<ReadonlyArray<ExecutionStatus.Status>>([])
       const runBackend = ExecutionBackend.Service.of({
         ...backend,
         start: (input) =>
@@ -5249,7 +5258,7 @@ describe("Operation", () => {
         TranscriptRepository.Service,
       )
       const childId = "child:execution%3Aturn-new:call_1"
-      const childEvents: ReadonlyArray<ExecutionBackend.Event> = [
+      const childEvents: ReadonlyArray<ExecutionEvent.Event> = [
         executionStarted(childId),
         {
           executionId: childId,
@@ -5704,7 +5713,7 @@ describe("Operation", () => {
             Effect.as({ pin: value, generation }),
           ),
       })
-      const starts = yield* Ref.make<ReadonlyArray<ExecutionBackend.StartInput>>([])
+      const starts = yield* Ref.make<ReadonlyArray<ExecutionRequest.StartInput>>([])
       const runBackend = ExecutionBackend.Service.of({
         ...backend,
         start: (input) =>
@@ -6038,7 +6047,7 @@ describe("Operation", () => {
         backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
         resolveExecutionRoute: (mode) => {
           runSync(Ref.update(modes, (all) => [...all, mode]))
-          const route = Turn.testExecutionRoute(mode)
+          const route = ExecutionRouteSnapshot.testExecutionRoute(mode)
           return Effect.succeed({
             ...route,
             tokenBudget: 1,
@@ -6142,7 +6151,7 @@ describe("Operation", () => {
       })
       const finalAvailable = yield* Ref.make(false)
       const pageRequests = yield* Ref.make<ReadonlyArray<string | undefined>>([])
-      const rootEvent = (cursor: string, sequence: number, type: string, text?: string): ExecutionBackend.Event => ({
+      const rootEvent = (cursor: string, sequence: number, type: string, text?: string): ExecutionEvent.Event => ({
         executionId: String(targetTurn.id),
         cursor: `execution:${targetTurn.id}:${cursor}`,
         sequence,
@@ -6437,7 +6446,7 @@ const delegationEvent = (
   sequence: number,
   type: string,
   data: Record<string, unknown>,
-): ExecutionBackend.Event => ({
+): ExecutionEvent.Event => ({
   executionId,
   cursor,
   sequence,
@@ -6447,7 +6456,7 @@ const delegationEvent = (
   data,
 })
 
-const usageEventAt = (executionId: string, cursor: string, sequence: number): ExecutionBackend.Event => ({
+const usageEventAt = (executionId: string, cursor: string, sequence: number): ExecutionEvent.Event => ({
   executionId,
   cursor,
   sequence,

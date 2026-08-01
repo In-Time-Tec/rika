@@ -1,13 +1,17 @@
 import * as TurnRepository from "@rika/product/turn-repository"
-import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
+import * as ThreadRelationship from "@rika/product/thread-relationship"
 import { Effect, Function } from "effect"
 
-export const executionRoute = () => Turn.testExecutionRoute()
+export const executionRoute = () => ExecutionRouteSnapshot.testExecutionRoute()
 
-type CreateInput = Omit<TurnRepository.CreateInput, "author" | "executionRoute" | "lineage" | "queueCapacity"> & {
-  readonly author?: Turn.TurnAuthor
-  readonly executionRoute?: Turn.ExecutionRoutePin
-  readonly lineage?: Turn.TurnLineage
+type CreateInput = Omit<
+  TurnRepositoryContract.CreateInput,
+  "author" | "executionRoute" | "lineage" | "queueCapacity"
+> & {
+  readonly author?: ThreadRelationship.TurnAuthor
+  readonly executionRoute?: ExecutionRouteSnapshot.ExecutionRoutePin
+  readonly lineage?: ThreadRelationship.TurnLineage
 }
 
 export const createTurn: {
@@ -15,11 +19,11 @@ export const createTurn: {
     input: CreateInput,
   ): (
     repository: TurnRepository.Interface,
-  ) => Effect.Effect<TurnRepository.Submission, TurnRepository.QueueFull | TurnRepository.RepositoryError>
+  ) => Effect.Effect<TurnQueuePromotion.Submission, TurnRepository.QueueFull | TurnRepository.RepositoryError>
   (
     repository: TurnRepository.Interface,
     input: CreateInput,
-  ): Effect.Effect<TurnRepository.Submission, TurnRepository.QueueFull | TurnRepository.RepositoryError>
+  ): Effect.Effect<TurnQueuePromotion.Submission, TurnRepository.QueueFull | TurnRepository.RepositoryError>
 } = Function.dual(2, (repository: TurnRepository.Interface, input: CreateInput) =>
   repository.createForSubmission({
     author: { _tag: "Human" },
