@@ -80,9 +80,7 @@ export const makeRelayLayer = <
           const toolRuntimeLayer = makeToolComposition({
             relayClient,
             options,
-            runnerToolkit: runnerToolkit as unknown as import("effect/unstable/ai").Toolkit.Toolkit<
-              Record<string, Tool.Any>
-            >,
+            runnerToolkit,
             handlerLayer,
             rikaToolRuntimeLayer,
             sharedModelRegistryLayer,
@@ -111,8 +109,4 @@ export const makeRelayLayer = <
         }
       }
     }),
-  ) as unknown as Layer.Layer<
-    Service,
-    BackendError | PlatformError.PlatformError | Runtime.AcquisitionError,
-    Crypto.Crypto | ExternalToolRuntimeRequirements<RuntimeRequirements>
-  >
+  )

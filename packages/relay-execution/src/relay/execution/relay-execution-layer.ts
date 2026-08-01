@@ -57,14 +57,26 @@ export interface LayerOptions<AdditionalTools extends Record<string, Tool.Any> =
 export const defaultModelResilience: ModelResilience.Interface = ModelResilience.make({
   retrySchedule: Schedule.exponential("500 millis", 2).pipe(Schedule.jittered, Schedule.upTo({ times: 3 })),
 })
-export const route = {
+export const route: {
+  readonly modelRoutesForExecution: typeof Route.modelRoutesForExecution
+  readonly defaultModelRoutes: typeof Route.defaultModelRoutes
+  readonly executionRoutePin: typeof Route.executionRoutePin
+  readonly resolveExecutionRouteForSettings: typeof Route.resolveExecutionRouteForSettings
+  readonly productionCompaction: typeof Route.productionCompaction
+} = {
   modelRoutesForExecution: Route.modelRoutesForExecution,
   defaultModelRoutes: Route.defaultModelRoutes,
   executionRoutePin: Route.executionRoutePin,
   resolveExecutionRouteForSettings: Route.resolveExecutionRouteForSettings,
   productionCompaction: Route.productionCompaction,
 }
-export const execution = {
+export const execution: {
+  readonly turnIdFromExecutionId: typeof Identifier.turnIdFromExecutionId
+  readonly workspaceFromExecutionId: typeof Identifier.workspaceFromExecutionId
+  readonly configuredLayer: typeof Configured.makeConfiguredLayer
+  readonly routeForSettings: typeof Configured.makeConfiguredRoute
+  readonly modelRoutes: typeof Configured.configuredExecutionModelRoutes
+} = {
   turnIdFromExecutionId: Identifier.turnIdFromExecutionId,
   workspaceFromExecutionId: Identifier.workspaceFromExecutionId,
   configuredLayer: Configured.makeConfiguredLayer,

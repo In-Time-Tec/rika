@@ -36,9 +36,9 @@ export const childResult = (input: { readonly client: Client.Interface; readonly
     }),
   )
 }
-export const makeFanOutHost = (context: {
+export const makeFanOutHost = <RunnerTools extends Record<string, Tool.Any>>(context: {
   readonly relayClient: Deferred.Deferred<Client.Interface>
-  readonly toolkit: Toolkit.Toolkit<Record<string, Tool.Any>>
+  readonly toolkit: Toolkit.Toolkit<RunnerTools>
   readonly options: Pick<
     LayerOptions,
     "selection" | "oracleSelection" | "compaction" | "oracleCompaction" | "compactionSummarySelection"

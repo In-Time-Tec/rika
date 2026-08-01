@@ -3,6 +3,7 @@ import * as ModelRouteResolution from "@rika/configuration/model-route-resolutio
 import * as SettingsDefaults from "@rika/configuration/configuration-settings"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ModelProviderRuntime from "../../../src/model/provider/model-provider-runtime"
+import { Function } from "effect"
 import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 
 const resolveTunedModeRoute = (
@@ -23,7 +24,7 @@ const resolveTunedModeRoute = (
   )
 }
 
-export const modelRoutesForExecution = (
+const modelRoutesForExecutionEffect = (
   settings: SettingsDefaults.ConfigurationSettings,
   mode: BehaviorMode.ModeId,
   tuning?: { readonly fastMode?: boolean },
@@ -71,7 +72,7 @@ const executionModelRoute = (
   compaction: route.compaction,
 })
 
-export const executionRoutePinFromPrepared = (
+const executionRoutePinFromPreparedEffect = (
   mode: BehaviorMode.ModeId,
   prepared: Pick<ModelProviderRuntime.PreparedRoutes, "routes" | "plans">,
 ): ExecutionRouteSnapshot.ExecutionRoutePin => {
@@ -103,17 +104,51 @@ export const executionRoutePinFromPrepared = (
   }
 }
 
-export const executionRoutePin = (
+const executionRoutePinEffect = (
   settings: SettingsDefaults.ConfigurationSettings,
   mode: BehaviorMode.ModeId,
   tuning?: { readonly fastMode?: boolean },
 ): ExecutionRouteSnapshot.ExecutionRoutePin => {
-  const routes = modelRoutesForExecution(settings, mode, tuning)
-  return executionRoutePinFromPrepared(mode, {
+  const routes = modelRoutesForExecutionEffect(settings, mode, tuning)
+  return executionRoutePinFromPreparedEffect(mode, {
     routes,
     plans: routes.map((route) => ModelProviderRuntime.modelRoutePlan(route)),
   })
 }
+
+export const modelRoutesForExecution: {
+  (
+    settings: SettingsDefaults.ConfigurationSettings,
+    mode: BehaviorMode.ModeId,
+    tuning?: { readonly fastMode?: boolean },
+  ): ReturnType<typeof modelRoutesForExecutionEffect>
+  (
+    mode: BehaviorMode.ModeId,
+    tuning?: { readonly fastMode?: boolean },
+  ): (settings: SettingsDefaults.ConfigurationSettings) => ReturnType<typeof modelRoutesForExecutionEffect>
+} = Function.dual((args) => typeof args[0] === "object", modelRoutesForExecutionEffect)
+
+export const executionRoutePinFromPrepared: {
+  (
+    mode: BehaviorMode.ModeId,
+    prepared: Pick<ModelProviderRuntime.PreparedRoutes, "routes" | "plans">,
+  ): ExecutionRouteSnapshot.ExecutionRoutePin
+  (
+    prepared: Pick<ModelProviderRuntime.PreparedRoutes, "routes" | "plans">,
+  ): (mode: BehaviorMode.ModeId) => ExecutionRouteSnapshot.ExecutionRoutePin
+} = Function.dual(2, executionRoutePinFromPreparedEffect)
+
+export const executionRoutePin: {
+  (
+    settings: SettingsDefaults.ConfigurationSettings,
+    mode: BehaviorMode.ModeId,
+    tuning?: { readonly fastMode?: boolean },
+  ): ExecutionRouteSnapshot.ExecutionRoutePin
+  (
+    mode: BehaviorMode.ModeId,
+    tuning?: { readonly fastMode?: boolean },
+  ): (settings: SettingsDefaults.ConfigurationSettings) => ExecutionRouteSnapshot.ExecutionRoutePin
+} = Function.dual((args) => typeof args[0] === "object", executionRoutePinEffect)
 
 export const executionModelRoutes = (
   route: ExecutionRouteSnapshot.ExecutionRoutePin,

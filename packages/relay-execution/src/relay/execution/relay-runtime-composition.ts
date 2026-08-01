@@ -1,7 +1,7 @@
 import { ModelHub } from "@relayfx/sdk"
 import { lazyModelRegistryLayer } from "../../model/routing/relay-model-registry"
 import { error } from "./relay-event-payload"
-import { Cause, Context, Effect, Layer } from "effect"
+import { Cause, Context, Effect, Layer, Scope } from "effect"
 import { ModelRegistry } from "@batonfx/core"
 import { BackendError } from "@rika/product/execution-service"
 import type { ToolRuntimeRequirements, LayerOptions } from "./relay-execution-layer"
@@ -9,9 +9,13 @@ import * as RikaToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as ContextTokenizer from "../../context-tokenizer"
 import { routedToolRuntimeLayer } from "./relay-tool-runtime"
 
-export const buildModelContext: (
+export type RelayModelContext = Context.Context<
+  ModelHub.Service | ModelRegistry.ModelRegistry | import("@relayfx/sdk").LanguageModelService.Service
+>
+
+export const buildModelContext = (
   registrations: ReadonlyArray<ModelRegistry.Registration>,
-) => Effect.Effect<Context.Context<any>, any, any> = (registrations) =>
+): Effect.Effect<RelayModelContext, BackendError, Scope.Scope> =>
   Layer.build(
     Layer.unwrap(
       Layer.build(lazyModelRegistryLayer(registrations)).pipe(
@@ -25,8 +29,17 @@ export const makeModelRuntimeComposition = <
   RuntimeRequirements extends ToolRuntimeRequirements,
 >(input: {
   readonly options: LayerOptions<AdditionalTools, RuntimeRequirements>
-  readonly relayModelContext: Context.Context<any>
-}) => {
+  readonly relayModelContext: RelayModelContext
+}): {
+  readonly languageModelLayer: Layer.Layer<import("@relayfx/sdk").LanguageModelService.Service, never, never>
+  readonly sharedModelRegistryLayer: Layer.Layer<ModelRegistry.ModelRegistry, never, never>
+  readonly rikaToolRuntimeLayer: Layer.Layer<
+    RikaToolRuntime.Service,
+    BackendError,
+    ToolRuntimeRequirements | RuntimeRequirements
+  >
+  readonly modelRegistry: ModelRegistry.Interface
+} => {
   const { options, relayModelContext } = input
   const modelRegistry = Context.get(relayModelContext, ModelHub.Service).modelRegistry
   const languageModelLayer = Layer.mergeAll(Layer.succeedContext(relayModelContext), ContextTokenizer.layer)
