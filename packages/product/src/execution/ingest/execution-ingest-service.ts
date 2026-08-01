@@ -100,12 +100,13 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
         commit,
         startNode,
         wake,
-        finishReaders: (current) => {
+        finishReaders: (current: IngestState.Pipeline) => {
           if (current.active <= 0) current.readersFinished.openUnsafe()
         },
         finishPipeline,
         settlePipeline,
-        fail: (current, node, _reason, message) => fail(current, node, "checkpoint", message),
+        fail: (current: IngestState.Pipeline, node: IngestState.Node, _reason: "checkpoint", message: string) =>
+          fail(current, node, "checkpoint", message),
       },
       pipeline,
       pipelineScope,

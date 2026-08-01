@@ -1,3 +1,4 @@
+import { OperationError } from "../operation-error"
 import { Clock, Effect } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ExecutionEvent from "@rika/product/execution-event"
@@ -21,21 +22,21 @@ export const promotePendingTurns = (input: {
     turn: Turn.AgentExecutionTurn,
     workspace: string,
     persist?: boolean,
-  ) => Effect.Effect<any, any, any>
-  readonly ensureIngest: (threadId: Thread.ThreadId, turnId: Turn.TurnId) => Effect.Effect<any, any, any>
+  ) => Effect.Effect<any, OperationError, never>
+  readonly ensureIngest: (threadId: Thread.ThreadId, turnId: Turn.TurnId) => Effect.Effect<any, OperationError, never>
   readonly owner: RootTurnOwner.Interface
-  readonly notifyThreadSummaries: Effect.Effect<any, any, any>
-  readonly notifyTurnChanged: (turn: Pick<Turn.Turn, "id" | "threadId">) => Effect.Effect<any, any, any>
+  readonly notifyThreadSummaries: Effect.Effect<any, OperationError, never>
+  readonly notifyTurnChanged: (turn: Pick<Turn.Turn, "id" | "threadId">) => Effect.Effect<any, OperationError, never>
   readonly setTurnStatus: (
     id: Turn.TurnId,
     status: ExecutionStatus.Status,
     cursor: string | undefined,
     now: number,
-  ) => Effect.Effect<any, any, any>
+  ) => Effect.Effect<any, OperationError, never>
   readonly projectExecutionResult: (
     threadId: Thread.ThreadId,
     result: ExecutionEvent.Result,
-  ) => Effect.Effect<any, any, any>
+  ) => Effect.Effect<any, OperationError, never>
   readonly deliverResultEvents: (
     turnId: Turn.TurnId,
     events: ReadonlyArray<ExecutionEvent.Event>,
@@ -45,15 +46,15 @@ export const promotePendingTurns = (input: {
   readonly claimQueuedTurn: (
     threadId: Thread.ThreadId,
     now: number,
-  ) => Effect.Effect<TurnQueuePromotion.QueueClaim | undefined, any, any>
-  readonly releaseTurnObserver: (turnId: Turn.TurnId) => Effect.Effect<any, any, any>
+  ) => Effect.Effect<TurnQueuePromotion.QueueClaim | undefined, OperationError, never>
+  readonly releaseTurnObserver: (turnId: Turn.TurnId) => Effect.Effect<any, OperationError, never>
   readonly awaitSessionQuiescence: (
     backend: ExecutionBackend.Interface,
     threadId: Thread.ThreadId,
-  ) => Effect.Effect<Turn.Turn | undefined, any, any>
+  ) => Effect.Effect<Turn.Turn | undefined, OperationError, never>
   readonly emit: (dispatch: (event: InteractiveEvent) => void, event: InteractiveEvent) => void
   readonly failureMessage: string
-}) =>
+}): Effect.Effect<number, OperationError | ExecutionBackend.BackendError | TurnRepository.RepositoryError, never> =>
   Effect.gen(function* () {
     let staleRefused = false
     let claimed = 0
@@ -69,7 +70,7 @@ export const promotePendingTurns = (input: {
         threadId: input.thread.id,
         message: staleError.message,
       })
-      return yield* Effect.fail(staleError)
+      return yield* staleError
     })
     const runPromoted = (claim: TurnQueuePromotion.QueueClaim) =>
       Effect.gen(function* () {
@@ -175,7 +176,7 @@ export const promotePendingTurns = (input: {
       if (claim === undefined) break
       claimed += 1
       const keepDraining = yield* Effect.uninterruptible(runPromoted(claim)).pipe(
-        Effect.ensuring(input.releaseTurnObserver(claim.turn.id) as Effect.Effect<void, never, any>),
+        Effect.ensuring(input.releaseTurnObserver(claim.turn.id).pipe(Effect.ignore)),
       )
       if (!keepDraining) break
     }

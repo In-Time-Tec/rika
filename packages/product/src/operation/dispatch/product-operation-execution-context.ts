@@ -9,7 +9,7 @@ import * as ExecutionRecovery from "./execution-recovery-dispatch"
 import * as ContextMentions from "../../context/context-mention-parser"
 import * as FileMentions from "../../context/file-mention-parser"
 import * as ResolvedContext from "../../context/context-resolution-service"
-import { Effect } from "effect"
+import { Context, Effect } from "effect"
 import { operationError } from "../operation-error"
 
 const untrustedData = (value: unknown) => JSON.stringify(value).replaceAll("<", "\\u003c")
@@ -26,6 +26,12 @@ export const makeExecutionContext = (input: any) =>
       releaseTurnObserver,
       claimQueuedTurn,
     } = input
+    const typedExecutionDependencies: Context.Context<
+      | TurnRepository.Service
+      | ThreadRepository.Service
+      | ResolvedContext.Service
+      | ExecutionExtensions.ExecutionExtensionService
+    > = executionDependencies
     const { startReviewSettlement } = input
     const testRoute = (mode: Parameters<typeof ExecutionRouteSnapshot.testExecutionRoute>[0]) =>
       Effect.succeed(ExecutionRouteSnapshot.testExecutionRoute(mode))
@@ -135,9 +141,9 @@ export const makeExecutionContext = (input: any) =>
       },
       false,
     ).pipe(
-      Effect.provide(executionDependencies),
+      Effect.provide(typedExecutionDependencies),
       Effect.scoped,
       Effect.mapError((error) => operationError(String(error))),
     )
     return { resolveExecutionRoute, executionPrompt, prepareExecution, reconcileExecutions }
-  }).pipe(Effect.mapError((error) => new Error(String(error))))
+  }).pipe(Effect.mapError((error) => operationError(String(error), error)))

@@ -66,7 +66,9 @@ export interface Interface {
   readonly cancelChild: (id: string, at: number) => Effect.Effect<ExecutionEvent.Result, InvocationError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/product/product-agent/Service") {}
+export class Service extends Context.Service<Service, Interface>()(
+  "@rika/product/agent/product-agent-service/Service",
+) {}
 
 export const layer = Layer.effect(
   Service,

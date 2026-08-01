@@ -6,7 +6,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ThreadActivity from "../../thread/query/thread-activity"
 import { Clock, Context, Cause, Effect } from "effect"
-import { failureKind } from "../operation-error"
+import { failureKind, operationError } from "../operation-error"
 import { titleInteractiveThread } from "../interactive/thread-title-composition"
 import type { InteractiveEvent } from "../interactive/interactive-event"
 
@@ -118,4 +118,4 @@ export const makeExecutionLifecycle = (input: any): Effect.Effect<Readonly<Recor
       )
     })
     return { stopActiveExecutionWorkWithProjection, notifyThreadSummaries, titleThread }
-  }).pipe(Effect.mapError((error) => new Error(String(error))))
+  }).pipe(Effect.mapError((error) => operationError(String(error), error)))

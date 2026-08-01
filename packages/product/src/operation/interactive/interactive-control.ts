@@ -4,17 +4,17 @@ import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TurnQueuePromotion from "../../thread/repository/turn-repository-queue"
 import type { InteractiveEvent } from "./interactive-event"
-import { operationFailureDetail } from "../operation-error"
+import { OperationError, operationFailureDetail } from "../operation-error"
 
 export const makeInteractiveControl = (input: {
   readonly turns: TurnRepository.Interface
   readonly backend: ExecutionBackend.Interface
   readonly pendingCapacity: number
-  readonly active: () => Effect.Effect<Turn.Turn, any, any>
+  readonly active: () => Effect.Effect<Turn.Turn, OperationError, never>
   readonly dispatch: (event: InteractiveEvent) => void
   readonly queueMutation: (change: TurnQueuePromotion.QueueItemChange) => InteractiveEvent
   readonly nextSteeringIdentity: (turnId: string) => string
-  readonly fail: (message: string) => Effect.Effect<never, any, never>
+  readonly fail: (message: string) => Effect.Effect<never, OperationError, never>
 }) => {
   const editQueued = (id: string, prompt: string) =>
     Effect.gen(function* () {
@@ -62,7 +62,7 @@ export const makeInteractiveControl = (input: {
     Effect.gen(function* () {
       const turn = yield* input.active()
       const candidate = yield* input.turns.get(Turn.TurnId.make(id))
-      if (candidate?.status === "queued" && candidate.promptParts?.some((part) => part.type === "image"))
+      if (candidate?.status === "queued" && candidate.promptParts?.some((part) => part.type === "image") === true)
         return yield* input.fail("Queued turns with images cannot be steered")
       const taken = yield* input.turns.takeQueued(Turn.TurnId.make(id))
       const queued = taken.turn

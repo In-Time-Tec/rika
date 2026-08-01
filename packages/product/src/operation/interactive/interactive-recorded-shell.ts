@@ -1,19 +1,21 @@
+import { Function } from "effect"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
 import * as Thread from "@rika/product/thread-record"
+import * as Turn from "@rika/product/turn-record"
 import * as ThreadResult from "@rika/product/thread-result"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
 import { Cause, Clock, Effect } from "effect"
 import type { Exit } from "effect"
-import { operationError, failureKind } from "../operation-error"
+import { OperationError, operationError, failureKind } from "../operation-error"
 
 const appendRecordedShellOutput = (output: { readonly text: string; readonly truncated: boolean }, text: string) => {
   const accepted = text.slice(0, Math.max(0, 64 * 1024 - output.text.length))
   return { text: output.text + accepted, truncated: output.truncated || accepted.length < text.length }
 }
 
-export const runRecordedShell = (input: any, thread: Thread.Thread, command: string, incognito: boolean) => {
+const runRecordedShellImpl = (input: any, thread: Thread.Thread, command: string, incognito: boolean) => {
   const {
     options,
     dispatch,
@@ -28,10 +30,24 @@ export const runRecordedShell = (input: any, thread: Thread.Thread, command: str
     recordedShellStartedEvent,
     recordedShellSettledEvents,
   } = input
+  const typedEnsureTurnSummary: (turn: Turn.Turn) => Effect.Effect<void, OperationError, never> = ensureTurnSummary
+  const typedNotifyThreadSummaries: Effect.Effect<void, OperationError, never> = notifyThreadSummaries
+  const typedNotifyTurnChanged: (
+    turn: Pick<Turn.Turn, "id" | "threadId">,
+  ) => Effect.Effect<void, OperationError, never> = notifyTurnChanged
+  const typedMakeTurnId: Effect.Effect<Turn.TurnId, never, never> = options.makeTurnId
+  const typedExecuteShellCommand: (
+    tools: ToolRuntime.Interface,
+    command: string,
+  ) => Effect.Effect<
+    { readonly text: string; readonly truncated: boolean; readonly exitCode?: number },
+    OperationError,
+    never
+  > = executeShellCommand
   return Effect.gen(function* () {
     const tools = yield* ToolRuntime.Service
     if (incognito) {
-      const result = yield* executeShellCommand(tools, command)
+      const result = yield* typedExecuteShellCommand(tools, command)
       dispatch({
         _tag: "ShellCompleted",
         threadId: thread.id,
@@ -46,7 +62,7 @@ export const runRecordedShell = (input: any, thread: Thread.Thread, command: str
     const now = yield* Clock.currentTimeMillis
     const runningTurn: ThreadResult.RunningRecordedShellTurn = {
       _tag: "RecordedShell",
-      id: yield* options.makeTurnId,
+      id: yield* typedMakeTurnId,
       threadId: thread.id,
       prompt: `$ ${command}`,
       command,
@@ -63,7 +79,7 @@ export const runRecordedShell = (input: any, thread: Thread.Thread, command: str
         emit(dispatch, recordedShellStartedEvent(runningTurn, runningProjection))
         const processExit = (yield* Effect.exit(
           restore(
-            ensureTurnSummary(runningTurn).pipe(
+            typedEnsureTurnSummary(runningTurn).pipe(
               Effect.catchCause((cause) =>
                 Cause.hasInterrupts(cause)
                   ? Effect.failCause(cause)
@@ -75,7 +91,7 @@ export const runRecordedShell = (input: any, thread: Thread.Thread, command: str
                       }),
                     ),
               ),
-              Effect.andThen(executeShellCommand(tools, command)),
+              Effect.andThen(typedExecuteShellCommand(tools, command)),
             ),
           ),
         )) as Exit.Exit<{ readonly text: string; readonly truncated: boolean; readonly exitCode?: number }, unknown>
@@ -130,8 +146,8 @@ export const runRecordedShell = (input: any, thread: Thread.Thread, command: str
             lastEventAt: terminalTurn.updatedAt,
             now: terminalTurn.updatedAt,
           })
-          yield* notifyThreadSummaries
-          yield* notifyTurnChanged(terminalTurn)
+          yield* typedNotifyThreadSummaries
+          yield* typedNotifyTurnChanged(terminalTurn)
         }).pipe(
           Effect.catchCause((cause) =>
             Effect.logError("recorded-shell.summary.settle.failed").pipe(
@@ -146,5 +162,10 @@ export const runRecordedShell = (input: any, thread: Thread.Thread, command: str
         if (interrupted) return yield* Effect.interrupt
       }),
     )
-  })
+  }).pipe(Effect.mapError((error) => operationError(String(error), error)))
 }
+
+export const runRecordedShell: {
+  (arg1: Thread.Thread, arg2: string, arg3: boolean): (arg0: any) => ReturnType<typeof runRecordedShellImpl>
+  (arg0: any, arg1: Thread.Thread, arg2: string, arg3: boolean): ReturnType<typeof runRecordedShellImpl>
+} = Function.dual(4, runRecordedShellImpl)

@@ -1,8 +1,10 @@
 import * as Turn from "@rika/product/turn-record"
-import { Effect, Exit, Scope } from "effect"
+import * as ExecutionBackend from "@rika/product/execution-service"
+import type { TurnPromoter } from "../../execution/contract/execution-identifier"
+import { Effect, Exit, Scope, Semaphore } from "effect"
 import type { InteractiveSession } from "./interactive-session"
 import type { ProductLayerOptions } from "../dispatch/product-operation-options"
-import { makeInteractiveSessionState } from "./interactive-session-state"
+import { makeInteractiveSessionState, type InteractiveSessionState } from "./interactive-session-state"
 import { makeInteractiveImplementation } from "./interactive-session-interface"
 import {
   makeInteractiveExecutionComponents,
@@ -11,6 +13,8 @@ import {
   makeInteractiveSupervisionComponents,
 } from "./interactive-session-runtime-components"
 import { ignoreInteractiveEvent } from "./interactive-session-following"
+import type { InteractiveOperationFeed } from "./interactive-operation-feed"
+import { OperationError } from "../operation-error"
 
 export interface InteractiveSessionInput {
   readonly options: ProductLayerOptions<any, any, any, any, any, any, any>
@@ -56,13 +60,25 @@ export interface InteractiveSessionInput {
   readonly activitySequence: number
 }
 
-export const makeInteractiveSession = (input: InteractiveSessionInput) =>
+export interface InteractiveSessionRuntimeResult {
+  readonly session: InteractiveSession
+  readonly supervise: Effect.Effect<void, OperationError, never>
+  readonly followClaimed: ((turnId: Turn.TurnId) => Effect.Effect<void, OperationError, never>) | undefined
+  readonly close: Effect.Effect<void, never, never>
+}
+
+export const makeInteractiveSession = (
+  input: InteractiveSessionInput,
+): ((
+  workspace: string,
+  settings?: { readonly initialThreadId?: string; readonly registerPromoter?: boolean },
+) => Effect.Effect<InteractiveSessionRuntimeResult, OperationError, never>) =>
   Effect.fn("ProductOperation.makeInteractiveSession")(function* (
     workspace: string,
     settings: { readonly initialThreadId?: string; readonly registerPromoter?: boolean } = {},
   ) {
     const sessionId = input.nextSessionId()
-    const state = yield* makeInteractiveSessionState({
+    const state: InteractiveSessionState = yield* makeInteractiveSessionState({
       sessionId,
       executionIngest: input.executionIngest,
       publishInteractiveActivity: input.publishInteractiveActivity,
@@ -71,6 +87,13 @@ export const makeInteractiveSession = (input: InteractiveSessionInput) =>
       initialThreadId: settings.initialThreadId,
       registerPromoter: settings.registerPromoter ?? false,
     })
+    const typedLifecycleAdmission: Semaphore.Semaphore = state.lifecycleAdmission
+    const typedGetLifecycle: () => "open" | "closed" = state.getLifecycle
+    const typedSetLifecycle: (value: "open" | "closed") => void = state.setLifecycle
+    const typedInteractiveSinks: Map<number, unknown> = input.interactiveSinks
+    const typedSessionThreadViews: Map<number, unknown> = input.sessionThreadViews
+    const typedOperationFeed: InteractiveOperationFeed = state.operationFeed
+    const typedSessionScope: Scope.Scope = state.sessionScope
     const runtimeInput = {
       ...input,
       ...state,
@@ -121,8 +144,11 @@ export const makeInteractiveSession = (input: InteractiveSessionInput) =>
       previewThread: (threadId) => state.composition.admitLocal(implementation.previewThread(threadId)),
       reopenThread: (epoch) => state.composition.admitLocal(implementation.reopenThread(epoch)),
     }
-    if ((settings.registerPromoter ?? false) && input.acquiredBackend.registerTurnPromoter !== undefined)
-      yield* input.acquiredBackend.registerTurnPromoter(execution.promoterFor(() => undefined))
+    const typedAcquiredBackend: ExecutionBackend.Interface = input.acquiredBackend
+    const typedRegisterTurnPromoter: ((promoter: TurnPromoter) => Effect.Effect<void, never, never>) | undefined =
+      typedAcquiredBackend.registerTurnPromoter
+    if ((settings.registerPromoter ?? false) && typedRegisterTurnPromoter !== undefined)
+      yield* typedRegisterTurnPromoter(execution.promoterFor(() => undefined))
     return {
       session,
       supervise: supervision.supervise,
@@ -130,13 +156,13 @@ export const makeInteractiveSession = (input: InteractiveSessionInput) =>
         input.acquiredBackend.follow === undefined
           ? undefined
           : (turnId: Turn.TurnId) => following.followClaimedTurn(turnId, ignoreInteractiveEvent),
-      close: state.lifecycleAdmission.withPermits(1)(
+      close: typedLifecycleAdmission.withPermits(1)(
         Effect.suspend(() => {
-          if (state.getLifecycle() === "closed") return Effect.void
-          state.setLifecycle("closed")
-          input.interactiveSinks.delete(sessionId)
-          input.sessionThreadViews.delete(sessionId)
-          return state.operationFeed.close.pipe(Effect.andThen(Scope.close(state.sessionScope, Exit.void)))
+          if (typedGetLifecycle() === "closed") return Effect.void
+          typedSetLifecycle("closed")
+          typedInteractiveSinks.delete(sessionId)
+          typedSessionThreadViews.delete(sessionId)
+          return typedOperationFeed.close.pipe(Effect.andThen(Scope.close(typedSessionScope, Exit.void)))
         }),
       ),
     }

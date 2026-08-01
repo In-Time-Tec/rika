@@ -6,6 +6,7 @@ import * as ExecutionStatus from "@rika/product/execution-status"
 import * as ExecutionChildRun from "@rika/product/execution-child-run"
 import { Effect, Fiber, PubSub, Scope, Semaphore } from "effect"
 import { makeProductOperationFoundation } from "./product-operation-foundation"
+import { operationError } from "../operation-error"
 import { makeProductOperationExecution } from "./product-operation-execution"
 import {
   executionStartFailureMessage,
@@ -31,14 +32,16 @@ export const buildProductOperationExecutionState = (
     const reviewSettlementAdmission = yield* Semaphore.make(1)
     const reviewSettlements = new Map<string, Fiber.Fiber<ExecutionChildRun.FanOutInspection, any>>()
     const turnMutationAdmission = yield* Semaphore.make(1)
-    const createForSubmission = (turns: any, submission: TurnRepositoryContract.CreateInput) =>
-      turnMutationAdmission.withPermits(1)(turns.createForSubmission(submission))
+    const createForSubmission = (turns: TurnRepository.Interface, submission: TurnRepositoryContract.CreateInput) =>
+      turnMutationAdmission.withPermits(1)(
+        turns.createForSubmission(submission).pipe(Effect.mapError((error) => operationError(String(error), error))),
+      )
     const turnChanges = yield* PubSub.sliding<void>(1)
     const dirtyTurnObservers = new Set<Turn.TurnId>()
     const watched = () => watchedThreadIds(sessionThreadViews)
     const foundation = yield* makeProductOperationFoundation({ options, ownerScope, publishInteractiveActivity }).pipe(
       Effect.provideService(Scope.Scope, ownerScope),
-      Effect.mapError((error) => new Error(String(error))),
+      Effect.mapError((error) => operationError(String(error), error)),
     )
     const {
       rootTurnOwner,

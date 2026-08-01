@@ -1,10 +1,16 @@
+import { Function } from "effect"
 import { Crypto, Effect, Encoding, Layer } from "effect"
 import { createHash } from "node:crypto"
 import * as Flow from "../src/authentication/openai-auth-service"
 import * as Contract from "../src/authentication/openai-auth-contract"
 
-export const digest = (_algorithm: string, data: Uint8Array) =>
+const digestImpl = (_algorithm: string, data: Uint8Array) =>
   Effect.promise(() => globalThis.crypto.subtle.digest("SHA-256", data).then((value) => new Uint8Array(value)))
+
+export const digest: {
+  (arg1: Uint8Array): (arg0: string) => ReturnType<typeof digestImpl>
+  (arg0: string, arg1: Uint8Array): ReturnType<typeof digestImpl>
+} = Function.dual((args) => args.length <= 2, digestImpl)
 
 export const deterministicCrypto = (start = 0) => {
   let next = start
@@ -17,7 +23,7 @@ export const deterministicCrypto = (start = 0) => {
   )
 }
 
-export const jwt = (account = "account-secret", user = "user-secret", exp = 2_000_000_000) => {
+const jwtImpl = (account = "account-secret", user = "user-secret", exp = 2_000_000_000) => {
   const payload = Encoding.encodeBase64Url(
     new TextEncoder().encode(
       JSON.stringify({
@@ -29,17 +35,27 @@ export const jwt = (account = "account-secret", user = "user-secret", exp = 2_00
   return `header.${payload}.signature`
 }
 
+export const jwt: {
+  (arg1: unknown, arg2: unknown): (arg0: unknown) => ReturnType<typeof jwtImpl>
+  (arg0: unknown, arg1: unknown, arg2: unknown): ReturnType<typeof jwtImpl>
+} = Function.dual((args) => args.length <= 3, jwtImpl)
+
 export const expiryJwt = (exp: number) => {
   const payload = Encoding.encodeBase64Url(new TextEncoder().encode(JSON.stringify({ exp })))
   return `header.${payload}.signature`
 }
 
-export const tokens = (account?: string, user?: string) => ({
+const tokensImpl = (account?: string, user?: string) => ({
   access_token: jwt(account, user),
   id_token: jwt(account, user),
   refresh_token: "refresh-secret",
   expires_in: 3600,
 })
+
+export const tokens: {
+  (arg1?: string): (arg0?: string) => ReturnType<typeof tokensImpl>
+  (arg0?: string, arg1?: string): ReturnType<typeof tokensImpl>
+} = Function.dual((args) => args.length <= 2, tokensImpl)
 
 type Disk = typeof Contract.CredentialDisk.Type
 export const disk = (overrides: Partial<Disk> = {}): Disk => ({

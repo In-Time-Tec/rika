@@ -6,8 +6,23 @@ import { makeInteractiveSessionComposition } from "./interactive-session-composi
 import { makeInteractiveSelectionProjection } from "./interactive-selection-projection"
 import { dispatchInteractiveFailure } from "./interactive-session-errors"
 import type { SelectionEpochState } from "./interactive-thread-selection"
+import type { InteractiveOperationFeed } from "./interactive-operation-feed"
 
-export const makeInteractiveSessionState = (input: any): any =>
+export interface InteractiveSessionState {
+  readonly operationFeed: InteractiveOperationFeed
+  readonly composition: ReturnType<typeof makeInteractiveSessionComposition>
+  readonly lifecycleAdmission: Semaphore.Semaphore
+  readonly sessionScope: Scope.Scope
+  readonly emit: InteractiveOperationFeed["emit"]
+  readonly getLifecycle: () => "open" | "closed"
+  readonly setLifecycle: (value: "open" | "closed") => void
+  readonly getCurrentSelectionEpoch: () => number
+  readonly getSelectedThreadId: () => string | undefined
+  readonly getActiveSelectionState: () => SelectionEpochState | undefined
+  readonly dispatchFailure: typeof dispatchInteractiveFailure
+}
+
+export const makeInteractiveSessionState = (input: any): Effect.Effect<InteractiveSessionState, never, never> =>
   Effect.gen(function* () {
     const { sessionId, executionIngest, publishInteractiveActivity, activitySequence, initialThreadId } = input
     let selectedThreadId = initialThreadId

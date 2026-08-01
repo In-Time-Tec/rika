@@ -14,7 +14,7 @@ import { clampThreadTitle } from "../../thread/query/thread-title-policy"
 import { Input } from "../contract/product-operation"
 import { OperationUnavailable } from "../contract/product-operation"
 import { OperationError } from "../operation-error"
-import { Cause, Clock, Console, Deferred, Effect, Fiber } from "effect"
+import { Cause, Clock, Console, Context, Deferred, Effect, Fiber } from "effect"
 
 export interface Dependencies {
   readonly defaultWorkspace: string
@@ -25,18 +25,18 @@ export interface Dependencies {
     mode: string,
     tuning?: undefined,
     workspace?: string,
-  ) => Effect.Effect<any, unknown, never>
+  ) => Effect.Effect<any, OperationError, never>
   readonly createObservedSubmission: (
     turns: TurnRepository.Interface,
     input: any,
-  ) => Effect.Effect<{ readonly turn: Turn.Turn; readonly claimed: boolean }, unknown, never>
-  readonly ensureTurnSummary: (turn: Turn.Turn) => Effect.Effect<void, unknown, never>
+  ) => Effect.Effect<{ readonly turn: Turn.Turn; readonly claimed: boolean }, OperationError, never>
+  readonly ensureTurnSummary: (turn: Turn.Turn) => Effect.Effect<void, OperationError, never>
   readonly setTurnStatus: (
     id: Turn.TurnId,
     status: any,
     cursor: string | undefined,
     now: number,
-  ) => Effect.Effect<Turn.Turn, unknown, never>
+  ) => Effect.Effect<Turn.Turn, OperationError, never>
   readonly publishInteractiveActivity: (origin: number, event: any) => void
   readonly rootTurnOwner: RootTurnOwner.Interface
   readonly executionIngest: ExecutionIngest.Interface
@@ -50,13 +50,13 @@ export interface Dependencies {
       readonly promptParts: ReadonlyArray<any> | undefined
       readonly extensionPin: any
     },
-    unknown,
+    OperationError,
     never
   >
   readonly claimQueuedTurn: (
     threadId: Thread.ThreadId,
     now: number,
-  ) => Effect.Effect<TurnQueuePromotion.QueueClaim | undefined, unknown, never>
+  ) => Effect.Effect<TurnQueuePromotion.QueueClaim | undefined, OperationError, never>
   readonly releaseTurnObserver: (turnId: Turn.TurnId) => Effect.Effect<unknown, never, never>
   readonly queueMutationEvent: (queue: TurnQueuePromotion.QueueItemChange) => any
   readonly deliverResultEvents: (
@@ -67,17 +67,19 @@ export interface Dependencies {
   readonly projectExecutionResult: (
     threadId: Thread.ThreadId,
     result: ExecutionEvent.Result,
-  ) => Effect.Effect<void, unknown, never>
-  readonly ensureIngest: (threadId: Thread.ThreadId, turnId: Turn.TurnId) => Effect.Effect<void, unknown, never>
-  readonly awaitIngestSettled: (turnId: Turn.TurnId) => Effect.Effect<void, unknown, never>
-  readonly executionDependencies: any
-  readonly followClaimed: ((turnId: Turn.TurnId) => Effect.Effect<void, unknown, never>) | undefined
+  ) => Effect.Effect<void, OperationError, never>
+  readonly ensureIngest: (threadId: Thread.ThreadId, turnId: Turn.TurnId) => Effect.Effect<void, OperationError, never>
+  readonly awaitIngestSettled: (turnId: Turn.TurnId) => Effect.Effect<void, OperationError, never>
+  readonly executionDependencies: Context.Context<
+    ExecutionBackend.Service | ThreadRepository.Service | TurnRepository.Service
+  >
+  readonly followClaimed: ((turnId: Turn.TurnId) => Effect.Effect<void, OperationError, never>) | undefined
   readonly staleQueuedTurnsError: typeof staleQueuedTurnsError
   readonly queuedTurnPromoteMaxAgeMs: number
   readonly awaitSessionQuiescence: (
     backend: ExecutionBackend.Interface,
     threadId: Thread.ThreadId,
-  ) => Effect.Effect<Turn.AgentExecutionTurn | undefined, unknown, never>
+  ) => Effect.Effect<Turn.AgentExecutionTurn | undefined, OperationError, never>
   readonly operationError: (message: string) => Effect.Effect<never, OperationError>
   readonly unavailable: (input: Input, message: string) => OperationUnavailable
 }

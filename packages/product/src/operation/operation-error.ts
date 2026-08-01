@@ -1,13 +1,22 @@
 import * as ExecutionBackend from "../execution/contract/execution-service"
+import { Function } from "effect"
 import * as TurnRepository from "../thread/repository/turn-repository"
 import { Cause, Schema } from "effect"
 import { StaleQueuedTurns } from "../thread/queue/pending-turn-policy"
 
 export class OperationError extends Schema.TaggedErrorClass<OperationError>()("OperationError", {
   message: Schema.String,
+  cause: Schema.optionalKey(Schema.Unknown),
 }) {}
 
-export const operationError = (message: string) => OperationError.make({ message })
+const operationErrorImpl = (message: string, cause?: unknown) =>
+  cause === undefined ? OperationError.make({ message }) : OperationError.make({ message, cause })
+
+export const operationError: {
+  (message: string): OperationError
+  (cause?: unknown): (message: string) => OperationError
+  (message: string, cause?: unknown): OperationError
+} = Function.dual((args) => args.length === 2 || typeof args[0] === "string", operationErrorImpl)
 
 export const failureKind = (cause: Cause.Cause<unknown>) => {
   const failure = Cause.squash(cause)

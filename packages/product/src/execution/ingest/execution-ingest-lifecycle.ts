@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import { Effect, Exit, Fiber, Queue, Scope } from "effect"
 import type { Options } from "./execution-ingest-state"
 import type { Node, Pipeline } from "./execution-ingest-state"
@@ -14,7 +15,7 @@ export interface LifecycleDependencies {
   readonly fail: (pipeline: Pipeline, node: Node, reason: "checkpoint", message: string) => void
 }
 
-export const make = (
+const makeImpl = (
   dependencies: LifecycleDependencies,
   pipeline: Pipeline,
   pipelineScope: Scope.Closeable,
@@ -90,3 +91,17 @@ export const make = (
       }),
     ),
   )
+
+export const make: {
+  (
+    arg1: Pipeline,
+    arg2: Scope.Closeable,
+    arg3: import("effect").Duration.Input,
+  ): (arg0: LifecycleDependencies) => ReturnType<typeof makeImpl>
+  (
+    arg0: LifecycleDependencies,
+    arg1: Pipeline,
+    arg2: Scope.Closeable,
+    arg3: import("effect").Duration.Input,
+  ): ReturnType<typeof makeImpl>
+} = Function.dual(4, makeImpl)

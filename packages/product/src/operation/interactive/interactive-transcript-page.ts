@@ -14,11 +14,12 @@ import {
   isNewerSelectionEpoch as _isNewerSelectionEpoch,
   selectionMatches as _selectionMatches,
 } from "./interactive-thread-selection"
-import { Effect, Clock, Ref } from "effect"
+import { Effect, Clock, Ref, Semaphore } from "effect"
 import { queueItem } from "./interactive-session-queue"
 import type { SelectionEpochState } from "./interactive-thread-selection"
-import { operationError } from "../operation-error"
+import { OperationError, operationError } from "../operation-error"
 import type { InteractiveEvent } from "./interactive-event"
+import type { InteractiveOperationFeed } from "./interactive-operation-feed"
 
 export const makeInitialTranscriptWindow = (input: any) =>
   Effect.fn("ProductOperation.interactive.initialTranscriptWindow")(function* (state: SelectionEpochState) {
@@ -57,6 +58,22 @@ export const makeInteractiveTranscriptPage = (input: any) => {
     startSelectionUsage,
     initialTranscriptWindow,
   } = input
+  const typedSelectionRequest: Ref.Ref<number> = selectionRequest
+  const typedSelectionAdmission: Semaphore.Semaphore = selectionAdmission
+  const typedGetCandidateSelectionState: () => SelectionEpochState | undefined = getCandidateSelectionState
+  const typedGetSelectionLoad: () =>
+    | { readonly epoch: number; readonly threadId: string; committed: boolean }
+    | undefined = getSelectionLoad
+  const typedInterruptSelectionBackground: Effect.Effect<void, OperationError, never> = interruptSelectionBackground
+  const typedStartSelectionProjectionFeed: (
+    state: SelectionEpochState,
+    dispatch: (event: InteractiveEvent) => void,
+  ) => Effect.Effect<void, OperationError, never> = startSelectionProjectionFeed
+  const typedOperationFeed: InteractiveOperationFeed = operationFeed
+  const typedStartSelectionUsage: (
+    state: SelectionEpochState,
+    dispatch: (event: InteractiveEvent) => void,
+  ) => Effect.Effect<void, OperationError, never> = startSelectionUsage
   const loadTranscriptPage = Effect.fn("ProductOperation.interactive.loadTranscriptPage")(function* (
     state: SelectionEpochState,
     dispatch: (event: InteractiveEvent) => void,
@@ -68,7 +85,7 @@ export const makeInteractiveTranscriptPage = (input: any) => {
     const loadedAt = yield* Clock.currentTimeMillis
     const turns = yield* TurnRepository.Service
     const transcripts = yield* TranscriptRepository.Service
-    if (!isCurrentSelectionState(state)) return
+    if (isCurrentSelectionState(state) !== true) return
     const page =
       before === undefined
         ? yield* initialTranscriptWindow(state)
@@ -78,7 +95,7 @@ export const makeInteractiveTranscriptPage = (input: any) => {
             projectionVersion: ExecutionIngest.projectionVersion,
           })
     if (
-      page.hasOlder &&
+      page.hasOlder === true &&
       before !== undefined &&
       (page.entries.length === 0 ||
         page.oldestCursor === undefined ||
@@ -90,9 +107,10 @@ export const makeInteractiveTranscriptPage = (input: any) => {
     let initialBoundary = -1
     let storedEntries = page.entries
     const bounded = boundTranscriptEntries(storedEntries, encodeJson)
-    if (bounded.oversizedEntry) return yield* operationError("Transcript entry exceeds the transcript event limit")
+    if (bounded.oversizedEntry === true)
+      return yield* operationError("Transcript entry exceeds the transcript event limit")
     storedEntries = bounded.entries
-    if (bounded.truncated) {
+    if (bounded.truncated === true) {
       initialBoundary = 1
     }
     if (initialBoundary > 0) {
@@ -108,7 +126,7 @@ export const makeInteractiveTranscriptPage = (input: any) => {
     const deliveredEntries =
       clientLoadedKeys === undefined ? entries : entries.filter((entry: any) => !clientLoadedKeys.has(entry.unit.key))
     const completedAt = yield* Clock.currentTimeMillis
-    if (!isCurrentSelectionState(state)) return
+    if (isCurrentSelectionState(state) !== true) return
     state.transcriptCursor = oldestCursor
     if (before === undefined)
       state.newestTranscriptCursor =
@@ -120,15 +138,16 @@ export const makeInteractiveTranscriptPage = (input: any) => {
     if (before === undefined) {
       const queue = yield* turns.readQueue(thread.id)
       const activeTurn = yield* turns.findActive(thread.id)
-      if (!isCurrentSelectionState(state) || (yield* Ref.get(selectionRequest)) !== request) return
+      if (isCurrentSelectionState(state) !== true || (yield* Ref.get(typedSelectionRequest)) !== request) return
       for (const entry of entries) state.loadedKeys.add(entry.unit.key)
-      yield* selectionAdmission.withPermits(1)(
+      yield* typedSelectionAdmission.withPermits(1)(
         Effect.uninterruptible(
           Effect.gen(function* () {
-            if ((yield* Ref.get(selectionRequest)) !== request || getCandidateSelectionState() !== state) return
-            const loading = getSelectionLoad()
+            if ((yield* Ref.get(typedSelectionRequest)) !== request || typedGetCandidateSelectionState() !== state)
+              return
+            const loading = typedGetSelectionLoad()
             if (loading === undefined || loading.epoch !== request || loading.threadId !== String(thread.id)) return
-            yield* interruptSelectionBackground
+            yield* typedInterruptSelectionBackground
             setActiveSelectionState(state)
             setCandidateSelectionState(undefined)
             setCurrentSelectionEpoch(request)
@@ -152,15 +171,15 @@ export const makeInteractiveTranscriptPage = (input: any) => {
               queue: queue.turns.map(queueItem),
               ...(activeTurn === undefined ? {} : { activeTurn }),
             })
-            yield* startSelectionProjectionFeed(state, dispatch)
-            operationFeed.releaseSelectionEvents(request, "Selection activity exceeded its bounded live window")
+            yield* typedStartSelectionProjectionFeed(state, dispatch)
+            typedOperationFeed.releaseSelectionEvents(request, "Selection activity exceeded its bounded live window")
             setSelectionLoad(undefined)
-            yield* startSelectionUsage(state, dispatch)
+            yield* typedStartSelectionUsage(state, dispatch)
           }),
         ),
       )
     } else {
-      if (!isCurrentSelectionState(state)) return
+      if (isCurrentSelectionState(state) !== true) return
       dispatch({
         _tag: "TranscriptPagePrepended",
         selectionEpoch: request,

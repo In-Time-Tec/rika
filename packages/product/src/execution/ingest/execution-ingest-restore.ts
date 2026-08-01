@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as Turn from "@rika/product/turn-record"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
@@ -46,7 +47,7 @@ const rootProjectionOf = (
   return { units: rootUnits, ...state }
 }
 
-export const restore = (turn: Turn.AgentExecutionTurn, stored: TranscriptPage.Projection | undefined): Restored => {
+const restoreImpl = (turn: Turn.AgentExecutionTurn, stored: TranscriptPage.Projection | undefined): Restored => {
   const rootKey = TranscriptCorrelation.executionKey(String(turn.id))
   const checkpoints = new Map(
     (stored?.executionCheckpoints ?? []).map((checkpoint) => [checkpoint.executionKey, checkpoint]),
@@ -153,7 +154,12 @@ export const restore = (turn: Turn.AgentExecutionTurn, stored: TranscriptPage.Pr
   return { nodes, order }
 }
 
-export const validateStoredAttachments = (
+export const restore: {
+  (arg1: TranscriptPage.Projection | undefined): (arg0: Turn.AgentExecutionTurn) => ReturnType<typeof restoreImpl>
+  (arg0: Turn.AgentExecutionTurn, arg1: TranscriptPage.Projection | undefined): ReturnType<typeof restoreImpl>
+} = Function.dual(2, restoreImpl)
+
+const validateStoredAttachmentsImpl = (
   turn: Turn.AgentExecutionTurn,
   stored: TranscriptPage.Projection,
   nodes: ReadonlyMap<string, Node>,
@@ -179,7 +185,21 @@ export const validateStoredAttachments = (
   return undefined
 }
 
-export const interruptedAncestorOutcome = (
+export const validateStoredAttachments: {
+  (
+    arg1: TranscriptPage.Projection,
+    arg2: ReadonlyMap<string, Node>,
+    arg3: ReadonlyMap<string, Attachment>,
+  ): (arg0: Turn.AgentExecutionTurn) => ReturnType<typeof validateStoredAttachmentsImpl>
+  (
+    arg0: Turn.AgentExecutionTurn,
+    arg1: TranscriptPage.Projection,
+    arg2: ReadonlyMap<string, Node>,
+    arg3: ReadonlyMap<string, Attachment>,
+  ): ReturnType<typeof validateStoredAttachmentsImpl>
+} = Function.dual(4, validateStoredAttachmentsImpl)
+
+const interruptedAncestorOutcomeImpl = (
   nodes: ReadonlyMap<string, Node>,
   node: Node,
   isInterrupted: (outcome: NonNullable<TranscriptUnit.Unit["executionOutcome"]>) => outcome is InterruptedOutcome,
@@ -195,13 +215,37 @@ export const interruptedAncestorOutcome = (
   return undefined
 }
 
+export const interruptedAncestorOutcome: {
+  (
+    arg1: Node,
+    arg2: (outcome: NonNullable<TranscriptUnit.Unit["executionOutcome"]>) => outcome is InterruptedOutcome,
+  ): (arg0: ReadonlyMap<string, Node>) => ReturnType<typeof interruptedAncestorOutcomeImpl>
+  (
+    arg0: ReadonlyMap<string, Node>,
+    arg1: Node,
+    arg2: (outcome: NonNullable<TranscriptUnit.Unit["executionOutcome"]>) => outcome is InterruptedOutcome,
+  ): ReturnType<typeof interruptedAncestorOutcomeImpl>
+} = Function.dual(3, interruptedAncestorOutcomeImpl)
+
 export const hasRunningUnits = (fold: TranscriptProjection.ProjectionFold): boolean =>
   TranscriptProjection.Fold.foldHasRunningUnits(fold)
 export const executionOutcome = (fold: TranscriptProjection.ProjectionFold) =>
   TranscriptProjection.Fold.foldExecutionOutcome(fold)
-export const applyChildOutcome = (
+const applyChildOutcomeImpl = (
   fold: TranscriptProjection.ProjectionFold,
   childExecutionId: string,
   outcome: NonNullable<TranscriptUnit.Unit["executionOutcome"]>,
 ) => TranscriptProjection.Fold.applyChildOutcome(fold, childExecutionId, outcome)
+
+export const applyChildOutcome: {
+  (
+    arg1: string,
+    arg2: NonNullable<TranscriptUnit.Unit["executionOutcome"]>,
+  ): (arg0: TranscriptProjection.ProjectionFold) => ReturnType<typeof applyChildOutcomeImpl>
+  (
+    arg0: TranscriptProjection.ProjectionFold,
+    arg1: string,
+    arg2: NonNullable<TranscriptUnit.Unit["executionOutcome"]>,
+  ): ReturnType<typeof applyChildOutcomeImpl>
+} = Function.dual(3, applyChildOutcomeImpl)
 export const units = (fold: TranscriptProjection.ProjectionFold) => TranscriptProjection.Fold.foldUnits(fold)

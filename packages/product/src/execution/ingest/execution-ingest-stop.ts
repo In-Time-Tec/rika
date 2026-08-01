@@ -1,9 +1,10 @@
+import { Function } from "effect"
 import { Deferred, Effect } from "effect"
 import type { Pipeline, Node } from "./execution-ingest-state"
 import type { ProjectionChange } from "./execution-ingest-event"
 import type { Failure } from "./execution-ingest-failure"
 
-export const finish = (
+const finishImpl = (
   pipeline: Pipeline,
   publish: (pipeline: Pipeline, change: ProjectionChange) => void,
   fail: (pipeline: Pipeline, node: Node, reason: "checkpoint", message: string) => void,
@@ -39,6 +40,20 @@ export const finish = (
     failure: pipeline.failure as Failure,
   })
 }
+
+export const finish: {
+  (
+    arg1: (pipeline: Pipeline, change: ProjectionChange) => void,
+    arg2: (pipeline: Pipeline, node: Node, reason: "checkpoint", message: string) => void,
+    arg3: (nodes: ReadonlyMap<string, Node>) => boolean,
+  ): (arg0: Pipeline) => ReturnType<typeof finishImpl>
+  (
+    arg0: Pipeline,
+    arg1: (pipeline: Pipeline, change: ProjectionChange) => void,
+    arg2: (pipeline: Pipeline, node: Node, reason: "checkpoint", message: string) => void,
+    arg3: (nodes: ReadonlyMap<string, Node>) => boolean,
+  ): ReturnType<typeof finishImpl>
+} = Function.dual(4, finishImpl)
 
 export const settle = (pipeline: Pipeline) =>
   Deferred.doneUnsafe(pipeline.finished, pipeline.failure === undefined ? Effect.void : Effect.fail(pipeline.failure))

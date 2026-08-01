@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as UsageRepository from "@rika/product/usage-repository"
@@ -15,11 +16,16 @@ import type { Commit, Refold } from "../../execution/ingest/execution-ingest-com
 import { Cause, Effect, Queue, Result, Scope } from "effect"
 import { failureKind, operationError, OperationError } from "../operation-error"
 
-export const undeliveredEvents = (
+const undeliveredEventsImpl = (
   events: ReadonlyArray<ExecutionEvent.Event>,
   delivered: ReadonlySet<string>,
 ): ReadonlyArray<ExecutionEvent.Event> =>
   events.filter((event) => !delivered.has(event.cursor)).toSorted((left, right) => left.sequence - right.sequence)
+
+export const undeliveredEvents: {
+  (arg1: ReadonlySet<string>): (arg0: ReadonlyArray<ExecutionEvent.Event>) => ReturnType<typeof undeliveredEventsImpl>
+  (arg0: ReadonlyArray<ExecutionEvent.Event>, arg1: ReadonlySet<string>): ReturnType<typeof undeliveredEventsImpl>
+} = Function.dual(2, undeliveredEventsImpl)
 
 interface ProductOperationIngest {
   readonly executionIngest: ExecutionIngest.Interface
@@ -189,11 +195,15 @@ export const makeProductOperationIngest = (input: any): Effect.Effect<ProductOpe
     const ensureIngest = (threadId: any, turnId: any) =>
       executionIngest
         .ensure({ threadId, turnId })
-        .pipe(Effect.mapError((failure: any) => operationError(failure.message)))
+        .pipe(Effect.mapError((failure: any) => operationError(String(failure.message), failure)))
     const awaitIngestSettled = (turnId: any) =>
-      executionIngest.settled(turnId).pipe(Effect.mapError((failure: any) => operationError(failure.message)))
+      executionIngest
+        .settled(turnId)
+        .pipe(Effect.mapError((failure: any) => operationError(String(failure.message), failure)))
     const flushIngest = (turnId: any) =>
-      executionIngest.flush(turnId).pipe(Effect.mapError((failure: any) => operationError(failure.message)))
+      executionIngest
+        .flush(turnId)
+        .pipe(Effect.mapError((failure: any) => operationError(String(failure.message), failure)))
     const deliverResultEvents = (
       turnId: any,
       events: ReadonlyArray<ExecutionEvent.Event>,

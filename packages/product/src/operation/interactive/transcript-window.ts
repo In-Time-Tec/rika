@@ -1,4 +1,5 @@
 import * as TranscriptPage from "@rika/product/transcript-page"
+import { OperationError } from "../operation-error"
 import { Effect } from "effect"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as Turn from "@rika/product/turn-record"
@@ -13,10 +14,13 @@ export const initialTranscriptWindow = (input: {
   readonly state: SelectionEpochState
   readonly turns: TurnRepository.Interface
   readonly transcripts: TranscriptRepository.Interface
-  readonly ensureIngest: (threadId: Turn.Turn["threadId"], turnId: Turn.Turn["id"]) => Effect.Effect<void, unknown>
+  readonly ensureIngest: (
+    threadId: Turn.Turn["threadId"],
+    turnId: Turn.Turn["id"],
+  ) => Effect.Effect<void, OperationError, never>
   readonly maxTurns: number
   readonly maxEntries: number
-  readonly fail: (message: string) => Effect.Effect<never, unknown>
+  readonly fail: (message: string) => Effect.Effect<never, OperationError, never>
 }) =>
   Effect.gen(function* () {
     const turnPage = yield* input.turns.page(input.state.thread.id, { limit: 50 })

@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptUsage from "@rika/transcript/model-usage-fallback"
@@ -404,7 +405,7 @@ const applyAttempt = (
   return Result.succeed(undefined)
 }
 
-export const applyUsageFoldEvent = (
+const applyUsageFoldEventImpl = (
   fold: UsageFold,
   input: RootExecution & { readonly event: ExecutionEvent.Event },
 ): Result.Result<void, ProjectionFailure> => {
@@ -424,7 +425,17 @@ export const applyUsageFoldEvent = (
   return applyAttempt(value, normalized)
 }
 
-export const completeExecution = (
+export const applyUsageFoldEvent: {
+  (
+    arg1: RootExecution & { readonly event: ExecutionEvent.Event },
+  ): (arg0: UsageFold) => ReturnType<typeof applyUsageFoldEventImpl>
+  (
+    arg0: UsageFold,
+    arg1: RootExecution & { readonly event: ExecutionEvent.Event },
+  ): ReturnType<typeof applyUsageFoldEventImpl>
+} = Function.dual(2, applyUsageFoldEventImpl)
+
+const completeExecutionImpl = (
   snapshot: Snapshot,
   executionIds: ReadonlySet<string>,
 ): Result.Result<void, ProjectionFailure> => {
@@ -448,7 +459,12 @@ export const completeExecution = (
   return Result.succeed(undefined)
 }
 
-export const foldEvents = (
+export const completeExecution: {
+  (arg1: ReadonlySet<string>): (arg0: Snapshot) => ReturnType<typeof completeExecutionImpl>
+  (arg0: Snapshot, arg1: ReadonlySet<string>): ReturnType<typeof completeExecutionImpl>
+} = Function.dual(2, completeExecutionImpl)
+
+const foldEventsImpl = (
   snapshot: Snapshot,
   observations: ReadonlyArray<RootExecution & { readonly event: ExecutionEvent.Event }>,
 ): Result.Result<Snapshot, ProjectionFailure> => {
@@ -459,3 +475,13 @@ export const foldEvents = (
   }
   return Result.succeed(usageFoldChanged(fold) ? snapshotUsageFold(fold) : snapshot)
 }
+
+export const foldEvents: {
+  (
+    arg1: ReadonlyArray<RootExecution & { readonly event: ExecutionEvent.Event }>,
+  ): (arg0: Snapshot) => ReturnType<typeof foldEventsImpl>
+  (
+    arg0: Snapshot,
+    arg1: ReadonlyArray<RootExecution & { readonly event: ExecutionEvent.Event }>,
+  ): ReturnType<typeof foldEventsImpl>
+} = Function.dual(2, foldEventsImpl)

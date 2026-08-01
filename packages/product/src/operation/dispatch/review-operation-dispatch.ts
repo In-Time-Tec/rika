@@ -9,7 +9,7 @@ import * as TurnRepository from "../../thread/repository/turn-repository"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import { Input } from "../contract/product-operation"
 import { OperationUnavailable } from "../contract/product-operation"
-import { OperationError } from "../operation-error"
+import { OperationError, operationError } from "../operation-error"
 import { Clock, Console, Effect, Fiber, Layer } from "effect"
 
 export interface Dependencies {
@@ -21,27 +21,27 @@ export interface Dependencies {
     mode: "medium",
     tuning?: undefined,
     workspace?: string,
-  ) => Effect.Effect<any, unknown, never>
+  ) => Effect.Effect<any, OperationError, never>
   readonly toolRuntimeLayer: (workspace: string) => Layer.Layer<ToolRuntime.Service, OperationError, never>
   readonly productAgentLayer: Layer.Layer<ProductAgent.Service, OperationError, ExecutionBackend.Service> | undefined
-  readonly backendLayer: Layer.Layer<ExecutionBackend.Service, unknown, never>
-  readonly acquiredDependencies: Layer.Layer<ThreadRepository.Service | TurnRepository.Service | any, never, never>
+  readonly backendLayer: Layer.Layer<ExecutionBackend.Service, OperationError, never>
+  readonly acquiredDependencies: Layer.Layer<ThreadRepository.Service | TurnRepository.Service, never, never>
   readonly createObservedSubmission: (
     turns: TurnRepository.Interface,
     input: any,
-  ) => Effect.Effect<{ readonly turn: Turn.Turn; readonly claimed: boolean }, unknown, never>
-  readonly ensureTurnSummary: (turn: Turn.Turn) => Effect.Effect<void, unknown, never>
+  ) => Effect.Effect<{ readonly turn: Turn.Turn; readonly claimed: boolean }, OperationError, never>
+  readonly ensureTurnSummary: (turn: Turn.Turn) => Effect.Effect<void, OperationError, never>
   readonly setTurnStatus: (
     id: Turn.TurnId,
     status: ExecutionStatus.Status,
     cursor: string | undefined,
     now: number,
-  ) => Effect.Effect<Turn.Turn, unknown, never>
+  ) => Effect.Effect<Turn.Turn, OperationError, never>
   readonly startReviewSettlement: (
     turn: Pick<Turn.AgentExecutionTurn, "id" | "lastCursor">,
     fanOutId: string,
     initial?: ExecutionChildRun.FanOutInspection,
-  ) => Effect.Effect<Fiber.Fiber<ExecutionChildRun.FanOutInspection, OperationError>, unknown, never>
+  ) => Effect.Effect<Fiber.Fiber<ExecutionChildRun.FanOutInspection, OperationError>, OperationError, never>
   readonly releaseTurnObserver: (turnId: Turn.TurnId) => Effect.Effect<unknown, never, never>
   readonly encodeJson: (value: unknown) => string
   readonly operationError: (message: string) => Effect.Effect<never, OperationError>
@@ -129,7 +129,9 @@ export const run = Effect.fn("ReviewOperation.run")(function* (
         return yield* dependencies.startReviewSettlement(runningParentTurn, fanOutId, inspection)
       }).pipe(
         Effect.catch((error) =>
-          dependencies.setTurnStatus(parentTurnId, "failed", undefined, now).pipe(Effect.andThen(Effect.fail(error))),
+          dependencies
+            .setTurnStatus(parentTurnId, "failed", undefined, now)
+            .pipe(Effect.andThen(Effect.fail(operationError(String(error), error)))),
         ),
         Effect.uninterruptible,
       )

@@ -1,4 +1,7 @@
-import { makeInteractiveSession as makeInteractiveSessionRuntime } from "../interactive/interactive-session-runtime"
+import {
+  makeInteractiveSession as makeInteractiveSessionRuntime,
+  type InteractiveSessionInput,
+} from "../interactive/interactive-session-runtime"
 import { selectionInitialTurnWindow, selectionInitialEntryWindow } from "../interactive/interactive-session-constants"
 import { isTerminalStatus } from "../../execution/contract/execution-status"
 import {
@@ -15,8 +18,8 @@ export const makeProductOperationInteractiveSession = (input: any) => {
   return (
     workspace: string,
     settings: { readonly initialThreadId?: string; readonly registerPromoter?: boolean } = {},
-  ) =>
-    makeInteractiveSessionRuntime({
+  ) => {
+    const runtimeInput: InteractiveSessionInput = {
       ...input,
       selectionInitialTurnWindow,
       selectionInitialEntryWindow,
@@ -30,5 +33,7 @@ export const makeProductOperationInteractiveSession = (input: any) => {
       executeShellCommand,
       nextSessionId: () => (sequence += 1),
       activitySequence: input.activitySequence,
-    })(workspace, settings)
+    }
+    return makeInteractiveSessionRuntime(runtimeInput)(workspace, settings)
+  }
 }

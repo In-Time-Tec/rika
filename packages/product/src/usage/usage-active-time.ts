@@ -92,7 +92,7 @@ const unionIntervals = (intervals: ReadonlyArray<Interval>): ActiveTime => {
   return { accumulated: Duration.sum(accumulated, Duration.millis(currentEnd - currentStart)) }
 }
 
-export const activeIntervals = (snapshot: Snapshot, threadId: string): ReadonlyArray<Interval> | undefined => {
+const activeIntervalsImpl = (snapshot: Snapshot, threadId: string): ReadonlyArray<Interval> | undefined => {
   const executions = new Map<string, Array<ActiveEvent>>()
   for (const event of snapshot.activeEvents.values()) {
     if (event.threadId !== threadId) continue
@@ -110,6 +110,11 @@ export const activeIntervals = (snapshot: Snapshot, threadId: string): ReadonlyA
   }
   return known ? intervals : undefined
 }
+
+export const activeIntervals: {
+  (arg1: string): (arg0: Snapshot) => ReturnType<typeof activeIntervalsImpl>
+  (arg0: Snapshot, arg1: string): ReturnType<typeof activeIntervalsImpl>
+} = Function.dual(2, activeIntervalsImpl)
 
 export const activeTime: {
   (snapshot: Snapshot, threadId: string): ActiveTimeAvailability

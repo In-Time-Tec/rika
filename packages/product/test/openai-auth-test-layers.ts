@@ -38,7 +38,7 @@ export const memoryStore = (initial: Option.Option<Disk> = Option.none()) => {
   }
 }
 
-export const dependencies = (
+const dependenciesImpl = (
   store: Layer.Layer<Store>,
   http: Http["Service"],
   host?: Host["Service"],
@@ -55,6 +55,20 @@ export const dependencies = (
       ),
     ),
   )
+
+export const dependencies: {
+  (
+    http: Http["Service"],
+    host?: Host["Service"],
+    presenter?: Presenter["Service"],
+  ): (store: Layer.Layer<Store>) => ReturnType<typeof dependenciesImpl>
+  (
+    store: Layer.Layer<Store>,
+    http: Http["Service"],
+    host?: Host["Service"],
+    presenter?: Presenter["Service"],
+  ): ReturnType<typeof dependenciesImpl>
+} = Function.dual((args) => args.length >= 2, dependenciesImpl)
 
 export const provideLayer: {
   <AOut, EOut, RIn>(

@@ -1,6 +1,8 @@
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as Thread from "@rika/product/thread-record"
-import { Clock, Context, Effect, Layer, Ref } from "effect"
+import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
+import { OperationError } from "../operation-error"
+import { Clock, Context, Effect, Layer, Ref, Semaphore } from "effect"
 import { clampThreadTitle } from "../../thread/query/thread-title-policy"
 import { runRecordedShell } from "./interactive-recorded-shell"
 import { operationError } from "../operation-error"
@@ -27,9 +29,19 @@ export const makeInteractiveShell = (input: any): any => {
     recordedShellStartedEvent,
     recordedShellSettledEvents,
   } = input
+  const typedSelectionAdmission: Semaphore.Semaphore = selectionAdmission
+  const typedInteractiveThread: Ref.Ref<Thread.Thread | undefined> = interactiveThread
+  const typedMakeThreadId: Effect.Effect<Thread.ThreadId, never, never> = options.makeThreadId
+  const typedExecutionDependencies: Context.Context<ThreadRepository.Service> = executionDependencies
+  const typedToolRuntimeLayer: Layer.Layer<ToolRuntime.Service, OperationError, never> | undefined =
+    options.toolRuntimeLayer?.(workspace)
+  const typedActivateCreatedThread: (
+    thread: Thread.Thread,
+    epoch: number,
+    dispatch: (event: import("./interactive-event").InteractiveEvent) => void,
+  ) => Effect.Effect<void, OperationError, never> = activateCreatedThread
   return (requestedThreadId: Thread.ThreadId | undefined, command: string, incognito: boolean) => {
     const dispatch = sessionDispatch
-    const toolRuntimeLayer = options.toolRuntimeLayer?.(workspace)
     let ownerThreadId = requestedThreadId
     const runOwnedShell = (thread: Thread.Thread) =>
       runRecordedShell(
@@ -53,7 +65,7 @@ export const makeInteractiveShell = (input: any): any => {
       )
     const program = Effect.gen(function* () {
       const threads = yield* ThreadRepository.Service
-      const thread = yield* selectionAdmission.withPermits(1)(
+      const thread = yield* typedSelectionAdmission.withPermits(1)(
         Effect.gen(function* () {
           if (requestedThreadId !== undefined) {
             const requested = yield* threads.get(requestedThreadId)
@@ -64,21 +76,21 @@ export const makeInteractiveShell = (input: any): any => {
               )
             return requested
           }
-          const selected = yield* Ref.get(interactiveThread)
+          const selected = yield* Ref.get(typedInteractiveThread)
           if (selected !== undefined) return selected
           const now = yield* Clock.currentTimeMillis
           const created = yield* threads.create({
-            id: yield* options.makeThreadId,
+            id: yield* typedMakeThreadId,
             workspace,
             title: incognito ? "New thread" : clampThreadTitle(`$ ${command}`),
             now,
           })
-          yield* activateCreatedThread(created, getCurrentSelectionEpoch(), dispatch)
+          yield* typedActivateCreatedThread(created, getCurrentSelectionEpoch(), dispatch)
           return created
         }),
       )
       ownerThreadId = thread.id
-      if (toolRuntimeLayer === undefined) {
+      if (typedToolRuntimeLayer === undefined) {
         dispatch({
           _tag: "ExecutionFailed",
           selectionEpoch: 0,
@@ -87,14 +99,14 @@ export const makeInteractiveShell = (input: any): any => {
         })
         return
       }
-      const toolContext = yield* Layer.build(toolRuntimeLayer)
+      const toolContext = yield* Layer.build(typedToolRuntimeLayer)
       yield* runOwnedShell(thread).pipe(
         Effect.provide(Context.merge(executionDependencies, toolContext)),
         Effect.catch((error) => Effect.sync(() => dispatchFailure(dispatch, error, thread.id))),
       )
     })
     return program.pipe(
-      Effect.provide(executionDependencies),
+      Effect.provide(typedExecutionDependencies),
       Effect.scoped,
       Effect.catch((error) => Effect.sync(() => dispatchFailure(dispatch, error, ownerThreadId))),
       Effect.forkIn(sessionScope),

@@ -1,6 +1,7 @@
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import * as ExecutionEvent from "@rika/product/execution-event"
 import * as ExecutionStatus from "@rika/product/execution-status"
+import { Function } from "effect"
 import type { InterruptedOutcome } from "./execution-ingest-state"
 
 export const isInterruptedOutcome = (
@@ -26,7 +27,10 @@ export const childExecutionIds = (event: ExecutionEvent.Event): ReadonlyArray<st
   return [...ids]
 }
 
-export const bySequence = (left: ExecutionEvent.Event, right: ExecutionEvent.Event) => left.sequence - right.sequence
+export const bySequence: {
+  (right: ExecutionEvent.Event): (left: ExecutionEvent.Event) => number
+  (left: ExecutionEvent.Event, right: ExecutionEvent.Event): number
+} = Function.dual(2, (left: ExecutionEvent.Event, right: ExecutionEvent.Event) => left.sequence - right.sequence)
 
 export const settledStatus = (
   status: ExecutionStatus.Status,

@@ -5,12 +5,21 @@ import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ResolvedContext from "../../context/context-resolution-service"
 import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"
-import { Effect } from "effect"
+import { Context, Effect } from "effect"
 import type { InteractiveEvent } from "./interactive-event"
 import { makeInteractiveQueue } from "./interactive-session-queue"
 import { makeInteractiveSubmission } from "./interactive-session-submission"
 
 export const makeInteractiveExecution = (input: any) => {
+  const typedExecutionDependencies: Context.Context<
+    | ThreadRepository.Service
+    | TurnRepository.Service
+    | ThreadSummaryRepository.Service
+    | TranscriptRepository.Service
+    | ExecutionBackend.Service
+    | ResolvedContext.Service
+    | ExecutionExtensions.ExecutionExtensionService
+  > = input.executionDependencies
   const queue = makeInteractiveQueue(input)
   const submit = makeInteractiveSubmission({ ...input, ...queue })
   const safe = <E>(
@@ -28,7 +37,7 @@ export const makeInteractiveExecution = (input: any) => {
     >,
   ) =>
     effect.pipe(
-      Effect.provide(input.executionDependencies),
+      Effect.provide(typedExecutionDependencies),
       Effect.scoped,
       Effect.catch((error) => Effect.sync(() => input.dispatchFailure(dispatch, error))),
     )

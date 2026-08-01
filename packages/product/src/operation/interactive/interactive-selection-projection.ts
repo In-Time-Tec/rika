@@ -1,5 +1,7 @@
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product/turn-repository"
+import * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
+import { OperationError } from "../operation-error"
 import type { ProjectionChange } from "../../execution/ingest/execution-ingest-event"
 import { Function, Effect, Exit, Ref, Scope, Stream } from "effect"
 import type { InteractiveEvent } from "./interactive-event"
@@ -8,7 +10,7 @@ import { queueItem } from "./interactive-session-queue"
 
 export type ThreadUsageEvent = Extract<InteractiveEvent, { readonly _tag: "ThreadUsageUpdated" }>
 
-export const initializeSelectedUsage = (threadId: Thread.ThreadId, request: number): ThreadUsageEvent => ({
+const initializeSelectedUsageImpl = (threadId: Thread.ThreadId, request: number): ThreadUsageEvent => ({
   _tag: "ThreadUsageUpdated",
   selectionEpoch: request,
   threadId,
@@ -17,6 +19,11 @@ export const initializeSelectedUsage = (threadId: Thread.ThreadId, request: numb
   tokens: { _tag: "Unavailable" },
   time: { _tag: "Unavailable" },
 })
+
+export const initializeSelectedUsage: {
+  (arg1: number): (arg0: Thread.ThreadId) => ReturnType<typeof initializeSelectedUsageImpl>
+  (arg0: Thread.ThreadId, arg1: number): ReturnType<typeof initializeSelectedUsageImpl>
+} = Function.dual(2, initializeSelectedUsageImpl)
 
 export const transcriptProjectionEvent = (change: ProjectionChange): InteractiveEvent => {
   switch (change._tag) {
@@ -77,13 +84,14 @@ export const makeInteractiveSelectionProjection = (input: any) => {
     setCurrentSelectionEpoch,
     setSelectedThreadId,
   } = input
-  const openSelectionProjectionFeed = Effect.fn("ProductOperation.interactive.openSelectionProjectionFeed")(function* (
-    state: SelectionEpochState,
-  ) {
-    const scope = yield* Scope.make()
-    const watch = yield* executionIngest.watchThread(state.thread.id).pipe(Effect.provideService(Scope.Scope, scope))
-    state.projectionFeed = { watch, scope, promoted: false }
-  })
+  const openSelectionProjectionFeed = (state: SelectionEpochState): Effect.Effect<void, OperationError, never> =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make()
+      const watch = yield* typedExecutionIngest
+        .watchThread(state.thread.id)
+        .pipe(Effect.provideService(Scope.Scope, scope))
+      state.projectionFeed = { watch, scope, promoted: false }
+    }).pipe(Effect.mapError((error) => OperationError.make({ message: String(error), cause: error })))
   const startSelectionProjectionFeed = Effect.fn("ProductOperation.interactive.startSelectionProjectionFeed")(
     function* (state: SelectionEpochState, dispatch: (event: InteractiveEvent) => void) {
       const feed = state.projectionFeed
@@ -123,6 +131,7 @@ export const makeInteractiveSelectionProjection = (input: any) => {
       const feed = state.projectionFeed
       return feed === undefined || feed.promoted ? Effect.void : Scope.close(feed.scope, Exit.void)
     })
+  const typedExecutionIngest: ExecutionIngest.Interface = executionIngest
   const activateCreatedThread = Effect.fn("ProductOperation.interactive.activateCreatedThread")(function* (
     thread: Thread.Thread,
     epoch: number,
