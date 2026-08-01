@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import type { Block } from "@rika/transcript/transcript-presentation-model"
 import type { Unit } from "@rika/transcript/transcript-unit"
 import type { Model } from "../../state/model/terminal-state"
@@ -73,7 +74,7 @@ const latestOutcomeFor = (
   return selected?.source.outcome
 }
 
-export const updateExecutionOutcomes = (
+const updateExecutionOutcomesImpl = (
   model: Model,
   units: ReadonlyArray<Unit>,
   removedKeys: ReadonlyArray<string>,
@@ -147,3 +148,18 @@ export const updateExecutionOutcomes = (
   }
   return projected
 }
+
+export const updateExecutionOutcomes: {
+  (
+    arg0: Parameters<typeof updateExecutionOutcomesImpl>[0],
+    arg1: Parameters<typeof updateExecutionOutcomesImpl>[1],
+    arg2: Parameters<typeof updateExecutionOutcomesImpl>[2],
+    arg3: Parameters<typeof updateExecutionOutcomesImpl>[3],
+    arg4?: Parameters<typeof updateExecutionOutcomesImpl>[4],
+  ): ReturnType<typeof updateExecutionOutcomesImpl>
+  (
+    arg1: Parameters<typeof updateExecutionOutcomesImpl>[1],
+    arg2: Parameters<typeof updateExecutionOutcomesImpl>[2],
+    arg3: Parameters<typeof updateExecutionOutcomesImpl>[3],
+  ): (arg0: Parameters<typeof updateExecutionOutcomesImpl>[0]) => ReturnType<typeof updateExecutionOutcomesImpl>
+} = Function.dual((args) => args.length > 0, updateExecutionOutcomesImpl)

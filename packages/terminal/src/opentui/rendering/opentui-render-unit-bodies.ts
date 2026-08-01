@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import { bold, dim, fg, type StyledText, type TextChunk } from "@opentui/core"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import type { TranscriptBlock } from "../../state/model/terminal-transcript-state"
@@ -16,7 +17,7 @@ type AppendAll = (styled: StyledText) => void
 export const toolOutputDisplayed = (block: Extract<TranscriptBlock, { _tag: "ToolCall" }>): boolean =>
   isToolOutputDisplayed(block)
 
-export const renderDiffBody = (
+const renderDiffBodyImpl = (
   block: Extract<TranscriptBlock, { _tag: "Diff" }>,
   selected: boolean,
   expanded: boolean,
@@ -41,7 +42,25 @@ export const renderDiffBody = (
   }
 }
 
-export const renderChildAgentBody = (
+export const renderDiffBody: {
+  (
+    arg1: Parameters<typeof renderDiffBodyImpl>[1],
+    arg2: Parameters<typeof renderDiffBodyImpl>[2],
+    arg3: Parameters<typeof renderDiffBodyImpl>[3],
+    arg4: Parameters<typeof renderDiffBodyImpl>[4],
+    arg5: Parameters<typeof renderDiffBodyImpl>[5],
+  ): (arg0: Parameters<typeof renderDiffBodyImpl>[0]) => ReturnType<typeof renderDiffBodyImpl>
+  (
+    arg0: Parameters<typeof renderDiffBodyImpl>[0],
+    arg1: Parameters<typeof renderDiffBodyImpl>[1],
+    arg2: Parameters<typeof renderDiffBodyImpl>[2],
+    arg3: Parameters<typeof renderDiffBodyImpl>[3],
+    arg4: Parameters<typeof renderDiffBodyImpl>[4],
+    arg5: Parameters<typeof renderDiffBodyImpl>[5],
+  ): ReturnType<typeof renderDiffBodyImpl>
+} = Function.dual(6, renderDiffBodyImpl)
+
+const renderChildAgentBodyImpl = (
   block: Extract<TranscriptBlock, { _tag: "ChildAgent" }>,
   expanded: boolean,
   width: number,
@@ -60,9 +79,39 @@ export const renderChildAgentBody = (
   }
 }
 
-export const renderPlainBody = (block: TranscriptBlock, width: number, append: Append): void => {
+export const renderChildAgentBody: {
+  (
+    arg1: Parameters<typeof renderChildAgentBodyImpl>[1],
+    arg2: Parameters<typeof renderChildAgentBodyImpl>[2],
+    arg3: Parameters<typeof renderChildAgentBodyImpl>[3],
+    arg4: Parameters<typeof renderChildAgentBodyImpl>[4],
+    arg5: Parameters<typeof renderChildAgentBodyImpl>[5],
+  ): (arg0: Parameters<typeof renderChildAgentBodyImpl>[0]) => ReturnType<typeof renderChildAgentBodyImpl>
+  (
+    arg0: Parameters<typeof renderChildAgentBodyImpl>[0],
+    arg1: Parameters<typeof renderChildAgentBodyImpl>[1],
+    arg2: Parameters<typeof renderChildAgentBodyImpl>[2],
+    arg3: Parameters<typeof renderChildAgentBodyImpl>[3],
+    arg4: Parameters<typeof renderChildAgentBodyImpl>[4],
+    arg5: Parameters<typeof renderChildAgentBodyImpl>[5],
+  ): ReturnType<typeof renderChildAgentBodyImpl>
+} = Function.dual(6, renderChildAgentBodyImpl)
+
+const renderPlainBodyImpl = (block: TranscriptBlock, width: number, append: Append): void => {
   let color = colors.text
   if (block._tag === "ContextUsage") color = colors.muted
   else if (block._tag === "Error") color = colors.red
   append(fg(color)(renderBlock(block, width)))
 }
+
+export const renderPlainBody: {
+  (
+    arg1: Parameters<typeof renderPlainBodyImpl>[1],
+    arg2: Parameters<typeof renderPlainBodyImpl>[2],
+  ): (arg0: Parameters<typeof renderPlainBodyImpl>[0]) => ReturnType<typeof renderPlainBodyImpl>
+  (
+    arg0: Parameters<typeof renderPlainBodyImpl>[0],
+    arg1: Parameters<typeof renderPlainBodyImpl>[1],
+    arg2: Parameters<typeof renderPlainBodyImpl>[2],
+  ): ReturnType<typeof renderPlainBodyImpl>
+} = Function.dual(3, renderPlainBodyImpl)

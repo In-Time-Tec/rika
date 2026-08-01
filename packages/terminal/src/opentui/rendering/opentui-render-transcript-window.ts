@@ -214,9 +214,19 @@ export interface TranscriptUnitBuild {
   readonly nested: ReadonlyArray<UnitLineRange>
 }
 
-export const offsetUnitRange = (range: UnitLineRange, offset: number): UnitLineRange => ({
+const offsetUnitRangeImpl = (range: UnitLineRange, offset: number): UnitLineRange => ({
   ...range,
   start: range.start + offset,
   end: range.end + offset,
   ...(range.headerEnd === undefined ? {} : { headerEnd: range.headerEnd + offset }),
 })
+
+export const offsetUnitRange: {
+  (
+    arg1: Parameters<typeof offsetUnitRangeImpl>[1],
+  ): (arg0: Parameters<typeof offsetUnitRangeImpl>[0]) => ReturnType<typeof offsetUnitRangeImpl>
+  (
+    arg0: Parameters<typeof offsetUnitRangeImpl>[0],
+    arg1: Parameters<typeof offsetUnitRangeImpl>[1],
+  ): ReturnType<typeof offsetUnitRangeImpl>
+} = Function.dual(2, offsetUnitRangeImpl)

@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import type { Message } from "../model/terminal-message"
 import type { Model } from "../model/terminal-state"
 import type { QueueItem } from "../model/terminal-queue-item"
@@ -7,7 +8,7 @@ import { bindSubmittedDraft, validQueueSelection } from "../model/terminal-queue
 import { composerHeightLimit, clampSidebarWidth } from "../model/terminal-layout-state"
 import { runningToolsActivity, type Activity } from "../model/terminal-activity-state"
 
-export const reduceExecution = (
+const reduceExecutionImpl = (
   model: Model,
   message: Message,
   _reduce: (model: Model, message: Message) => Model,
@@ -187,3 +188,15 @@ export const reduceExecution = (
   }
   return undefined
 }
+
+export const reduceExecution: {
+  (
+    arg1: Parameters<typeof reduceExecutionImpl>[1],
+    arg2: Parameters<typeof reduceExecutionImpl>[2],
+  ): (arg0: Parameters<typeof reduceExecutionImpl>[0]) => ReturnType<typeof reduceExecutionImpl>
+  (
+    arg0: Parameters<typeof reduceExecutionImpl>[0],
+    arg1: Parameters<typeof reduceExecutionImpl>[1],
+    arg2: Parameters<typeof reduceExecutionImpl>[2],
+  ): ReturnType<typeof reduceExecutionImpl>
+} = Function.dual(3, reduceExecutionImpl)

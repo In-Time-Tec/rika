@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import { RGBA, StyledText, type TextChunk } from "@opentui/core"
 import {
   renderMarkdownLines as markdownLines,
@@ -67,14 +68,37 @@ const terminalChunk = (chunk: TextChunk): TerminalTextChunk => ({
   ...(chunk.bg === undefined ? {} : { bg: chunk.bg }),
   ...(chunk.link === undefined ? {} : { link: chunk.link }),
 })
-export const renderMarkdownLines = (source: string, width?: number): ReadonlyArray<ReadonlyArray<TextChunk>> =>
+const renderMarkdownLinesImpl = (source: string, width?: number): ReadonlyArray<ReadonlyArray<TextChunk>> =>
   markdownLines(source, width).map((line) => line.map(toOpenChunk))
-export const renderMarkdownStyled = (source: string, width?: number): StyledText =>
+
+export const renderMarkdownLines: {
+  (
+    arg0: Parameters<typeof renderMarkdownLinesImpl>[0],
+    arg1?: Parameters<typeof renderMarkdownLinesImpl>[1],
+  ): ReturnType<typeof renderMarkdownLinesImpl>
+  (): (arg0: Parameters<typeof renderMarkdownLinesImpl>[0]) => ReturnType<typeof renderMarkdownLinesImpl>
+} = Function.dual((args) => args.length > 0, renderMarkdownLinesImpl)
+const renderMarkdownStyledImpl = (source: string, width?: number): StyledText =>
   toOpenText(markdownStyled(source, width))
+
+export const renderMarkdownStyled: {
+  (
+    arg0: Parameters<typeof renderMarkdownStyledImpl>[0],
+    arg1?: Parameters<typeof renderMarkdownStyledImpl>[1],
+  ): ReturnType<typeof renderMarkdownStyledImpl>
+  (): (arg0: Parameters<typeof renderMarkdownStyledImpl>[0]) => ReturnType<typeof renderMarkdownStyledImpl>
+} = Function.dual((args) => args.length > 0, renderMarkdownStyledImpl)
 export const highlightShellCommand = (source: string): ReadonlyArray<ReadonlyArray<TextChunk>> =>
   highlightCommand(source).map((line) => line.map(toOpenChunk))
-export const wrapStyledLine = (
-  line: ReadonlyArray<TextChunk>,
-  width: number,
-): ReadonlyArray<ReadonlyArray<TextChunk>> =>
+const wrapStyledLineImpl = (line: ReadonlyArray<TextChunk>, width: number): ReadonlyArray<ReadonlyArray<TextChunk>> =>
   wrapLine(line.map(terminalChunk), width).map((row) => row.map(toOpenChunk))
+
+export const wrapStyledLine: {
+  (
+    arg1: Parameters<typeof wrapStyledLineImpl>[1],
+  ): (arg0: Parameters<typeof wrapStyledLineImpl>[0]) => ReturnType<typeof wrapStyledLineImpl>
+  (
+    arg0: Parameters<typeof wrapStyledLineImpl>[0],
+    arg1: Parameters<typeof wrapStyledLineImpl>[1],
+  ): ReturnType<typeof wrapStyledLineImpl>
+} = Function.dual(2, wrapStyledLineImpl)

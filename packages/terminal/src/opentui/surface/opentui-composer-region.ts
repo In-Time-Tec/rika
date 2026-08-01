@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import { bold, bg, dim, fg, StyledText, type TextChunk } from "@opentui/core"
 import stringWidth from "string-width"
 import type { Model } from "../../state/model/terminal-state"
@@ -57,7 +58,7 @@ const sidebarShortcutRows: ReadonlyArray<readonly [string, string]> = [
   ["Enter", "open selected thread"],
 ]
 
-export const shortcutsContent = (model: Model, innerWidth: number): StyledText => {
+const shortcutsContentImpl = (model: Model, innerWidth: number): StyledText => {
   const chunks: Array<TextChunk> = []
   const secondColumn = 32
   const rows =
@@ -92,7 +93,17 @@ export const shortcutsContent = (model: Model, innerWidth: number): StyledText =
   return new StyledText(chunks)
 }
 
-export const paletteContent = (
+export const shortcutsContent: {
+  (
+    arg1: Parameters<typeof shortcutsContentImpl>[1],
+  ): (arg0: Parameters<typeof shortcutsContentImpl>[0]) => ReturnType<typeof shortcutsContentImpl>
+  (
+    arg0: Parameters<typeof shortcutsContentImpl>[0],
+    arg1: Parameters<typeof shortcutsContentImpl>[1],
+  ): ReturnType<typeof shortcutsContentImpl>
+} = Function.dual(2, shortcutsContentImpl)
+
+const paletteContentImpl = (
   model: Model,
   results: ReadonlyArray<Command>,
   innerWidth: number,
@@ -147,7 +158,21 @@ const modeDescription = {
   ultra: "The most capable mode for hard, open-ended tasks",
 } as const
 
-export const modePickerContent = (model: Model, innerWidth: number): StyledText => {
+export const paletteContent: {
+  (
+    arg1: Parameters<typeof paletteContentImpl>[1],
+    arg2: Parameters<typeof paletteContentImpl>[2],
+    arg3: Parameters<typeof paletteContentImpl>[3],
+  ): (arg0: Parameters<typeof paletteContentImpl>[0]) => ReturnType<typeof paletteContentImpl>
+  (
+    arg0: Parameters<typeof paletteContentImpl>[0],
+    arg1: Parameters<typeof paletteContentImpl>[1],
+    arg2: Parameters<typeof paletteContentImpl>[2],
+    arg3: Parameters<typeof paletteContentImpl>[3],
+  ): ReturnType<typeof paletteContentImpl>
+} = Function.dual(4, paletteContentImpl)
+
+const modePickerContentImpl = (model: Model, innerWidth: number): StyledText => {
   const modes = modeIds
   const selected = modes[model.modePicker.selected] ?? model.mode
   if (innerWidth < 40)
@@ -181,3 +206,13 @@ export const modePickerContent = (model: Model, innerWidth: number): StyledText 
   chunks.push(fg(colors.text)(modeDescription[selected]))
   return new StyledText(chunks)
 }
+
+export const modePickerContent: {
+  (
+    arg1: Parameters<typeof modePickerContentImpl>[1],
+  ): (arg0: Parameters<typeof modePickerContentImpl>[0]) => ReturnType<typeof modePickerContentImpl>
+  (
+    arg0: Parameters<typeof modePickerContentImpl>[0],
+    arg1: Parameters<typeof modePickerContentImpl>[1],
+  ): ReturnType<typeof modePickerContentImpl>
+} = Function.dual(2, modePickerContentImpl)

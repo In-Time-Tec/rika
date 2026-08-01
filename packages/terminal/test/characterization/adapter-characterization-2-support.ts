@@ -1,11 +1,11 @@
 import { vi } from "vitest"
-import { Effect } from "effect"
+import { Function, Effect } from "effect"
 import { create } from "../../src/opentui/surface/opentui-surface"
 import { type Handlers } from "../../src/opentui/surface/opentui-surface-state"
 import { initial, type Model } from "../../src/state/model/terminal-state"
 import { type ThreadItem } from "../../src/state/model/terminal-thread-state"
 
-export const shell = (id: string, command: string, output: string) => ({
+const shellImpl = (id: string, command: string, output: string) => ({
   _tag: "ToolCall" as const,
   id,
   name: "bash",
@@ -17,7 +17,19 @@ export const shell = (id: string, command: string, output: string) => ({
   files: [],
 })
 
-export const _windowUnitToolCall = (id: string, family: "agent" | "explore") => ({
+export const shell: {
+  (
+    arg1: Parameters<typeof shellImpl>[1],
+    arg2: Parameters<typeof shellImpl>[2],
+  ): (arg0: Parameters<typeof shellImpl>[0]) => ReturnType<typeof shellImpl>
+  (
+    arg0: Parameters<typeof shellImpl>[0],
+    arg1: Parameters<typeof shellImpl>[1],
+    arg2: Parameters<typeof shellImpl>[2],
+  ): ReturnType<typeof shellImpl>
+} = Function.dual(3, shellImpl)
+
+const _windowUnitToolCallImpl = (id: string, family: "agent" | "explore") => ({
   _tag: "ToolCall" as const,
   id,
   name: family === "agent" ? "task" : "read",
@@ -33,7 +45,17 @@ export const _windowUnitToolCall = (id: string, family: "agent" | "explore") => 
   files: [],
 })
 
-export const agentToolBlock = (
+export const _windowUnitToolCall: {
+  (
+    arg1: Parameters<typeof _windowUnitToolCallImpl>[1],
+  ): (arg0: Parameters<typeof _windowUnitToolCallImpl>[0]) => ReturnType<typeof _windowUnitToolCallImpl>
+  (
+    arg0: Parameters<typeof _windowUnitToolCallImpl>[0],
+    arg1: Parameters<typeof _windowUnitToolCallImpl>[1],
+  ): ReturnType<typeof _windowUnitToolCallImpl>
+} = Function.dual(2, _windowUnitToolCallImpl)
+
+const agentToolBlockImpl = (
   status: "running" | "complete" | "failed" | "cancelled",
   detail = "Investigate the crash",
 ) => ({
@@ -51,6 +73,14 @@ export const agentToolBlock = (
   detail,
   files: [],
 })
+
+export const agentToolBlock: {
+  (
+    arg0: Parameters<typeof agentToolBlockImpl>[0],
+    arg1?: Parameters<typeof agentToolBlockImpl>[1],
+  ): ReturnType<typeof agentToolBlockImpl>
+  (): (arg0: Parameters<typeof agentToolBlockImpl>[0]) => ReturnType<typeof agentToolBlockImpl>
+} = Function.dual((args) => args.length > 0, agentToolBlockImpl)
 
 export const _handlers = (): Handlers => ({ key: vi.fn(), resize: vi.fn() })
 

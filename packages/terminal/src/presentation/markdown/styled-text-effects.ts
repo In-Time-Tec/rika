@@ -1,12 +1,12 @@
 import type { TerminalColor, TerminalTextChunk, TerminalStyle } from "./styled-text"
 
 const attributes = (style: TerminalStyle): number =>
-  (style.bold ? 1 : 0) |
-  (style.dim ? 2 : 0) |
-  (style.italic ? 4 : 0) |
-  (style.underline ? 8 : 0) |
-  (style.reverse ? 32 : 0) |
-  (style.strikethrough ? 128 : 0)
+  (style.bold === true ? 1 : 0) |
+  (style.dim === true ? 2 : 0) |
+  (style.italic === true ? 4 : 0) |
+  (style.underline === true ? 8 : 0) |
+  (style.reverse === true ? 32 : 0) |
+  (style.strikethrough === true ? 128 : 0)
 const apply = (input: string | TerminalTextChunk, style: TerminalStyle): TerminalTextChunk => {
   const chunk = typeof input === "string" ? { __isChunk: true as const, text: input } : input
   return { ...chunk, attributes: (chunk.attributes ?? 0) | attributes(style) }

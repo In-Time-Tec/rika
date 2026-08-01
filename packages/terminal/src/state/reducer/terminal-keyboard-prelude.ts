@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import type { Message } from "../model/terminal-message"
 import type { Model } from "../model/terminal-state"
 import type { ThreadItem } from "../model/terminal-thread-state"
@@ -6,7 +7,7 @@ import { filteredThreads } from "../model/terminal-thread-navigation"
 import { expandPastedText } from "../model/terminal-composer-paste"
 import { idle } from "../model/terminal-loadable-state"
 
-export const reduceKeyboardPrelude = (
+const reduceKeyboardPreludeImpl = (
   model: Model,
   key: Key,
   reduce: (model: Model, message: Message) => Model,
@@ -90,3 +91,15 @@ export const reduceKeyboardPrelude = (
   }
   return undefined
 }
+
+export const reduceKeyboardPrelude: {
+  (
+    arg1: Parameters<typeof reduceKeyboardPreludeImpl>[1],
+    arg2: Parameters<typeof reduceKeyboardPreludeImpl>[2],
+  ): (arg0: Parameters<typeof reduceKeyboardPreludeImpl>[0]) => ReturnType<typeof reduceKeyboardPreludeImpl>
+  (
+    arg0: Parameters<typeof reduceKeyboardPreludeImpl>[0],
+    arg1: Parameters<typeof reduceKeyboardPreludeImpl>[1],
+    arg2: Parameters<typeof reduceKeyboardPreludeImpl>[2],
+  ): ReturnType<typeof reduceKeyboardPreludeImpl>
+} = Function.dual(3, reduceKeyboardPreludeImpl)

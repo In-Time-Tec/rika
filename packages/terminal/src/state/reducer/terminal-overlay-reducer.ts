@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import type { Message } from "../model/terminal-message"
 import type { Model } from "../model/terminal-state"
 import type { TranscriptBlock, TranscriptItem } from "../model/terminal-transcript-state"
@@ -7,7 +8,7 @@ import { dropSubmittedDrafts, settleSteering, takeSubmittedDraft } from "../mode
 import { expandableRowIds, transcriptUnits, transcriptUnitId } from "../../presentation/transcript/transcript-row"
 import { context } from "./terminal-state-reducer"
 
-export const reduceOverlay = (
+const reduceOverlayImpl = (
   model: Model,
   message: Message,
   _reduce: (model: Model, message: Message) => Model,
@@ -275,3 +276,15 @@ export const reduceOverlay = (
   }
   return undefined
 }
+
+export const reduceOverlay: {
+  (
+    arg1: Parameters<typeof reduceOverlayImpl>[1],
+    arg2: Parameters<typeof reduceOverlayImpl>[2],
+  ): (arg0: Parameters<typeof reduceOverlayImpl>[0]) => ReturnType<typeof reduceOverlayImpl>
+  (
+    arg0: Parameters<typeof reduceOverlayImpl>[0],
+    arg1: Parameters<typeof reduceOverlayImpl>[1],
+    arg2: Parameters<typeof reduceOverlayImpl>[2],
+  ): ReturnType<typeof reduceOverlayImpl>
+} = Function.dual(3, reduceOverlayImpl)

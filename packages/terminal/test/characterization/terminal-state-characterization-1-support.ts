@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import { type Key } from "../../src/presentation/terminal/terminal-keymap"
 import { type Model } from "../../src/state/model/terminal-state"
 import { type ThreadItem } from "../../src/state/model/terminal-thread-state"
@@ -23,7 +24,7 @@ export const _thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "ti
   ...input,
 })
 
-export const readCall = (
+const readCallImpl = (
   id: string,
   detail: string,
   status: "running" | "complete" = "running",
@@ -44,7 +45,18 @@ export const readCall = (
   files: [],
 })
 
-export const _editFile = (id: string, path: string) => ({
+export const readCall: {
+  (
+    arg0: Parameters<typeof readCallImpl>[0],
+    arg1: Parameters<typeof readCallImpl>[1],
+    arg2?: Parameters<typeof readCallImpl>[2],
+  ): ReturnType<typeof readCallImpl>
+  (
+    arg1: Parameters<typeof readCallImpl>[1],
+  ): (arg0: Parameters<typeof readCallImpl>[0]) => ReturnType<typeof readCallImpl>
+} = Function.dual((args) => args.length > 0, readCallImpl)
+
+const _editFileImpl = (id: string, path: string) => ({
   key: id,
   path,
   kind: "update" as const,
@@ -54,6 +66,16 @@ export const _editFile = (id: string, path: string) => ({
   preview: false,
   status: "complete" as const,
 })
+
+export const _editFile: {
+  (
+    arg1: Parameters<typeof _editFileImpl>[1],
+  ): (arg0: Parameters<typeof _editFileImpl>[0]) => ReturnType<typeof _editFileImpl>
+  (
+    arg0: Parameters<typeof _editFileImpl>[0],
+    arg1: Parameters<typeof _editFileImpl>[1],
+  ): ReturnType<typeof _editFileImpl>
+} = Function.dual(2, _editFileImpl)
 
 export const _busyQueueModel = (model: Model): Model => ({
   ...model,

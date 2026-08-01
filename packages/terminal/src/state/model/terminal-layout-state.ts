@@ -1,4 +1,6 @@
+import { Function } from "effect"
 import { isReady } from "./terminal-loadable-state"
+
 import type { Model } from "./terminal-state"
 
 export const isNarrow = (model: Model): boolean => model.width < 60
@@ -19,5 +21,15 @@ export const contentColumnWidth = (model: Model): number =>
 
 export const composerHeightLimit = (terminalHeight: number): number =>
   Math.max(1, Math.min(5, terminalHeight), terminalHeight - 4)
-export const clampSidebarWidth = (width: number, terminalWidth: number): number =>
+const clampSidebarWidthImpl = (width: number, terminalWidth: number): number =>
   Math.max(24, Math.min(width, Math.max(24, terminalWidth - 40)))
+
+export const clampSidebarWidth: {
+  (
+    arg1: Parameters<typeof clampSidebarWidthImpl>[1],
+  ): (arg0: Parameters<typeof clampSidebarWidthImpl>[0]) => ReturnType<typeof clampSidebarWidthImpl>
+  (
+    arg0: Parameters<typeof clampSidebarWidthImpl>[0],
+    arg1: Parameters<typeof clampSidebarWidthImpl>[1],
+  ): ReturnType<typeof clampSidebarWidthImpl>
+} = Function.dual(2, clampSidebarWidthImpl)

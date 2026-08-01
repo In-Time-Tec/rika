@@ -1,7 +1,8 @@
+import { Function } from "effect"
 import type { TranscriptItem } from "../../state/model/terminal-transcript-state"
 import { classifyTranscriptContent } from "../../presentation/transcript/transcript-viewport-window"
 
-export const prependedTranscriptItems = (
+const prependedTranscriptItemsImpl = (
   previousItems: ReadonlyArray<unknown>,
   currentItems: ReadonlyArray<unknown>,
 ): number => {
@@ -11,3 +12,13 @@ export const prependedTranscriptItems = (
     )
   return classifyTranscriptContent(identities(previousItems), identities(currentItems)).prepended.length
 }
+
+export const prependedTranscriptItems: {
+  (
+    arg1: Parameters<typeof prependedTranscriptItemsImpl>[1],
+  ): (arg0: Parameters<typeof prependedTranscriptItemsImpl>[0]) => ReturnType<typeof prependedTranscriptItemsImpl>
+  (
+    arg0: Parameters<typeof prependedTranscriptItemsImpl>[0],
+    arg1: Parameters<typeof prependedTranscriptItemsImpl>[1],
+  ): ReturnType<typeof prependedTranscriptItemsImpl>
+} = Function.dual(2, prependedTranscriptItemsImpl)

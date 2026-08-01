@@ -1,4 +1,5 @@
-export const nonSpaceBounds = (frame: string, height: number) => {
+import { Function } from "effect"
+const nonSpaceBoundsImpl = (frame: string, height: number) => {
   const points = frame
     .split("\n")
     .slice(0, height - 5)
@@ -11,3 +12,13 @@ export const nonSpaceBounds = (frame: string, height: number) => {
     bottom: Math.max(...points.map(({ y }) => y)),
   }
 }
+
+export const nonSpaceBounds: {
+  (
+    arg1: Parameters<typeof nonSpaceBoundsImpl>[1],
+  ): (arg0: Parameters<typeof nonSpaceBoundsImpl>[0]) => ReturnType<typeof nonSpaceBoundsImpl>
+  (
+    arg0: Parameters<typeof nonSpaceBoundsImpl>[0],
+    arg1: Parameters<typeof nonSpaceBoundsImpl>[1],
+  ): ReturnType<typeof nonSpaceBoundsImpl>
+} = Function.dual(2, nonSpaceBoundsImpl)

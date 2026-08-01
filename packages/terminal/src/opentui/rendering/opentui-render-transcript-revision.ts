@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import { StyledText, type TextRenderable } from "@opentui/core"
 import type { Model } from "../../state/model/terminal-state"
 import type { TranscriptBlock } from "../../state/model/terminal-transcript-state"
@@ -23,7 +24,7 @@ const identityRevision = (value: unknown): number => {
 export const agentResponseOutcome = (state: AgentResponseState): AgentOutcome =>
   state._tag === "Streaming" ? { kind: "answer", entry: state.answer } : state.outcome
 
-export const transcriptUnitRevision = (
+const transcriptUnitRevisionImpl = (
   model: Model,
   unit: TranscriptUnit,
   unitKey: string,
@@ -55,6 +56,20 @@ export const transcriptUnitRevision = (
   const selected = model.detailSelection === unitKey ? "1" : "0"
   return `${ids.join(".")}|${bits.join("")}|${selected}|${model.width}`
 }
+
+export const transcriptUnitRevision: {
+  (
+    arg1: Parameters<typeof transcriptUnitRevisionImpl>[1],
+    arg2: Parameters<typeof transcriptUnitRevisionImpl>[2],
+    arg3: Parameters<typeof transcriptUnitRevisionImpl>[3],
+  ): (arg0: Parameters<typeof transcriptUnitRevisionImpl>[0]) => ReturnType<typeof transcriptUnitRevisionImpl>
+  (
+    arg0: Parameters<typeof transcriptUnitRevisionImpl>[0],
+    arg1: Parameters<typeof transcriptUnitRevisionImpl>[1],
+    arg2: Parameters<typeof transcriptUnitRevisionImpl>[2],
+    arg3: Parameters<typeof transcriptUnitRevisionImpl>[3],
+  ): ReturnType<typeof transcriptUnitRevisionImpl>
+} = Function.dual(4, transcriptUnitRevisionImpl)
 
 export interface TranscriptRenderableDescriptor {
   readonly key: string

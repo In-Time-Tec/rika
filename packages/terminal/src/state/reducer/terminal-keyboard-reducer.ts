@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import type { Message } from "../model/terminal-message"
 import type { Model } from "../model/terminal-state"
 import type { QueueItem } from "../model/terminal-queue-item"
@@ -6,7 +7,7 @@ import { context } from "./terminal-state-reducer"
 import { reduceKeyboardPrelude } from "./terminal-keyboard-prelude"
 import { reduceKeyboardPicker } from "./terminal-keyboard-picker"
 
-export const reduceKeyboard = (
+const reduceKeyboardImpl = (
   model: Model,
   message: Message,
   reduce: (model: Model, message: Message) => Model,
@@ -183,3 +184,15 @@ export const reduceKeyboard = (
   }
   return undefined
 }
+
+export const reduceKeyboard: {
+  (
+    arg1: Parameters<typeof reduceKeyboardImpl>[1],
+    arg2: Parameters<typeof reduceKeyboardImpl>[2],
+  ): (arg0: Parameters<typeof reduceKeyboardImpl>[0]) => ReturnType<typeof reduceKeyboardImpl>
+  (
+    arg0: Parameters<typeof reduceKeyboardImpl>[0],
+    arg1: Parameters<typeof reduceKeyboardImpl>[1],
+    arg2: Parameters<typeof reduceKeyboardImpl>[2],
+  ): ReturnType<typeof reduceKeyboardImpl>
+} = Function.dual(3, reduceKeyboardImpl)

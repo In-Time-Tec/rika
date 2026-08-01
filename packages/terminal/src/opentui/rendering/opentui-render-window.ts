@@ -1,8 +1,9 @@
+import { Function } from "effect"
 import stringWidth from "string-width"
 import { idleSpinnerFrame } from "./opentui-spinner"
 
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" })
-export const wrapTextToWidth = (text: string, width: number): ReadonlyArray<string> => {
+const wrapTextToWidthImpl = (text: string, width: number): ReadonlyArray<string> => {
   const lines: Array<string> = []
   for (const hardLine of text.split("\n")) {
     let rest = hardLine
@@ -26,15 +27,49 @@ export const wrapTextToWidth = (text: string, width: number): ReadonlyArray<stri
   }
   return lines
 }
-export const wrapBodyText = (text: string, width: number, indent: string): string =>
+
+export const wrapTextToWidth: {
+  (
+    arg1: Parameters<typeof wrapTextToWidthImpl>[1],
+  ): (arg0: Parameters<typeof wrapTextToWidthImpl>[0]) => ReturnType<typeof wrapTextToWidthImpl>
+  (
+    arg0: Parameters<typeof wrapTextToWidthImpl>[0],
+    arg1: Parameters<typeof wrapTextToWidthImpl>[1],
+  ): ReturnType<typeof wrapTextToWidthImpl>
+} = Function.dual(2, wrapTextToWidthImpl)
+const wrapBodyTextImpl = (text: string, width: number, indent: string): string =>
   wrapTextToWidth(text, Math.max(1, width - stringWidth(indent)))
     .map((line) => `${indent}${line}`)
     .join("\n")
-export const iconChar = (failed: boolean, running: boolean, frame = idleSpinnerFrame, cancelled = false): string => {
+
+export const wrapBodyText: {
+  (
+    arg1: Parameters<typeof wrapBodyTextImpl>[1],
+    arg2: Parameters<typeof wrapBodyTextImpl>[2],
+  ): (arg0: Parameters<typeof wrapBodyTextImpl>[0]) => ReturnType<typeof wrapBodyTextImpl>
+  (
+    arg0: Parameters<typeof wrapBodyTextImpl>[0],
+    arg1: Parameters<typeof wrapBodyTextImpl>[1],
+    arg2: Parameters<typeof wrapBodyTextImpl>[2],
+  ): ReturnType<typeof wrapBodyTextImpl>
+} = Function.dual(3, wrapBodyTextImpl)
+const iconCharImpl = (failed: boolean, running: boolean, frame = idleSpinnerFrame, cancelled = false): string => {
   if (running) return frame
   if (cancelled) return "⊘"
   return failed ? "✕" : "✓"
 }
+
+export const iconChar: {
+  (
+    arg0: Parameters<typeof iconCharImpl>[0],
+    arg1: Parameters<typeof iconCharImpl>[1],
+    arg2?: Parameters<typeof iconCharImpl>[2],
+    arg3?: Parameters<typeof iconCharImpl>[3],
+  ): ReturnType<typeof iconCharImpl>
+  (
+    arg1: Parameters<typeof iconCharImpl>[1],
+  ): (arg0: Parameters<typeof iconCharImpl>[0]) => ReturnType<typeof iconCharImpl>
+} = Function.dual((args) => args.length > 0, iconCharImpl)
 
 export const markerText = (expanded: boolean): string => (expanded ? " ▾" : " ▸")
 
