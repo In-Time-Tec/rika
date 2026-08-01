@@ -24,7 +24,7 @@ import * as WebSearch from "@rika/coding-tools/web-search-service"
 import { Config, Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Schema, Scope, Stream } from "effect"
 import { AiError } from "effect/unstable/ai"
 import { FetchHttpClient } from "effect/unstable/http"
-import { interactiveTui } from "../src/interactive/process/process-loop"
+import { interactiveTui } from "../src/interactive/process/interactive-process-loop"
 
 export const model = {
   text: (text: string, delayMs?: number) =>

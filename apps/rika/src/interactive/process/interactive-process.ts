@@ -55,7 +55,7 @@ import {
 import { Command } from "effect/unstable/cli"
 import { command, version } from "../../command"
 import * as InteractiveController from "../controller/interactive-controller"
-import { interactiveTui } from "./process-loop"
+import { interactiveTui } from "./interactive-process-loop"
 import * as Logging from "../../logging"
 import { relaunchArguments } from "../input/relaunch-input"
 import { layer as residentLayer } from "../../resident-client-transport"
