@@ -22,25 +22,33 @@ const program = Effect.gen(function* () {
   if (Option.isNone(dataRoot) || dataRoot.value.length === 0)
     return yield* WarmConfigurationError.make({ message: "RIKA_WARM_ROOT is required" })
   const resident = yield* ResidentService.Service
-  const connection = yield* resident.getOrCreate({
-    profile: "default",
-    dataRoot: dataRoot.value,
-    clientKind: "product",
-    graceMilliseconds: 3_600_000,
-    allowSupersede: false,
-  })
+  const connection: ResidentService.Connection = yield* resident
+    .getOrCreate({
+      profile: "default",
+      dataRoot: dataRoot.value,
+      clientKind: "product",
+      graceMilliseconds: 3_600_000,
+      allowSupersede: false,
+    })
+    .pipe(Effect.orDie)
   yield* connection.run({ _tag: "Thread", action: "list" })
   yield* connection.close
   return yield* Schema.encodeEffect(WarmOutputJson)({ warmed: true, role: connection.role })
 })
 
-const services = Layer.mergeAll(BunServices.layer, BunCrypto.layer, residentLayer)
+const services = Layer.mergeAll(BunServices.layer, BunCrypto.layer, residentLayer).pipe(Layer.orDie)
 
 if (import.meta.main)
   BunRuntime.runMain(
     Effect.scoped(
       Effect.flatMap(Layer.build(services), (context) =>
-        Effect.provide(program.pipe(Effect.tap((output) => Effect.log(output))), context),
+        Effect.provide(
+          program.pipe(
+            Effect.tap((output) => Effect.log(output)),
+            Effect.orDie,
+          ),
+          context,
+        ),
       ),
     ),
   )

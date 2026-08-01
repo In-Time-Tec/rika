@@ -49,7 +49,7 @@ export const host = Effect.fn("ResidentTransport.host")(function* (options: {
   const graceFiber = yield* Ref.make<Fiber.Fiber<void> | undefined>(undefined)
   const coldCohortUntil = yield* Ref.make(0)
   const lifecycle = yield* ResidentService.ServiceRuntime.makeLifecycle(() => Effect.void)
-  const hostWork = yield* FiberSet.make<void, unknown>()
+  const hostWork = yield* FiberSet.make<void, never>()
   const activeConnections = yield* Ref.make(new Map<string, Effect.Effect<void>>())
   const operationAdmission = yield* Semaphore.make(32)
   const drainingFailure = (requestId: string, operation: string) =>
@@ -165,29 +165,27 @@ export const host = Effect.fn("ResidentTransport.host")(function* (options: {
   const server = yield* Scope.provide(BunHttpServer.make({ hostname: "127.0.0.1", port: options.port }), serverScope)
   const operationReady = yield* Deferred.make<Operation.Interface>()
   const { hasActiveExecutionWork, stopAbandonedExecutionWork } = makeExecutionControls(operationReady)
-  const handle: (socket: Socket.Socket) => Effect.Effect<void, ResidentService.ResidentServiceError> =
-    makeConnectionHandler({
-      options,
-      crypto,
-      baseConsole,
-      hostScope,
-      serviceNonce,
-      graceFiber,
-      lifecycle,
-      hostWork,
-      activeConnections,
-      operationAdmission,
-      drainingFailure,
-      scheduleGrace,
-      abandonFiber,
-      scheduleAbandonment,
-      requestByInput,
-      routes,
-      interactive,
-      server,
-      operationReady,
-      hasActiveExecutionWork,
-    })
+  const handle = makeConnectionHandler({
+    options,
+    crypto,
+    baseConsole,
+    hostScope,
+    serviceNonce,
+    graceFiber,
+    lifecycle,
+    hostWork,
+    activeConnections,
+    operationAdmission,
+    drainingFailure,
+    scheduleGrace,
+    abandonFiber,
+    scheduleAbandonment,
+    requestByInput,
+    routes,
+    interactive,
+    operationReady,
+    hasActiveExecutionWork,
+  })
   const app = Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest
     if (isLegacyResidentPath(request.url)) {

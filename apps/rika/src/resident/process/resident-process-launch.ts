@@ -249,15 +249,13 @@ export const start = () => {
             ),
             run: (input) => {
               if (input._tag === "Auth") {
-                return Effect.gen(function* () {
-                  return yield* Effect.scoped(
-                    Effect.tryPromise({
-                      try: () => import("../composition/resident-auth-layer"),
-                      catch: (cause) =>
-                        ProductOperation.OperationUnavailable.make({ operation: "Auth", message: String(cause) }),
-                    }).pipe(Effect.flatMap((auth) => auth.runResidentAuth(input, authOptions, process.cwd()))),
-                  )
-                }).pipe(
+                return Effect.scoped(
+                  Effect.tryPromise({
+                    try: () => import("../composition/resident-auth-layer"),
+                    catch: (cause) =>
+                      ProductOperation.OperationUnavailable.make({ operation: "Auth", message: String(cause) }),
+                  }).pipe(Effect.flatMap((auth) => auth.runResidentAuth(input, authOptions, process.cwd()))),
+                ).pipe(
                   Effect.mapError((error) =>
                     Schema.is(ProductOperation.OperationUnavailable)(error)
                       ? error

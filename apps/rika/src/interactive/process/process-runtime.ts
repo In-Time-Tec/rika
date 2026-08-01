@@ -14,12 +14,13 @@ type PromptPart = ReturnType<ReturnType<typeof promptParts>>[number]
 import type { ThreadItem } from "@rika/terminal/terminal-state"
 import * as Thread from "@rika/product/thread-record"
 import * as ProductOperation from "@rika/product/product-operation"
-import { Cause, Clock, Effect, Fiber, FileSystem } from "effect"
+import { Cause, Clock, Effect, Fiber, FileSystem, Schema } from "effect"
 import * as Logging from "../../logging"
 import { workspaceDirectory } from "@rika/configuration/configuration-paths"
 import { renderGoodbye } from "../input/goodbye-message"
+import type { InteractiveRuntimeContext } from "./interactive-runtime-context"
 
-type Runtime = any
+type Runtime = InteractiveRuntimeContext
 const provideLayerScoped = ProcessLayer.provideLayerScoped
 const noopSelectionResync = (_threadId: string, _selectionEpoch: number) => undefined
 const mkdir = ProcessFiles.mkdir
@@ -204,7 +205,7 @@ export const makeProcessRuntime = (runtime: Runtime) => {
             ),
             Effect.catchIf(
               (failure): failure is ProcessPrompt.PromptAttachmentError =>
-                failure instanceof ProcessPrompt.PromptAttachmentError,
+                Schema.is(ProcessPrompt.PromptAttachmentError)(failure),
               (failure) =>
                 Effect.sync(() => {
                   let restored: Model = {
@@ -315,55 +316,57 @@ export const makeProcessRuntime = (runtime: Runtime) => {
       session.selectThread(threadId, epoch).pipe(Effect.ensuring(Effect.sync(() => loop.selectionResyncs.delete(key)))),
     )
   }
-  const loadChangedFiles = () =>
-    readChangedFilesEffect(loop.model.workspace).pipe(
-      Effect.tap((files) =>
-        Effect.sync(() => {
-          const current = loop.model
-          loop.model = update(current, { _tag: "ChangedFilesReplaced", files })
-          if (loop.model !== current) loop.renderer?.surface.update(loop.model)
-        }),
-      ),
-      Effect.asVoid,
-    )
+  const loadChangedFiles = readChangedFilesEffect(loop.model.workspace).pipe(
+    Effect.tap((files) =>
+      Effect.sync(() => {
+        const current = loop.model
+        loop.model = update(current, { _tag: "ChangedFilesReplaced", files })
+        if (loop.model !== current) loop.renderer?.surface.update(loop.model)
+      }),
+    ),
+    Effect.asVoid,
+    Effect.catchCause((cause) => Effect.logWarning(`changed-files load failed: ${Cause.pretty(cause)}`)),
+  )
   const watchChangedFiles = FileSystem.FileSystem.pipe(
     Effect.flatMap((fileSystem) =>
       refreshChangedFilesOn(
         fileSystem.watch(loop.model.workspace),
         () => loop.model.changedFilesOpen,
-        loadChangedFiles(),
+        loadChangedFiles,
       ),
     ),
     Effect.catchCause((cause) => Effect.logWarning(`changed-files watcher stopped: ${Cause.pretty(cause)}`)),
   )
-  const editComposer = () =>
-    Clock.currentTimeMillis.pipe(
-      Effect.flatMap((now) =>
-        Effect.gen(function* () {
-          const fileSystem = yield* FileSystem.FileSystem
-          if (options.editor === undefined) {
-            loop.renderer?.surface.showToast("Set VISUAL or EDITOR to edit the prompt", "#e06c75")
-            return
-          }
-          const relative = `${workspaceDirectory}/compose-${now}.md`
-          const file = `${loop.model.workspace}/${relative}`
-          yield* mkdir(`${loop.model.workspace}/.rika`, { recursive: true })
-          yield* fileSystem.writeFileString(file, displayInput(loop.model))
-          const resumeTerminal = pauseTerminal()
-          yield* childExit("run editor", [options.editor, file], {
-            stdin: "inherit",
-            stdout: "inherit",
-            stderr: "inherit",
-            detached: false,
-          }).pipe(Effect.ensuring(Effect.sync(resumeTerminal)))
-          const edited = yield* fileSystem.readFileString(file)
-          yield* rm(file, { force: true })
-          loop.model = update(loop.model, { _tag: "ComposerReplaced", text: edited.replace(/\n$/, "") })
-          loop.renderer?.surface.update(loop.model)
-        }),
-      ),
-      Effect.asVoid,
-    )
+  const editComposer = Clock.currentTimeMillis.pipe(
+    Effect.flatMap((now) =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        if (options.editor === undefined) {
+          loop.renderer?.surface.showToast("Set VISUAL or EDITOR to edit the prompt", "#e06c75")
+          return
+        }
+        const relative = `${workspaceDirectory}/compose-${now}.md`
+        const file = `${loop.model.workspace}/${relative}`
+        yield* mkdir(`${loop.model.workspace}/.rika`, { recursive: true })
+        yield* fileSystem.writeFileString(file, displayInput(loop.model))
+        const resumeTerminal = pauseTerminal()
+        yield* childExit("run editor", [options.editor, file], {
+          stdin: "inherit",
+          stdout: "inherit",
+          stderr: "inherit",
+          detached: false,
+        }).pipe(Effect.ensuring(Effect.sync(resumeTerminal)))
+        const edited = yield* fileSystem.readFileString(file)
+        yield* rm(file, { force: true })
+        loop.model = update(loop.model, { _tag: "ComposerReplaced", text: edited.replace(/\n$/, "") })
+        loop.renderer?.surface.update(loop.model)
+      }),
+    ),
+    Effect.asVoid,
+    Effect.mapError((cause) =>
+      ProductOperation.OperationUnavailable.make({ operation: "Edit composer", message: String(cause) }),
+    ),
+  )
   const openPath = (target: PathTarget) => {
     if (loop.openingPath) return
     loop.openingPath = true

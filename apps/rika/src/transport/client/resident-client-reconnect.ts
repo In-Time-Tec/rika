@@ -50,12 +50,18 @@ export const isReconnectableTransport = (error: unknown) =>
 const ignoreInteractiveEvent = (_event: InteractiveEvent.InteractiveEvent) => {}
 
 type SupervisorContext = {
-  readonly initial: any
-  readonly acquireReady: any
-  readonly logicalClosed: any
+  readonly initial: ResidentService.Connection
+  readonly acquireReady: (
+    policy: "launch" | "reattach",
+  ) => Effect.Effect<
+    ResidentService.Connection,
+    ResidentService.ResidentServiceError | ResidentService.ResidentRestartRequired,
+    never
+  >
+  readonly logicalClosed: Deferred.Deferred<void>
 }
 
-export const makeInteractiveSupervisor = (context: SupervisorContext): any => {
+export const makeInteractiveSupervisor = (context: SupervisorContext) => {
   const { initial, acquireReady, logicalClosed } = context
   return Effect.fn("ResidentTransport.superviseInteractive")(function* (
     operationInput: ResidentFeed.InteractiveInput,
@@ -246,16 +252,16 @@ export const makeInteractiveSupervisor = (context: SupervisorContext): any => {
       | ProductOperation.OperationUnavailable
     > =>
       Effect.gen(function* () {
-        const acquired = (yield* Effect.exit(
+        const acquired = yield* Effect.exit(
           connection === undefined ? acquireReady("reattach") : Effect.succeed(connection),
-        )) as any
+        )
         if (acquired._tag === "Failure") return yield* recover(acquired.cause, undefined, first, consecutiveFailures)
         const startedAt = yield* Clock.currentTimeMillis
-        const outcome = (yield* Effect.exit(runPhysical(acquired.value, first))) as any
+        const outcome = yield* Effect.exit(runPhysical(acquired.value, first))
         const duration = (yield* Clock.currentTimeMillis) - startedAt
         if (outcome._tag === "Success") return
         return yield* recover(outcome.cause, duration, first, consecutiveFailures, acquired.value.connectionId)
-      }) as any
+      })
     const recover = (
       cause: Cause.Cause<
         | ResidentService.ResidentServiceError

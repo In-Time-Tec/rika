@@ -1,10 +1,9 @@
-import * as InteractiveSession from "@rika/product/interactive-session"
 import { create as createTui } from "@rika/terminal/opentui-surface"
-import type { PathTarget } from "@rika/terminal/terminal-transcript-presentation"
 import { Mode } from "@rika/terminal/terminal-state"
-import { expandPastedText, execute, promptParts, type Action, type Adapter } from "@rika/terminal/terminal-session"
+import { expandPastedText, execute, promptParts, type Action } from "@rika/terminal/terminal-session"
 import { canSubmit, selectedThreadMetadata, update } from "@rika/terminal/terminal-state-reducer"
 import { Effect, Fiber } from "effect"
+import type { InteractiveInputContext } from "./interactive-runtime-context"
 import { imagePasteBlockedNotice } from "../input/prompt-input"
 import { nextSubmissionId } from "../controller/terminal-turn-submission"
 import { pasteClipboardPng, pastedImagePath, persistPastedImage } from "./process-workspace"
@@ -20,22 +19,7 @@ const nextUsageDisplay = (display: "cost" | "tokens" | "time" | undefined): "cos
   return "cost"
 }
 
-type InputContext = {
-  readonly loop: any
-  readonly session: InteractiveSession.InteractiveSession
-  readonly run: (effect: Effect.Effect<void, any, any>) => void
-  readonly fork: (effect: Effect.Effect<any, any, never>) => Fiber.Fiber<any, any>
-  readonly requestNewerPage: () => void
-  readonly close: () => void
-  readonly refreshTerminalTitle: () => void
-  readonly openPath: (target: PathTarget) => void
-  readonly editComposer: () => Effect.Effect<void, any, any>
-  readonly recoverSession: <R>(effect: Effect.Effect<void, any, R>) => Effect.Effect<void, never, R>
-  readonly render: (immediate?: boolean) => void
-  readonly consumePendingAction: () => void
-  readonly loadChangedFiles: () => Effect.Effect<void, any, any>
-  readonly adapter: Adapter
-}
+type InputContext = Omit<InteractiveInputContext, "options" | "resume">
 
 export const createInputHandlers = (context: InputContext): Partial<Parameters<typeof createTui>[0]> => {
   const {
@@ -169,7 +153,7 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
         return
       }
       if (key.ctrl && key.name === "g") {
-        run(editComposer())
+        run(editComposer)
         return
       }
       const wasChangedFilesOpen = loop.model.changedFilesOpen
@@ -193,7 +177,7 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
       if (afterPreviewId !== undefined && afterPreviewId !== beforePreviewId)
         loop.model = update(loop.model, { _tag: "ThreadPreviewRequested" })
       loop.renderer?.surface.update(loop.model)
-      if (!wasChangedFilesOpen && loop.model.changedFilesOpen) run(loadChangedFiles())
+      if (!wasChangedFilesOpen && loop.model.changedFilesOpen) run(loadChangedFiles)
       if (afterPreviewId !== undefined && afterPreviewId !== beforePreviewId) {
         if (loop.previewTimer !== undefined) fork(Fiber.interrupt(loop.previewTimer))
         const selectedPreviewTimer = Effect.sleep("120 millis").pipe(

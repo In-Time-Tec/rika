@@ -1,4 +1,5 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
+import { OperationUnavailable } from "@rika/product/product-operation"
 import { Service } from "@rika/product/product-operation-service"
 import type { Input } from "@rika/product/product-operation"
 import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, Ref, Stream } from "effect"
@@ -36,7 +37,7 @@ it("accepts only successful and SIGINT-convention interactive runtime exits", ()
   expect(cleanInteractiveRuntimeExit(143)).toBe(false)
 })
 
-const execute = <A, E, R>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<R>) =>
+const execute = <A, E, R>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<R>): Effect.Effect<A, E, never> =>
   Effect.scoped(
     Effect.gen(function* () {
       const scope = yield* Effect.scope
@@ -101,11 +102,14 @@ it.effect("maps stdin failures and dispatch failures", () =>
       Layer.succeed(
         Service,
         Service.of({
-          run: () => Effect.fail(OperationUnavailable.make({ operation: "Doctor", message: "dispatch failed" })),
+          run: (_input): Effect.Effect<void, OperationUnavailable> =>
+            Effect.fail(OperationUnavailable.make({ operation: "Doctor", message: "dispatch failed" })),
         }),
       ),
     )
-    expect((yield* Effect.exit(execute(run(["doctor"]), layer)))._tag).toBe("Failure")
+    expect(
+      (yield* Effect.exit(execute(run(["doctor"]).pipe(Effect.mapError((error) => String(error))), layer)))._tag,
+    ).toBe("Failure")
   }),
 )
 

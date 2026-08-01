@@ -1,6 +1,10 @@
-import { Config, Effect, Option, Path, Schema } from "effect"
+import { Config, Effect, Function, Option, Path, Schema } from "effect"
 
-export const encodeLaunchArguments = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)))
+const encodeLaunchArgumentsImpl = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)))
+export const encodeLaunchArguments: {
+  (): (input: ReadonlyArray<string>) => string
+  (input: ReadonlyArray<string>): string
+} = Function.dual((args) => args.length >= 1, encodeLaunchArgumentsImpl)
 
 export interface RuntimeLaunch {
   readonly executable: string

@@ -1,6 +1,6 @@
 import * as Turn from "@rika/product/turn-record"
 import * as ThreadResult from "@rika/product/thread-result"
-import { HashMap } from "effect"
+import { Function, HashMap } from "effect"
 import { applyTurnDelta } from "@rika/terminal/terminal-transcript-presentation"
 import type { ThreadItem } from "@rika/terminal/terminal-state"
 import { update as updateModel } from "@rika/terminal/terminal-state-reducer"
@@ -27,7 +27,7 @@ import {
 } from "./interactive-transcript-window"
 import { activityAfterOrigin } from "./interactive-activity"
 const unchanged = (state: State): Update => ({ state, preserveAnchor: false })
-export const updateState = (state: State, event: TranscriptEvent): Update => {
+const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
   if (event._tag === "ThreadRefolding")
     return {
       state: {
@@ -487,3 +487,8 @@ export const updateState = (state: State, event: TranscriptEvent): Update => {
     return unchanged(state)
   return unchanged(state)
 }
+
+export const updateState: {
+  (event: TranscriptEvent): (state: State) => Update
+  (state: State, event: TranscriptEvent): Update
+} = Function.dual(2, updateStateImpl)

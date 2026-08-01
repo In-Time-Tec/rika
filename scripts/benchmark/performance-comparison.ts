@@ -1,6 +1,6 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Console, Effect, FileSystem, Layer, Schema } from "effect"
+import { Cause, Console, Effect, Exit, FileSystem, Function, Layer, Schema } from "effect"
 import { Command, Flag } from "effect/unstable/cli"
 import {
   evaluateMetric,
@@ -96,7 +96,7 @@ const comparePolicyMetric = (
   return evaluateMetric(policy, median(baselineValues), median(candidateValues))
 }
 
-export const comparePerformanceRuns = (
+const comparePerformanceRunsImpl = (
   baseline: ReadonlyArray<PerformanceEvidence>,
   candidate: ReadonlyArray<PerformanceEvidence>,
 ): ComparisonResult => {
@@ -137,14 +137,41 @@ export const comparePerformanceRuns = (
   return { pass: failures.length === 0, failures, metrics, unsupported }
 }
 
-const EvidenceJson = Schema.UnknownFromJsonString
+export const comparePerformanceRuns: {
+  (candidate: ReadonlyArray<PerformanceEvidence>): (baseline: ReadonlyArray<PerformanceEvidence>) => ComparisonResult
+  (baseline: ReadonlyArray<PerformanceEvidence>, candidate: ReadonlyArray<PerformanceEvidence>): ComparisonResult
+} = Function.dual(2, comparePerformanceRunsImpl)
 
-const loadEvidence = Effect.fn("PerformanceComparison.loadEvidence")(function* (path: string) {
-  const fileSystem = yield* FileSystem.FileSystem
-  return (yield* Schema.decodeUnknownEffect(EvidenceJson)(
-    yield* fileSystem.readFileString(path),
-  )) as PerformanceEvidence
+const PerformanceMetricSampleSchema = Schema.Struct({
+  id: Schema.String,
+  unit: Schema.String,
+  value: Schema.optional(Schema.Finite),
+  status: Schema.Literals(["measured", "unsupported"]),
+  target: Schema.optional(Schema.Struct({ operator: Schema.String, value: Schema.Finite })),
 })
+const PerformanceEvidenceSchema = Schema.Struct({
+  schemaVersion: Schema.Finite,
+  evidence: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+  workload: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+  process: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+  metrics: Schema.Array(PerformanceMetricSampleSchema),
+})
+const EvidenceJson = Schema.fromJsonString(PerformanceEvidenceSchema)
+class EvidenceReadError extends Schema.TaggedErrorClass<EvidenceReadError>()("EvidenceReadError", {
+  path: Schema.String,
+  message: Schema.String,
+}) {}
+
+const loadEvidence = (path: string): Effect.Effect<PerformanceEvidence, never, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem
+    const text = yield* fileSystem
+      .readFileString(path)
+      .pipe(Effect.mapError((error) => EvidenceReadError.make({ path, message: String(error) })))
+    const decoded = Schema.decodeUnknownExit(EvidenceJson)(text)
+    if (Exit.isFailure(decoded)) return yield* Effect.die(Cause.pretty(decoded.cause))
+    return decoded.value
+  }).pipe(Effect.orDie)
 
 const command = Command.make(
   "performance-comparison",
@@ -157,7 +184,7 @@ const command = Command.make(
       const baselineRuns = yield* Effect.forEach(baseline, loadEvidence)
       const candidateRuns = yield* Effect.forEach(candidate, loadEvidence)
       const result = comparePerformanceRuns(baselineRuns, candidateRuns)
-      yield* Console.log(JSON.stringify(result, null, 2))
+      yield* Console.log(yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(result))
       if (!result.pass) return yield* Effect.die(result.failures.join("\n"))
     }),
 )
@@ -165,8 +192,8 @@ const command = Command.make(
 if (import.meta.main)
   BunRuntime.runMain(
     Effect.scoped(
-      Effect.flatMap(Layer.build(BunServices.layer), (context) =>
-        Effect.provide(Command.run(command, { version: "0.0.0" }), context),
+      Effect.flatMap(Layer.build(BunServices.layer.pipe(Layer.orDie)), (context) =>
+        Effect.provide(Command.run(command, { version: "0.0.0" }).pipe(Effect.orDie), context),
       ),
     ),
   )

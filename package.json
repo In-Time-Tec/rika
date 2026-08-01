@@ -98,6 +98,9 @@
     "@effect/sql-pg": "4.0.0-beta.98",
     "@effect/sql-sqlite-bun": "catalog:",
     "@relayfx/sdk": "catalog:",
+    "@rika/product": "workspace:*",
+    "@rika/product-store": "workspace:*",
+    "@rika/transcript": "workspace:*",
     "drizzle-orm": "1.0.0-rc.3",
     "effect": "catalog:",
     "pg": "8.21.0"

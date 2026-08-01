@@ -1,6 +1,6 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, pipe } from "effect"
 import { Command, Flag } from "effect/unstable/cli"
 import {
   baselinePath,
@@ -79,10 +79,7 @@ const program = ({
     const foldRates: Array<number> = []
     let dataRoot = ""
     for (let window = 0; window < windows; window += 1) {
-      const result = yield* runFoldPersistenceBench({
-        eventCount,
-        commitBatch,
-      })
+      const result = yield* pipe({ eventCount, commitBatch }, runFoldPersistenceBench, Effect.orDie)
       samples.push(result.measurement)
       foldRates.push(result.foldEventsPerSec)
       dataRoot = result.dataRoot
@@ -123,8 +120,10 @@ const command = Command.make(
   program,
 )
 
-const main = Command.run(command, { version: "0.0.0" })
-const services = Layer.mergeAll(BunServices.layer, Layer.succeed(MonotonicClock, processMonotonicClock))
+const main = Command.run(command, { version: "0.0.0" }).pipe(Effect.orDie)
+const services = Layer.mergeAll(BunServices.layer, Layer.succeed(MonotonicClock, processMonotonicClock)).pipe(
+  Layer.orDie,
+)
 
 if (import.meta.main)
   BunRuntime.runMain(Effect.scoped(Effect.flatMap(Layer.build(services), (context) => Effect.provide(main, context))))

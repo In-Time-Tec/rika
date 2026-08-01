@@ -11,7 +11,7 @@ import * as ThreadInteractionRepository from "@rika/product-store/sqlite-thread-
 import * as ThreadToolService from "@rika/product/thread-tool-service"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as RelayExecution from "@rika/relay-execution/relay-execution-layer"
-import { Effect, Layer } from "effect"
+import { Cause, Effect, Exit, Layer, pipe } from "effect"
 import { resolveExecutionWorkspace } from "./resident-execution-recovery"
 import { validateWebSearchProviders } from "./resident-configuration-adapter"
 
@@ -42,11 +42,13 @@ interface ConfiguredBackendOptions {
     input: ExecutionRequest.StartInput,
   ) => Effect.Effect<ExecutionRouteSnapshot.ExecutionRoutePin, ExecutionBackend.BackendError>
   readonly threadToolGateway: ThreadToolService.Gateway
-  readonly toolRuntimeLayerForWorkspace: (workspace: string) => Layer.Layer<ToolRuntime.Service, never, never>
+  readonly toolRuntimeLayerForWorkspace: (
+    workspace: string,
+  ) => Layer.Layer<ToolRuntime.Service, ExecutionBackend.BackendError, never>
 }
 
-export const configuredBackendLayer = (options: ConfiguredBackendOptions) =>
-  RelayExecution.execution.configuredLayer({
+export const configuredBackendLayer = (options: ConfiguredBackendOptions) => {
+  const relayOptions = {
     filename: options.filename,
     workspace: options.workspace,
     ...(options.settings === undefined ? {} : { settings: options.settings }),
@@ -62,7 +64,18 @@ export const configuredBackendLayer = (options: ConfiguredBackendOptions) =>
     threadToolGateway: options.threadToolGateway,
     ...(options.resolveLegacyRoute === undefined ? {} : { resolveLegacyRoute: options.resolveLegacyRoute }),
     toolRuntimeLayerForWorkspace: options.toolRuntimeLayerForWorkspace,
-  })
+  }
+  const relayLayer = pipe(relayOptions, RelayExecution.execution.configuredLayer, Layer.orDie)
+  return Layer.effectContext(
+    Effect.gen(function* () {
+      const scope = yield* Effect.scope
+      const built = yield* Effect.exit(Layer.buildWithScope(relayLayer, scope))
+      if (Exit.isFailure(built))
+        return yield* ExecutionBackend.BackendError.make({ message: Cause.pretty(built.cause) })
+      return built.value
+    }),
+  )
+}
 
 const executionModelRoutes = RelayExecution.execution.modelRoutes
 export const execution = {

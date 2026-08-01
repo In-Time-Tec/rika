@@ -1,4 +1,4 @@
-import { Config, Crypto, Effect, Encoding, Option } from "effect"
+import { Config, Crypto, Effect, Encoding, Function, Option } from "effect"
 import { downloadedBytes, downloadedText, failWith, latestReleaseVersion, releaseBaseUrlEnv } from "./release-download"
 import { installLayout, publishInstall } from "./release-install"
 
@@ -23,8 +23,16 @@ export const hostReleaseTarget = (host: ReleaseHost): ReleaseTarget | undefined 
   if (operatingSystem === undefined || processor === undefined) return undefined
   return releaseTargets.find((target) => target === `${operatingSystem}-${processor}`)
 }
-export const archiveFileName = (version: string, target: ReleaseTarget): string => `rika-${version}-${target}.tar.gz`
-export const archiveRootName = (version: string, target: ReleaseTarget): string => `rika-${version}-${target}`
+const archiveFileNameImpl = (version: string, target: ReleaseTarget): string => `rika-${version}-${target}.tar.gz`
+export const archiveFileName: {
+  (target: ReleaseTarget): (version: string) => string
+  (version: string, target: ReleaseTarget): string
+} = Function.dual(2, archiveFileNameImpl)
+const archiveRootNameImpl = (version: string, target: ReleaseTarget): string => `rika-${version}-${target}`
+export const archiveRootName: {
+  (target: ReleaseTarget): (version: string) => string
+  (version: string, target: ReleaseTarget): string
+} = Function.dual(2, archiveRootNameImpl)
 export const releaseVersion = (tag: string): string => (tag.startsWith("v") ? tag.slice(1) : tag)
 const numericVersionParts = (value: string): ReadonlyArray<number> | undefined => {
   const parts = value.split(".")

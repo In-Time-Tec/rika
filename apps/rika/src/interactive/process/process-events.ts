@@ -2,13 +2,22 @@ import * as InteractiveEvent from "@rika/product/interactive-event"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Effect, Schema } from "effect"
-import type { ThreadItem } from "@rika/terminal/terminal-state"
+import * as Thread from "@rika/product/thread-record"
 import { selectedThreadMetadata, update } from "@rika/terminal/terminal-state-reducer"
 import * as InteractiveController from "../controller/interactive-controller"
 import * as ThreadSelection from "../controller/terminal-thread-selection"
 import { makeFeedFrameBatcher } from "../controller/interactive-frame-batch"
+import type { InteractiveRuntimeContext } from "./interactive-runtime-context"
 
-type Runtime = any
+type Runtime = Pick<InteractiveRuntimeContext, "loop" | "fork" | "session" | "render"> & {
+  readonly refreshTerminalTitle: () => void
+  readonly traceTuiModelEvent: (
+    seenDeltas: Set<string>,
+    event: InteractiveEvent.InteractiveEvent,
+  ) => Effect.Effect<void>
+  readonly requestSelectionResync: (threadId: string, selectionEpoch: number) => void
+  readonly requestQueueResync: (threadId: Thread.ThreadId) => void
+}
 
 export const makeEventRouter = (runtime: Runtime) => {
   const {
@@ -145,7 +154,7 @@ export const makeEventRouter = (runtime: Runtime) => {
           loop.model.activeTurnId === event.turn.id
         )
           return
-        if (loop.model.queue.some((item: ThreadItem) => item.id === event.turn.id)) {
+        if (loop.model.queue.some((item) => item.id === event.turn.id)) {
           loop.model = ThreadSelection.removePromotedTurn(loop.model, event.threadId, event.turn.id)
           fork(session.readQueue(event.threadId))
         }

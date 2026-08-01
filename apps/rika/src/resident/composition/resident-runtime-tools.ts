@@ -5,13 +5,16 @@ import * as WebSearch from "@rika/coding-tools/web-search-service"
 import * as WebSearchProvider from "@rika/coding-tools/web-search-provider"
 import { FetchHttpClient } from "effect/unstable/http"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Cause, Effect, Layer, Option, Redacted } from "effect"
+import { Cause, Effect, Function, Layer, Option, Redacted } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ConfigurationService from "@rika/configuration/configuration-service"
 import type * as ConfigurationSettings from "@rika/configuration/configuration-settings"
 
-export const defaultWorkspaceToolRuntimeLayer = (
+const defaultWorkspaceToolRuntimeLayerImpl = (
   workspace: string,
-  effectiveConfig: (workspace: string) => Effect.Effect<ConfigurationSettings.EffectiveConfiguration, unknown, never>,
+  effectiveConfig: (
+    workspace: string,
+  ) => Effect.Effect<ConfigurationSettings.EffectiveConfiguration, ExecutionBackend.BackendError, never>,
 ) =>
   Layer.unwrap(
     effectiveConfig(workspace).pipe(
@@ -34,16 +37,30 @@ export const defaultWorkspaceToolRuntimeLayer = (
     ),
   ).pipe(Layer.orDie)
 
+export const defaultWorkspaceToolRuntimeLayer: {
+  (
+    effectiveConfig: (
+      workspace: string,
+    ) => Effect.Effect<ConfigurationSettings.EffectiveConfiguration, ExecutionBackend.BackendError, never>,
+  ): (workspace: string) => ReturnType<typeof defaultWorkspaceToolRuntimeLayerImpl>
+  (
+    workspace: string,
+    effectiveConfig: (
+      workspace: string,
+    ) => Effect.Effect<ConfigurationSettings.EffectiveConfiguration, ExecutionBackend.BackendError, never>,
+  ): ReturnType<typeof defaultWorkspaceToolRuntimeLayerImpl>
+} = Function.dual(2, defaultWorkspaceToolRuntimeLayerImpl)
+
 export const workspaceToolRuntimeLayer = (options: {
   readonly workspace: string
   readonly effectiveConfig: (
     workspace: string,
-  ) => Effect.Effect<ConfigurationSettings.EffectiveConfiguration, unknown, never>
+  ) => Effect.Effect<ConfigurationSettings.EffectiveConfiguration, ExecutionBackend.BackendError, never>
   readonly testMediaAnalyzerResponse: Option.Option<string>
   readonly testMediaAnalyzerError: Option.Option<string>
   readonly validate: (
     credentials: Readonly<Record<string, Redacted.Redacted<string>>>,
-  ) => Effect.Effect<void, unknown, never>
+  ) => Effect.Effect<void, ConfigurationService.WebProviderConfigurationError, never>
 }) =>
   Layer.unwrap(
     options.effectiveConfig(options.workspace).pipe(

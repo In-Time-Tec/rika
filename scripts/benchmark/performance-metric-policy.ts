@@ -1,3 +1,5 @@
+import { Function } from "effect"
+
 export type MetricDirection = "higher-is-better" | "lower-is-better" | "exact"
 export type MetricOperator = "gte" | "lte" | "eq"
 
@@ -70,7 +72,7 @@ const baselinePasses = (policy: PerformanceMetricPolicy, baseline: number, value
   return value === baseline
 }
 
-export const evaluateMetric = (
+const evaluateMetricImpl = (
   policy: PerformanceMetricPolicy,
   baseline: number,
   candidate: number,
@@ -82,3 +84,8 @@ export const evaluateMetric = (
   operator: policy.operator,
   pass: targetPasses(policy, candidate) && baselinePasses(policy, baseline, candidate),
 })
+
+export const evaluateMetric: {
+  (baseline: number, candidate: number): (policy: PerformanceMetricPolicy) => MetricEvaluation
+  (policy: PerformanceMetricPolicy, baseline: number, candidate: number): MetricEvaluation
+} = Function.dual(3, evaluateMetricImpl)

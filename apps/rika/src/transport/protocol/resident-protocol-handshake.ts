@@ -1,5 +1,6 @@
 import * as ResidentHandshake from "@rika/product/resident-service-handshake"
 import * as ResidentService from "@rika/product/resident-service"
+import { Function } from "effect"
 import { json } from "./resident-protocol"
 
 type ClientHandshakeOptions = {
@@ -31,7 +32,7 @@ export const makeClientHandshakePair = (options: ClientHandshakeOptions) => {
   return { handshake: json(signedHandshake), signedHandshake }
 }
 
-export const verifyServerHandshake = (
+const verifyServerHandshakeImpl = (
   token: string,
   client: ResidentHandshake.Handshake,
   server: ResidentService.ServerMessage,
@@ -40,3 +41,8 @@ export const verifyServerHandshake = (
   server.identity === client.identity &&
   server.clientNonce === client.clientNonce &&
   ResidentHandshake.HandshakeProtocol.verifyServerProof(token, client, server)
+
+export const verifyServerHandshake: {
+  (client: ResidentHandshake.Handshake, server: ResidentService.ServerMessage): (token: string) => boolean
+  (token: string, client: ResidentHandshake.Handshake, server: ResidentService.ServerMessage): boolean
+} = Function.dual(3, verifyServerHandshakeImpl)

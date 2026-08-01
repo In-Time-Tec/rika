@@ -6,6 +6,7 @@ import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import type { Model } from "@rika/terminal/terminal-state"
 import type { TranscriptBlock, TranscriptItem } from "@rika/terminal/terminal-message"
 import { applyRootUnits } from "@rika/terminal/terminal-transcript-presentation"
+import { Function } from "effect"
 import type { ProjectionStream } from "./interactive-controller"
 import { normalizeEntries, projectionFromStream } from "./interactive-transcript-window"
 
@@ -20,7 +21,7 @@ export const cleared = (model: Model): Model => ({
   eventCursor: undefined,
 })
 
-export const retaining = (model: Model, previous: Model): Model => ({
+const retainingImpl = (model: Model, previous: Model): Model => ({
   ...model,
   entries: previous.entries,
   blocks: previous.blocks,
@@ -31,7 +32,12 @@ export const retaining = (model: Model, previous: Model): Model => ({
   eventCursor: previous.eventCursor,
 })
 
-export const activeSeedEntries = (
+export const retaining: {
+  (previous: Model): (model: Model) => Model
+  (model: Model, previous: Model): Model
+} = Function.dual(2, retainingImpl)
+
+const activeSeedEntriesImpl = (
   activeTurn: Turn.Turn | undefined,
   entries: ReadonlyArray<TranscriptPage.Entry>,
 ): ReadonlyArray<TranscriptPage.Entry> => {
@@ -45,7 +51,14 @@ export const activeSeedEntries = (
   }))
 }
 
-export const project = (
+export const activeSeedEntries: {
+  (
+    entries: ReadonlyArray<TranscriptPage.Entry>,
+  ): (activeTurn: Turn.Turn | undefined) => ReadonlyArray<TranscriptPage.Entry>
+  (activeTurn: Turn.Turn | undefined, entries: ReadonlyArray<TranscriptPage.Entry>): ReadonlyArray<TranscriptPage.Entry>
+} = Function.dual(2, activeSeedEntriesImpl)
+
+const projectImpl = (
   model: Model,
   entries: ReadonlyArray<TranscriptPage.Entry>,
   displayCostUsd: number | undefined,
@@ -63,7 +76,19 @@ export const project = (
   return displayCostUsd === undefined ? withoutCost : { ...withoutCost, costUsd: displayCostUsd }
 }
 
-export const projectionEntries = (
+export const project: {
+  (
+    entries: ReadonlyArray<TranscriptPage.Entry>,
+    displayCostUsd: number | undefined,
+  ): (model: Model) => ReturnType<typeof projectImpl>
+  (
+    model: Model,
+    entries: ReadonlyArray<TranscriptPage.Entry>,
+    displayCostUsd: number | undefined,
+  ): ReturnType<typeof projectImpl>
+} = Function.dual(3, projectImpl)
+
+const projectionEntriesImpl = (
   turn: Turn.Turn,
   projection: TranscriptProjectionModel.Projection,
 ): ReadonlyArray<TranscriptPage.Entry> =>
@@ -75,7 +100,12 @@ export const projectionEntries = (
     ...(projection.costUsd === undefined ? {} : { projectionCostUsd: projection.costUsd }),
   }))
 
-export const displayedEntries = (
+export const projectionEntries: {
+  (projection: TranscriptProjectionModel.Projection): (turn: Turn.Turn) => ReadonlyArray<TranscriptPage.Entry>
+  (turn: Turn.Turn, projection: TranscriptProjectionModel.Projection): ReadonlyArray<TranscriptPage.Entry>
+} = Function.dual(2, projectionEntriesImpl)
+
+const displayedEntriesImpl = (
   entries: ReadonlyArray<TranscriptPage.Entry>,
   replayTurns: ReadonlyMap<string, Turn.Turn>,
   liveProjections: ReadonlyMap<string, TranscriptProjectionModel.Projection>,
@@ -105,6 +135,22 @@ export const displayedEntries = (
   }
   return displayed === entries ? entries : normalizeEntries(displayed)
 }
+
+export const displayedEntries: {
+  (
+    replayTurns: ReadonlyMap<string, Turn.Turn>,
+    liveProjections: ReadonlyMap<string, TranscriptProjectionModel.Projection>,
+    projectionStreams: ReadonlyMap<string, ProjectionStream> | undefined,
+    activeTurnId: string | undefined,
+  ): (entries: ReadonlyArray<TranscriptPage.Entry>) => ReturnType<typeof displayedEntriesImpl>
+  (
+    entries: ReadonlyArray<TranscriptPage.Entry>,
+    replayTurns: ReadonlyMap<string, Turn.Turn>,
+    liveProjections: ReadonlyMap<string, TranscriptProjectionModel.Projection>,
+    projectionStreams: ReadonlyMap<string, ProjectionStream> | undefined,
+    activeTurnId: string | undefined,
+  ): ReturnType<typeof displayedEntriesImpl>
+} = Function.dual(5, displayedEntriesImpl)
 
 export const reconcileTranscriptBlocks = (model: Model): Model => {
   const blocks: Array<TranscriptBlock> = []
@@ -169,9 +215,17 @@ const projections = (
   )
 }
 
-export const projectionFromEntries = (
+const projectionFromEntriesImpl = (
   entries: ReadonlyArray<TranscriptPage.Entry>,
   turnId: string,
   prompt: string,
 ): TranscriptProjectionModel.Projection =>
   projections(entries).get(turnId) ?? TranscriptProjection.Projection.empty(turnId, prompt)
+
+export const projectionFromEntries: {
+  (
+    turnId: string,
+    prompt: string,
+  ): (entries: ReadonlyArray<TranscriptPage.Entry>) => TranscriptProjectionModel.Projection
+  (entries: ReadonlyArray<TranscriptPage.Entry>, turnId: string, prompt: string): TranscriptProjectionModel.Projection
+} = Function.dual(3, projectionFromEntriesImpl)

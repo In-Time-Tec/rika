@@ -3,36 +3,30 @@ import * as InteractiveEvent from "@rika/product/interactive-event"
 import * as InteractiveSession from "@rika/product/interactive-session"
 import * as InteractiveFeedOverflow from "@rika/product/resident-interactive-feed"
 import * as ResidentService from "@rika/product/resident-service"
-import { Deferred, Effect, Fiber, Queue, Ref, Schema, Semaphore } from "effect"
+import { Deferred, Effect, Fiber, Function, Queue, Ref, Schema, Semaphore } from "effect"
+import type { Crypto as CryptoShape } from "effect/Crypto"
+import type { ResidentRoute, ResidentSession } from "./resident-host-types"
 import { json } from "../protocol/resident-protocol"
 import { serverMessageFrames } from "../protocol/resident-message-codec"
 
 export const interactiveFeedInFlightCapacity = 32
 
-export const routeKey = (connectionId: string, requestId: string): string => `${connectionId}\0${requestId}`
+const routeKeyImpl = (connectionId: string, requestId: string): string => `${connectionId}\0${requestId}`
+export const routeKey: {
+  (requestId: string): (connectionId: string) => string
+  (connectionId: string, requestId: string): string
+} = Function.dual(2, routeKeyImpl)
 
-type InteractiveRouter = (
+export type InteractiveRouter = (
   input: InteractiveFeedOverflow.InteractiveInput,
   session: InteractiveSession.InteractiveSession,
 ) => Effect.Effect<void, ProductOperation.OperationUnavailable>
 
 type RouterContext = {
-  readonly crypto: any
+  readonly crypto: CryptoShape
   readonly options: { readonly outboundCapacity: number }
   readonly requestByInput: WeakMap<object, { readonly requestId: string; readonly routeKey: string }>
-  readonly routes: Ref.Ref<any>
-}
-
-type ResidentSession = {
-  readonly session: InteractiveSession.InteractiveSession
-  readonly ended: Deferred.Deferred<void>
-  readonly feedGeneration: string
-  readonly commands: Map<number, Deferred.Deferred<void>>
-  readonly commandReleases: Map<number, Effect.Effect<void>>
-  readonly commandQueue: Queue.Queue<any>
-  readonly acceptCommand: (sequence: number) => boolean
-  readonly acknowledge: (throughSequence: number) => Effect.Effect<boolean>
-  readonly replay: (afterSequence: number) => Effect.Effect<void>
+  readonly routes: Ref.Ref<Map<string, ResidentRoute>>
 }
 
 export const makeInteractiveRouter = (context: RouterContext): InteractiveRouter => {

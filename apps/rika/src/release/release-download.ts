@@ -1,4 +1,4 @@
-import { Config, Effect, Option, Schema } from "effect"
+import { Config, Effect, Function, Option, Schema } from "effect"
 import { HttpClient } from "effect/unstable/http"
 
 const releaseRepository = "In-Time-Tec/rika"
@@ -24,7 +24,11 @@ export class ReleaseUpdateError extends Schema.TaggedErrorClass<ReleaseUpdateErr
   message: Schema.String,
 }) {}
 
-export const failWith = (failure: UpdateFailure, message: string) => ReleaseUpdateError.make({ failure, message })
+const failWithImpl = (failure: UpdateFailure, message: string) => ReleaseUpdateError.make({ failure, message })
+export const failWith: {
+  (message: string): (failure: UpdateFailure) => ReleaseUpdateError
+  (failure: UpdateFailure, message: string): ReleaseUpdateError
+} = Function.dual(2, failWithImpl)
 
 const configuredUrl = Effect.fn("ReleaseDownload.configuredUrl")(function* (variable: string) {
   const value = yield* Config.option(Config.string(variable)).pipe(

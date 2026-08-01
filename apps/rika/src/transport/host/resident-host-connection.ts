@@ -1,5 +1,6 @@
 import * as ProductOperation from "@rika/product/product-operation"
-import { Clock, Deferred, Effect, Fiber, Queue, Ref, Schema, Semaphore } from "effect"
+import { Clock, Console, Deferred, Effect, Fiber, FiberSet, Queue, Ref, Schema, Scope, Semaphore } from "effect"
+import type { Crypto as CryptoShape } from "effect/Crypto"
 import * as ResidentHandshake from "@rika/product/resident-service-handshake"
 import * as ResidentService from "@rika/product/resident-service"
 import { executeInteractiveCommand } from "@rika/product/interactive-command"
@@ -9,31 +10,42 @@ import { decodeClient, json, maxFrameBytes, parse } from "../protocol/resident-p
 import { transportError } from "../protocol/resident-message-codec"
 import { handleOperation } from "./resident-host-operation"
 import { routeKey as makeRouteKey } from "./resident-host-feed"
+import type { InteractiveRouter } from "./resident-host-feed"
+import type { ResidentRoute } from "./resident-host-types"
 
+type HostOptions = {
+  readonly identity: string
+  readonly token: string
+  readonly outboundCapacity: number
+}
+type Lifecycle = Effect.Success<ReturnType<typeof ResidentService.ServiceRuntime.makeLifecycle>>
 type ConnectionContext = {
-  readonly options: any
-  readonly crypto: any
-  readonly baseConsole: any
-  readonly hostScope: any
-  readonly serviceNonce: any
-  readonly graceFiber: any
-  readonly lifecycle: any
-  readonly hostWork: any
-  readonly activeConnections: any
-  readonly operationAdmission: any
-  readonly drainingFailure: any
-  readonly scheduleGrace: any
-  readonly abandonFiber: any
-  readonly scheduleAbandonment: any
-  readonly requestByInput: any
-  readonly routes: any
-  readonly interactive: any
-  readonly server: any
-  readonly operationReady: any
-  readonly hasActiveExecutionWork: any
+  readonly options: HostOptions
+  readonly crypto: CryptoShape
+  readonly baseConsole: Console.Console
+  readonly hostScope: Scope.Scope
+  readonly serviceNonce: string
+  readonly graceFiber: Ref.Ref<Fiber.Fiber<void> | undefined>
+  readonly lifecycle: Lifecycle
+  readonly hostWork: FiberSet.FiberSet<void, never>
+  readonly activeConnections: Ref.Ref<Map<string, Effect.Effect<void>>>
+  readonly operationAdmission: Semaphore.Semaphore
+  readonly drainingFailure: (requestId: string, operation: string) => string
+  readonly scheduleGrace: (generation: number, delay?: number) => Effect.Effect<void>
+  readonly abandonFiber: Ref.Ref<Fiber.Fiber<void> | undefined>
+  readonly scheduleAbandonment: (
+    generation: number,
+    requireActiveWork?: boolean,
+    sleepMilliseconds?: number,
+  ) => Effect.Effect<void>
+  readonly requestByInput: WeakMap<object, { readonly requestId: string; readonly routeKey: string }>
+  readonly routes: Ref.Ref<Map<string, ResidentRoute>>
+  readonly interactive: InteractiveRouter
+  readonly operationReady: Deferred.Deferred<import("@rika/product/product-operation-service").Interface>
+  readonly hasActiveExecutionWork: Effect.Effect<boolean>
 }
 
-export const makeConnectionHandler = (context: ConnectionContext): any => {
+export const makeConnectionHandler = (context: ConnectionContext) => {
   const {
     options,
     crypto,
@@ -54,10 +66,10 @@ export const makeConnectionHandler = (context: ConnectionContext): any => {
     operationReady,
     hasActiveExecutionWork,
   } = context
-  const activeConnectionsRef = activeConnections as Ref.Ref<any>
-  const abandonFiberRef = abandonFiber as Ref.Ref<any>
-  const graceFiberRef = graceFiber as Ref.Ref<any>
-  const routesRef = routes as Ref.Ref<any>
+  const activeConnectionsRef = activeConnections
+  const abandonFiberRef = abandonFiber
+  const graceFiberRef = graceFiber
+  const routesRef = routes
   return Effect.fn("ResidentTransport.connection")(function* (socket: Socket.Socket) {
     const rawWriter = yield* socket.writer
     const outbound = yield* Queue.bounded<string | Socket.CloseEvent>(options.outboundCapacity)
@@ -83,7 +95,12 @@ export const makeConnectionHandler = (context: ConnectionContext): any => {
     const inbound = yield* Semaphore.make(1)
     const attached = yield* Ref.make(false)
     const decodeClientFrame = makeClientMessageFrameDecoder()
-    const requests = yield* Ref.make(new Map<string, Fiber.Fiber<void, unknown>>())
+    const requests = yield* Ref.make(
+      new Map<
+        string,
+        Fiber.Fiber<void, ProductOperation.OperationUnavailable | ResidentService.ResidentServiceError>
+      >(),
+    )
     const connectionId = yield* crypto.randomUUIDv4
     const routeKey = (requestId: string) => makeRouteKey(connectionId, requestId)
     const close = (code: number, reason?: string) => writer(new Socket.CloseEvent(code, reason))
@@ -427,7 +444,7 @@ export const makeConnectionHandler = (context: ConnectionContext): any => {
                 hostWork,
                 options,
                 baseConsole,
-                rawWriter,
+                rawWriter: (frame) => rawWriter(frame).pipe(Effect.ignore),
                 operationReady,
                 operationAdmission,
                 drainingFailure,
@@ -440,8 +457,8 @@ export const makeConnectionHandler = (context: ConnectionContext): any => {
           Effect.gen(function* () {
             yield* Ref.update(activeConnectionsRef, (current) => (current.delete(connectionId), current))
             if (!(yield* Ref.get(attached))) return
-            const activeRequests = (yield* Ref.get(requests)) as Map<string, Fiber.Fiber<void, unknown>>
-            const activeRoutes = (yield* Ref.get(routesRef)) as Map<string, any>
+            const activeRequests = yield* Ref.get(requests)
+            const activeRoutes = yield* Ref.get(routesRef)
             for (const requestId of activeRequests.keys()) {
               const route = activeRoutes.get(routeKey(requestId))
               if (route === undefined) continue
@@ -468,7 +485,7 @@ export const makeConnectionHandler = (context: ConnectionContext): any => {
                 "rika.resident.generation": generation,
               }),
             )
-          }) as any,
+          }),
         ),
       )
   })

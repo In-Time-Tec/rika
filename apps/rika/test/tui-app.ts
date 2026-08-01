@@ -241,7 +241,7 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
   const terminalTitles: Array<string> = []
   let nextThread = options.idStart ?? 0
   let nextTurn = options.idStart ?? 0
-  let session: InteractiveSession | undefined
+  let session: InteractiveSession.InteractiveSession | undefined
   const reloadLoaded = yield* Deferred.make<void>()
   const runSync = Effect.runSyncWith(yield* Effect.context<never>())
   const runInteractive = interactiveTui({
