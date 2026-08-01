@@ -33,8 +33,6 @@ export const makeInteractiveShell = (input: any): any => {
   const typedInteractiveThread: Ref.Ref<Thread.Thread | undefined> = interactiveThread
   const typedMakeThreadId: Effect.Effect<Thread.ThreadId, never, never> = options.makeThreadId
   const typedExecutionDependencies: Context.Context<ThreadRepository.Service> = executionDependencies
-  const typedToolRuntimeLayer: Layer.Layer<ToolRuntime.Service, OperationError, never> | undefined =
-    options.toolRuntimeLayer?.(workspace)
   const typedActivateCreatedThread: (
     thread: Thread.Thread,
     epoch: number,
@@ -42,6 +40,8 @@ export const makeInteractiveShell = (input: any): any => {
   ) => Effect.Effect<void, OperationError, never> = activateCreatedThread
   return (requestedThreadId: Thread.ThreadId | undefined, command: string, incognito: boolean) => {
     const dispatch = sessionDispatch
+    const typedToolRuntimeLayer: Layer.Layer<ToolRuntime.Service, OperationError, never> | undefined =
+      options.toolRuntimeLayer?.(workspace)
     let ownerThreadId = requestedThreadId
     const runOwnedShell = (thread: Thread.Thread) =>
       runRecordedShell(

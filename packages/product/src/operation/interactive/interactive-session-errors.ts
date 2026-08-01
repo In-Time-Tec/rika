@@ -1,7 +1,6 @@
-import { Function } from "effect"
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product/turn-repository"
-import { Schema } from "effect"
+import { Function, Schema } from "effect"
 import type { InteractiveEvent } from "./interactive-event"
 import { operationFailureDetail } from "../operation-error"
 
@@ -26,13 +25,6 @@ const dispatchInteractiveFailureImpl = (
       })
 
 export const dispatchInteractiveFailure: {
-  (
-    arg1: unknown,
-    arg2?: Thread.ThreadId,
-  ): (arg0: (event: InteractiveEvent) => void) => ReturnType<typeof dispatchInteractiveFailureImpl>
-  (
-    arg0: (event: InteractiveEvent) => void,
-    arg1: unknown,
-    arg2?: Thread.ThreadId,
-  ): ReturnType<typeof dispatchInteractiveFailureImpl>
-} = Function.dual(3, dispatchInteractiveFailureImpl)
+  (error: unknown, threadId?: Thread.ThreadId): (dispatch: (event: InteractiveEvent) => void) => void
+  (dispatch: (event: InteractiveEvent) => void, error: unknown, threadId?: Thread.ThreadId): void
+} = Function.dual((args) => typeof args[0] === "function", dispatchInteractiveFailureImpl)

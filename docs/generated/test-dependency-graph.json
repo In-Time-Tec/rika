@@ -663,6 +663,14 @@
       "package": "effect"
     },
     {
+      "id": "external:effect/Crypto",
+      "workspace": "root",
+      "kind": "external",
+      "production": true,
+      "publicExports": [],
+      "package": "effect"
+    },
+    {
       "id": "external:effect/FileSystem",
       "workspace": "root",
       "kind": "external",

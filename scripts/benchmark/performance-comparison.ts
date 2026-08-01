@@ -142,21 +142,7 @@ export const comparePerformanceRuns: {
   (baseline: ReadonlyArray<PerformanceEvidence>, candidate: ReadonlyArray<PerformanceEvidence>): ComparisonResult
 } = Function.dual(2, comparePerformanceRunsImpl)
 
-const PerformanceMetricSampleSchema = Schema.Struct({
-  id: Schema.String,
-  unit: Schema.String,
-  value: Schema.optional(Schema.Finite),
-  status: Schema.Literals(["measured", "unsupported"]),
-  target: Schema.optional(Schema.Struct({ operator: Schema.String, value: Schema.Finite })),
-})
-const PerformanceEvidenceSchema = Schema.Struct({
-  schemaVersion: Schema.Finite,
-  evidence: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-  workload: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-  process: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-  metrics: Schema.Array(PerformanceMetricSampleSchema),
-})
-const EvidenceJson = Schema.fromJsonString(PerformanceEvidenceSchema)
+const EvidenceJson = Schema.UnknownFromJsonString
 class EvidenceReadError extends Schema.TaggedErrorClass<EvidenceReadError>()("EvidenceReadError", {
   path: Schema.String,
   message: Schema.String,

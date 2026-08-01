@@ -7,17 +7,16 @@ import * as ExecutionStatus from "@rika/product/execution-status"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ExecutionEvent from "@rika/product/execution-event"
 import * as ThreadActivity from "../../thread/query/thread-activity"
-import { Clock, Effect, PubSub } from "effect"
+import { Clock, Context, Effect, PubSub } from "effect"
 import { operationError } from "../operation-error"
 import type { InteractiveEvent } from "../interactive/interactive-event"
 
 export const makeExecutionProjection = (input: any) =>
   Effect.sync(() => {
-    const { dirtyTurnObservers, turnChanges, notifyThreadSummaries } = input
-    const typedProjectExecutionResult: (
-      threadId: Turn.Turn["threadId"],
-      result: ExecutionEvent.Result,
-    ) => Effect.Effect<void, import("../operation-error").OperationError, never> = input.projectExecutionResult
+    const { dirtyTurnObservers, turnChanges } = input
+    const typedNotifyThreadSummaries: Effect.Effect<void, import("../operation-error").OperationError, never> =
+      input.notifyThreadSummaries
+    const typedDependencyContext: Context.Context<ThreadSummaryRepository.Service> = input.dependencyContext
     const notifyTurnChanged = (turn: Pick<Turn.Turn, "id" | "threadId">) =>
       Effect.sync(() => dirtyTurnObservers.add(turn.id)).pipe(
         Effect.andThen(PubSub.publish(turnChanges, undefined)),
@@ -32,7 +31,7 @@ export const makeExecutionProjection = (input: any) =>
     const ensureTurnSummary = Effect.fn("ProductOperation.ensureTurnSummary")(function* (turn: Turn.Turn) {
       const summaries = yield* ThreadSummaryRepository.Service
       yield* summaries.ensureTurn(turn.id, turn.threadId, turn.updatedAt)
-      yield* notifyThreadSummaries
+      yield* typedNotifyThreadSummaries
       yield* notifyTurnChanged(turn)
     })
     const projectExecutionResult = Effect.fn("ProductOperation.projectExecutionResult")(function* (
@@ -41,8 +40,16 @@ export const makeExecutionProjection = (input: any) =>
     ) {
       const summaries = yield* ThreadSummaryRepository.Service
       yield* summaries.replaceTurn(ThreadActivity.projectionInput(threadId, result, yield* Clock.currentTimeMillis))
-      yield* notifyThreadSummaries
+      yield* typedNotifyThreadSummaries
     })
+    const typedProjectExecutionResult = (
+      threadId: Turn.Turn["threadId"],
+      result: ExecutionEvent.Result,
+    ): Effect.Effect<void, import("../operation-error").OperationError, never> =>
+      projectExecutionResult(threadId, result).pipe(
+        Effect.provide(typedDependencyContext),
+        Effect.mapError((error) => operationError(String(error), error)),
+      )
     const setTurnStatus = Effect.fn("ProductOperation.setTurnStatus")(function* (
       id: Turn.TurnId,
       status: ExecutionStatus.Status,
@@ -51,7 +58,7 @@ export const makeExecutionProjection = (input: any) =>
     ) {
       const turns = yield* TurnRepository.Service
       const turn = yield* turns.setStatus(id, status, lastCursor, now)
-      yield* notifyThreadSummaries
+      yield* typedNotifyThreadSummaries
       yield* notifyTurnChanged(turn)
       return turn
     })

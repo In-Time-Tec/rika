@@ -318,6 +318,15 @@
       "publicExports": []
     },
     {
+      "id": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
+      "path": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "apps/rika/src/interactive/process/process-configuration.ts",
       "path": "apps/rika/src/interactive/process/process-configuration.ts",
       "workspace": "@rika/cli",
@@ -752,6 +761,15 @@
     {
       "id": "apps/rika/src/transport/host/resident-host-transport.ts",
       "path": "apps/rika/src/transport/host/resident-host-transport.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/transport/host/resident-host-types.ts",
+      "path": "apps/rika/src/transport/host/resident-host-types.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -1484,6 +1502,14 @@
     },
     {
       "id": "external:effect/Config",
+      "workspace": "root",
+      "kind": "external",
+      "production": true,
+      "publicExports": [],
+      "package": "effect"
+    },
+    {
+      "id": "external:effect/Crypto",
       "workspace": "root",
       "kind": "external",
       "production": true,
@@ -11892,6 +11918,14 @@
     },
     {
       "from": "apps/rika/src/interactive/controller/interactive-activity.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/controller/interactive-activity.ts",
       "to": "packages/product/src/operation/interactive/interactive-event.ts",
       "specifier": "@rika/product/interactive-event",
       "kind": "import",
@@ -12014,6 +12048,14 @@
       "from": "apps/rika/src/interactive/controller/interactive-transcript-projection.ts",
       "to": "apps/rika/src/interactive/controller/interactive-transcript-window.ts",
       "specifier": "./interactive-transcript-window",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/controller/interactive-transcript-projection.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12292,6 +12334,14 @@
     },
     {
       "from": "apps/rika/src/interactive/process/interactive-process-input.ts",
+      "to": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
+      "specifier": "./interactive-runtime-context",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/interactive-process-input.ts",
       "to": "apps/rika/src/interactive/process/process-workspace.ts",
       "specifier": "./process-workspace",
       "kind": "import",
@@ -12308,24 +12358,8 @@
     },
     {
       "from": "apps/rika/src/interactive/process/interactive-process-input.ts",
-      "to": "packages/product/src/operation/interactive/interactive-session.ts",
-      "specifier": "@rika/product/interactive-session",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/interactive/process/interactive-process-input.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-surface.ts",
       "specifier": "@rika/terminal/opentui-surface",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/interactive/process/interactive-process-input.ts",
-      "to": "packages/terminal/src/presentation/transcript/terminal-transcript-presentation.ts",
-      "specifier": "@rika/terminal/terminal-transcript-presentation",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12374,6 +12408,14 @@
       "from": "apps/rika/src/interactive/process/interactive-process-loop.ts",
       "to": "apps/rika/src/interactive/process/interactive-process.ts",
       "specifier": "./interactive-process",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/interactive-process-loop.ts",
+      "to": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
+      "specifier": "./interactive-runtime-context",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12492,6 +12534,14 @@
     },
     {
       "from": "apps/rika/src/interactive/process/interactive-process-setup.ts",
+      "to": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
+      "specifier": "./interactive-runtime-context",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/interactive-process-setup.ts",
       "to": "apps/rika/src/interactive/process/process-configuration.ts",
       "specifier": "./process-configuration",
       "kind": "import",
@@ -12540,8 +12590,8 @@
     },
     {
       "from": "apps/rika/src/interactive/process/interactive-process-setup.ts",
-      "to": "packages/product/src/operation/interactive/interactive-session.ts",
-      "specifier": "@rika/product/interactive-session",
+      "to": "packages/product/src/operation/interactive/interactive-event.ts",
+      "specifier": "@rika/product/interactive-event",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12590,6 +12640,110 @@
       "from": "apps/rika/src/interactive/process/interactive-process.ts",
       "to": "packages/product/src/operation/interactive/interactive-event.ts",
       "specifier": "@rika/product/interactive-event",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
+      "to": "apps/rika/src/interactive/controller/interactive-controller.ts",
+      "specifier": "../controller/interactive-controller",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
+      "to": "apps/rika/src/interactive/process/interactive-process-loop.ts",
+      "specifier": "./interactive-process-loop",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
+      "to": "packages/product/src/operation/contract/product-operation.ts",
+      "specifier": "@rika/product/product-operation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
+      "to": "packages/product/src/operation/interactive/interactive-session.ts",
+      "specifier": "@rika/product/interactive-session",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
+      "to": "packages/product/src/thread/model/transcript-page.ts",
+      "specifier": "@rika/product/transcript-page",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-surface.ts",
+      "specifier": "@rika/terminal/opentui-surface",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
+      "to": "packages/terminal/src/presentation/transcript/terminal-transcript-presentation.ts",
+      "specifier": "@rika/terminal/terminal-transcript-presentation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
+      "to": "packages/terminal/src/state/model/terminal-state.ts",
+      "specifier": "@rika/terminal/terminal-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
+      "to": "packages/terminal/src/terminal-session.ts",
+      "specifier": "@rika/terminal/terminal-session",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
+      "to": "packages/transcript/src/schema/transcript-projection-model.ts",
+      "specifier": "@rika/transcript/transcript-projection-model",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12644,6 +12798,14 @@
     },
     {
       "from": "apps/rika/src/interactive/process/process-events.ts",
+      "to": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
+      "specifier": "./interactive-runtime-context",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/process-events.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -12660,8 +12822,8 @@
     },
     {
       "from": "apps/rika/src/interactive/process/process-events.ts",
-      "to": "packages/terminal/src/state/model/terminal-state.ts",
-      "specifier": "@rika/terminal/terminal-state",
+      "to": "packages/product/src/thread/model/thread-record.ts",
+      "specifier": "@rika/product/thread-record",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12790,6 +12952,14 @@
       "from": "apps/rika/src/interactive/process/process-runtime.ts",
       "to": "apps/rika/src/interactive/input/goodbye-message.ts",
       "specifier": "../input/goodbye-message",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/process-runtime.ts",
+      "to": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
+      "specifier": "./interactive-runtime-context",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -13636,6 +13806,14 @@
     },
     {
       "from": "apps/rika/src/resident/composition/resident-configuration-adapter.ts",
+      "to": "apps/rika/src/resident/composition/resident-product-config.ts",
+      "specifier": "./resident-product-config",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-configuration-adapter.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -13852,6 +14030,14 @@
     },
     {
       "from": "apps/rika/src/resident/composition/resident-execution-recovery.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-recovery.ts",
       "to": "packages/product/src/execution/contract/execution-service.ts",
       "specifier": "@rika/product/execution-service",
       "kind": "import",
@@ -13988,14 +14174,6 @@
     },
     {
       "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
-      "to": "apps/rika/src/resident/composition/resident-product-config.ts",
-      "specifier": "./resident-product-config",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
       "to": "apps/rika/src/resident/composition/resident-product-context.ts",
       "specifier": "./resident-product-context",
       "kind": "import",
@@ -14044,6 +14222,14 @@
     },
     {
       "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
+      "to": "packages/product/src/execution/contract/execution-service.ts",
+      "specifier": "@rika/product/execution-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
       "to": "packages/product/src/operation/contract/product-operation-service.ts",
       "specifier": "@rika/product/product-operation-service",
       "kind": "import",
@@ -14086,6 +14272,14 @@
       "from": "apps/rika/src/resident/composition/resident-product-layer.ts",
       "to": "packages/relay-execution/src/relay/execution/relay-execution-layer.ts",
       "specifier": "@rika/relay-execution/relay-execution-layer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-repository-layer.ts",
+      "to": "apps/rika/src/resident/composition/resident-configuration-adapter.ts",
+      "specifier": "./resident-configuration-adapter",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -14278,6 +14472,14 @@
       "from": "apps/rika/src/resident/composition/resident-runtime-tools.ts",
       "to": "packages/coding-tools/src/web-research/web-search-service.ts",
       "specifier": "@rika/coding-tools/web-search-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-runtime-tools.ts",
+      "to": "packages/configuration/src/settings/configuration-service.ts",
+      "specifier": "@rika/configuration/configuration-service",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -15012,6 +15214,14 @@
     },
     {
       "from": "apps/rika/src/transport/host/resident-host-connection.ts",
+      "to": "apps/rika/src/transport/host/resident-host-types.ts",
+      "specifier": "./resident-host-types",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/transport/host/resident-host-connection.ts",
       "to": "apps/rika/src/transport/protocol/resident-message-codec.ts",
       "specifier": "../protocol/resident-message-codec",
       "kind": "import",
@@ -15036,9 +15246,25 @@
     },
     {
       "from": "apps/rika/src/transport/host/resident-host-connection.ts",
+      "to": "external:effect/Crypto",
+      "specifier": "effect/Crypto",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/transport/host/resident-host-connection.ts",
       "to": "external:effect/unstable/socket/Socket",
       "specifier": "effect/unstable/socket/Socket",
       "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/transport/host/resident-host-connection.ts",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
+      "kind": "dynamic-import",
       "relationship": "runtime",
       "production": true
     },
@@ -15076,6 +15302,14 @@
     },
     {
       "from": "apps/rika/src/transport/host/resident-host-feed.ts",
+      "to": "apps/rika/src/transport/host/resident-host-types.ts",
+      "specifier": "./resident-host-types",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/transport/host/resident-host-feed.ts",
       "to": "apps/rika/src/transport/protocol/resident-message-codec.ts",
       "specifier": "../protocol/resident-message-codec",
       "kind": "import",
@@ -15094,6 +15328,14 @@
       "from": "apps/rika/src/transport/host/resident-host-feed.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/transport/host/resident-host-feed.ts",
+      "to": "external:effect/Crypto",
+      "specifier": "effect/Crypto",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -15268,6 +15510,14 @@
     },
     {
       "from": "apps/rika/src/transport/host/resident-host-operation.ts",
+      "to": "apps/rika/src/transport/host/resident-host-types.ts",
+      "specifier": "./resident-host-types",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/transport/host/resident-host-operation.ts",
       "to": "apps/rika/src/transport/protocol/resident-message-codec.ts",
       "specifier": "../protocol/resident-message-codec",
       "kind": "import",
@@ -15395,6 +15645,38 @@
       "production": true
     },
     {
+      "from": "apps/rika/src/transport/host/resident-host-types.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/transport/host/resident-host-types.ts",
+      "to": "packages/product/src/operation/contract/product-operation.ts",
+      "specifier": "@rika/product/product-operation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/transport/host/resident-host-types.ts",
+      "to": "packages/product/src/operation/interactive/interactive-session.ts",
+      "specifier": "@rika/product/interactive-session",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/transport/host/resident-host-types.ts",
+      "to": "packages/product/src/resident/resident-service.ts",
+      "specifier": "@rika/product/resident-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "apps/rika/src/transport/protocol/resident-message-codec.ts",
       "to": "apps/rika/src/transport/protocol/resident-protocol.ts",
       "specifier": "./resident-protocol",
@@ -15422,6 +15704,14 @@
       "from": "apps/rika/src/transport/protocol/resident-protocol-handshake.ts",
       "to": "apps/rika/src/transport/protocol/resident-protocol.ts",
       "specifier": "./resident-protocol",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/transport/protocol/resident-protocol-handshake.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -16758,6 +17048,14 @@
       "from": "apps/rika/test/openai-credential-store.native.test.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/openai-credential-store.native.test.ts",
+      "to": "packages/product/src/authentication/openai-auth-contract.ts",
+      "specifier": "@rika/product/openai-auth-contract",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -35100,6 +35398,14 @@
     },
     {
       "from": "packages/product/src/execution/ingest/execution-ingest-event-family.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/execution/ingest/execution-ingest-event-family.ts",
       "to": "packages/product/src/execution/contract/execution-event.ts",
       "specifier": "@rika/product/execution-event",
       "kind": "import",
@@ -35326,6 +35632,14 @@
       "from": "packages/product/src/execution/ingest/execution-ingest-lifecycle.ts",
       "to": "packages/product/src/execution/ingest/execution-ingest-state.ts",
       "specifier": "./execution-ingest-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/execution/ingest/execution-ingest-restore.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -35796,6 +36110,14 @@
     },
     {
       "from": "packages/product/src/execution/ingest/execution-projection-patch.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/execution/ingest/execution-projection-patch.ts",
       "to": "packages/product/src/execution/ingest/execution-ingest-state.ts",
       "specifier": "./execution-ingest-state",
       "kind": "import",
@@ -35990,6 +36312,14 @@
       "from": "packages/product/src/execution/lifecycle/abandoned-product-work-settlement.ts",
       "to": "packages/product/src/thread/repository/turn-repository.ts",
       "specifier": "../../thread/repository/turn-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/execution/lifecycle/child-projection-follower.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -37020,6 +37350,14 @@
     },
     {
       "from": "packages/product/src/operation/dispatch/product-operation-execution-projection.ts",
+      "to": "packages/product/src/operation/operation-error.ts",
+      "specifier": "../operation-error",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/product-operation-execution-projection.ts",
       "to": "packages/product/src/thread/model/thread-record.ts",
       "specifier": "@rika/product/thread-record",
       "kind": "import",
@@ -37087,6 +37425,14 @@
       "to": "packages/product/src/execution/contract/execution-service.ts",
       "specifier": "@rika/product/execution-service",
       "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/product-operation-execution-review.ts",
+      "to": "packages/product/src/execution/contract/execution-status.ts",
+      "specifier": "@rika/product/execution-status",
+      "kind": "dynamic-import",
       "relationship": "runtime",
       "production": true
     },
@@ -37166,6 +37512,14 @@
       "from": "packages/product/src/operation/dispatch/product-operation-execution.ts",
       "to": "packages/product/src/operation/dispatch/thread-result-reconciliation.ts",
       "specifier": "./thread-result-reconciliation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/product-operation-execution.ts",
+      "to": "packages/product/src/operation/operation-error.ts",
+      "specifier": "../operation-error",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -37748,6 +38102,22 @@
     },
     {
       "from": "packages/product/src/operation/dispatch/product-operation-run-branches.ts",
+      "to": "packages/product/src/operation/interactive/interactive-session.ts",
+      "specifier": "../interactive/interactive-session",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/product-operation-run-branches.ts",
+      "to": "packages/product/src/operation/operation-error.ts",
+      "specifier": "../operation-error",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/product-operation-run-branches.ts",
       "to": "packages/product/src/thread/model/thread-record.ts",
       "specifier": "@rika/product/thread-record",
       "kind": "import",
@@ -37766,6 +38136,14 @@
       "from": "packages/product/src/operation/dispatch/product-operation-run-branches.ts",
       "to": "packages/product/src/thread/repository/thread-summary-repository.ts",
       "specifier": "@rika/product/thread-summary-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/product-operation-run-branches.ts",
+      "to": "packages/product/src/thread/repository/turn-repository.ts",
+      "specifier": "@rika/product/turn-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -37844,6 +38222,14 @@
     },
     {
       "from": "packages/product/src/operation/dispatch/product-operation-runtime-execution-state.ts",
+      "to": "packages/product/src/operation/operation-error.ts",
+      "specifier": "../operation-error",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/product-operation-runtime-execution-state.ts",
       "to": "packages/product/src/thread/model/thread-record.ts",
       "specifier": "@rika/product/thread-record",
       "kind": "import",
@@ -37870,6 +38256,14 @@
       "from": "packages/product/src/operation/dispatch/product-operation-runtime-execution-state.ts",
       "to": "packages/product/src/thread/repository/turn-repository.ts",
       "specifier": "@rika/product/turn-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/product-operation-runtime-session.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -37910,6 +38304,14 @@
       "from": "packages/product/src/operation/dispatch/product-operation-runtime-session.ts",
       "to": "packages/product/src/operation/interactive/interactive-session-runtime.ts",
       "specifier": "../interactive/interactive-session-runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/product-operation-runtime-session.ts",
+      "to": "packages/product/src/operation/operation-error.ts",
+      "specifier": "../operation-error",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -38012,6 +38414,14 @@
     },
     {
       "from": "packages/product/src/operation/dispatch/product-operation-schedule.ts",
+      "to": "packages/product/src/thread/model/thread-record.ts",
+      "specifier": "@rika/product/thread-record",
+      "kind": "dynamic-import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/product-operation-schedule.ts",
       "to": "packages/product/src/thread/model/thread-result.ts",
       "specifier": "@rika/product/thread-result",
       "kind": "import",
@@ -38046,6 +38456,14 @@
       "from": "packages/product/src/operation/dispatch/product-operation-service.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/product-operation-service.ts",
+      "to": "packages/product/src/execution/contract/execution-service.ts",
+      "specifier": "@rika/product/execution-service",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -38340,6 +38758,14 @@
     },
     {
       "from": "packages/product/src/operation/dispatch/thread-result-reconciliation.ts",
+      "to": "packages/product/src/operation/operation-error.ts",
+      "specifier": "../operation-error",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/thread-result-reconciliation.ts",
       "to": "packages/product/src/thread/model/thread-result.ts",
       "specifier": "@rika/product/thread-result",
       "kind": "import",
@@ -38350,6 +38776,22 @@
       "from": "packages/product/src/operation/dispatch/thread-result-reconciliation.ts",
       "to": "packages/product/src/thread/model/turn-record.ts",
       "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/thread-result-reconciliation.ts",
+      "to": "packages/product/src/thread/queue/root-turn-owner.ts",
+      "specifier": "../../thread/queue/root-turn-owner",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/thread-result-reconciliation.ts",
+      "to": "packages/product/src/thread/repository/thread-interaction-repository.ts",
+      "specifier": "@rika/product/thread-interaction-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -38470,6 +38912,14 @@
       "from": "packages/product/src/operation/interactive/child-run-follower.ts",
       "to": "packages/product/src/operation/interactive/interactive-event.ts",
       "specifier": "./interactive-event",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/child-run-follower.ts",
+      "to": "packages/product/src/operation/operation-error.ts",
+      "specifier": "../operation-error",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -38884,6 +39334,14 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-recorded-shell.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-recorded-shell.ts",
       "to": "packages/product/src/thread/repository/thread-summary-repository.ts",
       "specifier": "@rika/product/thread-summary-repository",
       "kind": "import",
@@ -38916,6 +39374,14 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-selection-projection.ts",
+      "to": "packages/product/src/execution/ingest/execution-ingest-service.ts",
+      "specifier": "../../execution/ingest/execution-ingest-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-selection-projection.ts",
       "to": "packages/product/src/operation/interactive/interactive-event.ts",
       "specifier": "./interactive-event",
       "kind": "import",
@@ -38934,6 +39400,14 @@
       "from": "packages/product/src/operation/interactive/interactive-selection-projection.ts",
       "to": "packages/product/src/operation/interactive/interactive-thread-selection.ts",
       "specifier": "./interactive-thread-selection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-selection-projection.ts",
+      "to": "packages/product/src/operation/operation-error.ts",
+      "specifier": "../operation-error",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -39172,9 +39646,25 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-session-interface-controls.ts",
+      "to": "packages/product/src/execution/contract/execution-status.ts",
+      "specifier": "@rika/product/execution-status",
+      "kind": "dynamic-import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-interface-controls.ts",
       "to": "packages/product/src/operation/contract/product-operation.ts",
       "specifier": "../contract/product-operation",
       "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-interface-controls.ts",
+      "to": "packages/product/src/operation/interactive/interactive-event.ts",
+      "specifier": "./interactive-event",
+      "kind": "dynamic-import",
       "relationship": "runtime",
       "production": true
     },
@@ -39220,9 +39710,33 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-session-interface-controls.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-interface-controls.ts",
       "to": "packages/product/src/thread/query/thread-activity.ts",
       "specifier": "../../thread/query/thread-activity",
       "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-interface-controls.ts",
+      "to": "packages/product/src/thread/repository/turn-repository-contract.ts",
+      "specifier": "../../thread/repository/turn-repository-contract",
+      "kind": "dynamic-import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-interface-controls.ts",
+      "to": "packages/product/src/thread/repository/turn-repository-queue.ts",
+      "specifier": "../../thread/repository/turn-repository-queue",
+      "kind": "dynamic-import",
       "relationship": "runtime",
       "production": true
     },
@@ -39252,6 +39766,22 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-session-interface-events.ts",
+      "to": "packages/product/src/operation/interactive/interactive-event.ts",
+      "specifier": "./interactive-event",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-interface-events.ts",
+      "to": "packages/product/src/operation/interactive/interactive-operation-feed.ts",
+      "specifier": "./interactive-operation-feed",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-interface-events.ts",
       "to": "packages/product/src/operation/interactive/interactive-session.ts",
       "specifier": "./interactive-session",
       "kind": "import",
@@ -39262,6 +39792,14 @@
       "from": "packages/product/src/operation/interactive/interactive-session-interface-events.ts",
       "to": "packages/product/src/operation/interactive/interactive-shell-session.ts",
       "specifier": "./interactive-shell-session",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-interface-events.ts",
+      "to": "packages/product/src/operation/operation-error.ts",
+      "specifier": "../operation-error",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -39279,6 +39817,22 @@
       "to": "packages/product/src/execution/contract/execution-service.ts",
       "specifier": "@rika/product/execution-service",
       "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-interface-selection.ts",
+      "to": "packages/product/src/operation/contract/product-operation.ts",
+      "specifier": "../contract/product-operation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-interface-selection.ts",
+      "to": "packages/product/src/operation/interactive/interactive-event.ts",
+      "specifier": "./interactive-event",
+      "kind": "dynamic-import",
       "relationship": "runtime",
       "production": true
     },
@@ -39540,9 +40094,41 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-session-runtime.ts",
+      "to": "packages/product/src/execution/contract/execution-identifier.ts",
+      "specifier": "../../execution/contract/execution-identifier",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-runtime.ts",
+      "to": "packages/product/src/execution/contract/execution-service.ts",
+      "specifier": "@rika/product/execution-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-runtime.ts",
       "to": "packages/product/src/operation/dispatch/product-operation-options.ts",
       "specifier": "../dispatch/product-operation-options",
       "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-runtime.ts",
+      "to": "packages/product/src/operation/interactive/interactive-operation-feed.ts",
+      "specifier": "./interactive-operation-feed",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-runtime.ts",
+      "to": "packages/product/src/operation/interactive/interactive-operation-leaves.ts",
+      "specifier": "./interactive-operation-leaves",
+      "kind": "dynamic-import",
       "relationship": "runtime",
       "production": true
     },
@@ -39582,6 +40168,14 @@
       "from": "packages/product/src/operation/interactive/interactive-session-runtime.ts",
       "to": "packages/product/src/operation/interactive/interactive-session.ts",
       "specifier": "./interactive-session",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-runtime.ts",
+      "to": "packages/product/src/operation/operation-error.ts",
+      "specifier": "../operation-error",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -39676,9 +40270,33 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-session-steer.ts",
+      "to": "packages/product/src/operation/contract/product-operation.ts",
+      "specifier": "../contract/product-operation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-steer.ts",
+      "to": "packages/product/src/operation/interactive/interactive-event.ts",
+      "specifier": "./interactive-event",
+      "kind": "dynamic-import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-steer.ts",
       "to": "packages/product/src/operation/operation-error.ts",
       "specifier": "../operation-error",
       "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-steer.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "dynamic-import",
       "relationship": "runtime",
       "production": true
     },
@@ -39716,9 +40334,25 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-session-submission-stages.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-submission-stages.ts",
       "to": "packages/product/src/execution/contract/execution-service.ts",
       "specifier": "@rika/product/execution-service",
       "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-submission-stages.ts",
+      "to": "packages/product/src/execution/contract/execution-status.ts",
+      "specifier": "@rika/product/execution-status",
+      "kind": "dynamic-import",
       "relationship": "runtime",
       "production": true
     },
@@ -39772,6 +40406,14 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-session-submission-stages.ts",
+      "to": "packages/product/src/thread/queue/root-turn-owner.ts",
+      "specifier": "../../thread/queue/root-turn-owner",
+      "kind": "dynamic-import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-submission-stages.ts",
       "to": "packages/product/src/thread/repository/thread-repository.ts",
       "specifier": "@rika/product/thread-repository",
       "kind": "import",
@@ -39804,6 +40446,22 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-session-supervision.ts",
+      "to": "packages/product/src/execution/contract/execution-service.ts",
+      "specifier": "@rika/product/execution-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-supervision.ts",
+      "to": "packages/product/src/execution/contract/execution-status.ts",
+      "specifier": "@rika/product/execution-status",
+      "kind": "dynamic-import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-supervision.ts",
       "to": "packages/product/src/execution/ingest/execution-ingest-service.ts",
       "specifier": "../../execution/ingest/execution-ingest-service",
       "kind": "import",
@@ -39822,6 +40480,22 @@
       "from": "packages/product/src/operation/interactive/interactive-session-supervision.ts",
       "to": "packages/product/src/operation/interactive/interactive-event.ts",
       "specifier": "./interactive-event",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-supervision.ts",
+      "to": "packages/product/src/operation/interactive/interactive-operation-feed.ts",
+      "specifier": "./interactive-operation-feed",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-supervision.ts",
+      "to": "packages/product/src/operation/operation-error.ts",
+      "specifier": "../operation-error",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -39956,6 +40630,22 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-shell-session.ts",
+      "to": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
+      "specifier": "@rika/coding-tools/coding-tool-runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-shell-session.ts",
+      "to": "packages/product/src/operation/interactive/interactive-event.ts",
+      "specifier": "./interactive-event",
+      "kind": "dynamic-import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-shell-session.ts",
       "to": "packages/product/src/operation/interactive/interactive-recorded-shell.ts",
       "specifier": "./interactive-recorded-shell",
       "kind": "import",
@@ -40044,6 +40734,14 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-transcript-lifecycle.ts",
+      "to": "packages/product/src/operation/operation-error.ts",
+      "specifier": "../operation-error",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-transcript-lifecycle.ts",
       "to": "packages/product/src/thread/model/thread-record.ts",
       "specifier": "@rika/product/thread-record",
       "kind": "import",
@@ -40062,6 +40760,14 @@
       "from": "packages/product/src/operation/interactive/interactive-transcript-lifecycle.ts",
       "to": "packages/product/src/thread/repository/thread-summary-repository.ts",
       "specifier": "@rika/product/thread-summary-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-transcript-lifecycle.ts",
+      "to": "packages/product/src/thread/repository/usage-repository.ts",
+      "specifier": "@rika/product/usage-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -40086,6 +40792,14 @@
       "from": "packages/product/src/operation/interactive/interactive-transcript-page.ts",
       "to": "packages/product/src/operation/interactive/interactive-event.ts",
       "specifier": "./interactive-event",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-transcript-page.ts",
+      "to": "packages/product/src/operation/interactive/interactive-operation-feed.ts",
+      "specifier": "./interactive-operation-feed",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -40172,6 +40886,14 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-turn-submission.ts",
+      "to": "packages/product/src/operation/operation-error.ts",
+      "specifier": "../operation-error",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-turn-submission.ts",
       "to": "packages/product/src/thread/model/turn-record.ts",
       "specifier": "@rika/product/turn-record",
       "kind": "import",
@@ -40230,6 +40952,14 @@
       "from": "packages/product/src/operation/interactive/pending-turn-promotion.ts",
       "to": "packages/product/src/operation/interactive/interactive-event.ts",
       "specifier": "./interactive-event",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/pending-turn-promotion.ts",
+      "to": "packages/product/src/operation/operation-error.ts",
+      "specifier": "../operation-error",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -40412,6 +41142,14 @@
     },
     {
       "from": "packages/product/src/operation/interactive/transcript-access.ts",
+      "to": "packages/product/src/operation/operation-error.ts",
+      "specifier": "../operation-error",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/transcript-access.ts",
       "to": "packages/product/src/thread/model/transcript-page.ts",
       "specifier": "@rika/product/transcript-page",
       "kind": "import",
@@ -40446,6 +41184,14 @@
       "from": "packages/product/src/operation/interactive/transcript-window.ts",
       "to": "packages/product/src/operation/interactive/interactive-thread-selection.ts",
       "specifier": "./interactive-thread-selection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/transcript-window.ts",
+      "to": "packages/product/src/operation/operation-error.ts",
+      "specifier": "../operation-error",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -41900,8 +42646,24 @@
     },
     {
       "from": "packages/product/src/transcript/thread-transcript-window.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/transcript/thread-transcript-window.ts",
       "to": "packages/product/src/thread/model/transcript-page.ts",
       "specifier": "../thread/model/transcript-page",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/transcript/transcript-bounds.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -42198,6 +42960,14 @@
       "from": "packages/product/src/usage/usage-snapshot.ts",
       "to": "packages/product/src/usage/usage-total.ts",
       "specifier": "./usage-total",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/usage/usage-total.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -46524,6 +47294,14 @@
     },
     {
       "from": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "to": "external:@relayfx/sdk",
+      "specifier": "@relayfx/sdk",
+      "kind": "dynamic-import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -46623,6 +47401,14 @@
       "to": "packages/product/src/thread/tool/thread-tool-service.ts",
       "specifier": "@rika/product/thread-tool-service",
       "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-configured.ts",
+      "to": "packages/relay-execution/src/relay/execution/relay-execution-layer.ts",
+      "specifier": "./relay-execution-layer",
+      "kind": "dynamic-import",
       "relationship": "runtime",
       "production": true
     },
@@ -47444,6 +48230,14 @@
     },
     {
       "from": "packages/relay-execution/src/relay/execution/relay-execution-route.ts",
+      "to": "packages/product/src/execution/contract/execution-service.ts",
+      "specifier": "@rika/product/execution-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-execution-route.ts",
       "to": "packages/product/src/execution/contract/model-registration-identity.ts",
       "specifier": "@rika/product/model-registration-identity",
       "kind": "import",
@@ -47916,6 +48710,14 @@
     },
     {
       "from": "packages/relay-execution/src/relay/execution/relay-product-tools.ts",
+      "to": "external:@relayfx/sdk",
+      "specifier": "@relayfx/sdk",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-product-tools.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -48380,6 +49182,14 @@
     },
     {
       "from": "packages/relay-execution/src/relay/execution/relay-tool-composition.ts",
+      "to": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
+      "specifier": "@rika/coding-tools/coding-tool-runtime",
+      "kind": "dynamic-import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-tool-composition.ts",
       "to": "packages/coding-tools/src/web-research/read-web-page-service.ts",
       "specifier": "@rika/coding-tools/read-web-page-service",
       "kind": "import",
@@ -48399,6 +49209,14 @@
       "to": "packages/coding-tools/src/web-research/web-search-service.ts",
       "specifier": "@rika/coding-tools/web-search-service",
       "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-tool-composition.ts",
+      "to": "packages/product/src/execution/contract/execution-service.ts",
+      "specifier": "@rika/product/execution-service",
+      "kind": "dynamic-import",
       "relationship": "runtime",
       "production": true
     },
@@ -50401,6 +51219,14 @@
       "kind": "import",
       "relationship": "test",
       "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/model-provider-fixture.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
     },
     {
       "from": "packages/relay-execution/test/model/provider/model-provider-fixture.ts",
@@ -52484,6 +53310,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/rendering/opentui-render-transcript-revision.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/rendering/opentui-render-transcript-revision.ts",
       "to": "packages/terminal/src/presentation/transcript/transcript-tool-detail-types.ts",
       "specifier": "../../presentation/transcript/transcript-tool-detail-types",
       "kind": "import",
@@ -52566,6 +53400,14 @@
       "from": "packages/terminal/src/opentui/rendering/opentui-render-unit-bodies.ts",
       "to": "external:@opentui/core",
       "specifier": "@opentui/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/rendering/opentui-render-unit-bodies.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -52660,6 +53502,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/rendering/opentui-render-unit.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/rendering/opentui-render-unit.ts",
       "to": "external:string-width",
       "specifier": "string-width",
       "kind": "import",
@@ -52678,14 +53528,6 @@
       "from": "packages/terminal/src/opentui/rendering/opentui-render-unit.ts",
       "to": "packages/terminal/src/opentui/rendering/opentui-render-tool-detail.ts",
       "specifier": "./opentui-render-tool-detail",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/rendering/opentui-render-unit.ts",
-      "to": "packages/terminal/src/opentui/rendering/opentui-render-transcript-revision.ts",
-      "specifier": "./opentui-render-transcript-revision",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -52790,6 +53632,14 @@
       "from": "packages/terminal/src/opentui/rendering/opentui-render-unit.ts",
       "to": "packages/terminal/src/state/model/terminal-transcript-state.ts",
       "specifier": "../../state/model/terminal-transcript-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/rendering/opentui-render-window.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -52916,6 +53766,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/rendering/terminal-diff-text-adapter.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/rendering/terminal-diff-text-adapter.ts",
       "to": "packages/terminal/src/presentation/markdown/styled-text.ts",
       "specifier": "../../presentation/markdown/styled-text",
       "kind": "import",
@@ -52956,6 +53814,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/rendering/terminal-text-adapter.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/rendering/terminal-text-adapter.ts",
       "to": "packages/terminal/src/presentation/markdown/markdown-renderer.ts",
       "specifier": "../../presentation/markdown/markdown-renderer",
       "kind": "import",
@@ -52990,6 +53856,14 @@
       "from": "packages/terminal/src/opentui/surface/opentui-composer-region.ts",
       "to": "external:@opentui/core",
       "specifier": "@opentui/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-composer-region.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -53508,6 +54382,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-lifecycle-transcript.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-lifecycle-transcript.ts",
       "to": "packages/terminal/src/presentation/transcript/transcript-viewport-window.ts",
       "specifier": "../../presentation/transcript/transcript-viewport-window",
       "kind": "import",
@@ -53804,6 +54686,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-queue-presentation.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-queue-presentation.ts",
       "to": "external:string-width",
       "specifier": "string-width",
       "kind": "import",
@@ -53950,6 +54840,14 @@
       "from": "packages/terminal/src/opentui/surface/opentui-surface-content.ts",
       "to": "external:@opentui/core",
       "specifier": "@opentui/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-surface-content.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -55052,6 +55950,14 @@
     },
     {
       "from": "packages/terminal/src/presentation/transcript/transcript-projection-outcomes.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/transcript/transcript-projection-outcomes.ts",
       "to": "packages/terminal/src/presentation/transcript/transcript-agent-response.ts",
       "specifier": "./transcript-agent-response",
       "kind": "import",
@@ -55532,6 +56438,14 @@
     },
     {
       "from": "packages/terminal/src/state/model/terminal-layout-state.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/model/terminal-layout-state.ts",
       "to": "packages/terminal/src/state/model/terminal-loadable-state.ts",
       "specifier": "./terminal-loadable-state",
       "kind": "import",
@@ -55820,6 +56734,14 @@
     },
     {
       "from": "packages/terminal/src/state/model/terminal-thread-navigation.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/model/terminal-thread-navigation.ts",
       "to": "packages/terminal/src/state/model/terminal-loadable-state.ts",
       "specifier": "./terminal-loadable-state",
       "kind": "import",
@@ -55868,6 +56790,14 @@
     },
     {
       "from": "packages/terminal/src/state/model/terminal-usage-state.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/reducer/terminal-data-reducer.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -55940,6 +56870,14 @@
     },
     {
       "from": "packages/terminal/src/state/reducer/terminal-execution-reducer.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/reducer/terminal-execution-reducer.ts",
       "to": "packages/terminal/src/state/model/terminal-activity-state.ts",
       "specifier": "../model/terminal-activity-state",
       "kind": "import",
@@ -55998,6 +56936,14 @@
       "from": "packages/terminal/src/state/reducer/terminal-execution-reducer.ts",
       "to": "packages/terminal/src/state/model/terminal-state.ts",
       "specifier": "../model/terminal-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/reducer/terminal-keyboard-picker.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -56068,6 +57014,14 @@
     },
     {
       "from": "packages/terminal/src/state/reducer/terminal-keyboard-prelude.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/reducer/terminal-keyboard-prelude.ts",
       "to": "packages/terminal/src/presentation/terminal/terminal-keymap.ts",
       "specifier": "../../presentation/terminal/terminal-keymap",
       "kind": "import",
@@ -56124,6 +57078,14 @@
     },
     {
       "from": "packages/terminal/src/state/reducer/terminal-keyboard-reducer.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/reducer/terminal-keyboard-reducer.ts",
       "to": "packages/terminal/src/presentation/terminal/terminal-keymap.ts",
       "specifier": "../../presentation/terminal/terminal-keymap",
       "kind": "import",
@@ -56174,6 +57136,14 @@
       "from": "packages/terminal/src/state/reducer/terminal-keyboard-reducer.ts",
       "to": "packages/terminal/src/state/reducer/terminal-state-reducer.ts",
       "specifier": "./terminal-state-reducer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/reducer/terminal-overlay-reducer.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -57204,6 +58174,14 @@
     },
     {
       "from": "packages/terminal/test/characterization/execution-events-characterization-1-support.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/test/characterization/execution-events-characterization-1-support.ts",
       "to": "packages/transcript/src/schema/transcript-source-event.ts",
       "specifier": "@rika/transcript/transcript-source-event",
       "kind": "import",
@@ -57460,6 +58438,14 @@
     },
     {
       "from": "packages/terminal/test/characterization/terminal-state-characterization-1-support.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/test/characterization/terminal-state-characterization-1-support.ts",
       "to": "packages/terminal/src/presentation/terminal/terminal-keymap.ts",
       "specifier": "../../src/presentation/terminal/terminal-keymap",
       "kind": "import",
@@ -57673,6 +58659,14 @@
       "kind": "import",
       "relationship": "test",
       "production": false
+    },
+    {
+      "from": "packages/terminal/test/characterization/terminal-state-characterization-2-support.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
     },
     {
       "from": "packages/terminal/test/characterization/terminal-state-characterization-2-support.ts",
@@ -57939,6 +58933,14 @@
       "production": false
     },
     {
+      "from": "packages/terminal/test/integration/opentui-surface-characterization-1-geometry.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/test/integration/opentui-surface-characterization-1-support.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -58147,6 +59149,14 @@
       "production": false
     },
     {
+      "from": "packages/terminal/test/integration/opentui-surface-characterization-10-geometry.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/test/integration/opentui-surface-characterization-10-support.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -58345,6 +59355,14 @@
       "kind": "import",
       "relationship": "test",
       "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-surface-characterization-11-geometry.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
     },
     {
       "from": "packages/terminal/test/integration/opentui-surface-characterization-11-support.ts",
@@ -58619,6 +59637,14 @@
       "production": false
     },
     {
+      "from": "packages/terminal/test/integration/opentui-surface-characterization-13-geometry.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/test/integration/opentui-surface-characterization-13-support.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -58809,6 +59835,14 @@
       "kind": "import",
       "relationship": "test",
       "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-surface-characterization-14-geometry.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
     },
     {
       "from": "packages/terminal/test/integration/opentui-surface-characterization-14-support.ts",
@@ -59011,6 +60045,14 @@
       "production": false
     },
     {
+      "from": "packages/terminal/test/integration/opentui-surface-characterization-15-geometry.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/test/integration/opentui-surface-characterization-15-support.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -59145,6 +60187,14 @@
       "kind": "import",
       "relationship": "test",
       "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-surface-characterization-2-geometry.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
     },
     {
       "from": "packages/terminal/test/integration/opentui-surface-characterization-2-support.ts",
@@ -59355,6 +60405,14 @@
       "production": false
     },
     {
+      "from": "packages/terminal/test/integration/opentui-surface-characterization-3-geometry.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/test/integration/opentui-surface-characterization-3-support.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -59545,6 +60603,14 @@
       "kind": "import",
       "relationship": "test",
       "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-surface-characterization-4-geometry.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
     },
     {
       "from": "packages/terminal/test/integration/opentui-surface-characterization-4-support.ts",
@@ -59747,6 +60813,14 @@
       "production": false
     },
     {
+      "from": "packages/terminal/test/integration/opentui-surface-characterization-5-geometry.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/test/integration/opentui-surface-characterization-5-support.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -59939,6 +61013,14 @@
       "production": false
     },
     {
+      "from": "packages/terminal/test/integration/opentui-surface-characterization-6-geometry.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/test/integration/opentui-surface-characterization-6-support.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -60123,6 +61205,14 @@
       "production": false
     },
     {
+      "from": "packages/terminal/test/integration/opentui-surface-characterization-7-geometry.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/test/integration/opentui-surface-characterization-7-support.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -60305,6 +61395,14 @@
       "kind": "import",
       "relationship": "test",
       "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-surface-characterization-8-geometry.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
     },
     {
       "from": "packages/terminal/test/integration/opentui-surface-characterization-8-support.ts",
@@ -60505,6 +61603,14 @@
       "kind": "import",
       "relationship": "test",
       "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-surface-characterization-9-geometry.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
     },
     {
       "from": "packages/terminal/test/integration/opentui-surface-characterization-9-support.ts",
@@ -62724,6 +63830,14 @@
     },
     {
       "from": "scripts/benchmark/fold-persistence-benchmark.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/fold-persistence-benchmark.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -62891,6 +64005,14 @@
       "production": true
     },
     {
+      "from": "scripts/benchmark/performance-metric-policy.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "scripts/benchmark/populated-root-seed.ts",
       "to": "external:@effect/platform-bun/BunRuntime",
       "specifier": "@effect/platform-bun/BunRuntime",
@@ -62926,14 +64048,6 @@
       "from": "scripts/benchmark/populated-root-seed.ts",
       "to": "external:effect/PlatformError",
       "specifier": "effect/PlatformError",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/benchmark/populated-root-seed.ts",
-      "to": "external:effect/unstable/sql/SqlError",
-      "specifier": "effect/unstable/sql/SqlError",
       "kind": "import",
       "relationship": "runtime",
       "production": true
