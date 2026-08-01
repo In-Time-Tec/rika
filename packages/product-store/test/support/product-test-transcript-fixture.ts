@@ -1,3 +1,5 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
+import * as ThreadResult from "@rika/product/thread-result"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
@@ -6,12 +8,11 @@ import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Function } from "effect"
-import { ExecutionIngest } from "@rika/product/product-operation"
 
-const projectionVersion = ExecutionIngest.projectionVersion
+const projectionVersion = 4
 
 export interface StoreProjectionOptions {
-  readonly executionCheckpoints?: ReadonlyArray<TranscriptRepository.ExecutionCheckpoint>
+  readonly executionCheckpoints?: ReadonlyArray<TranscriptPage.ExecutionCheckpoint>
   readonly consumed?: Readonly<
     Record<
       string,
@@ -23,11 +24,11 @@ export interface StoreProjectionOptions {
 }
 
 export const invalidatedProjection: {
-  (turn: Turn.Turn, revision?: number, checkpointGeneration?: number): TranscriptRepository.Projection
-  (revision?: number, checkpointGeneration?: number): (turn: Turn.Turn) => TranscriptRepository.Projection
+  (turn: Turn.Turn, revision?: number, checkpointGeneration?: number): TranscriptPage.Projection
+  (revision?: number, checkpointGeneration?: number): (turn: Turn.Turn) => TranscriptPage.Projection
 } = Function.dual(
   (args) => typeof args[0] === "object" && args[0] !== null && "_tag" in args[0],
-  (turn: Turn.Turn, revision = -1, checkpointGeneration = 0): TranscriptRepository.Projection => ({
+  (turn: Turn.Turn, revision = -1, checkpointGeneration = 0): TranscriptPage.Projection => ({
     turn,
     units: [],
     checkpointGeneration,
@@ -40,7 +41,7 @@ export const invalidatedProjection: {
     usageCursors: undefined,
     pricingVersion: undefined,
     executionCheckpoints: [],
-    projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
+    projectionVersion: 2,
   }),
 )
 
@@ -85,7 +86,7 @@ const attachmentFor = (
   projection: TranscriptProjectionModel.Projection,
   executionId: string,
   units: ReadonlyArray<TranscriptUnit.Unit>,
-): TranscriptRepository.ExecutionAttachment => {
+): ThreadResult.ExecutionAttachment => {
   const sample = units[0]
   if (sample === undefined) {
     const parent = TranscriptCorrelation.childParentMatch(
@@ -144,7 +145,7 @@ const inferredExecutionCheckpoints = (
   turn: Turn.Turn,
   projection: TranscriptProjectionModel.Projection,
   options: StoreProjectionOptions,
-): ReadonlyArray<TranscriptRepository.ExecutionCheckpoint> => {
+): ReadonlyArray<TranscriptPage.ExecutionCheckpoint> => {
   const rootKey = TranscriptCorrelation.executionKey(String(turn.id))
   const executions = new Map<string, { readonly executionId: string; readonly units: Array<TranscriptUnit.Unit> }>()
   for (const unit of projection.units) {
@@ -154,7 +155,7 @@ const inferredExecutionCheckpoints = (
     else execution.units.push(unit)
   }
   if (!executions.has(rootKey)) executions.set(rootKey, { executionId: String(turn.id), units: [] })
-  const checkpoints: Array<TranscriptRepository.ExecutionCheckpoint> = []
+  const checkpoints: Array<TranscriptPage.ExecutionCheckpoint> = []
   for (const [executionKey, execution] of executions) {
     const { executionId, units } = execution
     const consumed = options.consumed?.[executionKey]

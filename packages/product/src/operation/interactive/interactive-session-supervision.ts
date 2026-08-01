@@ -1,4 +1,5 @@
 import * as Turn from "@rika/product/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
@@ -50,7 +51,7 @@ export const makeInteractiveSupervision = (input: any): any => {
                       .pipe(
                         Effect.flatMap((current) =>
                           current !== undefined &&
-                          Turn.isAgentExecution(current) &&
+                          ThreadResult.TurnResult.isAgentExecution(current) &&
                           !isTerminalStatus(current.status) &&
                           current.status !== "queued"
                             ? Effect.sleep("50 millis").pipe(Effect.andThen(notifyTurnChanged(current)))
@@ -97,7 +98,7 @@ export const makeInteractiveSupervision = (input: any): any => {
                 const turn = yield* turns.get(turnId)
                 if (
                   turn !== undefined &&
-                  Turn.isAgentExecution(turn) &&
+                  ThreadResult.TurnResult.isAgentExecution(turn) &&
                   !isTerminalStatus(turn.status) &&
                   turn.status !== "queued"
                 )

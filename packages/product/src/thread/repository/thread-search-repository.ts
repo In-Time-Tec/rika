@@ -3,13 +3,7 @@ import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Thread, ThreadId } from "@rika/product/thread-record"
 import { Turn } from "@rika/product/turn-record"
 
-export const schemaVersion = 2 as const
-export const defaultPageSize = 50
-export const maximumPageSize = 200
-export const maximumSnippetLength = 240
-export const maximumSnippets = 8
-
-export const MatchSource = Schema.Literals([
+const MatchSource = Schema.Literals([
   "title",
   "label",
   "humanPrompt",
@@ -18,18 +12,18 @@ export const MatchSource = Schema.Literals([
   "childAssistant",
   "file",
 ])
-export type MatchSource = typeof MatchSource.Type
+type MatchSource = typeof MatchSource.Type
 
-export const OmissionReason = Schema.Literals(["snippetLimit", "snippetLength"])
-export type OmissionReason = typeof OmissionReason.Type
+const OmissionReason = Schema.Literals(["snippetLimit", "snippetLength"])
+type OmissionReason = typeof OmissionReason.Type
 
-export const Cursor = Schema.Struct({ updatedAt: Schema.Finite, threadId: ThreadId })
-export type Cursor = typeof Cursor.Type
+const Cursor = Schema.Struct({ updatedAt: Schema.Finite, threadId: ThreadId })
+type Cursor = typeof Cursor.Type
 
-export const Snippet = Schema.Struct({ source: MatchSource, text: Schema.String })
-export type Snippet = typeof Snippet.Type
+const Snippet = Schema.Struct({ source: MatchSource, text: Schema.String })
+type Snippet = typeof Snippet.Type
 
-export const Result = Schema.Struct({
+const Result = Schema.Struct({
   schemaVersion: Schema.Literal(2),
   threadId: ThreadId,
   title: Schema.String,
@@ -41,9 +35,9 @@ export const Result = Schema.Struct({
   snippets: Schema.Array(Snippet),
   omissionReasons: Schema.Array(OmissionReason),
 })
-export type Result = typeof Result.Type
+type Result = typeof Result.Type
 
-export interface SearchInput {
+interface SearchInput {
   readonly workspace: string
   readonly query: string
   readonly includeArchived?: boolean
@@ -54,13 +48,13 @@ export interface SearchInput {
   readonly limit?: number
 }
 
-export interface SearchPage {
+interface SearchPage {
   readonly schemaVersion: 2
   readonly results: ReadonlyArray<Result>
   readonly nextCursor: Cursor | undefined
 }
 
-export interface RebuildInput {
+interface RebuildInput {
   readonly thread: Thread
   readonly turns: ReadonlyArray<Turn>
   readonly units: ReadonlyArray<TranscriptUnit.Unit>
@@ -76,4 +70,6 @@ export interface Interface {
   readonly removeThread: (threadId: ThreadId) => Effect.Effect<void, RepositoryError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/product/thread/repository/thread-search-repository/Service") {}
+export class Service extends Context.Service<Service, Interface>()(
+  "@rika/product/thread/repository/thread-search-repository/Service",
+) {}

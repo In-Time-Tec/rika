@@ -3,6 +3,9 @@ import { Schema } from "effect"
 export const ThreadState = Schema.Literals(["idle", "error", "queued", "running"])
 export type ThreadState = typeof ThreadState.Type
 
+export const StopIntent = Schema.Literals(["none", "requested"])
+export type StopIntent = typeof StopIntent.Type
+
 const ranked = [
   { rank: 2, state: "running", statuses: ["accepted", "running", "waiting"] },
   { rank: 1, state: "queued", statuses: ["queued"] },
@@ -24,7 +27,7 @@ export const rankCase = (column: string): string =>
     "ELSE 0 END",
   ].join(" ")
 
-export interface RankedThreadState {
+interface RankedThreadState {
   readonly rank: number
   readonly lastStatus: string | undefined
 }

@@ -6,6 +6,8 @@ import * as ThreadRepository from "../../thread/repository/thread-repository"
 import * as ThreadSummaryRepository from "../../thread/repository/thread-summary-repository"
 import * as TranscriptRepository from "../../thread/repository/transcript-repository"
 import * as Turn from "../../thread/model/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
+import * as ExecutionStatus from "@rika/product/execution-status"
 import * as TurnRepository from "../../thread/repository/turn-repository"
 import * as UsageRepository from "../../thread/repository/usage-repository"
 import * as ThreadActivity from "../../thread/query/thread-activity"
@@ -161,7 +163,7 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
         const thread = yield* dependencies.requireThread(repository, input.threadId)
         const threadTurns = yield* turns.list(thread.id)
         const usage = yield* dependencies.usageRepository.readThread(String(thread.id))
-        const statusNames: ReadonlyArray<Turn.Status> = [
+        const statusNames: ReadonlyArray<ExecutionStatus.Status> = [
           "accepted",
           "queued",
           "running",
@@ -205,7 +207,7 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
             if (boundary < 0 && input.atTurn !== undefined)
               return yield* operationError(`Turn ${input.atTurn} does not exist in thread ${input.threadId}`)
             const copiedSourceTurns = sourceTurns.slice(0, boundary + 1)
-            const runningShell = copiedSourceTurns.find(Turn.isRunningRecordedShell)
+            const runningShell = copiedSourceTurns.find(ThreadResult.TurnResult.isRunningRecordedShell)
             if (runningShell !== undefined)
               return yield* operationError(
                 `Cannot fork thread ${input.threadId} while recorded shell turn ${runningShell.id} is running`,
@@ -233,8 +235,8 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
               const transcripts = yield* TranscriptRepository.Service
               for (const sourceTurn of copiedSourceTurns) {
                 const id = yield* dependencies.makeTurnId
-                if (Turn.isRecordedShell(sourceTurn)) {
-                  if (!Turn.isTerminalRecordedShell(sourceTurn))
+                if (ThreadResult.TurnResult.isRecordedShell(sourceTurn)) {
+                  if (!ThreadResult.TurnResult.isTerminalRecordedShell(sourceTurn))
                     return yield* operationError(`Cannot fork running recorded shell turn ${sourceTurn.id}`)
                   const copied = yield* transcripts.copyRecordedShell(
                     { ...sourceTurn, id, threadId: fork.id },

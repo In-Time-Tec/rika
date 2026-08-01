@@ -1,6 +1,8 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
 import { Effect } from "effect"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as Turn from "@rika/product/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
@@ -18,12 +20,12 @@ export const initialTranscriptWindow = (input: {
 }) =>
   Effect.gen(function* () {
     const turnPage = yield* input.turns.page(input.state.thread.id, { limit: 50 })
-    const window: Array<ReadonlyArray<TranscriptRepository.Entry>> = []
+    const window: Array<ReadonlyArray<TranscriptPage.Entry>> = []
     let entryCount = 0
     let projectedTurns = 0
     let hasOlder = turnPage.hasOlder
     let reduced = false
-    let oldestCursor: TranscriptRepository.PageCursor | undefined
+    let oldestCursor: TranscriptPage.PageCursor | undefined
     for (const turn of turnPage.turns.toReversed()) {
       if (projectedTurns >= input.maxTurns) {
         hasOlder = true
@@ -31,12 +33,12 @@ export const initialTranscriptWindow = (input: {
       }
       if (turn.status === "queued") continue
       const projection = yield* input.transcripts.get(turn.id)
-      let entries: ReadonlyArray<TranscriptRepository.Entry>
+      let entries: ReadonlyArray<TranscriptPage.Entry>
       if (projection === undefined || projection.projectionVersion < ExecutionIngest.projectionVersion) {
-        if (Turn.isRecordedShell(turn))
+        if (ThreadResult.TurnResult.isRecordedShell(turn))
           return yield* input.fail(`Recorded shell turn ${turn.id} has no current durable transcript`)
         yield* input.ensureIngest(turn.threadId, turn.id)
-        if (!Turn.isAgentExecution(turn)) continue
+        if (!ThreadResult.TurnResult.isAgentExecution(turn)) continue
         const seed = TranscriptProjection.Projection.empty(turn.id, turn.prompt)
         entries = seed.units.map((unit) => ({
           turn,

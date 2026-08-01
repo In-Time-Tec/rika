@@ -1,9 +1,13 @@
 import * as ProductAgent from "../../agent/product-agent-service"
 import * as ExecutionBackend from "../../execution/contract/execution-service"
+import * as ExecutionChildRun from "@rika/product/execution-child-run"
 import * as Thread from "../../thread/model/thread-record"
 import * as ThreadRepository from "../../thread/repository/thread-repository"
 import * as Turn from "../../thread/model/turn-record"
+import * as ExecutionStatus from "@rika/product/execution-status"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as TurnRepository from "../../thread/repository/turn-repository"
+import * as TurnRepositoryContract from "../../thread/repository/turn-repository-contract"
 import * as ThreadSummaryRepository from "../../thread/repository/thread-summary-repository"
 import * as TranscriptRepository from "../../thread/repository/transcript-repository"
 import * as UsageRepository from "../../thread/repository/usage-repository"
@@ -21,7 +25,11 @@ export interface Dependencies {
   readonly pendingTurnCapacity: number
   readonly makeThreadId: Effect.Effect<Thread.ThreadId>
   readonly makeTurnId: Effect.Effect<Turn.TurnId>
-  readonly resolveExecutionRoute: (mode: "medium", tuning?: undefined, workspace?: string) => Effect.Effect<Turn.ExecutionRoutePin, unknown, never>
+  readonly resolveExecutionRoute: (
+    mode: "medium",
+    tuning?: undefined,
+    workspace?: string,
+  ) => Effect.Effect<ExecutionRouteSnapshot.ExecutionRoutePin, unknown, never>
   readonly toolRuntimeLayer: (workspace: string) => Layer.Layer<ToolRuntime.Service, OperationError, never>
   readonly productAgentLayer: Layer.Layer<ProductAgent.Service, OperationError, ExecutionBackend.Service> | undefined
   readonly backendLayer: Layer.Layer<ExecutionBackend.Service, unknown, never>
@@ -37,18 +45,32 @@ export interface Dependencies {
     never,
     never
   >
-  readonly createObservedSubmission: (turns: TurnRepository.Interface, input: TurnRepository.CreateInput) => Effect.Effect<{ readonly turn: Turn.Turn; readonly claimed: boolean }, unknown, never>
+  readonly createObservedSubmission: (
+    turns: TurnRepository.Interface,
+    input: TurnRepositoryContract.CreateInput,
+  ) => Effect.Effect<{ readonly turn: Turn.Turn; readonly claimed: boolean }, unknown, never>
   readonly ensureTurnSummary: (turn: Turn.Turn) => Effect.Effect<void, unknown, never>
-  readonly setTurnStatus: (id: Turn.TurnId, status: Turn.Status, cursor: string | undefined, now: number) => Effect.Effect<Turn.Turn, unknown, never>
-  readonly startReviewSettlement: (turn: Pick<Turn.AgentExecutionTurn, "id" | "lastCursor">, fanOutId: string, initial?: ExecutionBackend.FanOutInspection) => Effect.Effect<Fiber.Fiber<ExecutionBackend.FanOutInspection, OperationError>, unknown, never>
+  readonly setTurnStatus: (
+    id: Turn.TurnId,
+    status: ExecutionStatus.Status,
+    cursor: string | undefined,
+    now: number,
+  ) => Effect.Effect<Turn.Turn, unknown, never>
+  readonly startReviewSettlement: (
+    turn: Pick<Turn.AgentExecutionTurn, "id" | "lastCursor">,
+    fanOutId: string,
+    initial?: ExecutionChildRun.FanOutInspection,
+  ) => Effect.Effect<Fiber.Fiber<ExecutionChildRun.FanOutInspection, OperationError>, unknown, never>
   readonly releaseTurnObserver: (turnId: Turn.TurnId) => Effect.Effect<unknown, never, never>
   readonly encodeJson: (value: unknown) => string
   readonly operationError: (message: string) => Effect.Effect<never, OperationError>
   readonly unavailable: (input: Input, message: string) => OperationUnavailable
 }
 
-export const run = Effect.fn("ReviewOperation.run")(function* (input: Extract<Input, { readonly _tag: "Review" }>, dependencies: Dependencies) {
-
+export const run = Effect.fn("ReviewOperation.run")(function* (
+  input: Extract<Input, { readonly _tag: "Review" }>,
+  dependencies: Dependencies,
+) {
   if (dependencies.toolRuntimeLayer === undefined)
     return yield* dependencies.unavailable(input, "Review requires the local tool runtime")
   const workspace = input.workspace ?? dependencies.defaultWorkspace
@@ -159,9 +181,7 @@ export const run = Effect.fn("ReviewOperation.run")(function* (input: Extract<In
       lanes
         .map((lane) => {
           if (lane.output === undefined) {
-            return `## ${lane.id}\nReview lane ${lane.status}${
-              lane.error === undefined ? "" : `: ${lane.error}`
-            }`
+            return `## ${lane.id}\nReview lane ${lane.status}${lane.error === undefined ? "" : `: ${lane.error}`}`
           }
           const output = typeof lane.output === "string" ? lane.output : dependencies.encodeJson(lane.output)
           return `## ${lane.id}\n${output}`
@@ -182,7 +202,9 @@ export const run = Effect.fn("ReviewOperation.run")(function* (input: Extract<In
     ).pipe(Effect.mapError((error) => dependencies.unavailable(input, String(error))))
     yield* program.pipe(
       Effect.provide(reviewContext),
-      Effect.mapError((error) => dependencies.unavailable(input, error instanceof Error ? error.message : String(error))),
+      Effect.mapError((error) =>
+        dependencies.unavailable(input, error instanceof Error ? error.message : String(error)),
+      ),
     )
   }).pipe(Effect.scoped)
 })

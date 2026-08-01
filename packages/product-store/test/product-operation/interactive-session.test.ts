@@ -80,13 +80,13 @@ const active = (threadId: RuntimeFixtures.Thread.ThreadId, id = "active"): Runti
 })
 
 const serverEvents = (
-  events: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>,
-): ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> =>
+  events: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event>,
+): ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> =>
   events.map((event) => ({ ...event, timestampSource: "server" as const }))
 
 const completeServerTimeline = (
-  events: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>,
-): ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> => {
+  events: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event>,
+): ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> => {
   if (events.length === 0) return events
   const stamped = serverEvents(events)
   if (stamped.some((event) => event.type === "execution.started" || event.type === "execution.accepted")) return stamped
@@ -134,7 +134,7 @@ const completeActive = Effect.fn("InteractiveSessionTest.completeActive")(functi
 })
 
 const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
-  pagedEvents?: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>,
+  pagedEvents?: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event>,
   stalePageCursor: boolean = false,
   turnPageRequests?: Ref.Ref<ReadonlyArray<RuntimeFixtures.TurnRepository.PageCursor | undefined>>,
   cancelFailure: boolean = false,
@@ -208,11 +208,11 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
       ? {
           follow: (
             turnId: string,
-            checkpoint: string | RuntimeFixtures.ExecutionBackend.ExecutionCheckpoint | undefined,
-            onEvent?: (event: RuntimeFixtures.ExecutionBackend.Event) => void,
+            checkpoint: string | RuntimeFixtures.ExecutionEvent.ExecutionCheckpoint | undefined,
+            onEvent?: (event: RuntimeFixtures.ExecutionEvent.Event) => void,
           ) => {
             const afterCursor = typeof checkpoint === "string" ? checkpoint : checkpoint?.cursor
-            const output: RuntimeFixtures.ExecutionBackend.Event = {
+            const output: RuntimeFixtures.ExecutionEvent.Event = {
               executionId: turnId,
               cursor: "resumed-output",
               sequence: 2,
@@ -221,7 +221,7 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
               timestampSource: "server",
               text: "created file",
             }
-            const completed: RuntimeFixtures.ExecutionBackend.Event = {
+            const completed: RuntimeFixtures.ExecutionEvent.Event = {
               executionId: turnId,
               cursor: "resumed-done",
               sequence: 3,
@@ -1205,7 +1205,8 @@ describe("InteractiveSession controls", () => {
         expect(concurrent.some((event) => event._tag === "QueueUpdated")).toBe(false)
         expect(
           (yield* turns.list(RuntimeFixtures.Thread.ThreadId.make("shell-thread"))).find(
-            (turn) => RuntimeFixtures.Turn.isRecordedShell(turn) && turn.command === "printf alongside",
+            (turn) =>
+              RuntimeFixtures.ThreadResult.TurnResult.isRecordedShell(turn) && turn.command === "printf alongside",
           ),
         ).toMatchObject({
           _tag: "RecordedShell",
@@ -1250,7 +1251,7 @@ describe("InteractiveSession controls", () => {
     Effect.gen(function* () {
       const pagedEvents = Array.from(
         { length: 450 },
-        (_, index): RuntimeFixtures.ExecutionBackend.Event => ({
+        (_, index): RuntimeFixtures.ExecutionEvent.Event => ({
           executionId: "execution:active",
           cursor: `cursor-${index + 1}`,
           sequence: index + 1,
@@ -1287,7 +1288,7 @@ describe("InteractiveSession controls", () => {
     Effect.gen(function* () {
       const pagedEvents = Array.from(
         { length: 450 },
-        (_, index): RuntimeFixtures.ExecutionBackend.Event => ({
+        (_, index): RuntimeFixtures.ExecutionEvent.Event => ({
           executionId: "execution:active",
           cursor: `cursor-${index + 1}`,
           sequence: index + 1,
@@ -1323,7 +1324,7 @@ describe("InteractiveSession controls", () => {
         prompt: "queued prompt",
         now: 2,
       })
-      const shell: RuntimeFixtures.Turn.TerminalRecordedShellTurn = {
+      const shell: RuntimeFixtures.ThreadResult.TerminalRecordedShellTurn = {
         _tag: "RecordedShell",
         id: RuntimeFixtures.Turn.TurnId.make("recorded-shell"),
         threadId: older.id,
@@ -1600,7 +1601,7 @@ describe("InteractiveSession controls", () => {
         ),
       )
 
-      const olderEntries: Array<RuntimeFixtures.TranscriptRepository.Entry> = []
+      const olderEntries: Array<RuntimeFixtures.TranscriptPage.Entry> = []
       let hasOlder = initial.hasOlder
       let before = cursor
       for (let page = 0; page < 20 && hasOlder; page += 1) {
@@ -1756,7 +1757,7 @@ describe("InteractiveSession controls", () => {
 const subagentToolId = "done:call_1"
 const subagentChildId = "child:execution%3Adone:call_1"
 
-const subagentRootEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = serverEvents([
+const subagentRootEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = serverEvents([
   {
     executionId: "execution:done",
     cursor: "done-started",
@@ -1799,7 +1800,7 @@ const subagentRootEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> 
   { executionId: "execution:done", cursor: "done-final", sequence: 5, type: "execution.completed", createdAt: 5 },
 ])
 
-const subagentChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = serverEvents([
+const subagentChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = serverEvents([
   {
     executionId: subagentChildId,
     cursor: "childstarted~a0",
@@ -1837,18 +1838,18 @@ const subagentChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>
 const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagentReloadHarness")(function* (options: {
   readonly storedTree: TranscriptFixtures.TranscriptProjectionModel.Projection
   readonly turnLastCursor: string
-  readonly childReplayEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>
+  readonly childReplayEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event>
   readonly consumed?: Readonly<
     Record<
       string,
       { readonly cursor: string; readonly sequence: number; readonly status?: "completed" | "failed" | "cancelled" }
     >
   >
-  readonly turnStatus?: RuntimeFixtures.Turn.Status
+  readonly turnStatus?: RuntimeFixtures.ExecutionStatus.Status
   readonly followed?: Ref.Ref<ReadonlyArray<string>>
   readonly inspection?: (executionId: string) => RuntimeFixtures.ExecutionBackend.Inspection | undefined
-  readonly replayEvents?: (executionId: string) => ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>
-  readonly pageEvents?: (executionId: string, after: string | undefined) => RuntimeFixtures.ExecutionBackend.EventPage
+  readonly replayEvents?: (executionId: string) => ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event>
+  readonly pageEvents?: (executionId: string, after: string | undefined) => RuntimeFixtures.ExecutionEvent.EventPage
   readonly projectionVersion?: number
 }) {
   const subagentThread = thread("subagent-thread", 1)
@@ -1893,7 +1894,7 @@ const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagent
       children: [{ executionId: subagentChildId, status: "completed" }],
     }
   }
-  const eventsFor = (turnId: string): ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> => {
+  const eventsFor = (turnId: string): ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> => {
     const replay = options.replayEvents?.(turnId)
     if (replay !== undefined)
       return completeServerTimeline(replay).map((event) => Object.assign({}, event, { executionId: turnId }))
@@ -1983,7 +1984,7 @@ interface ObservedProjectionStream {
 
 const observedProjectionEntries = (
   stream: ObservedProjectionStream,
-): ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry> => {
+): ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry> => {
   const turn = stream.rootStatus === undefined ? stream.turn : { ...stream.turn, status: stream.rootStatus }
   return [...stream.units.values()].map((unit) => ({
     turn,
@@ -1993,7 +1994,7 @@ const observedProjectionEntries = (
   }))
 }
 
-const sortObservedEntries = (entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>) =>
+const sortObservedEntries = (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) =>
   entries.toSorted(
     (left, right) =>
       left.turn.createdAt - right.turn.createdAt ||
@@ -2002,7 +2003,7 @@ const sortObservedEntries = (entries: ReadonlyArray<RuntimeFixtures.TranscriptRe
   )
 
 const latestSelectionEntries = (events: ReadonlyArray<Operation.InteractiveEvent>) => {
-  let entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry> | undefined
+  let entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry> | undefined
   let selectionEpoch: number | undefined
   let threadId: string | undefined
   const streams = new Map<string, ObservedProjectionStream>()
@@ -2015,7 +2016,7 @@ const latestSelectionEntries = (events: ReadonlyArray<Operation.InteractiveEvent
       continue
     }
     if (event._tag === "TranscriptProjectionStarted") {
-      if (!RuntimeFixtures.Turn.isAgentExecution(event.turn)) continue
+      if (!RuntimeFixtures.ThreadResult.TurnResult.isAgentExecution(event.turn)) continue
       if (
         selectionEpoch !== undefined &&
         (event.selectionEpoch !== selectionEpoch || String(event.threadId) !== threadId)
@@ -2075,7 +2076,7 @@ const latestSelectionEntries = (events: ReadonlyArray<Operation.InteractiveEvent
 
 const awaitSelectionEntries = (
   events: ReadonlyArray<Operation.InteractiveEvent>,
-  until: (entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>) => boolean,
+  until: (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) => boolean,
 ) =>
   Effect.gen(function* () {
     for (let attempt = 0; attempt < 2_000; attempt += 1) {
@@ -2131,10 +2132,10 @@ const awaitPrependedPage = (events: ReadonlyArray<Operation.InteractiveEvent>, p
 const selectionEntriesFor = (
   session: Operation.InteractiveSession,
   threadId: RuntimeFixtures.Thread.ThreadId,
-  until?: (entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>) => boolean,
+  until?: (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) => boolean,
 ): Effect.Effect<
   {
-    readonly entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>
+    readonly entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>
     readonly events: ReadonlyArray<Operation.InteractiveEvent>
   },
   Operation.OperationUnavailable
@@ -2147,12 +2148,12 @@ const selectionEntriesFor = (
     return { entries, events }
   })
 
-const nestedSubagentReady = (entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>) => {
+const nestedSubagentReady = (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) => {
   const { nestedTool, nestedAnswer } = nestedSubagentExpectations(entries)
   return nestedTool && nestedAnswer
 }
 
-const nestedSubagentExpectations = (entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>) => {
+const nestedSubagentExpectations = (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) => {
   const nested = entries.filter((entry) => entry.unit.parentId === subagentToolId)
   const nestedTool = nested.some(
     (entry) =>
@@ -2172,7 +2173,7 @@ const nestedSubagentExpectations = (entries: ReadonlyArray<RuntimeFixtures.Trans
 describe("InteractiveSession subagent reload", () => {
   it.effect("refolds terminal child outcomes from Relay after a projection-version change", () =>
     Effect.gen(function* () {
-      const failedRootEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
+      const failedRootEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [
         ...subagentRootEvents.slice(0, 3),
         {
           executionId: "execution:done",
@@ -2205,7 +2206,7 @@ describe("InteractiveSession subagent reload", () => {
         projectionVersion: RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion,
       })
 
-      const reconciledParent = (entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>) =>
+      const reconciledParent = (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) =>
         entries.find(
           (entry) =>
             entry.unit.parentId === undefined &&
@@ -2238,7 +2239,7 @@ describe("InteractiveSession subagent reload", () => {
       const completedChildId = "child:execution%3Adone:completed"
       const failedChildId = "child:execution%3Adone:failed"
       const nestedChildId = `child:${encodeURIComponent(completedChildId)}:nested`
-      const rootEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
+      const rootEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [
         {
           executionId: "execution:done",
           cursor: "root-completed-tool",
@@ -2312,7 +2313,7 @@ describe("InteractiveSession subagent reload", () => {
           text: "resident was replaced during execution",
         },
       ]
-      const completedChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
+      const completedChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [
         {
           executionId: completedChildId,
           cursor: "nested-tool",
@@ -2337,7 +2338,7 @@ describe("InteractiveSession subagent reload", () => {
           createdAt: 7,
         },
       ]
-      const failedChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
+      const failedChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [
         {
           executionId: failedChildId,
           cursor: "failed-child",
@@ -2347,7 +2348,7 @@ describe("InteractiveSession subagent reload", () => {
           text: "child checks failed",
         },
       ]
-      const nestedChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
+      const nestedChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [
         {
           executionId: nestedChildId,
           cursor: "nested-answer",
@@ -2406,7 +2407,7 @@ describe("InteractiveSession subagent reload", () => {
           children: [],
         },
       }
-      const replayEvents: Readonly<Record<string, ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>>> = {
+      const replayEvents: Readonly<Record<string, ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event>>> = {
         done: rootEvents,
         [completedChildId]: completedChildEvents,
         [failedChildId]: failedChildEvents,
@@ -2443,7 +2444,7 @@ describe("InteractiveSession subagent reload", () => {
       expect(
         root.every(
           (entry) =>
-            RuntimeFixtures.Turn.isAgentExecution(entry.turn) &&
+            RuntimeFixtures.ThreadResult.TurnResult.isAgentExecution(entry.turn) &&
             entry.turn.status === "failed" &&
             entry.turn.lastCursor === "root-failed",
         ),
@@ -2537,7 +2538,7 @@ describe("InteractiveSession subagent reload", () => {
     Effect.gen(function* () {
       const nestedId = `child:${encodeURIComponent(subagentChildId)}:nested`
       const followed = yield* Ref.make<ReadonlyArray<string>>([])
-      const childEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
+      const childEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [
         {
           executionId: subagentChildId,
           cursor: "nested-call",
@@ -2562,7 +2563,7 @@ describe("InteractiveSession subagent reload", () => {
           createdAt: 5,
         },
       ]
-      const nestedEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
+      const nestedEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [
         {
           executionId: nestedId,
           cursor: "nested-started",
@@ -2572,7 +2573,7 @@ describe("InteractiveSession subagent reload", () => {
           timestampSource: "server",
         },
       ]
-      const failedRootEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
+      const failedRootEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [
         ...subagentRootEvents.slice(0, 3),
         {
           executionId: "execution:done",
@@ -2587,7 +2588,7 @@ describe("InteractiveSession subagent reload", () => {
         let children: RuntimeFixtures.ExecutionBackend.Inspection["children"] = []
         if (executionId === "done") children = [{ executionId: subagentChildId, status: "completed" }]
         else if (executionId === subagentChildId) children = [{ executionId: nestedId, status: "running" }]
-        let status: RuntimeFixtures.ExecutionBackend.Status = "running"
+        let status: RuntimeFixtures.ExecutionStatus.Status = "running"
         if (executionId === "done") status = "failed"
         else if (executionId === subagentChildId) status = "completed"
         return {
@@ -3052,11 +3053,11 @@ const spendExecutionId = String(spendTurnId)
 
 const stamped = (
   cursor: string,
-  type: RuntimeFixtures.ExecutionBackend.Event["type"],
+  type: RuntimeFixtures.ExecutionEvent.Event["type"],
   createdAt: number,
   sequence: number,
   fields: Record<string, unknown> = {},
-): RuntimeFixtures.ExecutionBackend.Event =>
+): RuntimeFixtures.ExecutionEvent.Event =>
   ({
     executionId: spendExecutionId,
     cursor,
@@ -3065,9 +3066,9 @@ const stamped = (
     createdAt,
     timestampSource: "server",
     ...fields,
-  }) as RuntimeFixtures.ExecutionBackend.Event
+  }) as RuntimeFixtures.ExecutionEvent.Event
 
-const spendEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
+const spendEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [
   stamped("spend-started", "execution.started", 10_000, 1),
   stamped("spend-usage", "model.attempt.completed", 20_000, 2, {
     data: { model_attempt_id: "spend-attempt", attempt: 1, cost: { amount: 0.75, currency: "USD" } },
@@ -3077,7 +3078,7 @@ const spendEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
 
 const spendCompleted = stamped("spend-completed", "execution.completed", 40_000, 4)
 
-const spendTimeline: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [...spendEvents, spendCompleted]
+const spendTimeline: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [...spendEvents, spendCompleted]
 
 const legacyUsageRow = () => {
   const folded = TranscriptFixtures.UsageCost.foldBatch(
@@ -3111,7 +3112,7 @@ const legacyUsageRow = () => {
 
 const makeSpendHarness = Effect.fn("InteractiveSessionTest.makeSpendHarness")(function* (options: {
   readonly gate?: Deferred.Deferred<void>
-  readonly turnStatus?: RuntimeFixtures.Turn.Status
+  readonly turnStatus?: RuntimeFixtures.ExecutionStatus.Status
   readonly legacy?: boolean
 }) {
   const spendTurn: RuntimeFixtures.Turn.AgentExecutionTurn = {

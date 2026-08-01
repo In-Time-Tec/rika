@@ -4,7 +4,10 @@ import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionWorkflow from "@rika/product/execution-workflow"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import { Context, Deferred, Effect, Fiber, Layer, Ref, Schema } from "effect"
 import { TestClock, TestConsole } from "effect/testing"
@@ -53,7 +56,7 @@ const layer = (
   options: {
     readonly repositoryLayer?: Layer.Layer<ThreadRepository.Service>
     readonly turnRepositoryLayer?: Layer.Layer<TurnRepository.Service>
-    readonly resolveExecutionRoute?: () => Effect.Effect<Turn.ExecutionRoutePin>
+    readonly resolveExecutionRoute?: () => Effect.Effect<ExecutionRouteSnapshot.ExecutionRoutePin>
     readonly toolRuntimeLayer?: Layer.Layer<ToolRuntime.Service>
     readonly backend?: ExecutionBackend.Interface
   } = {},
@@ -187,7 +190,7 @@ describe("Operation review dispatcher", () => {
       )
       const threads = yield* ThreadRepository.makeMemory()
       const turns = yield* TurnRepository.makeMemory()
-      const route = Turn.testExecutionRoute("medium")
+      const route = ExecutionRouteSnapshot.testExecutionRoute("medium")
       const agent = ProductAgent.Service.of({
         invoke: () => Effect.die("unused"),
         fanOut: () => Effect.die("unused"),
@@ -245,7 +248,7 @@ describe("Operation review dispatcher", () => {
       expect(submitted).toMatchObject({ workspace: "/work", executionRoute: route })
       const reviewTurn = yield* turns.get(Turn.TurnId.make("review-turn"))
       expect(
-        reviewTurn !== undefined && Turn.isAgentExecution(reviewTurn) ? reviewTurn.executionRoute : undefined,
+        reviewTurn !== undefined && ThreadResult.TurnResult.isAgentExecution(reviewTurn) ? reviewTurn.executionRoute : undefined,
       ).toEqual(route)
       expect(yield* turns.get(Turn.TurnId.make("review-turn"))).toMatchObject({
         status: "completed",
@@ -362,7 +365,7 @@ describe("Operation review dispatcher", () => {
       })
       const reviewBackend = ExecutionBackend.Service.of({
         ...backend,
-        inspectWorkflow: () => Effect.sync((): ExecutionBackend.WorkflowInspection | undefined => undefined),
+        inspectWorkflow: () => Effect.sync((): ExecutionWorkflow.WorkflowInspection | undefined => undefined),
         inspectFanOut: () =>
           Ref.update(inspections, (count) => count + 1).pipe(
             Effect.andThen(Ref.get(fanOutRegistered)),

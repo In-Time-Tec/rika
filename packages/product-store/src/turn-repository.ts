@@ -1,25 +1,20 @@
+import * as ThreadResult from "@rika/product/thread-result"
+import * as ExecutionStatus from "@rika/product/execution-status"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
+import { TurnLineage } from "@rika/product/thread-relationship"
+import { TurnAuthor } from "@rika/product/thread-relationship"
+import type { ExecutionRoutePin } from "@rika/product/execution-route-snapshot"
+import { ExecutionExtensionPin } from "@rika/product/execution-workflow"
+import { PromptPart } from "@rika/product/execution-request"
+import { Status } from "@rika/product/execution-status"
 import { Service } from "@rika/product/turn-repository"
 export { Service }
 import { Effect, Layer, Ref, Schema, Semaphore } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { ThreadId } from "@rika/product/thread-record"
-import * as ExecutionStatus from "@rika/product/execution-status"
-import {
-  AgentExecutionTurn,
-  ExecutionExtensionPin,
-  ExecutionRoutePin,
-  PromptPart,
-  RecordedShellTurn,
-  Status,
-  StopIntent,
-  Turn,
-  TurnAuthor,
-  TurnId,
-  TurnLineage,
-  isAgentExecution,
-  isRunningRecordedShell,
-} from "@rika/product/turn-record"
-import type { RunningRecordedShellTurn } from "@rika/product/turn-record"
+import { AgentExecutionTurn, RecordedShellTurn, Turn, TurnId } from "@rika/product/turn-record"
+import type { StopIntent } from "@rika/product/thread-state"
+import type { RunningRecordedShellTurn } from "@rika/product/thread-result"
 
 export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("TurnRepositoryError", {
   message: Schema.String,
@@ -229,7 +224,7 @@ const QueueStateRow = Schema.Struct({
 
 const ExtensionPinJson = Schema.fromJsonString(ExecutionExtensionPin)
 const PromptPartsJson = Schema.fromJsonString(Schema.Array(PromptPart))
-const ExecutionRouteJson = Schema.fromJsonString(ExecutionRoutePin)
+const ExecutionRouteJson = Schema.fromJsonString(ExecutionRouteSnapshot.ExecutionRouteSnapshot)
 const AuthorJson = Schema.fromJsonString(TurnAuthor)
 const LineageJson = Schema.fromJsonString(TurnLineage)
 const repositoryError = (error: unknown) =>
@@ -358,7 +353,11 @@ const decode = (row: unknown) =>
   }).pipe(Effect.mapError(repositoryError))
 
 const decodeAgent = (row: unknown) =>
-  decode(row).pipe(Effect.filterOrFail(isAgentExecution, () => repositoryError("Expected an AgentExecution turn")))
+  decode(row).pipe(
+    Effect.filterOrFail(ThreadResult.TurnResult.isAgentExecution, () =>
+      repositoryError("Expected an AgentExecution turn"),
+    ),
+  )
 
 export const StoredTurnRow = Row
 export const decodeStoredTurn = decode
@@ -371,7 +370,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
     const initialTurns = new Map(initial.map((turn) => [turn.id, clone(turn)]))
     const initialQueues = new Map<ThreadId, MemoryQueueState>()
     for (const turn of initialTurns.values()) {
-      if (!isAgentExecution(turn) || turn.status !== "queued") continue
+      if (!ThreadResult.TurnResult.isAgentExecution(turn) || turn.status !== "queued") continue
       const current = initialQueues.get(turn.threadId) ?? emptyQueueState
       initialQueues.set(turn.threadId, {
         ...current,
@@ -391,7 +390,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
     const modifyState = <A>(f: (state: MemoryState) => readonly [A, MemoryState]) => withLock(Ref.modify(state, f))
     const updateState = (f: (state: MemoryState) => MemoryState) => withLock(Ref.update(state, f))
     const agentExecutions: MemoryCoordinator["agentExecutions"] = Ref.get(state).pipe(
-      Effect.map((current) => [...current.turns.values()].filter(isAgentExecution).map(clone)),
+      Effect.map((current) => [...current.turns.values()].filter(ThreadResult.TurnResult.isAgentExecution).map(clone)),
     )
     const adoptRefold: MemoryCoordinator["adoptRefold"] = (expected, status, cursor, write) =>
       withLock(
@@ -400,7 +399,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
           const current = currentState.turns.get(expected.id)
           if (
             current === undefined ||
-            !isAgentExecution(current) ||
+            !ThreadResult.TurnResult.isAgentExecution(current) ||
             current.status !== expected.status ||
             current.lastCursor !== expected.lastCursor
           )
@@ -424,10 +423,10 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
             if (current !== undefined) return { _tag: "Stale" as const }
           } else if (
             current === undefined ||
-            !isRunningRecordedShell(current) ||
-            !isRunningRecordedShell(expected) ||
+            !ThreadResult.TurnResult.isRunningRecordedShell(current) ||
+            !ThreadResult.TurnResult.isRunningRecordedShell(expected) ||
             !sameTurn(current, expected) ||
-            isRunningRecordedShell(turn) ||
+            ThreadResult.TurnResult.isRunningRecordedShell(turn) ||
             turn.threadId !== current.threadId ||
             turn.prompt !== current.prompt ||
             turn.command !== current.command ||
@@ -463,7 +462,9 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
           if (current.turns.has(input.id)) return [{ _tag: "Duplicate" as const }, current] as const
           const active = [...current.turns.values()].some(
             (turn) =>
-              isAgentExecution(turn) && turn.threadId === input.threadId && ExecutionStatus.occupiesQueue(turn.status),
+              ThreadResult.TurnResult.isAgentExecution(turn) &&
+              turn.threadId === input.threadId &&
+              ExecutionStatus.occupiesQueue(turn.status),
           )
           const previousQueue = queueState(current, input.threadId)
           if (active && previousQueue.queuedCount >= input.queueCapacity)
@@ -594,7 +595,9 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
         return [...(yield* readState).turns.values()]
           .filter(
             (turn): turn is AgentExecutionTurn =>
-              isAgentExecution(turn) && turn.threadId === threadId && ExecutionStatus.isActiveStatus(turn.status),
+              ThreadResult.TurnResult.isAgentExecution(turn) &&
+              turn.threadId === threadId &&
+              ExecutionStatus.isActiveStatus(turn.status),
           )
           .toSorted((left, right) => left.createdAt - right.createdAt)[0]
       }),
@@ -604,7 +607,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
         const turns = [...current.turns.values()]
           .filter(
             (turn): turn is AgentExecutionTurn =>
-              isAgentExecution(turn) && turn.threadId === threadId && turn.status === "queued",
+              ThreadResult.TurnResult.isAgentExecution(turn) && turn.threadId === threadId && turn.status === "queued",
           )
           .toSorted((left, right) => left.createdAt - right.createdAt)
           .map(clone)
@@ -614,7 +617,9 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
         return [...(yield* readState).turns.values()]
           .filter(
             (turn): turn is AgentExecutionTurn =>
-              isAgentExecution(turn) && ExecutionStatus.occupiesQueue(turn.status) && turn.stopIntent === "none",
+              ThreadResult.TurnResult.isAgentExecution(turn) &&
+              ExecutionStatus.occupiesQueue(turn.status) &&
+              turn.stopIntent === "none",
           )
           .toSorted((left, right) => left.createdAt - right.createdAt)
           .map(clone)
@@ -623,7 +628,9 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
         return [...(yield* readState).turns.values()]
           .filter(
             (turn): turn is AgentExecutionTurn =>
-              isAgentExecution(turn) && ExecutionStatus.occupiesQueue(turn.status) && turn.stopIntent === "requested",
+              ThreadResult.TurnResult.isAgentExecution(turn) &&
+              ExecutionStatus.occupiesQueue(turn.status) &&
+              turn.stopIntent === "requested",
           )
           .toSorted((left, right) => left.createdAt - right.createdAt)
           .map(clone)
@@ -633,7 +640,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
           const existing = current.turns.get(id)
           if (
             existing === undefined ||
-            !isAgentExecution(existing) ||
+            !ThreadResult.TurnResult.isAgentExecution(existing) ||
             !ExecutionStatus.occupiesQueue(existing.status)
           ) {
             return [undefined, current] as const
@@ -648,12 +655,14 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
         return yield* modifyState((current) => {
           const hasActive = [...current.turns.values()].some(
             (turn) =>
-              isAgentExecution(turn) && turn.threadId === threadId && ExecutionStatus.isActiveStatus(turn.status),
+              ThreadResult.TurnResult.isAgentExecution(turn) &&
+              turn.threadId === threadId &&
+              ExecutionStatus.isActiveStatus(turn.status),
           )
           const queued = [...current.turns.values()]
             .filter(
               (turn): turn is AgentExecutionTurn =>
-                isAgentExecution(turn) &&
+                ThreadResult.TurnResult.isAgentExecution(turn) &&
                 turn.threadId === threadId &&
                 turn.status === "queued" &&
                 !current.claims.has(turn.id),
@@ -678,7 +687,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
             const existing = current.turns.get(claim.turn.id)
             if (
               existing === undefined ||
-              !isAgentExecution(existing) ||
+              !ThreadResult.TurnResult.isAgentExecution(existing) ||
               existing.status !== "queued" ||
               current.claims.get(claim.turn.id) !== claim.token
             )
@@ -815,7 +824,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
           if (turn === undefined || turn.status !== "accepted") return [{ _tag: "Unavailable" as const }, current]
           const hasOtherActive = [...current.turns.values()].some(
             (candidate) =>
-              isAgentExecution(candidate) &&
+              ThreadResult.TurnResult.isAgentExecution(candidate) &&
               candidate.id !== id &&
               candidate.threadId === turn.threadId &&
               ExecutionStatus.isActiveStatus(candidate.status),
@@ -882,7 +891,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
           Effect.gen(function* () {
             const currentState = yield* Ref.get(state)
             const current = currentState.turns.get(id)
-            if (current === undefined || !isAgentExecution(current)) return yield* missing(id)
+            if (current === undefined || !ThreadResult.TurnResult.isAgentExecution(current)) return yield* missing(id)
             const encoded = yield* Schema.encodeEffect(ExtensionPinJson)(pin).pipe(Effect.mapError(repositoryError))
             if (
               current.extensionPin !== undefined &&
@@ -914,7 +923,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
           ] => {
             const current = currentState.turns.get(id)
             if (current === undefined) return [{ _tag: "Missing" }, currentState]
-            if (!isAgentExecution(current)) return [{ _tag: "Missing" }, currentState]
+            if (!ThreadResult.TurnResult.isAgentExecution(current)) return [{ _tag: "Missing" }, currentState]
             if (status === "queued" || current.status === "queued") return [{ _tag: "Queued" }, currentState]
             if (isTerminalStatus(current.status)) return [{ _tag: "Ok", turn: clone(current) }, currentState]
             const { lastCursor: previousCursor, ...withoutCursor } = current
@@ -942,7 +951,11 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
       startAccepted: Effect.fn("TurnRepository.startAccepted")(function* (id, now) {
         return yield* modifyState((currentState) => {
           const current = currentState.turns.get(id)
-          if (current === undefined || !isAgentExecution(current) || current.status !== "accepted")
+          if (
+            current === undefined ||
+            !ThreadResult.TurnResult.isAgentExecution(current) ||
+            current.status !== "accepted"
+          )
             return [false, currentState]
           const next: AgentExecutionTurn = { ...current, status: "running", updatedAt: now }
           return [true, { ...currentState, turns: new Map(currentState.turns).set(id, next) }]
@@ -951,7 +964,11 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
       cancelAccepted: Effect.fn("TurnRepository.cancelAccepted")(function* (id, now) {
         return yield* modifyState((currentState) => {
           const current = currentState.turns.get(id)
-          if (current === undefined || !isAgentExecution(current) || current.status !== "accepted")
+          if (
+            current === undefined ||
+            !ThreadResult.TurnResult.isAgentExecution(current) ||
+            current.status !== "accepted"
+          )
             return [false, currentState]
           const next: AgentExecutionTurn = { ...current, status: "cancelled", updatedAt: now }
           return [true, { ...currentState, turns: new Map(currentState.turns).set(id, next) }]
@@ -962,7 +979,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
           const current = currentState.turns.get(id)
           if (
             current === undefined ||
-            !isAgentExecution(current) ||
+            !ThreadResult.TurnResult.isAgentExecution(current) ||
             current.status !== status ||
             current.lastCursor !== expectedCursor
           )

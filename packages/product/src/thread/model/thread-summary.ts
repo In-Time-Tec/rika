@@ -33,4 +33,3 @@ export const RepairCandidate = Schema.Struct({
   lastCursor: Schema.optionalKey(Schema.String),
 })
 export type RepairCandidate = typeof RepairCandidate.Type
-

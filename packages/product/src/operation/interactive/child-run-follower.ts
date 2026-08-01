@@ -1,6 +1,9 @@
 import { Effect } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
 import * as Turn from "@rika/product/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
+import * as ExecutionStatus from "@rika/product/execution-status"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as ThreadActivity from "../../thread/query/thread-activity"
@@ -16,18 +19,18 @@ export const followChildRun = (input: {
   readonly ensureIngest: (threadId: Thread.ThreadId, turnId: Turn.TurnId) => Effect.Effect<any, any, any>
   readonly deliverResultEvents: (
     turnId: Turn.TurnId,
-    events: ReadonlyArray<ExecutionBackend.Event>,
+    events: ReadonlyArray<ExecutionEvent.Event>,
     delivered?: ReadonlySet<string>,
   ) => void
   readonly setTurnStatus: (
     id: Turn.TurnId,
-    status: Turn.Status,
+    status: ExecutionStatus.Status,
     cursor: string | undefined,
     now: number,
   ) => Effect.Effect<any, any, any>
   readonly projectExecutionResult: (
     threadId: Thread.ThreadId,
-    result: ExecutionBackend.Result,
+    result: ExecutionEvent.Result,
   ) => Effect.Effect<any, any, any>
   readonly settleThread: (
     thread: Thread.Thread,
@@ -47,7 +50,7 @@ export const followChildRun = (input: {
     if (input.backend.follow === undefined) return
     const turn = yield* input.turns.get(input.turnId)
     if (turn === undefined) return yield* Effect.fail(new Error(`Turn ${input.turnId} does not exist`))
-    if (!Turn.isAgentExecution(turn))
+    if (!ThreadResult.TurnResult.isAgentExecution(turn))
       return yield* Effect.fail(new Error(`Recorded shell turn ${input.turnId} cannot be followed as an execution`))
     const thread = yield* input.threadForTurn(turn)
     yield* input.ensureIngest(turn.threadId, turn.id)

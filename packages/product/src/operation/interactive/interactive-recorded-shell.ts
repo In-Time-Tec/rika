@@ -1,6 +1,6 @@
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
 import * as Thread from "@rika/product/thread-record"
-import * as Turn from "@rika/product/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
@@ -44,7 +44,7 @@ export const runRecordedShell = (input: any, thread: Thread.Thread, command: str
     }
     const transcripts = yield* TranscriptRepository.Service
     const now = yield* Clock.currentTimeMillis
-    const runningTurn: Turn.RunningRecordedShellTurn = {
+    const runningTurn: ThreadResult.RunningRecordedShellTurn = {
       _tag: "RecordedShell",
       id: yield* options.makeTurnId,
       threadId: thread.id,
@@ -81,7 +81,7 @@ export const runRecordedShell = (input: any, thread: Thread.Thread, command: str
         )) as Exit.Exit<{ readonly text: string; readonly truncated: boolean; readonly exitCode?: number }, unknown>
         const completedAt = yield* Clock.currentTimeMillis
         const interrupted = processExit._tag === "Failure" && Cause.hasInterrupts(processExit.cause)
-        const terminalTurn: Turn.TerminalRecordedShellTurn =
+        const terminalTurn: ThreadResult.TerminalRecordedShellTurn =
           processExit._tag === "Success"
             ? {
                 ...runningTurn,

@@ -1,4 +1,6 @@
 import * as ExecutionBackend from "../../execution/contract/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionChildRun from "@rika/product/execution-child-run"
 import * as ExecutionStatus from "../../execution/contract/execution-status"
 import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"
 import * as ResolvedContext from "../../context/context-resolution-service"
@@ -6,7 +8,11 @@ import * as Thread from "../../thread/model/thread-record"
 import * as ThreadRepository from "../../thread/repository/thread-repository"
 import * as ThreadActivity from "../../thread/query/thread-activity"
 import * as Turn from "../../thread/model/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
+import * as ExecutionRequest from "@rika/product/execution-request"
+import * as ExecutionWorkflow from "@rika/product/execution-workflow"
 import * as TurnRepository from "../../thread/repository/turn-repository"
+import * as TurnQueuePromotion from "../../thread/queue/turn-queue-promotion"
 import { queuedTurnPromoteMaxAgeMs, staleQueuedTurnsError } from "../../thread/queue/pending-turn-policy"
 import {
   awaitSessionQuiescence,
@@ -26,8 +32,8 @@ export const reconcileInternal = Effect.fn("ProductOperation.reconcile")(functio
   ) => Effect.Effect<
     {
       readonly prompt: string
-      readonly promptParts: ReadonlyArray<Turn.PromptPart> | undefined
-      readonly extensionPin: Turn.ExecutionExtensionPin | undefined
+      readonly promptParts: ReadonlyArray<ExecutionRequest.PromptPart> | undefined
+      readonly extensionPin: ExecutionWorkflow.ExecutionExtensionPin | undefined
     },
     OperationError,
     | TurnRepository.Service
@@ -37,7 +43,7 @@ export const reconcileInternal = Effect.fn("ProductOperation.reconcile")(functio
   >,
   watchReviewOwner?: (
     turn: Turn.AgentExecutionTurn,
-    inspection: ExecutionBackend.FanOutInspection,
+    inspection: ExecutionChildRun.FanOutInspection,
   ) => Effect.Effect<void, OperationError>,
   ownership?: {
     readonly claim: (
@@ -47,7 +53,11 @@ export const reconcileInternal = Effect.fn("ProductOperation.reconcile")(functio
     readonly claimQueued: (
       threadId: Thread.ThreadId,
       now: number,
-    ) => Effect.Effect<TurnRepository.QueueClaim | undefined, TurnRepository.RepositoryError, TurnRepository.Service>
+    ) => Effect.Effect<
+      TurnQueuePromotion.QueueClaim | undefined,
+      TurnRepository.RepositoryError,
+      TurnRepository.Service
+    >
   },
   repairQueues: boolean = true,
 ) {
@@ -70,7 +80,7 @@ export const reconcileInternal = Effect.fn("ProductOperation.reconcile")(functio
           ? backend.inspectFanOut(turn.reviewFanOutId).pipe(
               Effect.flatMap((inspection) =>
                 Effect.gen(function* () {
-                  let status: Turn.Status = "failed"
+                  let status: ExecutionStatus.Status = "failed"
                   if (inspection !== undefined) {
                     status = fanOutTurnStatus(inspection.state)
                   }
@@ -112,7 +122,11 @@ export const reconcileInternal = Effect.fn("ProductOperation.reconcile")(functio
                         if (!(yield* turns.startAccepted(turn.id, now))) return
                       } else {
                         const current = yield* turns.get(turn.id)
-                        if (current === undefined || !Turn.isAgentExecution(current) || current.status !== turn.status)
+                        if (
+                          current === undefined ||
+                          !ThreadResult.TurnResult.isAgentExecution(current) ||
+                          current.status !== turn.status
+                        )
                           return
                       }
                       const result = yield* backend.start({
@@ -201,7 +215,7 @@ export const reconcileInternal = Effect.fn("ProductOperation.reconcile")(functio
         }
         const thread = prepare === undefined ? undefined : yield* (yield* ThreadRepository.Service).get(threadId)
         if (prepare !== undefined && thread === undefined) return
-        const executePromoted = (claim: TurnRepository.QueueClaim) =>
+        const executePromoted = (claim: TurnQueuePromotion.QueueClaim) =>
           Effect.gen(function* () {
             const promotedTurn = claim.turn
             const prepared = yield* prepare === undefined
@@ -261,8 +275,8 @@ export const reconcileInternal = Effect.fn("ProductOperation.reconcile")(functio
         while (true) {
           if ((yield* turns.readQueue(threadId)).queuedCount === 0) return
           if ((yield* awaitSessionQuiescence(backend, threadId)) !== undefined) return
-          let promotedTurn: TurnRepository.QueueClaim
-          let result: ExecutionBackend.Result
+          let promotedTurn: TurnQueuePromotion.QueueClaim
+          let result: ExecutionEvent.Result
           if (ownership === undefined) {
             const promoted = yield* turns.claimNextQueued(threadId, yield* Clock.currentTimeMillis)
             if (promoted === undefined) return
@@ -308,8 +322,8 @@ export const reconcile = Effect.fn("ProductOperation.reconcilePublic")(function*
   ) => Effect.Effect<
     {
       readonly prompt: string
-      readonly promptParts: ReadonlyArray<Turn.PromptPart> | undefined
-      readonly extensionPin: Turn.ExecutionExtensionPin | undefined
+      readonly promptParts: ReadonlyArray<ExecutionRequest.PromptPart> | undefined
+      readonly extensionPin: ExecutionWorkflow.ExecutionExtensionPin | undefined
     },
     OperationError,
     | TurnRepository.Service
@@ -319,7 +333,7 @@ export const reconcile = Effect.fn("ProductOperation.reconcilePublic")(function*
   >,
   watchReviewOwner?: (
     turn: Turn.AgentExecutionTurn,
-    inspection: ExecutionBackend.FanOutInspection,
+    inspection: ExecutionChildRun.FanOutInspection,
   ) => Effect.Effect<void, OperationError>,
 ): Effect.fn.Return<
   void,

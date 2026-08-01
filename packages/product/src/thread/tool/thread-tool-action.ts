@@ -4,6 +4,8 @@ import * as ToolInvocation from "@rika/coding-tools/tool-invocation"
 import * as Turn from "@rika/product/turn-record"
 import { Effect, Option } from "effect"
 import * as ThreadQuery from "../query/thread-query-service"
+import type { Selector } from "../query/thread-query-input"
+import type { ReadSuccess } from "../query/thread-result-delivery"
 import * as ThreadToolService from "./thread-tool-service"
 
 const error = (tool: string, cause: { readonly _tag: string }) =>
@@ -26,7 +28,7 @@ const queryForInvocation = (factory: ThreadQuery.Factory["Service"], resolveWork
     return yield* factory.forWorkspace(workspace)
   })
 
-const publicSelection = (selector: ThreadQuery.Selector) => {
+const publicSelection = (selector: Selector) => {
   if (selector._tag === "overview") return { mode: "overview" as const }
   if (selector._tag === "recent")
     return {
@@ -65,7 +67,7 @@ const publicSelection = (selector: ThreadQuery.Selector) => {
   }
 }
 
-export const publicReadResult = (result: ThreadQuery.ReadSuccess) => ({
+export const publicReadResult = (result: ReadSuccess) => ({
   ...result,
   selector: publicSelection(result.selector),
   omissions: result.omissions.map((omission) => ({

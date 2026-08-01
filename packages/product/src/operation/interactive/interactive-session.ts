@@ -1,6 +1,6 @@
 import * as Thread from "@rika/product/thread-record"
 import * as TranscriptPage from "@rika/product/transcript-page"
-import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRequest from "@rika/product/execution-request"
 import { Effect } from "effect"
 import { ModeId } from "@rika/configuration/behavior-mode"
 import { OperationUnavailable } from "../contract/product-operation-service"
@@ -11,7 +11,7 @@ export interface InteractiveSession {
   readonly submit: (
     prompt: string,
     mode?: ModeId,
-    promptParts?: ReadonlyArray<Turn.PromptPart>,
+    promptParts?: ReadonlyArray<ExecutionRequest.PromptPart>,
     modelTuning?: { readonly fastMode?: boolean },
     submissionId?: string,
   ) => Effect.Effect<void, OperationUnavailable>
@@ -44,4 +44,3 @@ export interface InteractiveSession {
   readonly previewThread: (threadId: string) => Effect.Effect<void, OperationUnavailable>
   readonly reopenThread: (selectionEpoch: number) => Effect.Effect<void, OperationUnavailable>
 }
-

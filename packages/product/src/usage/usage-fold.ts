@@ -9,7 +9,7 @@ import { Lifecycle, ProjectionFailure, isLifecycleEvent, isObservedEvent, isServ
 import { executionIntervals } from "./usage-active-time"
 import { empty, type Snapshot } from "./usage-snapshot"
 import { accumulate, difference, noTotals, shifts, type Totals } from "./usage-total"
-import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
 
 declare const UsageFoldType: unique symbol
 
@@ -182,7 +182,7 @@ const unreadableMutable = (value: OwnedUsageFold, input: RootExecution, key: str
 
 const applyActive = (
   value: OwnedUsageFold,
-  input: RootExecution & { readonly event: ExecutionBackend.Event },
+  input: RootExecution & { readonly event: ExecutionEvent.Event },
 ): Result.Result<void, ProjectionFailure> => {
   const event = input.event
   if (!Lifecycle.isActiveEventType(event.type)) return Result.succeed(undefined)
@@ -303,7 +303,7 @@ const applyActive = (
 
 const applyAttempt = (
   value: OwnedUsageFold,
-  input: RootExecution & { readonly event: ExecutionBackend.Event },
+  input: RootExecution & { readonly event: ExecutionEvent.Event },
 ): Result.Result<void, ProjectionFailure> => {
   const event = input.event
   if (event.executionId.length === 0)
@@ -406,7 +406,7 @@ const applyAttempt = (
 
 export const applyUsageFoldEvent = (
   fold: UsageFold,
-  input: RootExecution & { readonly event: ExecutionBackend.Event },
+  input: RootExecution & { readonly event: ExecutionEvent.Event },
 ): Result.Result<void, ProjectionFailure> => {
   const executionId = TranscriptCorrelation.executionKey(input.event.executionId)
   const normalized =
@@ -450,7 +450,7 @@ export const completeExecution = (
 
 export const foldEvents = (
   snapshot: Snapshot,
-  observations: ReadonlyArray<RootExecution & { readonly event: ExecutionBackend.Event }>,
+  observations: ReadonlyArray<RootExecution & { readonly event: ExecutionEvent.Event }>,
 ): Result.Result<Snapshot, ProjectionFailure> => {
   const fold = freshUsageFold(snapshot)
   for (const observation of observations) {

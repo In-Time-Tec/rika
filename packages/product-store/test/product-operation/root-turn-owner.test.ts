@@ -1,20 +1,23 @@
 import { assert, it } from "@effect/vitest"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionStatus from "@rika/product/execution-status"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionRequest from "@rika/product/execution-request"
 import { Deferred, Effect, Ref } from "effect"
 import * as RootTurnOwner from "../../../product/src/thread/queue/root-turn-owner"
 
 const threadId = Thread.ThreadId.make("thread")
-const turn = (id: string, status: Turn.Status, createdAt = 0): Turn.Turn => ({
+const turn = (id: string, status: ExecutionStatus.Status, createdAt = 0): Turn.Turn => ({
   _tag: "AgentExecution",
   id: Turn.TurnId.make(id),
   threadId,
   prompt: id,
   status,
   stopIntent: "none",
-  executionRoute: Turn.testExecutionRoute("medium"),
+  executionRoute: ExecutionRouteSnapshot.testExecutionRoute("medium"),
   author: { _tag: "Human" },
   lineage: { _tag: "Original" },
   createdAt,
@@ -23,7 +26,7 @@ const turn = (id: string, status: Turn.Status, createdAt = 0): Turn.Turn => ({
 
 const backend = (starts: Ref.Ref<number>, follows: Ref.Ref<number>) =>
   ({
-    start: (input: ExecutionBackend.StartInput) =>
+    start: (input: ExecutionRequest.StartInput) =>
       Ref.update(starts, (value) => value + 1).pipe(
         Effect.as({ turnId: String(input.turnId), status: "completed", events: [] } as const),
       ),
@@ -75,7 +78,7 @@ it.effect("rejects terminal claims and centralizes root start and follow", () =>
       threadId,
       turnId: Turn.TurnId.make("new"),
       prompt: "prompt",
-      executionRoute: Turn.testExecutionRoute("medium"),
+      executionRoute: ExecutionRouteSnapshot.testExecutionRoute("medium"),
     })
     yield* owner.follow(Turn.TurnId.make("new"), { cursor: "cursor", sequence: 1 }, undefined, undefined, undefined)
     assert.strictEqual(yield* Ref.get(starts), 1)

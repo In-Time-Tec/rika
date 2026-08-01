@@ -1,6 +1,9 @@
+import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Schema } from "effect"
 import { Turn, TurnId } from "./turn-record"
+import type { AgentExecutionTurn } from "./turn-record"
+import type { ExecutionAttachment } from "./thread-result"
 
 export interface Entry {
   readonly turn: Turn
@@ -29,3 +32,42 @@ export const PageCursor = Schema.Struct({
   turnId: TurnId,
   orderKey: Schema.NonEmptyString,
 })
+
+export interface ExecutionCheckpoint {
+  readonly executionKey: string
+  readonly executionId: string
+  readonly cursor: string
+  readonly sequence: number
+  readonly status?: "completed" | "failed" | "cancelled"
+  readonly state: TranscriptProjectionModel.ProjectionState
+  readonly attachment?: ExecutionAttachment
+}
+
+export interface Projection {
+  readonly turn: Turn
+  readonly units: ReadonlyArray<TranscriptUnit.Unit>
+  readonly checkpointGeneration: number
+  readonly revision: number
+  readonly modelPhase: number
+  readonly usableCompletionSequence: number | undefined
+  readonly oldestCursor: string | undefined
+  readonly checkpointCursor: string | undefined
+  readonly costUsd: number | undefined
+  readonly usageCursors: ReadonlyArray<string> | undefined
+  readonly pricingVersion: string | undefined
+  readonly executionCheckpoints: ReadonlyArray<ExecutionCheckpoint>
+  readonly projectionVersion: number
+}
+
+export interface Page {
+  readonly entries: ReadonlyArray<Entry>
+  readonly hasOlder: boolean
+  readonly hasNewer?: boolean
+  readonly oldestCursor: PageCursor | undefined
+  readonly newestCursor?: PageCursor | undefined
+  readonly threadCostUsd: number
+}
+
+export type RefoldWriteResult =
+  | { readonly _tag: "Committed"; readonly turn: AgentExecutionTurn }
+  | { readonly _tag: "Stale" }

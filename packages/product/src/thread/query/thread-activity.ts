@@ -1,17 +1,17 @@
+import * as ExecutionEvent from "@rika/product/execution-event"
 import { ExecutionId } from "../../execution/contract/execution-identifier"
 import * as ExecutionStatus from "../../execution/contract/execution-status"
 import * as ThreadSummary from "../model/thread-summary"
 import * as ThreadSummaryRepository from "../repository/thread-summary-repository"
 import type * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
-import type * as ExecutionBackend from "@rika/product/execution-service"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Function } from "effect"
 
 const record = (value: unknown): Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null ? (value as Readonly<Record<string, unknown>>) : {}
 
-const patchFromExplicitEvent = (event: ExecutionBackend.Event): string | undefined => {
+const patchFromExplicitEvent = (event: ExecutionEvent.Event): string | undefined => {
   if (!event.type.includes("diff")) return undefined
   if (event.text !== undefined && event.text.length > 0) return event.text
   const data = event.data ?? record(event.content?.[0])
@@ -19,7 +19,7 @@ const patchFromExplicitEvent = (event: ExecutionBackend.Event): string | undefin
   return typeof patch === "string" && patch.length > 0 ? patch : undefined
 }
 
-const patchFromToolResult = (event: ExecutionBackend.Event): string | undefined => {
+const patchFromToolResult = (event: ExecutionEvent.Event): string | undefined => {
   if (event.type !== "tool.result.received") return undefined
   const data = event.data ?? record(event.content?.[0])
   const diff = record(data.output).diff
@@ -59,7 +59,7 @@ export const editTotalsForPatch = (patch: string): ThreadSummary.EditTotals => {
   return totals
 }
 
-export const editTotals = (events: ReadonlyArray<ExecutionBackend.Event>): ThreadSummary.EditTotals => {
+export const editTotals = (events: ReadonlyArray<ExecutionEvent.Event>): ThreadSummary.EditTotals => {
   const ordered = events.toSorted((left, right) => left.sequence - right.sequence)
   const explicit = ordered.flatMap((event) => {
     const patch = patchFromExplicitEvent(event)
@@ -86,23 +86,23 @@ export const editTotals = (events: ReadonlyArray<ExecutionBackend.Event>): Threa
 }
 
 export const latestCursor: {
-  (turnId: string, events: ReadonlyArray<ExecutionBackend.Event>): string | undefined
-  (events: ReadonlyArray<ExecutionBackend.Event>): (turnId: string) => string | undefined
+  (turnId: string, events: ReadonlyArray<ExecutionEvent.Event>): string | undefined
+  (events: ReadonlyArray<ExecutionEvent.Event>): (turnId: string) => string | undefined
 } = Function.dual(
   2,
-  (turnId: string, events: ReadonlyArray<ExecutionBackend.Event>): string | undefined =>
+  (turnId: string, events: ReadonlyArray<ExecutionEvent.Event>): string | undefined =>
     events
       .filter(
         (event) =>
           ExecutionId.ownsExecution(turnId, event.executionId) && !TranscriptProjection.Fold.isTransientEvent(event),
       )
       .reduce<
-        ExecutionBackend.Event | undefined
+        ExecutionEvent.Event | undefined
       >((current, event) => (current === undefined || event.sequence >= current.sequence ? event : current), undefined)
       ?.cursor,
 )
 
-export const finalAssistantOutput = (events: ReadonlyArray<ExecutionBackend.Event>): string | undefined => {
+export const finalAssistantOutput = (events: ReadonlyArray<ExecutionEvent.Event>): string | undefined => {
   const latestToolSequence = events.reduce(
     (latest, event) => (event.type === "tool.call.requested" ? Math.max(latest, event.sequence) : latest),
     -1,
@@ -125,16 +125,13 @@ export const finalAssistantOutput = (events: ReadonlyArray<ExecutionBackend.Even
 }
 
 export const projectionInput: {
-  (
-    result: ExecutionBackend.Result,
-    now: number,
-  ): (threadId: Thread.ThreadId) => ThreadSummaryRepository.TurnActivityInput
-  (threadId: Thread.ThreadId, result: ExecutionBackend.Result, now: number): ThreadSummaryRepository.TurnActivityInput
+  (result: ExecutionEvent.Result, now: number): (threadId: Thread.ThreadId) => ThreadSummaryRepository.TurnActivityInput
+  (threadId: Thread.ThreadId, result: ExecutionEvent.Result, now: number): ThreadSummaryRepository.TurnActivityInput
 } = Function.dual(
   3,
   (
     threadId: Thread.ThreadId,
-    result: ExecutionBackend.Result,
+    result: ExecutionEvent.Result,
     now: number,
   ): ThreadSummaryRepository.TurnActivityInput => {
     const projectedCursor = latestCursor(result.turnId, result.events)

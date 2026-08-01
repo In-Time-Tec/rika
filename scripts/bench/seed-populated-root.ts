@@ -4,6 +4,7 @@ import * as Database from "../../packages/product-store/src/product-database"
 import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "../../packages/product-store/src/thread-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as TurnRepository from "../../packages/product-store/src/turn-repository"
 import { Config, Effect, FileSystem, Layer, Path, Schema } from "effect"
 import type { SqlError } from "effect/unstable/sql/SqlError"
@@ -60,7 +61,7 @@ const seed = Effect.gen(function* () {
         id: turnId,
         threadId,
         prompt: `prompt ${index}-${turnIndex}`,
-        executionRoute: Turn.testExecutionRoute(),
+        executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
         queueCapacity: 128,
         now: index + 1,
       })

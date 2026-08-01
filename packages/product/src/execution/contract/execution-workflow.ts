@@ -1,11 +1,14 @@
-export interface ExecutionExtensionPin {
-  readonly generation: string
-  readonly sourceDigest: string
-  readonly configFingerprint: string
-  readonly toolSchemaDigest: string
-  readonly mcpFingerprint: string
-  readonly resolvedContextDigest: string
-}
+import { Schema } from "effect"
+
+export const ExecutionExtensionPin = Schema.Struct({
+  generation: Schema.String,
+  sourceDigest: Schema.String,
+  configFingerprint: Schema.String,
+  toolSchemaDigest: Schema.String,
+  mcpFingerprint: Schema.String,
+  resolvedContextDigest: Schema.String,
+})
+export type ExecutionExtensionPin = typeof ExecutionExtensionPin.Type
 
 export interface WorkflowInspection {
   readonly runId: string

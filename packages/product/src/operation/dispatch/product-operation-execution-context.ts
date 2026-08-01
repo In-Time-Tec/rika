@@ -2,6 +2,8 @@ import * as ThreadRepository from "@rika/product/thread-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRequest from "@rika/product/execution-request"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"
 import * as ExecutionRecovery from "./execution-recovery-dispatch"
 import * as ContextMentions from "../../context/context-mention-parser"
@@ -25,13 +27,13 @@ export const makeExecutionContext = (input: any) =>
       claimQueuedTurn,
     } = input
     const { startReviewSettlement } = input
-    const testRoute = (mode: Parameters<typeof Turn.testExecutionRoute>[0]) =>
-      Effect.succeed(Turn.testExecutionRoute(mode))
+    const testRoute = (mode: Parameters<typeof ExecutionRouteSnapshot.testExecutionRoute>[0]) =>
+      Effect.succeed(ExecutionRouteSnapshot.testExecutionRoute(mode))
     const resolveExecutionRoute = options.resolveExecutionRoute ?? testRoute
     const executionPrompt = Effect.fn("ProductOperation.executionPrompt")(function* (
       workspace: string,
       prompt: string,
-      promptParts?: ReadonlyArray<Turn.PromptPart>,
+      promptParts?: ReadonlyArray<ExecutionRequest.PromptPart>,
     ) {
       const context = yield* ResolvedContext.Service
       const threads = yield* ThreadRepository.Service

@@ -9,7 +9,8 @@ import { Deferred, Effect, Exit, Fiber, Layer, Logger, Redacted, Ref, Schedule, 
 import { TestClock } from "effect/testing"
 import { AiError, Tool, Toolkit } from "effect/unstable/ai"
 import * as ExecutionBackend from "@rika/product/execution-service"
-import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
+import * as ExecutionIdentifier from "@rika/product/execution-identifier"
+import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 import * as RelayExecutionBackend from "../src/execution-backend"
 import { createFanOut, currentExecutionRoute, start } from "./current-execution-route"
 
@@ -1639,7 +1640,7 @@ describe("ExecutionBackend Relay client adapter", () => {
           createdAt: 1,
         })
         return {
-          replay: yield* backend.replay("child:already-prefixed", undefined, ExecutionBackend.executionReference),
+          replay: yield* backend.replay("child:already-prefixed", undefined, ExecutionIdentifier.executionReference),
           inspection: yield* backend.inspect("p"),
         }
       }).pipe(provideBackend(fixture.implementation))
@@ -1668,10 +1669,10 @@ describe("ExecutionBackend Relay client adapter", () => {
         const inspection = yield* backend.inspect("parent")
         const childId = inspection?.children[0]?.executionId
         if (childId === undefined) return yield* Effect.die("Missing inspected child")
-        yield* backend.replay(childId, undefined, ExecutionBackend.executionReference)
+        yield* backend.replay(childId, undefined, ExecutionIdentifier.executionReference)
         if (backend.pageEvents === undefined) return yield* Effect.die("Missing event paging")
-        yield* backend.pageEvents(childId, "forward", undefined, undefined, ExecutionBackend.executionReference)
-        yield* backend.cancel(childId, ExecutionBackend.executionReference)
+        yield* backend.pageEvents(childId, "forward", undefined, undefined, ExecutionIdentifier.executionReference)
+        yield* backend.cancel(childId, ExecutionIdentifier.executionReference)
         return childId
       }).pipe(provideBackend(fixture.implementation))
 

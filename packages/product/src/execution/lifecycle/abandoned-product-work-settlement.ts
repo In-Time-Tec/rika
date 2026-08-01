@@ -1,6 +1,8 @@
 import * as ExecutionBackend from "../../execution/contract/execution-service"
+import * as ExecutionIdentifier from "@rika/product/execution-identifier"
 import * as ExecutionStatus from "../../execution/contract/execution-status"
 import * as Turn from "../../thread/model/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
 import * as TurnRepository from "../../thread/repository/turn-repository"
 import { Clock, Duration, Effect } from "effect"
 import { settleStopRequestedTurns } from "./product-execution-stop"
@@ -38,9 +40,14 @@ export const settleAbandonedRecoveredWork = Effect.fn("ProductOperation.settleAb
   for (const root of openRoots) {
     if (root.createdAt >= bootAt) continue
     const turn = root.turnId === undefined ? undefined : yield* turns.get(Turn.TurnId.make(root.turnId))
-    if (turn !== undefined && Turn.isAgentExecution(turn) && !ExecutionStatus.isTerminalStatus(turn.status)) continue
+    if (
+      turn !== undefined &&
+      ThreadResult.TurnResult.isAgentExecution(turn) &&
+      !ExecutionStatus.isTerminalStatus(turn.status)
+    )
+      continue
     yield* backend
-      .cancel(root.executionId, ExecutionBackend.executionReference)
+      .cancel(root.executionId, ExecutionIdentifier.executionReference)
       .pipe(
         Effect.catch((failure) =>
           Effect.logWarning("execution.recovery.orphan_cancel_failed").pipe(

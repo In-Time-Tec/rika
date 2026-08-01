@@ -4,6 +4,7 @@ import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
 import { Deferred, Effect, Fiber, Layer, Queue, Schema } from "effect"
 import { Operation } from "@rika/product/product-operation"
 
@@ -37,9 +38,9 @@ it.effect("delivers each joined subscriber suffix exactly once through subscribe
     const releases = yield* Queue.unbounded<void>()
     const started = yield* Deferred.make<void>()
     const following = yield* Deferred.make<void>()
-    const liveEvents = yield* Queue.unbounded<ExecutionBackend.Event>()
-    const emitted: Array<ExecutionBackend.Event> = []
-    const lifecycleEvents: ReadonlyArray<ExecutionBackend.Event> = [
+    const liveEvents = yield* Queue.unbounded<ExecutionEvent.Event>()
+    const emitted: Array<ExecutionEvent.Event> = []
+    const lifecycleEvents: ReadonlyArray<ExecutionEvent.Event> = [
       {
         executionId: "execution:churn-turn",
         cursor: "churn-accepted",
@@ -57,7 +58,7 @@ it.effect("delivers each joined subscriber suffix exactly once through subscribe
         timestampSource: "server",
       },
     ]
-    const streamed: ReadonlyArray<ExecutionBackend.Event> = Array.from({ length: 8 }, (_, index) => ({
+    const streamed: ReadonlyArray<ExecutionEvent.Event> = Array.from({ length: 8 }, (_, index) => ({
       executionId: "execution:churn-turn",
       cursor: `churn-${index}`,
       sequence: index + 3,
@@ -91,7 +92,7 @@ it.effect("delivers each joined subscriber suffix exactly once through subscribe
       follow: (turnId, _afterCursor, onEvent) =>
         Effect.gen(function* () {
           yield* Deferred.succeed(following, undefined)
-          const events: Array<ExecutionBackend.Event> = [...lifecycleEvents]
+          const events: Array<ExecutionEvent.Event> = [...lifecycleEvents]
           for (const event of lifecycleEvents) {
             emitted.push(event)
             onEvent?.(event)

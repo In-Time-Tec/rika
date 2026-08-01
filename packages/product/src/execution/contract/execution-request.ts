@@ -1,10 +1,18 @@
+import { Schema } from "effect"
 import type { Event } from "./execution-event"
 import type { ExecutionExtensionPin } from "./execution-workflow"
 import type { ExecutionRouteSnapshot } from "./execution-route-snapshot"
 
-export type PromptPart =
-  | { readonly type: "text"; readonly text: string }
-  | { readonly type: "image"; readonly mediaType: string; readonly data: string; readonly filename?: string }
+export const PromptPart = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("text"), text: Schema.String, pasted: Schema.optionalKey(Schema.Boolean) }),
+  Schema.Struct({
+    type: Schema.Literal("image"),
+    mediaType: Schema.String,
+    data: Schema.String,
+    filename: Schema.optionalKey(Schema.String),
+  }),
+])
+export type PromptPart = typeof PromptPart.Type
 
 export type EventScope = "execution" | "tree"
 export type SessionPurpose = { readonly _tag: "Conversation" }

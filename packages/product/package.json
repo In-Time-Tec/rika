@@ -61,8 +61,7 @@
     "./usage-snapshot-codec": "./src/usage/usage-snapshot-codec.ts",
     "./workflow-definition": "./src/workflow/workflow-definition.ts",
     "./workflow-service": "./src/workflow/workflow-service.ts",
-    "./product-operation": "./src/operation/contract/product-operation.ts",
-    "./pending-turn": "./src/thread/queue/pending-turn-policy.ts"
+    "./product-operation": "./src/operation/contract/product-operation.ts"
   },
   "dependencies": {
     "@rika/configuration": "workspace:*",

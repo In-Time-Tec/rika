@@ -1,6 +1,7 @@
 import * as ExecutionBackend from "../../execution/contract/execution-service"
 import * as ThreadActivity from "../../thread/query/thread-activity"
 import * as Turn from "../../thread/model/turn-record"
+import * as ExecutionStatus from "@rika/product/execution-status"
 import * as TurnRepository from "../../thread/repository/turn-repository"
 import { Clock, Effect } from "effect"
 
@@ -15,7 +16,7 @@ export const settleStopRequestedTurns = Effect.fn("ProductOperation.settleStopRe
   backend: ExecutionBackend.Interface,
   settle: (
     turnId: Turn.TurnId,
-    status: Turn.Status,
+    status: ExecutionStatus.Status,
     cursor: string | undefined,
     settledAt: number,
   ) => Effect.Effect<void, E, R>,

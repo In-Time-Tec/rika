@@ -1,6 +1,8 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
 import type * as Operation from "@rika/product/product-operation"
 import type * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
@@ -32,7 +34,7 @@ export interface State {
   readonly model: ViewState.Model
   readonly selectionEpoch: number
   readonly replayTurns: ReadonlyMap<string, Turn.Turn>
-  readonly entries: ReadonlyArray<TranscriptRepository.Entry>
+  readonly entries: ReadonlyArray<TranscriptPage.Entry>
   readonly revisions: ReadonlyMap<string, number>
   readonly liveProjections: ReadonlyMap<string, TranscriptProjectionModel.Projection>
   readonly projectionStreams?: ReadonlyMap<string, ProjectionStream>
@@ -41,8 +43,8 @@ export interface State {
   readonly usageRevision?: number
   readonly hasOlder?: boolean
   readonly hasNewer?: boolean
-  readonly oldestCursor?: TranscriptRepository.PageCursor | undefined
-  readonly newestCursor?: TranscriptRepository.PageCursor | undefined
+  readonly oldestCursor?: TranscriptPage.PageCursor | undefined
+  readonly newestCursor?: TranscriptPage.PageCursor | undefined
 }
 
 interface OpenProjectionStream {
@@ -80,14 +82,14 @@ export type ProjectionStream = OpenProjectionStream | StoppedProjectionStream | 
 export const transcriptWindowEntryBudget = 400
 export const transcriptWindowByteBudget = 4 * 1024 * 1024
 
-const entryBytes = (entry: TranscriptRepository.Entry): number =>
+const entryBytes = (entry: TranscriptPage.Entry): number =>
   new TextEncoder().encode(JSON.stringify(entry)).byteLength
 const compareText = (left: string, right: string): number => {
   if (left < right) return -1
   if (left > right) return 1
   return 0
 }
-const cursorForEntry = (entry: TranscriptRepository.Entry | undefined): TranscriptRepository.PageCursor | undefined =>
+const cursorForEntry = (entry: TranscriptPage.Entry | undefined): TranscriptPage.PageCursor | undefined =>
   entry === undefined
     ? undefined
     : {
@@ -97,14 +99,14 @@ const cursorForEntry = (entry: TranscriptRepository.Entry | undefined): Transcri
       }
 
 const sameCursor = (
-  left: TranscriptRepository.PageCursor | undefined,
-  right: TranscriptRepository.PageCursor | undefined,
+  left: TranscriptPage.PageCursor | undefined,
+  right: TranscriptPage.PageCursor | undefined,
 ) => left?.createdAt === right?.createdAt && left?.turnId === right?.turnId && left?.orderKey === right?.orderKey
 
 const boundWindow = (
-  entries: ReadonlyArray<TranscriptRepository.Entry>,
+  entries: ReadonlyArray<TranscriptPage.Entry>,
   edge: "oldest" | "newest",
-): { readonly entries: ReadonlyArray<TranscriptRepository.Entry>; readonly evicted: boolean } => {
+): { readonly entries: ReadonlyArray<TranscriptPage.Entry>; readonly evicted: boolean } => {
   const retained = [...entries]
   let bytes = retained.reduce((total, entry) => total + entryBytes(entry), 0)
   let evicted = false
@@ -236,8 +238,8 @@ const retaining = (model: ViewState.Model, previous: ViewState.Model): ViewState
 
 const activeSeedEntries = (
   activeTurn: Turn.Turn | undefined,
-  entries: ReadonlyArray<TranscriptRepository.Entry>,
-): ReadonlyArray<TranscriptRepository.Entry> => {
+  entries: ReadonlyArray<TranscriptPage.Entry>,
+): ReadonlyArray<TranscriptPage.Entry> => {
   if (activeTurn === undefined || entries.some((entry) => entry.turn.id === activeTurn.id)) return []
   const seed = TranscriptProjection.Projection.empty(activeTurn.id, activeTurn.prompt)
   return seed.units.map((unit) => ({
@@ -250,7 +252,7 @@ const activeSeedEntries = (
 
 const project = (
   model: ViewState.Model,
-  entries: ReadonlyArray<TranscriptRepository.Entry>,
+  entries: ReadonlyArray<TranscriptPage.Entry>,
   displayCostUsd: number | undefined,
 ) => {
   const grouped = new Map<string, Array<TranscriptUnit.Unit>>()
@@ -269,7 +271,7 @@ const project = (
 const projectionEntries = (
   turn: Turn.Turn,
   projection: TranscriptProjectionModel.Projection,
-): ReadonlyArray<TranscriptRepository.Entry> =>
+): ReadonlyArray<TranscriptPage.Entry> =>
   projection.units.map((unit) => ({
     turn,
     unit,
@@ -279,7 +281,7 @@ const projectionEntries = (
   }))
 
 const displayedEntries = (
-  entries: ReadonlyArray<TranscriptRepository.Entry>,
+  entries: ReadonlyArray<TranscriptPage.Entry>,
   replayTurns: ReadonlyMap<string, Turn.Turn>,
   liveProjections: ReadonlyMap<string, TranscriptProjectionModel.Projection>,
   projectionStreams: ReadonlyMap<string, ProjectionStream> | undefined,
@@ -349,9 +351,9 @@ const reconcileTranscriptBlocks = (model: ViewState.Model): ViewState.Model => {
 }
 
 const projections = (
-  entries: ReadonlyArray<TranscriptRepository.Entry>,
+  entries: ReadonlyArray<TranscriptPage.Entry>,
 ): ReadonlyMap<string, TranscriptProjectionModel.Projection> => {
-  const grouped = new Map<string, Array<TranscriptRepository.Entry>>()
+  const grouped = new Map<string, Array<TranscriptPage.Entry>>()
   for (const entry of entries) grouped.set(entry.turn.id, [...(grouped.get(entry.turn.id) ?? []), entry])
   return new Map(
     [...grouped].map(([turnId, values]) => {
@@ -373,7 +375,7 @@ const projections = (
 }
 
 const projectionFromEntries = (
-  entries: ReadonlyArray<TranscriptRepository.Entry>,
+  entries: ReadonlyArray<TranscriptPage.Entry>,
   turnId: string,
   prompt: string,
 ): TranscriptProjectionModel.Projection =>
@@ -475,9 +477,9 @@ const projectionFromStream = (
 })
 
 const normalizeEntries = (
-  entries: ReadonlyArray<TranscriptRepository.Entry>,
-): ReadonlyArray<TranscriptRepository.Entry> => {
-  const unique = new Map<string, TranscriptRepository.Entry>()
+  entries: ReadonlyArray<TranscriptPage.Entry>,
+): ReadonlyArray<TranscriptPage.Entry> => {
+  const unique = new Map<string, TranscriptPage.Entry>()
   for (const entry of entries) {
     const current = unique.get(entry.unit.key)
     if (current === undefined || entry.projectionRevision >= current.projectionRevision)
@@ -492,7 +494,7 @@ const normalizeEntries = (
 }
 
 const revisionsForWindow = (
-  entries: ReadonlyArray<TranscriptRepository.Entry>,
+  entries: ReadonlyArray<TranscriptPage.Entry>,
   activeTurnId: string | undefined,
   current: ReadonlyMap<string, number>,
   projectionStreams: ReadonlyMap<string, ProjectionStream> | undefined,
@@ -513,7 +515,7 @@ const projectedRootIds = (projectionStreams: ReadonlyMap<string, ProjectionStrea
   )
 
 const replayTurnsForWindow = (
-  entries: ReadonlyArray<TranscriptRepository.Entry>,
+  entries: ReadonlyArray<TranscriptPage.Entry>,
   previous: ReadonlyMap<string, Turn.Turn>,
   projectionStreams: ReadonlyMap<string, ProjectionStream> | undefined,
   activeTurnId: string | undefined,
@@ -907,10 +909,10 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
     )
       return { state, preserveAnchor: false, resync: true }
     const turn = state.replayTurns.get(rootTurnId)
-    let terminalTurn: Turn.AgentExecutionTurn | Turn.TerminalRecordedShellTurn | undefined
+    let terminalTurn: Turn.AgentExecutionTurn | ThreadResult.TerminalRecordedShellTurn | undefined
     if (turn !== undefined) {
-      if (Turn.isAgentExecution(turn)) terminalTurn = { ...turn, status: event.status }
-      else if (Turn.isTerminalRecordedShell(turn) && turn.status === event.status) terminalTurn = turn
+      if (ThreadResult.TurnResult.isAgentExecution(turn)) terminalTurn = { ...turn, status: event.status }
+      else if (ThreadResult.TurnResult.isTerminalRecordedShell(turn) && turn.status === event.status) terminalTurn = turn
     }
     if (terminalTurn === undefined) return { state, preserveAnchor: false, resync: true }
     const projectionStreams = new Map<string, ProjectionStream>(state.projectionStreams)

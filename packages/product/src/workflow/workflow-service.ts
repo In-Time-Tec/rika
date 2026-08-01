@@ -1,4 +1,5 @@
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionWorkflow from "@rika/product/execution-workflow"
 import { Context, Effect, Layer, Schema } from "effect"
 
 export class WorkflowError extends Schema.TaggedErrorClass<WorkflowError>()("ProductWorkflowError", {
@@ -14,9 +15,9 @@ export interface Interface {
     name: "delivery" | "research-synthesis",
     runId: string,
     revision?: number,
-  ) => Effect.Effect<ExecutionBackend.WorkflowInspection, WorkflowError>
-  readonly inspect: (runId: string) => Effect.Effect<ExecutionBackend.WorkflowInspection | undefined, WorkflowError>
-  readonly cancel: (runId: string) => Effect.Effect<ExecutionBackend.WorkflowInspection | undefined, WorkflowError>
+  ) => Effect.Effect<ExecutionWorkflow.WorkflowInspection, WorkflowError>
+  readonly inspect: (runId: string) => Effect.Effect<ExecutionWorkflow.WorkflowInspection | undefined, WorkflowError>
+  readonly cancel: (runId: string) => Effect.Effect<ExecutionWorkflow.WorkflowInspection | undefined, WorkflowError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/product/workflow/workflow-service/Service") {}

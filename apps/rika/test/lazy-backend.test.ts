@@ -1,9 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionIdentifier from "@rika/product/execution-identifier"
 import { Context, Effect, Layer } from "effect"
 import { lazyBackendLayer } from "../src/lazy-backend"
 
-const completedResult = (turnId: string): ExecutionBackend.Result => ({ turnId, status: "completed", events: [] })
+const completedResult = (turnId: string): ExecutionEvent.Result => ({ turnId, status: "completed", events: [] })
 
 const recordingBackend = (calls: Array<ReadonlyArray<unknown>>) => {
   const record = (...call: ReadonlyArray<unknown>) => Effect.sync(() => calls.push(call))
@@ -43,7 +45,7 @@ describe("lazyBackendLayer", () => {
           lazyBackendLayer(Layer.succeed(ExecutionBackend.Service, recordingBackend(calls))),
         )
         const backend = Context.get(context, ExecutionBackend.Service)
-        const reference = ExecutionBackend.executionReference
+        const reference = ExecutionIdentifier.executionReference
         const childId = "child:execution%3Aturn-a:call_1"
         yield* backend.inspect(childId, reference)
         yield* backend.replay(childId, "cursor-1", reference)

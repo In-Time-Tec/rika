@@ -1,3 +1,4 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
@@ -23,8 +24,8 @@ import {
 } from "./transcript-repository-fixtures"
 
 const compareExecutionCheckpoints = (
-  left: TranscriptRepository.ExecutionCheckpoint,
-  right: TranscriptRepository.ExecutionCheckpoint,
+  left: TranscriptPage.ExecutionCheckpoint,
+  right: TranscriptPage.ExecutionCheckpoint,
 ): number => {
   if (left.executionKey < right.executionKey) return -1
   if (left.executionKey > right.executionKey) return 1
@@ -72,7 +73,7 @@ it.effect("lists terminal roots whose current projection has an unfinished child
 it.effect("loads a migration-invalidated empty projection for authoritative refold", () =>
   Effect.gen(function* () {
     const target = turn(0)
-    const invalidated: TranscriptRepository.Projection = {
+    const invalidated: TranscriptPage.Projection = {
       turn: target,
       units: [],
       checkpointGeneration: 4,
@@ -663,8 +664,8 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
           undefined,
         )
       }
-      const collected: Array<TranscriptRepository.Entry> = []
-      let cursor: TranscriptRepository.PageCursor | undefined
+      const collected: Array<TranscriptPage.Entry> = []
+      let cursor: TranscriptPage.PageCursor | undefined
       while (true) {
         const page = yield* repository.page(threadId, { ...(cursor === undefined ? {} : { before: cursor }), limit: 2 })
         collected.unshift(...page.entries)

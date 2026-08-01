@@ -34,7 +34,7 @@ export interface ProductLayerOptions<
     tuning?: { readonly fastMode?: boolean },
     workspace?: string,
   ) => import("effect").Effect.Effect<
-    import("@rika/product/turn-record").ExecutionRoutePin,
+    import("@rika/product/execution-route-snapshot").ExecutionRoutePin,
     import("../operation-error").OperationError,
     import("@rika/product/execution-service").Service
   >

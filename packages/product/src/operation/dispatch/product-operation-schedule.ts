@@ -1,4 +1,5 @@
 import * as Turn from "@rika/product/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
 import { Duration, Effect, Deferred, Ref, Cause } from "effect"
@@ -74,7 +75,11 @@ export const makeProductOperationSchedule = (input: any): any =>
       const turns = yield* TurnRepository.Service
       for (const thread of yield* threads.listAll) {
         const firstTurn = (yield* turns.list(thread.id))[0]
-        if (firstTurn !== undefined && Turn.isAgentExecution(firstTurn) && firstTurn.status === "completed")
+        if (
+          firstTurn !== undefined &&
+          ThreadResult.TurnResult.isAgentExecution(firstTurn) &&
+          firstTurn.status === "completed"
+        )
           yield* titleThread(thread, firstTurn, (event: InteractiveEvent) => publishInteractiveActivity(0, event))
       }
     }).pipe(

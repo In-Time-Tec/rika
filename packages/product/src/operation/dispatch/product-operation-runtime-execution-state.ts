@@ -1,7 +1,9 @@
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product/turn-repository"
+import * as TurnRepositoryContract from "../../thread/repository/turn-repository-contract"
 import * as Turn from "@rika/product/turn-record"
-import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionStatus from "@rika/product/execution-status"
+import * as ExecutionChildRun from "@rika/product/execution-child-run"
 import { Effect, Fiber, PubSub, Semaphore } from "effect"
 import { makeProductOperationFoundation } from "./product-operation-foundation"
 import { makeProductOperationExecution } from "./product-operation-execution"
@@ -24,9 +26,9 @@ export const buildProductOperationExecutionState = (input: any) =>
     const { options, ownerScope, publishInteractiveActivity, sessionThreadViews } = input
     const pendingTurnCapacity = Math.max(0, Math.floor(options.pendingTurnCapacity ?? 64))
     const reviewSettlementAdmission = yield* Semaphore.make(1)
-    const reviewSettlements = new Map<string, Fiber.Fiber<ExecutionBackend.FanOutInspection, any>>()
+    const reviewSettlements = new Map<string, Fiber.Fiber<ExecutionChildRun.FanOutInspection, any>>()
     const turnMutationAdmission = yield* Semaphore.make(1)
-    const createForSubmission = (turns: any, submission: TurnRepository.CreateInput) =>
+    const createForSubmission = (turns: any, submission: TurnRepositoryContract.CreateInput) =>
       turnMutationAdmission.withPermits(1)(turns.createForSubmission(submission))
     const turnChanges = yield* PubSub.sliding<void>(1)
     const dirtyTurnObservers = new Set<Turn.TurnId>()
@@ -55,7 +57,7 @@ export const buildProductOperationExecutionState = (input: any) =>
       flushIngest,
       deliverResultEvents,
     } = foundation
-    const claimTurnObserver = (turnId: Turn.TurnId, expectedStatus?: Turn.Status) =>
+    const claimTurnObserver = (turnId: Turn.TurnId, expectedStatus?: ExecutionStatus.Status) =>
       rootTurnOwner.claim(turnId, expectedStatus)
     const releaseTurnObserver = (turnId: Turn.TurnId, notify = true) =>
       Effect.uninterruptible(
@@ -71,7 +73,10 @@ export const buildProductOperationExecutionState = (input: any) =>
             ),
           ),
       )
-    const createObservedSubmission = (turns: TurnRepository.Interface, submission: TurnRepository.CreateInput) =>
+    const createObservedSubmission = (
+      turns: TurnRepository.Interface,
+      submission: TurnRepositoryContract.CreateInput,
+    ) =>
       Effect.gen(function* () {
         const turn = yield* turns.createForSubmission(submission)
         return turn.status === "queued"

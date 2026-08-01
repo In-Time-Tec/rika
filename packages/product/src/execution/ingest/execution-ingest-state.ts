@@ -1,7 +1,7 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
+import * as ExecutionEvent from "@rika/product/execution-event"
 import type * as Thread from "@rika/product/thread-record"
 import type * as Turn from "@rika/product/turn-record"
-import type * as TranscriptRepository from "@rika/product/transcript-repository"
-import type * as ExecutionBackend from "@rika/product/execution-service"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import type * as IngestProjectionTypes from "./execution-projection-types"
@@ -13,7 +13,7 @@ import type { ProjectionChange } from "./execution-ingest-event"
 import type { ProjectionWatchOverflow } from "./execution-ingest-watch"
 import type { Cause, Deferred, Latch, Queue, Semaphore } from "effect"
 
-export type Settled = NonNullable<TranscriptRepository.ExecutionCheckpoint["status"]>
+export type Settled = NonNullable<TranscriptPage.ExecutionCheckpoint["status"]>
 export type InterruptedOutcome = NonNullable<TranscriptUnit.Unit["executionOutcome"]> & {
   readonly status: "failed" | "cancelled"
 }
@@ -57,12 +57,12 @@ export interface Pipeline {
   accepting: boolean
   stopped: boolean
   reading: number
-  delivered: Array<ExecutionBackend.Event> | undefined
+  delivered: Array<ExecutionEvent.Event> | undefined
   usageSnapshot: Snapshot
   usageRevision: number
   usageSourceComplete: boolean
   usageRefoldFromVersion: number | undefined
-  usagePending: Array<RootExecution & { readonly event: ExecutionBackend.Event }>
+  usagePending: Array<RootExecution & { readonly event: ExecutionEvent.Event }>
   usageFold: UsageFold
   usageNotificationPending: boolean
   delta: IngestProjectionTypes.ProjectionDelta

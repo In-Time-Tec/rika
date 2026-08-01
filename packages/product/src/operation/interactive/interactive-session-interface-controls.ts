@@ -1,6 +1,7 @@
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
 import * as ThreadActivity from "../../thread/query/thread-activity"
 import { Clock, Effect, Ref } from "effect"
 import { operationError, operationFailureDetail } from "../operation-error"
@@ -115,7 +116,7 @@ export const makeInteractiveSessionControls = (
         })
       else if (
         result.status === "failed" &&
-        !result.events.some((event: ExecutionBackend.Event) => event.type === "execution.failed")
+        !result.events.some((event: ExecutionEvent.Event) => event.type === "execution.failed")
       )
         input.emit(input.sessionDispatch, {
           _tag: "ExecutionFailed",

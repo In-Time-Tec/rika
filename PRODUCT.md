@@ -15,6 +15,7 @@ Rika is for a technical owner who prefers a local CLI and TUI, controls the work
 - Keep model routes configurable while modes describe stable user intent.
 - Consume framework behavior through released package contracts.
 - Prefer one current pre-1.0 contract over compatibility layers.
+- Keep each public contract at its exact owning subpath so product semantics do not leak through adapter-shaped facades.
 
 ## Boundaries
 

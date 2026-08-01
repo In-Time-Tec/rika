@@ -3,85 +3,43 @@ import * as TranscriptProjectionModel from "@rika/transcript/transcript-projecti
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { ThreadId } from "@rika/product/thread-record"
 import { Turn, TurnId } from "@rika/product/turn-record"
-import type { AgentExecutionTurn, RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/turn-record"
-import { EntrySchema, PageCursor, type Entry } from "@rika/product/transcript-page"
+import type { AgentExecutionTurn } from "@rika/product/turn-record"
+import type { RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/thread-result"
+import type {
+  ExecutionCheckpoint,
+  Page,
+  PageCursor,
+  Projection,
+  RefoldWriteResult,
+} from "@rika/product/transcript-page"
 
-export { EntrySchema, PageCursor }
-export type { Entry }
-
-export const ExecutionAttachment = Schema.Struct({
-  parentExecutionKey: Schema.String,
-  parentUnitKey: Schema.String,
-  parentId: Schema.String,
-  parentOrderKey: Schema.String,
-})
-export type ExecutionAttachment = typeof ExecutionAttachment.Type
-
-export const ExecutionCheckpoint = Schema.Struct({
-  executionKey: Schema.String,
-  executionId: Schema.String,
-  cursor: Schema.String,
-  sequence: Schema.Finite,
-  status: Schema.optionalKey(Schema.Literals(["completed", "failed", "cancelled"])),
-  state: TranscriptProjectionModel.ProjectionState,
-  attachment: Schema.optionalKey(ExecutionAttachment),
-})
-export type ExecutionCheckpoint = typeof ExecutionCheckpoint.Type
-
-export const invalidatedProjectionVersion = 2
-
-export interface Projection {
-  readonly turn: Turn
-  readonly units: ReadonlyArray<TranscriptUnit.Unit>
-  readonly checkpointGeneration: number
-  readonly revision: number
-  readonly modelPhase: number
-  readonly usableCompletionSequence: number | undefined
-  readonly oldestCursor: string | undefined
-  readonly checkpointCursor: string | undefined
-  readonly costUsd: number | undefined
-  readonly usageCursors: ReadonlyArray<string> | undefined
-  readonly pricingVersion: string | undefined
+interface CheckpointOptions {
   readonly executionCheckpoints: ReadonlyArray<ExecutionCheckpoint>
   readonly projectionVersion: number
 }
 
-export interface CheckpointOptions {
-  readonly executionCheckpoints: ReadonlyArray<ExecutionCheckpoint>
-  readonly projectionVersion: number
-}
-
-export interface DeltaCheckpointOptions extends CheckpointOptions {
+interface DeltaCheckpointOptions extends CheckpointOptions {
   readonly expectedGeneration: number | undefined
 }
 
-export interface UnitDelta {
+interface UnitDelta {
   readonly upsert: ReadonlyArray<TranscriptUnit.Unit>
   readonly remove: ReadonlyArray<string>
 }
 
-export interface RefoldOptions extends CheckpointOptions {
+interface RefoldOptions extends CheckpointOptions {
   readonly expectedProjectionVersion: number
   readonly expectedGeneration: number
 }
 
-export interface PageOptions {
+interface PageOptions {
   readonly before?: PageCursor | undefined
   readonly after?: PageCursor | undefined
   readonly limit?: number
   readonly projectionVersion?: number
 }
 
-export interface Page {
-  readonly entries: ReadonlyArray<Entry>
-  readonly hasOlder: boolean
-  readonly hasNewer?: boolean
-  readonly oldestCursor: PageCursor | undefined
-  readonly newestCursor?: PageCursor | undefined
-  readonly threadCostUsd: number
-}
-
-export interface ProjectionRecoveryCandidate {
+interface ProjectionRecoveryCandidate {
   readonly threadId: ThreadId
   readonly turnId: TurnId
 }
@@ -90,11 +48,8 @@ export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()(
   message: Schema.String,
 }) {}
 
-export type WriteResult = "committed" | "stale"
-export type RefoldWriteResult =
-  | { readonly _tag: "Committed"; readonly turn: AgentExecutionTurn }
-  | { readonly _tag: "Stale" }
-export type RecordedShellWriteResult =
+type WriteResult = "committed" | "stale"
+type RecordedShellWriteResult =
   | { readonly _tag: "Committed"; readonly projection: Projection }
   | { readonly _tag: "Stale" }
 
@@ -132,7 +87,9 @@ export interface Interface {
   readonly globalCostUsd: Effect.Effect<number, RepositoryError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/product/thread/repository/transcript-repository/Service") {}
+export class Service extends Context.Service<Service, Interface>()(
+  "@rika/product/thread/repository/transcript-repository/Service",
+) {}
 
 const emptyProjection = (turn: Turn, projectionVersion: number): Projection => ({
   turn,

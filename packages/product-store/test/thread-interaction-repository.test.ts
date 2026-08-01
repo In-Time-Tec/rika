@@ -7,10 +7,11 @@ import * as ThreadRepository from "../src/thread-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "../src/turn-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 
 const sourceThreadId = Thread.ThreadId.make("source")
 const sourceTurnId = Turn.TurnId.make("source-turn")
-const route = Turn.testExecutionRoute()
+const route = ExecutionRouteSnapshot.testExecutionRoute()
 const sourceThread: Thread.Thread = {
   id: sourceThreadId,
   workspace: "/workspace",

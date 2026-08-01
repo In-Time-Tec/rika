@@ -1,5 +1,6 @@
-import * as Turn from "@rika/product/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Cause, Deferred, Duration, Effect, FiberSet, Latch, Queue, Result, Scope, Semaphore } from "effect"
 import * as UsageFold from "../../usage/usage-fold"
@@ -43,7 +44,7 @@ export interface Interface {
   readonly watchThread: (
     threadId: IngestEvent.Root["threadId"],
   ) => Effect.Effect<IngestWatch.ProjectionWatch, never, Scope.Scope>
-  readonly deliver: (turnId: IngestEvent.Root["turnId"], event: ExecutionBackend.Event) => void
+  readonly deliver: (turnId: IngestEvent.Root["turnId"], event: ExecutionEvent.Event) => void
   readonly consumed: (turnId: IngestEvent.Root["turnId"]) => Effect.Effect<void, Failure>
   readonly flush: (turnId: IngestEvent.Root["turnId"]) => Effect.Effect<void, Failure>
   readonly settled: (turnId: IngestEvent.Root["turnId"]) => Effect.Effect<void, Failure>
@@ -143,7 +144,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
             }),
           ),
         )
-        if (turn !== undefined && !Turn.isAgentExecution(turn))
+        if (turn !== undefined && !ThreadResult.TurnResult.isAgentExecution(turn))
           return yield* IngestFailure.make({
             message: `Recorded shell turn ${root.turnId} cannot enter execution ingest`,
             threadId: String(root.threadId),

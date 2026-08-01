@@ -1,8 +1,11 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
 import * as InteractiveController from "../src/interactive-controller"
 import type * as Operation from "@rika/product/product-operation"
 import * as Thread from "@rika/product/thread-record"
 import type * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as TranscriptIdentity from "@rika/transcript/transcript-unit-identity"
 import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
@@ -47,7 +50,7 @@ const entries = (
     prompt: id,
     author: { _tag: "Human" } as const,
     lineage: { _tag: "Original" } as const,
-    executionRoute: Turn.testExecutionRoute(),
+    executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
     status: "completed" as const,
     stopIntent: "none" as const,
     createdAt,
@@ -67,16 +70,16 @@ const entries = (
   )
 }
 
-type AgentTranscriptEntry = Omit<TranscriptRepository.Entry, "turn"> & {
+type AgentTranscriptEntry = Omit<TranscriptPage.Entry, "turn"> & {
   readonly turn: Turn.AgentExecutionTurn
 }
 
-const asRunningEntry = (entry: TranscriptRepository.Entry): AgentTranscriptEntry => {
-  if (!Turn.isAgentExecution(entry.turn)) throw new TypeError("Running transcript fixture requires an agent turn")
+const asRunningEntry = (entry: TranscriptPage.Entry): AgentTranscriptEntry => {
+  if (!ThreadResult.TurnResult.isAgentExecution(entry.turn)) throw new TypeError("Running transcript fixture requires an agent turn")
   return { ...entry, turn: { ...entry.turn, status: "running" } }
 }
 
-const cursor = (entry: TranscriptRepository.Entry): TranscriptRepository.PageCursor => ({
+const cursor = (entry: TranscriptPage.Entry): TranscriptPage.PageCursor => ({
   createdAt: entry.turn.createdAt,
   turnId: entry.turn.id,
   orderKey: TranscriptOrdering.encodeUnitOrder(entry.unit.order),
@@ -1080,7 +1083,7 @@ const runningTurn = (id: string): Turn.AgentExecutionTurn => ({
   prompt: `${id} prompt`,
   author: { _tag: "Human" },
   lineage: { _tag: "Original" },
-  executionRoute: Turn.testExecutionRoute(),
+  executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
   status: "running",
   stopIntent: "none",
   createdAt: 2,
@@ -1366,7 +1369,7 @@ it("rejects a terminal boundary that contradicts the last projection patch", () 
 })
 
 it("settles a recorded shell projection without treating it as an agent execution", () => {
-  const running: Turn.RunningRecordedShellTurn = {
+  const running: ThreadResult.RunningRecordedShellTurn = {
     _tag: "RecordedShell",
     id: Turn.TurnId.make("recorded-shell"),
     threadId: thread.id,
@@ -1385,7 +1388,7 @@ it("settles a recorded shell projection without treating it as an agent executio
     status: "running",
   })
   const started = startProjection(populatedSelection(running).state, running, initial)
-  const terminal: Turn.TerminalRecordedShellTurn = {
+  const terminal: ThreadResult.TerminalRecordedShellTurn = {
     ...running,
     status: "completed",
     result: { text: "done", truncated: false, exitCode: 0 },

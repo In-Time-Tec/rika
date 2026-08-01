@@ -2,6 +2,7 @@ import { Clock, Effect } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
+import * as TurnQueuePromotion from "../../thread/queue/turn-queue-promotion"
 import type { InteractiveEvent } from "./interactive-event"
 import { operationFailureDetail } from "../operation-error"
 
@@ -11,7 +12,7 @@ export const makeInteractiveControl = (input: {
   readonly pendingCapacity: number
   readonly active: () => Effect.Effect<Turn.Turn, any, any>
   readonly dispatch: (event: InteractiveEvent) => void
-  readonly queueMutation: (change: TurnRepository.QueueItemChange) => InteractiveEvent
+  readonly queueMutation: (change: TurnQueuePromotion.QueueItemChange) => InteractiveEvent
   readonly nextSteeringIdentity: (turnId: string) => string
   readonly fail: (message: string) => Effect.Effect<never, any, never>
 }) => {

@@ -1,8 +1,11 @@
 import { Clock, Effect } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionStatus from "@rika/product/execution-status"
 import * as TurnRepository from "@rika/product/turn-repository"
+import * as TurnQueuePromotion from "../../thread/queue/turn-queue-promotion"
 import * as ThreadActivity from "../../thread/query/thread-activity"
 import { queuedTurnPromoteMaxAgeMs, staleQueuedTurnsError } from "../../thread/queue/pending-turn-policy"
 import type * as RootTurnOwner from "../../thread/queue/root-turn-owner"
@@ -25,24 +28,24 @@ export const promotePendingTurns = (input: {
   readonly notifyTurnChanged: (turn: Pick<Turn.Turn, "id" | "threadId">) => Effect.Effect<any, any, any>
   readonly setTurnStatus: (
     id: Turn.TurnId,
-    status: Turn.Status,
+    status: ExecutionStatus.Status,
     cursor: string | undefined,
     now: number,
   ) => Effect.Effect<any, any, any>
   readonly projectExecutionResult: (
     threadId: Thread.ThreadId,
-    result: ExecutionBackend.Result,
+    result: ExecutionEvent.Result,
   ) => Effect.Effect<any, any, any>
   readonly deliverResultEvents: (
     turnId: Turn.TurnId,
-    events: ReadonlyArray<ExecutionBackend.Event>,
+    events: ReadonlyArray<ExecutionEvent.Event>,
     delivered?: ReadonlySet<string>,
   ) => void
-  readonly queueMutationEvent: (change: TurnRepository.QueueItemChange) => InteractiveEvent
+  readonly queueMutationEvent: (change: TurnQueuePromotion.QueueItemChange) => InteractiveEvent
   readonly claimQueuedTurn: (
     threadId: Thread.ThreadId,
     now: number,
-  ) => Effect.Effect<TurnRepository.QueueClaim | undefined, any, any>
+  ) => Effect.Effect<TurnQueuePromotion.QueueClaim | undefined, any, any>
   readonly releaseTurnObserver: (turnId: Turn.TurnId) => Effect.Effect<any, any, any>
   readonly awaitSessionQuiescence: (
     backend: ExecutionBackend.Interface,
@@ -68,7 +71,7 @@ export const promotePendingTurns = (input: {
       })
       return yield* Effect.fail(staleError)
     })
-    const runPromoted = (claim: TurnRepository.QueueClaim) =>
+    const runPromoted = (claim: TurnQueuePromotion.QueueClaim) =>
       Effect.gen(function* () {
         const promoted = claim.turn
         const delivered = new Set<string>()

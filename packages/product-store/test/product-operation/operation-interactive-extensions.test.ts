@@ -4,9 +4,13 @@ import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
 import * as SummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionRequest from "@rika/product/execution-request"
 import * as TranscriptIdentity from "@rika/transcript/transcript-unit-identity"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
@@ -52,7 +56,7 @@ const providerCostEvent = (
   cursor: string,
   amount: number,
   sequence = 0,
-): ExecutionBackend.Event => ({
+): ExecutionEvent.Event => ({
   executionId,
   cursor,
   sequence,
@@ -122,7 +126,7 @@ const terminalTransitionScenario = (
         stopIntent: "none",
         author: { _tag: "Human" },
         lineage: { _tag: "Original" },
-        executionRoute: Turn.testExecutionRoute(),
+        executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
         status: oversizedProjection ? inspectedStatus : "completed",
         lastCursor: "terminal-cursor",
         createdAt: 1,
@@ -195,9 +199,9 @@ const terminalTransitionScenario = (
           projectionVersion: ExecutionIngest.projectionVersion,
         })
       const pageCount = pagedHistory ? 34 : 2
-      const replayEvents: ReadonlyArray<ExecutionBackend.Event> = Array.from({ length: pageCount }, (_, index) => {
+      const replayEvents: ReadonlyArray<ExecutionEvent.Event> = Array.from({ length: pageCount }, (_, index) => {
         const terminal = index === pageCount - 1
-        let type: ExecutionBackend.Event["type"]
+        let type: ExecutionEvent.Event["type"]
         if (terminal) {
           type = `execution.${inspectedStatus}` as const
         } else if (index === 0) {
@@ -322,7 +326,7 @@ const terminalTransitionScenario = (
         loadedPages.flat().length === 0 ? stored.units : loadedPages.flat().map((entry) => entry.unit)
       const deliveredTurn = loadedPages.flat()[0]?.turn ?? stored.turn
       expect(deliveredTurn.status).toBe(inspectedStatus)
-      expect(Turn.isAgentExecution(deliveredTurn) ? deliveredTurn.lastCursor : undefined).toBe("terminal-cursor")
+      expect(ThreadResult.TurnResult.isAgentExecution(deliveredTurn) ? deliveredTurn.lastCursor : undefined).toBe("terminal-cursor")
       expect(yield* turns.get(target.id)).toMatchObject({
         status: inspectedStatus,
         lastCursor: "terminal-cursor",
@@ -365,7 +369,7 @@ describe("interactive session extensions", () => {
           stopIntent: "none",
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
-          executionRoute: Turn.testExecutionRoute(),
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
           status: "running",
           lastCursor: "stored-cursor",
           createdAt: 1,
@@ -539,7 +543,7 @@ describe("interactive session extensions", () => {
           prompt: "priced",
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
-          executionRoute: Turn.testExecutionRoute(),
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
           status: "completed",
           stopIntent: "none",
           createdAt: 1,
@@ -625,7 +629,7 @@ describe("interactive session extensions", () => {
           prompt: "a",
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
-          executionRoute: Turn.testExecutionRoute(),
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
           status: "running",
           stopIntent: "none",
           createdAt: 1,
@@ -709,7 +713,7 @@ describe("interactive session extensions", () => {
             prompt: "first",
             author: { _tag: "Human" },
             lineage: { _tag: "Original" },
-            executionRoute: Turn.testExecutionRoute(),
+            executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
             status: "completed",
             stopIntent: "none",
             createdAt: 1,
@@ -722,7 +726,7 @@ describe("interactive session extensions", () => {
             prompt: "second",
             author: { _tag: "Human" },
             lineage: { _tag: "Original" },
-            executionRoute: Turn.testExecutionRoute(),
+            executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
             status: "completed",
             stopIntent: "none",
             createdAt: 2,
@@ -734,7 +738,7 @@ describe("interactive session extensions", () => {
         const transcripts = Context.get(transcriptContext, TranscriptRepository.Service)
         for (const turnId of ["turn-first", "turn-second"] as const) {
           const target = (yield* turns.get(Turn.TurnId.make(turnId)))!
-          if (!Turn.isAgentExecution(target)) return yield* Effect.die(`Expected agent execution turn ${turnId}`)
+          if (!ThreadResult.TurnResult.isAgentExecution(target)) return yield* Effect.die(`Expected agent execution turn ${turnId}`)
           yield* storeProjection(
             transcripts,
             target,
@@ -851,7 +855,7 @@ describe("interactive session extensions", () => {
             prompt: "synth",
             author: { _tag: "Human" },
             lineage: { _tag: "Original" },
-            executionRoute: Turn.testExecutionRoute(),
+            executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
             status: "completed",
             stopIntent: "none",
             createdAt: 1,
@@ -859,7 +863,7 @@ describe("interactive session extensions", () => {
           },
         ])
         const childId = "turn-synth-child"
-        const rootEvents: ReadonlyArray<ExecutionBackend.Event> = [
+        const rootEvents: ReadonlyArray<ExecutionEvent.Event> = [
           {
             executionId: "turn-synth",
             cursor: "root-answer",
@@ -869,7 +873,7 @@ describe("interactive session extensions", () => {
             text: "Delegated.",
           },
         ]
-        const childEvents: ReadonlyArray<ExecutionBackend.Event> = [
+        const childEvents: ReadonlyArray<ExecutionEvent.Event> = [
           {
             executionId: childId,
             cursor: "child-read",
@@ -914,7 +918,7 @@ describe("interactive session extensions", () => {
             return Effect.void.pipe(Effect.as(undefined))
           },
           replay: (executionId) => {
-            let events: ReadonlyArray<ExecutionBackend.Event> = []
+            let events: ReadonlyArray<ExecutionEvent.Event> = []
             if (executionId === "turn-synth") events = rootEvents
             else if (executionId === childId) events = childEvents
             return Effect.succeed({ turnId: executionId, status: "completed" as const, events })
@@ -965,7 +969,7 @@ describe("interactive session extensions", () => {
             prompt: "queued",
             author: { _tag: "Human" },
             lineage: { _tag: "Original" },
-            executionRoute: Turn.testExecutionRoute(),
+            executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
             status: "queued",
             stopIntent: "none",
             createdAt: 1,
@@ -973,7 +977,7 @@ describe("interactive session extensions", () => {
           },
         ])
         const registration = yield* Deferred.make<Operation.InteractiveSession>()
-        const starts = yield* Ref.make<ReadonlyArray<ExecutionBackend.StartInput>>([])
+        const starts = yield* Ref.make<ReadonlyArray<ExecutionRequest.StartInput>>([])
         const backend = ExecutionBackend.Service.of({
           ...baseBackend,
           start: (input) =>
@@ -1035,12 +1039,12 @@ describe("interactive session extensions", () => {
         const turns = yield* TurnRepository.makeMemory()
         const registration = yield* Deferred.make<Operation.InteractiveSession>()
         const followed = yield* Ref.make<ReadonlyArray<string>>([])
-        const startEventScopes = yield* Ref.make<ReadonlyArray<ExecutionBackend.EventScope | undefined>>([])
+        const startEventScopes = yield* Ref.make<ReadonlyArray<ExecutionRequest.EventScope | undefined>>([])
         const childCallId = "agent"
         const childId = `child:execution%3Aparent-turn:${childCallId}`
         const nestedCallId = "worker"
         const nestedId = `child:${encodeURIComponent(childId)}:${nestedCallId}`
-        const childEvents: ReadonlyArray<ExecutionBackend.Event> = [
+        const childEvents: ReadonlyArray<ExecutionEvent.Event> = [
           {
             executionId: childId,
             cursor: "child-started",
@@ -1091,7 +1095,7 @@ describe("interactive session extensions", () => {
             timestampSource: "server",
           },
         ]
-        const nestedEvents: ReadonlyArray<ExecutionBackend.Event> = [
+        const nestedEvents: ReadonlyArray<ExecutionEvent.Event> = [
           {
             executionId: nestedId,
             cursor: "nested-started",
@@ -1129,7 +1133,7 @@ describe("interactive session extensions", () => {
         const backend = ExecutionBackend.Service.of({
           ...baseBackend,
           start: (input) => {
-            const parentEvents: ReadonlyArray<ExecutionBackend.Event> = [
+            const parentEvents: ReadonlyArray<ExecutionEvent.Event> = [
               {
                 executionId: input.turnId,
                 cursor: "parent-started",
@@ -1184,7 +1188,7 @@ describe("interactive session extensions", () => {
             )
           },
           replay: (executionId) => {
-            let events: ReadonlyArray<ExecutionBackend.Event> = []
+            let events: ReadonlyArray<ExecutionEvent.Event> = []
             if (executionId === childId) events = childEvents
             else if (executionId === nestedId) events = nestedEvents
             return Effect.succeed({ turnId: executionId, status: "completed" as const, events })
@@ -1445,7 +1449,7 @@ describe("interactive session extensions", () => {
             const cursor = typeof afterCursor === "string" ? afterCursor : afterCursor?.cursor
             if (executionId === "parent-turn")
               return Effect.succeed({ turnId: executionId, status: "running" as const, events: [] })
-            const waiting: ExecutionBackend.Event = {
+            const waiting: ExecutionEvent.Event = {
               executionId,
               cursor: "wait",
               sequence: 1,
@@ -1454,7 +1458,7 @@ describe("interactive session extensions", () => {
               timestampSource: "server",
               data: { wait_id: "wait-child", mode: "external_input" },
             }
-            const completed: ReadonlyArray<ExecutionBackend.Event> = [
+            const completed: ReadonlyArray<ExecutionEvent.Event> = [
               {
                 executionId,
                 cursor: "wake",
@@ -1654,7 +1658,7 @@ describe("interactive session extensions", () => {
                 }),
               ),
             cancel: (turnId) => {
-              const events: ReadonlyArray<ExecutionBackend.Event> = turnId.includes(":child:")
+              const events: ReadonlyArray<ExecutionEvent.Event> = turnId.includes(":child:")
                 ? [
                     {
                       executionId: turnId,

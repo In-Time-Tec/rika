@@ -2,7 +2,10 @@ import * as ThreadSummaryRepository from "@rika/product/thread-summary-repositor
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
+import * as ExecutionStatus from "@rika/product/execution-status"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
 import * as ThreadActivity from "../../thread/query/thread-activity"
 import { Clock, Effect, PubSub } from "effect"
 import type { InteractiveEvent } from "../interactive/interactive-event"
@@ -29,7 +32,7 @@ export const makeExecutionProjection = (input: any) =>
     })
     const projectExecutionResult = Effect.fn("ProductOperation.projectExecutionResult")(function* (
       threadId: Thread.ThreadId,
-      result: ExecutionBackend.Result,
+      result: ExecutionEvent.Result,
     ) {
       const summaries = yield* ThreadSummaryRepository.Service
       yield* summaries.replaceTurn(ThreadActivity.projectionInput(threadId, result, yield* Clock.currentTimeMillis))
@@ -37,7 +40,7 @@ export const makeExecutionProjection = (input: any) =>
     })
     const setTurnStatus = Effect.fn("ProductOperation.setTurnStatus")(function* (
       id: Turn.TurnId,
-      status: Turn.Status,
+      status: ExecutionStatus.Status,
       lastCursor: string | undefined,
       now: number,
     ) {
@@ -84,7 +87,7 @@ export const makeExecutionProjection = (input: any) =>
               const current = yield* turns.get(candidate.turnId)
               if (
                 current === undefined ||
-                !Turn.isAgentExecution(current) ||
+                !ThreadResult.TurnResult.isAgentExecution(current) ||
                 current.status !== candidate.status ||
                 current.lastCursor !== candidate.lastCursor
               )

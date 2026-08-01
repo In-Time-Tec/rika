@@ -1,9 +1,10 @@
 import * as ExecutionBackend from "../../execution/contract/execution-service"
-import { AgentDepth } from "../../execution/contract/execution-service"
+import * as ExecutionIdentifier from "@rika/product/execution-identifier"
+import { AgentDepth } from "../../execution/contract/execution-identifier"
 import * as ExecutionStatus from "../../execution/contract/execution-status"
 import * as Thread from "../../thread/model/thread-record"
 import * as ThreadRepository from "../../thread/repository/thread-repository"
-import * as Turn from "../../thread/model/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
 import * as TurnRepository from "../../thread/repository/turn-repository"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import { Clock, Effect } from "effect"
@@ -17,7 +18,7 @@ export interface ExecutionActivity {
 export const isProductExecutionQuiescent = (activity: ExecutionActivity): boolean =>
   activity.active === 0 && activity.pending === 0 && activity.reading === 0 && activity.stopped
 
-export const fanOutTurnStatus = (state: "joining" | "satisfied" | "failed" | "cancelled"): Turn.Status => {
+export const fanOutTurnStatus = (state: "joining" | "satisfied" | "failed" | "cancelled"): ExecutionStatus.Status => {
   if (state === "joining") return "running"
   return state === "satisfied" ? "completed" : state
 }
@@ -30,7 +31,7 @@ export const executionTreeQuiescent = Effect.fn("ProductOperation.executionTreeQ
   turnId: string,
   reference: boolean = false,
 ) {
-  const root = yield* backend.inspect(turnId, reference ? ExecutionBackend.executionReference : undefined)
+  const root = yield* backend.inspect(turnId, reference ? ExecutionIdentifier.executionReference : undefined)
   if (root === undefined) return true
   if (!isTerminalStatus(root.status)) return false
   const pending: Array<string> = []
@@ -42,7 +43,7 @@ export const executionTreeQuiescent = Effect.fn("ProductOperation.executionTreeQ
   }
   while (pending.length > 0) {
     const current = pending.shift()!
-    const inspection = yield* backend.inspect(current, ExecutionBackend.executionReference)
+    const inspection = yield* backend.inspect(current, ExecutionIdentifier.executionReference)
     if (inspection === undefined) continue
     if (!isTerminalStatus(inspection.status)) return false
     for (const child of inspection.children) {
@@ -65,7 +66,7 @@ export const hasActiveExecutionWork = Effect.fn("ProductOperation.hasActiveExecu
           concurrency: 1,
         }))
           .flat()
-          .filter(Turn.isAgentExecution)
+          .filter(ThreadResult.TurnResult.isAgentExecution)
           .filter((turn) => turn.status !== "queued")
       : (yield* turns.listNonterminal).filter((turn) => turn.status !== "queued")
   for (const turn of persisted) {
@@ -114,7 +115,7 @@ const blockedSessionWriter = Effect.fn("ProductOperation.blockedSessionWriter")(
   const turns = yield* TurnRepository.Service
   const history = yield* turns.list(threadId)
   const candidates = history
-    .filter(Turn.isAgentExecution)
+    .filter(ThreadResult.TurnResult.isAgentExecution)
     .filter((turn) => turn.status === "cancelled" || turn.status === "failed")
     .slice(-sessionQuiescenceCandidateLimit)
     .toReversed()

@@ -1,4 +1,4 @@
-import * as ExecutionBackend from "../../execution/contract/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
 import { ExecutionId } from "../../execution/contract/execution-identifier"
 import { Function } from "effect"
 
@@ -11,10 +11,10 @@ export interface RootExecutionEvent {
 export const isRootExecutionEvent = (event: RootExecutionEvent): boolean => event.executionId.length > 0
 
 export const rootExecutionEvents: {
-  (turnId: string, events: ReadonlyArray<ExecutionBackend.Event>): ReadonlyArray<ExecutionBackend.Event>
-  (events: ReadonlyArray<ExecutionBackend.Event>): (turnId: string) => ReadonlyArray<ExecutionBackend.Event>
+  (turnId: string, events: ReadonlyArray<ExecutionEvent.Event>): ReadonlyArray<ExecutionEvent.Event>
+  (events: ReadonlyArray<ExecutionEvent.Event>): (turnId: string) => ReadonlyArray<ExecutionEvent.Event>
 } = Function.dual(
   2,
-  (turnId: string, events: ReadonlyArray<ExecutionBackend.Event>): ReadonlyArray<ExecutionBackend.Event> =>
+  (turnId: string, events: ReadonlyArray<ExecutionEvent.Event>): ReadonlyArray<ExecutionEvent.Event> =>
     events.filter((event) => ExecutionId.ownsExecution(turnId, event.executionId)),
 )

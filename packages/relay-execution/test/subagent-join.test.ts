@@ -6,7 +6,8 @@ import { describe, expect, it, test } from "vitest"
 import { Database } from "bun:sqlite"
 import { Deferred, Effect, Fiber, FileSystem, Layer, Ref, Schedule, Stream } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
-import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
+import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 import * as RelayExecutionBackend from "../src/execution-backend"
 import { planJoin } from "../src/subagent-join"
 import { start } from "./current-execution-route"
@@ -14,9 +15,9 @@ import { start } from "./current-execution-route"
 const encodeJson = (value: unknown) => JSON.stringify(value)
 
 const executionModelRoute = (
-  role: ExecutionBackend.ExecutionModelRoute["role"],
+  role: ExecutionRouteSnapshot.ExecutionModelRoute["role"],
   selection: { readonly provider: string; readonly model: string; readonly registrationKey?: string },
-): ExecutionBackend.ExecutionModelRoute => ({
+): ExecutionRouteSnapshot.ExecutionModelRoute => ({
   role,
   alias: role,
   model: selection.model,

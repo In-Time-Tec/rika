@@ -1,4 +1,4 @@
-import type * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
 import { Result } from "effect"
 import * as StrictUsageCostProjection from "../src/usage/usage-projection"
 import * as StrictUsageCostActiveTime from "../src/usage/usage-active-time"
@@ -27,12 +27,12 @@ export const UsageCost = {
   ...StrictUsageCost,
   observe: (
     snapshot: StrictUsageCost.Snapshot,
-    input: StrictUsageCost.RootExecution & { readonly event: ExecutionBackend.Event },
+    input: StrictUsageCost.RootExecution & { readonly event: ExecutionEvent.Event },
   ) => unwrap(StrictUsageCost.observe(snapshot, input)),
   deserialize: (json: string) => unwrap(StrictUsageCost.deserialize(json)),
 }
 
-const usage = (cursor: string, costUsd: number): ExecutionBackend.Event => ({
+const usage = (cursor: string, costUsd: number): ExecutionEvent.Event => ({
   executionId: "execution",
   cursor,
   sequence: 0,
@@ -46,7 +46,7 @@ const usage = (cursor: string, costUsd: number): ExecutionBackend.Event => ({
   },
 })
 
-const attemptCompleted = (cursor: string, attemptId: string, executionId = "execution"): ExecutionBackend.Event => ({
+const attemptCompleted = (cursor: string, attemptId: string, executionId = "execution"): ExecutionEvent.Event => ({
   executionId,
   cursor,
   sequence: 0,
@@ -61,7 +61,7 @@ const reportedTokens = (
   inputTokens: number | null,
   outputTokens: number | null,
   data: Readonly<Record<string, unknown>> = {},
-): ExecutionBackend.Event => ({
+): ExecutionEvent.Event => ({
   executionId: "execution",
   cursor,
   sequence: 0,
@@ -96,7 +96,7 @@ const lifecycle = (
     | "execution.cancelled",
   createdAt: number,
   sequence: number,
-): ExecutionBackend.Event => ({ executionId, cursor: id, sequence, type, createdAt, timestampSource: "server" })
+): ExecutionEvent.Event => ({ executionId, cursor: id, sequence, type, createdAt, timestampSource: "server" })
 
 const unstampedLifecycle = (
   executionId: string,
@@ -104,18 +104,18 @@ const unstampedLifecycle = (
   type: "execution.started" | "wait.created" | "wait.woken" | "execution.completed",
   createdAt: number,
   sequence: number,
-): ExecutionBackend.Event => ({ executionId, cursor: id, sequence, type, createdAt })
+): ExecutionEvent.Event => ({ executionId, cursor: id, sequence, type, createdAt })
 
 const work = (executionId: string, cursor: string, type: string, createdAt: number, sequence: number) =>
-  ({ executionId, cursor, sequence, type, createdAt }) as ExecutionBackend.Event
+  ({ executionId, cursor, sequence, type, createdAt }) as ExecutionEvent.Event
 
-const usageIn = (executionId: string, cursor: string, costUsd: number): ExecutionBackend.Event => ({
+const usageIn = (executionId: string, cursor: string, costUsd: number): ExecutionEvent.Event => ({
   ...usage(cursor, costUsd),
   executionId,
 })
 
 const fold = (
-  events: ReadonlyArray<ExecutionBackend.Event>,
+  events: ReadonlyArray<ExecutionEvent.Event>,
   input: { readonly threadId: string; readonly turnId: string } = { threadId: "thread", turnId: "turn" },
   snapshot: StrictUsageCost.Snapshot = UsageCost.empty,
 ): StrictUsageCost.Snapshot =>

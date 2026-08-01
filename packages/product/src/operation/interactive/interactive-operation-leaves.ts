@@ -1,7 +1,8 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
 import * as ExecutionStatus from "../../execution/contract/execution-status"
 import type * as IngestProjectionContract from "../../execution/ingest/execution-projection-contract"
-import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
 import type { InteractiveEvent } from "./interactive-event"
 import { Effect } from "effect"
 import { operationError } from "../operation-error"
@@ -35,7 +36,7 @@ const appendRecordedShellOutput = (output: RecordedShellOutput, text: string): R
 }
 
 const projectionVisibleState = (
-  projection: Pick<TranscriptRepository.Projection, "revision" | "modelPhase" | "usableCompletionSequence">,
+  projection: Pick<TranscriptPage.Projection, "revision" | "modelPhase" | "usableCompletionSequence">,
 ): IngestProjectionContract.Snapshot["state"] => ({
   revision: projection.revision,
   modelPhase: projection.modelPhase,
@@ -47,8 +48,8 @@ const projectionVisibleState = (
 const recordedShellStreamId = (turnId: Turn.TurnId): string => `recorded-shell:${turnId}`
 
 export const recordedShellStartedEvent = (
-  turn: Turn.RunningRecordedShellTurn,
-  projection: TranscriptRepository.Projection,
+  turn: ThreadResult.RunningRecordedShellTurn,
+  projection: TranscriptPage.Projection,
 ): InteractiveEvent => ({
   _tag: "TranscriptProjectionStarted",
   selectionEpoch: 0,
@@ -62,8 +63,8 @@ export const recordedShellStartedEvent = (
 })
 
 export const recordedShellSettledEvents = (
-  turn: Turn.TerminalRecordedShellTurn,
-  projection: TranscriptRepository.Projection,
+  turn: ThreadResult.TerminalRecordedShellTurn,
+  projection: TranscriptPage.Projection,
 ): readonly [InteractiveEvent, InteractiveEvent] => {
   const streamId = recordedShellStreamId(turn.id)
   return [

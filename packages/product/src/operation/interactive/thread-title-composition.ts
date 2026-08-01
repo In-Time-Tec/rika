@@ -1,10 +1,12 @@
 import { Cause, Clock, Effect } from "effect"
 import * as UsageSnapshot from "@rika/product/usage-snapshot"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionIdentifier from "@rika/product/execution-identifier"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as UsageRepository from "@rika/product/usage-repository"
-import { AgentDepth } from "@rika/product/execution-service"
+import { AgentDepth } from "../../execution/contract/execution-identifier"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import { failureKind } from "../operation-error"
 import { isTerminalStatus } from "../../execution/contract/execution-status"
@@ -33,7 +35,7 @@ export const titleInteractiveThread = (input: {
     id: string,
     threadId: string,
     turnId: string,
-    events: ReadonlyArray<ExecutionBackend.Event>,
+    events: ReadonlyArray<ExecutionEvent.Event>,
     terminal: boolean,
   ) => Effect.Effect<any, any, never>
   readonly announce: (event: InteractiveEvent) => void
@@ -48,12 +50,12 @@ export const titleInteractiveThread = (input: {
     if (current === undefined || current.title !== clampThreadTitle(input.turn.prompt)) return
     const id = titleExecutionId(input.turn.id)
     if (input.settled.has(id)) return
-    const inspection = yield* input.backend.inspect(id, ExecutionBackend.executionReference)
+    const inspection = yield* input.backend.inspect(id, ExecutionIdentifier.executionReference)
     if (inspection?.status === "failed" || inspection?.status === "cancelled") {
       input.settled.add(id)
       return
     }
-    let result: ExecutionBackend.Result | undefined
+    let result: ExecutionEvent.Result | undefined
     if (inspection === undefined) {
       yield* input.backend.invokeChild({
         parentTurnId: String(input.turn.id),
@@ -61,15 +63,15 @@ export const titleInteractiveThread = (input: {
         profile: "Title",
         prompt: input.turn.prompt.slice(0, 2000),
       })
-      const spawned = yield* input.backend.inspect(id, ExecutionBackend.executionReference)
+      const spawned = yield* input.backend.inspect(id, ExecutionIdentifier.executionReference)
       if (spawned !== undefined && isTerminalStatus(spawned.status))
-        result = yield* input.backend.replay(id, undefined, ExecutionBackend.executionReference)
+        result = yield* input.backend.replay(id, undefined, ExecutionIdentifier.executionReference)
       else if (input.backend.follow !== undefined)
-        result = yield* input.backend.follow(id, undefined, undefined, ExecutionBackend.executionReference)
+        result = yield* input.backend.follow(id, undefined, undefined, ExecutionIdentifier.executionReference)
     } else if (isTerminalStatus(inspection.status))
-      result = yield* input.backend.replay(id, undefined, ExecutionBackend.executionReference)
+      result = yield* input.backend.replay(id, undefined, ExecutionIdentifier.executionReference)
     else if (input.backend.follow !== undefined)
-      result = yield* input.backend.follow(id, undefined, undefined, ExecutionBackend.executionReference)
+      result = yield* input.backend.follow(id, undefined, undefined, ExecutionIdentifier.executionReference)
     if (result === undefined) return
     yield* input.commitUsage(
       id,

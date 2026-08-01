@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as InteractiveFeedOverflow from "../src/operation/interactive/interactive-feed-overflow"
 
 describe("interactive feed overflow", () => {
@@ -11,7 +12,7 @@ describe("interactive feed overflow", () => {
     prompt: "prompt",
     status: "running",
     stopIntent: "none",
-    executionRoute: Turn.testExecutionRoute(),
+    executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
     author: { _tag: "Human" },
     lineage: { _tag: "Original" },
     createdAt: 0,

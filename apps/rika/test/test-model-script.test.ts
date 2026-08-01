@@ -19,7 +19,9 @@ import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
+import * as ExecutionRequest from "@rika/product/execution-request"
 import { ViewState } from "@rika/terminal/terminal-state"
 import { Surface } from "@rika/terminal/opentui-surface"
 import {
@@ -43,7 +45,7 @@ import {
 import { withClientWorkspace } from "../src/interactive-main"
 import { bedrockAuthRefreshTestLayer } from "@rika/relay-execution/model-provider-runtime"
 import { modelRoutePlan, Service as ModelProviderRuntime } from "@rika/relay-execution/model-provider-runtime"
-import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
+import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 
 const distinctModelRoutes = (routes: ReadonlyArray<ModelRouteResolution.ResolvedModelRoute>) =>
   routes.filter(
@@ -75,7 +77,7 @@ const modelRouteDisplayLabel = (route: ModelRouteResolution.ResolvedModelRoute) 
   return `${provider?.toUpperCase()}-${version} ${modelName} ${route.effort}`
 }
 
-const recordingBackend = (starts: Array<ExecutionBackend.StartInput>, registrations?: Array<string>) =>
+const recordingBackend = (starts: Array<ExecutionRequest.StartInput>, registrations?: Array<string>) =>
   ExecutionBackend.Service.of({
     ...(registrations === undefined
       ? {}
@@ -466,7 +468,7 @@ test("isolates a stale persisted route while healthy routes keep starting", () =
         expect(unavailable[0]?.route.alias).toBe("retired")
         expect(unavailable[0]?.route.registrationIdentity).toBe("retired-registration")
         expect(unavailable[0]?.message).toContain("RETIRED_API_KEY")
-        const starts = new Array<ExecutionBackend.StartInput>()
+        const starts = new Array<ExecutionRequest.StartInput>()
         const backend = recordingBackend(starts)
         const isolated = yield* withPinnedRouteRegistration(backend, {
           registeredRoutes: [healthy],
@@ -629,13 +631,13 @@ test("resolves a legacy unavailable route to the current default when it starts"
           authentication: "none" as const,
         },
       }
-      const legacy: Turn.ExecutionRoutePin = {
+      const legacy: ExecutionRouteSnapshot.ExecutionRoutePin = {
         version: 1,
         mode: "test",
         main: legacyModel,
         oracle: { ...legacyModel, role: "oracle" },
       }
-      const starts = new Array<ExecutionBackend.StartInput>()
+      const starts = new Array<ExecutionRequest.StartInput>()
       const isolated = yield* withPinnedRouteRegistration(recordingBackend(starts), {
         registeredRoutes: executionModelRoutes(current),
         unavailable: [],
@@ -658,7 +660,7 @@ test("re-registers a cloned active route when interrupt-and-send starts it", () 
   Effect.runPromise(
     Effect.gen(function* () {
       const cloned = executionRoutePin(SettingsDefaults.Defaults.defaults, "high")
-      const starts = new Array<ExecutionBackend.StartInput>()
+      const starts = new Array<ExecutionRequest.StartInput>()
       const registrations = new Array<string>()
       const isolated = yield* withPinnedRouteRegistration(recordingBackend(starts, registrations), {
         registeredRoutes: [],

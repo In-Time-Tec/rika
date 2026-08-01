@@ -8,6 +8,7 @@ import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import { Config, Effect, FileSystem, Layer, Logger, Schedule, Schema, Semaphore, Stdio, Stream } from "effect"
 import { ProductAgent } from "@rika/product/product-operation"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 
 class FixtureError extends Schema.TaggedErrorClass<FixtureError>()("MultiAgentProcessFixtureError", {
   message: Schema.String,
@@ -41,7 +42,7 @@ const ChildResult = Schema.Struct({
   completedAt: Schema.optional(Schema.Finite),
 })
 
-const executionRoute: ExecutionBackend.ExecutionRoutePin = Turn.testExecutionRoute()
+const executionRoute: ExecutionRouteSnapshot.ExecutionRoutePin = ExecutionRouteSnapshot.testExecutionRoute()
 const decodeMessage = Schema.decodeEffect(Schema.fromJsonString(Message))
 const decodeChildResult = Schema.decodeEffect(Schema.UnknownFromJsonString)
 const encodeLine = Schema.encodeEffect(Schema.UnknownFromJsonString)

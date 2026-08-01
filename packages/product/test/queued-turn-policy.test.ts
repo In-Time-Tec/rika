@@ -1,7 +1,12 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
-import { queuedTurnPromoteMaxAgeMs, staleQueuedTurns, staleQueuedTurnsError } from "../src/thread/queue/pending-turn-policy"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
+import {
+  queuedTurnPromoteMaxAgeMs,
+  staleQueuedTurns,
+  staleQueuedTurnsError,
+} from "../src/thread/queue/pending-turn-policy"
 
 const queued = (id: string, createdAt: number): Turn.AgentExecutionTurn => ({
   _tag: "AgentExecution",
@@ -10,7 +15,7 @@ const queued = (id: string, createdAt: number): Turn.AgentExecutionTurn => ({
   prompt: id,
   author: { _tag: "Human" },
   lineage: { _tag: "Original" },
-  executionRoute: Turn.testExecutionRoute(),
+  executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
   status: "queued",
   stopIntent: "none",
   createdAt,

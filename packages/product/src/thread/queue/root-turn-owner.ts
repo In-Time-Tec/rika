@@ -1,7 +1,12 @@
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionStatus from "@rika/product/execution-status"
 import * as TurnRepository from "@rika/product/turn-repository"
+import * as TurnQueuePromotion from "./turn-queue-promotion"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionRequest from "@rika/product/execution-request"
+import * as ExecutionIdentifier from "@rika/product/execution-identifier"
 import { Cause, Effect, Fiber, Scope, Semaphore } from "effect"
 
 export interface Lifecycle {
@@ -12,23 +17,23 @@ export interface Lifecycle {
 export interface Interface {
   readonly claim: (
     turnId: Turn.TurnId,
-    expectedStatus?: Turn.Status,
+    expectedStatus?: ExecutionStatus.Status,
   ) => Effect.Effect<boolean, TurnRepository.RepositoryError>
   readonly release: (turnId: Turn.TurnId) => Effect.Effect<boolean>
   readonly claimQueued: (
     threadId: Thread.ThreadId,
     now: number,
-  ) => Effect.Effect<TurnRepository.QueueClaim | undefined, TurnRepository.RepositoryError>
+  ) => Effect.Effect<TurnQueuePromotion.QueueClaim | undefined, TurnRepository.RepositoryError>
   readonly start: (
-    input: ExecutionBackend.StartInput,
-  ) => Effect.Effect<ExecutionBackend.Result, ExecutionBackend.BackendError>
+    input: ExecutionRequest.StartInput,
+  ) => Effect.Effect<ExecutionEvent.Result, ExecutionBackend.BackendError>
   readonly follow: (
     turnId: Turn.TurnId,
-    checkpoint: ExecutionBackend.ExecutionCheckpoint | string | undefined,
-    onEvent?: (event: ExecutionBackend.Event) => void,
-    reference?: ExecutionBackend.ExecutionReference,
-    eventScope?: ExecutionBackend.EventScope,
-  ) => Effect.Effect<ExecutionBackend.Result, ExecutionBackend.BackendError>
+    checkpoint: ExecutionEvent.ExecutionCheckpoint | string | undefined,
+    onEvent?: (event: ExecutionEvent.Event) => void,
+    reference?: ExecutionIdentifier.ExecutionReference,
+    eventScope?: ExecutionRequest.EventScope,
+  ) => Effect.Effect<ExecutionEvent.Result, ExecutionBackend.BackendError>
   readonly install: (lifecycle: Lifecycle) => Effect.Effect<void>
   readonly accepted: (turnId: Turn.TurnId) => Effect.Effect<void>
   readonly reconcile: Effect.Effect<void>
@@ -44,7 +49,7 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
   const claimed = new Set<string>()
   let lifecycle: Lifecycle | undefined
   const running = new Map<string, Fiber.Fiber<void, Error>>()
-  const claim = (turnId: Turn.TurnId, expectedStatus?: Turn.Status) =>
+  const claim = (turnId: Turn.TurnId, expectedStatus?: ExecutionStatus.Status) =>
     admission.withPermits(1)(
       Effect.gen(function* () {
         const key = String(turnId)

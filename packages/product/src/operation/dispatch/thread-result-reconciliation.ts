@@ -1,7 +1,8 @@
 import * as Turn from "@rika/product/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import * as ThreadInteractionRepository from "@rika/product/thread-interaction-repository"
+import * as ResultDelivery from "../../thread/repository/thread-interaction-result"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import { Clock, Context, Effect } from "effect"
@@ -29,13 +30,13 @@ export const makeThreadResultReconciliation =
         const turns = Context.get(dependencyContext, TurnRepository.Service)
         const transcripts = Context.get(dependencyContext, TranscriptRepository.Service)
         let retry = false
-        let after: ThreadInteractionRepository.ResultRouteCursor | undefined
+        let after: ResultDelivery.ResultRouteCursor | undefined
         while (true) {
           const routes = yield* threadInteractions.listUndeliveredResults(100, after)
           if (routes.length === 0) break
           for (const route of routes) {
             const turn = yield* turns.get(route.targetTurnId)
-            if (turn === undefined || !Turn.isAgentExecution(turn)) continue
+            if (turn === undefined || !ThreadResult.TurnResult.isAgentExecution(turn)) continue
             let currentRoute = route
             if (route.delivery === "awaiting-result" && isTerminalStatus(turn.status)) {
               let projection = yield* transcripts.get(turn.id)
@@ -49,7 +50,7 @@ export const makeThreadResultReconciliation =
                 }
                 projection = yield* transcripts.get(turn.id)
               }
-              let result: ThreadInteractionRepository.RootResult
+              let result: ResultDelivery.RootResult
               if (turn.status === "cancelled" && projection === undefined) result = { status: "cancelled" }
               else {
                 const checkpoint = projection?.executionCheckpoints.find(

@@ -32,4 +32,3 @@ export const terminalEventStatus = (eventType: string): Status | undefined => {
   if (eventType === "execution.cancelled") return "cancelled"
   return undefined
 }
-

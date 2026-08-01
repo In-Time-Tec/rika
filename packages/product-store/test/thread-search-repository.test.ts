@@ -9,6 +9,7 @@ import * as ThreadRepository from "../src/thread-repository"
 import * as Search from "../src/thread-search-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 
 const provideBun = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Layer.build(BunServices.layer).pipe(Effect.flatMap((context) => Effect.provide(effect, context)))
@@ -33,7 +34,7 @@ const turn = (target: Thread.Thread, prompt: string): Turn.AgentExecutionTurn =>
   prompt,
   status: "completed",
   stopIntent: "none",
-  executionRoute: Turn.testExecutionRoute(),
+  executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
   author: { _tag: "Human" },
   lineage: { _tag: "Original" },
   createdAt: target.createdAt,
@@ -290,7 +291,7 @@ describe("thread search repository", () => {
           INSERT INTO rika_threads (id, workspace, title, labels_json, created_at, updated_at)
             VALUES ('legacy', '/work/current', 'Legacy title', '["legacy-label"]', 1, 2);
           INSERT INTO rika_turns (id, thread_id, prompt, status, execution_route_json, created_at, updated_at)
-            VALUES ('legacy-turn', 'legacy', 'historical prompt', 'completed', '${encodeJson(Turn.testExecutionRoute()).replaceAll("'", "''")}', 1, 2);
+            VALUES ('legacy-turn', 'legacy', 'historical prompt', 'completed', '${encodeJson(ExecutionRouteSnapshot.testExecutionRoute()).replaceAll("'", "''")}', 1, 2);
         `)
           database.close()
         })

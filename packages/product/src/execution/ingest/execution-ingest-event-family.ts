@@ -1,13 +1,13 @@
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import * as ExecutionBackend from "../contract/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionStatus from "@rika/product/execution-status"
 import type { InterruptedOutcome } from "./execution-ingest-state"
-import * as ExecutionStatus from "../contract/execution-status"
 
 export const isInterruptedOutcome = (
   outcome: NonNullable<TranscriptUnit.Unit["executionOutcome"]>,
 ): outcome is InterruptedOutcome => outcome.status === "failed" || outcome.status === "cancelled"
 
-export const childExecutionIds = (event: ExecutionBackend.Event): ReadonlyArray<string> => {
+export const childExecutionIds = (event: ExecutionEvent.Event): ReadonlyArray<string> => {
   const ids = new Set<string>()
   const addAliases = (value: Readonly<Record<string, unknown>> | undefined) => {
     if (value === undefined) return
@@ -26,15 +26,14 @@ export const childExecutionIds = (event: ExecutionBackend.Event): ReadonlyArray<
   return [...ids]
 }
 
-export const bySequence = (left: ExecutionBackend.Event, right: ExecutionBackend.Event) =>
-  left.sequence - right.sequence
+export const bySequence = (left: ExecutionEvent.Event, right: ExecutionEvent.Event) => left.sequence - right.sequence
 
 export const settledStatus = (
-  status: ExecutionBackend.Status,
-): NonNullable<import("@rika/product/transcript-repository").ExecutionCheckpoint["status"]> | undefined =>
+  status: ExecutionStatus.Status,
+): NonNullable<import("@rika/product/transcript-page").ExecutionCheckpoint["status"]> | undefined =>
   status === "completed" || status === "failed" || status === "cancelled" ? status : undefined
 
-export const isTerminalStatus = (status: ExecutionBackend.Status): boolean =>
+export const isTerminalStatus = (status: ExecutionStatus.Status): boolean =>
   status === "completed" || status === "failed" || status === "cancelled"
 
 export const terminalEventStatus = ExecutionStatus.terminalEventStatus

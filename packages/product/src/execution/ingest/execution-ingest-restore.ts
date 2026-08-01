@@ -1,5 +1,5 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
 import * as Turn from "@rika/product/turn-record"
-import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
@@ -24,7 +24,7 @@ const childProjectionOf = (
 
 const rootProjectionOf = (
   turn: Turn.AgentExecutionTurn,
-  stored: TranscriptRepository.Projection,
+  stored: TranscriptPage.Projection,
   state: TranscriptProjectionModel.ProjectionState,
 ): TranscriptProjectionModel.Projection | string => {
   const rootUnits = stored.units.filter((unit) => unit.parentId === undefined)
@@ -46,10 +46,7 @@ const rootProjectionOf = (
   return { units: rootUnits, ...state }
 }
 
-export const restore = (
-  turn: Turn.AgentExecutionTurn,
-  stored: TranscriptRepository.Projection | undefined,
-): Restored => {
+export const restore = (turn: Turn.AgentExecutionTurn, stored: TranscriptPage.Projection | undefined): Restored => {
   const rootKey = TranscriptCorrelation.executionKey(String(turn.id))
   const checkpoints = new Map(
     (stored?.executionCheckpoints ?? []).map((checkpoint) => [checkpoint.executionKey, checkpoint]),
@@ -158,7 +155,7 @@ export const restore = (
 
 export const validateStoredAttachments = (
   turn: Turn.AgentExecutionTurn,
-  stored: TranscriptRepository.Projection,
+  stored: TranscriptPage.Projection,
   nodes: ReadonlyMap<string, Node>,
   attachments: ReadonlyMap<string, Attachment>,
 ): string | undefined => {

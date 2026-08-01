@@ -1,6 +1,6 @@
-import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
 
-export const agentResponseArrived = (events: ReadonlyArray<ExecutionBackend.Event>): boolean => {
+export const agentResponseArrived = (events: ReadonlyArray<ExecutionEvent.Event>): boolean => {
   for (const event of events) {
     if (event.type === "execution.cancelled") return false
     if (

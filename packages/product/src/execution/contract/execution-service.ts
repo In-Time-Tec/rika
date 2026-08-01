@@ -1,60 +1,11 @@
 import { Context, Effect, Schema } from "effect"
-import * as ExecutionIngestModule from "../ingest/execution-ingest-service"
-import type {
-  ExecutionModelRoute,
-  ExecutionRouteModelSnapshot,
-  ExecutionRoutePin,
-  ExecutionRouteSnapshot,
-} from "./execution-route-snapshot"
-import type {
-  ChildEvent,
-  ChildProjection,
-  FanOutInput,
-  FanOutInspection,
-  InvokeChildInput,
-  JoinPolicy,
-} from "./execution-child-run"
+import type { ChildEvent, FanOutInput, FanOutInspection, InvokeChildInput } from "./execution-child-run"
 import type { Event, EventPage, ExecutionCheckpoint, Result } from "./execution-event"
 import type { ExecutionReference, InvocationSource, OpenRootExecution, TurnPromoter } from "./execution-identifier"
 import type { PendingApproval } from "./execution-approval"
 import type { Inspection } from "./execution-inspection"
-import type { EventScope, PromptPart, SessionPurpose, StartInput } from "./execution-request"
-import type { ExecutionExtensionPin, WorkflowInspection } from "./execution-workflow"
-import { executionReference } from "./execution-identifier"
-import { Status } from "./execution-status"
-
-export const ExecutionIngest = ExecutionIngestModule
-
-export { AgentProfile } from "./execution-child-run"
-export { Event } from "./execution-event"
-export { executionReference, Status }
-export type {
-  ChildEvent,
-  ChildProjection,
-  EventPage,
-  EventScope,
-  ExecutionCheckpoint,
-  ExecutionExtensionPin,
-  ExecutionReference,
-  ExecutionRouteModelSnapshot,
-  ExecutionRouteSnapshot,
-  FanOutInput,
-  FanOutInspection,
-  Inspection,
-  InvocationSource,
-  InvokeChildInput,
-  JoinPolicy,
-  OpenRootExecution,
-  PendingApproval,
-  PromptPart,
-  Result,
-  SessionPurpose,
-  StartInput,
-  TurnPromoter,
-  WorkflowInspection,
-}
-
-export type { ExecutionModelRoute, ExecutionRoutePin }
+import type { EventScope, StartInput } from "./execution-request"
+import type { WorkflowInspection } from "./execution-workflow"
 export class BackendError extends Schema.TaggedErrorClass<BackendError>()("ExecutionBackendError", {
   message: Schema.String,
 }) {}
@@ -159,19 +110,3 @@ export interface SteerReceipt {
 export class Service extends Context.Service<Service, Interface>()(
   "@rika/product/execution/contract/execution-service/Service",
 ) {}
-
-export const AgentDepth = {
-  childExecutionId: (parentExecutionId: string, childId: string): string =>
-    `child:${encodeURIComponent(parentExecutionId)}:${childId}`,
-  childExecutionDepth: (executionId: string): number => {
-    let depth = 0
-    let current = executionId
-    while (current.startsWith("child:")) {
-      const separator = current.indexOf(":", "child:".length)
-      if (separator < 0) break
-      depth += 1
-      current = decodeURIComponent(current.slice("child:".length, separator))
-    }
-    return depth
-  },
-}

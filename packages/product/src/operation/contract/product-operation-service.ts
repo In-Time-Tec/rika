@@ -23,7 +23,9 @@ export interface Interface {
   readonly stopActiveExecutionWork?: Effect.Effect<void, OperationUnavailable>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/product/operation/contract/product-operation-service/Service") {}
+export class Service extends Context.Service<Service, Interface>()(
+  "@rika/product/operation/contract/product-operation-service/Service",
+) {}
 
 export const unavailableLayer = Layer.succeed(
   Service,

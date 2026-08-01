@@ -1,3 +1,4 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
 import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as ThreadRepository from "@rika/product/thread-repository"
@@ -55,7 +56,7 @@ export const makeInteractiveSessionSelection = (
   const loadOlder = (
     threadId: string,
     epoch: number,
-    before: TranscriptRepository.PageCursor | undefined,
+    before: TranscriptPage.PageCursor | undefined,
     loadedKeys: ReadonlyArray<string>,
   ) =>
     input.safe(
@@ -68,7 +69,7 @@ export const makeInteractiveSessionSelection = (
         )
       }),
     )
-  const loadNewer = (threadId: string, epoch: number, after: TranscriptRepository.PageCursor) =>
+  const loadNewer = (threadId: string, epoch: number, after: TranscriptPage.PageCursor) =>
     input.safe(
       input.sessionDispatch,
       input.transcriptPageAdmission.withPermits(1)(

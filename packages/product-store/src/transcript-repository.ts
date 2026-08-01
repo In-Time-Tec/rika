@@ -1,3 +1,4 @@
+import * as ThreadResult from "@rika/product/thread-result"
 import { Service } from "@rika/product/transcript-repository"
 export { Service }
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
@@ -10,8 +11,9 @@ import { Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { ThreadId } from "@rika/product/thread-record"
 import * as TurnRepository from "./turn-repository"
-import { Turn, TurnId, isAgentExecution, isRecordedShell } from "@rika/product/turn-record"
-import type { AgentExecutionTurn, RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/turn-record"
+import { Turn, TurnId } from "@rika/product/turn-record"
+import type { AgentExecutionTurn } from "@rika/product/turn-record"
+import type { RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/thread-result"
 import { EntrySchema, PageCursor, type Entry } from "@rika/product/transcript-page"
 
 export { EntrySchema, PageCursor }
@@ -725,7 +727,7 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
         projection.projectionVersion === invalidatedProjectionVersion &&
         projection.units.length === 0 &&
         projection.executionCheckpoints.length === 0
-      if (isRecordedShell(projection.turn)) {
+      if (ThreadResult.TurnResult.isRecordedShell(projection.turn)) {
         if (projection.executionCheckpoints.length !== 0)
           return yield* RepositoryError.make({
             message: `Recorded shell turn ${projection.turn.id} has execution checkpoints`,
@@ -1021,7 +1023,7 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
               current.projection.projectionVersion !== options.expectedProjectionVersion ||
               current.projection.checkpointGeneration !== options.expectedGeneration ||
               options.projectionVersion <= current.projection.projectionVersion ||
-              !isAgentExecution(current.projection.turn) ||
+              !ThreadResult.TurnResult.isAgentExecution(current.projection.turn) ||
               current.projection.turn.status !== turn.status ||
               current.projection.turn.lastCursor !== turn.lastCursor
             )
@@ -1066,7 +1068,7 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
                   current === undefined ||
                   current.projection.checkpointGeneration !== expectedGeneration ||
                   current.projection.projectionVersion !== projectionVersion ||
-                  !isRecordedShell(current.projection.turn) ||
+                  !ThreadResult.TurnResult.isRecordedShell(current.projection.turn) ||
                   !sameTurn(current.projection.turn, expected)
                 )
                   return [{ _tag: "Stale" as const }, entries] as const
@@ -1234,7 +1236,7 @@ export const layer = Layer.effect(
                         : null
                     return (
                       unit.key === unitRow.unit_key &&
-                      (isRecordedShell(turn) ? null : TranscriptCorrelation.executionKey(unit.turnId)) ===
+                      (ThreadResult.TurnResult.isRecordedShell(turn) ? null : TranscriptCorrelation.executionKey(unit.turnId)) ===
                         unitRow.execution_key &&
                       TranscriptOrdering.hasIntrinsicOrder(unit) &&
                       TranscriptOrdering.encodeUnitOrder(unit.order) === unitRow.unit_order_key &&
@@ -1274,7 +1276,7 @@ export const layer = Layer.effect(
         row.projection_version === invalidatedProjectionVersion &&
         units.length === 0 &&
         executionCheckpoints.length === 0
-      if (isRecordedShell(turn)) {
+      if (ThreadResult.TurnResult.isRecordedShell(turn)) {
         if (executionCheckpoints.length !== 0)
           return yield* RepositoryError.make({ message: `Recorded shell turn ${turn.id} has execution checkpoints` })
         yield* validateRecordedShellProjection(turn, withUnits(state, units), row.projection_version)
@@ -1338,7 +1340,7 @@ export const layer = Layer.effect(
         return yield* RepositoryError.make({ message: `Transcript unit ${unit.key} has a non-intrinsic order` })
       const encoded = yield* Schema.encodeEffect(UnitJson)(unit)
       const orderKey = TranscriptOrdering.encodeUnitOrder(unit.order)
-      const executionKey = isRecordedShell(turn) ? null : TranscriptCorrelation.executionKey(unit.turnId)
+      const executionKey = ThreadResult.TurnResult.isRecordedShell(turn) ? null : TranscriptCorrelation.executionKey(unit.turnId)
       const rows =
         yield* sql`INSERT INTO rika_transcript_units (turn_id, unit_key, execution_key, thread_id, unit_order_key, tool_id, parent_id, revision, unit_json, created_at, updated_at)
           VALUES (${turn.id}, ${unit.key}, ${executionKey}, ${turn.threadId}, ${orderKey}, ${unit.content._tag === "Block" && unit.content.block._tag === "ToolCall" ? unit.content.block.id : null}, ${unit.parentId ?? null}, ${unit.revision}, ${encoded}, ${turn.createdAt}, ${turn.updatedAt})
@@ -1605,7 +1607,7 @@ export const layer = Layer.effect(
               const committed = yield* get(turn.id)
               if (committed === undefined)
                 return yield* RepositoryError.make({ message: `Transcript ${turn.id} disappeared during refold` })
-              if (!isAgentExecution(committed.turn))
+              if (!ThreadResult.TurnResult.isAgentExecution(committed.turn))
                 return yield* RepositoryError.make({ message: `Transcript ${turn.id} changed turn kind during refold` })
               return { _tag: "Committed", turn: committed.turn } as const
             }),
@@ -1768,7 +1770,7 @@ export const layer = Layer.effect(
                       : null
                   if (
                     unit.key !== row.unit_key ||
-                    (isRecordedShell(turn) ? null : TranscriptCorrelation.executionKey(unit.turnId)) !==
+                    (ThreadResult.TurnResult.isRecordedShell(turn) ? null : TranscriptCorrelation.executionKey(unit.turnId)) !==
                       row.execution_key ||
                     !TranscriptOrdering.hasIntrinsicOrder(unit) ||
                     TranscriptOrdering.encodeUnitOrder(unit.order) !== row.unit_order_key ||
@@ -1779,7 +1781,7 @@ export const layer = Layer.effect(
                     return yield* RepositoryError.make({
                       message: "Transcript unit order does not match its durable key",
                     })
-                  if (isRecordedShell(turn)) {
+                  if (ThreadResult.TurnResult.isRecordedShell(turn)) {
                     if (
                       row.execution_key !== null ||
                       unit.parentId !== undefined ||

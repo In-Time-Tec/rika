@@ -1,3 +1,4 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
@@ -59,7 +60,7 @@ export const makeInteractiveTranscriptPage = (input: any) => {
   const loadTranscriptPage = Effect.fn("ProductOperation.interactive.loadTranscriptPage")(function* (
     state: SelectionEpochState,
     dispatch: (event: InteractiveEvent) => void,
-    before?: TranscriptRepository.PageCursor,
+    before?: TranscriptPage.PageCursor,
     clientLoadedKeys?: ReadonlySet<string>,
   ) {
     const thread = state.thread

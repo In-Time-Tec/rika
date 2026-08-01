@@ -1,8 +1,16 @@
 import * as ExecutionBackend from "../../execution/contract/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
 import * as Thread from "../../thread/model/thread-record"
 import * as ThreadRepository from "../../thread/repository/thread-repository"
 import * as Turn from "../../thread/model/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
+import * as ExecutionStatus from "@rika/product/execution-status"
+import * as ExecutionRequest from "@rika/product/execution-request"
+import * as ExecutionWorkflow from "@rika/product/execution-workflow"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as TurnRepository from "../../thread/repository/turn-repository"
+import * as TurnQueuePromotion from "../../thread/queue/turn-queue-promotion"
+import * as TurnRepositoryContract from "../../thread/repository/turn-repository-contract"
 import * as ThreadActivity from "../../thread/query/thread-activity"
 import { staleQueuedTurnsError } from "../../thread/queue/pending-turn-policy"
 import { clampThreadTitle } from "../../thread/query/thread-title-policy"
@@ -16,19 +24,58 @@ export interface Dependencies {
   readonly pendingTurnCapacity: number
   readonly makeThreadId: Effect.Effect<Thread.ThreadId>
   readonly makeTurnId: Effect.Effect<Turn.TurnId>
-  readonly resolveExecutionRoute: (mode: string, tuning?: undefined, workspace?: string) => Effect.Effect<Turn.ExecutionRoutePin, unknown, never>
-  readonly createObservedSubmission: (turns: TurnRepository.Interface, input: TurnRepository.CreateInput) => Effect.Effect<{ readonly turn: Turn.Turn; readonly claimed: boolean }, unknown, never>
+  readonly resolveExecutionRoute: (
+    mode: string,
+    tuning?: undefined,
+    workspace?: string,
+  ) => Effect.Effect<ExecutionRouteSnapshot.ExecutionRoutePin, unknown, never>
+  readonly createObservedSubmission: (
+    turns: TurnRepository.Interface,
+    input: TurnRepositoryContract.CreateInput,
+  ) => Effect.Effect<{ readonly turn: Turn.Turn; readonly claimed: boolean }, unknown, never>
   readonly ensureTurnSummary: (turn: Turn.Turn) => Effect.Effect<void, unknown, never>
-  readonly setTurnStatus: (id: Turn.TurnId, status: Turn.Status, cursor: string | undefined, now: number) => Effect.Effect<Turn.Turn, unknown, never>
-  readonly publishInteractiveActivity: (origin: number, event: import("../interactive/interactive-event").InteractiveEvent) => void
+  readonly setTurnStatus: (
+    id: Turn.TurnId,
+    status: ExecutionStatus.Status,
+    cursor: string | undefined,
+    now: number,
+  ) => Effect.Effect<Turn.Turn, unknown, never>
+  readonly publishInteractiveActivity: (
+    origin: number,
+    event: import("../interactive/interactive-event").InteractiveEvent,
+  ) => void
   readonly rootTurnOwner: import("../../thread/queue/root-turn-owner").Interface
   readonly executionIngest: import("../../execution/ingest/execution-ingest-service").Interface
-  readonly prepareExecution: (turn: Turn.AgentExecutionTurn, workspace: string, persist?: boolean) => Effect.Effect<{ readonly prompt: string; readonly promptParts: ReadonlyArray<Turn.PromptPart> | undefined; readonly extensionPin: Turn.ExecutionExtensionPin | undefined }, unknown, never>
-  readonly claimQueuedTurn: (threadId: Thread.ThreadId, now: number) => Effect.Effect<TurnRepository.QueueClaim | undefined, unknown, never>
+  readonly prepareExecution: (
+    turn: Turn.AgentExecutionTurn,
+    workspace: string,
+    persist?: boolean,
+  ) => Effect.Effect<
+    {
+      readonly prompt: string
+      readonly promptParts: ReadonlyArray<ExecutionRequest.PromptPart> | undefined
+      readonly extensionPin: ExecutionWorkflow.ExecutionExtensionPin | undefined
+    },
+    unknown,
+    never
+  >
+  readonly claimQueuedTurn: (
+    threadId: Thread.ThreadId,
+    now: number,
+  ) => Effect.Effect<TurnQueuePromotion.QueueClaim | undefined, unknown, never>
   readonly releaseTurnObserver: (turnId: Turn.TurnId) => Effect.Effect<unknown, never, never>
-  readonly queueMutationEvent: (queue: TurnRepository.QueueItemChange) => import("../interactive/interactive-event").InteractiveEvent
-  readonly deliverResultEvents: (turnId: Turn.TurnId, events: ReadonlyArray<ExecutionBackend.Event>, delivered?: ReadonlySet<string>) => void
-  readonly projectExecutionResult: (threadId: Thread.ThreadId, result: ExecutionBackend.Result) => Effect.Effect<void, unknown, never>
+  readonly queueMutationEvent: (
+    queue: TurnQueuePromotion.QueueItemChange,
+  ) => import("../interactive/interactive-event").InteractiveEvent
+  readonly deliverResultEvents: (
+    turnId: Turn.TurnId,
+    events: ReadonlyArray<ExecutionEvent.Event>,
+    delivered?: ReadonlySet<string>,
+  ) => void
+  readonly projectExecutionResult: (
+    threadId: Thread.ThreadId,
+    result: ExecutionEvent.Result,
+  ) => Effect.Effect<void, unknown, never>
   readonly ensureIngest: (threadId: Thread.ThreadId, turnId: Turn.TurnId) => Effect.Effect<void, unknown, never>
   readonly awaitIngestSettled: (turnId: Turn.TurnId) => Effect.Effect<void, unknown, never>
   readonly executionDependencies: import("effect").Context.Context<
@@ -44,13 +91,18 @@ export interface Dependencies {
   readonly followClaimed: ((turnId: Turn.TurnId) => Effect.Effect<void, unknown, never>) | undefined
   readonly staleQueuedTurnsError: typeof staleQueuedTurnsError
   readonly queuedTurnPromoteMaxAgeMs: number
-  readonly awaitSessionQuiescence: (backend: ExecutionBackend.Interface, threadId: Thread.ThreadId) => Effect.Effect<Turn.AgentExecutionTurn | undefined, unknown, never>
+  readonly awaitSessionQuiescence: (
+    backend: ExecutionBackend.Interface,
+    threadId: Thread.ThreadId,
+  ) => Effect.Effect<Turn.AgentExecutionTurn | undefined, unknown, never>
   readonly operationError: (message: string) => Effect.Effect<never, OperationError>
   readonly unavailable: (input: Input, message: string) => OperationUnavailable
 }
 
-export const run = Effect.fn("NoninteractiveOperation.run")(function* (input: Extract<Input, { readonly _tag: "Run" }>, dependencies: Dependencies) {
-
+export const run = Effect.fn("NoninteractiveOperation.run")(function* (
+  input: Extract<Input, { readonly _tag: "Run" }>,
+  dependencies: Dependencies,
+) {
   const program = Effect.gen(function* () {
     const threads = yield* ThreadRepository.Service
     const turns = yield* TurnRepository.Service
@@ -77,8 +129,8 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (input: Ex
       turn: Turn.AgentExecutionTurn,
       preparedInput?: {
         readonly prompt: string
-        readonly promptParts: ReadonlyArray<Turn.PromptPart> | undefined
-        readonly extensionPin: Turn.ExecutionExtensionPin | undefined
+        readonly promptParts: ReadonlyArray<ExecutionRequest.PromptPart> | undefined
+        readonly extensionPin: ExecutionWorkflow.ExecutionExtensionPin | undefined
       },
     ) {
       const blockedTurn = yield* dependencies.awaitSessionQuiescence(backend, turn.threadId)
@@ -264,7 +316,7 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (input: Ex
     if (submitted.status === "queued") return
     if (!observed.claimed)
       return yield* dependencies.operationError(`Turn ${submitted.id} already has an execution observer`)
-    if (!Turn.isAgentExecution(submitted))
+    if (!ThreadResult.TurnResult.isAgentExecution(submitted))
       return yield* dependencies.operationError(`Turn ${submitted.id} is not an executable turn`)
     const result = yield* runTurn(submitted).pipe(Effect.ensuring(dependencies.releaseTurnObserver(submitted.id)))
     yield* drainRunQueue()

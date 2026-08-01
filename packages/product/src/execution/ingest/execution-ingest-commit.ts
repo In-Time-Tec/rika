@@ -1,5 +1,6 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
-import * as Turn from "@rika/product/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
 import * as UsageRepository from "@rika/product/usage-repository"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
@@ -151,7 +152,7 @@ export const make = (dependencies: CommitDependencies) => {
             )
             return
           }
-          if (!Turn.isAgentExecution(turn)) {
+          if (!ThreadResult.TurnResult.isAgentExecution(turn)) {
             dependencies.fail(
               pipeline,
               root,
@@ -180,7 +181,7 @@ export const make = (dependencies: CommitDependencies) => {
           pipeline.delta = { units: new Map(), checkpoints: new Set() }
           pipeline.pendingVersion = 0
           pipeline.pending = 0
-          const checkpoint = (node: Node): TranscriptRepository.ExecutionCheckpoint => ({
+          const checkpoint = (node: Node): TranscriptPage.ExecutionCheckpoint => ({
             executionKey: node.key,
             executionId: node.executionId,
             cursor: node.cursor ?? "",
@@ -263,7 +264,7 @@ export const make = (dependencies: CommitDependencies) => {
               Deferred.doneUnsafe(pipeline.rootCommitted, Effect.void)
             return
           }
-          const write: Effect.Effect<TranscriptRepository.RefoldWriteResult, TranscriptRepository.RepositoryError> =
+          const write: Effect.Effect<TranscriptPage.RefoldWriteResult, TranscriptRepository.RepositoryError> =
             pipeline.refolding
               ? dependencies.options.transcripts.replaceForRefold(
                   turn,
@@ -304,7 +305,7 @@ export const make = (dependencies: CommitDependencies) => {
                   )
                   .pipe(
                     Effect.map(
-                      (result): TranscriptRepository.RefoldWriteResult =>
+                      (result): TranscriptPage.RefoldWriteResult =>
                         result === "stale" ? { _tag: "Stale" } : { _tag: "Committed", turn },
                     ),
                   )

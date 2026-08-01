@@ -1,13 +1,14 @@
-import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionIdentifier from "@rika/product/execution-identifier"
 import * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
 import type { Commit, Refold } from "../../execution/ingest/execution-ingest-commit"
 import { Cause, Effect, Queue } from "effect"
 import { failureKind, operationError } from "../operation-error"
 
 export const undeliveredEvents = (
-  events: ReadonlyArray<ExecutionBackend.Event>,
+  events: ReadonlyArray<ExecutionEvent.Event>,
   delivered: ReadonlySet<string>,
-): ReadonlyArray<ExecutionBackend.Event> =>
+): ReadonlyArray<ExecutionEvent.Event> =>
   events.filter((event) => !delivered.has(event.cursor)).toSorted((left, right) => left.sequence - right.sequence)
 
 export const makeProductOperationIngest = (input: any) =>
@@ -59,11 +60,11 @@ export const makeProductOperationIngest = (input: any) =>
           const commit = yield* Queue.take(usageCommits)
           if (commit.refolded) {
             const sourceId = titleExecutionId(commit.rootTurnId)
-            const inspection = yield* acquiredBackend.inspect(sourceId, ExecutionBackend.executionReference)
+            const inspection = yield* acquiredBackend.inspect(sourceId, ExecutionIdentifier.executionReference)
             if (inspection !== undefined) {
               if (!isTerminalStatus(inspection.status))
                 return yield* operationError(`Title usage source ${sourceId} is nonterminal after root refold`)
-              const replay = yield* acquiredBackend.replay(sourceId, undefined, ExecutionBackend.executionReference)
+              const replay = yield* acquiredBackend.replay(sourceId, undefined, ExecutionIdentifier.executionReference)
               if (replay.status !== inspection.status)
                 return yield* operationError(`Title usage source ${sourceId} has contradictory terminal status`)
               yield* commitUsageSource(
@@ -102,7 +103,7 @@ export const makeProductOperationIngest = (input: any) =>
       executionIngest.flush(turnId).pipe(Effect.mapError((failure: any) => operationError(failure.message)))
     const deliverResultEvents = (
       turnId: any,
-      events: ReadonlyArray<ExecutionBackend.Event>,
+      events: ReadonlyArray<ExecutionEvent.Event>,
       delivered: ReadonlySet<string> = new Set(),
     ) => {
       for (const event of undeliveredEvents(events, delivered)) executionIngest.deliver(turnId, event)

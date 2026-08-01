@@ -2,7 +2,9 @@ import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRequest from "@rika/product/execution-request"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
 import * as ThreadActivity from "../../thread/query/thread-activity"
 import { Cause, Clock, Effect, Ref } from "effect"
 import { admitInteractiveTurn } from "./interactive-turn-submission"
@@ -19,7 +21,7 @@ export const admitInteractiveSubmission = (
   prompt: string,
   mode: ModeId,
   modelTuning: { readonly fastMode?: boolean } | undefined,
-  promptParts: ReadonlyArray<Turn.PromptPart> | undefined,
+  promptParts: ReadonlyArray<ExecutionRequest.PromptPart> | undefined,
   dispatch: (event: InteractiveEvent) => void,
   submissionId?: string,
 ) => {
@@ -111,7 +113,7 @@ export const settleInteractiveSubmission = (input: any, state: any) => {
       if (result.status === "waiting" || result.status === "running" || result.status === "queued") return
       if (
         result.status === "failed" &&
-        !result.events.some((event: ExecutionBackend.Event) => event.type === "execution.failed")
+        !result.events.some((event: ExecutionEvent.Event) => event.type === "execution.failed")
       )
         emitEvent(input, dispatch, {
           _tag: "ExecutionFailed",
@@ -185,7 +187,7 @@ export const executeInteractiveSubmission = (
           executionRoute: turn.executionRoute,
           ...(modelTuning?.fastMode === undefined ? {} : { fastMode: modelTuning.fastMode }),
           eventScope: "execution",
-          onEvent: (event: ExecutionBackend.Event) => {
+          onEvent: (event: ExecutionEvent.Event) => {
             deliveredCursors.add(event.cursor)
             input.executionIngest.deliver(turn.id, event)
           },
@@ -227,7 +229,7 @@ export const submitInteractiveOperation = (input: any) => {
     prompt: string,
     dispatch: (event: InteractiveEvent) => void,
     mode: ModeId = "medium",
-    promptParts?: ReadonlyArray<Turn.PromptPart>,
+    promptParts?: ReadonlyArray<ExecutionRequest.PromptPart>,
     modelTuning?: { readonly fastMode?: boolean },
     submissionId?: string,
   ) {

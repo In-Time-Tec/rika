@@ -1,6 +1,6 @@
 import * as Thread from "@rika/product/thread-record"
 import * as TranscriptPage from "@rika/product/transcript-page"
-import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRequest from "@rika/product/execution-request"
 import { Effect, Function, Schema } from "effect"
 import { ModeId } from "@rika/configuration/behavior-mode"
 import { OperationUnavailable } from "../contract/product-operation-service"
@@ -14,7 +14,7 @@ export const InteractiveCommand = Schema.Union([
     prompt: Schema.String,
     submissionId: Schema.optionalKey(Schema.String),
     mode: Schema.optionalKey(Mode),
-    promptParts: Schema.optionalKey(Schema.Array(Turn.PromptPart)),
+    promptParts: Schema.optionalKey(Schema.Array(ExecutionRequest.PromptPart)),
     modelTuning: Schema.optionalKey(
       Schema.Struct({
         fastMode: Schema.optionalKey(Schema.Boolean),
@@ -59,25 +59,46 @@ export const InteractiveCommand = Schema.Union([
 ])
 export type InteractiveCommand = typeof InteractiveCommand.Type
 
-
 const executeInteractiveCommandImpl = (session: InteractiveSession, command: InteractiveCommand) => {
   switch (command._tag) {
-    case "Submit": return session.submit(command.prompt, command.mode, command.promptParts, command.modelTuning, command.submissionId)
-    case "Shell": return session.shell(command.threadId, command.command, command.incognito)
-    case "EditQueued": return session.editQueued(command.turnId, command.prompt)
-    case "Dequeue": return session.dequeue(command.turnId)
-    case "SteerQueued": return session.steerQueued(command.turnId, command.text)
-    case "Steer": return session.steer(command.text, command.turnId)
-    case "InterruptAndSend": return session.interruptAndSend(command.prompt)
-    case "Cancel": return session.cancel
-    case "Quit": return session.quit
-    case "NewThread": return session.newThread
-    case "SelectThread": return session.selectThread(command.threadId, command.selectionEpoch)
-    case "ReadQueue": return session.readQueue(command.threadId)
-    case "LoadOlder": return session.loadOlder(command.threadId, command.selectionEpoch, command.before, command.loadedKeys)
-    case "LoadNewer": return session.loadNewer(command.threadId, command.selectionEpoch, command.after)
-    case "PreviewThread": return session.previewThread(command.threadId)
-    case "ReopenThread": return session.reopenThread(command.selectionEpoch)
+    case "Submit":
+      return session.submit(
+        command.prompt,
+        command.mode,
+        command.promptParts,
+        command.modelTuning,
+        command.submissionId,
+      )
+    case "Shell":
+      return session.shell(command.threadId, command.command, command.incognito)
+    case "EditQueued":
+      return session.editQueued(command.turnId, command.prompt)
+    case "Dequeue":
+      return session.dequeue(command.turnId)
+    case "SteerQueued":
+      return session.steerQueued(command.turnId, command.text)
+    case "Steer":
+      return session.steer(command.text, command.turnId)
+    case "InterruptAndSend":
+      return session.interruptAndSend(command.prompt)
+    case "Cancel":
+      return session.cancel
+    case "Quit":
+      return session.quit
+    case "NewThread":
+      return session.newThread
+    case "SelectThread":
+      return session.selectThread(command.threadId, command.selectionEpoch)
+    case "ReadQueue":
+      return session.readQueue(command.threadId)
+    case "LoadOlder":
+      return session.loadOlder(command.threadId, command.selectionEpoch, command.before, command.loadedKeys)
+    case "LoadNewer":
+      return session.loadNewer(command.threadId, command.selectionEpoch, command.after)
+    case "PreviewThread":
+      return session.previewThread(command.threadId)
+    case "ReopenThread":
+      return session.reopenThread(command.selectionEpoch)
   }
 }
 

@@ -1,6 +1,4 @@
 import { Schema } from "effect"
-import { modelRegistrationIdentity } from "./model-registration-identity"
-export { modelRegistrationIdentity }
 import { ModelRegistrationIdentity } from "./model-registration-identity"
 import { ProviderConnectionSnapshot } from "./provider-connection-snapshot"
 
@@ -58,6 +56,40 @@ export const ExecutionRouteSnapshot = Schema.Struct({
 export type ExecutionRouteSnapshot = typeof ExecutionRouteSnapshot.Type
 export type ExecutionModelRoute = ExecutionRouteModelSnapshot
 export type ExecutionRoutePin = ExecutionRouteSnapshot
+
+export const testExecutionRoute = (mode = "test"): ExecutionRoutePin => {
+  const route = {
+    alias: "test",
+    model: "test",
+    providerConnection: {
+      provider: "test",
+      protocol: "test",
+      baseUrl: "test://model",
+      authentication: "none" as const,
+    },
+    registrationIdentity: "test" as ExecutionModelRoute["registrationIdentity"],
+    effort: "medium",
+    fast: false,
+    requestVariant: "test",
+    compaction: { contextWindow: 372_000, reserveTokens: 128_000, keepRecentTokens: 32_000 },
+  }
+  return {
+    version: 1,
+    mode,
+    title: { ...route, role: "title", effort: "low" },
+    compactionSummary: { ...route, role: "compaction" },
+    main: { ...route, role: "main" },
+    oracle: { ...route, role: "oracle" },
+    agents: {
+      librarian: { ...route, role: "librarian" },
+      painter: { ...route, role: "painter" },
+      review: { ...route, role: "review" },
+      readThread: { ...route, role: "readThread" },
+      surgeon: { ...route, role: "surgeon" },
+      task: { ...route, role: "task" },
+    },
+  }
+}
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)

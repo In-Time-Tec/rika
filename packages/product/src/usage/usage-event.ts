@@ -1,4 +1,4 @@
-import type * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
 import * as ExecutionStatus from "../execution/contract/execution-status"
 import { Schema } from "effect"
 
@@ -85,12 +85,12 @@ const lifecycleEventTypes = new Set<string>([
 
 const attemptEventTypes = new Set<string>(["model.usage.reported", "model.attempt.completed", "model.attempt.failed"])
 
-export const isObservedEvent = (event: ExecutionBackend.Event): boolean =>
+export const isObservedEvent = (event: ExecutionEvent.Event): boolean =>
   lifecycleEventTypes.has(event.type) || attemptEventTypes.has(event.type)
 
-export const isLifecycleEvent = (event: ExecutionBackend.Event): boolean => lifecycleEventTypes.has(event.type)
+export const isLifecycleEvent = (event: ExecutionEvent.Event): boolean => lifecycleEventTypes.has(event.type)
 
-export const isServerStamped = (event: ExecutionBackend.Event): boolean => event.timestampSource === "server"
+export const isServerStamped = (event: ExecutionEvent.Event): boolean => event.timestampSource === "server"
 
 const isActiveEventType = (type: string): type is ActiveEventType => lifecycleEventTypes.has(type)
 

@@ -1,6 +1,7 @@
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import * as ExecutionBackend from "../contract/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionIdentifier from "@rika/product/execution-identifier"
 import * as EventFamily from "./execution-ingest-event-family"
 import type { Node, InterruptedOutcome, Pipeline } from "./execution-ingest-state"
 export const fullyConsumed = (nodes: ReadonlyMap<string, Node>): boolean =>
@@ -222,7 +223,7 @@ export const make = (dependencies: EventDependencies) => {
       dependencies.publishPatch(pipeline, { _tag: "Discovery", executionId: childExecutionId }, localVisible)
     startNode(pipeline, node)
   }
-  const accept = (pipeline: Pipeline, node: Node, event: ExecutionBackend.Event) => {
+  const accept = (pipeline: Pipeline, node: Node, event: ExecutionEvent.Event) => {
     if (pipeline.stopped || !pipeline.accepting) return
     try {
       if (event.executionId.length > 0 && !ExecutionId.ownsExecution(node.key, event.executionId)) return
@@ -304,7 +305,7 @@ export const make = (dependencies: EventDependencies) => {
       dependencies.fail(pipeline, node, "backend", String(cause))
     }
   }
-  const pageNode = (pipeline: Pipeline, node: Node, reference: ExecutionBackend.ExecutionReference | undefined) =>
+  const pageNode = (pipeline: Pipeline, node: Node, reference: ExecutionIdentifier.ExecutionReference | undefined) =>
     Effect.gen(function* () {
       if (dependencies.options.backend.pageEvents === undefined) {
         const result = yield* dependencies.options.backend.replay(node.executionId, node.cursor, reference)
@@ -332,7 +333,7 @@ export const make = (dependencies: EventDependencies) => {
   const followNode = (pipeline: Pipeline, node: Node) =>
     Effect.gen(function* () {
       if (node.status !== undefined) return
-      const reference = node.parentKey === undefined ? undefined : ExecutionBackend.executionReference
+      const reference = node.parentKey === undefined ? undefined : ExecutionIdentifier.executionReference
       const inspection = yield* dependencies.options.backend.inspect(node.executionId, reference)
       if (inspection !== undefined) for (const child of inspection.children) discover(pipeline, node, child.executionId)
       const follow = dependencies.options.backend.follow

@@ -1,10 +1,11 @@
+import * as ThreadResult from "@rika/product/thread-result"
 import { Context, Effect, Layer, Ref, Schema } from "effect"
 import * as ExecutionStatus from "../../execution/contract/execution-status"
 import * as ThreadRepository from "./thread-repository"
 import { ThreadId } from "@rika/product/thread-record"
 import { EditTotals, RepairCandidate, ThreadSummary } from "@rika/product/thread-summary"
 import * as TurnRepository from "./turn-repository"
-import { TurnId, isAgentExecution } from "@rika/product/turn-record"
+import { TurnId } from "@rika/product/turn-record"
 import * as ThreadState from "@rika/product/thread-state"
 
 export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("ThreadSummaryRepositoryError", {
@@ -34,7 +35,9 @@ export interface Interface {
   readonly listRepairCandidates: (limit?: number) => Effect.Effect<ReadonlyArray<RepairCandidate>, RepositoryError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/product/thread/repository/thread-summary-repository/Service") {}
+export class Service extends Context.Service<Service, Interface>()(
+  "@rika/product/thread/repository/thread-summary-repository/Service",
+) {}
 
 interface Activity {
   readonly turnId: TurnId
@@ -77,7 +80,7 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
         const currentProjected = history.flatMap((turn) => {
           const activity = activityValues.get(turn.id)
           return activity !== undefined &&
-            (isAgentExecution(turn)
+            (ThreadResult.TurnResult.isAgentExecution(turn)
               ? activity.projectedCursor === turn.lastCursor &&
                 (!ExecutionStatus.isTerminalStatus(turn.status) || activity.complete)
               : !ExecutionStatus.isTerminalStatus(turn.status) || activity.complete)
@@ -158,7 +161,7 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
         turns.list(thread.id).pipe(Effect.mapError((error) => RepositoryError.make({ message: String(error) }))),
       )).flat()
       return history
-        .filter(isAgentExecution)
+        .filter(ThreadResult.TurnResult.isAgentExecution)
         .filter((turn) => {
           const activity = activityValues.get(turn.id)
           return (

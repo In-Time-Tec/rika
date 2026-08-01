@@ -1,4 +1,8 @@
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionIdentifier from "@rika/product/execution-identifier"
+import * as ExecutionChildRun from "@rika/product/execution-child-run"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import { AgentProfile } from "./agent-profile"
 import { Context, Effect, Layer, Schema } from "effect"
 
@@ -29,10 +33,10 @@ interface ParallelInput {
   readonly parentTurnId: string
   readonly fanOutId: string
   readonly workspace?: string
-  readonly executionRoute: ExecutionBackend.ExecutionRoutePin
+  readonly executionRoute: ExecutionRouteSnapshot.ExecutionRoutePin
   readonly tasks: ReadonlyArray<TaskInput>
   readonly maxConcurrency: number
-  readonly join?: ExecutionBackend.JoinPolicy
+  readonly join?: ExecutionChildRun.JoinPolicy
   readonly quorum?: number
   readonly createdAt: number
 }
@@ -44,22 +48,22 @@ export class InvocationError extends Schema.TaggedErrorClass<InvocationError>()(
 export interface Interface {
   readonly invoke: (input: InvokeInput) => Effect.Effect<ChildEvent, InvocationError>
   readonly fanOut: (
-    input: ExecutionBackend.FanOutInput,
-  ) => Effect.Effect<ExecutionBackend.FanOutInspection, InvocationError>
-  readonly inspectFanOut: (id: string) => Effect.Effect<ExecutionBackend.FanOutInspection | undefined, InvocationError>
+    input: ExecutionChildRun.FanOutInput,
+  ) => Effect.Effect<ExecutionChildRun.FanOutInspection, InvocationError>
+  readonly inspectFanOut: (id: string) => Effect.Effect<ExecutionChildRun.FanOutInspection | undefined, InvocationError>
   readonly cancelFanOut: (
     id: string,
     at: number,
     reason?: string,
-  ) => Effect.Effect<ExecutionBackend.FanOutInspection, InvocationError>
-  readonly runParallel: (input: ParallelInput) => Effect.Effect<ExecutionBackend.FanOutInspection, InvocationError>
+  ) => Effect.Effect<ExecutionChildRun.FanOutInspection, InvocationError>
+  readonly runParallel: (input: ParallelInput) => Effect.Effect<ExecutionChildRun.FanOutInspection, InvocationError>
   readonly runReviewLanes: (
     input: Omit<ParallelInput, "tasks"> & { readonly checks: ReadonlyArray<TaskInput> },
-  ) => Effect.Effect<ExecutionBackend.FanOutInspection, InvocationError>
+  ) => Effect.Effect<ExecutionChildRun.FanOutInspection, InvocationError>
   readonly projectChildren: (
-    inspection: ExecutionBackend.FanOutInspection,
-  ) => ReadonlyArray<ExecutionBackend.ChildProjection>
-  readonly cancelChild: (id: string, at: number) => Effect.Effect<ExecutionBackend.Result, InvocationError>
+    inspection: ExecutionChildRun.FanOutInspection,
+  ) => ReadonlyArray<ExecutionChildRun.ChildProjection>
+  readonly cancelChild: (id: string, at: number) => Effect.Effect<ExecutionEvent.Result, InvocationError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/product/product-agent/Service") {}
@@ -88,7 +92,7 @@ export const layer = Layer.effect(
       ),
       cancelChild: Effect.fn("ProductAgent.cancelChild")((id, _at) =>
         backend
-          .cancel(id, ExecutionBackend.executionReference)
+          .cancel(id, ExecutionIdentifier.executionReference)
           .pipe(Effect.mapError((cause) => InvocationError.make({ message: cause.message }))),
       ),
       runParallel: Effect.fn("ProductAgent.runParallel")((input) =>

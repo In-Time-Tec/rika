@@ -2,6 +2,7 @@ import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { ViewState } from "@rika/terminal/terminal-state"
@@ -266,7 +267,7 @@ const program = Effect.gen(function* () {
                     prompt: "timed tools",
                     author: { _tag: "Human" } as const,
                     lineage: { _tag: "Original" } as const,
-                    executionRoute: Turn.testExecutionRoute(),
+                    executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
                     status: "running" as const,
                     stopIntent: "none" as const,
                     createdAt: startedAt,

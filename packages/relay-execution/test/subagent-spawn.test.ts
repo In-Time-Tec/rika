@@ -8,7 +8,8 @@ import { expect, test } from "vitest"
 import { Database } from "bun:sqlite"
 import { Clock, Effect, FileSystem, Layer, Ref, Schedule, Schema, Stream } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
-import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
+import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 import * as RelayExecutionBackend from "../src/execution-backend"
 import { routedModel } from "./routed-model"
 import { start } from "./current-execution-route"
@@ -29,10 +30,10 @@ const parallelRootPrompt = "Explore alpha, beta, and gamma independently."
 const nestedRootPrompt = "Coordinate the nested work."
 
 const executionModelRoute = (
-  role: ExecutionBackend.ExecutionModelRoute["role"],
+  role: ExecutionRouteSnapshot.ExecutionModelRoute["role"],
   selection: { readonly provider: string; readonly model: string; readonly registrationKey?: string },
   effort = "medium",
-): ExecutionBackend.ExecutionModelRoute => ({
+): ExecutionRouteSnapshot.ExecutionModelRoute => ({
   role,
   alias: role,
   model: selection.model,
@@ -262,7 +263,7 @@ test("ReadThread uses the Oracle route and receives the current Thread identity"
       const backendContext = yield* Layer.build(backendLayer)
       return yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
-        const route: ExecutionBackend.ExecutionRoutePin = {
+        const route: ExecutionRouteSnapshot.ExecutionRoutePin = {
           version: 1 as const,
           mode: "medium",
           main: executionModelRoute("main", main.selection, "xhigh"),
@@ -380,7 +381,7 @@ test("a nested subagent delegates ReadThread without broadening its Relay scope"
       const backendContext = yield* Layer.build(backendLayer)
       return yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
-        const route: ExecutionBackend.ExecutionRoutePin = {
+        const route: ExecutionRouteSnapshot.ExecutionRoutePin = {
           version: 1 as const,
           mode: "medium",
           main: executionModelRoute("main", main.selection, "xhigh"),
@@ -464,7 +465,7 @@ test("parallel Task calls fall back to the pinned main Sol route when no agent r
         ],
         { provider: "test", model: "gpt-5.6-sol", registrationKey: "sol-xhigh" },
       )
-      const executionRoute: ExecutionBackend.ExecutionRoutePin = {
+      const executionRoute: ExecutionRouteSnapshot.ExecutionRoutePin = {
         version: 1 as const,
         mode: "high",
         main: executionModelRoute("main", sol.selection, "xhigh"),
@@ -604,7 +605,7 @@ test("depth-one Task agents can use specialists but cannot delegate more Tasks",
         layer: terra.layer,
       })
       const solRegistration = yield* ModelRegistry.registration({ ...sol.selection, layer: sol.layer })
-      const executionRoute: ExecutionBackend.ExecutionRoutePin = {
+      const executionRoute: ExecutionRouteSnapshot.ExecutionRoutePin = {
         version: 1 as const,
         mode: "test",
         main: executionModelRoute("main", terra.selection),

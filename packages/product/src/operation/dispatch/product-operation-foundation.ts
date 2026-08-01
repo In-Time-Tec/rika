@@ -3,6 +3,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as UsageRepository from "@rika/product/usage-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import { persistedThreadUsage } from "../interactive/interactive-session-transcript-runtime"
 import * as RootTurnOwner from "../../thread/queue/root-turn-owner"
@@ -14,7 +15,7 @@ import { Context, Effect, Layer, Result, Ref, Semaphore } from "effect"
 import { buildProductOperationDependencies } from "./product-operation-foundation-dependencies"
 import { makeProductOperationAdmission } from "./product-operation-admission"
 import { makeProductOperationIngest } from "./product-operation-ingest"
-import { AgentDepth } from "@rika/product/execution-service"
+import { AgentDepth } from "../../execution/contract/execution-identifier"
 import { isTerminalStatus } from "../../execution/contract/execution-status"
 
 const workflowReplacementKey = (runId: string, ownerTurnId?: string, workspace?: string) =>
@@ -80,7 +81,7 @@ export const makeProductOperationFoundation = Effect.fn("ProductOperation.makeFo
     sourceId: string,
     threadId: string,
     turnId: string,
-    events: ReadonlyArray<ExecutionBackend.Event>,
+    events: ReadonlyArray<ExecutionEvent.Event>,
     terminal: boolean,
   ) {
     yield* usageRepository.admitSource(sourceId, turnId, threadId)

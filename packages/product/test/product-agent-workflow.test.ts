@@ -1,5 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionWorkflow from "@rika/product/execution-workflow"
+import * as ExecutionChildRun from "@rika/product/execution-child-run"
 import { Effect, Layer } from "effect"
 import * as ProductAgent from "../src/agent/product-agent-service"
 import * as Workflow from "@rika/product/workflow-service"
@@ -7,7 +9,10 @@ import { provideLayer } from "./layer"
 import { executionRoute } from "./current-state"
 
 const failure = ExecutionBackend.BackendError.make({ message: "backend failed" })
-const fanOut = (id: string, state: ExecutionBackend.FanOutInspection["state"]): ExecutionBackend.FanOutInspection => ({
+const fanOut = (
+  id: string,
+  state: ExecutionChildRun.FanOutInspection["state"],
+): ExecutionChildRun.FanOutInspection => ({
   fanOutId: id,
   parentTurnId: "turn",
   state,
@@ -17,8 +22,8 @@ const fanOut = (id: string, state: ExecutionBackend.FanOutInspection["state"]): 
 })
 const workflow = (
   runId: string,
-  status: ExecutionBackend.WorkflowInspection["status"],
-): ExecutionBackend.WorkflowInspection => ({
+  status: ExecutionWorkflow.WorkflowInspection["status"],
+): ExecutionWorkflow.WorkflowInspection => ({
   runId,
   workflow: "delivery",
   revision: 1,

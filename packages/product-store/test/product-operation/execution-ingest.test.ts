@@ -10,12 +10,12 @@ const threadId = Fixtures.Thread.ThreadId.make("ingest-thread")
 const rootId = Fixtures.Turn.TurnId.make("root")
 const childId = "child:root:call_1"
 const grandchildId = "child:child%3Aroot%3Acall_1:call_2"
-const checkpoint = (projection: Fixtures.TranscriptRepository.Projection | undefined, key: string) =>
+const checkpoint = (projection: Fixtures.TranscriptPage.Projection | undefined, key: string) =>
   projection?.executionCheckpoints.find(
     (entry) => entry.executionKey === Fixtures.TranscriptCorrelation.executionKey(key),
   )
 
-const makeTurn = (status: Fixtures.Turn.Status): Fixtures.Turn.AgentExecutionTurn => ({
+const makeTurn = (status: Fixtures.ExecutionStatus.Status): Fixtures.Turn.AgentExecutionTurn => ({
   _tag: "AgentExecution",
   id: rootId,
   threadId,
@@ -34,8 +34,8 @@ const event = (
   cursor: string,
   sequence: number,
   type: string,
-  extra: Partial<Fixtures.ExecutionBackend.Event> = {},
-): Fixtures.ExecutionBackend.Event => ({
+  extra: Partial<Fixtures.ExecutionEvent.Event> = {},
+): Fixtures.ExecutionEvent.Event => ({
   executionId,
   cursor,
   sequence,
@@ -45,10 +45,10 @@ const event = (
   ...extra,
 })
 
-const started = (executionId: string): Fixtures.ExecutionBackend.Event =>
+const started = (executionId: string): Fixtures.ExecutionEvent.Event =>
   event(executionId, `${executionId}:started`, 0, "execution.started", { createdAt: 0 })
 
-const rootEvents: ReadonlyArray<Fixtures.ExecutionBackend.Event> = [
+const rootEvents: ReadonlyArray<Fixtures.ExecutionEvent.Event> = [
   started("root"),
   event("root", "r1", 1, "tool.call.requested", {
     data: { tool_call_id: "call_1", tool_name: "task", input: { prompt: "go" } },
@@ -57,7 +57,7 @@ const rootEvents: ReadonlyArray<Fixtures.ExecutionBackend.Event> = [
   event("root", "r3", 3, "execution.completed"),
 ]
 
-const childEvents: ReadonlyArray<Fixtures.ExecutionBackend.Event> = [
+const childEvents: ReadonlyArray<Fixtures.ExecutionEvent.Event> = [
   started(childId),
   event(childId, "c1", 1, "tool.call.requested", {
     data: { tool_call_id: "child_call", tool_name: "bash", input: { command: "bun test" } },
@@ -67,12 +67,12 @@ const childEvents: ReadonlyArray<Fixtures.ExecutionBackend.Event> = [
 ]
 
 interface ScriptEntry {
-  readonly events: ReadonlyArray<Fixtures.ExecutionBackend.Event>
-  readonly status: Fixtures.ExecutionBackend.Status
+  readonly events: ReadonlyArray<Fixtures.ExecutionEvent.Event>
+  readonly status: Fixtures.ExecutionStatus.Status
   readonly children?: ReadonlyArray<string>
   readonly hold?: Deferred.Deferred<void>
   readonly ignoreCursor?: boolean
-  readonly pages?: (after: string | undefined) => Fixtures.ExecutionBackend.EventPage
+  readonly pages?: (after: string | undefined) => Fixtures.ExecutionEvent.EventPage
 }
 
 interface Followed {
@@ -87,9 +87,9 @@ interface DeltaWrite {
 
 const makeHarness = Effect.fn("ExecutionIngestTest.makeHarness")(function* (options: {
   readonly script: Readonly<Record<string, ScriptEntry>>
-  readonly turnStatus?: Fixtures.Turn.Status
+  readonly turnStatus?: Fixtures.ExecutionStatus.Status
   readonly stored?: Fixtures.TranscriptProjectionModel.Projection
-  readonly executionCheckpoints?: ReadonlyArray<Fixtures.TranscriptRepository.ExecutionCheckpoint>
+  readonly executionCheckpoints?: ReadonlyArray<Fixtures.TranscriptPage.ExecutionCheckpoint>
   readonly consumed?: Readonly<
     Record<
       string,
@@ -98,7 +98,7 @@ const makeHarness = Effect.fn("ExecutionIngestTest.makeHarness")(function* (opti
   >
   readonly executionStates?: Readonly<Record<string, Fixtures.TranscriptProjectionModel.ProjectionState>>
   readonly storedProjectionVersion?: number
-  readonly exposeStored?: (stored: Fixtures.TranscriptRepository.Projection) => Fixtures.TranscriptRepository.Projection
+  readonly exposeStored?: (stored: Fixtures.TranscriptPage.Projection) => Fixtures.TranscriptPage.Projection
   readonly commitEvents?: number
   readonly watchCapacity?: number
   readonly commitOutcome?: "failure" | "stale"
@@ -374,7 +374,7 @@ describe("ExecutionIngest", () => {
 
   it.effect("rejects one durable cursor reused at a different sequence", () =>
     Effect.gen(function* () {
-      const duplicateCursorEvents: ReadonlyArray<Fixtures.ExecutionBackend.Event> = [
+      const duplicateCursorEvents: ReadonlyArray<Fixtures.ExecutionEvent.Event> = [
         started("root"),
         event("root", "duplicate", 1, "model.output.completed", { text: "first" }),
         event("root", "duplicate", 2, "model.output.completed", { text: "second" }),
@@ -483,7 +483,7 @@ describe("ExecutionIngest", () => {
   it.effect("keeps ingest live while streamed parallel tool calls resolve one at a time", () =>
     Effect.gen(function* () {
       const toolIds = ["call-a", "call-b", "call-c", "call-d", "call-e"] as const
-      const events: ReadonlyArray<Fixtures.ExecutionBackend.Event> = [
+      const events: ReadonlyArray<Fixtures.ExecutionEvent.Event> = [
         started("root"),
         ...toolIds.map((toolId, index) =>
           event("root", `transient-${toolId}`, 0, "model.toolcall.delta", {
@@ -599,7 +599,7 @@ describe("ExecutionIngest", () => {
 
   it.effect("authoritatively corrects a completed turn from a versioned Relay refold", () =>
     Effect.gen(function* () {
-      const failedEvents: ReadonlyArray<Fixtures.ExecutionBackend.Event> = [
+      const failedEvents: ReadonlyArray<Fixtures.ExecutionEvent.Event> = [
         started("root"),
         event("root", "failed", 1, "execution.failed", { text: "backend failed" }),
       ]
@@ -746,7 +746,7 @@ describe("ExecutionIngest", () => {
 
   it.effect("resumes a partially consumed execution from its stored cursor", () =>
     Effect.gen(function* () {
-      const partial: ReadonlyArray<Fixtures.ExecutionBackend.Event> = rootEvents.slice(0, 3)
+      const partial: ReadonlyArray<Fixtures.ExecutionEvent.Event> = rootEvents.slice(0, 3)
       const { ingest, transcripts, follows } = yield* makeHarness({
         script: {
           root: { events: rootEvents, status: "completed", children: [childId] },
@@ -808,7 +808,7 @@ describe("ExecutionIngest", () => {
 
   it.effect("restores a child's fold state before resuming its durable suffix", () =>
     Effect.gen(function* () {
-      const partialChildEvents: ReadonlyArray<Fixtures.ExecutionBackend.Event> = [
+      const partialChildEvents: ReadonlyArray<Fixtures.ExecutionEvent.Event> = [
         started(childId),
         event(childId, "c1", 1, "model.input.prepared"),
         event(childId, "c2", 2, "model.output.completed", { text: "first child answer" }),
@@ -1152,7 +1152,7 @@ describe("ExecutionIngest", () => {
 
   it.effect("folds a grandchild under the child tool that requested it", () =>
     Effect.gen(function* () {
-      const nestedChildEvents: ReadonlyArray<Fixtures.ExecutionBackend.Event> = [
+      const nestedChildEvents: ReadonlyArray<Fixtures.ExecutionEvent.Event> = [
         started(childId),
         event(childId, "c1", 1, "tool.call.requested", {
           data: { tool_call_id: "call_2", tool_name: "task", input: { prompt: "deeper" } },
@@ -1685,7 +1685,7 @@ describe("ExecutionIngest", () => {
   it.effect("finishes a held catch-up page before recording terminal state and drops stale stored units", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>()
-      const paged: ReadonlyArray<Fixtures.ExecutionBackend.Event> = [
+      const paged: ReadonlyArray<Fixtures.ExecutionEvent.Event> = [
         started("root"),
         event("root", "p1", 1, "model.output.completed", { text: "replayed one" }),
         event("root", "p2", 2, "model.output.completed", { text: "replayed two" }),

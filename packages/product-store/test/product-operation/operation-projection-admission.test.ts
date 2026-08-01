@@ -4,6 +4,10 @@ import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionStatus from "@rika/product/execution-status"
+import * as ExecutionChildRun from "@rika/product/execution-child-run"
+import * as ExecutionInspection from "@rika/product/execution-inspection"
 import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
 import { Context, Deferred, Effect, Layer, Queue, Ref, Schema } from "effect"
 import { Operation } from "@rika/product/product-operation"
@@ -40,7 +44,7 @@ const openTurn: Turn.Turn = {
   updatedAt: 1,
 }
 
-const completedEvents = (prefix: string, turnId: string): ReadonlyArray<ExecutionBackend.Event> => [
+const completedEvents = (prefix: string, turnId: string): ReadonlyArray<ExecutionEvent.Event> => [
   {
     executionId: turnId,
     cursor: `${prefix}-0`,
@@ -69,11 +73,11 @@ const completedEvents = (prefix: string, turnId: string): ReadonlyArray<Executio
 
 const inspection = (
   turnId: string,
-  children: ReadonlyArray<{ readonly executionId: string; readonly status: ExecutionBackend.Status }>,
-): ExecutionBackend.Inspection => ({ turnId, status: "completed", waits: [], pendingTools: [], children })
+  children: ReadonlyArray<{ readonly executionId: string; readonly status: ExecutionStatus.Status }>,
+): ExecutionInspection.Inspection => ({ turnId, status: "completed", waits: [], pendingTools: [], children })
 
 const idleBackend = {
-  invokeChild: (input: ExecutionBackend.InvokeChildInput) => Effect.succeed({ ...input, type: "accepted" as const }),
+  invokeChild: (input: ExecutionChildRun.InvokeChildInput) => Effect.succeed({ ...input, type: "accepted" as const }),
   createFanOut: () => Effect.die("unused"),
   inspectFanOut: () => Effect.die("unused"),
   cancelFanOut: () => Effect.die("unused"),
@@ -205,8 +209,8 @@ it.effect("loads an interactive thread while a background projection holds anoth
 const pricedEvents = (
   turnId: string,
   children: ReadonlyArray<{ readonly executionId: string }> = [],
-): ReadonlyArray<ExecutionBackend.Event> => {
-  const delegation = children.flatMap((child, index): ReadonlyArray<ExecutionBackend.Event> => {
+): ReadonlyArray<ExecutionEvent.Event> => {
+  const delegation = children.flatMap((child, index): ReadonlyArray<ExecutionEvent.Event> => {
     const sequence = index * 2 + 2
     const callId = `busy-call-${index}`
     return [

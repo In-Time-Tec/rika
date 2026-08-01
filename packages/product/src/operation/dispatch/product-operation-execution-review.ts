@@ -1,5 +1,6 @@
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionChildRun from "@rika/product/execution-child-run"
 import { Clock, Effect } from "effect"
 import { operationError } from "../operation-error"
 import { fanOutTurnStatus } from "../../execution/lifecycle/product-execution-quiescence"
@@ -11,7 +12,7 @@ export const makeExecutionReview = (input: any) =>
     const settleReviewOwner = Effect.fn("ProductOperation.settleReviewOwner")(function* (
       turn: Pick<Turn.AgentExecutionTurn, "id" | "lastCursor">,
       fanOutId: string,
-      initial?: ExecutionBackend.FanOutInspection,
+      initial?: ExecutionChildRun.FanOutInspection,
     ) {
       const backend = yield* ExecutionBackend.Service
       let inspection = initial
@@ -29,7 +30,7 @@ export const makeExecutionReview = (input: any) =>
     const startReviewSettlement = Effect.fn("ProductOperation.startReviewSettlement")(function* (
       turn: Pick<Turn.AgentExecutionTurn, "id" | "lastCursor">,
       fanOutId: string,
-      initial?: ExecutionBackend.FanOutInspection,
+      initial?: ExecutionChildRun.FanOutInspection,
     ) {
       return yield* reviewSettlementAdmission.withPermits(1)(
         Effect.gen(function* () {

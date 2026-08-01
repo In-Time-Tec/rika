@@ -1,4 +1,4 @@
-import type * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
 import { Duration, Function, Result } from "effect"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as ActiveTime from "./usage-active-time"
@@ -69,13 +69,13 @@ export const threadTotals: {
 
 export const observe: {
   (
-    input: RootExecution & { readonly event: ExecutionBackend.Event },
+    input: RootExecution & { readonly event: ExecutionEvent.Event },
   ): (snapshot: Snapshot) => Result.Result<Snapshot, UsageEvent.ProjectionFailure>
   (
     snapshot: Snapshot,
-    input: RootExecution & { readonly event: ExecutionBackend.Event },
+    input: RootExecution & { readonly event: ExecutionEvent.Event },
   ): Result.Result<Snapshot, UsageEvent.ProjectionFailure>
-} = Function.dual(2, (snapshot: Snapshot, input: RootExecution & { readonly event: ExecutionBackend.Event }) => {
+} = Function.dual(2, (snapshot: Snapshot, input: RootExecution & { readonly event: ExecutionEvent.Event }) => {
   const fold = UsageFold.restoreUsageFold(snapshot)
   const applied = UsageFold.applyUsageFoldEvent(fold, input)
   if (Result.isFailure(applied)) return Result.fail(applied.failure)
@@ -87,19 +87,19 @@ const isSnapshot = (value: unknown): value is Snapshot =>
 
 export const foldBatch: {
   (
-    observations: ReadonlyArray<RootExecution & { readonly event: ExecutionBackend.Event }>,
+    observations: ReadonlyArray<RootExecution & { readonly event: ExecutionEvent.Event }>,
     completeExecutionIds?: ReadonlySet<string>,
   ): (snapshot: Snapshot) => Result.Result<Snapshot, UsageEvent.ProjectionFailure>
   (
     snapshot: Snapshot,
-    observations: ReadonlyArray<RootExecution & { readonly event: ExecutionBackend.Event }>,
+    observations: ReadonlyArray<RootExecution & { readonly event: ExecutionEvent.Event }>,
     completeExecutionIds?: ReadonlySet<string>,
   ): Result.Result<Snapshot, UsageEvent.ProjectionFailure>
 } = Function.dual(
   (args): boolean => args.length > 0 && isSnapshot(args[0]),
   (
     snapshot: Snapshot,
-    observations: ReadonlyArray<RootExecution & { readonly event: ExecutionBackend.Event }>,
+    observations: ReadonlyArray<RootExecution & { readonly event: ExecutionEvent.Event }>,
     completeExecutionIds: ReadonlySet<string> = new Set(),
   ) => {
     const folded = UsageFold.foldEvents(snapshot, observations)

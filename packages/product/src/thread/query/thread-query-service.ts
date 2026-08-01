@@ -3,104 +3,16 @@ import * as ThreadInteractionRepository from "@rika/product/thread-interaction-r
 import * as ThreadSearchRepository from "@rika/product/thread-search-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product/turn-repository"
+import * as TurnQueueState from "../queue/turn-queue-state"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Context, DateTime, Effect, Layer, Schema } from "effect"
 import * as ThreadState from "@rika/product/thread-state"
+import type { FindInput, LegacyReadInput, ReadInput } from "./thread-query-input"
+import type { FindSuccess, Message, Omission, ReadItem, ReadSuccess, Result } from "./thread-result-delivery"
 
-export const schemaVersion = 2 as const
-export const transcriptBudget = 36_000
+export const QueryPolicy = { schemaVersion: 2 as const, transcriptBudget: 36_000 }
 
-export interface FindInput {
-  readonly query: string
-  readonly includeArchived?: boolean
-  readonly limit?: number
-}
-export interface LegacyReadInput {
-  readonly threadId: string
-  readonly includeArchived?: boolean
-  readonly maxTurns?: number
-  readonly maxChars?: number
-}
-export interface Result {
-  readonly text: string
-  readonly truncated: boolean
-}
-export type Selector =
-  | { readonly _tag: "overview" }
-  | { readonly _tag: "recent"; readonly limit?: number; readonly before?: TurnRepository.PageCursor }
-  | {
-      readonly _tag: "relevant"
-      readonly query: string
-      readonly limit?: number
-      readonly before?: TranscriptRepository.PageCursor
-    }
-  | {
-      readonly _tag: "subtree"
-      readonly childExecutionId: string
-      readonly before?: TranscriptRepository.PageCursor
-      readonly offset?: number
-    }
-  | {
-      readonly _tag: "related"
-      readonly before?: ThreadInteractionRepository.RelationshipCursor
-    }
-export interface ReadInput {
-  readonly threadId: string
-  readonly includeArchived?: boolean
-  readonly selector: Selector
-}
-export interface Omission {
-  readonly reason: "olderTurns" | "responseBudget" | "unavailableChild" | "relationshipsUnavailable"
-  readonly continuation: Selector
-}
-export interface ReadItem {
-  readonly turnId: string
-  readonly author: "human" | "agent"
-  readonly createdAt: string
-  readonly status: string
-  readonly messages: ReadonlyArray<Message>
-}
-export interface Message {
-  readonly role: "user" | "assistant" | "notice" | "child"
-  readonly text: string
-  readonly childExecutionId?: string
-  readonly children?: ReadonlyArray<Message>
-}
-export interface RelatedThread {
-  readonly kind: "created" | "message" | "reply" | "fork"
-  readonly direction: "incoming" | "outgoing"
-  readonly threadId: string
-  readonly turnId: string
-  readonly title: string
-  readonly archived: boolean
-  readonly available: boolean
-  readonly createdAt: string
-}
-export interface ReadSuccess {
-  readonly schemaVersion: 2
-  readonly threadId: string
-  readonly title: string
-  readonly selector: Selector
-  readonly items: ReadonlyArray<ReadItem>
-  readonly relatedThreads: ReadonlyArray<RelatedThread>
-  readonly nextCursor?: TurnRepository.PageCursor | TranscriptRepository.PageCursor
-  readonly omissions: ReadonlyArray<Omission>
-  readonly truncated: boolean
-}
-export interface FindSuccess {
-  readonly schemaVersion: 2
-  readonly threads: ReadonlyArray<{
-    readonly threadId: string
-    readonly state: "idle" | "queued" | "running" | "error"
-    readonly archived: boolean
-    readonly title: string
-    readonly updatedAt: string
-    readonly summary: string
-    readonly truncated: boolean
-  }>
-  readonly truncated: boolean
-}
 export interface Interface {
   readonly find: (input: FindInput) => Effect.Effect<FindSuccess, QueryError>
   readonly search: (input: FindInput) => Effect.Effect<Result, QueryError>
@@ -111,7 +23,9 @@ export interface Interface {
     input: LegacyReadInput,
   ) => Effect.Effect<Result, QueryError | ThreadNotFoundError | ArchivedThreadError>
 }
-export class Service extends Context.Service<Service, Interface>()("@rika/product/thread/query/thread-query-service/Service") {}
+export class Service extends Context.Service<Service, Interface>()(
+  "@rika/product/thread/query/thread-query-service/Service",
+) {}
 export class Factory extends Context.Service<
   Factory,
   { readonly forWorkspace: (workspace: string) => Effect.Effect<Interface> }
@@ -136,7 +50,7 @@ const bounded = (name: string, value: number | undefined, fallback: number, maxi
   })
 const safeText = (text: string, limit: number) => [...text].slice(0, limit).join("")
 const threadState = (
-  threadTurns: ReadonlyArray<TurnRepository.PageResult["turns"][number]>,
+  threadTurns: ReadonlyArray<TurnQueueState.PageResult["turns"][number]>,
 ): FindSuccess["threads"][number]["state"] => ThreadState.threadState(threadTurns.map((turn) => turn.status))
 
 interface ChildLink {
@@ -176,7 +90,7 @@ const message = (
   }
 }
 const item = (
-  turn: TurnRepository.PageResult["turns"][number],
+  turn: TurnQueueState.PageResult["turns"][number],
   units: ReadonlyArray<TranscriptUnit.Unit>,
 ): ReadItem => ({
   turnId: turn.id,
@@ -191,7 +105,7 @@ const item = (
     }),
 })
 const subtreeItem = (
-  turn: TurnRepository.PageResult["turns"][number],
+  turn: TurnQueueState.PageResult["turns"][number],
   root: TranscriptUnit.Unit,
   descendants: ReadonlyArray<TranscriptUnit.Unit>,
 ): ReadItem => {
@@ -206,7 +120,7 @@ const subtreeItem = (
 }
 
 const boundedSubtreeItem = (
-  turn: TurnRepository.PageResult["turns"][number],
+  turn: TurnQueueState.PageResult["turns"][number],
   root: TranscriptUnit.Unit,
   candidate: TranscriptUnit.Unit,
 ): ReadItem => {
@@ -231,7 +145,7 @@ const encodeBounded = (
   base: Omit<ReadSuccess, "items" | "omissions" | "truncated">,
   candidates: ReadonlyArray<ReadItem>,
   omissions: ReadonlyArray<Omission>,
-  maximum = transcriptBudget,
+  maximum = QueryPolicy.transcriptBudget,
 ): ReadSuccess => {
   const selected: Array<ReadItem> = []
   let budgetOmitted = false
@@ -250,7 +164,7 @@ const encodeBounded = (
 }
 const mapError = (error: { readonly message: string }) => QueryError.make({ message: error.message })
 
-export const makeForWorkspace = (workspace: string) =>
+const makeForWorkspace = (workspace: string) =>
   Effect.gen(function* () {
     const threadRepository = yield* ThreadRepository.Service
     const searches = yield* ThreadSearchRepository.Service
@@ -304,7 +218,7 @@ export const makeForWorkspace = (workspace: string) =>
           }),
         { concurrency: 8 },
       )
-      return { schemaVersion, threads: results, truncated: page.nextCursor !== undefined }
+      return { schemaVersion: QueryPolicy.schemaVersion, threads: results, truncated: page.nextCursor !== undefined }
     })
     const readStructured = Effect.fn("ThreadQueryService.readStructured")(function* (input: ReadInput) {
       if (input.threadId.trim().length === 0 || input.threadId.trim() !== input.threadId)
@@ -316,7 +230,7 @@ export const makeForWorkspace = (workspace: string) =>
       if (thread.archived && input.includeArchived !== true)
         return yield* ArchivedThreadError.make({ threadId: input.threadId })
       const base = {
-        schemaVersion,
+        schemaVersion: QueryPolicy.schemaVersion,
         threadId: input.threadId,
         title: thread.title,
         selector: input.selector,
@@ -421,7 +335,7 @@ export const makeForWorkspace = (workspace: string) =>
             omissions: [],
             truncated: false,
           }
-          if (encodeJson(result).length > transcriptBudget) {
+          if (encodeJson(result).length > QueryPolicy.transcriptBudget) {
             if (selected.size === 0) {
               selected.add(candidate)
               nextOffset = index + 1
@@ -504,7 +418,7 @@ export const makeForWorkspace = (workspace: string) =>
     })
     const read = Effect.fn("ThreadQueryService.read")(function* (input: LegacyReadInput) {
       const limit = yield* bounded("maxTurns", input.maxTurns, 10, 20)
-      yield* bounded("maxChars", input.maxChars, transcriptBudget, transcriptBudget)
+      yield* bounded("maxChars", input.maxChars, QueryPolicy.transcriptBudget, QueryPolicy.transcriptBudget)
       const result = yield* readStructured({
         threadId: input.threadId,
         selector: { _tag: "recent", limit },
@@ -514,8 +428,8 @@ export const makeForWorkspace = (workspace: string) =>
     })
     return Service.of({ find, search, readStructured, read })
   })
-export const layerForWorkspace = (workspace: string) => Layer.effect(Service, makeForWorkspace(workspace))
-export const factoryLayer = Layer.effect(
+const layerForWorkspace = (workspace: string) => Layer.effect(Service, makeForWorkspace(workspace))
+const factoryLayer = Layer.effect(
   Factory,
   Effect.gen(function* () {
     const context = yield* Effect.context<
@@ -530,5 +444,7 @@ export const factoryLayer = Layer.effect(
     })
   }),
 )
-export const layer = layerForWorkspace("")
-export const testLayer = (service: Interface) => Layer.succeed(Service, Service.of(service))
+const layer = layerForWorkspace("")
+const testLayer = (service: Interface) => Layer.succeed(Service, Service.of(service))
+
+export const Runtime = { makeForWorkspace, layerForWorkspace, factoryLayer, layer, testLayer }

@@ -3,7 +3,7 @@ import { expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { layer } from "../src/product-database"
-import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 
 it.layer(BunServices.layer)("product database", (test) => {
   test.effect("builds the current schema through the ordered migration history", () =>
@@ -133,7 +133,9 @@ it.layer(BunServices.layer)("product database", (test) => {
             yield* sql`INSERT INTO rika_workspaces (path, created_at) VALUES ('/work/legacy', 1)`
             yield* sql`INSERT INTO rika_threads (id, workspace, title, created_at, updated_at)
               VALUES ('thread-legacy', '/work/legacy', 'Legacy', 1, 2)`
-            const route = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(Turn.testExecutionRoute())
+            const route = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(
+              ExecutionRouteSnapshot.testExecutionRoute(),
+            )
             yield* sql`INSERT INTO rika_turns (
               id, thread_id, prompt, status, execution_route_json, created_at, updated_at
             ) VALUES (

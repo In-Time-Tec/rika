@@ -1,9 +1,11 @@
 import { ThreadContract } from "@rika/coding-tools/thread-tool-contract"
 import { createHash, randomUUID } from "node:crypto"
 import * as ThreadInteractionRepository from "@rika/product/thread-interaction-repository"
+import * as ResultDelivery from "../repository/thread-interaction-result"
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as Turn from "@rika/product/turn-record"
+import * as ThreadResult from "@rika/product/thread-result"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ExecutionStatus from "../../execution/contract/execution-status"
 import * as ToolInvocation from "@rika/coding-tools/tool-invocation"
@@ -39,7 +41,9 @@ export interface Interface {
   ) => Effect.Effect<typeof ThreadContract.WaitForThreadsSuccess.Type, Failure>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/product/thread/tool/thread-tool-service/Service") {}
+export class Service extends Context.Service<Service, Interface>()(
+  "@rika/product/thread/tool/thread-tool-service/Service",
+) {}
 
 export class GatewayUnavailable extends Schema.TaggedErrorClass<GatewayUnavailable>()("ThreadToolGatewayUnavailable", {
   state: Schema.Literals(["uninstalled", "installed", "closed"]),
@@ -103,7 +107,11 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
       const sourceTurnId = Turn.TurnId.make(source.rootTurnId)
       const sourceThreadId = Thread.ThreadId.make(source.threadId)
       const sourceTurn = yield* turns.get(sourceTurnId)
-      if (sourceTurn === undefined || !Turn.isAgentExecution(sourceTurn) || sourceTurn.threadId !== sourceThreadId)
+      if (
+        sourceTurn === undefined ||
+        !ThreadResult.TurnResult.isAgentExecution(sourceTurn) ||
+        sourceTurn.threadId !== sourceThreadId
+      )
         return yield* Effect.fail({ _tag: "InvocationAuthorityUnavailable" } as const)
       const id = options.id ?? randomUUID
       const invocationInput = (input: unknown) => ({
@@ -115,7 +123,7 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
       })
       const executionRoute = (mode?: ModeId) =>
         mode === undefined ? sourceTurn.executionRoute : { ...sourceTurn.executionRoute, mode }
-      const schedule = (accepted: ThreadInteractionRepository.AcceptedThreadTurn) =>
+      const schedule = (accepted: ResultDelivery.AcceptedThreadTurn) =>
         accepted.status === "accepted"
           ? options.scheduler
               .accepted(accepted.turnId)

@@ -1,4 +1,4 @@
-import * as TranscriptRepository from "@rika/product/transcript-repository"
+import * as TranscriptPage from "@rika/product/transcript-page"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 
 export const transcriptPageEncoder = new TextEncoder()
@@ -6,14 +6,12 @@ export const maximumTranscriptPageBytes = 8 * 1024 * 1024
 export const maximumTranscriptPayloadBytes = maximumTranscriptPageBytes - 64 * 1024
 
 export const sameTranscriptCursor = (
-  left: TranscriptRepository.PageCursor | undefined,
-  right: TranscriptRepository.PageCursor | undefined,
+  left: TranscriptPage.PageCursor | undefined,
+  right: TranscriptPage.PageCursor | undefined,
   encodeJson: (value: unknown) => string,
 ) => left !== undefined && right !== undefined && encodeJson(left) === encodeJson(right)
 
-export const transcriptCursorFor = (
-  entry: TranscriptRepository.Entry | undefined,
-): TranscriptRepository.PageCursor | undefined =>
+export const transcriptCursorFor = (entry: TranscriptPage.Entry | undefined): TranscriptPage.PageCursor | undefined =>
   entry === undefined
     ? undefined
     : {
@@ -22,16 +20,16 @@ export const transcriptCursorFor = (
         orderKey: TranscriptOrdering.encodeUnitOrder(entry.unit.order),
       }
 
-export const isSemanticTranscriptEntry = (entry: TranscriptRepository.Entry): boolean =>
+export const isSemanticTranscriptEntry = (entry: TranscriptPage.Entry): boolean =>
   entry.unit.parentId === undefined &&
   (entry.unit.content._tag === "Entry" ||
     entry.unit.content.block._tag === "Compaction" ||
     entry.unit.executionOutcome !== undefined)
 
 export const boundTurnEntries = (
-  entries: ReadonlyArray<TranscriptRepository.Entry>,
+  entries: ReadonlyArray<TranscriptPage.Entry>,
   detail: number,
-): { readonly entries: ReadonlyArray<TranscriptRepository.Entry>; readonly contiguousFrom: number } => {
+): { readonly entries: ReadonlyArray<TranscriptPage.Entry>; readonly contiguousFrom: number } => {
   const semantic = new Set(entries.flatMap((entry, index) => (isSemanticTranscriptEntry(entry) ? [index] : [])))
   const contiguousFrom = Math.max(0, entries.length - Math.max(0, detail - semantic.size))
   return {
@@ -41,11 +39,11 @@ export const boundTurnEntries = (
 }
 
 export const boundTranscriptEntries = (
-  sourceEntries: ReadonlyArray<TranscriptRepository.Entry>,
+  sourceEntries: ReadonlyArray<TranscriptPage.Entry>,
   encodeJson: (value: unknown) => string,
 ): {
-  readonly entries: ReadonlyArray<TranscriptRepository.Entry>
-  readonly partialCursor?: TranscriptRepository.PageCursor
+  readonly entries: ReadonlyArray<TranscriptPage.Entry>
+  readonly partialCursor?: TranscriptPage.PageCursor
   readonly truncated: boolean
   readonly oversizedEntry: boolean
 } => {
@@ -68,20 +66,20 @@ export const boundTranscriptEntries = (
 }
 
 const boundPartialTranscriptEntries = (
-  sourceEntries: ReadonlyArray<TranscriptRepository.Entry>,
+  sourceEntries: ReadonlyArray<TranscriptPage.Entry>,
   initialStart: number,
   initialBytes: number,
   encodeJson: (value: unknown) => string,
 ): {
-  readonly entries: ReadonlyArray<TranscriptRepository.Entry>
-  readonly partialCursor?: TranscriptRepository.PageCursor
+  readonly entries: ReadonlyArray<TranscriptPage.Entry>
+  readonly partialCursor?: TranscriptPage.PageCursor
   readonly truncated: true
   readonly oversizedEntry: false
 } => {
   let entries = sourceEntries
   let boundedStart = initialStart
   let boundedBytes = initialBytes
-  let partialCursor: TranscriptRepository.PageCursor | undefined
+  let partialCursor: TranscriptPage.PageCursor | undefined
   const turnBoundary = entries.findIndex(
     (entry, index) => index >= boundedStart && entry.unit.key === `turn:${entry.turn.id}:user`,
   )
@@ -106,7 +104,9 @@ const boundPartialTranscriptEntries = (
       boundedBytes = semanticBytes
       while (boundedStart > userBoundary + 1) {
         const index = boundedStart - 1
-        const entryBytes = semanticIndexes.has(index) ? 0 : transcriptPageEncoder.encode(encodeJson(entries[index])).byteLength
+        const entryBytes = semanticIndexes.has(index)
+          ? 0
+          : transcriptPageEncoder.encode(encodeJson(entries[index])).byteLength
         if (boundedBytes + entryBytes > maximumTranscriptPayloadBytes && boundedStart < entries.length) break
         boundedStart -= 1
         boundedBytes += entryBytes
