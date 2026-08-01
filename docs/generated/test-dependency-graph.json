@@ -103,6 +103,16 @@
       "testKind": "fixture"
     },
     {
+      "id": "apps/rika/test/fixtures/resident-client-commands.ts",
+      "path": "apps/rika/test/fixtures/resident-client-commands.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
       "id": "apps/rika/test/fixtures/resident-client.ts",
       "path": "apps/rika/test/fixtures/resident-client.ts",
       "workspace": "@rika/cli",
@@ -183,8 +193,68 @@
       "testKind": "unit-test"
     },
     {
-      "id": "apps/rika/test/interactive-controller.test.ts",
-      "path": "apps/rika/test/interactive-controller.test.ts",
+      "id": "apps/rika/test/interactive-controller-activity.test.ts",
+      "path": "apps/rika/test/interactive-controller-activity.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "apps/rika/test/interactive-controller-child-projection.test.ts",
+      "path": "apps/rika/test/interactive-controller-child-projection.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "apps/rika/test/interactive-controller-page-order.test.ts",
+      "path": "apps/rika/test/interactive-controller-page-order.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "apps/rika/test/interactive-controller-projection-reload.test.ts",
+      "path": "apps/rika/test/interactive-controller-projection-reload.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "apps/rika/test/interactive-controller-projection-stream.test.ts",
+      "path": "apps/rika/test/interactive-controller-projection-stream.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "apps/rika/test/interactive-controller-queue.test.ts",
+      "path": "apps/rika/test/interactive-controller-queue.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "apps/rika/test/interactive-controller-selection.test.ts",
+      "path": "apps/rika/test/interactive-controller-selection.test.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -215,6 +285,56 @@
     {
       "id": "apps/rika/test/logging.test.ts",
       "path": "apps/rika/test/logging.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "apps/rika/test/model-execution-backend.test.ts",
+      "path": "apps/rika/test/model-execution-backend.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "apps/rika/test/model-execution-restart.test.ts",
+      "path": "apps/rika/test/model-execution-restart.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "apps/rika/test/model-route-interactive.test.ts",
+      "path": "apps/rika/test/model-route-interactive.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "apps/rika/test/model-route-policy.test.ts",
+      "path": "apps/rika/test/model-route-policy.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "apps/rika/test/model-route-registration.test.ts",
+      "path": "apps/rika/test/model-route-registration.test.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -383,6 +503,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "apps/rika/test/scripted-model-runtime.test.ts",
+      "path": "apps/rika/test/scripted-model-runtime.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "apps/rika/test/shell-session.test.ts",
       "path": "apps/rika/test/shell-session.test.ts",
       "workspace": "@rika/cli",
@@ -405,16 +535,6 @@
     {
       "id": "apps/rika/test/terminal-title.test.ts",
       "path": "apps/rika/test/terminal-title.test.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "apps/rika/test/test-model-script.test.ts",
-      "path": "apps/rika/test/test-model-script.test.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -4696,6 +4816,30 @@
       "production": false
     },
     {
+      "from": "apps/rika/test/fixtures/resident-client-commands.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/fixtures/resident-client-commands.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/fixtures/resident-client.ts",
+      "to": "apps/rika/test/fixtures/resident-client-commands.ts",
+      "specifier": "./resident-client-commands",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "apps/rika/test/fixtures/resident-client.ts",
       "to": "external:@effect/platform-bun/BunRuntime",
       "specifier": "@effect/platform-bun/BunRuntime",
@@ -4723,14 +4867,6 @@
       "from": "apps/rika/test/fixtures/resident-client.ts",
       "to": "external:effect/unstable/process",
       "specifier": "effect/unstable/process",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/fixtures/resident-client.ts",
-      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
-      "specifier": "@rika/product/execution-route-snapshot",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -4912,15 +5048,7 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/interactive-controller.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/interactive-controller.test.ts",
+      "from": "apps/rika/test/interactive-controller-activity.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -4928,9 +5056,57 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/interactive-controller.test.ts",
-      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
-      "specifier": "@rika/product/execution-route-snapshot",
+      "from": "apps/rika/test/interactive-controller-child-projection.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-page-order.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-projection-reload.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-projection-stream.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-projection-stream.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-queue.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-selection.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -5035,6 +5211,134 @@
       "from": "apps/rika/test/logging.test.ts",
       "to": "external:effect/testing",
       "specifier": "effect/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/model-execution-backend.test.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/model-execution-backend.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/model-execution-backend.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/model-execution-backend.test.ts",
+      "to": "packages/product/src/execution/contract/model-registration-identity.ts",
+      "specifier": "@rika/product/model-registration-identity",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/model-execution-restart.test.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/model-execution-restart.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/model-execution-restart.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/model-execution-restart.test.ts",
+      "to": "packages/product/src/execution/contract/execution-service.ts",
+      "specifier": "@rika/product/execution-service",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/model-execution-restart.test.ts",
+      "to": "packages/product/src/execution/contract/model-registration-identity.ts",
+      "specifier": "@rika/product/model-registration-identity",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/model-route-interactive.test.ts",
+      "to": "external:@opentui/core/testing",
+      "specifier": "@opentui/core/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/model-route-interactive.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/model-route-interactive.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/model-route-interactive.test.ts",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/model-route-policy.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/model-route-policy.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/model-route-registration.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -5432,6 +5736,38 @@
       "production": false
     },
     {
+      "from": "apps/rika/test/scripted-model-runtime.test.ts",
+      "to": "external:@opentui/core/testing",
+      "specifier": "@opentui/core/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/scripted-model-runtime.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/scripted-model-runtime.test.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/scripted-model-runtime.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "apps/rika/test/shell-session.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
@@ -5457,14 +5793,6 @@
     },
     {
       "from": "apps/rika/test/shell-session.test.ts",
-      "to": "external:effect/unstable/http",
-      "specifier": "effect/unstable/http",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/shell-session.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -5475,14 +5803,6 @@
       "from": "apps/rika/test/shell-session.test.ts",
       "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
       "specifier": "@rika/product/execution-route-snapshot",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/shell-session.test.ts",
-      "to": "packages/product/src/operation/contract/product-operation-service.ts",
-      "specifier": "@rika/product/product-operation-service",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -5507,70 +5827,6 @@
       "from": "apps/rika/test/terminal-title.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/test-model-script.test.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/test-model-script.test.ts",
-      "to": "external:@opentui/core/testing",
-      "specifier": "@opentui/core/testing",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/test-model-script.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/test-model-script.test.ts",
-      "to": "external:effect/unstable/ai",
-      "specifier": "effect/unstable/ai",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/test-model-script.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/test-model-script.test.ts",
-      "to": "packages/product/src/execution/contract/execution-request.ts",
-      "specifier": "@rika/product/execution-request",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/test-model-script.test.ts",
-      "to": "packages/product/src/execution/contract/model-registration-identity.ts",
-      "specifier": "@rika/product/model-registration-identity",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/test-model-script.test.ts",
-      "to": "packages/product/src/operation/contract/product-operation-service.ts",
-      "specifier": "@rika/product/product-operation-service",
       "kind": "import",
       "relationship": "test",
       "production": false

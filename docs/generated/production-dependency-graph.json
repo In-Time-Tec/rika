@@ -3,6 +3,24 @@
   "graphKind": "production",
   "nodes": [
     {
+      "id": "apps/rika/src/application-performance-evaluation.ts",
+      "path": "apps/rika/src/application-performance-evaluation.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/application-version.ts",
+      "path": "apps/rika/src/application-version.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "apps/rika/src/client-main.ts",
       "path": "apps/rika/src/client-main.ts",
       "workspace": "@rika/cli",
@@ -158,6 +176,15 @@
     {
       "id": "apps/rika/src/command/root/rika-command.ts",
       "path": "apps/rika/src/command/root/rika-command.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/diagnostic-file-logging.ts",
+      "path": "apps/rika/src/diagnostic-file-logging.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -417,15 +444,6 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/logging.ts",
-      "path": "apps/rika/src/logging.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
       "id": "apps/rika/src/performance-main.ts",
       "path": "apps/rika/src/performance-main.ts",
       "workspace": "@rika/cli",
@@ -437,15 +455,6 @@
     {
       "id": "apps/rika/src/performance-platform.ts",
       "path": "apps/rika/src/performance-platform.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "apps/rika/src/performance.ts",
-      "path": "apps/rika/src/performance.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -813,8 +822,8 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/version.ts",
-      "path": "apps/rika/src/version.ts",
+      "id": "apps/rika/test/client-process-test-runtime.ts",
+      "path": "apps/rika/test/client-process-test-runtime.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -822,8 +831,8 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/test/client-main-harness.ts",
-      "path": "apps/rika/test/client-main-harness.ts",
+      "id": "apps/rika/test/client-pty-scenario.ts",
+      "path": "apps/rika/test/client-pty-scenario.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -831,8 +840,125 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/test/resident-transport-harness.ts",
-      "path": "apps/rika/test/resident-transport-harness.ts",
+      "id": "apps/rika/test/client-turn-status.ts",
+      "path": "apps/rika/test/client-turn-status.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/test/interactive-controller-active-fixtures.ts",
+      "path": "apps/rika/test/interactive-controller-active-fixtures.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/test/interactive-controller-stream-fixtures.ts",
+      "path": "apps/rika/test/interactive-controller-stream-fixtures.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/test/interactive-controller-transcript-fixtures.ts",
+      "path": "apps/rika/test/interactive-controller-transcript-fixtures.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/test/model-script-fixtures.ts",
+      "path": "apps/rika/test/model-script-fixtures.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/test/resident-legacy-client.ts",
+      "path": "apps/rika/test/resident-legacy-client.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/test/resident-process-exit.ts",
+      "path": "apps/rika/test/resident-process-exit.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/test/resident-transport-files.ts",
+      "path": "apps/rika/test/resident-transport-files.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/test/resident-transport-process.ts",
+      "path": "apps/rika/test/resident-transport-process.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/test/resident-transport-runtime.ts",
+      "path": "apps/rika/test/resident-transport-runtime.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/test/shell-session-operation.ts",
+      "path": "apps/rika/test/shell-session-operation.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/test/tui-app-legacy-projection.ts",
+      "path": "apps/rika/test/tui-app-legacy-projection.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/test/tui-app-model.ts",
+      "path": "apps/rika/test/tui-app-model.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/test/tui-app-tool-runtime.ts",
+      "path": "apps/rika/test/tui-app-tool-runtime.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -7300,8 +7426,32 @@
       "publicExports": ["./transcript-unit"]
     },
     {
+      "id": "scripts/benchmark/benchmark-baseline-measurement.ts",
+      "path": "scripts/benchmark/benchmark-baseline-measurement.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "scripts/benchmark/benchmark-baseline-model.ts",
+      "path": "scripts/benchmark/benchmark-baseline-model.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "scripts/benchmark/benchmark-baseline.ts",
       "path": "scripts/benchmark/benchmark-baseline.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "scripts/benchmark/benchmark-measurement.ts",
+      "path": "scripts/benchmark/benchmark-measurement.ts",
       "workspace": "root",
       "kind": "source",
       "production": true,
@@ -7372,8 +7522,8 @@
       "publicExports": []
     },
     {
-      "id": "scripts/installation/install-contract.ts",
-      "path": "scripts/installation/install-contract.ts",
+      "id": "scripts/installation/install-command-names.ts",
+      "path": "scripts/installation/install-command-names.ts",
       "workspace": "root",
       "kind": "source",
       "production": true,
@@ -7382,6 +7532,22 @@
     {
       "id": "scripts/installation/install-local.ts",
       "path": "scripts/installation/install-local.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "scripts/installation/install-paths.ts",
+      "path": "scripts/installation/install-paths.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "scripts/installation/install-script-validation.ts",
+      "path": "scripts/installation/install-script-validation.ts",
       "workspace": "root",
       "kind": "source",
       "production": true,
@@ -7412,6 +7578,22 @@
       "publicExports": []
     },
     {
+      "id": "scripts/packaging/npm-launcher.ts",
+      "path": "scripts/packaging/npm-launcher.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "scripts/packaging/npm-package-names.ts",
+      "path": "scripts/packaging/npm-package-names.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "scripts/packaging/npm-package.ts",
       "path": "scripts/packaging/npm-package.ts",
       "workspace": "root",
@@ -7420,8 +7602,40 @@
       "publicExports": []
     },
     {
+      "id": "scripts/packaging/npm-platform-package.ts",
+      "path": "scripts/packaging/npm-platform-package.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "scripts/packaging/package-target-contract.ts",
+      "path": "scripts/packaging/package-target-contract.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "scripts/packaging/package-target.ts",
       "path": "scripts/packaging/package-target.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "scripts/packaging/release-archive.ts",
+      "path": "scripts/packaging/release-archive.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "scripts/packaging/release-evidence.ts",
+      "path": "scripts/packaging/release-evidence.ts",
       "workspace": "root",
       "kind": "source",
       "production": true,
@@ -7498,6 +7712,30 @@
   ],
   "edges": [
     {
+      "from": "apps/rika/src/application-performance-evaluation.ts",
+      "to": "apps/rika/src/performance-platform.ts",
+      "specifier": "./performance-platform",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/application-performance-evaluation.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/application-performance-evaluation.ts",
+      "to": "packages/terminal/src/performance/terminal-performance-evaluation.ts",
+      "specifier": "@rika/terminal/terminal-performance-evaluation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "apps/rika/src/client-main.ts",
       "to": "apps/rika/src/client/client-process-exit.ts",
       "specifier": "./client/client-process-exit",
@@ -7571,8 +7809,8 @@
     },
     {
       "from": "apps/rika/src/client/client-process.ts",
-      "to": "apps/rika/src/logging.ts",
-      "specifier": "../logging",
+      "to": "apps/rika/src/diagnostic-file-logging.ts",
+      "specifier": "../diagnostic-file-logging",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -7715,8 +7953,8 @@
     },
     {
       "from": "apps/rika/src/command/product/diagnostics-command.ts",
-      "to": "apps/rika/src/logging.ts",
-      "specifier": "../../logging",
+      "to": "apps/rika/src/diagnostic-file-logging.ts",
+      "specifier": "../../diagnostic-file-logging",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -7963,6 +8201,14 @@
     },
     {
       "from": "apps/rika/src/command/root/rika-command.ts",
+      "to": "apps/rika/src/application-version.ts",
+      "specifier": "../../application-version",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/rika-command.ts",
       "to": "apps/rika/src/command/product/auth-command.ts",
       "specifier": "../product/auth-command",
       "kind": "import",
@@ -8067,14 +8313,6 @@
     },
     {
       "from": "apps/rika/src/command/root/rika-command.ts",
-      "to": "apps/rika/src/version.ts",
-      "specifier": "../../version",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/command/root/rika-command.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -8093,6 +8331,14 @@
       "from": "apps/rika/src/command/root/rika-command.ts",
       "to": "packages/configuration/src/model-routing/behavior-mode.ts",
       "specifier": "@rika/configuration/behavior-mode",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/diagnostic-file-logging.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -9099,6 +9345,14 @@
     },
     {
       "from": "apps/rika/src/interactive/process/process-runtime.ts",
+      "to": "apps/rika/src/diagnostic-file-logging.ts",
+      "specifier": "../../diagnostic-file-logging",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/process-runtime.ts",
       "to": "apps/rika/src/interactive/controller/interactive-palette-controller.ts",
       "specifier": "../controller/interactive-palette-controller",
       "kind": "import",
@@ -9157,14 +9411,6 @@
       "from": "apps/rika/src/interactive/process/process-runtime.ts",
       "to": "apps/rika/src/interactive/process/process-workspace.ts",
       "specifier": "./process-workspace",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/interactive/process/process-runtime.ts",
-      "to": "apps/rika/src/logging.ts",
-      "specifier": "../../logging",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -9371,6 +9617,14 @@
     },
     {
       "from": "apps/rika/src/interactive/process/process-startup-dispatcher.ts",
+      "to": "apps/rika/src/diagnostic-file-logging.ts",
+      "specifier": "../../diagnostic-file-logging",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/process-startup-dispatcher.ts",
       "to": "apps/rika/src/interactive/process/process-configuration.ts",
       "specifier": "./process-configuration",
       "kind": "import",
@@ -9381,14 +9635,6 @@
       "from": "apps/rika/src/interactive/process/process-startup-dispatcher.ts",
       "to": "apps/rika/src/interactive/process/process-layer.ts",
       "specifier": "./process-layer",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/interactive/process/process-startup-dispatcher.ts",
-      "to": "apps/rika/src/logging.ts",
-      "specifier": "../../logging",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -9506,17 +9752,9 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/logging.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
       "from": "apps/rika/src/performance-main.ts",
-      "to": "apps/rika/src/performance.ts",
-      "specifier": "./performance",
+      "to": "apps/rika/src/application-performance-evaluation.ts",
+      "specifier": "./application-performance-evaluation",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -9549,30 +9787,6 @@
       "from": "apps/rika/src/performance-platform.ts",
       "to": "external:effect",
       "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/performance.ts",
-      "to": "apps/rika/src/performance-platform.ts",
-      "specifier": "./performance-platform",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/performance.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/performance.ts",
-      "to": "packages/terminal/src/performance/terminal-performance-evaluation.ts",
-      "specifier": "@rika/terminal/terminal-performance-evaluation",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10507,8 +10721,16 @@
     },
     {
       "from": "apps/rika/src/resident/process/resident-process-launch.ts",
-      "to": "apps/rika/src/logging.ts",
-      "specifier": "../../logging",
+      "to": "apps/rika/src/application-version.ts",
+      "specifier": "../../application-version",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/process/resident-process-launch.ts",
+      "to": "apps/rika/src/diagnostic-file-logging.ts",
+      "specifier": "../../diagnostic-file-logging",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10541,14 +10763,6 @@
       "from": "apps/rika/src/resident/process/resident-process-launch.ts",
       "to": "apps/rika/src/transport/host/resident-host-transport.ts",
       "specifier": "../../transport/host/resident-host-transport",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/resident/process/resident-process-launch.ts",
-      "to": "apps/rika/src/version.ts",
-      "specifier": "../../version",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -11626,7 +11840,7 @@
       "production": true
     },
     {
-      "from": "apps/rika/test/client-main-harness.ts",
+      "from": "apps/rika/test/client-process-test-runtime.ts",
       "to": "apps/rika/src/resident/process/resident-endpoint.ts",
       "specifier": "../src/resident/process/resident-endpoint",
       "kind": "import",
@@ -11634,15 +11848,23 @@
       "production": true
     },
     {
-      "from": "apps/rika/test/client-main-harness.ts",
-      "to": "apps/rika/test/resident-transport-harness.ts",
-      "specifier": "./resident-transport-harness",
+      "from": "apps/rika/test/client-process-test-runtime.ts",
+      "to": "apps/rika/test/resident-process-exit.ts",
+      "specifier": "./resident-process-exit",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "apps/rika/test/client-main-harness.ts",
+      "from": "apps/rika/test/client-process-test-runtime.ts",
+      "to": "apps/rika/test/resident-transport-process.ts",
+      "specifier": "./resident-transport-process",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/client-process-test-runtime.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -11650,7 +11872,63 @@
       "production": true
     },
     {
-      "from": "apps/rika/test/client-main-harness.ts",
+      "from": "apps/rika/test/client-process-test-runtime.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/client-pty-scenario.ts",
+      "to": "apps/rika/test/client-process-test-runtime.ts",
+      "specifier": "./client-process-test-runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/client-pty-scenario.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/client-pty-scenario.ts",
+      "to": "external:effect/unstable/process",
+      "specifier": "effect/unstable/process",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/client-pty-scenario.ts",
+      "to": "external:url",
+      "specifier": "url",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/client-pty-scenario.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/client-turn-status.ts",
+      "to": "apps/rika/test/client-process-test-runtime.ts",
+      "specifier": "./client-process-test-runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/client-turn-status.ts",
       "to": "external:@effect/sql-sqlite-bun/SqliteClient",
       "specifier": "@effect/sql-sqlite-bun/SqliteClient",
       "kind": "import",
@@ -11658,7 +11936,7 @@
       "production": true
     },
     {
-      "from": "apps/rika/test/client-main-harness.ts",
+      "from": "apps/rika/test/client-turn-status.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -11666,15 +11944,7 @@
       "production": true
     },
     {
-      "from": "apps/rika/test/client-main-harness.ts",
-      "to": "external:effect/unstable/process",
-      "specifier": "effect/unstable/process",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/test/client-main-harness.ts",
+      "from": "apps/rika/test/client-turn-status.ts",
       "to": "external:effect/unstable/reactivity/Reactivity",
       "specifier": "effect/unstable/reactivity/Reactivity",
       "kind": "import",
@@ -11682,31 +11952,23 @@
       "production": true
     },
     {
-      "from": "apps/rika/test/client-main-harness.ts",
-      "to": "external:url",
-      "specifier": "url",
+      "from": "apps/rika/test/interactive-controller-active-fixtures.ts",
+      "to": "apps/rika/src/interactive/controller/interactive-controller.ts",
+      "specifier": "../src/interactive/controller/interactive-controller",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "apps/rika/test/client-main-harness.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
+      "from": "apps/rika/test/interactive-controller-active-fixtures.ts",
+      "to": "apps/rika/test/interactive-controller-transcript-fixtures.ts",
+      "specifier": "./interactive-controller-transcript-fixtures",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "apps/rika/test/resident-transport-harness.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/test/resident-transport-harness.ts",
+      "from": "apps/rika/test/interactive-controller-active-fixtures.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -11714,7 +11976,295 @@
       "production": true
     },
     {
-      "from": "apps/rika/test/resident-transport-harness.ts",
+      "from": "apps/rika/test/interactive-controller-active-fixtures.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-active-fixtures.ts",
+      "to": "packages/transcript/src/ordering/transcript-unit-order.ts",
+      "specifier": "@rika/transcript/transcript-unit-order",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-stream-fixtures.ts",
+      "to": "apps/rika/src/interactive/controller/interactive-controller.ts",
+      "specifier": "../src/interactive/controller/interactive-controller",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-stream-fixtures.ts",
+      "to": "apps/rika/test/interactive-controller-transcript-fixtures.ts",
+      "specifier": "./interactive-controller-transcript-fixtures",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-stream-fixtures.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-stream-fixtures.ts",
+      "to": "packages/product/src/operation/interactive/interactive-event.ts",
+      "specifier": "@rika/product/interactive-event",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-stream-fixtures.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-stream-fixtures.ts",
+      "to": "packages/terminal/src/state/model/terminal-state.ts",
+      "specifier": "@rika/terminal/terminal-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-stream-fixtures.ts",
+      "to": "packages/transcript/src/projection/transcript-projection.ts",
+      "specifier": "@rika/transcript/transcript-projection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-stream-fixtures.ts",
+      "to": "packages/transcript/src/schema/transcript-projection-model.ts",
+      "specifier": "@rika/transcript/transcript-projection-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-stream-fixtures.ts",
+      "to": "packages/transcript/src/schema/transcript-source-event.ts",
+      "specifier": "@rika/transcript/transcript-source-event",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-transcript-fixtures.ts",
+      "to": "apps/rika/src/interactive/controller/interactive-controller.ts",
+      "specifier": "../src/interactive/controller/interactive-controller",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-transcript-fixtures.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-transcript-fixtures.ts",
+      "to": "packages/product/src/thread/model/thread-record.ts",
+      "specifier": "@rika/product/thread-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-transcript-fixtures.ts",
+      "to": "packages/product/src/thread/model/thread-result.ts",
+      "specifier": "@rika/product/thread-result",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-transcript-fixtures.ts",
+      "to": "packages/product/src/thread/model/transcript-page.ts",
+      "specifier": "@rika/product/transcript-page",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-transcript-fixtures.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-transcript-fixtures.ts",
+      "to": "packages/terminal/src/state/model/terminal-state.ts",
+      "specifier": "@rika/terminal/terminal-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-transcript-fixtures.ts",
+      "to": "packages/transcript/src/ordering/transcript-unit-order.ts",
+      "specifier": "@rika/transcript/transcript-unit-order",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-transcript-fixtures.ts",
+      "to": "packages/transcript/src/projection/transcript-projection.ts",
+      "specifier": "@rika/transcript/transcript-projection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-transcript-fixtures.ts",
+      "to": "packages/transcript/src/schema/transcript-projection-model.ts",
+      "specifier": "@rika/transcript/transcript-projection-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/model-script-fixtures.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/model-script-fixtures.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/model-script-fixtures.ts",
+      "to": "packages/configuration/src/model-routing/model-route-resolution.ts",
+      "specifier": "@rika/configuration/model-route-resolution",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/model-script-fixtures.ts",
+      "to": "packages/configuration/src/model-routing/model-route.ts",
+      "specifier": "@rika/configuration/model-route",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/model-script-fixtures.ts",
+      "to": "packages/relay-execution/src/model/provider/model-provider-runtime.ts",
+      "specifier": "@rika/relay-execution/model-provider-runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/model-script-fixtures.ts",
+      "to": "packages/relay-execution/src/relay/execution/relay-execution-layer.ts",
+      "specifier": "@rika/relay-execution/relay-execution-layer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/resident-legacy-client.ts",
+      "to": "apps/rika/test/resident-transport-runtime.ts",
+      "specifier": "./resident-transport-runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/resident-legacy-client.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/resident-process-exit.ts",
+      "to": "apps/rika/test/resident-transport-process.ts",
+      "specifier": "./resident-transport-process",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/resident-process-exit.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/resident-transport-files.ts",
+      "to": "apps/rika/test/resident-transport-runtime.ts",
+      "specifier": "./resident-transport-runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/resident-transport-files.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/resident-transport-process.ts",
+      "to": "apps/rika/test/resident-transport-files.ts",
+      "specifier": "./resident-transport-files",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/resident-transport-process.ts",
+      "to": "apps/rika/test/resident-transport-runtime.ts",
+      "specifier": "./resident-transport-runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/resident-transport-process.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/resident-transport-process.ts",
       "to": "external:effect/unstable/process",
       "specifier": "effect/unstable/process",
       "kind": "import",
@@ -11722,7 +12272,7 @@
       "production": true
     },
     {
-      "from": "apps/rika/test/resident-transport-harness.ts",
+      "from": "apps/rika/test/resident-transport-process.ts",
       "to": "external:url",
       "specifier": "url",
       "kind": "import",
@@ -11730,9 +12280,289 @@
       "production": true
     },
     {
-      "from": "apps/rika/test/resident-transport-harness.ts",
+      "from": "apps/rika/test/resident-transport-process.ts",
       "to": "external:vitest",
       "specifier": "vitest",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/resident-transport-runtime.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/resident-transport-runtime.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/shell-session-operation.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/shell-session-operation.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/shell-session-operation.ts",
+      "to": "external:effect/unstable/http",
+      "specifier": "effect/unstable/http",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/shell-session-operation.ts",
+      "to": "packages/coding-tools/src/media/media-view-service.ts",
+      "specifier": "@rika/coding-tools/media-view-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/shell-session-operation.ts",
+      "to": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
+      "specifier": "@rika/coding-tools/coding-tool-runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/shell-session-operation.ts",
+      "to": "packages/coding-tools/src/web-research/read-web-page-service.ts",
+      "specifier": "@rika/coding-tools/read-web-page-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/shell-session-operation.ts",
+      "to": "packages/coding-tools/src/web-research/web-search-service.ts",
+      "specifier": "@rika/coding-tools/web-search-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/shell-session-operation.ts",
+      "to": "packages/product-store/src/database/product-database-layer.ts",
+      "specifier": "@rika/product-store/product-database-layer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/shell-session-operation.ts",
+      "to": "packages/product-store/src/thread/sqlite-thread-repository.ts",
+      "specifier": "@rika/product-store/sqlite-thread-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/shell-session-operation.ts",
+      "to": "packages/product-store/src/transcript/sqlite-transcript-repository.ts",
+      "specifier": "@rika/product-store/sqlite-transcript-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/shell-session-operation.ts",
+      "to": "packages/product-store/src/turn/sqlite-turn-repository.ts",
+      "specifier": "@rika/product-store/sqlite-turn-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/shell-session-operation.ts",
+      "to": "packages/product/src/operation/interactive/interactive-session.ts",
+      "specifier": "@rika/product/interactive-session",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/shell-session-operation.ts",
+      "to": "packages/product/src/thread/model/thread-record.ts",
+      "specifier": "@rika/product/thread-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/shell-session-operation.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/shell-session-operation.ts",
+      "to": "packages/relay-execution/src/relay/execution/relay-execution-layer.ts",
+      "specifier": "@rika/relay-execution/relay-execution-layer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-legacy-projection.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-legacy-projection.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-legacy-projection.ts",
+      "to": "external:effect/unstable/sql/SqlClient",
+      "specifier": "effect/unstable/sql/SqlClient",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-legacy-projection.ts",
+      "to": "packages/product-store/src/database/product-database-layer.ts",
+      "specifier": "@rika/product-store/product-database-layer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-legacy-projection.ts",
+      "to": "packages/product-store/src/thread/sqlite-thread-repository.ts",
+      "specifier": "@rika/product-store/sqlite-thread-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-legacy-projection.ts",
+      "to": "packages/product-store/src/transcript/sqlite-transcript-repository.ts",
+      "specifier": "@rika/product-store/sqlite-transcript-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-legacy-projection.ts",
+      "to": "packages/product-store/src/turn/sqlite-turn-repository.ts",
+      "specifier": "@rika/product-store/sqlite-turn-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-legacy-projection.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-model.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-model.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-model.ts",
+      "to": "packages/relay-execution/src/model/provider/scripted-model-runtime.ts",
+      "specifier": "@rika/relay-execution/scripted-model-runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-tool-runtime.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-tool-runtime.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-tool-runtime.ts",
+      "to": "external:effect/unstable/http",
+      "specifier": "effect/unstable/http",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-tool-runtime.ts",
+      "to": "packages/coding-tools/src/media/media-view-service.ts",
+      "specifier": "@rika/coding-tools/media-view-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-tool-runtime.ts",
+      "to": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
+      "specifier": "@rika/coding-tools/coding-tool-runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-tool-runtime.ts",
+      "to": "packages/coding-tools/src/web-research/read-web-page-service.ts",
+      "specifier": "@rika/coding-tools/read-web-page-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-tool-runtime.ts",
+      "to": "packages/coding-tools/src/web-research/web-search-service.ts",
+      "specifier": "@rika/coding-tools/web-search-service",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -11741,6 +12571,22 @@
       "from": "apps/rika/test/tui-app.ts",
       "to": "apps/rika/src/interactive/process/interactive-process-loop.ts",
       "specifier": "../src/interactive/process/interactive-process-loop",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app.ts",
+      "to": "apps/rika/test/tui-app-model.ts",
+      "specifier": "./tui-app-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app.ts",
+      "to": "apps/rika/test/tui-app-tool-runtime.ts",
+      "specifier": "./tui-app-tool-runtime",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -11765,62 +12611,6 @@
       "from": "apps/rika/test/tui-app.ts",
       "to": "external:effect",
       "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/test/tui-app.ts",
-      "to": "external:effect/unstable/ai",
-      "specifier": "effect/unstable/ai",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/test/tui-app.ts",
-      "to": "external:effect/unstable/http",
-      "specifier": "effect/unstable/http",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/test/tui-app.ts",
-      "to": "external:effect/unstable/sql/SqlClient",
-      "specifier": "effect/unstable/sql/SqlClient",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/test/tui-app.ts",
-      "to": "packages/coding-tools/src/media/media-view-service.ts",
-      "specifier": "@rika/coding-tools/media-view-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/test/tui-app.ts",
-      "to": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
-      "specifier": "@rika/coding-tools/coding-tool-runtime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/test/tui-app.ts",
-      "to": "packages/coding-tools/src/web-research/read-web-page-service.ts",
-      "specifier": "@rika/coding-tools/read-web-page-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/test/tui-app.ts",
-      "to": "packages/coding-tools/src/web-research/web-search-service.ts",
-      "specifier": "@rika/coding-tools/web-search-service",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -11893,14 +12683,6 @@
       "from": "apps/rika/test/tui-app.ts",
       "to": "packages/product/src/thread/model/turn-record.ts",
       "specifier": "@rika/product/turn-record",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/test/tui-app.ts",
-      "to": "packages/relay-execution/src/model/provider/scripted-model-runtime.ts",
-      "specifier": "@rika/relay-execution/scripted-model-runtime",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -26377,7 +27159,7 @@
     {
       "from": "packages/product/test/product-operation-private/execution-ingest-support.ts",
       "to": "packages/product-store/src/transcript/sqlite-transcript-repository.ts",
-      "specifier": "../../../product-store/src/transcript/sqlite-transcript-repository",
+      "specifier": "@rika/product-store/sqlite-transcript-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -26385,7 +27167,7 @@
     {
       "from": "packages/product/test/product-operation-private/execution-ingest-support.ts",
       "to": "packages/product-store/src/turn/sqlite-turn-repository.ts",
-      "specifier": "../../../product-store/src/turn/sqlite-turn-repository",
+      "specifier": "@rika/product-store/sqlite-turn-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -26393,7 +27175,7 @@
     {
       "from": "packages/product/test/product-operation-private/execution-ingest-support.ts",
       "to": "packages/product-store/src/usage/sqlite-usage-repository.ts",
-      "specifier": "../../../product-store/src/usage/sqlite-usage-repository",
+      "specifier": "@rika/product-store/sqlite-usage-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -26537,7 +27319,7 @@
     {
       "from": "packages/product/test/product-operation-private/operation-queued-admission-repositories.ts",
       "to": "packages/product-store/src/thread/sqlite-thread-repository.ts",
-      "specifier": "../../../product-store/src/thread/sqlite-thread-repository",
+      "specifier": "@rika/product-store/sqlite-thread-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -26545,7 +27327,7 @@
     {
       "from": "packages/product/test/product-operation-private/operation-queued-admission-repositories.ts",
       "to": "packages/product-store/src/turn/sqlite-turn-repository.ts",
-      "specifier": "../../../product-store/src/turn/sqlite-turn-repository",
+      "specifier": "@rika/product-store/sqlite-turn-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -26585,7 +27367,7 @@
     {
       "from": "packages/product/test/product-operation-private/operation-recovery-restore-fixtures.ts",
       "to": "packages/product-store/src/thread/sqlite-thread-repository.ts",
-      "specifier": "../../../product-store/src/thread/sqlite-thread-repository",
+      "specifier": "@rika/product-store/sqlite-thread-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -26593,7 +27375,7 @@
     {
       "from": "packages/product/test/product-operation-private/operation-recovery-restore-fixtures.ts",
       "to": "packages/product-store/src/transcript/sqlite-transcript-repository.ts",
-      "specifier": "../../../product-store/src/transcript/sqlite-transcript-repository",
+      "specifier": "@rika/product-store/sqlite-transcript-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -26601,7 +27383,7 @@
     {
       "from": "packages/product/test/product-operation-private/operation-recovery-restore-fixtures.ts",
       "to": "packages/product-store/src/turn/sqlite-turn-repository.ts",
-      "specifier": "../../../product-store/src/turn/sqlite-turn-repository",
+      "specifier": "@rika/product-store/sqlite-turn-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -36751,6 +37533,30 @@
       "production": true
     },
     {
+      "from": "scripts/benchmark/benchmark-baseline-measurement.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/benchmark-baseline-measurement.ts",
+      "to": "scripts/benchmark/benchmark-baseline-model.ts",
+      "specifier": "./benchmark-baseline-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/benchmark-baseline-measurement.ts",
+      "to": "scripts/benchmark/benchmark-measurement.ts",
+      "specifier": "./benchmark-measurement",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "scripts/benchmark/benchmark-baseline.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -36763,6 +37569,30 @@
       "to": "external:effect/PlatformError",
       "specifier": "effect/PlatformError",
       "kind": "dynamic-import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/benchmark-baseline.ts",
+      "to": "scripts/benchmark/benchmark-baseline-measurement.ts",
+      "specifier": "./benchmark-baseline-measurement",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/benchmark-baseline.ts",
+      "to": "scripts/benchmark/benchmark-baseline-model.ts",
+      "specifier": "./benchmark-baseline-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/benchmark-baseline.ts",
+      "to": "scripts/benchmark/benchmark-measurement.ts",
+      "specifier": "./benchmark-measurement",
+      "kind": "import",
       "relationship": "runtime",
       "production": true
     },
@@ -36800,8 +37630,24 @@
     },
     {
       "from": "scripts/benchmark/benchmark-runner.ts",
+      "to": "scripts/benchmark/benchmark-baseline-measurement.ts",
+      "specifier": "./benchmark-baseline-measurement",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/benchmark-runner.ts",
       "to": "scripts/benchmark/benchmark-baseline.ts",
       "specifier": "./benchmark-baseline",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/benchmark-runner.ts",
+      "to": "scripts/benchmark/benchmark-measurement.ts",
+      "specifier": "./benchmark-measurement",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -36936,8 +37782,8 @@
     },
     {
       "from": "scripts/benchmark/fold-persistence-benchmark.ts",
-      "to": "scripts/benchmark/benchmark-baseline.ts",
-      "specifier": "./benchmark-baseline",
+      "to": "scripts/benchmark/benchmark-measurement.ts",
+      "specifier": "./benchmark-measurement",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -37191,6 +38037,22 @@
       "production": true
     },
     {
+      "from": "scripts/installation/install-script-validation.ts",
+      "to": "scripts/installation/install-command-names.ts",
+      "specifier": "./install-command-names",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/installation/install-script-validation.ts",
+      "to": "scripts/installation/install-paths.ts",
+      "specifier": "./install-paths",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "scripts/installation/local-install.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -37208,8 +38070,16 @@
     },
     {
       "from": "scripts/installation/local-install.ts",
-      "to": "scripts/installation/install-contract.ts",
-      "specifier": "./install-contract",
+      "to": "scripts/installation/install-command-names.ts",
+      "specifier": "./install-command-names",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/installation/local-install.ts",
+      "to": "scripts/installation/install-paths.ts",
+      "specifier": "./install-paths",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -37263,6 +38133,38 @@
       "production": true
     },
     {
+      "from": "scripts/packaging/npm-launcher.ts",
+      "to": "scripts/packaging/npm-package-names.ts",
+      "specifier": "./npm-package-names",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/packaging/npm-launcher.ts",
+      "to": "scripts/packaging/package-target-contract.ts",
+      "specifier": "./package-target-contract",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/packaging/npm-package-names.ts",
+      "to": "external:effect/Function",
+      "specifier": "effect/Function",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/packaging/npm-package-names.ts",
+      "to": "scripts/packaging/package-target-contract.ts",
+      "specifier": "./package-target-contract",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "scripts/packaging/npm-package.ts",
       "to": "external:@effect/platform-bun/BunRuntime",
       "specifier": "@effect/platform-bun/BunRuntime",
@@ -37288,14 +38190,6 @@
     },
     {
       "from": "scripts/packaging/npm-package.ts",
-      "to": "external:effect/Function",
-      "specifier": "effect/Function",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "scripts/packaging/npm-package.ts",
       "to": "external:effect/unstable/process",
       "specifier": "effect/unstable/process",
       "kind": "import",
@@ -37304,8 +38198,56 @@
     },
     {
       "from": "scripts/packaging/npm-package.ts",
-      "to": "scripts/packaging/package-target.ts",
-      "specifier": "./package-target",
+      "to": "scripts/packaging/npm-launcher.ts",
+      "specifier": "./npm-launcher",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/packaging/npm-package.ts",
+      "to": "scripts/packaging/npm-platform-package.ts",
+      "specifier": "./npm-platform-package",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/packaging/npm-package.ts",
+      "to": "scripts/packaging/package-target-contract.ts",
+      "specifier": "./package-target-contract",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/packaging/npm-package.ts",
+      "to": "scripts/packaging/release-archive.ts",
+      "specifier": "./release-archive",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/packaging/npm-platform-package.ts",
+      "to": "external:effect/Function",
+      "specifier": "effect/Function",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/packaging/npm-platform-package.ts",
+      "to": "scripts/packaging/npm-package-names.ts",
+      "specifier": "./npm-package-names",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/packaging/npm-platform-package.ts",
+      "to": "scripts/packaging/package-target-contract.ts",
+      "specifier": "./package-target-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -37336,6 +38278,38 @@
     },
     {
       "from": "scripts/packaging/package-target.ts",
+      "to": "external:effect/unstable/process",
+      "specifier": "effect/unstable/process",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/packaging/package-target.ts",
+      "to": "scripts/packaging/package-target-contract.ts",
+      "specifier": "./package-target-contract",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/packaging/package-target.ts",
+      "to": "scripts/packaging/release-archive.ts",
+      "specifier": "./release-archive",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/packaging/package-target.ts",
+      "to": "scripts/packaging/release-evidence.ts",
+      "specifier": "./release-evidence",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/packaging/release-archive.ts",
       "to": "external:effect/Function",
       "specifier": "effect/Function",
       "kind": "import",
@@ -37343,9 +38317,17 @@
       "production": true
     },
     {
-      "from": "scripts/packaging/package-target.ts",
-      "to": "external:effect/unstable/process",
-      "specifier": "effect/unstable/process",
+      "from": "scripts/packaging/release-archive.ts",
+      "to": "scripts/packaging/package-target-contract.ts",
+      "specifier": "./package-target-contract",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/packaging/release-evidence.ts",
+      "to": "scripts/packaging/package-target-contract.ts",
+      "specifier": "./package-target-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
