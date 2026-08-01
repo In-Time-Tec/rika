@@ -1,43 +1,19 @@
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import * as ExecutionBackend from "../contract/execution-service"
-import type { Node } from "./execution-ingest-state"
-import type { InterruptedOutcome } from "./execution-ingest-state"
-export const isInterruptedOutcome = (
-  outcome: NonNullable<TranscriptUnit.Unit["executionOutcome"]>,
-): outcome is InterruptedOutcome => outcome.status === "failed" || outcome.status === "cancelled"
-const childExecutionIds = (event: ExecutionBackend.Event): ReadonlyArray<string> => {
-  const ids = new Set<string>()
-  const addAliases = (value: Readonly<Record<string, unknown>> | undefined) => {
-    if (value === undefined) return
-    for (const alias of ["child_execution_id", "child_run_id", "childId", "child_id"] as const) {
-      const id = value[alias]
-      if (typeof id === "string" && id.length > 0) ids.add(id)
-    }
-  }
-  if (event.childExecutionId !== undefined && event.childExecutionId.length > 0) ids.add(event.childExecutionId)
-  addAliases(event.data)
-  const member = event.data?.member
-  if (member !== null && typeof member === "object") addAliases(member as Readonly<Record<string, unknown>>)
-  if (event.type === "child_fan_out.created" && Array.isArray(event.data?.children))
-    for (const child of event.data.children)
-      if (child !== null && typeof child === "object") addAliases(child as Readonly<Record<string, unknown>>)
-  return [...ids]
-}
-const bySequence = (left: ExecutionBackend.Event, right: ExecutionBackend.Event) => left.sequence - right.sequence
+import * as EventFamily from "./execution-ingest-event-family"
+import type { Node, InterruptedOutcome, Pipeline } from "./execution-ingest-state"
 export const fullyConsumed = (nodes: ReadonlyMap<string, Node>): boolean =>
   [...nodes.values()].every((node) => node.status !== undefined)
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 export const executionKey = TranscriptCorrelation.executionKey
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
-import * as ExecutionStatus from "../contract/execution-status"
 import { ExecutionId } from "../contract/execution-identifier"
 import { Cause, Effect, Result } from "effect"
 import * as IngestProjection from "./execution-projection-state"
 import * as IngestState from "./execution-ingest-state"
 import type { VisibleDelta } from "./execution-projection-types"
 import * as IngestRestore from "./execution-ingest-restore"
-import type { Pipeline } from "./execution-ingest-state"
 import type { Options } from "./execution-ingest-service"
 import type { IngestFailure, Failure } from "./execution-ingest-failure"
 import type * as IngestProjectionContract from "./execution-projection-contract"
@@ -79,8 +55,8 @@ export interface EventDependencies {
   readonly settlePipeline: (pipeline: Pipeline) => void
 }
 const interruptedAncestorOutcome = (nodes: ReadonlyMap<string, Node>, node: Node): InterruptedOutcome | undefined =>
-  IngestRestore.interruptedAncestorOutcome(nodes, node, isInterruptedOutcome)
-const spawnedChildIds = childExecutionIds
+  IngestRestore.interruptedAncestorOutcome(nodes, node, EventFamily.isInterruptedOutcome)
+const spawnedChildIds = EventFamily.childExecutionIds
 const isDescendant = (nodes: ReadonlyMap<string, Node>, node: Node, ancestorKey: string): boolean => {
   let parentKey = node.parentKey
   while (parentKey !== undefined) {
@@ -89,11 +65,8 @@ const isDescendant = (nodes: ReadonlyMap<string, Node>, node: Node, ancestorKey:
   }
   return false
 }
-const settledStatus = (
-  status: ExecutionBackend.Status,
-): NonNullable<import("@rika/product/transcript-repository").ExecutionCheckpoint["status"]> | undefined =>
-  status === "completed" || status === "failed" || status === "cancelled" ? status : undefined
-const isTerminalStatus = ExecutionStatus.isTerminalStatus
+const settledStatus = EventFamily.settledStatus
+const isTerminalStatus = EventFamily.isTerminalStatus
 export const make = (dependencies: EventDependencies) => {
   const markCheckpoint = (pipeline: Pipeline, node: Node) => {
     pipeline.delta.checkpoints.add(node.key)
@@ -287,7 +260,7 @@ export const make = (dependencies: EventDependencies) => {
         turnId: String(pipeline.turnId),
         event,
       }
-      const terminal = ExecutionStatus.terminalEventStatus(event.type)
+      const terminal = EventFamily.terminalEventStatus(event.type)
       const usage = UsageFold.applyUsageFoldEvent(pipeline.usageFold, observation)
       if (Result.isFailure(usage)) {
         dependencies.failProjection(pipeline, usage.failure)
@@ -310,7 +283,7 @@ export const make = (dependencies: EventDependencies) => {
             "backend",
             `Execution ${node.executionId} emitted a terminal event without a projected outcome`,
           )
-        if (isInterruptedOutcome(outcome)) applyDescendantOutcome(pipeline, node, outcome, visible)
+        if (EventFamily.isInterruptedOutcome(outcome)) applyDescendantOutcome(pipeline, node, outcome, visible)
         if (node.parentKey !== undefined) {
           const parent = pipeline.nodes.get(node.parentKey)
           if (parent !== undefined)
@@ -335,14 +308,14 @@ export const make = (dependencies: EventDependencies) => {
     Effect.gen(function* () {
       if (dependencies.options.backend.pageEvents === undefined) {
         const result = yield* dependencies.options.backend.replay(node.executionId, node.cursor, reference)
-        for (const event of result.events.toSorted(bySequence)) accept(pipeline, node, event)
+        for (const event of result.events.toSorted(EventFamily.bySequence)) accept(pipeline, node, event)
         return
       }
       const cursors = new Set<string>()
       let after = node.cursor
       while (!pipeline.stopped) {
         const page = yield* dependencies.options.backend.pageEvents(node.executionId, "forward", after, 200, reference)
-        for (const event of page.events.toSorted(bySequence)) accept(pipeline, node, event)
+        for (const event of page.events.toSorted(EventFamily.bySequence)) accept(pipeline, node, event)
         if (!page.hasMore) return
         const next = page.newestCursor
         if (page.events.length === 0 || next === undefined || next === after || cursors.has(next))

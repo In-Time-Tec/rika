@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import * as ThreadToolkits from "@rika/coding-tools/thread-tool-contract"
+import * as ResidentFeed from "@rika/product/resident-interactive-feed"
 import { MediaAnalysisError } from "@rika/coding-tools/media-view-service"
 import { analyzerTestLayer } from "@rika/coding-tools/media-view-service"
 import * as BehaviorMode from "@rika/configuration/behavior-mode"
@@ -974,7 +975,7 @@ export const runResidentAuth: {
 const createOperationLayerImpl = (
   options: ResidentProductOptions,
   injectedInteractive: (
-    input: ResidentService.InteractiveInput,
+    input: ResidentFeed.InteractiveInput,
     session: Operation.InteractiveSession,
   ) => Effect.Effect<void, Operation.OperationUnavailable>,
 ) => {
@@ -1327,14 +1328,14 @@ const createOperationLayerImpl = (
 export const createOperationLayer: {
   (
     injectedInteractive: (
-      input: ResidentService.InteractiveInput,
+      input: ResidentFeed.InteractiveInput,
       session: Operation.InteractiveSession,
     ) => Effect.Effect<void, Operation.OperationUnavailable>,
   ): (options: ResidentProductOptions) => ReturnType<typeof createOperationLayerImpl>
   (
     options: ResidentProductOptions,
     injectedInteractive: (
-      input: ResidentService.InteractiveInput,
+      input: ResidentFeed.InteractiveInput,
       session: Operation.InteractiveSession,
     ) => Effect.Effect<void, Operation.OperationUnavailable>,
   ): ReturnType<typeof createOperationLayerImpl>

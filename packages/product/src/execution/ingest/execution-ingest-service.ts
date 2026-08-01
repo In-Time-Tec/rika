@@ -8,6 +8,7 @@ import * as UsageCodec from "../../usage/usage-snapshot-codec"
 import * as UsageEvent from "../../usage/usage-event"
 import * as IngestState from "./execution-ingest-state"
 import * as IngestEvent from "./execution-ingest-event"
+import * as EventFamily from "./execution-ingest-event-family"
 import * as IngestRestore from "./execution-ingest-restore"
 import * as IngestCommit from "./execution-ingest-commit"
 import * as IngestWatch from "./execution-ingest-watch"
@@ -54,10 +55,9 @@ type Pipeline = IngestState.Pipeline
 
 const isTerminalStatus = (status: string): boolean =>
   status === "completed" || status === "failed" || status === "cancelled"
-const isInterruptedOutcome = IngestEvent.isInterruptedOutcome
 const fullyConsumed = IngestEvent.fullyConsumed
 const interruptedAncestorOutcome = (nodes: ReadonlyMap<string, Node>, node: Node): InterruptedOutcome | undefined =>
-  IngestRestore.interruptedAncestorOutcome(nodes, node, isInterruptedOutcome)
+  IngestRestore.interruptedAncestorOutcome(nodes, node, EventFamily.isInterruptedOutcome)
 
 export const make = Effect.fn("ExecutionIngestService.make")(function* (options: Options) {
   const ownerScope = yield* Effect.scope

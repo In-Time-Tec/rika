@@ -6,6 +6,8 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Operation from "@rika/product/product-operation"
+import * as ResidentHandshake from "@rika/product/resident-service-handshake"
+import * as InteractiveFeed from "@rika/product/resident-interactive-feed"
 import * as ResidentService from "@rika/product/resident-service"
 import * as DataRoot from "@rika/configuration/canonical-data-root"
 import { resolveProfileDataPaths } from "@rika/configuration/profile-data-paths"
@@ -683,7 +685,7 @@ export interface InteractiveTuiOptions {
 export const interactiveTui =
   (options: InteractiveTuiOptions) =>
   (
-    input: ResidentService.InteractiveInput,
+    input: InteractiveFeed.InteractiveInput,
     session: Operation.InteractiveSession,
   ): Effect.Effect<void, Operation.OperationUnavailable> =>
     Effect.uninterruptible(
@@ -1910,7 +1912,7 @@ const start = () => {
                           }),
                         ),
                       )
-                    let clientKind: ResidentService.Handshake["clientKind"]
+                    let clientKind: ResidentHandshake.Handshake["clientKind"]
                     if (clientInput._tag === "Interactive") clientKind = "interactive"
                     else if (clientInput._tag === "Thread") clientKind = "thread-continue"
                     else if (clientInput._tag === "Run") clientKind = "run"
@@ -2061,7 +2063,7 @@ const start = () => {
           return onExit(2)
         }
       }
-      if (runtimeRestartRequest !== undefined) return onExit(ResidentService.runtimeRestartExitCode)
+      if (runtimeRestartRequest !== undefined) return onExit(ResidentService.ServiceRuntime.runtimeRestartExitCode)
       Runtime.defaultTeardown(exit, onExit)
     },
   })

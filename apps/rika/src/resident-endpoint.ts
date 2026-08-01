@@ -8,7 +8,10 @@ export const resolve = Effect.fn("ResidentEndpoint.resolve")(function* (profile:
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const canonicalDataRoot = yield* fs.realPath(dataRoot)
-  const identity = yield* ResidentService.canonicalServiceIdentity(profile.trim().toLowerCase(), canonicalDataRoot)
+  const identity = yield* ResidentService.ServiceRuntime.canonicalServiceIdentity(
+    profile.trim().toLowerCase(),
+    canonicalDataRoot,
+  )
   const port = 20_000 + (Number.parseInt(identity.slice(0, 8), 16) % 30_000)
   return {
     identity,

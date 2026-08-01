@@ -1,6 +1,7 @@
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
 import * as Operation from "@rika/product/product-operation"
 import * as InteractiveFeedOverflow from "@rika/product/resident-interactive-feed"
+import * as ResidentHandshake from "@rika/product/resident-service-handshake"
 import * as ResidentService from "@rika/product/resident-service"
 import {
   Cause,
@@ -63,7 +64,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
   const serviceNonce = yield* crypto.randomUUIDv4
   const graceFiber = yield* Ref.make<Fiber.Fiber<void> | undefined>(undefined)
   const coldCohortUntil = yield* Ref.make(0)
-  const lifecycle = yield* ResidentService.makeLifecycle(() => Effect.void)
+  const lifecycle = yield* ResidentService.ServiceRuntime.makeLifecycle(() => Effect.void)
   const hostWork = yield* FiberSet.make<void, unknown>()
   const activeConnections = yield* Ref.make(new Map<string, Effect.Effect<void>>())
   const operationAdmission = yield* Semaphore.make(32)
@@ -135,7 +136,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
     >(),
   )
   const interactive = Effect.fn("ResidentTransport.interactive")(function* (
-    input: ResidentService.InteractiveInput,
+    input: InteractiveFeedOverflow.InteractiveInput,
     session: Operation.InteractiveSession,
   ) {
     const request = requestByInput.get(input)
@@ -592,13 +593,13 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                     try: () => parse(text),
                     catch: () => transportError("Invalid legacy resident request"),
                   }).pipe(
-                    Effect.flatMap(Schema.decodeUnknownEffect(ResidentService.HandshakeV3)),
+                    Effect.flatMap(Schema.decodeUnknownEffect(ResidentHandshake.HandshakeProtocol.HandshakeV3)),
                     Effect.mapError(() => transportError("Invalid legacy resident request")),
                   ),
                 )
                 if (
                   legacy._tag === "Success" &&
-                  ResidentService.validateHandshakeV3(legacy.success, {
+                  ResidentHandshake.HandshakeProtocol.validateHandshakeV3(legacy.success, {
                     identity: options.identity,
                     token: options.token,
                   })
@@ -611,10 +612,10 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
             if (message === undefined) return
             if (!isAttached) {
               if (!("family" in message)) return yield* close(4401)
-              const result = ResidentService.validateHandshake(message, {
+              const result = ResidentHandshake.HandshakeProtocol.validateHandshake(message, {
                 identity: options.identity,
                 token: options.token,
-                buildIdentity: ResidentService.buildIdentity,
+                buildIdentity: ResidentHandshake.HandshakeProtocol.buildIdentity,
               })
               if (result._tag !== "Accepted") {
                 const incompatible = result._tag === "ProtocolMismatch" || result._tag === "BuildMismatch"
@@ -636,21 +637,21 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                   const response = {
                     _tag: "incompatible" as const,
                     disposition,
-                    replacementGuard: ResidentService.replacementGuard,
+                    replacementGuard: ResidentHandshake.HandshakeProtocol.replacementGuard,
                     family: "rika-resident" as const,
                     identity: options.identity,
                     clientNonce: message.clientNonce,
                     serviceNonce,
                     connectionId,
-                    protocolVersion: ResidentService.protocolVersion,
-                    buildIdentity: ResidentService.buildIdentity,
+                    protocolVersion: ResidentHandshake.HandshakeProtocol.protocolVersion,
+                    buildIdentity: ResidentHandshake.HandshakeProtocol.buildIdentity,
                     residentPid: process.pid,
                   }
                   yield* writer(
                     json({
                       ...response,
-                      serverProof: ResidentService.serverProof(options.token, message, response),
-                    } satisfies ResidentService.HandshakeIncompatible),
+                      serverProof: ResidentHandshake.HandshakeProtocol.serverProof(options.token, message, response),
+                    } satisfies ResidentHandshake.HandshakeIncompatible),
                   )
                   if (replacementDelayed)
                     yield* Effect.logWarning("resident.replacement.delayed").pipe(
@@ -667,7 +668,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               }
               if (!(yield* lifecycle.tryAttach)) {
                 yield* writer(
-                  json({ _tag: "rejected", reason: "draining" } satisfies ResidentService.HandshakeRejected),
+                  json({ _tag: "rejected", reason: "draining" } satisfies ResidentHandshake.HandshakeRejected),
                 )
                 return yield* close(4409)
               }
@@ -685,16 +686,16 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                 clientNonce: message.clientNonce,
                 serviceNonce,
                 connectionId,
-                protocolVersion: ResidentService.protocolVersion,
-                buildIdentity: ResidentService.buildIdentity,
+                protocolVersion: ResidentHandshake.HandshakeProtocol.protocolVersion,
+                buildIdentity: ResidentHandshake.HandshakeProtocol.buildIdentity,
                 residentPid: process.pid,
               }
-              const acceptedProof = ResidentService.serverProof(options.token, message, response)
+              const acceptedProof = ResidentHandshake.HandshakeProtocol.serverProof(options.token, message, response)
               yield* writer(
                 json({
                   ...response,
                   serverProof: acceptedProof,
-                } satisfies ResidentService.HandshakeAccepted),
+                } satisfies ResidentHandshake.HandshakeAccepted),
               )
               yield* Effect.logInfo("resident.connection.accepted").pipe(
                 Effect.annotateLogs({

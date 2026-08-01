@@ -1,5 +1,7 @@
 import * as BunSocket from "@effect/platform-bun/BunSocket"
 import * as Operation from "@rika/product/product-operation"
+import * as ResidentHandshake from "@rika/product/resident-service-handshake"
+import * as ResidentFeed from "@rika/product/resident-interactive-feed"
 import * as ResidentService from "@rika/product/resident-service"
 import * as Thread from "@rika/product/thread-record"
 import {
@@ -119,8 +121,8 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
   readonly url: string
   readonly identity: string
   readonly token: string
-  readonly clientKind: ResidentService.Handshake["clientKind"]
-  readonly connectRole: ResidentService.ConnectRole
+  readonly clientKind: ResidentHandshake.Handshake["clientKind"]
+  readonly connectRole: ResidentHandshake.ConnectRole
   readonly role: ResidentService.Connection["role"]
 }) {
   const crypto = yield* Crypto.Crypto
@@ -152,7 +154,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
       }),
     )
   yield* Effect.forkIn(Effect.forever(Queue.take(outbound).pipe(Effect.flatMap(rawWriter))), connectionScope)
-  const accepted = yield* Deferred.make<ResidentService.HandshakeAccepted>()
+  const accepted = yield* Deferred.make<ResidentHandshake.HandshakeAccepted>()
   let acceptedConnectionId: string | undefined
   const clientNonce = yield* crypto.randomUUIDv4
   const connectionFailure = yield* Deferred.make<never, ResidentService.ResidentServiceError>()
@@ -176,7 +178,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
         readonly stdout?: (text: string) => Effect.Effect<void>
         readonly stderr?: (text: string) => Effect.Effect<void>
         readonly interactive?: (
-          input: ResidentService.InteractiveInput,
+          input: ResidentFeed.InteractiveInput,
           session: Operation.InteractiveSession,
         ) => Effect.Effect<void, Operation.OperationUnavailable>
         readonly interactiveStarted?: Deferred.Deferred<{
@@ -195,14 +197,14 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
     clientNonce,
     clientKind: options.clientKind,
     connectRole: options.connectRole,
-    protocolVersion: ResidentService.protocolVersion,
-    buildIdentity: ResidentService.buildIdentity,
+    protocolVersion: ResidentHandshake.HandshakeProtocol.protocolVersion,
+    buildIdentity: ResidentHandshake.HandshakeProtocol.buildIdentity,
   }
   const handshake = json({
     family: "rika-resident",
     ...signedHandshake,
-    clientProof: ResidentService.clientProof(options.token, signedHandshake),
-  } satisfies ResidentService.Handshake)
+    clientProof: ResidentHandshake.HandshakeProtocol.clientProof(options.token, signedHandshake),
+  } satisfies ResidentHandshake.Handshake)
   const decodeFrame = makeServerMessageFrameDecoder()
   yield* socket
     .runString(
@@ -220,7 +222,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
               if (message._tag === "accepted" || message._tag === "incompatible") {
                 if (message.identity !== options.identity || message.clientNonce !== clientNonce)
                   return Effect.fail(transportError("Foreign resident listener", "foreign-listener"))
-                if (!ResidentService.verifyServerProof(options.token, signedHandshake, message))
+                if (!ResidentHandshake.HandshakeProtocol.verifyServerProof(options.token, signedHandshake, message))
                   return Effect.fail(transportError("Foreign resident listener", "foreign-listener"))
                 if (message._tag === "incompatible") {
                   const validDisposition =
@@ -231,7 +233,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                     return Effect.fail(
                       transportError("Resident returned an invalid upgrade disposition", "foreign-listener"),
                     )
-                  if (!ResidentService.isValidIncompatibility(options.connectRole, message))
+                  if (!ResidentHandshake.HandshakeProtocol.isValidIncompatibility(options.connectRole, message))
                     return Effect.fail(
                       transportError(
                         "Resident returned an incompatible response for a compatible handshake",
@@ -254,14 +256,17 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                     }),
                   )
                 }
-                if (message.protocolVersion !== ResidentService.protocolVersion)
+                if (message.protocolVersion !== ResidentHandshake.HandshakeProtocol.protocolVersion)
                   return Effect.fail(
                     transportError(
                       `An incompatible Rika resident${message.residentPid === undefined ? "" : ` (PID ${message.residentPid})`} is still running at ${options.url}; close other Rika clients, then run rika again`,
                       "incompatible-resident",
                     ),
                   )
-                if (options.connectRole === "launch" && message.buildIdentity !== ResidentService.buildIdentity)
+                if (
+                  options.connectRole === "launch" &&
+                  message.buildIdentity !== ResidentHandshake.HandshakeProtocol.buildIdentity
+                )
                   return Effect.fail(transportError("Resident accepted an incompatible launch", "foreign-listener"))
                 return Effect.sync(() => (acceptedConnectionId = message.connectionId)).pipe(
                   Effect.andThen(Deferred.succeed(accepted, message)),
@@ -673,7 +678,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                     ? Effect.void
                     : Effect.raceFirst(
                         whileConnected(
-                          runOptions.interactive!(input as ResidentService.InteractiveInput, state.started.session),
+                          runOptions.interactive!(input as ResidentFeed.InteractiveInput, state.started.session),
                         ).pipe(
                           Effect.exit,
                           Effect.map((outcome) => ({ _tag: "Callback" as const, outcome })),
@@ -738,7 +743,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
           const path = yield* Path.Path
           const connectionScope = yield* Scope.make()
           yield* Effect.addFinalizer((exit) => Scope.close(connectionScope, exit))
-          const attach = (connectRole: ResidentService.ConnectRole) =>
+          const attach = (connectRole: ResidentHandshake.ConnectRole) =>
             Effect.gen(function* () {
               const attemptScope = yield* Scope.fork(connectionScope)
               const result = yield* Effect.exit(
@@ -942,7 +947,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
           const initial = yield* acquireReady(input.allowSupersede === false ? "reattach" : "launch")
           const logicalClosed = yield* Deferred.make<void>()
           const supervise = Effect.fn("ResidentTransport.superviseInteractive")(function* (
-            operationInput: ResidentService.InteractiveInput,
+            operationInput: ResidentFeed.InteractiveInput,
             interactive: NonNullable<NonNullable<Parameters<ResidentService.Connection["run"]>[1]>["interactive"]>,
           ) {
             const firstSession = yield* Deferred.make<void>()
