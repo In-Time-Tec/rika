@@ -132,7 +132,7 @@ describe("release target construction", () => {
       expect(files).not.toContain(forbidden)
     for (const forbidden of ["@batonfx/providers", "@relayfx/", "@opentui/", "@ff-labs/"])
       expect(external).not.toContain(forbidden)
-    expect(files).toContain("/operation-contract.ts")
+    expect(files).toContain("/product-operation-service.ts")
     expect(files).toContain("/resident-client-transport.ts")
   })
 

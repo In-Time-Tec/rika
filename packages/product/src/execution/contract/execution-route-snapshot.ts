@@ -54,6 +54,7 @@ export const ExecutionRouteSnapshot = Schema.Struct({
   ),
 })
 export type ExecutionRouteSnapshot = typeof ExecutionRouteSnapshot.Type
+export const ExecutionRoutePin = ExecutionRouteSnapshot
 export type ExecutionModelRoute = ExecutionRouteModelSnapshot
 export type ExecutionRoutePin = ExecutionRouteSnapshot
 

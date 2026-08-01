@@ -19,6 +19,8 @@ import * as BedrockAuthRefresh from "./bedrock-auth-refresh"
 import { ProviderAdapters, type Adapter as ProviderAdapter } from "./provider-adapters"
 const { adapters, authRefreshFingerprint, canonical, normalizePinnedRuntime, unavailableRestore } = ProviderAdapters
 export const bedrockAuthRefreshLiveLayer = BedrockAuthRefresh.liveLayer
+export const bedrockAuthRefreshTestLayer = BedrockAuthRefresh.testLayer
+export const bedrockAuthRefreshService = BedrockAuthRefresh.Service
 type Adapter = ProviderAdapter
 
 interface Account {

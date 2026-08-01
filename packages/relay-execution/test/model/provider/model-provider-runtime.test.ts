@@ -4,12 +4,11 @@ import * as BehaviorMode from "@rika/configuration/behavior-mode"
 import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
 import * as SettingsDefaults from "@rika/configuration/configuration-settings"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { ModelRegistry } from "@rika/relay-execution/model-provider-runtime"
+import { ModelRegistry } from "@batonfx/core"
 import { expect, test } from "vitest"
-import { OpenAiAuth } from "@rika/product/product-operation-service"
+import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
-import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
-import * as RelayExecutionBackend from "@rika/relay-execution/relay-execution-layer"
+import * as ExecutionBackend from "../../../src/relay/execution/relay-execution-layer"
 import * as RikaToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import { Database } from "bun:sqlite"
 import { Cause, ConfigProvider, Context, Effect, FileSystem, Layer, Redacted, Schema, Scope, Stream } from "effect"
@@ -19,9 +18,10 @@ import {
   executionRoutePin,
   executionRoutePinFromPrepared,
   modelRoutesForExecution,
-} from "../src/resident-product"
-import { bedrockAuthRefreshTestLayer } from "@rika/relay-execution/model-provider-runtime"
-import * as ModelProviderRuntime from "@rika/relay-execution/model-provider-runtime"
+} from "./model-provider-fixture"
+import { bedrockAuthRefreshTestLayer } from "../../../src/model/provider/model-provider-runtime"
+import * as ModelProviderRuntime from "../../../src/model/provider/model-provider-runtime"
+import { normalizePinnedRuntime } from "../../../src/model/provider/provider-adapters"
 
 const credential = (fingerprint: string): OpenAiAuth.Credential => ({
   accessToken: Redacted.make("account-access-token"),
@@ -167,7 +167,7 @@ test("sends configured reasoning effort and summary to custom OpenAI requests", 
 
 test("assembles each fragmented OpenAI function call once and sends supported stream options", () => {
   const requests = new Array<Record<string, unknown>>()
-  const handled = new Array<RikaToolRuntimeContract.Request>()
+  const handled = new Array<typeof RikaToolRuntime.Request.Type>()
   const calls = [
     { id: "item-1", callId: "call-1", path: "first.txt" },
     { id: "item-2", callId: "call-2", path: "second.txt" },
@@ -432,7 +432,7 @@ test("compacts a restored durable session and replays a nested OpenAI Responses 
             layer: Layer.succeed(LanguageModel.LanguageModel, summaryModel),
           })
           const backendContext = yield* Layer.build(
-            RelayExecutionBackend.layer({
+            ExecutionBackend.layer({
               filename: `${directory}/execution.db`,
               workspace: directory,
               registration,
@@ -652,7 +652,7 @@ test("pins provider runtime identity, roundtrips JSON, and normalizes old accoun
   const encoded = Schema.decodeUnknownSync(ExecutionRouteSnapshot.ExecutionRoutePin)(JSON.parse(JSON.stringify(pin)))
   expect(encoded.main.providerConnection).toEqual(pin.main.providerConnection)
   expect(
-    ModelProviderRuntime.normalizePinnedRuntime({
+    normalizePinnedRuntime({
       ...pin.main,
       provider: "openai",
       registrationKey: "old-registration",

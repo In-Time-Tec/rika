@@ -2,12 +2,12 @@ import * as ModelRouteResolution from "@rika/configuration/model-route-resolutio
 import * as SettingsDefaults from "@rika/configuration/configuration-settings"
 import * as SettingsDecoder from "@rika/configuration/configuration-settings"
 import { describe, expect, it } from "@effect/vitest"
-import { ModelRegistry } from "@rika/relay-execution/model-provider-runtime"
-import { OpenAi } from "@rika/relay-execution/model-provider-runtime"
+import { ModelRegistry } from "@batonfx/core"
+import * as OpenAi from "@batonfx/providers/openai"
 import { Config, Effect, Layer, Redacted, Schema } from "effect"
 import { LanguageModel } from "effect/unstable/ai"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
-import * as ModelProviderRuntime from "@rika/relay-execution/model-provider-runtime"
+import * as ModelProviderRuntime from "../../../src/model/provider/model-provider-runtime"
 
 const settingsWith = (baseUrl: string, promptCaching?: boolean): SettingsDefaults.ConfigurationSettings => ({
   ...SettingsDefaults.Defaults.defaults,
