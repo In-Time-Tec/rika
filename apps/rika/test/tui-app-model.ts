@@ -28,7 +28,7 @@ export interface TuiAppLane {
 }
 
 export const makeRoutedModel = Effect.fn("TuiApp.makeRoutedModel")(function* (lanes: ReadonlyArray<TuiAppLane>) {
-  const encodePrompt = Schema.encodeSync(Schema.UnknownFromJsonString)
+  const encodePrompt = Schema.encodeEffect(Schema.UnknownFromJsonString)
   const fixtures = yield* Effect.forEach(lanes, (lane) =>
     TestModel.make([...lane.script], {
       metadata: {
@@ -43,17 +43,25 @@ export const makeRoutedModel = Effect.fn("TuiApp.makeRoutedModel")(function* (la
   const services = yield* Effect.forEach(fixtures, (built) =>
     Layer.build(built.layer).pipe(Effect.map((context) => Context.get(context, LanguageModel.LanguageModel))),
   )
-  const selectLane = (prompt: unknown) => {
-    const text = encodePrompt(prompt)
+  const selectLane = (text: string) => {
     const index = lanes.findIndex((lane) => lane.when !== undefined && lane.when(text))
     return services[index < 0 ? 0 : index]!
   }
   const routedModel: LanguageModel.Service = {
     ...services[0]!,
-    streamText: ((request: Parameters<LanguageModel.Service["streamText"]>[0]) =>
+    streamText: (request) =>
       Stream.unwrap(
-        Effect.sync(() => selectLane(request.prompt).streamText(request)),
-      )) as LanguageModel.Service["streamText"],
+        encodePrompt(request.prompt).pipe(
+          Effect.mapError((error) =>
+            AiError.make({
+              module: "TuiApp",
+              method: "routePrompt",
+              reason: AiError.UnknownError.make({ description: error.message }),
+            }),
+          ),
+          Effect.map((prompt) => selectLane(prompt).streamText(request)),
+        ),
+      ),
   }
   const fixture = fixtures[0]!
   const registration = yield* ModelRegistry.registration({

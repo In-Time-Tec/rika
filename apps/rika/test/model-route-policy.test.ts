@@ -4,7 +4,10 @@ import { expect, test } from "vitest"
 
 import { Cause, Effect, Redacted } from "effect"
 
-import { execution as ResidentExecution, validateWebSearchProviders } from "../src/resident/composition/resident-execution-layer"
+import {
+  execution as ResidentExecution,
+  validateWebSearchProviders,
+} from "../src/resident/composition/resident-execution-layer"
 import { route as ResidentConfiguration } from "../src/resident/composition/resident-configuration-adapter"
 import { modelRoutePlan } from "@rika/relay-execution/model-provider-runtime"
 import { httpRoute } from "./model-script-fixtures"

@@ -19,6 +19,10 @@ import {
   type Interface as OperationServiceInterface,
 } from "@rika/product/product-operation-service"
 
+type RepositoryContext = Context.Context<
+  ThreadRepository.Service | TurnRepository.Service | TranscriptRepository.Service
+>
+
 export const startShellOperation = Effect.fn("ShellSession.startOperation")(function* (input: {
   readonly fileSystem: FileSystem.FileSystem
   readonly path: Path.Path
@@ -98,7 +102,7 @@ export const startShellOperation = Effect.fn("ShellSession.startOperation")(func
     yield* Layer.buildWithScope(operationLayer, yield* Effect.scope),
     Service,
   )
-  const repositories = yield* Layer.buildWithScope(
+  const repositories: RepositoryContext = yield* Layer.buildWithScope(
     Layer.mergeAll(repositoryLayer, turnRepositoryLayer, transcriptRepositoryLayer),
     yield* Effect.scope,
   )

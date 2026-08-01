@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import * as InteractiveController from "../src/interactive/controller/interactive-controller"
 import * as Turn from "@rika/product/turn-record"
@@ -9,7 +10,7 @@ import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event
 import * as ViewState from "@rika/terminal/terminal-state"
 import { unitDelta, visibleState } from "./interactive-controller-transcript-fixtures"
 
-export const projectionOrigin = (
+const projectionOriginImpl = (
   event: TranscriptSourceEvent.SourceEvent,
   executionId: string,
 ): Extract<
@@ -35,6 +36,11 @@ export const projectionOrigin = (
   }
 }
 
+export const projectionOrigin: {
+  (event: TranscriptSourceEvent.SourceEvent, executionId: string): ReturnType<typeof projectionOriginImpl>
+  (executionId: string): (event: TranscriptSourceEvent.SourceEvent) => ReturnType<typeof projectionOriginImpl>
+} = Function.dual(2, projectionOriginImpl)
+
 export const terminalRootStatus = (
   event: TranscriptSourceEvent.SourceEvent,
 ): "completed" | "failed" | "cancelled" | undefined => {
@@ -44,7 +50,7 @@ export const terminalRootStatus = (
   return undefined
 }
 
-export const transientDelta = (index: number, text: string): TranscriptSourceEvent.SourceEvent => ({
+const transientDeltaImpl = (index: number, text: string): TranscriptSourceEvent.SourceEvent => ({
   cursor: `transient-${index}`,
   sequence: 2,
   type: "model.output.delta",
@@ -53,7 +59,12 @@ export const transientDelta = (index: number, text: string): TranscriptSourceEve
   data: { delta: text, transient_index: index, model_call_id: "call-1", model_attempt_id: "attempt-1" },
 })
 
-export const startProjection = (
+export const transientDelta: {
+  (index: number, text: string): ReturnType<typeof transientDeltaImpl>
+  (text: string): (index: number) => ReturnType<typeof transientDeltaImpl>
+} = Function.dual(2, transientDeltaImpl)
+
+const startProjectionImpl = (
   state: InteractiveController.State,
   turn: Turn.Turn,
   projection: TranscriptProjectionModel.Projection,
@@ -70,13 +81,30 @@ export const startProjection = (
     units: projection.units,
   })
 
-export const openProjectionStream = (state: InteractiveController.State, turnId: string) => {
+export const startProjection: {
+  (
+    state: InteractiveController.State,
+    turn: Turn.Turn,
+    projection: TranscriptProjectionModel.Projection,
+  ): ReturnType<typeof startProjectionImpl>
+  (
+    turn: Turn.Turn,
+    projection: TranscriptProjectionModel.Projection,
+  ): (state: InteractiveController.State) => ReturnType<typeof startProjectionImpl>
+} = Function.dual(3, startProjectionImpl)
+
+const openProjectionStreamImpl = (state: InteractiveController.State, turnId: string) => {
   const stream = state.projectionStreams?.get(turnId)
   if (stream?._tag !== "Open") throw new Error(`Projection ${turnId} is not open`)
   return stream
 }
 
-export const makeProjectionFeed = (
+export const openProjectionStream: {
+  (state: InteractiveController.State, turnId: string): ReturnType<typeof openProjectionStreamImpl>
+  (turnId: string): (state: InteractiveController.State) => ReturnType<typeof openProjectionStreamImpl>
+} = Function.dual(2, openProjectionStreamImpl)
+
+const makeProjectionFeedImpl = (
   selected: InteractiveController.State,
   turn: Turn.Turn,
   initialProjection: TranscriptProjectionModel.Projection,
@@ -132,6 +160,18 @@ export const makeProjectionFeed = (
     },
   }
 }
+
+export const makeProjectionFeed: {
+  (
+    selected: InteractiveController.State,
+    turn: Turn.Turn,
+    initialProjection: TranscriptProjectionModel.Projection,
+  ): ReturnType<typeof makeProjectionFeedImpl>
+  (
+    turn: Turn.Turn,
+    initialProjection: TranscriptProjectionModel.Projection,
+  ): (selected: InteractiveController.State) => ReturnType<typeof makeProjectionFeedImpl>
+} = Function.dual(3, makeProjectionFeedImpl)
 
 export const key = (input: Partial<ViewState.Keys.Key> & Pick<ViewState.Keys.Key, "name">): ViewState.Keys.Key => ({
   name: input.name,

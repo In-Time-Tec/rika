@@ -1,17 +1,21 @@
 import * as SettingsDefaults from "@rika/configuration/configuration-settings"
 import { expect, test } from "vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Context, Effect, FileSystem, Layer, Path } from "effect"
+import { Effect, FileSystem, Layer, Path, Scope } from "effect"
 
 import * as Database from "@rika/product-store/product-database-layer"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
+import * as ExecutionBackend from "@rika/product/execution-service"
 
 import * as Turn from "@rika/product/turn-record"
+import { QueueFull } from "@rika/product/turn-repository"
 
 import { route as ResidentConfiguration } from "../src/resident/composition/resident-configuration-adapter"
+import { resolveExecutionWorkspace } from "../src/resident/composition/resident-execution-recovery"
+import { provideLayerScoped } from "../src/resident/composition/resident-configuration-adapter"
 import {
   persistedModelRoutesForStartup,
   persistedTitleModelRoutesForStartup,
@@ -116,36 +120,36 @@ test("loads title model pins from completed turn rows for restart registration",
     ),
   ))
 
-test("uses the owning thread workspace for durable title executions", () =>
-  Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const repositories = Layer.merge(ThreadRepository.memoryLayer(), TurnRepository.memoryLayer())
-        const repositoryContext = yield* Layer.build(repositories)
-        const repositoryLayer = Layer.succeedContext(repositoryContext)
-        const threads = Context.get(repositoryContext, ThreadRepository.Service)
-        const turns = Context.get(repositoryContext, TurnRepository.Service)
-        const thread = yield* threads.create({
-          id: Thread.ThreadId.make("title-workspace-thread"),
-          workspace: "/thread-workspace",
-          title: "Seed",
-          now: 1,
-        })
-        yield* turns.createForSubmission({
-          id: Turn.TurnId.make("title-workspace-turn"),
-          threadId: thread.id,
-          prompt: "title me",
-          executionRoute: executionRoutePin(SettingsDefaults.Defaults.defaults, "medium"),
-          queueCapacity: 128,
-          now: 1,
-        })
-        const workspace = yield* resolveExecutionWorkspace(
-          "child:execution%3Atitle-workspace-turn:title",
-          "/backend-workspace",
-          repositoryLayer,
-          repositoryLayer,
-        )
-        expect(workspace).toBe("/thread-workspace")
-      }),
-    ),
-  ))
+test("uses the owning thread workspace for durable title executions", () => {
+  const repositories = Layer.merge(ThreadRepository.memoryLayer(), TurnRepository.memoryLayer())
+  const program: Effect.Effect<
+    void,
+    ThreadRepository.RepositoryError | TurnRepository.RepositoryError | QueueFull | ExecutionBackend.BackendError,
+    Scope.Scope
+  > = Effect.gen(function* () {
+    const threads = yield* ThreadRepository.Service
+    const turns = yield* TurnRepository.Service
+    const thread = yield* threads.create({
+      id: Thread.ThreadId.make("title-workspace-thread"),
+      workspace: "/thread-workspace",
+      title: "Seed",
+      now: 1,
+    })
+    yield* turns.createForSubmission({
+      id: Turn.TurnId.make("title-workspace-turn"),
+      threadId: thread.id,
+      prompt: "title me",
+      executionRoute: executionRoutePin(SettingsDefaults.Defaults.defaults, "medium"),
+      queueCapacity: 128,
+      now: 1,
+    })
+    const workspace = yield* resolveExecutionWorkspace(
+      "child:execution%3Atitle-workspace-turn:title",
+      "/backend-workspace",
+      repositories,
+      repositories,
+    )
+    expect(workspace).toBe("/thread-workspace")
+  }).pipe(provideLayerScoped(repositories))
+  return Effect.runPromise(Effect.scoped(program))
+})

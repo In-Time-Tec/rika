@@ -93,7 +93,7 @@ const program = Effect.gen(function* () {
     clientPid: process.pid,
     hostPid: yield* Ref.get(hostPid),
   })
-  yield* runResidentClientCommands({ connection, stdio, dataRoot, path, clock, fileSystem: fs, emit, kill })
+  yield* runResidentClientCommands({ connection, stdio, dataRoot, path, clock, fileSystem: fs, hostPid, emit, kill })
 })
 
 let supersedeStatusCount = 0

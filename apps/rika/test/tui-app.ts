@@ -139,7 +139,7 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
     transcriptRepositoryLayer,
     usageRepositoryLayer,
     backendLayer,
-    toolRuntimeLayer,
+    toolRuntimeLayer: tuiToolRuntimeLayer,
     defaultWorkspace: workspace,
     makeThreadId: Effect.sync(() => Thread.ThreadId.make(`tui-thread-${nextThread++}`)),
     makeTurnId: Effect.sync(() => Turn.TurnId.make(`tui-turn-${nextTurn++}`)),

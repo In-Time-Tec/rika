@@ -13,7 +13,7 @@ import * as TerminalReducer from "@rika/terminal/terminal-state-reducer"
 import { classifyPrompt } from "@rika/terminal/terminal-session"
 import { Surface } from "@rika/terminal/opentui-surface"
 import { expect, test } from "vitest"
-import { Clock, Deferred, Effect, Fiber, FileSystem, Layer, Queue } from "effect"
+import { Clock, Deferred, Effect, Fiber, FileSystem, Layer, Path, Queue, Scope } from "effect"
 import {
   interruptAndClearTrackedFiber,
   interruptTrackedFibers,
@@ -140,165 +140,164 @@ test("awaits delayed TUI initialization and tears down its renderer before lease
 })
 
 test("drives bypassed recorded and incognito shell commands through Operation and native OpenTUI", () => {
-  const program: Effect.Effect<void, never, BunServices.BunServices> = Effect.scoped(
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const operationSetup = yield* startShellOperation({ fileSystem, path })
-      const { workspace, repositories, operationFiber, session, releaseSession, relayReads } = operationSetup
-      const setup = yield* Effect.acquireRelease(
-        Effect.tryPromise(() => createTestRenderer({ width: 100, height: 30 })),
-        (value) => Effect.sync(() => value.renderer.destroy()),
+  const operation: Effect.Effect<void, never, BunServices.BunServices | Scope.Scope> = Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const operationSetup = yield* startShellOperation({ fileSystem, path })
+    const { workspace, repositories, operationFiber, session, releaseSession, relayReads } = operationSetup
+    const setup = yield* Effect.acquireRelease(
+      Effect.tryPromise(() => createTestRenderer({ width: 100, height: 30 })),
+      (value) => Effect.sync(() => value.renderer.destroy()),
+    )
+    let controller: InteractiveController.State = {
+      model: TerminalReducer.resetQueue(initial(workspace), "shell-thread", 0, []),
+      selectionEpoch: 0,
+      replayTurns: new Map(),
+      entries: [],
+      revisions: new Map(),
+      liveProjections: new Map(),
+    }
+    let model = controller.model
+    const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+    yield* Effect.addFinalizer(() => Effect.sync(() => surface.destroy()))
+    const completedShells = yield* Queue.unbounded<string>()
+    const dispatch = (event: InteractiveEvent.InteractiveEvent) => {
+      if (event._tag === "ShellCompleted") {
+        if (event.incognito) model = TerminalReducer.update(model, { _tag: "AssistantCompleted", text: event.text })
+        model = TerminalReducer.update(model, { _tag: "ExecutionCompleted" })
+        Queue.offerUnsafe(completedShells, event.command)
+      } else if (event._tag === "QueueUpdated") {
+        if (event.change._tag === "Reset")
+          model = TerminalReducer.resetQueue(model, event.threadId, event.revision, event.change.items)
+        else model = TerminalReducer.applyQueueDelta(model, event.threadId, event.revision, event.change).model
+      } else if (
+        event._tag === "SelectionLoaded" ||
+        event._tag === "TranscriptPagePrepended" ||
+        event._tag === "TranscriptPageAppended" ||
+        event._tag === "TranscriptProjectionStarted" ||
+        event._tag === "TranscriptProjectionPatched" ||
+        event._tag === "TranscriptProjectionStopped" ||
+        event._tag === "TranscriptProjectionFailed" ||
+        event._tag === "TranscriptResyncRequired" ||
+        event._tag === "ThreadUsageUpdated" ||
+        event._tag === "ThreadRefolding"
+      ) {
+        controller = InteractiveController.update({ ...controller, model }, event).state
+        model = controller.model
+      } else if (
+        event._tag !== "QueueResyncRequired" &&
+        event._tag !== "QueueFull" &&
+        event._tag !== "ExecutionControlFailed" &&
+        event._tag !== "ExecutionControlled" &&
+        event._tag !== "ContextDiagnostics" &&
+        event._tag !== "ThreadsListed" &&
+        event._tag !== "TitleCostUpdated" &&
+        event._tag !== "ThreadTitled" &&
+        event._tag !== "ThreadPreviewLoaded" &&
+        event._tag !== "TurnStarted"
       )
-      let controller: InteractiveController.State = {
-        model: TerminalReducer.resetQueue(initial(workspace), "shell-thread", 0, []),
-        selectionEpoch: 0,
-        replayTurns: new Map(),
-        entries: [],
-        revisions: new Map(),
-        liveProjections: new Map(),
+        model = TerminalReducer.update(model, event)
+      surface.update(model)
+    }
+    yield* Effect.forkChild(session.events(dispatch))
+    yield* Effect.yieldNow
+    const run = Effect.fn("ShellSessionNativeTest.run")(function* (prompt: string) {
+      const classified = classifyPrompt(prompt)
+      if (classified._tag !== "Shell") return yield* Effect.die("Expected shell prompt")
+      yield* session.shell(
+        model.currentThreadId === undefined ? undefined : Thread.ThreadId.make(model.currentThreadId),
+        classified.command,
+        classified.incognito,
+      )
+      expect(yield* Queue.take(completedShells)).toBe(classified.command)
+      surface.update(model)
+      yield* Effect.tryPromise(() => setup.renderOnce())
+      return setup.captureCharFrame()
+    })
+
+    const recordedFrame = yield* run("$ printf recorded-output")
+    expect(recordedFrame).not.toContain("Run shell command")
+    expect(recordedFrame).toContain("recorded-output")
+    yield* session.reopenThread(1)
+    expect(relayReads).toEqual([])
+    expect(model.blocks).toContainEqual(
+      expect.objectContaining({
+        _tag: "ToolCall",
+        detail: "printf recorded-output",
+        output: "recorded-output",
+        status: "complete",
+      }),
+    )
+    const incognitoFrame = yield* run("$$ printf incognito-output")
+    expect(incognitoFrame).toContain("incognito-output")
+
+    const persisted = yield* Effect.gen(function* () {
+      const threads = yield* ThreadRepository.Service
+      const turns = yield* TurnRepository.Service
+      const transcripts = yield* TranscriptRepository.Service
+      const storedTurns = yield* turns.list(Thread.ThreadId.make("shell-thread"))
+      return {
+        threads: yield* threads.list({ includeArchived: true }),
+        turns: storedTurns,
+        projection: storedTurns[0] === undefined ? undefined : yield* transcripts.get(storedTurns[0].id),
       }
-      let model = controller.model
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-      yield* Effect.addFinalizer(() => Effect.sync(() => surface.destroy()))
-      const completedShells = yield* Queue.unbounded<string>()
-      const dispatch = (event: InteractiveEvent.InteractiveEvent) => {
-        if (event._tag === "ShellCompleted") {
-          if (event.incognito) model = TerminalReducer.update(model, { _tag: "AssistantCompleted", text: event.text })
-          model = TerminalReducer.update(model, { _tag: "ExecutionCompleted" })
-          Queue.offerUnsafe(completedShells, event.command)
-        } else if (event._tag === "QueueUpdated") {
-          if (event.change._tag === "Reset")
-            model = TerminalReducer.resetQueue(model, event.threadId, event.revision, event.change.items)
-          else model = TerminalReducer.applyQueueDelta(model, event.threadId, event.revision, event.change).model
-        } else if (
-          event._tag === "SelectionLoaded" ||
-          event._tag === "TranscriptPagePrepended" ||
-          event._tag === "TranscriptPageAppended" ||
-          event._tag === "TranscriptProjectionStarted" ||
-          event._tag === "TranscriptProjectionPatched" ||
-          event._tag === "TranscriptProjectionStopped" ||
-          event._tag === "TranscriptProjectionFailed" ||
-          event._tag === "TranscriptResyncRequired" ||
-          event._tag === "ThreadUsageUpdated" ||
-          event._tag === "ThreadRefolding"
-        ) {
-          controller = InteractiveController.update({ ...controller, model }, event).state
-          model = controller.model
-        } else if (
-          event._tag !== "QueueResyncRequired" &&
-          event._tag !== "QueueFull" &&
-          event._tag !== "ExecutionControlFailed" &&
-          event._tag !== "ExecutionControlled" &&
-          event._tag !== "ContextDiagnostics" &&
-          event._tag !== "ThreadsListed" &&
-          event._tag !== "TitleCostUpdated" &&
-          event._tag !== "ThreadTitled" &&
-          event._tag !== "ThreadPreviewLoaded" &&
-          event._tag !== "TurnStarted"
-        )
-          model = TerminalReducer.update(model, event)
-        surface.update(model)
+    }).pipe(Effect.provide(repositories))
+    expect(persisted.threads).toHaveLength(1)
+    expect(persisted.turns).toHaveLength(1)
+    expect(persisted.turns[0]?.prompt).toContain("recorded-output")
+    expect(persisted.turns[0]?.prompt).not.toContain("incognito-output")
+    expect(persisted.projection).toMatchObject({
+      turn: { _tag: "RecordedShell", status: "completed" },
+      units: [{ content: { _tag: "Block", block: { _tag: "ToolCall", output: "recorded-output" } } }],
+      executionCheckpoints: [],
+    })
+
+    yield* Effect.gen(function* () {
+      const turns = yield* TurnRepository.Service
+      const now = yield* Clock.currentTimeMillis
+      yield* turns.createForSubmission({
+        id: Turn.TurnId.make("active"),
+        threadId: Thread.ThreadId.make("shell-thread"),
+        prompt: "active",
+        executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
+        queueCapacity: 128,
+        now,
+      })
+    }).pipe(Effect.provide(repositories))
+    const alongsideFrame = yield* run("$ printf alongside-output")
+    const alongside = yield* Effect.gen(function* () {
+      const turns = yield* TurnRepository.Service
+      return {
+        queue: (yield* turns.readQueue(Thread.ThreadId.make("shell-thread"))).turns,
+        turns: yield* turns.list(Thread.ThreadId.make("shell-thread")),
       }
-      yield* Effect.forkChild(session.events(dispatch))
-      yield* Effect.yieldNow
-      const run = Effect.fn("ShellSessionNativeTest.run")(function* (prompt: string) {
-        const classified = classifyPrompt(prompt)
-        if (classified._tag !== "Shell") return yield* Effect.die("Expected shell prompt")
-        yield* session.shell(
-          model.currentThreadId === undefined ? undefined : Thread.ThreadId.make(model.currentThreadId),
-          classified.command,
-          classified.incognito,
-        )
-        expect(yield* Queue.take(completedShells)).toBe(classified.command)
-        surface.update(model)
-        yield* Effect.tryPromise(() => setup.renderOnce())
-        return setup.captureCharFrame()
-      })
-
-      const recordedFrame = yield* run("$ printf recorded-output")
-      expect(recordedFrame).not.toContain("Run shell command")
-      expect(recordedFrame).toContain("recorded-output")
-      yield* session.reopenThread(1)
-      expect(relayReads).toEqual([])
-      expect(model.blocks).toContainEqual(
+    }).pipe(Effect.provide(repositories))
+    expect(alongside.queue).toEqual([])
+    expect(alongside.turns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ _tag: "AgentExecution", id: "active", status: "accepted" }),
         expect.objectContaining({
-          _tag: "ToolCall",
-          detail: "printf recorded-output",
-          output: "recorded-output",
-          status: "complete",
+          _tag: "RecordedShell",
+          command: "printf alongside-output",
+          status: "completed",
         }),
-      )
-      const incognitoFrame = yield* run("$$ printf incognito-output")
-      expect(incognitoFrame).toContain("incognito-output")
-
-      const persisted = yield* Effect.gen(function* () {
-        const threads = yield* ThreadRepository.Service
-        const turns = yield* TurnRepository.Service
-        const transcripts = yield* TranscriptRepository.Service
-        const storedTurns = yield* turns.list(Thread.ThreadId.make("shell-thread"))
-        return {
-          threads: yield* threads.list({ includeArchived: true }),
-          turns: storedTurns,
-          projection: storedTurns[0] === undefined ? undefined : yield* transcripts.get(storedTurns[0].id),
-        }
-      }).pipe(Effect.provide(repositories))
-      expect(persisted.threads).toHaveLength(1)
-      expect(persisted.turns).toHaveLength(1)
-      expect(persisted.turns[0]?.prompt).toContain("recorded-output")
-      expect(persisted.turns[0]?.prompt).not.toContain("incognito-output")
-      expect(persisted.projection).toMatchObject({
-        turn: { _tag: "RecordedShell", status: "completed" },
-        units: [{ content: { _tag: "Block", block: { _tag: "ToolCall", output: "recorded-output" } } }],
-        executionCheckpoints: [],
-      })
-
-      yield* Effect.gen(function* () {
-        const turns = yield* TurnRepository.Service
-        const now = yield* Clock.currentTimeMillis
-        yield* turns.createForSubmission({
-          id: Turn.TurnId.make("active"),
-          threadId: Thread.ThreadId.make("shell-thread"),
-          prompt: "active",
-          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
-          queueCapacity: 128,
-          now,
-        })
-      }).pipe(Effect.provide(repositories))
-      const alongsideFrame = yield* run("$ printf alongside-output")
-      const alongside = yield* Effect.gen(function* () {
-        const turns = yield* TurnRepository.Service
-        return {
-          queue: (yield* turns.readQueue(Thread.ThreadId.make("shell-thread"))).turns,
-          turns: yield* turns.list(Thread.ThreadId.make("shell-thread")),
-        }
-      }).pipe(Effect.provide(repositories))
-      expect(alongside.queue).toEqual([])
-      expect(alongside.turns).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ _tag: "AgentExecution", id: "active", status: "accepted" }),
-          expect.objectContaining({
-            _tag: "RecordedShell",
-            command: "printf alongside-output",
-            status: "completed",
-          }),
-        ]),
-      )
-      expect(model.blocks).toContainEqual(
-        expect.objectContaining({
-          _tag: "ToolCall",
-          detail: "printf alongside-output",
-          output: "alongside-output",
-          status: "complete",
-        }),
-      )
-      expect(alongsideFrame).toContain("$ printf recorded-output")
-      expect(alongsideFrame).toContain("$ printf alongside-output")
-      expect(alongsideFrame).not.toContain("Ran 2 commands")
-      yield* Deferred.succeed(releaseSession, undefined)
-      yield* Fiber.join(operationFiber)
-    }),
-  ).pipe(Effect.orDie)
+      ]),
+    )
+    expect(model.blocks).toContainEqual(
+      expect.objectContaining({
+        _tag: "ToolCall",
+        detail: "printf alongside-output",
+        output: "alongside-output",
+        status: "complete",
+      }),
+    )
+    expect(alongsideFrame).toContain("$ printf recorded-output")
+    expect(alongsideFrame).toContain("$ printf alongside-output")
+    expect(alongsideFrame).not.toContain("Ran 2 commands")
+    yield* Deferred.succeed(releaseSession, undefined)
+    yield* Fiber.join(operationFiber)
+  }).pipe(Effect.orDie)
+  const program: Effect.Effect<void, never, BunServices.BunServices> = Effect.scoped(operation)
   return Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {

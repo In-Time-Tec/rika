@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as InteractiveController from "../src/interactive/controller/interactive-controller"
 import * as Thread from "@rika/product/thread-record"
@@ -21,7 +22,7 @@ export const thread: Thread.Thread = {
   updatedAt: 1,
 }
 
-export const entries = (
+const entriesImpl = (
   id: string,
   createdAt: number,
   events: ReadonlyArray<{
@@ -94,7 +95,7 @@ export const visibleState = (projection: TranscriptProjectionModel.Projection) =
     : { usableCompletionSequence: projection.usableCompletionSequence }),
 })
 
-export const unitDelta = (
+const unitDeltaImpl = (
   previous: TranscriptProjectionModel.Projection,
   next: TranscriptProjectionModel.Projection,
 ): TranscriptProjection.UnitDelta => {
@@ -105,3 +106,39 @@ export const unitDelta = (
     remove: previous.units.flatMap((unit) => (nextUnits.has(unit.key) ? [] : [unit.key])),
   }
 }
+
+export const entries: {
+  (
+    id: string,
+    createdAt: number,
+    events?: ReadonlyArray<{
+      readonly cursor: string
+      readonly sequence: number
+      readonly type: string
+      readonly createdAt: number
+      readonly text?: string
+      readonly data?: Readonly<Record<string, unknown>>
+    }>,
+  ): ReturnType<typeof entriesImpl>
+  (
+    createdAt: number,
+    events?: ReadonlyArray<{
+      readonly cursor: string
+      readonly sequence: number
+      readonly type: string
+      readonly createdAt: number
+      readonly text?: string
+      readonly data?: Readonly<Record<string, unknown>>
+    }>,
+  ): (id: string) => ReturnType<typeof entriesImpl>
+} = Function.dual((args) => typeof args[0] === "string", entriesImpl)
+
+export const unitDelta: {
+  (
+    previous: TranscriptProjectionModel.Projection,
+    next: TranscriptProjectionModel.Projection,
+  ): ReturnType<typeof unitDeltaImpl>
+  (
+    next: TranscriptProjectionModel.Projection,
+  ): (previous: TranscriptProjectionModel.Projection) => ReturnType<typeof unitDeltaImpl>
+} = Function.dual(2, unitDeltaImpl)

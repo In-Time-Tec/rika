@@ -6,7 +6,7 @@ import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as ViewState from "@rika/terminal/terminal-state"
 import * as TerminalMessage from "@rika/terminal/terminal-message"
 import * as ResidentService from "@rika/product/resident-service"
-import { Clock, Deferred, Effect, FileSystem, Fiber, Path, Queue, Stdio, Stream } from "effect"
+import { Clock, Deferred, Effect, FileSystem, Fiber, Path, Queue, Ref, Stdio, Stream } from "effect"
 
 export const runResidentClientCommands = Effect.fn("ResidentClient.runCommands")(function* (input: {
   readonly connection: ResidentService.Connection
@@ -15,10 +15,11 @@ export const runResidentClientCommands = Effect.fn("ResidentClient.runCommands")
   readonly path: Path.Path
   readonly clock: Clock.Clock
   readonly fileSystem: FileSystem.FileSystem
+  readonly hostPid: Ref.Ref<number>
   readonly emit: (value: unknown) => Effect.Effect<void>
   readonly kill: (pid: number) => Effect.Effect<void>
 }) {
-  const { connection, stdio, dataRoot, path, clock, fileSystem: fs, emit, kill } = input
+  const { connection, stdio, dataRoot, path, clock, fileSystem: fs, hostPid, emit, kill } = input
 
   const commands = stdio.stdin.pipe(
     Stream.decodeText(),

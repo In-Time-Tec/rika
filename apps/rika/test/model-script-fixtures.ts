@@ -1,5 +1,5 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Effect, Layer, Schema } from "effect"
+import { Effect, Function, Layer, Schema } from "effect"
 import type { ModelRegistry } from "@rika/relay-execution/model-provider-runtime"
 import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
 import * as ModelRoute from "@rika/configuration/model-route"
@@ -28,7 +28,7 @@ export const modelRouteDisplayLabel = (route: ModelRouteResolution.ResolvedModel
   return `${provider?.toUpperCase()}-${version} ${modelName} ${route.effort}`
 }
 
-export const recordingBackend = (starts: Array<ExecutionRequest.StartInput>, registrations?: Array<string>) =>
+const recordingBackendImpl = (starts: Array<ExecutionRequest.StartInput>, registrations?: Array<string>) =>
   ExecutionBackend.Service.of({
     ...(registrations === undefined
       ? {}
@@ -57,6 +57,13 @@ export const recordingBackend = (starts: Array<ExecutionRequest.StartInput>, reg
     steer: () => Effect.die("unused"),
     cancel: () => Effect.die("unused"),
   })
+
+export const recordingBackend: {
+  (starts: Array<ExecutionRequest.StartInput>, registrations?: Array<string>): ReturnType<typeof recordingBackendImpl>
+  (
+    registrations?: Array<string>,
+  ): (starts: Array<ExecutionRequest.StartInput>) => ReturnType<typeof recordingBackendImpl>
+} = Function.dual((args) => args.length >= 1, recordingBackendImpl)
 
 export class RouteOperationError extends Schema.TaggedErrorClass<RouteOperationError>()("OperationError", {
   message: Schema.String,
