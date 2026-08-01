@@ -1,11 +1,16 @@
 import { bold, fg, StyledText, type TextChunk } from "@opentui/core"
-import { formatContextTokens, formatTokens } from "./terminal-format"
+import { formatTokens } from "./terminal-format"
+import { formatContextTokens } from "../../state/model/terminal-usage-state"
 import { activeTimeAt, activeTimeIcon, formatActiveTime } from "../../state/model/terminal-activity-time"
 import type { Model } from "../../state/model/terminal-state"
 import * as ContextMeter from "../../state/model/terminal-context-meter"
 import { colors } from "./terminal-theme"
 
-const toneColor = (tone: ContextMeter.Tone) => (tone === "critical" ? colors.red : tone === "warning" ? colors.amber : colors.teal)
+const toneColor = (tone: ContextMeter.Tone) => {
+  if (tone === "critical") return colors.red
+  if (tone === "warning") return colors.amber
+  return colors.teal
+}
 const cost = (model: Model): string => {
   if (model.usageCost?._tag === "Available") return `$${model.usageCost.usd.toFixed(2)}`
   if (model.costUsd !== undefined) return `$${model.costUsd.toFixed(2)}`
@@ -25,9 +30,14 @@ export const contextDetails = (model: Model, width: number, height: number, now:
     const value = ContextMeter.meter(context, { cells: Math.max(4, Math.min(24, width - 7)) })
     const tone = toneColor(value.tone)
     chunks.push(fg(tone)(value.glyphs.join("")), bold(fg(tone)(` ${value.percent}%`)))
-    line(`${formatContextTokens(context.inputTokens)} used · ${formatContextTokens(Math.max(0, ContextMeter.usableTokens(context) - context.inputTokens))} available`)
+    line(
+      `${formatContextTokens(context.inputTokens)} used · ${formatContextTokens(Math.max(0, ContextMeter.usableTokens(context) - context.inputTokens))} available`,
+    )
     if (height >= 4)
-      line(`${formatContextTokens(ContextMeter.usableTokens(context))} usable · ${formatContextTokens(context.contextWindow)} window · ${formatContextTokens(context.reserveTokens)} reserved`, colors.muted)
+      line(
+        `${formatContextTokens(ContextMeter.usableTokens(context))} usable · ${formatContextTokens(context.contextWindow)} window · ${formatContextTokens(context.reserveTokens)} reserved`,
+        colors.muted,
+      )
   } else {
     chunks.push(fg(colors.muted)(context?._tag === "Loading" ? "········ —" : "░░░░░░░░ —"))
     line(context?._tag === "Loading" ? "Waiting for model usage" : "Context unavailable", colors.muted)

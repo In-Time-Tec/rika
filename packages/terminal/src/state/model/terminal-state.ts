@@ -10,6 +10,7 @@ import type { ThreadItem } from "./terminal-thread-state"
 import { QueueItem as QueueItemSchema } from "./terminal-queue-item"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Entry } from "./terminal-message"
+import { ContextUsage } from "./terminal-context-usage"
 
 export const Mode = ModeId
 export type Mode = typeof Mode.Type
@@ -63,18 +64,6 @@ const ThreadPreviewSchema = Schema.Union([
   Schema.TaggedStruct("Loading", { previous: Schema.optionalKey(ThreadPreviewValueSchema) }),
   Schema.TaggedStruct("Ready", { value: ThreadPreviewValueSchema }),
 ])
-export const ContextUsage = Schema.Union([
-  Schema.Struct({ _tag: Schema.tag("Loading") }),
-  Schema.Struct({ _tag: Schema.tag("Unavailable") }),
-  Schema.Struct({
-    _tag: Schema.tag("Available"),
-    inputTokens: Schema.Finite,
-    contextWindow: Schema.Finite,
-    reserveTokens: Schema.Finite,
-  }),
-])
-export type ContextUsage = typeof ContextUsage.Type
-
 export const Model = Schema.Struct({
   workspace: Schema.String,
   branch: Schema.optional(Schema.String),

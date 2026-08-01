@@ -281,7 +281,7 @@ test(
               })
               return { result, requests: yield* fixture.requests }
             }),
-          { modelResilience: ModelResilience.make({ retrySchedule: Schedule.recurs(1) }) },
+          { modelResilience: Effect.runSync(ModelResilience.make({ retrySchedule: Schedule.recurs(1) })) },
         )
         const result = yield* program
         expect(result.result.status).toBe("completed")

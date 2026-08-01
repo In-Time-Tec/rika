@@ -3459,6 +3459,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/terminal/test/context-meter.test.ts",
+      "path": "packages/terminal/test/context-meter.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/terminal/test/fixtures/visual/cancelled-subagent.styles.json",
       "path": "packages/terminal/test/fixtures/visual/cancelled-subagent.styles.json",
       "workspace": "@rika/terminal",
@@ -3491,6 +3501,26 @@
     {
       "id": "packages/terminal/test/fixtures/visual/child-workflow.styles.json",
       "path": "packages/terminal/test/fixtures/visual/child-workflow.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/context-details.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/context-details.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/context-meter.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/context-meter.styles.json",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "asset",
@@ -11065,6 +11095,14 @@
     },
     {
       "from": "packages/relay-execution/test/model/provider/model-provider-runtime.test.ts",
+      "to": "external:@batonfx/providers/openai",
+      "specifier": "@batonfx/providers/openai",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/model-provider-runtime.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -12193,6 +12231,14 @@
     },
     {
       "from": "packages/terminal/test/characterization/terminal-state-characterization-3.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/context-meter.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",

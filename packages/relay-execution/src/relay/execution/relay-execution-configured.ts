@@ -16,9 +16,10 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import ProductTools from "./relay-product-tools"
 import { ModelResilience } from "@batonfx/core"
 
-const defaultModelResilience = ModelResilience.make({
+const defaultModelResilience: ModelResilience.Interface = {
+  ...ModelResilience.none,
   retrySchedule: Schedule.exponential("500 millis", 2).pipe(Schedule.jittered, Schedule.upTo({ times: 3 })),
-})
+}
 
 export interface RouteFailure {
   readonly route: ExecutionRouteSnapshot.ExecutionRouteModelSnapshot

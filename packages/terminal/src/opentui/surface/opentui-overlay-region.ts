@@ -98,7 +98,12 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
       this.paletteBox.titleAlignment = "left"
       this.paletteBox.bottomTitle = " Ctrl+Y toggle · esc "
       this.paletteBox.bottomTitleAlignment = "right"
-      this.palette.content = contextDetails(model, Math.max(1, boxWidth - 4), Math.max(1, boxHeight - 2), this.currentTimeMillis())
+      this.palette.content = contextDetails(
+        model,
+        Math.max(1, boxWidth - 4),
+        Math.max(1, boxHeight - 2),
+        this.currentTimeMillis(),
+      )
       cursorEditor = undefined
     } else if (overlay === "files") {
       const entries = filteredFiles(model).map((file) => `@${file}`)

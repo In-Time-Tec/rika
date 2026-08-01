@@ -183,6 +183,15 @@
       "publicExports": []
     },
     {
+      "id": "apps/rika/src/diagnostic-file-logging-contract.ts",
+      "path": "apps/rika/src/diagnostic-file-logging-contract.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "apps/rika/src/diagnostic-file-logging.ts",
       "path": "apps/rika/src/diagnostic-file-logging.ts",
       "workspace": "@rika/cli",
@@ -5360,6 +5369,15 @@
       "publicExports": []
     },
     {
+      "id": "packages/product/src/context/diagnostic-contract.ts",
+      "path": "packages/product/src/context/diagnostic-contract.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/product/src/context/file-mention-parser.ts",
       "path": "packages/product/src/context/file-mention-parser.ts",
       "workspace": "@rika/product",
@@ -9053,6 +9071,15 @@
       "publicExports": []
     },
     {
+      "id": "packages/terminal/src/presentation/terminal/terminal-context-details.ts",
+      "path": "packages/terminal/src/presentation/terminal/terminal-context-details.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/terminal/src/presentation/terminal/terminal-format.ts",
       "path": "packages/terminal/src/presentation/terminal/terminal-format.ts",
       "workspace": "@rika/terminal",
@@ -9352,6 +9379,24 @@
     {
       "id": "packages/terminal/src/state/model/terminal-composer-state.ts",
       "path": "packages/terminal/src/state/model/terminal-composer-state.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/terminal/src/state/model/terminal-context-meter.ts",
+      "path": "packages/terminal/src/state/model/terminal-context-meter.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/terminal/src/state/model/terminal-context-usage.ts",
+      "path": "packages/terminal/src/state/model/terminal-context-usage.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -9847,6 +9892,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/terminal/test/context-meter.test.ts",
+      "path": "packages/terminal/test/context-meter.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/terminal/test/fixtures/visual/cancelled-subagent.styles.json",
       "path": "packages/terminal/test/fixtures/visual/cancelled-subagent.styles.json",
       "workspace": "@rika/terminal",
@@ -9879,6 +9934,26 @@
     {
       "id": "packages/terminal/test/fixtures/visual/child-workflow.styles.json",
       "path": "packages/terminal/test/fixtures/visual/child-workflow.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/context-details.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/context-details.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/context-meter.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/context-meter.styles.json",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "asset",
@@ -12374,6 +12449,14 @@
       "from": "apps/rika/src/command/root/rika-command.ts",
       "to": "packages/product/src/operation/contract/product-operation.ts",
       "specifier": "@rika/product/product-operation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/diagnostic-file-logging.ts",
+      "to": "apps/rika/src/diagnostic-file-logging-contract.ts",
+      "specifier": "./diagnostic-file-logging-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -18094,6 +18177,14 @@
       "from": "apps/rika/test/logging-process.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/logging.test.ts",
+      "to": "apps/rika/src/diagnostic-file-logging-contract.ts",
+      "specifier": "../src/diagnostic-file-logging-contract",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -53292,6 +53383,14 @@
     },
     {
       "from": "packages/relay-execution/test/model/provider/model-provider-runtime.test.ts",
+      "to": "external:@batonfx/providers/openai",
+      "specifier": "@batonfx/providers/openai",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/model-provider-runtime.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -55956,6 +56055,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-input.ts",
+      "to": "packages/terminal/src/state/model/terminal-context-meter.ts",
+      "specifier": "../../state/model/terminal-context-meter",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-input.ts",
       "to": "packages/terminal/src/state/model/terminal-state.ts",
       "specifier": "../../state/model/terminal-state",
       "kind": "import",
@@ -56574,6 +56681,14 @@
       "from": "packages/terminal/src/opentui/surface/opentui-overlay-region.ts",
       "to": "packages/terminal/src/presentation/terminal/command-palette.ts",
       "specifier": "../../presentation/terminal/command-palette",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-overlay-region.ts",
+      "to": "packages/terminal/src/presentation/terminal/terminal-context-details.ts",
+      "specifier": "../../presentation/terminal/terminal-context-details",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -57507,6 +57622,62 @@
       "production": true
     },
     {
+      "from": "packages/terminal/src/presentation/terminal/terminal-context-details.ts",
+      "to": "external:@opentui/core",
+      "specifier": "@opentui/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/terminal/terminal-context-details.ts",
+      "to": "packages/terminal/src/presentation/terminal/terminal-format.ts",
+      "specifier": "./terminal-format",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/terminal/terminal-context-details.ts",
+      "to": "packages/terminal/src/presentation/terminal/terminal-theme.ts",
+      "specifier": "./terminal-theme",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/terminal/terminal-context-details.ts",
+      "to": "packages/terminal/src/state/model/terminal-activity-time.ts",
+      "specifier": "../../state/model/terminal-activity-time",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/terminal/terminal-context-details.ts",
+      "to": "packages/terminal/src/state/model/terminal-context-meter.ts",
+      "specifier": "../../state/model/terminal-context-meter",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/terminal/terminal-context-details.ts",
+      "to": "packages/terminal/src/state/model/terminal-state.ts",
+      "specifier": "../../state/model/terminal-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/terminal/terminal-context-details.ts",
+      "to": "packages/terminal/src/state/model/terminal-usage-state.ts",
+      "specifier": "../../state/model/terminal-usage-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/src/presentation/terminal/terminal-format.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -58307,6 +58478,22 @@
       "production": true
     },
     {
+      "from": "packages/terminal/src/state/model/terminal-context-meter.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/model/terminal-context-usage.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/src/state/model/terminal-layout-composer.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -58590,6 +58777,14 @@
       "from": "packages/terminal/src/state/model/terminal-state.ts",
       "to": "packages/terminal/src/state/model/terminal-changed-file.ts",
       "specifier": "./terminal-changed-file",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/model/terminal-state.ts",
+      "to": "packages/terminal/src/state/model/terminal-context-usage.ts",
+      "specifier": "./terminal-context-usage",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -60819,6 +61014,22 @@
       "production": false
     },
     {
+      "from": "packages/terminal/test/context-meter.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/context-meter.test.ts",
+      "to": "packages/terminal/src/state/model/terminal-context-meter.ts",
+      "specifier": "../src/state/model/terminal-context-meter",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/terminal/test/format.test.ts",
       "to": "external:string-width",
       "specifier": "string-width",
@@ -60846,6 +61057,14 @@
       "from": "packages/terminal/test/format.test.ts",
       "to": "packages/terminal/src/presentation/terminal/terminal-relative-time.ts",
       "specifier": "../src/presentation/terminal/terminal-relative-time",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/format.test.ts",
+      "to": "packages/terminal/src/state/model/terminal-usage-state.ts",
+      "specifier": "../src/state/model/terminal-usage-state",
       "kind": "import",
       "relationship": "test",
       "production": false

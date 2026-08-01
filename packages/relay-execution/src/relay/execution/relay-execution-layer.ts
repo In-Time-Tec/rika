@@ -54,9 +54,10 @@ export interface LayerOptions<AdditionalTools extends Record<string, Tool.Any> =
   readonly resolveWorkspace?: (executionId: string) => Effect.Effect<string, BackendError>
   readonly recoveryChildSettlementGrace?: Duration.Input
 }
-export const defaultModelResilience: ModelResilience.Interface = ModelResilience.make({
+export const defaultModelResilience: ModelResilience.Interface = {
+  ...ModelResilience.none,
   retrySchedule: Schedule.exponential("500 millis", 2).pipe(Schedule.jittered, Schedule.upTo({ times: 3 })),
-})
+}
 export const route: {
   readonly modelRoutesForExecution: typeof Route.modelRoutesForExecution
   readonly defaultModelRoutes: typeof Route.defaultModelRoutes

@@ -5,7 +5,10 @@ import { makeInteractiveTranscriptLifecycle } from "./interactive-transcript-lif
 
 export const persistedThreadUsage = (
   value: UsageSnapshot.Aggregate,
-): Pick<Extract<InteractiveEvent, { readonly _tag: "ThreadUsageUpdated" }>, "context" | "cost" | "tokens" | "time"> => ({
+): Pick<
+  Extract<InteractiveEvent, { readonly _tag: "ThreadUsageUpdated" }>,
+  "context" | "cost" | "tokens" | "time"
+> => ({
   context: { _tag: "Unavailable" },
   cost:
     value.costNanoUsd === undefined

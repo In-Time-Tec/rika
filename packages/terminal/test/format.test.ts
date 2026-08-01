@@ -1,10 +1,10 @@
 import stringWidth from "string-width"
 import { describe, expect, test } from "vitest"
+import { formatContextTokens } from "../src/state/model/terminal-usage-state"
 import {
   clipToWidth,
   escapeControlCharacters,
   formatBytes,
-  formatContextTokens,
   formatTokens,
   homeRelativePath,
   plural,

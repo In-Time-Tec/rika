@@ -150,9 +150,7 @@ describe("Logging", () => {
                   ),
                   taggedFailure("ExecutionIngestFollowFailure"),
                   Effect.logError("failure.tagged").pipe(
-                    Effect.annotateLogs(
-                      Diagnostic.failureFrom(new Error("invalid model configuration")),
-                    ),
+                    Effect.annotateLogs(Diagnostic.failureFrom(new Error("invalid model configuration"))),
                   ),
                 ],
                 { concurrency: 1, discard: true },
@@ -167,7 +165,7 @@ describe("Logging", () => {
             { "rika.model.backend.kind": "test-script" },
             { "rika.model.backend.kind": "test-response" },
             { "rika.failure.kind": "ExecutionIngestFollowFailure" },
-            { "rika.failure.kind": "Error" }
+            { "rika.failure.kind": "Error" },
           ],
         )
       }),
@@ -241,11 +239,7 @@ describe("Logging", () => {
         yield* TestClock.adjust("1 minute")
         yield* Effect.scoped(
           Effect.flatMap(
-            Layer.build(
-              Layer.mergeAll(
-                Logging.layer({ dataRoot: root, role: "resident", version: "1", pid: 42 }),
-              ),
-            ),
+            Layer.build(Layer.mergeAll(Logging.layer({ dataRoot: root, role: "resident", version: "1", pid: 42 }))),
             (context) =>
               Effect.logError("execution.recovery.orphan_cancel_failed", opaque).pipe(
                 Effect.annotateLogs(Diagnostic.failure("RecoveredRootCancelFailure")),

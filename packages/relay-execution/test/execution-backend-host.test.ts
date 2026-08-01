@@ -210,7 +210,9 @@ it.effect.each([
         workspace: "/tmp",
         registration: model.registration,
         selection: model.selection,
-        ...(resilience ? { modelResilience: ModelResilience.make({ retrySchedule: Schedule.recurs(0) }) } : {}),
+        ...(resilience
+          ? { modelResilience: Effect.runSync(ModelResilience.make({ retrySchedule: Schedule.recurs(0) })) }
+          : {}),
         ...(extensions ? { additionalToolkit: Toolkit.make(), additionalHandlerLayer: Layer.empty } : {}),
       }).pipe(Layer.provide(BunServices.layer), Layer.build, Effect.exit)
       expect(result._tag).toBe("Success")
