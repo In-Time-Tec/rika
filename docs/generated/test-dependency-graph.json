@@ -4099,8 +4099,128 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/transcript/test/projection.test.ts",
-      "path": "packages/transcript/test/projection.test.ts",
+      "id": "packages/transcript/test/projection-01-basics.test.ts",
+      "path": "packages/transcript/test/projection-01-basics.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-02-children.test.ts",
+      "path": "packages/transcript/test/projection-02-children.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-03-tools.test.ts",
+      "path": "packages/transcript/test/projection-03-tools.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-04-process.test.ts",
+      "path": "packages/transcript/test/projection-04-process.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-05-compaction.test.ts",
+      "path": "packages/transcript/test/projection-05-compaction.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-06-lifecycle.test.ts",
+      "path": "packages/transcript/test/projection-06-lifecycle.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-07-usage.test.ts",
+      "path": "packages/transcript/test/projection-07-usage.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-08-settlement.test.ts",
+      "path": "packages/transcript/test/projection-08-settlement.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-09-correlation.test.ts",
+      "path": "packages/transcript/test/projection-09-correlation.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-10-failure.test.ts",
+      "path": "packages/transcript/test/projection-10-failure.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-11-inputs.test.ts",
+      "path": "packages/transcript/test/projection-11-inputs.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-12-steering.test.ts",
+      "path": "packages/transcript/test/projection-12-steering.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-13-retry.test.ts",
+      "path": "packages/transcript/test/projection-13-retry.test.ts",
       "workspace": "@rika/transcript",
       "package": "@rika/transcript",
       "kind": "source",
@@ -12912,7 +13032,103 @@
       "production": false
     },
     {
-      "from": "packages/transcript/test/projection.test.ts",
+      "from": "packages/transcript/test/projection-01-basics.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-02-children.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-03-tools.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-04-process.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-05-compaction.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-06-lifecycle.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-07-usage.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-08-settlement.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-09-correlation.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-10-failure.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-11-inputs.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-12-steering.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-13-retry.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",

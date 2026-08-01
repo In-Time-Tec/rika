@@ -10820,8 +10820,128 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/transcript/test/projection.test.ts",
-      "path": "packages/transcript/test/projection.test.ts",
+      "id": "packages/transcript/test/projection-01-basics.test.ts",
+      "path": "packages/transcript/test/projection-01-basics.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-02-children.test.ts",
+      "path": "packages/transcript/test/projection-02-children.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-03-tools.test.ts",
+      "path": "packages/transcript/test/projection-03-tools.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-04-process.test.ts",
+      "path": "packages/transcript/test/projection-04-process.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-05-compaction.test.ts",
+      "path": "packages/transcript/test/projection-05-compaction.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-06-lifecycle.test.ts",
+      "path": "packages/transcript/test/projection-06-lifecycle.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-07-usage.test.ts",
+      "path": "packages/transcript/test/projection-07-usage.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-08-settlement.test.ts",
+      "path": "packages/transcript/test/projection-08-settlement.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-09-correlation.test.ts",
+      "path": "packages/transcript/test/projection-09-correlation.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-10-failure.test.ts",
+      "path": "packages/transcript/test/projection-10-failure.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-11-inputs.test.ts",
+      "path": "packages/transcript/test/projection-11-inputs.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-12-steering.test.ts",
+      "path": "packages/transcript/test/projection-12-steering.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/projection-13-retry.test.ts",
+      "path": "packages/transcript/test/projection-13-retry.test.ts",
       "workspace": "@rika/transcript",
       "package": "@rika/transcript",
       "kind": "source",
@@ -63565,7 +63685,7 @@
       "production": false
     },
     {
-      "from": "packages/transcript/test/projection.test.ts",
+      "from": "packages/transcript/test/projection-01-basics.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -63573,39 +63693,7 @@
       "production": false
     },
     {
-      "from": "packages/transcript/test/projection.test.ts",
-      "to": "packages/transcript/src/ordering/child-parent-correlation.ts",
-      "specifier": "../src/ordering/child-parent-correlation",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/transcript/test/projection.test.ts",
-      "to": "packages/transcript/src/ordering/transcript-unit-identity.ts",
-      "specifier": "../src/ordering/transcript-unit-identity",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/transcript/test/projection.test.ts",
-      "to": "packages/transcript/src/ordering/transcript-unit-order.ts",
-      "specifier": "../src/ordering/transcript-unit-order",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/transcript/test/projection.test.ts",
-      "to": "packages/transcript/src/projection/nested-transcript-projection.ts",
-      "specifier": "../src/projection/nested-transcript-projection",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/transcript/test/projection.test.ts",
+      "from": "packages/transcript/test/projection-01-basics.test.ts",
       "to": "packages/transcript/src/projection/transcript-projection.ts",
       "specifier": "../src/projection/transcript-projection",
       "kind": "import",
@@ -63613,7 +63701,103 @@
       "production": false
     },
     {
-      "from": "packages/transcript/test/projection.test.ts",
+      "from": "packages/transcript/test/projection-01-basics.test.ts",
+      "to": "packages/transcript/src/schema/transcript-source-event.ts",
+      "specifier": "../src/schema/transcript-source-event",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-02-children.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-02-children.test.ts",
+      "to": "packages/transcript/src/projection/transcript-projection.ts",
+      "specifier": "../src/projection/transcript-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-02-children.test.ts",
+      "to": "packages/transcript/src/schema/transcript-source-event.ts",
+      "specifier": "../src/schema/transcript-source-event",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-03-tools.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-03-tools.test.ts",
+      "to": "packages/transcript/src/ordering/transcript-unit-identity.ts",
+      "specifier": "../src/ordering/transcript-unit-identity",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-03-tools.test.ts",
+      "to": "packages/transcript/src/projection/transcript-projection.ts",
+      "specifier": "../src/projection/transcript-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-04-process.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-04-process.test.ts",
+      "to": "packages/transcript/src/projection/transcript-projection.ts",
+      "specifier": "../src/projection/transcript-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-04-process.test.ts",
+      "to": "packages/transcript/src/schema/transcript-source-event.ts",
+      "specifier": "../src/schema/transcript-source-event",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-05-compaction.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-05-compaction.test.ts",
+      "to": "packages/transcript/src/projection/transcript-projection.ts",
+      "specifier": "../src/projection/transcript-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-05-compaction.test.ts",
       "to": "packages/transcript/src/projection/transcript-settlement.ts",
       "specifier": "../src/projection/transcript-settlement",
       "kind": "import",
@@ -63621,7 +63805,199 @@
       "production": false
     },
     {
-      "from": "packages/transcript/test/projection.test.ts",
+      "from": "packages/transcript/test/projection-05-compaction.test.ts",
+      "to": "packages/transcript/src/schema/transcript-source-event.ts",
+      "specifier": "../src/schema/transcript-source-event",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-06-lifecycle.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-06-lifecycle.test.ts",
+      "to": "packages/transcript/src/ordering/transcript-unit-order.ts",
+      "specifier": "../src/ordering/transcript-unit-order",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-06-lifecycle.test.ts",
+      "to": "packages/transcript/src/projection/nested-transcript-projection.ts",
+      "specifier": "../src/projection/nested-transcript-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-06-lifecycle.test.ts",
+      "to": "packages/transcript/src/projection/transcript-projection.ts",
+      "specifier": "../src/projection/transcript-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-06-lifecycle.test.ts",
+      "to": "packages/transcript/src/schema/transcript-source-event.ts",
+      "specifier": "../src/schema/transcript-source-event",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-07-usage.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-07-usage.test.ts",
+      "to": "packages/transcript/src/projection/transcript-projection.ts",
+      "specifier": "../src/projection/transcript-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-07-usage.test.ts",
+      "to": "packages/transcript/src/schema/transcript-source-event.ts",
+      "specifier": "../src/schema/transcript-source-event",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-08-settlement.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-08-settlement.test.ts",
+      "to": "packages/transcript/src/projection/transcript-projection.ts",
+      "specifier": "../src/projection/transcript-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-08-settlement.test.ts",
+      "to": "packages/transcript/src/projection/transcript-settlement.ts",
+      "specifier": "../src/projection/transcript-settlement",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-08-settlement.test.ts",
+      "to": "packages/transcript/src/schema/transcript-source-event.ts",
+      "specifier": "../src/schema/transcript-source-event",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-09-correlation.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-09-correlation.test.ts",
+      "to": "packages/transcript/src/ordering/child-parent-correlation.ts",
+      "specifier": "../src/ordering/child-parent-correlation",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-10-failure.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-10-failure.test.ts",
+      "to": "packages/transcript/src/projection/transcript-projection.ts",
+      "specifier": "../src/projection/transcript-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-11-inputs.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-11-inputs.test.ts",
+      "to": "packages/transcript/src/projection/transcript-projection.ts",
+      "specifier": "../src/projection/transcript-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-12-steering.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-12-steering.test.ts",
+      "to": "packages/transcript/src/projection/transcript-projection.ts",
+      "specifier": "../src/projection/transcript-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-12-steering.test.ts",
+      "to": "packages/transcript/src/schema/transcript-source-event.ts",
+      "specifier": "../src/schema/transcript-source-event",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-13-retry.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-13-retry.test.ts",
+      "to": "packages/transcript/src/projection/transcript-projection.ts",
+      "specifier": "../src/projection/transcript-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-13-retry.test.ts",
       "to": "packages/transcript/src/schema/transcript-source-event.ts",
       "specifier": "../src/schema/transcript-source-event",
       "kind": "import",
