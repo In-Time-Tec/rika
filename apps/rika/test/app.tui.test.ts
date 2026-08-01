@@ -1,15 +1,14 @@
 import { expect, test } from "vitest"
-import { Theme } from "@rika/terminal/terminal-state"
 import { Deferred, Effect, FileSystem, Path } from "effect"
 import * as TuiApp from "./tui-app"
 
 const activeTimePattern = /◷ [0-9]+s/u
 
-const spanHasColor = (app: TuiApp.TuiApp, text: string, color: typeof Theme.colors.text): boolean =>
+const spanHasColor = (app: TuiApp.TuiApp, text: string, color: string): boolean =>
   app
     .spans()
     .lines.flatMap((line) => line.spans)
-    .some((span) => span.text.includes(text) && span.fg.toInts().join(",") === color.toInts().join(","))
+    .some((span) => span.text.includes(text) && span.fg.toInts().join(",") === color)
 
 test(
   "reloads a failed root with completed nested subagents from durable state",
@@ -218,8 +217,8 @@ test(
         expect(completed).not.toContain("The subagent finished without a final message.")
         expect(completed).not.toContain("Collected subagents")
         expect(completed).not.toContain("Waiting for subagents")
-        expect(spanHasColor(app, "Read", Theme.colors.text), "Read primary span").toBe(true)
-        expect(spanHasColor(app, " nested.txt", Theme.colors.muted), "Read path span").toBe(true)
+        expect(spanHasColor(app, "Read", "192,192,192,255"), "Read primary span").toBe(true)
+        expect(spanHasColor(app, " nested.txt", "128,128,128,255"), "Read path span").toBe(true)
         yield* app.quit
       }),
     ),

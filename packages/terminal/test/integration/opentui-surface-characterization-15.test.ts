@@ -101,11 +101,11 @@ for (const panel of ["changed", "workspace"] as const) {
     ))
 }
 for (const width of [80, 50] as const) {
-  test(`renders a visible error action and leaves the composer usable at width ${width}`, () =>
+  test(`renders a visible error action, refreshes idle status, and leaves the composer usable at width ${width}`, () =>
     Effect.runPromise(
       Effect.gen(function* () {
         const setup = yield* openTui(() => createTestRenderer({ width, height: 20 }))
-        let model: Model = { ...initial("/work", "high"), width, height: 20 }
+        let model: Model = { ...initial("/work", "high"), width, height: 20, costUsd: 1.25 }
         model = update(model, { _tag: "ExecutionFailed", message: "The model is unavailable." })
         const surface = new Surface(setup.renderer, {
           key: (key) => {
@@ -137,6 +137,13 @@ for (const width of [80, 50] as const) {
           yield* openTui(() => setup.renderOnce())
           expect(model.entries.at(-1)).toEqual({ role: "user", text: "retry", turnId: "turn-retry" })
           expect(setup.captureCharFrame()).toContain("┃ retry")
+          expect(setup.captureCharFrame()).toContain("Waiting")
+          const previousFrameCount = setup.getNativeStats().nativeFrameCount
+          model = { ...model, busy: false, activity: undefined }
+          surface.update(model)
+          yield* openTui(() => setup.flush())
+          expect(setup.getNativeStats().nativeFrameCount).toBeGreaterThan(previousFrameCount)
+          expect(setup.captureCharFrame()).not.toContain("Waiting")
         } finally {
           surface.destroy()
           setup.renderer.destroy()

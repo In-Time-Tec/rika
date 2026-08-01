@@ -16,7 +16,9 @@ import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import * as ReadWebPage from "@rika/coding-tools/read-web-page-service"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as WebSearch from "@rika/coding-tools/web-search-service"
-import * as ViewState from "@rika/terminal/terminal-state"
+import { initial } from "@rika/terminal/terminal-state"
+import * as TerminalReducer from "@rika/terminal/terminal-state-reducer"
+import { classifyPrompt } from "@rika/terminal/terminal-session"
 import { Surface } from "@rika/terminal/opentui-surface"
 import { expect, test } from "vitest"
 import { Clock, Config, Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Queue } from "effect"
@@ -231,7 +233,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
         (value) => Effect.sync(() => value.renderer.destroy()),
       )
       let controller: InteractiveController.State = {
-        model: ViewState.resetQueue(ViewState.initial(workspace), "shell-thread", 0, []),
+        model: TerminalReducer.resetQueue(initial(workspace), "shell-thread", 0, []),
         selectionEpoch: 0,
         replayTurns: new Map(),
         entries: [],
@@ -244,13 +246,13 @@ test("drives bypassed recorded and incognito shell commands through Operation an
       const completedShells = yield* Queue.unbounded<string>()
       const dispatch = (event: InteractiveEvent) => {
         if (event._tag === "ShellCompleted") {
-          if (event.incognito) model = ViewState.update(model, { _tag: "AssistantCompleted", text: event.text })
-          model = ViewState.update(model, { _tag: "ExecutionCompleted" })
+          if (event.incognito) model = TerminalReducer.update(model, { _tag: "AssistantCompleted", text: event.text })
+          model = TerminalReducer.update(model, { _tag: "ExecutionCompleted" })
           Queue.offerUnsafe(completedShells, event.command)
         } else if (event._tag === "QueueUpdated") {
           if (event.change._tag === "Reset")
-            model = ViewState.resetQueue(model, event.threadId, event.revision, event.change.items)
-          else model = ViewState.applyQueueDelta(model, event.threadId, event.revision, event.change).model
+            model = TerminalReducer.resetQueue(model, event.threadId, event.revision, event.change.items)
+          else model = TerminalReducer.applyQueueDelta(model, event.threadId, event.revision, event.change).model
         } else if (
           event._tag === "SelectionLoaded" ||
           event._tag === "TranscriptPagePrepended" ||
@@ -277,13 +279,13 @@ test("drives bypassed recorded and incognito shell commands through Operation an
           event._tag !== "ThreadPreviewLoaded" &&
           event._tag !== "TurnStarted"
         )
-          model = ViewState.update(model, event)
+          model = TerminalReducer.update(model, event)
         surface.update(model)
       }
       yield* Effect.forkChild(session.events(dispatch))
       yield* Effect.yieldNow
       const run = Effect.fn("ShellSessionNativeTest.run")(function* (prompt: string) {
-        const classified = ViewState.classifyPrompt(prompt)
+        const classified = classifyPrompt(prompt)
         if (classified._tag !== "Shell") return yield* Effect.die("Expected shell prompt")
         yield* session.shell(
           model.currentThreadId === undefined ? undefined : Thread.ThreadId.make(model.currentThreadId),

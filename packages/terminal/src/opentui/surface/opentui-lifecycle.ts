@@ -132,5 +132,6 @@ export abstract class SurfaceLifecycle extends SurfaceLifecycleTranscript {
       transcriptLayout.renderedInputHeight,
       transcriptLayout.threadSidebarVisible,
     )
+    this.renderer.requestRender()
   }
 }

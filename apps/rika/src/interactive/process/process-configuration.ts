@@ -41,6 +41,7 @@ const withClientWorkspaceImpl = (input: ProductOperation.Input, workspace: strin
     input._tag === "Config" ||
     input._tag === "Auth" ||
     input._tag === "Doctor" ||
+    input._tag === "Thread" ||
     input._tag === "Workflow"
   )
     return { ...input, clientWorkspace: workspace }
