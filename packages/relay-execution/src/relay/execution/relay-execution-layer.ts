@@ -1,27 +1,61 @@
-import { Crypto, Layer, PlatformError } from "effect"
+import { Crypto, Duration, Effect, Layer, PlatformError, Redacted, Schedule } from "effect"
 import { Runtime } from "@relayfx/sdk"
+import { ModelRegistry, ModelResilience, Compaction } from "@batonfx/core"
 import { Tool } from "effect/unstable/ai"
 import { BackendError, Service as ExecutionService } from "@rika/product/execution-service"
 import type { Service as ExecutionServiceType } from "@rika/product/execution-service"
-export { BackendError }
-import type { ToolRuntimeRequirements, ExternalToolRuntimeRequirements, LayerOptions } from "./relay-execution-adapter"
+import * as RikaToolRuntime from "@rika/coding-tools/coding-tool-runtime"
+import { MediaAnalyzer } from "@rika/coding-tools/media-view-service"
+import * as ProcessRegistry from "@rika/coding-tools/shell-process-registry"
+import * as ReadWebPage from "@rika/coding-tools/read-web-page-service"
+import * as WebSearch from "@rika/coding-tools/web-search-service"
 import { makeRelayLayer } from "./relay-execution-composition"
 import * as Identifier from "./relay-execution-identifier"
-import { webSearchFactories } from "../../model/routing/relay-model-tools"
-import { defaultModelResilience } from "../../model/routing/relay-model-registry"
-import type { ModelVariantPolicy } from "./relay-execution-adapter"
-import { Compaction, ModelRegistry } from "@batonfx/core"
 
-export { ExecutionService as Service }
 type Service = ExecutionServiceType
-export type Interface = ExecutionServiceType
-export type { LayerOptions, ModelVariantPolicy }
-export { webSearchFactories, defaultModelResilience }
+export type ModelVariantPolicy = "registration-key" | "fixed-selection"
+export type ToolRuntimeRequirements =
+  ReturnType<typeof RikaToolRuntime.layer> extends Layer.Layer<infer _A, infer _E, infer R> ? R : never
+type SuppliedToolRuntimeRequirements =
+  | MediaAnalyzer
+  | ModelRegistry.ModelRegistry
+  | ProcessRegistry.Service
+  | ReadWebPage.Service
+  | WebSearch.Service
+export type ExternalToolRuntimeRequirements<R> = Exclude<ToolRuntimeRequirements | R, SuppliedToolRuntimeRequirements>
+
+export interface LayerOptions<AdditionalTools extends Record<string, Tool.Any> = {}, RuntimeRequirements = never> {
+  readonly filename: string
+  readonly workspace: string
+  readonly webSearchCredentials?: Readonly<Record<string, Redacted.Redacted<string>>>
+  readonly registration: ModelRegistry.Registration
+  readonly additionalRegistrations?: ReadonlyArray<ModelRegistry.Registration>
+  readonly selection: ModelRegistry.ModelSelection
+  readonly oracleSelection?: ModelRegistry.ModelSelection
+  readonly compactionSummarySelection?: ModelRegistry.ModelSelection
+  readonly defaultReasoningEffort?: string
+  readonly modelVariantPolicy?: ModelVariantPolicy
+  readonly modelResilience?: ModelResilience.Interface
+  readonly compaction?: Compaction.DefaultOptions
+  readonly oracleCompaction?: Compaction.DefaultOptions
+  readonly additionalToolkit?: import("effect/unstable/ai").Toolkit.Toolkit<AdditionalTools>
+  readonly additionalHandlerLayer?: Layer.Layer<
+    Tool.HandlersFor<AdditionalTools>,
+    BackendError,
+    Tool.HandlerServices<AdditionalTools[keyof AdditionalTools]>
+  >
+  readonly toolRuntimeLayer?: Layer.Layer<RikaToolRuntime.Service, BackendError, RuntimeRequirements>
+  readonly toolRuntimeLayerForWorkspace?: (
+    workspace: string,
+  ) => Layer.Layer<RikaToolRuntime.Service, BackendError, RuntimeRequirements | ProcessRegistry.Service>
+  readonly resolveWorkspace?: (executionId: string) => Effect.Effect<string, BackendError>
+  readonly recoveryChildSettlementGrace?: Duration.Input
+}
+export const defaultModelResilience: ModelResilience.Interface = ModelResilience.make({
+  retrySchedule: Schedule.exponential("500 millis", 2).pipe(Schedule.jittered, Schedule.upTo({ times: 3 })),
+})
 export const turnIdFromExecutionId = Identifier.turnIdFromExecutionId
 export const workspaceFromExecutionId = Identifier.workspaceFromExecutionId
-export type ModelRegistration = ModelRegistry.Registration
-export type ModelSelection = ModelRegistry.ModelSelection
-export type CompactionOptions = Compaction.DefaultOptions
 
 export const layer = <
   AdditionalTools extends Record<string, Tool.Any> = {},

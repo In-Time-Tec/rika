@@ -1,7 +1,7 @@
 import { ModelRegistry, ModelResilience } from "@batonfx/core"
 import { EventHistory } from "@relayfx/sdk"
 import { executionEventHistoryFor } from "@rika/configuration/profile-data-paths"
-import { Effect, Layer, Ref, Schedule, Semaphore, Stream } from "effect"
+import { Effect, Layer, Ref, Semaphore, Stream } from "effect"
 import { LanguageModel } from "effect/unstable/ai"
 
 const modelSelectionKey = (selection: ModelRegistry.ModelSelection) =>
@@ -79,10 +79,6 @@ export const eventHistoryOption = (filename: string): { readonly eventHistory?: 
   filename === ":memory:"
     ? {}
     : { eventHistory: EventHistory.fileSystem({ directory: executionEventHistoryFor(filename) }) }
-
-export const defaultModelResilience: ModelResilience.Interface = ModelResilience.make({
-  retrySchedule: Schedule.exponential("500 millis", 2).pipe(Schedule.jittered, Schedule.upTo({ times: 3 })),
-})
 
 export const withResilience = (input: {
   readonly registration: ModelRegistry.Registration

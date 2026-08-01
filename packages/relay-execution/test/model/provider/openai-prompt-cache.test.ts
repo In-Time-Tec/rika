@@ -75,15 +75,17 @@ const capturedRequestBody = (config: Readonly<Record<string, unknown>>) =>
 
 describe("openai prompt cache retention", () => {
   it("asks for 24h retention on the native OpenAI endpoint so the prefix cache outlives the default window", () => {
-    expect(ModelProviderRuntime.requestOptions(nativeRoute)).toMatchObject({ prompt_cache_retention: "24h" })
+    expect(ModelProviderRuntime.modelRoutePlan(nativeRoute).options).toMatchObject({ prompt_cache_retention: "24h" })
   })
 
   it("omits retention on an OpenAI-compatible endpoint that never promised the parameter", () => {
-    expect(ModelProviderRuntime.requestOptions(proxyRoute)).not.toHaveProperty("prompt_cache_retention")
+    expect(ModelProviderRuntime.modelRoutePlan(proxyRoute).options).not.toHaveProperty("prompt_cache_retention")
   })
 
   it("sends retention to the same proxy once promptCaching declares the endpoint supports it", () => {
-    expect(ModelProviderRuntime.requestOptions(optedInProxyRoute)).toMatchObject({ prompt_cache_retention: "24h" })
+    expect(ModelProviderRuntime.modelRoutePlan(optedInProxyRoute).options).toMatchObject({
+      prompt_cache_retention: "24h",
+    })
   })
 
   it("lets promptCaching false turn retention off even on the native endpoint", () => {
@@ -92,7 +94,7 @@ describe("openai prompt cache retention", () => {
       "medium",
       "main",
     )
-    expect(ModelProviderRuntime.requestOptions(route)).not.toHaveProperty("prompt_cache_retention")
+    expect(ModelProviderRuntime.modelRoutePlan(route).options).not.toHaveProperty("prompt_cache_retention")
   })
 
   it("accepts promptCaching as a provider key instead of rejecting it as unknown configuration", () => {
@@ -108,7 +110,9 @@ describe("openai prompt cache retention", () => {
   })
 
   it("omits retention for the ChatGPT account adapter, which posts to the Codex backend", () => {
-    expect(ModelProviderRuntime.requestOptions(nativeRoute, "account-a")).not.toHaveProperty("prompt_cache_retention")
+    expect(ModelProviderRuntime.modelRoutePlan(nativeRoute, "account-a").options).not.toHaveProperty(
+      "prompt_cache_retention",
+    )
   })
 
   it("keeps retention out of the Anthropic request options, where cache control does the work instead", () => {
@@ -122,12 +126,12 @@ describe("openai prompt cache retention", () => {
         apiKeyEnv: "ANTHROPIC_API_KEY",
       },
     }
-    expect(ModelProviderRuntime.requestOptions(anthropic)).not.toHaveProperty("prompt_cache_retention")
+    expect(ModelProviderRuntime.modelRoutePlan(anthropic).options).not.toHaveProperty("prompt_cache_retention")
   })
 
   it.effect("reaches the Responses request body, because the provider spreads config straight into the payload", () =>
     Effect.gen(function* () {
-      const body = yield* capturedRequestBody(ModelProviderRuntime.requestOptions(optedInProxyRoute))
+      const body = yield* capturedRequestBody(ModelProviderRuntime.modelRoutePlan(optedInProxyRoute).options)
       expect(body.model).toBe("gpt-5")
       expect(body.prompt_cache_retention).toBe("24h")
       expect(body.prompt_cache_key).toBeUndefined()
@@ -136,7 +140,7 @@ describe("openai prompt cache retention", () => {
 
   it.effect("sends no retention key at all when the route did not ask for it", () =>
     Effect.gen(function* () {
-      const body = yield* capturedRequestBody(ModelProviderRuntime.requestOptions(proxyRoute))
+      const body = yield* capturedRequestBody(ModelProviderRuntime.modelRoutePlan(proxyRoute).options)
       expect(body.model).toBe("gpt-5")
       expect(body.prompt_cache_retention).toBeUndefined()
     }),

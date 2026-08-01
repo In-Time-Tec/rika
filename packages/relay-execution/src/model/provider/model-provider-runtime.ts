@@ -20,7 +20,6 @@ import { ProviderAdapters, type Adapter as ProviderAdapter } from "./provider-ad
 const { adapters, authRefreshFingerprint, canonical, normalizePinnedRuntime, unavailableRestore } = ProviderAdapters
 export const bedrockAuthRefreshLiveLayer = BedrockAuthRefresh.liveLayer
 export const bedrockAuthRefreshTestLayer = BedrockAuthRefresh.testLayer
-export const bedrockAuthRefreshService = BedrockAuthRefresh.Service
 type Adapter = ProviderAdapter
 
 interface Account {
@@ -107,26 +106,8 @@ export const modelRoutePlan = Function.dual((args) => typeof args[0] === "object
   (route: ModelRouteResolution.ResolvedModelRoute, fingerprint?: string): ReturnType<typeof plan>
   (fingerprint?: string): (route: ModelRouteResolution.ResolvedModelRoute) => ReturnType<typeof plan>
 }
-export const providerRuntimePin = Function.dual(
-  (args) => typeof args[0] === "object",
-  (route: ModelRouteResolution.ResolvedModelRoute, fingerprint?: string) => purePlan(route, fingerprint).runtime,
-) as {
-  (route: ModelRouteResolution.ResolvedModelRoute, fingerprint?: string): ProviderRuntimePin
-  (fingerprint?: string): (route: ModelRouteResolution.ResolvedModelRoute) => ProviderRuntimePin
-}
-export const requestOptions = Function.dual(
-  (args) => typeof args[0] === "object",
-  (route: ModelRouteResolution.ResolvedModelRoute, fingerprint?: string) => purePlan(route, fingerprint).options,
-) as {
-  (route: ModelRouteResolution.ResolvedModelRoute, fingerprint?: string): Readonly<Record<string, unknown>>
-  (fingerprint?: string): (route: ModelRouteResolution.ResolvedModelRoute) => Readonly<Record<string, unknown>>
-}
 
-export type ModelRegistration = ModelRegistry.Registration
-export type ModelSelection = ModelRegistry.ModelSelection
-export type CompactionOptions = Compaction.DefaultOptions
-
-export interface ServiceInterface {
+interface ServiceInterface {
   readonly prepare: (
     routes: ReadonlyArray<ModelRouteResolution.ResolvedModelRoute>,
   ) => Effect.Effect<PreparedRoutes, RuntimeError>
