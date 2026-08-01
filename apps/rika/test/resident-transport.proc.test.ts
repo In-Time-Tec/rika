@@ -1,20 +1,11 @@
 import { afterEach, describe, expect, test } from "vitest"
 import { Clock, Effect, Fiber, FileSystem } from "effect"
 import { resolve } from "../src/resident/process/resident-endpoint"
-import {
-  alive,
-  attachedEffect,
-  cleanRoot,
-  fileExists,
-  killTrackedHosts,
-  legacyClose,
-  makeRoot,
-  readText,
-  run,
-  start,
-  startOldResident,
-  waitUntil,
-} from "./resident-transport-harness"
+import { makeRoot, run, waitUntil } from "./resident-transport-runtime"
+import { cleanRoot, fileExists, readText } from "./resident-transport-files"
+import { legacyClose } from "./resident-legacy-client"
+import { alive, attachedEffect, start, startOldResident } from "./resident-transport-process"
+import { killTrackedHosts } from "./resident-process-exit"
 
 afterEach(() => killTrackedHosts())
 

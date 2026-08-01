@@ -10,9 +10,9 @@ import { resolveProfileDataPaths } from "@rika/configuration/profile-data-paths"
 import { FetchHttpClient } from "effect/unstable/http"
 import { Cause, Clock, Config, Context, Effect, FileSystem, Layer, Option, Ref, References, Schema } from "effect"
 import { createHash } from "node:crypto"
-import * as Logging from "../../logging"
+import * as Logging from "../../diagnostic-file-logging"
 import { serve as serveResident } from "../../transport/host/resident-host-transport"
-import { version } from "../../version"
+import { version } from "../../application-version"
 
 export { spawn } from "./resident-process-spawn"
 

@@ -1,6 +1,7 @@
 import { expect, test } from "vitest"
 import { Effect, Schema } from "effect"
-import { UnknownJson, interactivePty, run } from "./client-main-harness"
+import { UnknownJson, interactivePty } from "./client-pty-scenario"
+import { run } from "./client-process-test-runtime"
 
 test(
   "cancels a busy turn on Ctrl+C and keeps the interactive TUI running",

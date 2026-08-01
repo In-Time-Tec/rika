@@ -1,6 +1,8 @@
 import { expect, test } from "vitest"
 import { Deferred, Effect, FileSystem, Path } from "effect"
 import * as TuiApp from "./tui-app"
+import { model } from "./tui-app-model"
+import { makeProjectionsLegacy } from "./tui-app-legacy-projection"
 
 const activeTimePattern = /◷ [0-9]+s/u
 
@@ -19,21 +21,21 @@ test(
           lanes: [
             {
               script: [
-                TuiApp.model.toolCall("task", { prompt: "Run top-level work." }, "top-agent"),
-                TuiApp.model.toolCall("await_subagents", {}, "root-join"),
-                TuiApp.model.failure("ROOT_RELOAD_FAILED"),
+                model.toolCall("task", { prompt: "Run top-level work." }, "top-agent"),
+                model.toolCall("await_subagents", {}, "root-join"),
+                model.failure("ROOT_RELOAD_FAILED"),
               ],
             },
             {
               when: (prompt) => prompt.includes("Run nested work.") && !prompt.includes("Run top-level work."),
-              script: [TuiApp.model.text("NESTED_RELOAD_COMPLETE")],
+              script: [model.text("NESTED_RELOAD_COMPLETE")],
             },
             {
               when: (prompt) => !prompt.includes("Delegate nested work, then fail."),
               script: [
-                TuiApp.model.toolCall("review", { prompt: "Run nested work." }, "nested-agent"),
-                TuiApp.model.toolCall("await_subagents", {}, "top-join"),
-                TuiApp.model.text("TOP_LEVEL_RELOAD_COMPLETE"),
+                model.toolCall("review", { prompt: "Run nested work." }, "nested-agent"),
+                model.toolCall("await_subagents", {}, "top-join"),
+                model.text("TOP_LEVEL_RELOAD_COMPLETE"),
               ],
             },
           ],
@@ -72,7 +74,7 @@ test(
     TuiApp.run(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
-          script: [TuiApp.model.text("PRICED_TURN_COMPLETE"), TuiApp.model.failure("UNPRICED_TURN_FAILED")],
+          script: [model.text("PRICED_TURN_COMPLETE"), model.failure("UNPRICED_TURN_FAILED")],
         })
 
         yield* Effect.promise(() => app.type("Price this turn."))
@@ -100,7 +102,7 @@ test(
   () =>
     TuiApp.run(
       Effect.gen(function* () {
-        const app = yield* TuiApp.tuiApp({ script: [TuiApp.model.text("TIMER_COMPLETE", 1_500)] })
+        const app = yield* TuiApp.tuiApp({ script: [model.text("TIMER_COMPLETE", 1_500)] })
 
         yield* Effect.promise(() => app.type("Measure this turn."))
         app.pressEnter()
@@ -137,8 +139,8 @@ test(
               root,
               workspaceFiles: { "timer.txt": "TIMER" },
               script: [
-                TuiApp.model.turn([TuiApp.model.toolCall("read", { path: "timer.txt" }, "timer-read")]),
-                TuiApp.model.text("PERSISTED_TIMER_COMPLETE", 1_500),
+                model.turn([model.toolCall("read", { path: "timer.txt" }, "timer-read")]),
+                model.text("PERSISTED_TIMER_COMPLETE", 1_500),
               ],
             })
             yield* Effect.promise(() => app.type("Persist this timer."))
@@ -184,16 +186,16 @@ test(
           lanes: [
             {
               script: [
-                TuiApp.model.toolCall("oracle", { prompt: "Read the nested fixture." }, "oracle-style"),
-                TuiApp.model.toolCall("await_subagents", {}, "root-join"),
-                TuiApp.model.text("ROOT_STYLE_RESULT"),
+                model.toolCall("oracle", { prompt: "Read the nested fixture." }, "oracle-style"),
+                model.toolCall("await_subagents", {}, "root-join"),
+                model.text("ROOT_STYLE_RESULT"),
               ],
             },
             {
               when: (prompt) => !prompt.includes("Ask Oracle to inspect the fixture."),
               script: [
-                TuiApp.model.toolCall("read", { path: "nested.txt" }, "nested-read"),
-                TuiApp.model.text("## Oracle result\n\n**ORACLE_STYLE_RESULT**"),
+                model.toolCall("read", { path: "nested.txt" }, "nested-read"),
+                model.text("## Oracle result\n\n**ORACLE_STYLE_RESULT**"),
               ],
             },
           ],
@@ -235,24 +237,21 @@ test(
           lanes: [
             {
               script: [
-                TuiApp.model.toolCall("task", { prompt: "PARENT_AGENT_PROMPT" }, "parent-agent"),
-                TuiApp.model.toolCall("await_subagents", {}, "root-join"),
-                TuiApp.model.text("ROOT_AGENT_FINAL"),
+                model.toolCall("task", { prompt: "PARENT_AGENT_PROMPT" }, "parent-agent"),
+                model.toolCall("await_subagents", {}, "root-join"),
+                model.text("ROOT_AGENT_FINAL"),
               ],
             },
             {
               when: (prompt) => prompt.includes("NESTED_AGENT_PROMPT") && !prompt.includes("PARENT_AGENT_PROMPT"),
-              script: [
-                TuiApp.model.toolCall("read", { path: "nested.txt" }, "nested-read"),
-                TuiApp.model.text("NESTED_AGENT_FINAL"),
-              ],
+              script: [model.toolCall("read", { path: "nested.txt" }, "nested-read"), model.text("NESTED_AGENT_FINAL")],
             },
             {
               when: (prompt) => !prompt.includes("ROOT_USER_PROMPT"),
               script: [
-                TuiApp.model.toolCall("review", { prompt: "NESTED_AGENT_PROMPT" }, "nested-agent"),
-                TuiApp.model.toolCall("await_subagents", {}, "parent-join"),
-                TuiApp.model.text("PARENT_AGENT_FINAL"),
+                model.toolCall("review", { prompt: "NESTED_AGENT_PROMPT" }, "nested-agent"),
+                model.toolCall("await_subagents", {}, "parent-join"),
+                model.text("PARENT_AGENT_FINAL"),
               ],
             },
           ],
@@ -314,28 +313,28 @@ test(
           lanes: [
             {
               script: [
-                TuiApp.model.toolCall("task", { prompt: "REPORTING_AGENT_PROMPT" }, "reporting-agent"),
-                TuiApp.model.toolCall("await_subagents", {}, "join-report"),
-                TuiApp.model.text("ROOT_AFTER_REPORT"),
-                TuiApp.model.toolCall("task", { prompt: "SILENT_AGENT_PROMPT" }, "silent-agent"),
-                TuiApp.model.toolCall("await_subagents", {}, "join-silent"),
-                TuiApp.model.text("ROOT_AFTER_NO_REPORT"),
-                TuiApp.model.toolCall("task", { prompt: "FAILING_AGENT_PROMPT" }, "failing-agent"),
-                TuiApp.model.toolCall("await_subagents", {}, "join-failure"),
-                TuiApp.model.text("ROOT_AFTER_FAILURE"),
+                model.toolCall("task", { prompt: "REPORTING_AGENT_PROMPT" }, "reporting-agent"),
+                model.toolCall("await_subagents", {}, "join-report"),
+                model.text("ROOT_AFTER_REPORT"),
+                model.toolCall("task", { prompt: "SILENT_AGENT_PROMPT" }, "silent-agent"),
+                model.toolCall("await_subagents", {}, "join-silent"),
+                model.text("ROOT_AFTER_NO_REPORT"),
+                model.toolCall("task", { prompt: "FAILING_AGENT_PROMPT" }, "failing-agent"),
+                model.toolCall("await_subagents", {}, "join-failure"),
+                model.text("ROOT_AFTER_FAILURE"),
               ],
             },
             {
               when: (prompt) => prompt.includes("REPORTING_AGENT_PROMPT") && !prompt.includes("reports back"),
-              script: [TuiApp.model.text("REPORTING_AGENT_FINDING")],
+              script: [model.text("REPORTING_AGENT_FINDING")],
             },
             {
               when: (prompt) => prompt.includes("SILENT_AGENT_PROMPT") && !prompt.includes("reports nothing"),
-              script: [TuiApp.model.turn([])],
+              script: [model.turn([])],
             },
             {
               when: (prompt) => prompt.includes("FAILING_AGENT_PROMPT") && !prompt.includes("fails outright"),
-              script: [TuiApp.model.failure("CHILD_STREAM_FAILED")],
+              script: [model.failure("CHILD_STREAM_FAILED")],
             },
           ],
           width: 100,
@@ -378,14 +377,10 @@ test(
         const command = "printf EARLY_OUTPUT; sleep 1; printf FINAL_OUTPUT"
         const app = yield* TuiApp.tuiApp({
           script: [
-            TuiApp.model.turn([TuiApp.model.toolCall("bash", { command, timeout_ms: 0 }, "bash-wait")]),
-            TuiApp.model.turn([
-              TuiApp.model.toolCall("shell_command_status", { processId: "1", waitMillis: 0 }, "wait-immediate"),
-            ]),
-            TuiApp.model.turn([
-              TuiApp.model.toolCall("shell_command_status", { processId: "1", waitMillis: 10_000 }, "wait-final"),
-            ]),
-            TuiApp.model.text("SHELL_WAIT_COMPLETE"),
+            model.turn([model.toolCall("bash", { command, timeout_ms: 0 }, "bash-wait")]),
+            model.turn([model.toolCall("shell_command_status", { processId: "1", waitMillis: 0 }, "wait-immediate")]),
+            model.turn([model.toolCall("shell_command_status", { processId: "1", waitMillis: 10_000 }, "wait-final")]),
+            model.text("SHELL_WAIT_COMPLETE"),
           ],
         })
 
@@ -415,11 +410,11 @@ test(
         const app = yield* TuiApp.tuiApp({
           workspaceFiles: { "src/alpha.ts": "alpha", "src/beta.ts": "beta", "README.md": "readme" },
           script: [
-            TuiApp.model.text("HARNESS_RESPONSE"),
-            TuiApp.model.turn([TuiApp.model.toolCall("bash", { command: "printf TOOL_OK" }, "ordinary-tool")]),
-            TuiApp.model.text("ORDINARY_COMPLETE"),
-            TuiApp.model.text("MENTION_COMPLETE"),
-            TuiApp.model.text("MENTION_COMPLETE"),
+            model.text("HARNESS_RESPONSE"),
+            model.turn([model.toolCall("bash", { command: "printf TOOL_OK" }, "ordinary-tool")]),
+            model.text("ORDINARY_COMPLETE"),
+            model.text("MENTION_COMPLETE"),
+            model.text("MENTION_COMPLETE"),
           ],
         })
         yield* Effect.promise(() => app.type("Say hello."))
@@ -515,12 +510,12 @@ test(
         const app = yield* TuiApp.tuiApp({
           workspaceFiles: { "notes.txt": "APPROVAL_NOTES" },
           script: [
-            TuiApp.model.turn([TuiApp.model.toolCall("read", { path: "notes.txt" }, "approved-read")]),
-            TuiApp.model.text("APPROVAL_COMPLETE"),
-            TuiApp.model.turn([
-              TuiApp.model.toolCall("bash", { command: "printf CANCEL_PROOF > cancel-proof.txt" }, "cancelled-tool"),
+            model.turn([model.toolCall("read", { path: "notes.txt" }, "approved-read")]),
+            model.text("APPROVAL_COMPLETE"),
+            model.turn([
+              model.toolCall("bash", { command: "printf CANCEL_PROOF > cancel-proof.txt" }, "cancelled-tool"),
             ]),
-            TuiApp.model.text("BASH_COMPLETE"),
+            model.text("BASH_COMPLETE"),
           ],
         })
 
@@ -556,9 +551,9 @@ test(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
           script: [
-            TuiApp.model.text("CANCELLED_LATE_RESPONSE", 5_000),
-            TuiApp.model.text("RESTORED_PROMPT_SENT"),
-            TuiApp.model.text("RESTORED_PROMPT_SENT"),
+            model.text("CANCELLED_LATE_RESPONSE", 5_000),
+            model.text("RESTORED_PROMPT_SENT"),
+            model.text("RESTORED_PROMPT_SENT"),
           ],
         })
 
@@ -587,7 +582,7 @@ test(
     TuiApp.run(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
-          script: [TuiApp.model.text("SLOW_FIRST_ANSWER", 5_000), TuiApp.model.text("QUEUED_SECOND_ANSWER")],
+          script: [model.text("SLOW_FIRST_ANSWER", 5_000), model.text("QUEUED_SECOND_ANSWER")],
         })
         yield* Effect.promise(() => app.type("First slow prompt."))
         app.pressEnter()
@@ -611,11 +606,7 @@ test(
     TuiApp.run(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
-          script: [
-            TuiApp.model.text("LATE_QUEUE_HEAD", 5_000),
-            TuiApp.model.text("QUEUED_DONE"),
-            TuiApp.model.text("QUEUED_DONE"),
-          ],
+          script: [model.text("LATE_QUEUE_HEAD", 5_000), model.text("QUEUED_DONE"), model.text("QUEUED_DONE")],
         })
         yield* Effect.promise(() => app.type("Hold the queue head."))
         app.pressEnter()
@@ -645,12 +636,12 @@ test(
         const app = yield* TuiApp.tuiApp({
           workspaceFiles: { "fixture.txt": "steer fixture body" },
           script: [
-            TuiApp.model.turn([TuiApp.model.toolCall("read", { path: "fixture.txt" }, "steer-read")], {
+            model.turn([model.toolCall("read", { path: "fixture.txt" }, "steer-read")], {
               delay: "10000 millis",
             }),
-            TuiApp.model.text("ACTIVE_STEER_COMPLETE"),
-            TuiApp.model.text("ACTIVE_STEER_COMPLETE"),
-            TuiApp.model.text("ACTIVE_STEER_COMPLETE"),
+            model.text("ACTIVE_STEER_COMPLETE"),
+            model.text("ACTIVE_STEER_COMPLETE"),
+            model.text("ACTIVE_STEER_COMPLETE"),
           ],
         })
         yield* Effect.promise(() => app.type("Read the fixture slowly."))
@@ -692,7 +683,7 @@ test(
 
         yield* Effect.scoped(
           Effect.gen(function* () {
-            const app = yield* TuiApp.tuiApp({ root, script: [TuiApp.model.text("LEGACY_TURN_COMPLETE")] })
+            const app = yield* TuiApp.tuiApp({ root, script: [model.text("LEGACY_TURN_COMPLETE")] })
             yield* Effect.promise(() => app.type("Persist a legacy turn."))
             app.pressEnter()
             yield* app.waitFrame("LEGACY_TURN_COMPLETE")
@@ -701,7 +692,7 @@ test(
           }),
         )
 
-        expect(yield* TuiApp.makeProjectionsLegacy(root)).toContain("tui-turn-0")
+        expect(yield* makeProjectionsLegacy(root)).toContain("tui-turn-0")
         const held = yield* Deferred.make<void>()
 
         yield* Effect.scoped(
@@ -733,9 +724,9 @@ test(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
           script: [
-            TuiApp.model.text("LATE_INTERRUPTED_RESPONSE", 5_000),
-            TuiApp.model.text("REPLACEMENT_COMPLETE"),
-            TuiApp.model.text("REPLACEMENT_COMPLETE"),
+            model.text("LATE_INTERRUPTED_RESPONSE", 5_000),
+            model.text("REPLACEMENT_COMPLETE"),
+            model.text("REPLACEMENT_COMPLETE"),
           ],
         })
         yield* Effect.promise(() => app.type("Begin interruptible work."))

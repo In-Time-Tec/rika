@@ -16,12 +16,6 @@ import {
 export type ProcessRole = "client" | "resident"
 export type LogLevel = "debug" | "info" | "warning" | "error"
 
-export interface Status {
-  readonly directory: string
-  readonly files: number
-  readonly bytes: bigint
-}
-
 const activeSettlers = new Set<() => void>()
 
 const diagnosticAnnotations = new Set([

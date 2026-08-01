@@ -1,6 +1,8 @@
 import { expect, test } from "vitest"
 import { Effect, Schema } from "effect"
-import { UnknownJson, awaitTurnStatus, interactivePty, run } from "./client-main-harness"
+import { UnknownJson, interactivePty } from "./client-pty-scenario"
+import { awaitTurnStatus } from "./client-turn-status"
+import { run } from "./client-process-test-runtime"
 
 const blockedTurnScript = Schema.encodeUnknownEffect(UnknownJson)([
   {

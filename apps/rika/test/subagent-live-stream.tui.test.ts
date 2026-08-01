@@ -2,6 +2,7 @@ import * as Turn from "@rika/product/turn-record"
 import { Effect, Schema } from "effect"
 import { expect, test } from "vitest"
 import * as TuiApp from "./tui-app"
+import { model } from "./tui-app-model"
 
 test(
   "streams child progress before the root execution completes",
@@ -14,20 +15,20 @@ test(
           lanes: [
             {
               script: [
-                TuiApp.model.toolCall("task", { prompt: "Inspect the live child fixture." }, "live-child"),
-                TuiApp.model.toolCall("await_subagents", {}, "live-join"),
-                TuiApp.model.text("ROOT_FINISHED_AFTER_CHILD_STREAM", 2_000),
+                model.toolCall("task", { prompt: "Inspect the live child fixture." }, "live-child"),
+                model.toolCall("await_subagents", {}, "live-join"),
+                model.text("ROOT_FINISHED_AFTER_CHILD_STREAM", 2_000),
               ],
             },
             {
               when: (prompt) => !prompt.includes("Verify live child streaming."),
               script: [
-                TuiApp.model.toolCall("read", { path: "live-child.txt" }, "live-read"),
-                TuiApp.model.turn([
-                  TuiApp.model.part("CHILD_STREAMED_BEFORE_ROOT"),
-                  TuiApp.model.toolCall("bash", { command: "sleep 3" }, "live-child-hold"),
+                model.toolCall("read", { path: "live-child.txt" }, "live-read"),
+                model.turn([
+                  model.part("CHILD_STREAMED_BEFORE_ROOT"),
+                  model.toolCall("bash", { command: "sleep 3" }, "live-child-hold"),
                 ]),
-                TuiApp.model.text("CHILD_FINISHED_AFTER_HOLD"),
+                model.text("CHILD_FINISHED_AFTER_HOLD"),
               ],
             },
           ],
