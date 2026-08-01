@@ -1,4 +1,5 @@
 import * as TranscriptPage from "@rika/product/transcript-page"
+import { OperationError } from "../operation-error"
 import { Effect } from "effect"
 import {
   boundTranscriptEntries,
@@ -11,7 +12,7 @@ export const boundedTranscriptPage = (input: {
   readonly entries: ReadonlyArray<TranscriptPage.Entry>
   readonly hasOlder: boolean
   readonly encoder: (value: unknown) => string
-  readonly fail: (message: string) => Effect.Effect<never, unknown>
+  readonly fail: (message: string) => Effect.Effect<never, OperationError, never>
 }) => {
   const bounded = boundTranscriptEntries(input.entries, input.encoder)
   if (bounded.oversizedEntry) return input.fail("Transcript entry exceeds the transcript event limit")

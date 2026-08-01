@@ -14,7 +14,7 @@ import * as ThreadActivity from "../../thread/query/thread-activity"
 import { clampThreadTitle } from "../../thread/query/thread-title-policy"
 import { Input } from "../contract/product-operation"
 import { OperationUnavailable } from "../contract/product-operation"
-import { operationError } from "../operation-error"
+import { OperationError, operationError } from "../operation-error"
 import { Clock, Context, Effect, Semaphore, Console } from "effect"
 
 export interface Dependencies {
@@ -25,9 +25,12 @@ export interface Dependencies {
   readonly turnMutationAdmission: Semaphore.Semaphore
   readonly backend: ExecutionBackend.Interface
   readonly usageRepository: UsageRepository.Interface
-  readonly notifyThreadSummaries: Effect.Effect<void, unknown, ThreadSummaryRepository.Service>
+  readonly notifyThreadSummaries: Effect.Effect<void, OperationError, ThreadSummaryRepository.Service>
   readonly writeThread: (thread: Thread.Thread) => Effect.Effect<void>
-  readonly requireThread: (repository: ThreadRepository.Interface, id: string) => Effect.Effect<Thread.Thread, unknown>
+  readonly requireThread: (
+    repository: ThreadRepository.Interface,
+    id: string,
+  ) => Effect.Effect<Thread.Thread, OperationError, never>
   readonly markdownExport: (thread: Thread.Thread, turns: ReadonlyArray<Turn.Turn>) => string
   readonly encodeJson: (value: unknown) => string
   readonly unavailable: (input: Input, message: string) => OperationUnavailable

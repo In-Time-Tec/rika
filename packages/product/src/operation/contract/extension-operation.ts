@@ -1,6 +1,6 @@
 import { Input } from "./product-operation"
 export { Input }
-export type ExtensionOperation = typeof Input.Type
+export type ExtensionOperation = Input
 import * as McpConfig from "@rika/extensions/mcp-configuration"
 import * as McpOAuth from "@rika/extensions/mcp-oauth-service"
 import * as SkillRegistry from "@rika/extensions/skill-registry"
@@ -23,7 +23,9 @@ export interface Interface {
   readonly admission: Semaphore.Semaphore
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/product/extension-operations/Service") {}
+export class Service extends Context.Service<Service, Interface>()(
+  "@rika/product/operation/contract/extension-operation/Service",
+) {}
 
 export const layer = (options: Options) => {
   const admission = Semaphore.makeUnsafe(1)

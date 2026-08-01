@@ -1,4 +1,6 @@
+import { Function } from "effect"
 import * as ThreadRepository from "@rika/product/thread-repository"
+import * as TurnRepository from "@rika/product/turn-repository"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as NoninteractiveOperation from "./noninteractive-operation-dispatch"
@@ -11,32 +13,62 @@ import { Console, Context, Effect, Layer } from "effect"
 import { Catalog as ToolCatalog } from "@rika/coding-tools/coding-tool-catalog"
 import type { Input } from "../contract/product-operation"
 import type { ModeId } from "@rika/configuration/behavior-mode"
+import type { InteractiveSession } from "../interactive/interactive-session"
+import { OperationError } from "../operation-error"
 
-export const runInteractiveOperation = (factory: any, input: Extract<Input, { readonly _tag: "Interactive" }>) =>
+const unavailable = (
+  factory: any,
+  input: Input,
+  message?: string,
+): import("../contract/product-operation").OperationUnavailable =>
+  factory.unavailable(input, message ?? "Operation unavailable")
+
+const runInteractiveOperationImpl = (factory: any, input: Extract<Input, { readonly _tag: "Interactive" }>) =>
   Effect.gen(function* () {
+    const typedDependencyContext: Context.Context<ThreadSummaryRepository.Service | ThreadRepository.Service> =
+      factory.dependencyContext
+    const typedMakeInteractiveSession: (
+      workspace: string,
+      settings: { readonly initialThreadId?: string },
+    ) => Effect.Effect<
+      { readonly session: InteractiveSession; readonly close: Effect.Effect<void, never, never> },
+      OperationError,
+      never
+    > = factory.makeInteractiveSession
+    const typedInteractiveRun: (
+      input: Extract<Input, { readonly _tag: "Interactive" }>,
+      session: InteractiveSession,
+    ) => Effect.Effect<void, OperationError, never> = factory.options.interactive
     if (factory.options.interactive === undefined) return
     let initialThreadId = input.threadId
     if (input.last === true) {
-      const summary = (yield* Context.get(factory.dependencyContext, ThreadSummaryRepository.Service)
+      const summary = (yield* Context.get(typedDependencyContext, ThreadSummaryRepository.Service)
         .list({ limit: 1 })
-        .pipe(Effect.mapError((error) => factory.unavailable(input, String(error)))))[0]
-      if (summary === undefined) return yield* factory.unavailable(input, "No threads exist")
+        .pipe(Effect.mapError((error) => unavailable(factory, input, String(error)))))[0]
+      if (summary === undefined) return yield* unavailable(factory, input, "No threads exist")
       initialThreadId = String(summary.id)
     }
     if (initialThreadId !== undefined) {
-      const thread = yield* Context.get(factory.dependencyContext, ThreadRepository.Service)
+      const thread = yield* Context.get(typedDependencyContext, ThreadRepository.Service)
         .get(Thread.ThreadId.make(initialThreadId))
-        .pipe(Effect.mapError((error) => factory.unavailable(input, String(error))))
-      if (thread === undefined) return yield* factory.unavailable(input, `Thread ${initialThreadId} does not exist`)
+        .pipe(Effect.mapError((error) => unavailable(factory, input, String(error))))
+      if (thread === undefined) return yield* unavailable(factory, input, `Thread ${initialThreadId} does not exist`)
     }
-    const made = yield* factory.makeInteractiveSession(
+    const made = yield* typedMakeInteractiveSession(
       input.workspace ?? factory.options.defaultWorkspace,
       initialThreadId === undefined ? {} : { initialThreadId },
-    ) as any
-    yield* factory.options.interactive(input, made.session).pipe(Effect.ensuring(made.close))
+    )
+    yield* typedInteractiveRun(input, made.session).pipe(Effect.ensuring(made.close))
   })
 
-export const runNoninteractiveOperation = (factory: any, input: Extract<Input, { readonly _tag: "Run" }>) =>
+export const runInteractiveOperation: {
+  (
+    arg1: Extract<Input, { readonly _tag: "Interactive" }>,
+  ): (arg0: any) => ReturnType<typeof runInteractiveOperationImpl>
+  (arg0: any, arg1: Extract<Input, { readonly _tag: "Interactive" }>): ReturnType<typeof runInteractiveOperationImpl>
+} = Function.dual(2, runInteractiveOperationImpl)
+
+const runNoninteractiveOperationImpl = (factory: any, input: Extract<Input, { readonly _tag: "Run" }>) =>
   NoninteractiveOperation.run(input, {
     defaultWorkspace: factory.options.defaultWorkspace,
     pendingTurnCapacity: factory.pendingTurnCapacity,
@@ -78,13 +110,18 @@ export const runNoninteractiveOperation = (factory: any, input: Extract<Input, {
     awaitSessionQuiescence: (backend: any, threadId: any) =>
       factory.awaitSessionQuiescence(backend, threadId).pipe(Effect.provide(factory.executionDependencies)),
     operationError: factory.operationError,
-    unavailable: factory.unavailable,
+    unavailable: (operationInput: Input, message: string) => unavailable(factory, operationInput, message),
   })
 
-export const runReviewOperation = (factory: any, input: Extract<Input, { readonly _tag: "Review" }>) =>
+export const runNoninteractiveOperation: {
+  (arg1: Extract<Input, { readonly _tag: "Run" }>): (arg0: any) => ReturnType<typeof runNoninteractiveOperationImpl>
+  (arg0: any, arg1: Extract<Input, { readonly _tag: "Run" }>): ReturnType<typeof runNoninteractiveOperationImpl>
+} = Function.dual(2, runNoninteractiveOperationImpl)
+
+const runReviewOperationImpl = (factory: any, input: Extract<Input, { readonly _tag: "Review" }>) =>
   Effect.gen(function* () {
     if (factory.options.toolRuntimeLayer === undefined)
-      return yield* factory.unavailable(input, "Review requires the local tool runtime")
+      return yield* unavailable(factory, input, "Review requires the local tool runtime")
     yield* ReviewOperation.run(input, {
       defaultWorkspace: factory.options.defaultWorkspace,
       pendingTurnCapacity: factory.pendingTurnCapacity,
@@ -109,56 +146,98 @@ export const runReviewOperation = (factory: any, input: Extract<Input, { readonl
       releaseTurnObserver: (turnId: any) => factory.releaseTurnObserver(turnId).pipe(Effect.asVoid),
       encodeJson: factory.encodeJson,
       operationError: factory.operationError,
-      unavailable: factory.unavailable,
+      unavailable: (operationInput: Input, message: string) => unavailable(factory, operationInput, message),
     })
   })
 
-export const runExtensionOperation = (
+export const runReviewOperation: {
+  (arg1: Extract<Input, { readonly _tag: "Review" }>): (arg0: any) => ReturnType<typeof runReviewOperationImpl>
+  (arg0: any, arg1: Extract<Input, { readonly _tag: "Review" }>): ReturnType<typeof runReviewOperationImpl>
+} = Function.dual(2, runReviewOperationImpl)
+
+const runExtensionOperationImpl = (
   factory: any,
   input: Extract<Input, { readonly _tag: "Skill" | "Mcp" | "Extension" }>,
 ) =>
   Effect.gen(function* () {
     if (factory.options.extensionOperations === undefined) return
-    const context = yield* Layer.build(factory.options.extensionOperations.layer).pipe(
-      Effect.mapError((error) => factory.unavailable(input, String(error))),
+    const extensionLayer: Layer.Layer<ExtensionOperations.Service, OperationError, never> =
+      factory.options.extensionOperations.layer
+    const context = yield* Layer.build(extensionLayer).pipe(
+      Effect.mapError((error) => unavailable(factory, input, String(error))),
     )
     yield* ExtensionOperations.run(input).pipe(
       Effect.provide(context),
-      Effect.mapError((error) => factory.unavailable(input, error instanceof Error ? error.message : String(error))),
+      Effect.mapError((error) => unavailable(factory, input, error instanceof Error ? error.message : String(error))),
     )
   }).pipe(Effect.scoped)
 
-export const runConfigurationOperation = (
+export const runExtensionOperation: {
+  (
+    arg1: Extract<Input, { readonly _tag: "Skill" | "Mcp" | "Extension" }>,
+  ): (arg0: any) => ReturnType<typeof runExtensionOperationImpl>
+  (
+    arg0: any,
+    arg1: Extract<Input, { readonly _tag: "Skill" | "Mcp" | "Extension" }>,
+  ): ReturnType<typeof runExtensionOperationImpl>
+} = Function.dual(2, runExtensionOperationImpl)
+
+const runConfigurationOperationImpl = (
   factory: any,
   input: Extract<Input, { readonly _tag: "Config" | "Doctor" | "Mcp" }>,
 ) =>
   Effect.gen(function* () {
-    if (factory.options.configOperations === undefined || (input._tag === "Mcp" && input.action !== "doctor")) return
+    const typedConfigOperations:
+      | {
+          readonly layer: Layer.Layer<ConfigOperations.Adapter, OperationError, never>
+          readonly options: ConfigOperations.Options
+          readonly forWorkspace?: (workspace: string) => Effect.Effect<
+            {
+              readonly layer: Layer.Layer<ConfigOperations.Adapter, OperationError, never>
+              readonly options: ConfigOperations.Options
+            },
+            OperationError,
+            never
+          >
+        }
+      | undefined = factory.options.configOperations
+    if (typedConfigOperations === undefined || (input._tag === "Mcp" && input.action !== "doctor")) return
     const config =
-      factory.options.configOperations.forWorkspace === undefined
-        ? factory.options.configOperations
-        : yield* factory.options.configOperations
+      typedConfigOperations.forWorkspace === undefined
+        ? typedConfigOperations
+        : yield* typedConfigOperations
             .forWorkspace(input.clientWorkspace ?? factory.options.defaultWorkspace)
-            .pipe(Effect.mapError((error) => factory.unavailable(input, String(error))))
-    yield* Effect.gen(function* () {
-      const context = yield* Layer.build(config.layer)
-      yield* ConfigOperations.run(input, config.options).pipe(Effect.provide(context))
-    }).pipe(
-      Effect.scoped,
-      Effect.mapError((error) => factory.unavailable(input, String(error))),
-    )
+            .pipe(Effect.mapError((error) => unavailable(factory, input, String(error))))
+    const configLayer: Layer.Layer<ConfigOperations.Adapter, OperationError, never> = config.layer
+    const context = yield* Layer.build(configLayer)
+    yield* ConfigOperations.run(input, config.options).pipe(Effect.provide(context))
   })
 
-export const runSystemOperation = (factory: any, input: Input) => {
+export const runConfigurationOperation: {
+  (
+    arg1: Extract<Input, { readonly _tag: "Config" | "Doctor" | "Mcp" }>,
+  ): (arg0: any) => ReturnType<typeof runConfigurationOperationImpl>
+  (
+    arg0: any,
+    arg1: Extract<Input, { readonly _tag: "Config" | "Doctor" | "Mcp" }>,
+  ): ReturnType<typeof runConfigurationOperationImpl>
+} = Function.dual(2, runConfigurationOperationImpl)
+
+const runSystemOperationImpl = (factory: any, input: Input) => {
+  const typedRunAuth: (
+    input: Extract<Input, { readonly _tag: "Auth" }>,
+    options: any,
+    workspace: string,
+  ) => Effect.Effect<void, OperationError, never> = factory.runAuth
   if (input._tag === "ToolCatalog") {
     if (input.action === "list") return Console.log(factory.encodeJson(ToolCatalog.definitions))
     const definition = ToolCatalog.get(input.name)
     return definition === undefined
-      ? factory.unavailable(input, `Tool ${input.name} does not exist`)
+      ? unavailable(factory, input, `Tool ${input.name} does not exist`)
       : Console.log(factory.encodeJson(definition))
   }
   if (input._tag === "Auth" && factory.options.authOperations !== undefined)
-    return Effect.scoped(factory.runAuth(input, factory.options.authOperations, factory.options.defaultWorkspace))
+    return Effect.scoped(typedRunAuth(input, factory.options.authOperations, factory.options.defaultWorkspace))
   if (
     (input._tag === "Skill" || input._tag === "Mcp" || input._tag === "Extension") &&
     factory.options.extensionOperations !== undefined
@@ -173,9 +252,12 @@ export const runSystemOperation = (factory: any, input: Input) => {
     return WorkflowOperation.run(input, {
       backend: factory.backend,
       encodeJson: factory.encodeJson,
-      unavailable: factory.unavailable,
+      unavailable: (operationInput: Input, message: string) => unavailable(factory, operationInput, message),
     })
-  if (input._tag === "Thread")
+  if (input._tag === "Thread") {
+    const typedSystemExecutionDependencies: Context.Context<
+      ThreadRepository.Service | TurnRepository.Service | ThreadSummaryRepository.Service
+    > = factory.executionDependencies
     return ThreadOperation.run(input, {
       defaultWorkspace: factory.options.defaultWorkspace,
       pendingTurnCapacity: factory.pendingTurnCapacity,
@@ -189,7 +271,13 @@ export const runSystemOperation = (factory: any, input: Input) => {
       requireThread: factory.requireThread,
       markdownExport: factory.markdownExport,
       encodeJson: factory.encodeJson,
-      unavailable: factory.unavailable,
-    }).pipe(Effect.provide(factory.executionDependencies))
-  return factory.unavailable(input)
+      unavailable: (operationInput: Input, message: string) => unavailable(factory, operationInput, message),
+    }).pipe(Effect.provide(typedSystemExecutionDependencies))
+  }
+  return unavailable(factory, input)
 }
+
+export const runSystemOperation: {
+  (arg1: Input): (arg0: any) => ReturnType<typeof runSystemOperationImpl>
+  (arg0: any, arg1: Input): ReturnType<typeof runSystemOperationImpl>
+} = Function.dual(2, runSystemOperationImpl)

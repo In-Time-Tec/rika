@@ -8,11 +8,16 @@ import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ExecutionEvent from "@rika/product/execution-event"
 import * as ThreadActivity from "../../thread/query/thread-activity"
 import { Clock, Effect, PubSub } from "effect"
+import { operationError } from "../operation-error"
 import type { InteractiveEvent } from "../interactive/interactive-event"
 
 export const makeExecutionProjection = (input: any) =>
   Effect.sync(() => {
     const { dirtyTurnObservers, turnChanges, notifyThreadSummaries } = input
+    const typedProjectExecutionResult: (
+      threadId: Turn.Turn["threadId"],
+      result: ExecutionEvent.Result,
+    ) => Effect.Effect<void, import("../operation-error").OperationError, never> = input.projectExecutionResult
     const notifyTurnChanged = (turn: Pick<Turn.Turn, "id" | "threadId">) =>
       Effect.sync(() => dirtyTurnObservers.add(turn.id)).pipe(
         Effect.andThen(PubSub.publish(turnChanges, undefined)),
@@ -102,7 +107,7 @@ export const makeExecutionProjection = (input: any) =>
                 ))
               )
                 return
-              yield* projectExecutionResult(candidate.threadId, result)
+              yield* typedProjectExecutionResult(candidate.threadId, result)
             }).pipe(
               Effect.catch((error) =>
                 Effect.logError("thread-summary.repair.failed").pipe(
@@ -123,4 +128,4 @@ export const makeExecutionProjection = (input: any) =>
       setTurnStatus,
       repairThreadSummaries,
     }
-  }).pipe(Effect.mapError((error) => new Error(String(error))))
+  }).pipe(Effect.mapError((error) => operationError(String(error), error)))

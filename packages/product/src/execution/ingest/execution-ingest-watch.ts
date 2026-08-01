@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import * as Thread from "@rika/product/thread-record"
 import { Cause, Effect, Queue, Scope, Schema, Stream } from "effect"
 import * as IngestPatch from "./execution-projection-patch"
@@ -17,7 +18,7 @@ export interface ProjectionWatch {
   readonly changes: Stream.Stream<ProjectionChange, ProjectionWatchOverflow>
 }
 
-export const make = (
+const makeImpl = (
   pipelines: ReadonlyMap<string, Pipeline>,
   watchCapacity: number,
 ): {
@@ -83,3 +84,8 @@ export const make = (
     })
   return { publish, publishPatch, publishStarted, watchThread }
 }
+
+export const make: {
+  (arg1: number): (arg0: ReadonlyMap<string, Pipeline>) => ReturnType<typeof makeImpl>
+  (arg0: ReadonlyMap<string, Pipeline>, arg1: number): ReturnType<typeof makeImpl>
+} = Function.dual(2, makeImpl)

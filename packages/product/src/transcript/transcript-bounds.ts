@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 
@@ -5,11 +6,23 @@ export const transcriptPageEncoder = new TextEncoder()
 export const maximumTranscriptPageBytes = 8 * 1024 * 1024
 export const maximumTranscriptPayloadBytes = maximumTranscriptPageBytes - 64 * 1024
 
-export const sameTranscriptCursor = (
+const sameTranscriptCursorImpl = (
   left: TranscriptPage.PageCursor | undefined,
   right: TranscriptPage.PageCursor | undefined,
   encodeJson: (value: unknown) => string,
 ) => left !== undefined && right !== undefined && encodeJson(left) === encodeJson(right)
+
+export const sameTranscriptCursor: {
+  (
+    arg1: TranscriptPage.PageCursor | undefined,
+    arg2: (value: unknown) => string,
+  ): (arg0: TranscriptPage.PageCursor | undefined) => ReturnType<typeof sameTranscriptCursorImpl>
+  (
+    arg0: TranscriptPage.PageCursor | undefined,
+    arg1: TranscriptPage.PageCursor | undefined,
+    arg2: (value: unknown) => string,
+  ): ReturnType<typeof sameTranscriptCursorImpl>
+} = Function.dual(3, sameTranscriptCursorImpl)
 
 export const transcriptCursorFor = (entry: TranscriptPage.Entry | undefined): TranscriptPage.PageCursor | undefined =>
   entry === undefined
@@ -26,7 +39,7 @@ export const isSemanticTranscriptEntry = (entry: TranscriptPage.Entry): boolean 
     entry.unit.content.block._tag === "Compaction" ||
     entry.unit.executionOutcome !== undefined)
 
-export const boundTurnEntries = (
+const boundTurnEntriesImpl = (
   entries: ReadonlyArray<TranscriptPage.Entry>,
   detail: number,
 ): { readonly entries: ReadonlyArray<TranscriptPage.Entry>; readonly contiguousFrom: number } => {
@@ -38,7 +51,12 @@ export const boundTurnEntries = (
   }
 }
 
-export const boundTranscriptEntries = (
+export const boundTurnEntries: {
+  (arg1: number): (arg0: ReadonlyArray<TranscriptPage.Entry>) => ReturnType<typeof boundTurnEntriesImpl>
+  (arg0: ReadonlyArray<TranscriptPage.Entry>, arg1: number): ReturnType<typeof boundTurnEntriesImpl>
+} = Function.dual(2, boundTurnEntriesImpl)
+
+const boundTranscriptEntriesImpl = (
   sourceEntries: ReadonlyArray<TranscriptPage.Entry>,
   encodeJson: (value: unknown) => string,
 ): {
@@ -64,6 +82,16 @@ export const boundTranscriptEntries = (
   }
   return { entries, truncated: false, oversizedEntry: false }
 }
+
+export const boundTranscriptEntries: {
+  (
+    arg1: (value: unknown) => string,
+  ): (arg0: ReadonlyArray<TranscriptPage.Entry>) => ReturnType<typeof boundTranscriptEntriesImpl>
+  (
+    arg0: ReadonlyArray<TranscriptPage.Entry>,
+    arg1: (value: unknown) => string,
+  ): ReturnType<typeof boundTranscriptEntriesImpl>
+} = Function.dual(2, boundTranscriptEntriesImpl)
 
 const boundPartialTranscriptEntries = (
   sourceEntries: ReadonlyArray<TranscriptPage.Entry>,

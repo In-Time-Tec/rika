@@ -1,9 +1,12 @@
 import * as Turn from "@rika/product/turn-record"
+import * as ExecutionBackend from "@rika/product/execution-service"
+import { OperationError } from "../operation-error"
+import type { InteractiveOperationFeed } from "./interactive-operation-feed"
 import * as ThreadResult from "@rika/product/thread-result"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
-import { Effect, PubSub } from "effect"
+import { Context, Effect, PubSub } from "effect"
 import type { InteractiveEvent } from "./interactive-event"
 import { settleStopRequestedTurns } from "../../execution/lifecycle/product-execution-stop"
 
@@ -33,28 +36,59 @@ export const makeInteractiveSupervision = (input: any): any => {
     interactiveSinks,
     operationFeed,
   } = input
-  const backend = acquiredBackend
+  const backend: ExecutionBackend.Interface = acquiredBackend
+  const typedTurnChanges: PubSub.PubSub<void> = turnChanges
+  const typedDirtyTurnObservers: Set<Turn.TurnId> = dirtyTurnObservers
+  const typedEnsureIngest: (
+    threadId: Turn.Turn["threadId"],
+    turnId: Turn.Turn["id"],
+  ) => Effect.Effect<void, OperationError, never> = ensureIngest
+  const typedSetTurnStatus: (
+    id: Turn.TurnId,
+    status: import("@rika/product/execution-status").Status,
+    cursor: string | undefined,
+    now: number,
+  ) => Effect.Effect<Turn.Turn, OperationError, never> = setTurnStatus
+  const typedNotifyTurnChanged: (
+    turn: Pick<Turn.Turn, "id" | "threadId">,
+  ) => Effect.Effect<void, OperationError, never> = notifyTurnChanged
+  const typedIsTerminalStatus: (status: Turn.Turn["status"]) => boolean = isTerminalStatus
+  const typedObserveTurn: (
+    turn: Turn.AgentExecutionTurn,
+    dispatch: (event: InteractiveEvent) => void,
+  ) => Effect.Effect<boolean, OperationError | ExecutionBackend.BackendError | TurnRepository.RepositoryError, never> =
+    observeTurn
+  const typedExecutionDependencies: Context.Context<
+    TurnRepository.Service | TranscriptRepository.Service | ExecutionBackend.Service
+  > = executionDependencies
+  const typedOperationFeed: InteractiveOperationFeed = operationFeed
   const supervise =
-    acquiredBackend.follow === undefined
+    backend.follow === undefined
       ? Effect.void
       : Effect.scoped(
           Effect.gen(function* () {
-            const changes = yield* PubSub.subscribe(turnChanges)
+            const changes = yield* PubSub.subscribe(typedTurnChanges)
             const turns = yield* TurnRepository.Service
-            const launch = (turn: Turn.AgentExecutionTurn) =>
+            const launch = (
+              turn: Turn.AgentExecutionTurn,
+            ): Effect.Effect<
+              void,
+              OperationError | ExecutionBackend.BackendError | TurnRepository.RepositoryError,
+              never
+            > =>
               Effect.forkChild(
-                observeTurn(turn, () => undefined).pipe(
+                typedObserveTurn(turn, () => undefined).pipe(
                   Effect.flatMap((observed) => {
-                    if (!observed) return Effect.void
+                    if (observed !== true) return Effect.void
                     return turns
                       .get(turn.id)
                       .pipe(
                         Effect.flatMap((current) =>
                           current !== undefined &&
                           ThreadResult.TurnResult.isAgentExecution(current) &&
-                          !isTerminalStatus(current.status) &&
+                          typedIsTerminalStatus(current.status) !== true &&
                           current.status !== "queued"
-                            ? Effect.sleep("50 millis").pipe(Effect.andThen(notifyTurnChanged(current)))
+                            ? Effect.sleep("50 millis").pipe(Effect.andThen(typedNotifyTurnChanged(current)))
                             : Effect.void,
                         ),
                       )
@@ -67,13 +101,13 @@ export const makeInteractiveSupervision = (input: any): any => {
                         "rika.failure.kind": String(error),
                       }),
                       Effect.andThen(Effect.sleep("50 millis")),
-                      Effect.andThen(notifyTurnChanged(turn)),
+                      Effect.andThen(typedNotifyTurnChanged(turn)),
                     ),
                   ),
                 ),
               )
             const settleStopRequested = settleStopRequestedTurns(backend, (turnId, status, cursor, settledAt) =>
-              setTurnStatus(turnId, status, cursor, settledAt).pipe(Effect.asVoid),
+              typedSetTurnStatus(turnId, status, cursor, settledAt).pipe(Effect.asVoid),
             )
             const recover = Effect.gen(function* () {
               const transcripts = yield* TranscriptRepository.Service
@@ -84,22 +118,23 @@ export const makeInteractiveSupervision = (input: any): any => {
               const ensured = new Set<string>()
               for (const turn of nonterminal)
                 if (turn.status !== "queued") {
-                  yield* ensureIngest(turn.threadId, turn.id)
+                  yield* typedEnsureIngest(turn.threadId, turn.id)
                   ensured.add(String(turn.id))
                   yield* launch(turn)
                 }
               for (const candidate of projectionCandidates)
-                if (!ensured.has(String(candidate.turnId))) yield* ensureIngest(candidate.threadId, candidate.turnId)
+                if (!ensured.has(String(candidate.turnId)))
+                  yield* typedEnsureIngest(candidate.threadId, candidate.turnId)
             })
             const scanDirty = Effect.gen(function* () {
-              const dirty = [...dirtyTurnObservers]
-              dirtyTurnObservers.clear()
+              const dirty = [...typedDirtyTurnObservers]
+              typedDirtyTurnObservers.clear()
               for (const turnId of dirty) {
                 const turn = yield* turns.get(turnId)
                 if (
                   turn !== undefined &&
                   ThreadResult.TurnResult.isAgentExecution(turn) &&
-                  !isTerminalStatus(turn.status) &&
+                  typedIsTerminalStatus(turn.status) !== true &&
                   turn.status !== "queued"
                 )
                   yield* launch(turn)
@@ -112,19 +147,19 @@ export const makeInteractiveSupervision = (input: any): any => {
               yield* scanDirty
             }
           }),
-        ).pipe(Effect.provide(executionDependencies))
-  if (!registerPromoter) sessionThreadViews.set(sessionId, () => getSelectedThreadId())
-  if (!registerPromoter)
+        ).pipe(Effect.provide(typedExecutionDependencies))
+  if (registerPromoter !== true) sessionThreadViews.set(sessionId, () => getSelectedThreadId())
+  if (registerPromoter !== true)
     interactiveSinks.set(sessionId, (_origin: number, event: InteractiveEvent) => {
       const threadId = interactiveEventThreadId(event)
-      if (threadId !== undefined && operationFeed.bufferSelectionEvent(event)) return
+      if (threadId !== undefined && typedOperationFeed.bufferSelectionEvent(event) === true) return
       if (
         threadId === undefined ||
         threadId === getSelectedThreadId() ||
         event._tag === "TitleCostUpdated" ||
         event._tag === "ThreadUsageUpdated"
       )
-        operationFeed.deliver(event, {
+        typedOperationFeed.deliver(event, {
           selectedThreadOnly: threadId !== undefined && event._tag !== "TitleCostUpdated",
         })
     })

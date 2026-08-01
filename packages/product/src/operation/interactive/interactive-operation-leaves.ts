@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as ExecutionStatus from "../../execution/contract/execution-status"
 import type * as IngestProjectionContract from "../../execution/ingest/execution-projection-contract"
@@ -47,7 +48,7 @@ const projectionVisibleState = (
 
 const recordedShellStreamId = (turnId: Turn.TurnId): string => `recorded-shell:${turnId}`
 
-export const recordedShellStartedEvent = (
+const recordedShellStartedEventImpl = (
   turn: ThreadResult.RunningRecordedShellTurn,
   projection: TranscriptPage.Projection,
 ): InteractiveEvent => ({
@@ -62,7 +63,17 @@ export const recordedShellStartedEvent = (
   units: projection.units,
 })
 
-export const recordedShellSettledEvents = (
+export const recordedShellStartedEvent: {
+  (
+    arg1: TranscriptPage.Projection,
+  ): (arg0: ThreadResult.RunningRecordedShellTurn) => ReturnType<typeof recordedShellStartedEventImpl>
+  (
+    arg0: ThreadResult.RunningRecordedShellTurn,
+    arg1: TranscriptPage.Projection,
+  ): ReturnType<typeof recordedShellStartedEventImpl>
+} = Function.dual(2, recordedShellStartedEventImpl)
+
+const recordedShellSettledEventsImpl = (
   turn: ThreadResult.TerminalRecordedShellTurn,
   projection: TranscriptPage.Projection,
 ): readonly [InteractiveEvent, InteractiveEvent] => {
@@ -93,6 +104,16 @@ export const recordedShellSettledEvents = (
     },
   ]
 }
+
+export const recordedShellSettledEvents: {
+  (
+    arg1: TranscriptPage.Projection,
+  ): (arg0: ThreadResult.TerminalRecordedShellTurn) => ReturnType<typeof recordedShellSettledEventsImpl>
+  (
+    arg0: ThreadResult.TerminalRecordedShellTurn,
+    arg1: TranscriptPage.Projection,
+  ): ReturnType<typeof recordedShellSettledEventsImpl>
+} = Function.dual(2, recordedShellSettledEventsImpl)
 
 export const temporaryThreadTitle = (prompt: string) => clampThreadTitle(prompt) || "New thread"
 

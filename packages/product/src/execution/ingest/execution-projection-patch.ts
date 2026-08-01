@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import * as IngestProjection from "./execution-projection-state"
 import type { ProjectionOrigin, Patch, Snapshot } from "./execution-projection-contract"
 import type { Pipeline } from "./execution-ingest-state"
@@ -24,7 +25,7 @@ export const snapshot = (pipeline: Pipeline): Snapshot => {
   }
 }
 
-export const patch = (pipeline: Pipeline, origin: ProjectionOrigin, visible: VisibleDelta): Patch => {
+const patchImpl = (pipeline: Pipeline, origin: ProjectionOrigin, visible: VisibleDelta): Patch => {
   const root = pipeline.nodes.get(pipeline.rootKey)!
   const baseRevision = pipeline.patchRevision
   pipeline.patchRevision += 1
@@ -40,5 +41,10 @@ export const patch = (pipeline: Pipeline, origin: ProjectionOrigin, visible: Vis
     ...(root.status === undefined ? {} : { rootStatus: root.status }),
   }
 }
+
+export const patch: {
+  (arg1: ProjectionOrigin, arg2: VisibleDelta): (arg0: Pipeline) => ReturnType<typeof patchImpl>
+  (arg0: Pipeline, arg1: ProjectionOrigin, arg2: VisibleDelta): ReturnType<typeof patchImpl>
+} = Function.dual(3, patchImpl)
 
 export const attachmentsFor = (pipeline: Pipeline) => attachments(pipeline)

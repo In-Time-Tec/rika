@@ -5,6 +5,9 @@ import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as ResultDelivery from "../../thread/repository/thread-interaction-result"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
+import * as ThreadInteractionRepository from "@rika/product/thread-interaction-repository"
+import type * as RootTurnOwner from "../../thread/queue/root-turn-owner"
+import { OperationError } from "../operation-error"
 import { Clock, Context, Effect } from "effect"
 
 export const projectedOutcomeStatus = (
@@ -25,24 +28,38 @@ export const makeThreadResultReconciliation =
         dependencyContext,
         isTerminalStatus,
       } = input
+      const typedInteractions: ThreadInteractionRepository.Interface | undefined = threadInteractions
+      const typedContext: Context.Context<TurnRepository.Service | TranscriptRepository.Service> = dependencyContext
+      const typedEnsureIngest: (
+        threadId: Turn.Turn["threadId"],
+        turnId: Turn.Turn["id"],
+      ) => Effect.Effect<void, OperationError, never> = ensureIngest
+      const typedAwaitIngestSettled: (turnId: Turn.Turn["id"]) => Effect.Effect<void, OperationError, never> =
+        awaitIngestSettled
+      const typedRootTurnOwner: RootTurnOwner.Interface = rootTurnOwner
+      const typedIsTerminalStatus: (status: Turn.Turn["status"]) => boolean = isTerminalStatus
       const reconcileThreadResults = Effect.fn("ProductOperation.reconcileThreadResults")(function* () {
-        if (threadInteractions === undefined) return false
-        const turns = Context.get(dependencyContext, TurnRepository.Service)
-        const transcripts = Context.get(dependencyContext, TranscriptRepository.Service)
+        if (typedInteractions === undefined) return false
+        const turns = Context.get(typedContext, TurnRepository.Service)
+        const transcripts = Context.get(typedContext, TranscriptRepository.Service)
         let retry = false
         let after: ResultDelivery.ResultRouteCursor | undefined
         while (true) {
-          const routes = yield* threadInteractions.listUndeliveredResults(100, after)
+          const routes = yield* typedInteractions.listUndeliveredResults(100, after)
           if (routes.length === 0) break
           for (const route of routes) {
             const turn = yield* turns.get(route.targetTurnId)
             if (turn === undefined || !ThreadResult.TurnResult.isAgentExecution(turn)) continue
             let currentRoute = route
-            if (route.delivery === "awaiting-result" && isTerminalStatus(turn.status)) {
+            if (
+              typeof route.delivery === "string" &&
+              route.delivery === "awaiting-result" &&
+              typedIsTerminalStatus(turn.status) === true
+            ) {
               let projection = yield* transcripts.get(turn.id)
               if (turn.status !== "cancelled" || projection !== undefined) {
                 const ingested = yield* Effect.exit(
-                  ensureIngest(turn.threadId, turn.id).pipe(Effect.andThen(awaitIngestSettled(turn.id))),
+                  typedEnsureIngest(turn.threadId, turn.id).pipe(Effect.andThen(typedAwaitIngestSettled(turn.id))),
                 )
                 if (ingested._tag === "Failure") {
                   retry = true
@@ -94,7 +111,7 @@ export const makeThreadResultReconciliation =
                     ...(outcome.reason === undefined ? {} : { reason: outcome.reason }),
                   }
               }
-              const settled = yield* threadInteractions.settleResult({
+              const settled = yield* typedInteractions.settleResult({
                 targetTurnId: turn.id,
                 result,
                 now: yield* Clock.currentTimeMillis,
@@ -103,7 +120,7 @@ export const makeThreadResultReconciliation =
             }
             if (currentRoute.kind !== "reply" || currentRoute.delivery !== "ready") continue
             const delivered = yield* Effect.exit(
-              threadInteractions.deliverResult({
+              typedInteractions.deliverResult({
                 targetTurnId: turn.id,
                 deliveredTurnId: Turn.TurnId.make(`thread-result:${turn.id}`),
                 queueCapacity: pendingTurnCapacity,
@@ -117,7 +134,7 @@ export const makeThreadResultReconciliation =
             const deliveredValue: any = delivered.value
             if (deliveredValue.deliveredTurnId === undefined) continue
             const deliveredTurn = yield* turns.get(deliveredValue.deliveredTurnId)
-            if (deliveredTurn?.status === "accepted") yield* rootTurnOwner.accepted(deliveredTurn.id)
+            if (deliveredTurn?.status === "accepted") yield* typedRootTurnOwner.accepted(deliveredTurn.id)
           }
           const last = routes.at(-1)
           if (last === undefined || routes.length < 100) break

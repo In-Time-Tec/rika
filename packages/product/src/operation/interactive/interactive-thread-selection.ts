@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as Thread from "@rika/product/thread-record"
 import type { ProjectionWatch } from "../../execution/ingest/execution-ingest-watch"
@@ -17,7 +18,7 @@ export type SelectionEpochState = {
   }
 }
 
-export const makeSelectionState = (thread: Thread.Thread, epoch: number): SelectionEpochState => ({
+const makeSelectionStateImpl = (thread: Thread.Thread, epoch: number): SelectionEpochState => ({
   epoch,
   thread,
   loadedKeys: new Set(),
@@ -26,14 +27,36 @@ export const makeSelectionState = (thread: Thread.Thread, epoch: number): Select
   hasOlder: false,
 })
 
-export const isNewerSelectionEpoch = (requested: number, current: number): boolean => requested > current
+export const makeSelectionState: {
+  (arg1: number): (arg0: Thread.Thread) => ReturnType<typeof makeSelectionStateImpl>
+  (arg0: Thread.Thread, arg1: number): ReturnType<typeof makeSelectionStateImpl>
+} = Function.dual(2, makeSelectionStateImpl)
 
-export const selectionMatches = (
+const isNewerSelectionEpochImpl = (requested: number, current: number): boolean => requested > current
+
+export const isNewerSelectionEpoch: {
+  (arg1: number): (arg0: number) => ReturnType<typeof isNewerSelectionEpochImpl>
+  (arg0: number, arg1: number): ReturnType<typeof isNewerSelectionEpochImpl>
+} = Function.dual(2, isNewerSelectionEpochImpl)
+
+const selectionMatchesImpl = (
   state: SelectionEpochState | undefined,
   threadId: Thread.ThreadId | string,
   epoch: number,
 ): state is SelectionEpochState =>
   state !== undefined && String(state.thread.id) === String(threadId) && state.epoch === epoch
+
+export const selectionMatches: {
+  (
+    arg1: Thread.ThreadId | string,
+    arg2: number,
+  ): (arg0: SelectionEpochState | undefined) => ReturnType<typeof selectionMatchesImpl>
+  (
+    arg0: SelectionEpochState | undefined,
+    arg1: Thread.ThreadId | string,
+    arg2: number,
+  ): ReturnType<typeof selectionMatchesImpl>
+} = Function.dual(3, selectionMatchesImpl)
 
 export const selectionThreadId = (state: SelectionEpochState | undefined): string | undefined =>
   state === undefined ? undefined : String(state.thread.id)

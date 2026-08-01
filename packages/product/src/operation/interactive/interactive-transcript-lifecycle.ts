@@ -1,7 +1,9 @@
 import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
-import { Clock, Effect, Fiber, Ref } from "effect"
+import * as UsageRepository from "@rika/product/usage-repository"
+import { OperationError } from "../operation-error"
+import { Context, Clock, Effect, Fiber, Ref, Scope, Semaphore } from "effect"
 import { makeSelectionState, type SelectionEpochState } from "./interactive-thread-selection"
 
 export const makeInteractiveTranscriptLifecycle = (input: any) => {
@@ -27,13 +29,32 @@ export const makeInteractiveTranscriptLifecycle = (input: any) => {
     sessionDispatch,
     interruptSelectionBackground,
   } = input
+  const typedUsageRepository: UsageRepository.Interface = usageRepository
+  const typedExecutionDependencies: Context.Context<
+    UsageRepository.Service | ThreadRepository.Service | ThreadSummaryRepository.Service
+  > = executionDependencies
+  const typedSessionScope: Scope.Scope = sessionScope
+  const typedGetActiveSelectionState: () => SelectionEpochState | undefined = getActiveSelectionState
+  const typedSelectionRequest: Ref.Ref<number> = selectionRequest
+  const typedTranscriptPageAdmission: Semaphore.Semaphore = transcriptPageAdmission
+  const typedNotifyThreadSummaries: Effect.Effect<void, OperationError, never> = notifyThreadSummaries
+  const typedLoadTranscriptPage = (
+    state: SelectionEpochState,
+    dispatch: (event: any) => void,
+  ): Effect.Effect<void, OperationError, never> => input.loadTranscriptPage(state, dispatch)
+  const typedOpenSelectionProjectionFeed: (state: SelectionEpochState) => Effect.Effect<void, OperationError, never> =
+    openSelectionProjectionFeed
+  const typedCloseCandidateProjectionFeed: (state: SelectionEpochState) => Effect.Effect<void, OperationError, never> =
+    closeCandidateProjectionFeed
+  const typedInterruptSelectionLoad: Effect.Effect<void, OperationError, never> = interruptSelectionLoad
+  const typedSetSelectionLoadFiber: (fiber: Fiber.Fiber<unknown, unknown>) => void = setSelectionLoadFiber
   const startSelectionUsage = (state: SelectionEpochState, dispatch: (event: any) => void) =>
     Effect.gen(function* () {
       selectionBackground.push(
         yield* Effect.forkIn(
           Effect.gen(function* () {
-            const totals = yield* usageRepository.readThread(String(state.thread.id))
-            if (getActiveSelectionState() !== state) return
+            const totals = yield* typedUsageRepository.readThread(String(state.thread.id))
+            if (typedGetActiveSelectionState() !== state) return
             dispatch({
               _tag: "ThreadUsageUpdated",
               selectionEpoch: state.epoch,
@@ -41,8 +62,8 @@ export const makeInteractiveTranscriptLifecycle = (input: any) => {
               revision: totals.revision,
               ...input.persistedThreadUsage(totals),
             })
-          }).pipe(Effect.provide(executionDependencies)),
-          sessionScope,
+          }).pipe(Effect.provide(typedExecutionDependencies)),
+          typedSessionScope,
         ),
       )
     })
@@ -51,33 +72,33 @@ export const makeInteractiveTranscriptLifecycle = (input: any) => {
     request: number,
     dispatch: (event: any) => void,
   ) {
-    if ((yield* Ref.get(selectionRequest)) !== request) return
+    if ((yield* Ref.get(typedSelectionRequest)) !== request) return
     const state = makeSelectionState(thread, request)
     setCandidateSelectionState(state)
-    yield* openSelectionProjectionFeed(state)
+    yield* typedOpenSelectionProjectionFeed(state)
     yield* Effect.gen(function* () {
-      yield* transcriptPageAdmission.withPermits(1)(input.loadTranscriptPage(state, dispatch))
-      if (getActiveSelectionState() !== state) return
+      yield* typedTranscriptPageAdmission.withPermits(1)(typedLoadTranscriptPage(state, dispatch))
+      if (typedGetActiveSelectionState() !== state) return
       const summaries = yield* ThreadSummaryRepository.Service
       yield* summaries.markRead(thread.id, yield* Clock.currentTimeMillis)
-      yield* notifyThreadSummaries
-    }).pipe(Effect.ensuring(closeCandidateProjectionFeed(state)))
+      yield* typedNotifyThreadSummaries
+    }).pipe(Effect.ensuring(typedCloseCandidateProjectionFeed(state).pipe(Effect.ignore)))
   })
   const runThreadLoad = Effect.fn("ProductOperation.interactive.runThreadLoad")(function* (
     thread: Thread.Thread,
     request: number,
     dispatch: (event: any) => void,
   ) {
-    yield* interruptSelectionLoad
-    if ((yield* Ref.get(selectionRequest)) !== request) return
+    yield* typedInterruptSelectionLoad
+    if ((yield* Ref.get(typedSelectionRequest)) !== request) return
     const fiber = yield* Effect.forkIn(
-      loadThread(thread, request, dispatch).pipe(Effect.provide(executionDependencies)),
-      sessionScope,
+      loadThread(thread, request, dispatch).pipe(Effect.provide(typedExecutionDependencies)),
+      typedSessionScope,
     )
-    setSelectionLoadFiber(fiber)
+    typedSetSelectionLoadFiber(fiber)
     yield* Fiber.join(fiber).pipe(
       Effect.catchCause((cause) =>
-        Ref.get(selectionRequest).pipe(
+        Ref.get(typedSelectionRequest).pipe(
           Effect.flatMap((current) => (current === request ? Effect.failCause(cause) : Effect.void)),
         ),
       ),
@@ -86,7 +107,7 @@ export const makeInteractiveTranscriptLifecycle = (input: any) => {
   const createAndSelectThread = Effect.fn("ProductOperation.interactive.createAndSelectThread")(function* () {
     setActiveSelectionState(undefined)
     setCandidateSelectionState(undefined)
-    yield* interruptSelectionLoad
+    yield* typedInterruptSelectionLoad
     yield* interruptSelectionBackground
     const threads = yield* ThreadRepository.Service
     const thread = yield* threads.create({
@@ -99,7 +120,7 @@ export const makeInteractiveTranscriptLifecycle = (input: any) => {
     setSelectionLoad(undefined)
     yield* Ref.set(selectionRequest, epoch)
     yield* activateCreatedThread(thread, epoch, sessionDispatch)
-    yield* notifyThreadSummaries
+    yield* typedNotifyThreadSummaries
   })
   return { startSelectionUsage, loadThread, runThreadLoad, createAndSelectThread }
 }

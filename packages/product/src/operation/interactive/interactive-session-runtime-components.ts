@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import * as TurnRepository from "@rika/product/turn-repository"
 import { Context } from "effect"
 import { makeInteractiveExecution } from "./interactive-session-execution"
@@ -6,7 +7,7 @@ import { makeInteractiveTranscript } from "./interactive-session-transcript-runt
 import { makeInteractiveSupervision } from "./interactive-session-supervision"
 import { makeInteractiveControl } from "./interactive-control"
 
-export const makeInteractiveExecutionComponents = (input: any, state: any) => {
+const makeInteractiveExecutionComponentsImpl = (input: any, state: any) => {
   const execution = makeInteractiveExecution({
     ...input,
     ...state,
@@ -46,7 +47,12 @@ export const makeInteractiveExecutionComponents = (input: any, state: any) => {
   return execution
 }
 
-export const makeInteractiveFollowingComponents = (input: any, execution: any) =>
+export const makeInteractiveExecutionComponents: {
+  (arg1: any): (arg0: any) => ReturnType<typeof makeInteractiveExecutionComponentsImpl>
+  (arg0: any, arg1: any): ReturnType<typeof makeInteractiveExecutionComponentsImpl>
+} = Function.dual(2, makeInteractiveExecutionComponentsImpl)
+
+const makeInteractiveFollowingComponentsImpl = (input: any, execution: any) =>
   makeInteractiveFollowing({
     rootTurnOwner: input.rootTurnOwner,
     ensureIngest: input.ensureIngest,
@@ -61,7 +67,12 @@ export const makeInteractiveFollowingComponents = (input: any, execution: any) =
     emit: input.emit,
   })
 
-export const makeInteractiveTranscriptComponents = (input: any, state: any) =>
+export const makeInteractiveFollowingComponents: {
+  (arg1: any): (arg0: any) => ReturnType<typeof makeInteractiveFollowingComponentsImpl>
+  (arg0: any, arg1: any): ReturnType<typeof makeInteractiveFollowingComponentsImpl>
+} = Function.dual(2, makeInteractiveFollowingComponentsImpl)
+
+const makeInteractiveTranscriptComponentsImpl = (input: any, state: any) =>
   makeInteractiveTranscript({
     ...input,
     ...state,
@@ -73,7 +84,12 @@ export const makeInteractiveTranscriptComponents = (input: any, state: any) =>
     dispatchFailure: state.dispatchFailure,
   })
 
-export const makeInteractiveSupervisionComponents = (input: any, state: any, following: any, execution: any) => {
+export const makeInteractiveTranscriptComponents: {
+  (arg1: any): (arg0: any) => ReturnType<typeof makeInteractiveTranscriptComponentsImpl>
+  (arg0: any, arg1: any): ReturnType<typeof makeInteractiveTranscriptComponentsImpl>
+} = Function.dual(2, makeInteractiveTranscriptComponentsImpl)
+
+const makeInteractiveSupervisionComponentsImpl = (input: any, state: any, following: any, execution: any) => {
   const supervise = makeInteractiveSupervision({
     acquiredBackend: input.acquiredBackend,
     executionDependencies: input.executionDependencies,
@@ -107,3 +123,8 @@ export const makeInteractiveSupervisionComponents = (input: any, state: any, fol
   })
   return { supervise, nextSteeringIdentity, control }
 }
+
+export const makeInteractiveSupervisionComponents: {
+  (arg1: any, arg2: any, arg3: any): (arg0: any) => ReturnType<typeof makeInteractiveSupervisionComponentsImpl>
+  (arg0: any, arg1: any, arg2: any, arg3: any): ReturnType<typeof makeInteractiveSupervisionComponentsImpl>
+} = Function.dual(4, makeInteractiveSupervisionComponentsImpl)

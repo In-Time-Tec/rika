@@ -2,6 +2,7 @@ import * as ThreadInteractionRepository from "@rika/product/thread-interaction-r
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as ExecutionStatus from "../../execution/contract/execution-status"
 import { Effect, Context } from "effect"
+import { operationError } from "../operation-error"
 import { makeExecutionLifecycle } from "./product-operation-execution-lifecycle"
 import { makeExecutionProjection } from "./product-operation-execution-projection"
 import { makeExecutionReview } from "./product-operation-execution-review"
@@ -43,4 +44,4 @@ export const makeProductOperationExecution = (
       isTerminalStatus: ExecutionStatus.isTerminalStatus,
     })
     return { ...lifecycle, ...projection, ...review, ...context, reconcileThreadResults }
-  }).pipe(Effect.mapError((error) => new Error(String(error))))
+  }).pipe(Effect.mapError((error) => operationError(String(error), error)))

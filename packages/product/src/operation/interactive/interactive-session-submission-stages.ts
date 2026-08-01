@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
@@ -5,17 +6,18 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionRequest from "@rika/product/execution-request"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ThreadActivity from "../../thread/query/thread-activity"
-import { Cause, Clock, Effect, Ref } from "effect"
+import { Context, Cause, Clock, Effect, Ref, Semaphore } from "effect"
 import { admitInteractiveTurn } from "./interactive-turn-submission"
-import { failureKind, operationError } from "../operation-error"
+import { OperationError, failureKind, operationError } from "../operation-error"
 import type { ModeId } from "@rika/configuration/behavior-mode"
 import type { InteractiveEvent } from "./interactive-event"
 
 const emitEvent = (input: any, dispatch: (event: InteractiveEvent) => void, event: InteractiveEvent) =>
   input.emit(dispatch, event)
 
-export const admitInteractiveSubmission = (
+const admitInteractiveSubmissionImpl = (
   input: any,
   thread: Thread.Thread,
   prompt: string,
@@ -33,14 +35,23 @@ export const admitInteractiveSubmission = (
     resolveExecutionRoute,
     ensureTurnSummary,
   } = input
+  const typedAdmission: Semaphore.Semaphore = turnMutationAdmission
+  const typedResolveExecutionRoute: (
+    mode: ModeId,
+    tuning: { readonly fastMode?: boolean } | undefined,
+    workspace: string,
+  ) => Effect.Effect<ExecutionRouteSnapshot.ExecutionRouteSnapshot, OperationError, never> = resolveExecutionRoute
+  const typedEnsureTurnSummary: (turn: Turn.Turn) => Effect.Effect<void, OperationError, never> = ensureTurnSummary
+  const typedMakeTurnId: Effect.Effect<Turn.TurnId, never, never> = options.makeTurnId
+  const typedRootTurnOwner: import("../../thread/queue/root-turn-owner").Interface = rootTurnOwner
   return Effect.gen(function* () {
     const turns = (yield* TurnRepository.Service) as TurnRepository.Interface
-    const executionRoute = yield* resolveExecutionRoute(mode, modelTuning, thread.workspace)
-    const observed = yield* turnMutationAdmission.withPermits(1)(
+    const executionRoute = yield* typedResolveExecutionRoute(mode, modelTuning, thread.workspace)
+    const observed = yield* typedAdmission.withPermits(1)(
       admitInteractiveTurn({
         turns,
         submission: {
-          id: yield* options.makeTurnId,
+          id: yield* typedMakeTurnId,
           threadId: thread.id,
           prompt,
           ...(promptParts === undefined ? {} : { promptParts }),
@@ -48,12 +59,15 @@ export const admitInteractiveSubmission = (
           queueCapacity: pendingTurnCapacity,
           now: yield* Clock.currentTimeMillis,
         },
-        claim: rootTurnOwner.claim,
+        claim: (turnId, status) =>
+          typedRootTurnOwner
+            .claim(turnId, status)
+            .pipe(Effect.mapError((error) => operationError(String(error), error))),
       }),
     )
-    if (observed.turn.status !== "queued" && !observed.claimed)
+    if (observed.turn.status !== "queued" && observed.claimed !== true)
       return yield* operationError(`Turn ${observed.turn.id} already has an execution observer`)
-    yield* ensureTurnSummary(observed.turn)
+    yield* typedEnsureTurnSummary(observed.turn)
     emitEvent(input, dispatch, {
       _tag: "SubmissionAdmitted",
       selectionEpoch: 0,
@@ -66,7 +80,29 @@ export const admitInteractiveSubmission = (
   })
 }
 
-export const settleInteractiveSubmission = (input: any, state: any) => {
+export const admitInteractiveSubmission: {
+  (
+    arg1: Thread.Thread,
+    arg2: string,
+    arg3: ModeId,
+    arg4: { readonly fastMode?: boolean } | undefined,
+    arg5: ReadonlyArray<ExecutionRequest.PromptPart> | undefined,
+    arg6: (event: InteractiveEvent) => void,
+    arg7?: string,
+  ): (arg0: any) => ReturnType<typeof admitInteractiveSubmissionImpl>
+  (
+    arg0: any,
+    arg1: Thread.Thread,
+    arg2: string,
+    arg3: ModeId,
+    arg4: { readonly fastMode?: boolean } | undefined,
+    arg5: ReadonlyArray<ExecutionRequest.PromptPart> | undefined,
+    arg6: (event: InteractiveEvent) => void,
+    arg7?: string,
+  ): ReturnType<typeof admitInteractiveSubmissionImpl>
+} = Function.dual(8, admitInteractiveSubmissionImpl)
+
+const settleInteractiveSubmissionImpl = (input: any, state: any) => {
   const {
     setTurnStatus,
     deliverResultEvents,
@@ -76,12 +112,35 @@ export const settleInteractiveSubmission = (input: any, state: any) => {
     titleThread,
     executionStartFailureMessage,
   } = input
+  const typedSetTurnStatus: (
+    id: Turn.TurnId,
+    status: import("@rika/product/execution-status").Status,
+    cursor: string | undefined,
+    now: number,
+  ) => Effect.Effect<Turn.Turn, OperationError, never> = setTurnStatus
+  const typedProjectExecutionResult: (
+    threadId: Turn.Turn["threadId"],
+    result: ExecutionEvent.Result,
+  ) => Effect.Effect<void, OperationError, never> = projectExecutionResult
+  const typedEnsureIngest: (
+    threadId: Turn.Turn["threadId"],
+    turnId: Turn.Turn["id"],
+  ) => Effect.Effect<void, OperationError, never> = ensureIngest
+  const typedSettleThread: (
+    thread: Thread.Thread,
+    dispatch: (event: InteractiveEvent) => void,
+  ) => Effect.Effect<void, OperationError, never> = settleThread
+  const typedTitleThread: (
+    thread: Thread.Thread,
+    turn: Turn.Turn,
+    dispatch: (event: InteractiveEvent) => void,
+  ) => Effect.Effect<void, OperationError, never> = titleThread
   const { thread, turn, outcome, deliveredCursors, dispatch } = state
   return Effect.uninterruptible(
     Effect.gen(function* () {
       if (outcome._tag === "Failure") {
         if (Cause.hasInterruptsOnly(outcome.cause)) return
-        yield* setTurnStatus(turn.id, "failed", turn.lastCursor, yield* Clock.currentTimeMillis)
+        yield* typedSetTurnStatus(turn.id, "failed", turn.lastCursor, yield* Clock.currentTimeMillis)
         emitEvent(input, dispatch, {
           _tag: "ExecutionFailed",
           selectionEpoch: 0,
@@ -92,28 +151,28 @@ export const settleInteractiveSubmission = (input: any, state: any) => {
         return
       }
       const result = outcome.value
-      if (result === undefined) return yield* settleThread(thread, dispatch)
+      if (result === undefined) return yield* typedSettleThread(thread, dispatch)
       deliverResultEvents(turn.id, result.events, deliveredCursors)
-      const updated = yield* setTurnStatus(
+      const updated = yield* typedSetTurnStatus(
         turn.id,
         result.status,
         result.checkpoint?.cursor ?? ThreadActivity.latestCursor(turn.id, result.events) ?? turn.lastCursor,
         yield* Clock.currentTimeMillis,
       )
-      yield* projectExecutionResult(thread.id, result)
-      yield* ensureIngest(updated.threadId, updated.id)
+      yield* typedProjectExecutionResult(thread.id, result)
+      yield* typedEnsureIngest(updated.threadId, updated.id)
       if (result.status === "completed") {
-        yield* settleThread(thread, dispatch)
+        yield* typedSettleThread(thread, dispatch)
         if (turn.id === (yield* (yield* TurnRepository.Service).list(thread.id))[0]?.id)
           yield* Effect.interruptible(
-            titleThread(thread, updated, (event: InteractiveEvent) => emitEvent(input, dispatch, event)),
+            typedTitleThread(thread, updated, (event: InteractiveEvent) => emitEvent(input, dispatch, event)),
           )
         return
       }
       if (result.status === "waiting" || result.status === "running" || result.status === "queued") return
       if (
         result.status === "failed" &&
-        !result.events.some((event: ExecutionEvent.Event) => event.type === "execution.failed")
+        result.events.some((event: ExecutionEvent.Event) => event.type === "execution.failed") === false
       )
         emitEvent(input, dispatch, {
           _tag: "ExecutionFailed",
@@ -122,12 +181,17 @@ export const settleInteractiveSubmission = (input: any, state: any) => {
           turnId: turn.id,
           message: `Execution ${result.status}`,
         })
-      if (result.status !== "failed") yield* settleThread(thread, dispatch)
+      if (result.status !== "failed") yield* typedSettleThread(thread, dispatch)
     }),
   )
 }
 
-export const executeInteractiveSubmission = (
+export const settleInteractiveSubmission: {
+  (arg1: any): (arg0: any) => ReturnType<typeof settleInteractiveSubmissionImpl>
+  (arg0: any, arg1: any): ReturnType<typeof settleInteractiveSubmissionImpl>
+} = Function.dual(2, settleInteractiveSubmissionImpl)
+
+const executeInteractiveSubmissionImpl = (
   input: any,
   thread: Thread.Thread,
   turn: Turn.AgentExecutionTurn,
@@ -148,19 +212,54 @@ export const executeInteractiveSubmission = (
     notifyTurnChanged,
     queueMutationEvent,
   } = input
+  const typedAwaitSessionQuiescence: (
+    backend: ExecutionBackend.Interface,
+    threadId: Turn.Turn["threadId"],
+  ) => Effect.Effect<Turn.Turn | undefined, OperationError, never> = awaitSessionQuiescence
+  const typedPrepareExecution: (
+    turn: Turn.AgentExecutionTurn,
+    workspace: string,
+  ) => Effect.Effect<
+    {
+      readonly prompt: string
+      readonly promptParts?: ReadonlyArray<ExecutionRequest.PromptPart>
+      readonly extensionPin?: Turn.AgentExecutionTurn["extensionPin"]
+      readonly messages: ReadonlyArray<string>
+    },
+    OperationError,
+    never
+  > = prepareExecution
+  const typedSetTurnStatus: (
+    id: Turn.TurnId,
+    status: import("@rika/product/execution-status").Status,
+    cursor: string | undefined,
+    now: number,
+  ) => Effect.Effect<Turn.Turn, OperationError, never> = setTurnStatus
+  const typedEnsureIngest: (
+    threadId: Turn.Turn["threadId"],
+    turnId: Turn.Turn["id"],
+  ) => Effect.Effect<void, OperationError, never> = ensureIngest
+  const typedRootTurnOwner: import("../../thread/queue/root-turn-owner").Interface = rootTurnOwner
+  const typedExecutionDependencies: Context.Context<ExecutionBackend.Service | TurnRepository.Service> =
+    executionDependencies
+  const typedReleaseTurnObserver: (turnId: Turn.TurnId) => Effect.Effect<void, OperationError, never> =
+    releaseTurnObserver
+  const typedNotifyTurnChanged: (
+    turn: Pick<Turn.Turn, "id" | "threadId">,
+  ) => Effect.Effect<void, OperationError, never> = notifyTurnChanged
   return Effect.gen(function* () {
     const backend = yield* ExecutionBackend.Service
     const startedAt = yield* Clock.currentTimeMillis
     const deliveredCursors = new Set<string>()
     const outcome = yield* Effect.exit(
       Effect.gen(function* () {
-        if ((yield* awaitSessionQuiescence(backend, thread.id)) !== undefined) {
+        if ((yield* typedAwaitSessionQuiescence(backend, thread.id)) !== undefined) {
           const turns = (yield* TurnRepository.Service) as TurnRepository.Interface
           const requeued = yield* turns.requeueAccepted(turn.id, pendingTurnCapacity, yield* Clock.currentTimeMillis)
           emitEvent(input, dispatch, queueMutationEvent(requeued.queue))
           return undefined
         }
-        const prepared = yield* prepareExecution(turn, thread.workspace)
+        const prepared = yield* typedPrepareExecution(turn, thread.workspace)
         if (prepared.messages.length > 0)
           emitEvent(input, dispatch, {
             _tag: "ContextDiagnostics",
@@ -169,7 +268,7 @@ export const executeInteractiveSubmission = (
             turnId: turn.id,
             messages: prepared.messages,
           })
-        const running = yield* setTurnStatus(turn.id, "running", turn.lastCursor, startedAt)
+        const running = yield* typedSetTurnStatus(turn.id, "running", turn.lastCursor, startedAt)
         if (running.status !== "running") return undefined
         emitEvent(input, dispatch, {
           _tag: "TurnStarted",
@@ -178,8 +277,8 @@ export const executeInteractiveSubmission = (
           turn: running,
           ...(submissionId === undefined ? {} : { submissionId }),
         })
-        yield* ensureIngest(thread.id, turn.id)
-        return yield* rootTurnOwner.start({
+        yield* typedEnsureIngest(thread.id, turn.id)
+        return yield* typedRootTurnOwner.start({
           threadId: thread.id,
           turnId: turn.id,
           prompt: prepared.prompt,
@@ -197,7 +296,7 @@ export const executeInteractiveSubmission = (
     )
     yield* settleInteractiveSubmission(input, { thread, turn, outcome, deliveredCursors, dispatch })
   }).pipe(
-    Effect.provide(executionDependencies),
+    Effect.provide(typedExecutionDependencies),
     Effect.scoped,
     Effect.tapCause((cause) =>
       Cause.hasInterruptsOnly(cause)
@@ -207,9 +306,29 @@ export const executeInteractiveSubmission = (
           ),
     ),
     Effect.catch((error) => Effect.sync(() => dispatchFailure(dispatch, error))),
-    Effect.ensuring(releaseTurnObserver(turn.id).pipe(Effect.andThen(notifyTurnChanged(turn)))),
+    Effect.ensuring(
+      typedReleaseTurnObserver(turn.id).pipe(Effect.andThen(typedNotifyTurnChanged(turn)), Effect.ignore),
+    ),
   )
 }
+
+export const executeInteractiveSubmission: {
+  (
+    arg1: Thread.Thread,
+    arg2: Turn.AgentExecutionTurn,
+    arg3: { readonly fastMode?: boolean } | undefined,
+    arg4: (event: InteractiveEvent) => void,
+    arg5?: string,
+  ): (arg0: any) => ReturnType<typeof executeInteractiveSubmissionImpl>
+  (
+    arg0: any,
+    arg1: Thread.Thread,
+    arg2: Turn.AgentExecutionTurn,
+    arg3: { readonly fastMode?: boolean } | undefined,
+    arg4: (event: InteractiveEvent) => void,
+    arg5?: string,
+  ): ReturnType<typeof executeInteractiveSubmissionImpl>
+} = Function.dual(6, executeInteractiveSubmissionImpl)
 
 export const submitInteractiveOperation = (input: any) => {
   const {
@@ -225,6 +344,15 @@ export const submitInteractiveOperation = (input: any) => {
     notifyTurnChanged,
     queueMutationEvent,
   } = input
+  const typedSubmissionAdmission: Semaphore.Semaphore = submissionAdmission
+  const typedSubmitExecutionDependencies: Context.Context<
+    ThreadRepository.Service | TurnRepository.Service | ExecutionBackend.Service
+  > = executionDependencies
+  const typedSubmitReleaseTurnObserver: (turnId: Turn.TurnId) => Effect.Effect<void, OperationError, never> =
+    releaseTurnObserver
+  const typedSubmitNotifyTurnChanged: (
+    turn: Pick<Turn.Turn, "id" | "threadId">,
+  ) => Effect.Effect<void, OperationError, never> = notifyTurnChanged
   const submit = Effect.fn("ProductOperation.interactive.submit")(function* (
     prompt: string,
     dispatch: (event: InteractiveEvent) => void,
@@ -235,30 +363,39 @@ export const submitInteractiveOperation = (input: any) => {
   ) {
     let observerTurn: Turn.Turn | undefined
     let executionLaunched = false
+    const typedInteractiveThread: Ref.Ref<Thread.Thread | undefined> = input.interactiveThread
+    const typedMakeThreadId: Effect.Effect<Thread.ThreadId, never, never> = options.makeThreadId
+    const typedTemporaryThreadTitle: (prompt: string) => string = temporaryThreadTitle
+    const typedActivateCreatedThread: (
+      thread: Thread.Thread,
+      epoch: number,
+      dispatch: (event: InteractiveEvent) => void,
+    ) => Effect.Effect<void, OperationError, never> = input.activateCreatedThread
+    const typedNotifyThreadSummaries: Effect.Effect<void, OperationError, never> = notifyThreadSummaries
     const program = Effect.gen(function* () {
       const threads = (yield* ThreadRepository.Service) as ThreadRepository.Interface
-      let thread = (yield* Ref.get(input.interactiveThread)) as Thread.Thread | undefined
+      let thread = (yield* Ref.get(typedInteractiveThread)) as Thread.Thread | undefined
       if (thread === undefined) {
         thread = yield* threads.create({
-          id: yield* options.makeThreadId,
+          id: yield* typedMakeThreadId,
           workspace,
-          title: temporaryThreadTitle(prompt),
+          title: typedTemporaryThreadTitle(prompt),
           now: yield* Clock.currentTimeMillis,
         })
-        yield* input.activateCreatedThread(thread, input.getCurrentSelectionEpoch(), dispatch)
+        yield* typedActivateCreatedThread(thread, input.getCurrentSelectionEpoch(), dispatch)
       }
       const turns = (yield* TurnRepository.Service) as TurnRepository.Interface
       if (thread.title === "New thread" && (yield* turns.list(thread.id)).length === 1) {
         const renamed = yield* threads.renameIfTitle(
           thread.id,
           "New thread",
-          temporaryThreadTitle(prompt),
+          typedTemporaryThreadTitle(prompt),
           yield* Clock.currentTimeMillis,
         )
         if (renamed !== undefined) {
           thread = renamed
           emitEvent(input, dispatch, { _tag: "ThreadTitled", threadId: String(thread.id), title: thread.title })
-          yield* notifyThreadSummaries
+          yield* typedNotifyThreadSummaries
         }
       }
       const admitted = yield* admitInteractiveSubmission(
@@ -295,17 +432,20 @@ export const submitInteractiveOperation = (input: any) => {
       )
       executionLaunched = true
     })
-    yield* submissionAdmission
+    yield* typedSubmissionAdmission
       .withPermits(1)(program)
       .pipe(
-        Effect.provide(executionDependencies),
+        Effect.provide(typedSubmitExecutionDependencies),
         Effect.scoped,
         Effect.catch((error) => Effect.sync(() => dispatchFailure(dispatch, error))),
         Effect.ensuring(
           Effect.suspend(() =>
             observerTurn === undefined || executionLaunched
               ? Effect.void
-              : releaseTurnObserver(observerTurn!.id).pipe(Effect.andThen(notifyTurnChanged(observerTurn!))),
+              : typedSubmitReleaseTurnObserver(observerTurn!.id).pipe(
+                  Effect.andThen(typedSubmitNotifyTurnChanged(observerTurn!)),
+                  Effect.ignore,
+                ),
           ),
         ),
       )

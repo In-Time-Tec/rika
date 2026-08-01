@@ -5,9 +5,10 @@ import * as ThreadRepository from "@rika/product/thread-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
-import { operationError } from "../operation-error"
+import { OperationError, operationError } from "../operation-error"
+import { OperationUnavailable } from "../contract/product-operation"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import { Effect, Ref } from "effect"
+import { Context, Effect, Ref, Semaphore } from "effect"
 import { isNewerSelectionEpoch, selectionMatches } from "./interactive-thread-selection"
 import type { InteractiveSession } from "./interactive-session"
 
@@ -17,41 +18,84 @@ export const makeInteractiveSessionSelection = (
   InteractiveSession,
   "selectThread" | "readQueue" | "loadOlder" | "loadNewer" | "previewThread" | "reopenThread"
 > => {
+  const typedSelectionAdmission: Semaphore.Semaphore = input.selectionAdmission
+  const typedSelectionRequest: Ref.Ref<number> = input.selectionRequest
+  const typedInteractiveThread: Ref.Ref<Thread.Thread | undefined> = input.interactiveThread
+  const typedTranscriptPageAdmission: Semaphore.Semaphore = input.transcriptPageAdmission
+  const typedExecutionDependencies: Context.Context<
+    | ThreadRepository.Service
+    | TurnRepository.Service
+    | TranscriptRepository.Service
+    | ThreadSummaryRepository.Service
+    | ExecutionBackend.Service
+  > = input.executionDependencies
+  const typedRunThreadLoad: (
+    thread: Thread.Thread,
+    epoch: number,
+    dispatch: (event: import("./interactive-event").InteractiveEvent) => void,
+  ) => Effect.Effect<void, OperationUnavailable, never> = input.runThreadLoad
+  const typedLoadTranscriptPage: (
+    state: import("./interactive-thread-selection").SelectionEpochState,
+    dispatch: (event: import("./interactive-event").InteractiveEvent) => void,
+    before?: TranscriptPage.PageCursor,
+    loadedKeys?: ReadonlySet<string>,
+  ) => Effect.Effect<void, OperationUnavailable, never> = input.loadTranscriptPage
+  const safe: <A, E, R>(
+    dispatch: (event: import("./interactive-event").InteractiveEvent) => void,
+    effect: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, OperationUnavailable, never> = input.safe
+  const typedGetSelectionLoad: () =>
+    | {
+        readonly epoch: number
+        readonly threadId: string
+        readonly events: ReadonlyArray<import("./interactive-event").InteractiveEvent>
+        readonly committed: boolean
+        readonly overflow?: unknown
+      }
+    | undefined = input.getSelectionLoad
+  const typedSetSelectionLoad: (value: {
+    readonly epoch: number
+    readonly threadId: string
+    readonly previousEpoch: number
+    readonly previousThreadId: string | undefined
+    readonly events: ReadonlyArray<import("./interactive-event").InteractiveEvent>
+    committed: boolean
+  }) => void = input.setSelectionLoad
+  const typedGetCurrentSelectionEpoch: () => number = input.getCurrentSelectionEpoch
+  const typedFinishSelection: (epoch: number) => Effect.Effect<void, OperationError, never> = input.finishSelection
   const selectThread = (id: string, epoch: number) =>
-    input.safe(
+    safe(
       input.sessionDispatch,
       Effect.gen(function* () {
-        const admitted = yield* input.selectionAdmission.withPermits(1)(
+        const admitted = yield* typedSelectionAdmission.withPermits(1)(
           Effect.gen(function* () {
-            if (!isNewerSelectionEpoch(epoch, (yield* Ref.get(input.selectionRequest)) as number)) return false
-            const previous = (yield* Ref.get(input.interactiveThread)) as Thread.Thread | undefined
-            const joined =
-              input.getSelectionLoad()?.epoch === 0 && input.getSelectionLoad().threadId === id
-                ? input.getSelectionLoad()
-                : undefined
-            input.setSelectionLoad({
+            if (!isNewerSelectionEpoch(epoch, (yield* Ref.get(typedSelectionRequest)) as number)) return false
+            const previous = (yield* Ref.get(typedInteractiveThread)) as Thread.Thread | undefined
+            const loaded = typedGetSelectionLoad()
+            const joined = loaded?.epoch === 0 && loaded.threadId === id ? loaded : undefined
+            typedSetSelectionLoad({
               epoch,
               threadId: id,
-              previousEpoch: input.getCurrentSelectionEpoch(),
+              previousEpoch: typedGetCurrentSelectionEpoch(),
               previousThreadId: previous === undefined ? undefined : String(previous.id),
               events: joined?.events ?? [],
               committed: false,
               ...(joined?.overflow === undefined ? {} : { overflow: joined.overflow }),
             })
-            yield* Ref.set(input.selectionRequest, epoch)
+            yield* Ref.set(typedSelectionRequest, epoch)
             return true
           }),
         )
-        if (!admitted) return
+        if (admitted !== true) return
         const thread = yield* (yield* ThreadRepository.Service).get(Thread.ThreadId.make(id))
         if (thread === undefined) return yield* operationError(`Thread ${id} does not exist`)
-        yield* input.runThreadLoad(thread, epoch, input.selectionDispatch(epoch))
-      }).pipe(Effect.ensuring(input.finishSelection(epoch))),
+        yield* typedRunThreadLoad(thread, epoch, input.selectionDispatch(epoch))
+      }).pipe(Effect.ensuring(typedFinishSelection(epoch).pipe(Effect.ignore))),
     )
   const readQueue = (id: string) =>
-    input.safe(
+    safe(
       input.sessionDispatch,
-      input.readQueue(Thread.ThreadId.make(id), input.selectionDispatch(input.getCurrentSelectionEpoch())),
+      input.readQueue(Thread.ThreadId.make(id), input.selectionDispatch(typedGetCurrentSelectionEpoch())),
     )
   const loadOlder = (
     threadId: string,
@@ -59,25 +103,25 @@ export const makeInteractiveSessionSelection = (
     before: TranscriptPage.PageCursor | undefined,
     loadedKeys: ReadonlyArray<string>,
   ) =>
-    input.safe(
+    safe(
       input.sessionDispatch,
       Effect.gen(function* () {
         const state = input.getActiveSelectionState()
         if (!selectionMatches(state, threadId, epoch)) return
-        yield* input.transcriptPageAdmission.withPermits(1)(
-          input.loadTranscriptPage(state, input.selectionDispatch(state.epoch), before, new Set(loadedKeys)),
+        yield* typedTranscriptPageAdmission.withPermits(1)(
+          typedLoadTranscriptPage(state, input.selectionDispatch(state.epoch), before, new Set(loadedKeys)),
         )
       }),
     )
   const loadNewer = (threadId: string, epoch: number, after: TranscriptPage.PageCursor) =>
-    input.safe(
+    safe(
       input.sessionDispatch,
-      input.transcriptPageAdmission.withPermits(1)(
+      typedTranscriptPageAdmission.withPermits(1)(
         Effect.gen(function* () {
           const state = input.getActiveSelectionState()
           if (!selectionMatches(state, threadId, epoch)) return
           const page = yield* (yield* TranscriptRepository.Service).page(state.thread.id, { after, limit: 50 })
-          if (!input.isCurrentSelectionState(state)) return
+          if (input.isCurrentSelectionState(state) !== true) return
           state.newestTranscriptCursor = page.newestCursor ?? state.newestTranscriptCursor
           input.sessionDispatch({
             _tag: "TranscriptPageAppended",
@@ -107,7 +151,7 @@ export const makeInteractiveSessionSelection = (
           const execution = yield* backend.inspect(turn.id).pipe(Effect.orElseSucceed(() => undefined))
           if (
             execution !== undefined &&
-            (!input.isTerminalStatus(execution.status) ||
+            (input.isTerminalStatus(execution.status) !== true ||
               projection === undefined ||
               projection.checkpointCursor !== execution.lastCursor)
           )
@@ -125,21 +169,21 @@ export const makeInteractiveSessionSelection = (
       )
       input.sessionDispatch({ _tag: "ThreadPreviewLoaded", threadId: id, turns: previewTurns })
     }).pipe(
-      Effect.provide(input.executionDependencies),
+      Effect.provide(typedExecutionDependencies),
       Effect.scoped,
       Effect.orElseSucceed(() => undefined),
     ) as any
   const reopenThread = (epoch: number) =>
-    input.safe(
+    safe(
       input.sessionDispatch,
       Effect.gen(function* () {
-        if (!isNewerSelectionEpoch(epoch, (yield* Ref.get(input.selectionRequest)) as number)) return
+        if (!isNewerSelectionEpoch(epoch, (yield* Ref.get(typedSelectionRequest)) as number)) return
         const summary = (yield* (yield* ThreadSummaryRepository.Service).list({ limit: 1 }))[0]
         if (summary === undefined) return
         const thread = yield* (yield* ThreadRepository.Service).get(summary.id)
         if (thread === undefined) return yield* operationError(`Thread ${summary.id} does not exist`)
         yield* selectThread(String(thread.id), epoch)
-      }).pipe(Effect.ensuring(input.finishSelection(epoch))),
+      }).pipe(Effect.ensuring(typedFinishSelection(epoch).pipe(Effect.ignore))),
     )
   return { selectThread, readQueue, loadOlder, loadNewer, previewThread, reopenThread }
 }

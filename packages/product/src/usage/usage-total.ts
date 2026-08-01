@@ -1,3 +1,4 @@
+import { Function } from "effect"
 export interface Totals {
   readonly costUsd: number
   readonly pricedAttempts: number
@@ -16,7 +17,7 @@ export const noTotals: Totals = {
   uncountedAttempts: 0,
 }
 
-export const accumulate = (left: Totals, right: Totals): Totals => ({
+const accumulateImpl = (left: Totals, right: Totals): Totals => ({
   costUsd: left.costUsd + right.costUsd,
   pricedAttempts: left.pricedAttempts + right.pricedAttempts,
   unpricedAttempts: left.unpricedAttempts + right.unpricedAttempts,
@@ -25,7 +26,12 @@ export const accumulate = (left: Totals, right: Totals): Totals => ({
   uncountedAttempts: left.uncountedAttempts + right.uncountedAttempts,
 })
 
-export const difference = (next: Totals, previous: Totals): Totals => ({
+export const accumulate: {
+  (arg1: Totals): (arg0: Totals) => ReturnType<typeof accumulateImpl>
+  (arg0: Totals, arg1: Totals): ReturnType<typeof accumulateImpl>
+} = Function.dual(2, accumulateImpl)
+
+const differenceImpl = (next: Totals, previous: Totals): Totals => ({
   costUsd: next.costUsd - previous.costUsd,
   pricedAttempts: next.pricedAttempts - previous.pricedAttempts,
   unpricedAttempts: next.unpricedAttempts - previous.unpricedAttempts,
@@ -33,6 +39,11 @@ export const difference = (next: Totals, previous: Totals): Totals => ({
   countedAttempts: next.countedAttempts - previous.countedAttempts,
   uncountedAttempts: next.uncountedAttempts - previous.uncountedAttempts,
 })
+
+export const difference: {
+  (arg1: Totals): (arg0: Totals) => ReturnType<typeof differenceImpl>
+  (arg0: Totals, arg1: Totals): ReturnType<typeof differenceImpl>
+} = Function.dual(2, differenceImpl)
 
 export const shifts = (delta: Totals): boolean =>
   delta.costUsd !== 0 ||
@@ -42,4 +53,9 @@ export const shifts = (delta: Totals): boolean =>
   delta.countedAttempts !== 0 ||
   delta.uncountedAttempts !== 0
 
-export const addUsageTotals = (left: Totals, right: Totals): Totals => accumulate(left, right)
+const addUsageTotalsImpl = (left: Totals, right: Totals): Totals => accumulate(left, right)
+
+export const addUsageTotals: {
+  (arg1: Totals): (arg0: Totals) => ReturnType<typeof addUsageTotalsImpl>
+  (arg0: Totals, arg1: Totals): ReturnType<typeof addUsageTotalsImpl>
+} = Function.dual(2, addUsageTotalsImpl)

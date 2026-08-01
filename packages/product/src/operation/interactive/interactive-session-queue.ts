@@ -1,3 +1,4 @@
+import { OperationError } from "../operation-error"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as ThreadRepository from "@rika/product/thread-repository"
@@ -38,11 +39,16 @@ export const makeInteractiveQueue = (input: any) => {
     dependencyContext,
     acquiredBackend,
   } = input
+  const typedExecutionDependencies: Context.Context<
+    ThreadRepository.Service | TurnRepository.Service | ExecutionBackend.Service
+  > = executionDependencies
+  const typedDependencyContext: Context.Context<ThreadRepository.Service | TurnRepository.Service> = dependencyContext
+  const typedBackend: ExecutionBackend.Interface = acquiredBackend
   const readQueue = Effect.fn("ProductOperation.interactive.readQueue")(function* (
     threadId: Thread.ThreadId,
     dispatch: (event: InteractiveEvent) => void,
   ) {
-    const turns = Context.get(input.dependencyContext, TurnRepository.Service) as TurnRepository.Interface
+    const turns = Context.get(typedDependencyContext, TurnRepository.Service) as TurnRepository.Interface
     const queue = yield* turns.readQueue(threadId)
     dispatch({
       _tag: "QueueUpdated",
@@ -53,61 +59,62 @@ export const makeInteractiveQueue = (input: any) => {
       change: { _tag: "Reset", items: queue.turns.map(queueItem) },
     })
   })
-  const drainQueued = Effect.fn("ProductOperation.interactive.drainQueued")(function* (
+  const drainQueued = (
     thread: Thread.Thread,
     dispatch: (event: InteractiveEvent) => void,
-  ) {
-    const turns = Context.get(input.dependencyContext, TurnRepository.Service) as TurnRepository.Interface
-    const backend = input.acquiredBackend as ExecutionBackend.Interface
-    return yield* promotePendingTurns({
-      thread,
-      dispatch,
-      turns,
-      backend,
-      pendingCapacity: pendingTurnCapacity,
-      prepareExecution,
-      ensureIngest,
-      owner: rootTurnOwner,
-      notifyThreadSummaries,
-      notifyTurnChanged,
-      setTurnStatus,
-      projectExecutionResult,
-      deliverResultEvents,
-      queueMutationEvent: input.queueMutationEvent,
-      claimQueuedTurn,
-      emit,
-      releaseTurnObserver,
-      awaitSessionQuiescence,
-      failureMessage: executionStartFailureMessage,
+  ): Effect.Effect<number, OperationError | ExecutionBackend.BackendError | TurnRepository.RepositoryError, never> =>
+    Effect.gen(function* () {
+      const turns = Context.get(typedDependencyContext, TurnRepository.Service) as TurnRepository.Interface
+      const backend = typedBackend
+      return yield* promotePendingTurns({
+        thread,
+        dispatch,
+        turns,
+        backend,
+        pendingCapacity: pendingTurnCapacity,
+        prepareExecution,
+        ensureIngest,
+        owner: rootTurnOwner,
+        notifyThreadSummaries,
+        notifyTurnChanged,
+        setTurnStatus,
+        projectExecutionResult,
+        deliverResultEvents,
+        queueMutationEvent: input.queueMutationEvent,
+        claimQueuedTurn,
+        emit,
+        releaseTurnObserver,
+        awaitSessionQuiescence,
+        failureMessage: executionStartFailureMessage,
+      })
     })
-  })
   const promoterFor =
     (dispatch: (event: InteractiveEvent) => void) =>
-    (threadId: string, generation: number): Effect.Effect<number, any, any> =>
+    (threadId: string, generation: number): Effect.Effect<number, never, never> =>
       Effect.gen(function* () {
-        const threads = Context.get(input.dependencyContext, ThreadRepository.Service) as ThreadRepository.Interface
-        const turns = Context.get(input.dependencyContext, TurnRepository.Service) as TurnRepository.Interface
+        const threads = Context.get(typedDependencyContext, ThreadRepository.Service) as ThreadRepository.Interface
+        const turns = Context.get(typedDependencyContext, TurnRepository.Service) as TurnRepository.Interface
         if (!(yield* turns.consumeQueueWake(Thread.ThreadId.make(threadId), generation))) return 0
         const thread = (yield* threads.get(Thread.ThreadId.make(threadId))) as Thread.Thread | undefined
         if (thread === undefined) return 0
         return (yield* drainQueued(thread, dispatch)) as number
       }).pipe(
-        Effect.provide(executionDependencies),
+        Effect.provide(typedExecutionDependencies),
         Effect.scoped,
         Effect.onInterrupt(() =>
           Effect.gen(function* () {
-            const turns = Context.get(dependencyContext, TurnRepository.Service)
+            const turns = Context.get(typedDependencyContext, TurnRepository.Service)
             const wake = yield* turns.requestQueueWake(Thread.ThreadId.make(threadId))
-            if (wake !== undefined && acquiredBackend.wakeThreadHost !== undefined)
-              yield* acquiredBackend.wakeThreadHost({ ...wake, now: yield* Clock.currentTimeMillis })
+            if (wake !== undefined && typedBackend.wakeThreadHost !== undefined)
+              yield* typedBackend.wakeThreadHost({ ...wake, now: yield* Clock.currentTimeMillis })
           }).pipe(Effect.orElseSucceed(() => undefined)),
         ),
         Effect.catch(() =>
           Effect.gen(function* () {
-            const turns = Context.get(dependencyContext, TurnRepository.Service)
+            const turns = Context.get(typedDependencyContext, TurnRepository.Service)
             const wake = yield* turns.requestQueueWake(Thread.ThreadId.make(threadId))
-            if (wake !== undefined && acquiredBackend.wakeThreadHost !== undefined)
-              yield* acquiredBackend.wakeThreadHost({ ...wake, now: yield* Clock.currentTimeMillis })
+            if (wake !== undefined && typedBackend.wakeThreadHost !== undefined)
+              yield* typedBackend.wakeThreadHost({ ...wake, now: yield* Clock.currentTimeMillis })
             return 0
           }).pipe(Effect.orElseSucceed(() => 0)),
         ),
@@ -116,12 +123,12 @@ export const makeInteractiveQueue = (input: any) => {
     thread: Thread.Thread,
     dispatch: (event: InteractiveEvent) => void,
   ) {
-    const backend = input.acquiredBackend as ExecutionBackend.Interface
+    const backend = typedBackend
     if (backend.wakeThreadHost === undefined || backend.registerTurnPromoter === undefined) {
       yield* drainQueued(thread, dispatch)
       return
     }
-    const turns = Context.get(input.dependencyContext, TurnRepository.Service) as TurnRepository.Interface
+    const turns = Context.get(typedDependencyContext, TurnRepository.Service) as TurnRepository.Interface
     const wake = yield* turns.requestQueueWake(thread.id)
     if (wake === undefined) return
     yield* backend.wakeThreadHost({ ...wake, now: yield* Clock.currentTimeMillis })
@@ -138,7 +145,7 @@ export const makeInteractiveQueue = (input: any) => {
   const activeInThread = Effect.fn("ProductOperation.interactive.activeInThread")(function* (
     threadId: Thread.ThreadId,
   ) {
-    const turns = Context.get(input.dependencyContext, TurnRepository.Service) as TurnRepository.Interface
+    const turns = Context.get(typedDependencyContext, TurnRepository.Service) as TurnRepository.Interface
     const turn = yield* turns.findActive(threadId)
     if (turn === undefined) return yield* operationError("No active turn")
     return turn
@@ -152,7 +159,7 @@ export const makeInteractiveQueue = (input: any) => {
     turn: import("@rika/product/turn-record").Turn,
   ) {
     const thread = (yield* (
-      Context.get(input.dependencyContext, ThreadRepository.Service) as ThreadRepository.Interface
+      Context.get(typedDependencyContext, ThreadRepository.Service) as ThreadRepository.Interface
     ).get(turn.threadId)) as Thread.Thread | undefined
     if (thread === undefined) return yield* operationError(`Thread ${turn.threadId} does not exist`)
     return thread

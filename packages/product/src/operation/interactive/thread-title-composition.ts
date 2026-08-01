@@ -1,3 +1,4 @@
+import { OperationError } from "../operation-error"
 import { Cause, Clock, Effect } from "effect"
 import * as UsageSnapshot from "@rika/product/usage-snapshot"
 import * as ExecutionBackend from "@rika/product/execution-service"
@@ -37,10 +38,10 @@ export const titleInteractiveThread = (input: {
     turnId: string,
     events: ReadonlyArray<ExecutionEvent.Event>,
     terminal: boolean,
-  ) => Effect.Effect<any, any, never>
+  ) => Effect.Effect<any, OperationError, never>
   readonly announce: (event: InteractiveEvent) => void
-  readonly notify: Effect.Effect<any, any, never>
-  readonly publishUsage: (usage: UsageSnapshot.TurnUsage | undefined) => Effect.Effect<any, any, never>
+  readonly notify: Effect.Effect<any, OperationError, never>
+  readonly publishUsage: (usage: UsageSnapshot.TurnUsage | undefined) => Effect.Effect<any, OperationError, never>
   readonly attempts: Map<string, number>
   readonly settled: Set<string>
 }) =>

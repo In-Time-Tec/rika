@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import * as ExecutionBackend from "../../execution/contract/execution-service"
 import * as ThreadActivity from "../../thread/query/thread-activity"
 import * as Turn from "../../thread/model/turn-record"
@@ -10,7 +11,12 @@ export interface ExecutionStopRequest {
   readonly reason: string
 }
 
-export const stopRequest = (executionId: string, reason: string): ExecutionStopRequest => ({ executionId, reason })
+const stopRequestImpl = (executionId: string, reason: string): ExecutionStopRequest => ({ executionId, reason })
+
+export const stopRequest: {
+  (arg1: string): (arg0: string) => ReturnType<typeof stopRequestImpl>
+  (arg0: string, arg1: string): ReturnType<typeof stopRequestImpl>
+} = Function.dual(2, stopRequestImpl)
 
 export const settleStopRequestedTurns = Effect.fn("ProductOperation.settleStopRequestedTurns")(function* <E, R>(
   backend: ExecutionBackend.Interface,

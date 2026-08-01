@@ -14,13 +14,13 @@ export const makeProductOperationAdmission = (input: any) => {
         ),
       ),
       (admitted): Effect.Effect<A, E | ExecutionBackend.BackendError, R> =>
-        admitted
+        admitted === true
           ? effect
           : Effect.fail(
               ExecutionBackend.BackendError.make({ message: "Resident replacement has closed execution admission" }),
             ),
       (admitted) =>
-        admitted
+        admitted === true
           ? Ref.update(replacementState, (state: { closed: boolean; active: number }) => ({
               ...state,
               active: Math.max(0, state.active - 1),

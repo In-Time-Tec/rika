@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import { Fixtures } from "./execution-ingest-support"
 import { Context, Deferred, Effect, Layer, Ref, Scope, Stream } from "effect"
 import * as ExecutionIngest from "../../src/execution/ingest/execution-ingest-service"
@@ -255,8 +256,13 @@ export const makeHarness: (options: MakeHarnessOptions) => Effect.Effect<Harness
   }
 })
 
-export const followsOf = (follows: ReadonlyArray<Followed>, executionId: string) =>
+const followsOfImpl = (follows: ReadonlyArray<Followed>, executionId: string) =>
   follows.filter((followed) => followed.executionId === executionId)
+
+export const followsOf: {
+  (arg1: string): (arg0: ReadonlyArray<Followed>) => ReturnType<typeof followsOfImpl>
+  (arg0: ReadonlyArray<Followed>, arg1: string): ReturnType<typeof followsOfImpl>
+} = Function.dual(2, followsOfImpl)
 
 export const settle = (ingest: ExecutionIngest.Interface) =>
   ingest.settled(ExecutionFixtures.rootId).pipe(Effect.andThen(Effect.yieldNow), Effect.andThen(Effect.yieldNow))
