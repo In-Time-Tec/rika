@@ -3,7 +3,7 @@ import * as ThreadInteractionRepository from "@rika/product/thread-interaction-r
 import * as ThreadSearchRepository from "@rika/product/thread-search-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product/turn-repository"
-import * as TurnQueueState from "../queue/turn-queue-state"
+import * as TurnQueueState from "../repository/turn-repository-pagination"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Context, DateTime, Effect, Layer, Schema } from "effect"

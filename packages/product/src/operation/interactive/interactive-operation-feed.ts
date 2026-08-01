@@ -1,7 +1,7 @@
 import { Effect, Queue, Ref, Semaphore } from "effect"
 import * as InteractiveFeedOverflow from "./interactive-feed-overflow"
 import type { InteractiveEvent } from "./interactive-event"
-import { OperationUnavailable } from "../contract/product-operation-service"
+import { OperationUnavailable } from "../contract/product-operation-errors"
 
 const withEpoch = (event: InteractiveEvent, epoch: number): InteractiveEvent => {
   switch (event._tag) {

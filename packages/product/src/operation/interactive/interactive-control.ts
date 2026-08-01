@@ -2,7 +2,7 @@ import { Clock, Effect } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
-import * as TurnQueuePromotion from "../../thread/queue/turn-queue-promotion"
+import * as TurnQueuePromotion from "../../thread/repository/turn-repository-queue"
 import type { InteractiveEvent } from "./interactive-event"
 import { operationFailureDetail } from "../operation-error"
 

@@ -1,6 +1,6 @@
 import type * as ThreadRelationship from "../model/thread-relationship"
 import type * as TranscriptPage from "../model/transcript-page"
-import type * as TurnQueueState from "../queue/turn-queue-state"
+import type * as TurnQueueState from "../repository/turn-repository-pagination"
 
 export interface FindInput {
   readonly query: string

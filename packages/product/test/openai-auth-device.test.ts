@@ -1,6 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Cause, Effect, Exit, Fiber, Option, Presenter, Service, TestClock } from "./openai-auth-support"
-import { Http, dependencies, provideLayer, tokens, unusedHttp, memoryStore, Flow } from "./openai-auth-support"
+import { Cause, Effect, Exit, Fiber, Option } from "effect"
+import { TestClock } from "effect/testing"
+import { Presenter, Http } from "./openai-auth-test-contract"
+import { Flow } from "./openai-auth-test-contract"
+import { Service } from "./openai-auth-test-service"
+import { dependencies, provideLayer, unusedHttp, memoryStore } from "./openai-auth-test-layers"
+import { tokens } from "./openai-auth-test-credentials"
 
 describe("OpenAI device authentication", () => {
   it.effect("shows the exact anti-phishing device prompt, polls pending, and uses the device redirect", () => {

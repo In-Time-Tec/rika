@@ -10,7 +10,7 @@ type CreateInput = Omit<
   "author" | "executionRoute" | "lineage" | "queueCapacity"
 > & {
   readonly author?: ThreadRelationship.TurnAuthor
-  readonly executionRoute?: ExecutionRouteSnapshot.ExecutionRoutePin
+  readonly executionRoute?: ExecutionRouteSnapshot.ExecutionRouteSnapshot
   readonly lineage?: ThreadRelationship.TurnLineage
 }
 

@@ -1,13 +1,8 @@
 import { Schema } from "effect"
-import { ExecutionRouteSnapshot, testExecutionRoute } from "../../execution/contract/execution-route-snapshot"
-export type { ExecutionRoutePin } from "../../execution/contract/execution-route-snapshot"
-export { testExecutionRoute } from "../../execution/contract/execution-route-snapshot"
+import { ExecutionRouteSnapshot } from "../../execution/contract/execution-route-snapshot"
 import { ExecutionExtensionPin } from "../../execution/contract/execution-workflow"
 import { PromptPart } from "../../execution/contract/execution-request"
-export { ExecutionExtensionPin } from "../../execution/contract/execution-workflow"
-export { PromptPart } from "../../execution/contract/execution-request"
 import { Status } from "../../execution/contract/execution-status"
-export type { Status } from "../../execution/contract/execution-status"
 import { StopIntent } from "./thread-state"
 import { ThreadId } from "./thread-record"
 import { TurnAuthor, TurnLineage } from "./thread-relationship"
@@ -58,13 +53,5 @@ export const RecordedShellTurn = Schema.Union([
   }),
 ])
 export type RecordedShellTurn = typeof RecordedShellTurn.Type
-export type RunningRecordedShellTurn = Extract<RecordedShellTurn, { readonly status: "running" }>
-export type TerminalRecordedShellTurn = Exclude<RecordedShellTurn, RunningRecordedShellTurn>
-
 export const Turn = Schema.Union([AgentExecutionTurn, RecordedShellTurn])
 export type Turn = typeof Turn.Type
-
-export const isAgentExecution = (turn: Turn): turn is AgentExecutionTurn => turn._tag === "AgentExecution"
-export const isRecordedShell = (turn: Turn): turn is RecordedShellTurn => turn._tag === "RecordedShell"
-export const isRunningRecordedShell = (turn: Turn): turn is RunningRecordedShellTurn =>
-  turn._tag === "RecordedShell" && turn.status === "running"

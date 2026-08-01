@@ -19,7 +19,6 @@ import * as Feed from "./resident-interactive-feed"
 import * as Request from "./resident-operation-request"
 import * as Handshake from "./resident-service-handshake"
 import { OperationUnavailable } from "../operation/contract/product-operation-errors"
-import type { Interface as OperationInterface } from "../operation/contract/product-operation-service"
 import { Input } from "../operation/contract/product-operation"
 import type { InteractiveSession } from "../operation/interactive/interactive-session"
 
@@ -103,9 +102,6 @@ interface StartedHost {
   readonly detach: Effect.Effect<void, ResidentServiceError>
   readonly abort: Effect.Effect<void>
 }
-type Owner = (
-  interactive: (input: Feed.InteractiveInput, session: InteractiveSession) => Effect.Effect<void, OperationUnavailable>,
-) => Effect.Effect<OperationInterface, ResidentServiceError, Scope.Scope>
 interface Interface {
   readonly getOrCreate: (options: {
     readonly profile: string
@@ -268,4 +264,3 @@ const makeLifecycle = (changed: (state: LifecycleState) => Effect.Effect<void>) 
 const ServiceRuntime = { runtimeRestartExitCode, testLayer, canonicalServiceIdentity, makeLifecycle } as const
 
 export { ClientMessage, ServerMessage, ResidentServiceError, ResidentRestartRequired, Service, ServiceRuntime }
-export type { Connection, StartedHost, Owner, Interface, OperationInterface, LifecycleState }

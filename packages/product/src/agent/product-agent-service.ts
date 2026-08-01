@@ -33,7 +33,7 @@ interface ParallelInput {
   readonly parentTurnId: string
   readonly fanOutId: string
   readonly workspace?: string
-  readonly executionRoute: ExecutionRouteSnapshot.ExecutionRoutePin
+  readonly executionRoute: ExecutionRouteSnapshot.ExecutionRouteSnapshot
   readonly tasks: ReadonlyArray<TaskInput>
   readonly maxConcurrency: number
   readonly join?: ExecutionChildRun.JoinPolicy

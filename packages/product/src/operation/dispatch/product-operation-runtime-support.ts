@@ -1,4 +1,4 @@
-import * as TurnQueuePromotion from "../../thread/queue/turn-queue-promotion"
+import * as TurnQueuePromotion from "../../thread/repository/turn-repository-queue"
 import type { InteractiveEvent } from "../interactive/interactive-event"
 import { queueItem } from "../interactive/interactive-session-queue"
 

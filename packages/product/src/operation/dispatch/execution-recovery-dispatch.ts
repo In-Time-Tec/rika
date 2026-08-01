@@ -10,7 +10,7 @@ import * as ThreadActivity from "../../thread/query/thread-activity"
 import * as Turn from "../../thread/model/turn-record"
 import * as ThreadResult from "@rika/product/thread-result"
 import * as TurnRepository from "../../thread/repository/turn-repository"
-import * as TurnQueuePromotion from "../../thread/queue/turn-queue-promotion"
+import * as TurnQueuePromotion from "../../thread/repository/turn-repository-queue"
 import { queuedTurnPromoteMaxAgeMs, staleQueuedTurnsError } from "../../thread/queue/pending-turn-policy"
 import {
   awaitSessionQuiescence,

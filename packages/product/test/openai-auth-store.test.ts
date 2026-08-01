@@ -1,19 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
-import {
-  Effect,
-  Layer,
-  Option,
-  Schema,
-  Service,
-  Store,
-  dependencies,
-  disk,
-  memoryStore,
-  provideLayer,
-  unusedHttp,
-  Http,
-  tokens,
-} from "./openai-auth-support"
+import { Effect, Layer, Option, Schema } from "effect"
+import { Http, Store } from "./openai-auth-test-contract"
+import { Service } from "./openai-auth-test-service"
+import { dependencies, memoryStore, provideLayer, unusedHttp } from "./openai-auth-test-layers"
+import { disk, tokens } from "./openai-auth-test-credentials"
 import { Errors } from "../src/authentication/openai-auth-flow"
 import { createHash } from "node:crypto"
 

@@ -3,7 +3,7 @@ import * as TranscriptPage from "@rika/product/transcript-page"
 import * as ExecutionRequest from "@rika/product/execution-request"
 import { Effect, Function, Schema } from "effect"
 import { ModeId } from "@rika/configuration/behavior-mode"
-import { OperationUnavailable } from "../contract/product-operation-service"
+import { OperationUnavailable } from "../contract/product-operation-errors"
 import type { InteractiveSession } from "./interactive-session"
 
 const Mode = ModeId

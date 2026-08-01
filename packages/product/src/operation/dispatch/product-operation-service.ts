@@ -1,5 +1,6 @@
 import { Effect, Ref } from "effect"
-import { OperationUnavailable, Service } from "../contract/product-operation-service"
+import { OperationUnavailable } from "../contract/product-operation-errors"
+import { Service } from "../contract/product-operation-service"
 import { makeProductOperationRun } from "./product-operation-run"
 
 export const makeProductOperationService = (input: any) => {

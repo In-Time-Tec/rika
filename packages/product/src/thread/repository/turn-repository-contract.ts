@@ -1,4 +1,4 @@
-import type { ExecutionRoutePin } from "@rika/product/execution-route-snapshot"
+import type { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
 import type { PromptPart } from "@rika/product/execution-request"
 import type { ThreadId } from "@rika/product/thread-record"
 import type { TurnAuthor, TurnLineage } from "@rika/product/thread-relationship"
@@ -9,7 +9,7 @@ export interface CreateInput {
   readonly threadId: ThreadId
   readonly prompt: string
   readonly promptParts?: ReadonlyArray<PromptPart>
-  readonly executionRoute: ExecutionRoutePin
+  readonly executionRoute: ExecutionRouteSnapshot
   readonly reviewFanOutId?: string
   readonly author?: TurnAuthor
   readonly lineage?: TurnLineage

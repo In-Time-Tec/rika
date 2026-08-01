@@ -1,5 +1,5 @@
 import { Deferred, Effect } from "effect"
-import { OperationUnavailable } from "../contract/product-operation-service"
+import { OperationUnavailable } from "../contract/product-operation-errors"
 import type { Input } from "../contract/product-operation"
 import {
   runInteractiveOperation,
