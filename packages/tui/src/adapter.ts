@@ -1608,6 +1608,8 @@ export interface Handlers {
   readonly clickToggle?: (unit: string) => void
   readonly contextToggle?: () => void
   readonly modeToggle?: () => void
+  readonly modeCommit?: (selected: number) => void
+  readonly animationTick?: () => void
   readonly composerResize?: (height: number) => void
   readonly sidebarResize?: (width: number) => void
   readonly threadSidebarSelect?: (index: number) => void
@@ -2446,58 +2448,62 @@ export class Surface {
     const contextVisible = model.currentThreadId !== undefined && availableWidth >= 24
     const contextCells = availableWidth < 40 ? 4 : 8
     const contextPrefix = availableWidth < 40 ? " " : " ctx "
-    const buildContextChunks = (_hovered: boolean): Array<TextChunk> => {
+    const border = colors.text
+    const buildContextChunks = (): Array<TextChunk> => {
       if (!contextVisible) return []
-      const chunks: Array<TextChunk> = []
+      const chunks: Array<TextChunk> = [fg(colors[model.mode])(contextPrefix)]
       const context = model.contextUsage
-      const compacting = model.activity?._tag === "Compacting"
-      const activeColor = colors[model.mode]
-      const decorate = (chunk: TextChunk, highlighted = false) => (highlighted ? bold(chunk) : chunk)
-      chunks.push(decorate(fg(activeColor)(contextPrefix)))
-      if (compacting) {
-        for (let index = 0; index < contextCells; index += 1) {
-          const glyph = (index + this.loaderPhase) % 2 === 0 ? "▓" : "▒"
-          chunks.push(decorate(fg(activeColor)(glyph), index === this.loaderPhase % contextCells))
-        }
-        chunks.push(decorate(fg(activeColor)("  ↻  ")))
-        return chunks
-      }
+      const streaming = model.busy && context?._tag === "Available" && model.activity?._tag !== "Compacting"
       if (context?._tag === "Available") {
-        const value = ContextMeter.meter(context, {
+        const value = ContextMeter.meter(context, { cells: contextCells })
+        const glyphs = ContextMeter.animatedGlyphs(context, {
           cells: contextCells,
-          phase: this.loaderPhase,
-          animated: model.busy || model.activity !== undefined,
+          tick: model.animationTick + this.loaderPhase,
+          streaming,
+          ...(model.activity?._tag === "Compacting" ? { compactFromPercent: 100 } : {}),
         })
-        for (const [index, glyph] of value.glyphs.entries())
-          chunks.push(decorate(fg(activeColor)(glyph), index === value.highlight))
-        const percent = `${value.percent}%`
-        chunks.push(decorate(fg(activeColor)(` ${percent}${" ".repeat(Math.max(0, 4 - percent.length))}`)))
+        const filled = value.glyphs.filter((glyph) => glyph === ContextMeter.meterGlyphs.fill).length
+        const commit = model.modeCommit
+        for (const [index, glyph] of glyphs.entries()) {
+          let color: ColorInput = colors[model.mode]
+          if (commit !== undefined && index < filled)
+            color = index < Math.min(filled, commit.tick) ? colors[commit.to] : colors[commit.from]
+          chunks.push(fg(color)(glyph))
+        }
+        chunks.push(bold(fg(colors[model.mode])(` ${value.percent}% `)))
         return chunks
       }
-      const glyphs =
-        context?._tag === "Loading"
-          ? ContextMeter.loadingMeter(this.loaderPhase, { cells: contextCells })
-          : Array(contextCells).fill("░")
-      for (const [index, glyph] of glyphs.entries())
-        chunks.push(decorate(fg(activeColor)(glyph), index === this.loaderPhase % contextCells))
-      chunks.push(decorate(fg(activeColor)("     ")))
+      const glyphs = model.busy
+        ? ContextMeter.loadingMeter(model.animationTick + this.loaderPhase, { cells: contextCells })
+        : Array(contextCells).fill(ContextMeter.meterGlyphs.track)
+      for (const glyph of glyphs) chunks.push(fg(colors[model.mode])(glyph))
       return chunks
     }
-    const buildModeChunks = (hovered: boolean): Array<TextChunk> => {
-      const contextChunks = buildContextChunks(hovered)
+    const buildModeChunks = (): Array<TextChunk> => {
+      const contextChunks = buildContextChunks()
       const chunks = [...contextChunks]
-      if (contextChunks.length > 0) chunks.push(fg(colors.text)("─"))
-      chunks.push(fg(colors.text)(" "))
+      if (contextChunks.length > 0) chunks.push(fg(border)("─"))
+      chunks.push(fg(border)(" "))
       if (model.fastMode) chunks.push(fg(colors.amber)("↯"))
-      const modeText = fg(colors[model.mode])(model.mode)
+      const commit = model.modeCommit
+      let label: string = model.mode
+      let cursor = ""
+      if (commit !== undefined) {
+        label =
+          commit.tick < commit.from.length
+            ? commit.from.slice(0, Math.max(0, commit.from.length - commit.tick))
+            : commit.to.slice(0, Math.min(commit.to.length, commit.tick - commit.from.length))
+        if (commit.tick < commit.from.length + commit.to.length) cursor = "▮"
+      }
+      const modeText = fg(colors[commit?.to ?? model.mode])(label + cursor)
       chunks.push(this.modeLabelHovered ? bold(modeText) : modeText)
-      chunks.push(fg(colors.text)(" "))
+      chunks.push(fg(border)(" "))
       return chunks
     }
-    const initialContext = buildContextChunks(this.usageLabelHovered)
+    const initialContext = buildContextChunks()
     this.usageLabelWidth = initialContext.reduce((total, chunk) => total + modeLabelWidth(chunk.text), 0)
     this.modeSegmentStart = this.usageLabelWidth === 0 ? 0 : this.usageLabelWidth + 1
-    let modeChunks = buildModeChunks(this.usageLabelHovered)
+    let modeChunks = buildModeChunks()
     let width = modeChunks.reduce((total, chunk) => total + modeLabelWidth(chunk.text), 0)
     if (this.usagePointerX !== undefined && this.modeLabel.width > 0) {
       const screenX = previousRight - width
@@ -2505,7 +2511,7 @@ export class Surface {
       if (hovered !== this.usageLabelHovered) {
         this.usageLabelHovered = hovered
         this.renderer.setMousePointer(hovered ? "pointer" : "default")
-        modeChunks = buildModeChunks(hovered)
+        modeChunks = buildModeChunks()
         width = modeChunks.reduce((total, chunk) => total + modeLabelWidth(chunk.text), 0)
       }
     }
@@ -2536,6 +2542,7 @@ export class Surface {
   private tickLoader(): void {
     if (this.destroyed) return
     this.loaderPhase += 1
+    this.handlers.animationTick?.()
     this.toolSpinner.step()
     const current = this.model
     if (current !== undefined) {
@@ -3383,7 +3390,8 @@ export class Surface {
       model.activity !== undefined ||
       panelLoadingLabel !== undefined ||
       (model.usageTime?._tag === "Available" && model.usageTime.activeSince !== undefined) ||
-      model.contextUsage?._tag === "Loading" ||
+      (model.modePicker.open && model.modePicker.turnTick !== undefined) ||
+      model.modeCommit !== undefined ||
       (model.threadSidebar.open &&
         (model.threads as ReadonlyArray<ThreadItem>).some((thread) => isThreadBusy(thread.status)))
     if (this.options.animate !== false && loaderActive && this.loaderTimer === undefined) {
@@ -3401,6 +3409,7 @@ export class Surface {
     else if (model.palette.open || model.paletteOpen) overlay = "palette"
     this.paletteBox.visible = overlay !== undefined
     this.palette.visible = this.paletteBox.visible
+    this.palette.onMouseDown = undefined
     this.paletteBox.bottomTitle = ""
     let cursorEditor: ProjectedEditorRenderable | undefined =
       model.shortcutsOpen || (threadSidebarVisible && model.threadSidebar.focused) ? undefined : this.composerEditor
@@ -3420,7 +3429,7 @@ export class Surface {
       cursorEditor = this.overlayEditor
     } else if (overlay === "context") {
       const boxWidth = Math.min(68, contentWidth)
-      const boxHeight = Math.min(12, Math.max(1, composerTop))
+      const boxHeight = Math.min(14, Math.max(1, composerTop))
       this.paletteBox.width = boxWidth
       this.paletteBox.height = boxHeight
       this.paletteBox.left = contentLeft + Math.max(0, contentWidth - boxWidth)
@@ -3428,7 +3437,7 @@ export class Surface {
       this.paletteBox.title = " Context & Usage "
       this.paletteBox.titleColor = colors[model.mode]
       this.paletteBox.titleAlignment = "left"
-      this.paletteBox.bottomTitle = " Ctrl+Y toggle - esc "
+      this.paletteBox.bottomTitle = " Ctrl+Y toggle ── esc "
       this.paletteBox.bottomTitleAlignment = "right"
       this.palette.content = contextDetailsContent(
         model,
@@ -3439,15 +3448,27 @@ export class Surface {
       cursorEditor = undefined
     } else if (overlay === "modes") {
       const boxWidth = Math.min(58, contentWidth)
-      const boxHeight = Math.min(9, Math.max(1, composerTop))
+      const boxHeight = Math.min(12, Math.max(1, composerTop))
       this.paletteBox.width = boxWidth
       this.paletteBox.height = boxHeight
       this.paletteBox.left = contentLeft + Math.max(0, contentWidth - boxWidth)
       this.paletteBox.top = Math.max(0, composerTop - boxHeight)
-      this.paletteBox.title = ""
-      this.paletteBox.bottomTitle = " ←→ turn · esc"
+      const hovered = modeIds[model.modePicker.selected] ?? model.mode
+      this.paletteBox.title = " Mode "
+      this.paletteBox.titleColor = colors[hovered]
+      this.paletteBox.titleAlignment = "left"
+      this.paletteBox.bottomTitle = " ↔ turn ── esc "
       this.paletteBox.bottomTitleAlignment = "right"
-      this.palette.content = modePickerContent(model, Math.max(1, boxWidth - 4))
+      this.palette.content = modePickerContent(model, Math.max(1, boxWidth - 4), Math.max(1, boxHeight - 2))
+      this.palette.onMouseDown = (event) => {
+        const width = Math.max(1, boxWidth - 4)
+        const column = event.x - this.palette.screenX
+        const selected = Math.max(
+          0,
+          Math.min(modeIds.length - 1, Math.round((column * (modeIds.length - 1)) / Math.max(1, width - 5))),
+        )
+        this.handlers.modeCommit?.(selected)
+      }
       cursorEditor = undefined
     } else if (overlay === "files") {
       const entries = filteredFiles(model).map((file) => `@${file}`)
@@ -3472,7 +3493,7 @@ export class Surface {
       this.paletteBox.top = Math.max(0, composerTop - overlayHeight)
       this.paletteBox.title = model.threadSwitcher.kind === "mention" ? " Mention Thread " : " Switch Thread "
       this.paletteBox.titleAlignment = "left"
-      this.paletteBox.bottomTitle = " Opt+W/Ctrl+T all workspaces · Esc close "
+      this.paletteBox.bottomTitle = " Opt+W/Ctrl+T all workspaces ── Esc close "
       this.paletteBox.bottomTitleAlignment = "right"
       const switcherContentWidth = Math.max(1, overlayWidth - 4)
       const contentHeight = Math.max(1, overlayHeight - 2)
@@ -3743,119 +3764,111 @@ const usageTimeText = (model: Model, now: number): string => {
   return model.usageTime?._tag === "Loading" ? `${activeTimeIcon} ···` : `${activeTimeIcon} —`
 }
 
-const processedTokensText = (model: Model): string => {
-  if (model.usageTokens?._tag !== "Available") return "Unknown"
-  const value = formatTokens(model.usageTokens.total).replace(/ tok$/, "")
-  return `${value}${model.usageTokens.uncountedAttempts > 0 ? "+" : ""}`
-}
-
 const contextDetailsContent = (model: Model, innerWidth: number, innerHeight: number, now: number): StyledText => {
   const chunks: Array<TextChunk> = []
   const line = (text: string, style: (value: string) => TextChunk = fg(colors.text)) => {
     if (chunks.length > 0) chunks.push(fg(colors.text)("\n"))
     chunks.push(style(truncateToWidth(text, innerWidth)))
   }
+  const meterLine = () => {
+    if (chunks.length > 0) chunks.push(fg(colors.text)("\n"))
+    const cells = Math.max(4, Math.min(innerWidth < 40 ? 12 : 20, innerWidth - 5))
+    if (model.contextUsage?._tag === "Available") {
+      const value = ContextMeter.meter(model.contextUsage, { cells })
+      chunks.push(fg(colors[model.mode])(value.glyphs.join("")))
+      chunks.push(bold(fg(colors[model.mode])(` ${value.percent}%`)))
+    } else chunks.push(fg(colors[model.mode])(Array(cells).fill(ContextMeter.meterGlyphs.track).join("")))
+  }
+  const divider = (title: string) =>
+    line(`─ ${title} ${"─".repeat(Math.max(0, innerWidth - title.length - 3))}`, (value) => dim(fg(colors.text)(value)))
   const context = model.contextUsage
-  const activeColor = colors[model.mode]
-  const compact = innerWidth < 40 || innerHeight < 8
-  if (compact) {
-    if (context?._tag === "Available") {
-      const cells = Math.max(4, Math.min(12, innerWidth - 5))
-      const value = ContextMeter.meter(context, { cells })
-      chunks.push(fg(activeColor)(value.glyphs.join("")))
-      chunks.push(bold(fg(activeColor)(` ${value.percent}%`)))
-      const usable = ContextMeter.usableTokens(context)
-      if (innerHeight >= 4) line(`${formatContextTokens(context.inputTokens)} / ${formatContextTokens(usable)} usable`)
-      if (innerHeight >= 5)
-        line(
-          `${formatContextTokens(context.contextWindow)} window — ${formatContextTokens(context.reserveTokens)} reserve`,
-          fg(colors.muted),
-        )
-    } else {
-      const loading = context?._tag === "Loading"
-      const glyphs = loading ? ContextMeter.loadingMeter(0) : Array(8).fill("░")
-      chunks.push(fg(activeColor)(glyphs.join("")))
-      if (innerHeight >= 4) line(loading ? "Waiting for model usage" : "Context unavailable", fg(colors.muted))
-      if (innerHeight >= 5) line("Output capacity is reserved", fg(colors.muted))
-    }
-    if (innerHeight >= 2) {
-      const time = usageTimeText(model, now).replaceAll(" ", "")
-      line(`${usageCostText(model)} — ${time}`)
-    }
-    if (innerHeight >= 3) line(`${processedTokensText(model)} processed`, fg(colors.muted))
-    return new StyledText(chunks)
-  }
-  if (context?._tag === "Available") {
-    const cells = Math.max(8, Math.min(16, innerWidth - 7))
-    const value = ContextMeter.meter(context, { cells })
-    chunks.push(fg(activeColor)(value.glyphs.join("")))
-    chunks.push(bold(fg(activeColor)(` ${value.percent}%`)))
-    const usable = ContextMeter.usableTokens(context)
-    line("")
-    line(
-      `${formatContextTokens(context.inputTokens)} used — ${formatContextTokens(Math.max(0, usable - context.inputTokens))} available`,
-    )
-    line(
-      `${formatContextTokens(usable)} usable — ${formatContextTokens(context.contextWindow)} window — ${formatContextTokens(context.reserveTokens)} reserved`,
-      fg(colors.muted),
-    )
-  } else {
-    const loading = context?._tag === "Loading"
-    const glyphs = loading ? ContextMeter.loadingMeter(0, { cells: 16 }) : Array(16).fill("░")
-    chunks.push(fg(activeColor)(glyphs.join("")))
-    line("")
-    line(loading ? "Waiting for the first model usage report" : "Context is unavailable", fg(colors.muted))
-    line("Usable context reserves the model's output allowance", fg(colors.muted))
-  }
-  line("")
+  const usable = context?._tag === "Available" ? ContextMeter.usableTokens(context) : undefined
+  const used = context?._tag === "Available" ? formatContextTokens(context.inputTokens) : "Unknown"
+  const available =
+    context?._tag === "Available" ? formatContextTokens(Math.max(0, usable! - context.inputTokens)) : "Unknown"
+  const full = context?._tag === "Available" ? formatContextTokens(context.contextWindow) : "Unknown"
+  const usableText = usable === undefined ? "Unknown" : formatContextTokens(usable)
+  const compact = innerWidth < 40 || innerHeight < 11
+  if (!compact) line("")
+  meterLine()
+  if (!compact) line("")
+  line(`Used       ${used}`)
+  line(`Available  ${available}`)
+  divider("Window")
+  line(`Usable     ${usableText}`)
+  line(`Full       ${full}`)
+  divider("Session")
   line(`Cost       ${usageCostText(model)}`)
   line(`Active     ${usageTimeText(model, now)}`)
-  line(`Processed  ${processedTokensText(model)}`, fg(colors.muted))
+  if (!compact) line("")
   return new StyledText(chunks)
 }
 
-const modeGaugeFill = { low: 2, medium: 19, high: 36, ultra: 54 } as const
 const routeLabel = (route: ModeRouteLabel | undefined): string =>
   route === undefined ? "" : `${route.name} ${route.effort}${route.fast ? " fast" : ""}`
 const modeDescription = {
   low: "Fast, low-cost mode for small, well-defined tasks",
-  medium: "Balanced intelligence, speed, and cost for most tasks",
+  medium: "Balanced default for everyday work",
   high: "Deep reasoning for hard tasks",
   ultra: "The most capable mode for hard, open-ended tasks",
 } as const
 
-const modePickerContent = (model: Model, innerWidth: number): StyledText => {
-  const modes = modeIds
-  const selected = modes[model.modePicker.selected] ?? model.mode
+const modePickerContent = (model: Model, innerWidth: number, innerHeight = Number.POSITIVE_INFINITY): StyledText => {
+  const selected = modeIds[model.modePicker.selected] ?? model.mode
   if (innerWidth < 40)
     return new StyledText([
       bold(fg(colors[selected])(truncateToWidth(selected, innerWidth))),
       fg(colors.text)("\n"),
       fg(colors.muted)(truncateToWidth(modeDescription[selected], innerWidth)),
     ])
-  const gaugeWidth = Math.min(54, innerWidth)
-  const fill = Math.min(gaugeWidth, modeGaugeFill[selected])
+  if (innerHeight < 9) {
+    const routes = model.modeRoutes[selected]
+    return new StyledText([
+      bold(fg(colors[selected])(selected)),
+      fg(colors.text)("\n"),
+      fg(colors.text)(truncateToWidth(`Agent     ${routeLabel(routes?.main)}`, innerWidth)),
+      fg(colors.text)("\n"),
+      fg(colors.text)(truncateToWidth(`Oracle    ${routeLabel(routes?.oracle)}`, innerWidth)),
+    ])
+  }
   const chunks: Array<TextChunk> = []
-  chunks.push(fg(colors[selected])("•".repeat(fill)))
-  chunks.push(fg(colors.muted)("·".repeat(Math.max(0, gaugeWidth - fill))))
-  chunks.push(fg(colors.text)("\n"))
-  const labelStarts = [0, 16, 33, 49].map((start) => Math.floor((start * gaugeWidth) / 54))
+  const line = (text = "", style: (value: string) => TextChunk = fg(colors.text)) => {
+    if (chunks.length > 0) chunks.push(fg(colors.text)("\n"))
+    chunks.push(style(truncateToWidth(text, innerWidth)))
+  }
+  const starts = modeIds.map((_, index) => Math.floor((index * Math.max(0, innerWidth - 5)) / (modeIds.length - 1)))
+  const target = starts[model.modePicker.selected] ?? 0
+  const from = starts[model.modePicker.from ?? model.modePicker.selected] ?? target
+  const progress = Math.min(1, ((model.modePicker.turnTick ?? 4) + 1) / 4)
+  const center = Math.round(from + (target - from) * (1 - (1 - progress) * (1 - progress)))
+  const thumbWidth = selected.length
+  const dial: Array<string> = Array.from({ length: innerWidth }, () => ContextMeter.meterGlyphs.track)
+  for (let index = 0; index < thumbWidth; index += 1)
+    if (center + index < dial.length) dial[center + index] = ContextMeter.meterGlyphs.fill
+  if (model.modePicker.turnTick !== undefined) {
+    const edge = target >= from ? center + thumbWidth : center - 1
+    if (edge >= 0 && edge < dial.length) dial[edge] = "╾"
+  }
+  line("")
+  line(dial.join(""), fg(colors[selected]))
+  const labels: Array<TextChunk> = []
   let column = 0
-  modes.forEach((mode, index) => {
-    const start = labelStarts[index]!
-    chunks.push(fg(colors.text)(" ".repeat(Math.max(0, start - column))))
-    chunks.push(mode === selected ? bold(fg(colors[mode])(mode)) : fg(colors.muted)(mode))
-    column = Math.max(column, start) + mode.length
-  })
-  chunks.push(fg(colors.text)("\n\n"))
+  for (const [index, mode] of modeIds.entries()) {
+    const start = starts[index]!
+    labels.push(fg(colors.text)(" ".repeat(Math.max(0, start - column))))
+    labels.push(mode === selected ? bold(fg(colors[selected])(mode)) : dim(fg(colors.text)(mode)))
+    column = start + mode.length
+  }
+  chunks.push(fg(colors.text)("\n"), ...labels)
+  line("")
+  const divider = (title: string) =>
+    line(`─ ${title} ${"─".repeat(Math.max(0, innerWidth - title.length - 3))}`, (value) => dim(fg(colors.text)(value)))
   const routes = model.modeRoutes[selected]
-  chunks.push(bold(fg(colors.text)("Agent:")))
-  chunks.push(fg(colors.muted)(`  ${routeLabel(routes?.main)}`))
-  chunks.push(fg(colors.text)("\n"))
-  chunks.push(bold(fg(colors.text)("Oracle:")))
-  chunks.push(fg(colors.muted)(` ${routeLabel(routes?.oracle)}`))
-  chunks.push(fg(colors.text)("\n\n"))
-  chunks.push(fg(colors.text)(modeDescription[selected]))
+  divider("Route")
+  line(`Agent     ${routeLabel(routes?.main)}`)
+  line(`Oracle    ${routeLabel(routes?.oracle)}`)
+  divider("About")
+  line(modeDescription[selected])
   return new StyledText(chunks)
 }
 

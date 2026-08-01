@@ -1552,8 +1552,15 @@ export const interactiveTui =
                 render()
               },
               modeToggle: () => {
-                if (model.busy) return
-                model = { ...model, mode: ViewState.nextMode(model.mode) }
+                model = ViewState.update(model, { _tag: "ModeSelectorOpened" })
+                render()
+              },
+              modeCommit: (selected) => {
+                model = ViewState.update(model, { _tag: "ModeCommitted", selected })
+                render()
+              },
+              animationTick: () => {
+                model = ViewState.update(model, { _tag: "AnimationTicked" })
                 render()
               },
               key: (key) => {

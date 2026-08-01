@@ -86,7 +86,7 @@ test(
         yield* app.settled
         app.pressKey("y", { ctrl: true })
         const priced = yield* app.waitFrame("$0.00")
-        expect(priced).not.toContain("Unknown")
+        expect(priced).toContain("Cost       $0.00")
         app.pressEscape()
         yield* app.waitGone("Context & Usage")
 
@@ -156,24 +156,24 @@ test(
         app.pressEnter()
         yield* app.waitFrame("CONTEXT_METER_COMPLETE")
         yield* app.settled
-        expect(yield* app.waitFrame("ctx █▊░░░░░░ 23%")).toContain("medium")
+        expect(yield* app.waitFrame("ctx ━━╌╌╌╌╌╌ 23%")).toContain("medium")
 
         app.pressKey("y", { ctrl: true })
         const details = yield* app.waitFrame("Context & Usage")
-        expect(details).toContain("56.1K used")
-        expect(details).toContain("244K usable")
-        expect(details).toContain("372K window")
-        expect(details).toContain("128K reserved")
+        expect(details).toContain("Used       56.1K")
+        expect(details).toContain("Usable     244K")
+        expect(details).toContain("Full       372K")
+        expect(details).not.toContain("Reserved")
         app.pressKey("y", { ctrl: true })
         yield* app.waitGone("Context & Usage")
 
         yield* Effect.promise(() => app.type("Measure context again."))
         app.pressEnter()
         const pending = yield* app.waitFrame("Measure context again.")
-        expect(pending).toContain("ctx █▊░░░░░░ 23%")
+        expect(pending).toMatch(/ctx ━[ᗧᗤ]······ 23%/u)
         yield* app.waitFrame("CONTEXT_METER_SECOND_COMPLETE")
         yield* app.settled
-        expect(yield* app.waitFrame("ctx ███▎░░░░ 41%")).toContain("medium")
+        expect(yield* app.waitFrame("ctx ━━━╌╌╌╌╌ 41%")).toContain("medium")
         yield* app.quit
       }),
     ),
@@ -513,25 +513,25 @@ test(
         yield* app.waitGone("Files (")
 
         app.pressKey("s", { ctrl: true })
-        yield* app.waitFrame("Balanced intelligence, speed, and cost for most tasks")
+        yield* app.waitFrame("Balanced default for everyday work")
         app.pressArrow("right")
         yield* app.waitFrame("Deep reasoning for hard tasks")
         app.pressEscape()
         const escaped = yield* app.waitGone("Deep reasoning")
         expect(escaped).toContain("medium")
         app.pressKey("s", { ctrl: true })
-        yield* app.waitFrame("Balanced intelligence, speed, and cost for most tasks")
+        yield* app.waitFrame("Balanced default for everyday work")
         app.pressArrow("right")
         yield* app.waitFrame("Deep reasoning for hard tasks")
         app.pressEnter()
-        const applied = yield* app.waitGone("Deep reasoning")
-        expect(applied).toContain("high")
+        yield* app.waitGone("Deep reasoning")
+        expect(yield* app.waitFrame(" high ")).toContain("high")
 
         app.pressKey("y", { ctrl: true })
         const context = yield* app.waitFrame("Context & Usage")
         expect(context).toContain("Cost")
         expect(context).toContain("Active")
-        expect(context).toContain("Processed")
+        expect(context).not.toContain("Processed")
         expect(context).toContain("Ctrl+Y toggle")
         app.pressEscape()
         yield* app.waitGone("Context & Usage")

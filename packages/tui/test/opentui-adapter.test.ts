@@ -1921,9 +1921,9 @@ test("animates a fixed-width context shimmer while work is active", () =>
         clock.advance(200)
         const after = [...(surface.modeLabel.content as { readonly chunks: ReadonlyArray<unknown> }).chunks]
 
-        expect(styledTextValue(surface.modeLabel.content)).toBe(text)
+        expect(styledTextValue(surface.modeLabel.content)).not.toBe(text)
         expect(after).not.toEqual(before)
-        expect(text).toContain("ctx █▊░░░░░░ 23%")
+        expect(text).toContain("ctx ━")
       } finally {
         surface.destroy()
         setup.renderer.destroy()
@@ -2976,7 +2976,7 @@ test("keeps the mode label and picker grouped with the narrowed composer", () =>
           modePicker: { open: true, selected: 2 },
         })
         yield* openTui(() => setup.renderOnce())
-        expect(setup.captureCharFrame()).toContain(" ctx █▊░░░░░░ 23% ─ high ")
+        expect(setup.captureCharFrame()).toContain(" ctx ━━╌╌╌╌╌╌ 23% ─ high ")
         const composerRight = surface.inputBox.x + surface.inputBox.width
         expect(surface.modeLabel.x + surface.modeLabel.width).toBeLessThanOrEqual(composerRight)
         expect(surface.paletteBox.x + surface.paletteBox.width).toBeLessThanOrEqual(composerRight)
@@ -3006,7 +3006,7 @@ test("keeps the context meter and every compact usage metric visible at 24x12", 
       try {
         surface.update(compact)
         yield* openTui(() => setup.renderOnce())
-        expect(styledTextValue(surface.modeLabel.content)).toBe(" ▉░░░ 23% ─ high ")
+        expect(styledTextValue(surface.modeLabel.content)).toBe(" ━╌╌╌ 23% ─ high ")
         expect(surface.modeLabel.width).toBeLessThanOrEqual(surface.inputBox.width)
 
         const detailsModel = update(
@@ -3034,10 +3034,12 @@ test("keeps the context meter and every compact usage metric visible at 24x12", 
         yield* openTui(() => setup.renderOnce())
         const details = styledTextValue(surface.palette.content)
         expect(details).toContain("23%")
-        expect(details).toContain("56.1K / 244K")
-        expect(details).toContain("372K window — 128K")
-        expect(details).toContain("$1.25 — ◷1m43s")
-        expect(details).toContain("6.8M processed")
+        expect(details).toContain("Used       56.1K")
+        expect(details).toContain("Usable     244K")
+        expect(details).toContain("Full       372K")
+        expect(details).toContain("Cost       $1.25")
+        expect(details).toContain("Active     ◷ 1m 43s")
+        expect(details).not.toContain("processed")
       } finally {
         surface.destroy()
         setup.renderer.destroy()
@@ -3415,7 +3417,7 @@ test("keeps every overlay above the composer at 50x12", () =>
           "Command Palette",
           "toggle fast mode",
         )
-        yield* capture({ ...base, modePicker: { ...base.modePicker, open: true } }, "←→ turn · esc", "GPT-5.6")
+        yield* capture({ ...base, modePicker: { ...base.modePicker, open: true } }, "↔ turn ── esc", "GPT-5.6")
         yield* capture({ ...base, shortcutsOpen: true }, "command palette", "Ctrl+O", 4)
         yield* capture({ ...base, filePicker: { ...base.filePicker, open: true } }, "@src", "@src")
         yield* capture(

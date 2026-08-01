@@ -2132,7 +2132,7 @@ describe("Surface", () => {
           },
         }),
       )
-      expect(modeLabelText()).toBe(" ctx █▊░░░░░░ 23% ─ medium ")
+      expect(modeLabelText()).toBe(" ctx ━━╌╌╌╌╌╌ 23% ─ medium ")
       surface.update(
         model({
           currentThreadId: "thread",
@@ -2140,11 +2140,11 @@ describe("Surface", () => {
           contextUsage: { _tag: "Available", inputTokens: 4_400, contextWindow: 1_050_000, reserveTokens: 128_000 },
         }),
       )
-      expect(modeLabelText()).toBe(" ctx ░░░░░░░░ 0%  ─ medium ")
+      expect(modeLabelText()).toBe(" ctx ╌╌╌╌╌╌╌╌ 0% ─ medium ")
       surface.update(model({ currentThreadId: "thread", mode: "medium", contextUsage: { _tag: "Loading" } }))
-      expect(modeLabelText()).toBe(" ctx ▓░░░░░░░     ─ medium ")
+      expect(modeLabelText()).toBe(" ctx ╌╌╌╌╌╌╌╌─ medium ")
       surface.update(model({ currentThreadId: "thread", mode: "medium", contextUsage: { _tag: "Unavailable" } }))
-      expect(modeLabelText()).toBe(" ctx ░░░░░░░░     ─ medium ")
+      expect(modeLabelText()).toBe(" ctx ╌╌╌╌╌╌╌╌─ medium ")
       surface.update(
         model({
           currentThreadId: "thread",
@@ -2158,7 +2158,7 @@ describe("Surface", () => {
           },
         }),
       )
-      expect(modeLabelText()).toBe(" ctx ▓▒▓▒▓▒▓▒  ↻  ─ medium ")
+      expect(modeLabelText()).toBe(" ctx ━━━━━━━━ 98% ─ medium ")
 
       surface.update(
         model({
@@ -2231,7 +2231,8 @@ describe("Surface", () => {
         surface.update(model({ ...state, currentThreadId: "thread", mode: "medium" }))
         return surface.modeLabel.width
       })
-      expect(new Set(widths)).toEqual(new Set([27]))
+      expect(widths).toHaveLength(states.length)
+      expect(widths.every((width) => width > 0)).toBe(true)
     }),
   )
 
@@ -2270,17 +2271,18 @@ describe("Surface", () => {
       expect(surface.paletteBox.visible).toBe(true)
       expect(surface.paletteBox.title).toBe(" Context & Usage ")
       expect(surface.paletteBox.titleColor).toBe(colors.medium)
-      expect(surface.paletteBox.bottomTitle).toBe(" Ctrl+Y toggle - esc ")
+      expect(surface.paletteBox.bottomTitle).toBe(" Ctrl+Y toggle ── esc ")
       const content = (surface.palette.content as { chunks: ReadonlyArray<{ text: string }> }).chunks
         .map((chunk) => chunk.text)
         .join("")
       expect(content).toContain("23%")
-      expect(content).toContain("208.3K used")
+      expect(content).toContain("Used       208.3K")
       expect(content).toContain("$1.25")
       expect(content).toContain("◷ 1m 43s")
-      expect(content).toContain("208.3K used — 713.7K available")
-      expect(content).toContain("922K usable — 1.05M window — 128K reserved")
-      expect(content).toContain("Processed  40.1M")
+      expect(content).toContain("Available  713.7K")
+      expect(content).toContain("Usable     922K")
+      expect(content).toContain("Full       1.05M")
+      expect(content).not.toContain("Processed")
       expect(content).not.toContain(" · ")
       const contextRight = surface.paletteBox.x + surface.paletteBox.width
       const contextBottom = surface.paletteBox.y + surface.paletteBox.height
@@ -2315,12 +2317,12 @@ describe("Surface", () => {
       const footer = (surface.modeLabel.content as { chunks: ReadonlyArray<{ text: string }> }).chunks
         .map((chunk) => chunk.text)
         .join("")
-      expect(footer).toBe(" ctx ░░░░░░░░     ─ low ")
+      expect(footer).toBe(" ctx ╌╌╌╌╌╌╌╌─ low ")
       expect(surface.paletteBox.titleColor).toBe(colors.low)
       const content = (surface.palette.content as { chunks: ReadonlyArray<{ text: string }> }).chunks
         .map((chunk) => chunk.text)
         .join("")
-      expect(content.split("\n")[0]).toBe("░░░░░░░░░░░░░░░░")
+      expect(content).toContain("╌╌╌╌")
       expect(content.split("\n")[0]).not.toContain("—")
       expect(content.split("\n")[0]).not.toContain("%")
       expect(content).toContain("Cost       Unknown")
@@ -2464,7 +2466,7 @@ describe("Surface", () => {
       surface.update(model({ modePicker: { open: true, selected: 2 } }))
       expect(paletteText()).toContain("high")
       expect(paletteText()).toContain("Deep reasoning for hard tasks")
-      expect(surface.paletteBox.bottomTitle).toBe(" ←→ turn · esc")
+      expect(surface.paletteBox.bottomTitle).toBe(" ↔ turn ── esc ")
       surface.update(model({ palette: { open: true, query: "quit", selected: 0 } }))
       expect(paletteText()).toContain("quit")
       surface.update(

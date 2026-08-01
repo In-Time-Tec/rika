@@ -287,6 +287,13 @@ export interface PaletteState {
 export interface ModePickerState {
   readonly open: boolean
   readonly selected: number
+  readonly from?: number
+  readonly turnTick?: number
+}
+export interface ModeCommitAnimation {
+  readonly from: Mode
+  readonly to: Mode
+  readonly tick: number
 }
 export interface FilePickerState {
   readonly open: boolean
@@ -338,7 +345,13 @@ const WorkspaceFilesSchema = Schema.Union([
 ])
 
 const PaletteStateSchema = Schema.Struct({ open: Schema.Boolean, query: Schema.String, selected: Schema.Finite })
-const ModePickerStateSchema = Schema.Struct({ open: Schema.Boolean, selected: Schema.Finite })
+const ModePickerStateSchema = Schema.Struct({
+  open: Schema.Boolean,
+  selected: Schema.Finite,
+  from: Schema.optional(Schema.Finite),
+  turnTick: Schema.optional(Schema.Finite),
+})
+const ModeCommitAnimationSchema = Schema.Struct({ from: Mode, to: Mode, tick: Schema.Finite })
 
 const ModeRouteLabelSchema = Schema.Struct({
   name: Schema.String,
@@ -485,6 +498,8 @@ export const Model = Schema.Struct({
   paletteOpen: Schema.Boolean,
   palette: PaletteStateSchema,
   modePicker: ModePickerStateSchema,
+  modeCommit: Schema.optional(ModeCommitAnimationSchema),
+  animationTick: Schema.Finite,
   filePicker: FilePickerStateSchema,
   threadSwitcher: ThreadSwitcherStateSchema,
   shortcutsOpen: Schema.Boolean,
@@ -526,6 +541,10 @@ export type Model = typeof Model.Type
 export type Message =
   | { readonly _tag: "KeyPressed"; readonly key: Key }
   | { readonly _tag: "ContextDetailsToggled" }
+  | { readonly _tag: "ModeSelectorOpened" }
+  | { readonly _tag: "ModeTurned"; readonly offset: number }
+  | { readonly _tag: "ModeCommitted"; readonly selected?: number }
+  | { readonly _tag: "AnimationTicked" }
   | { readonly _tag: "Pasted"; readonly text: string }
   | { readonly _tag: "ImageInserted"; readonly path: string }
   | { readonly _tag: "ImageRemoved"; readonly path: string }
@@ -747,6 +766,8 @@ export const initial: {
     paletteOpen: false,
     palette: { open: false, query: "", selected: 0 },
     modePicker: { open: false, selected: 0 },
+    modeCommit: undefined,
+    animationTick: 0,
     filePicker: { open: false, query: "", selected: 0, items: idle },
     threadSwitcher: { open: false, query: "", selected: 0, kind: "switch", previewScroll: 0 },
     shortcutsOpen: false,
@@ -1106,6 +1127,33 @@ export const canSubmit = (model: Model): boolean =>
   !model.shortcutsOpen &&
   !(model.cursor > 0 && model.input[model.cursor - 1] === "\\")
 
+const openModeSelector = (model: Model): Model => ({
+  ...model,
+  contextDetailsOpen: false,
+  paletteOpen: false,
+  palette: { open: false, query: "", selected: 0 },
+  modePicker: { open: true, selected: modeIds.indexOf(model.mode) },
+  filePicker: { ...model.filePicker, open: false },
+  shortcutsOpen: false,
+})
+
+const turnModeSelector = (model: Model, offset: number): Model => {
+  if (!model.modePicker.open) return model
+  const selected = (model.modePicker.selected + offset + modeIds.length) % modeIds.length
+  return { ...model, modePicker: { open: true, selected, from: model.modePicker.selected, turnTick: 0 } }
+}
+
+const commitModeSelector = (model: Model, selected = model.modePicker.selected): Model => {
+  const next = modeIds[selected]
+  if (next === undefined) return model
+  return {
+    ...model,
+    mode: next,
+    modePicker: { open: false, selected },
+    modeCommit: next === model.mode ? undefined : { from: model.mode, to: next, tick: 0 },
+  }
+}
+
 const toggleContextDetails = (model: Model): Model => {
   const open = !model.contextDetailsOpen
   return {
@@ -1133,6 +1181,22 @@ export const update: {
   switch (message._tag) {
     case "ContextDetailsToggled":
       return toggleContextDetails(model)
+    case "ModeSelectorOpened":
+      return model.busy ? model : openModeSelector(model)
+    case "ModeTurned":
+      return turnModeSelector(model, message.offset)
+    case "ModeCommitted":
+      return commitModeSelector(model, message.selected)
+    case "AnimationTicked": {
+      const modePicker =
+        model.modePicker.turnTick === undefined || model.modePicker.turnTick >= 3
+          ? { ...model.modePicker, from: undefined, turnTick: undefined }
+          : { ...model.modePicker, turnTick: model.modePicker.turnTick + 1 }
+      let modeCommit = model.modeCommit
+      if (modeCommit !== undefined)
+        modeCommit = modeCommit.tick >= 10 ? undefined : { ...modeCommit, tick: modeCommit.tick + 1 }
+      return { ...model, animationTick: model.animationTick + 1, modePicker, modeCommit }
+    }
     case "Pasted": {
       const next = insertPaste(model, message.text)
       return model.shortcutsOpen ? continueShortcutsAfterEdit(model, next) : next
@@ -1958,17 +2022,8 @@ export const update: {
           "@",
         )
       if (key.ctrl && (key.name === "s" || key.name === "m") && !model.busy) {
-        if (model.modePicker.open)
-          return { ...model, modePicker: { open: true, selected: (model.modePicker.selected + 1) % 4 } }
-        return {
-          ...model,
-          contextDetailsOpen: false,
-          paletteOpen: false,
-          palette: { open: false, query: "", selected: 0 },
-          modePicker: { open: true, selected: modeIds.indexOf(model.mode) },
-          filePicker: { ...model.filePicker, open: false },
-          shortcutsOpen: false,
-        }
+        if (model.modePicker.open) return turnModeSelector(model, 1)
+        return openModeSelector(model)
       }
       if (key.ctrl && key.name === "c" && !model.cancelPending && model.busy)
         return { ...model, activity: { _tag: "Waiting" }, cancelPending: model.busy, pendingAction: { _tag: "Cancel" } }
@@ -2023,17 +2078,11 @@ export const update: {
         return continueShortcutsAfterEdit(model, next)
       }
       if (model.modePicker.open) {
-        if (key.name === "escape") return { ...model, modePicker: { ...model.modePicker, open: false } }
-        let selected = model.modePicker.selected
-        if (key.name === "left" || key.name === "up") selected = (model.modePicker.selected + 3) % 4
-        else if (key.name === "right" || key.name === "down") selected = (model.modePicker.selected + 1) % 4
-        if (key.name === "return")
-          return {
-            ...model,
-            mode: modeIds[selected]!,
-            modePicker: { open: false, selected },
-          }
-        return { ...model, modePicker: { open: true, selected } }
+        if (key.name === "escape") return { ...model, modePicker: { open: false, selected: model.modePicker.selected } }
+        if (key.name === "left" || key.name === "up") return turnModeSelector(model, -1)
+        if (key.name === "right" || key.name === "down") return turnModeSelector(model, 1)
+        if (key.name === "return") return commitModeSelector(model)
+        return model
       }
       if (model.palette.open) {
         const results = filter(model.palette.query)
