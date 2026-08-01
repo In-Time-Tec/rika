@@ -5,14 +5,14 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./product-database-layer": "./src/product-database.ts",
-    "./sqlite-thread-interaction-repository": "./src/thread-interaction-repository.ts",
-    "./sqlite-thread-search-repository": "./src/thread-search-repository.ts",
-    "./sqlite-thread-summary-repository": "./src/thread-summary-repository.ts",
-    "./sqlite-thread-repository": "./src/thread-repository.ts",
-    "./sqlite-transcript-repository": "./src/transcript-repository.ts",
-    "./sqlite-turn-repository": "./src/turn-repository.ts",
-    "./sqlite-usage-repository": "./src/usage-repository.ts"
+    "./product-database-layer": "./src/database/product-database-layer.ts",
+    "./sqlite-thread-interaction-repository": "./src/interaction/sqlite-thread-interaction-repository.ts",
+    "./sqlite-thread-search-repository": "./src/search/sqlite-thread-search-repository.ts",
+    "./sqlite-thread-summary-repository": "./src/summary/sqlite-thread-summary-repository.ts",
+    "./sqlite-thread-repository": "./src/thread/sqlite-thread-repository.ts",
+    "./sqlite-transcript-repository": "./src/transcript/sqlite-transcript-repository.ts",
+    "./sqlite-turn-repository": "./src/turn/sqlite-turn-repository.ts",
+    "./sqlite-usage-repository": "./src/usage/sqlite-usage-repository.ts"
   },
   "dependencies": {
     "@effect/sql-sqlite-bun": "catalog:",

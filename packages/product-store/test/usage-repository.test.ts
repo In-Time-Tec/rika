@@ -2,8 +2,8 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
 import { Context, Effect, FileSystem, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import * as Database from "../src/product-database"
-import * as Usage from "../src/usage-repository"
+import * as Database from "../src/database/product-database-layer"
+import * as Usage from "../src/usage/sqlite-usage-repository"
 
 const complete: Usage.Materialized = {
   costNanoUsd: 100,

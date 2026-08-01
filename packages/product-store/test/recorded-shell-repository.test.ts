@@ -3,10 +3,11 @@ import * as TranscriptRecordedShell from "@rika/transcript/recorded-shell-presen
 import { expect, it } from "@effect/vitest"
 import { Effect, FileSystem } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import * as ThreadRepository from "../src/thread-repository"
+import * as ThreadRepository from "../src/thread/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
-import * as TranscriptRepository from "../src/transcript-repository"
-import * as TurnRepository from "../src/turn-repository"
+import * as TranscriptRepository from "../src/transcript/sqlite-transcript-repository"
+import * as TurnRepository from "../src/turn/sqlite-turn-repository"
+import * as TurnContract from "@rika/product/turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ThreadResult from "@rika/product/thread-result"
 import { projectionVersion, provideLayer, sqliteLayer } from "./transcript-repository-fixtures"
@@ -34,7 +35,7 @@ const terminal = (turn: ThreadResult.RunningRecordedShellTurn): ThreadResult.Ter
 })
 
 const exercise = Effect.fn("RecordedShellRepositoryTest.exercise")(function* (
-  turns: TurnRepository.Interface,
+  turns: TurnContract.Interface,
   transcripts: TranscriptRepository.Interface,
 ) {
   const invalid = running("recorded-shell-invalid")

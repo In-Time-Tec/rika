@@ -1,0 +1,1 @@
+Migration files own the ordered Rika product schema history. Keep migration ids, names, SQL, and Effect sequencing stable. The registry is the only migration order declaration. Migration adapters do not import product repositories.
