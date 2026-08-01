@@ -1559,6 +1559,10 @@ export const interactiveTui =
                 model = ViewState.update(model, { _tag: "ModeCommitted", selected })
                 render()
               },
+              modeHover: (selected) => {
+                model = ViewState.update(model, { _tag: "ModeHovered", selected })
+                render()
+              },
               animationTick: () => {
                 model = ViewState.update(model, { _tag: "AnimationTicked" })
                 render()

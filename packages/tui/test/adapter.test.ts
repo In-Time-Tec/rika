@@ -1831,15 +1831,14 @@ describe("Surface", () => {
       const callbacks = handlers()
       const { surface } = yield* createScoped(callbacks)
 
-      expect(opentui.rootChildren.length).toBeGreaterThanOrEqual(6)
-      expect(opentui.rootChildren.slice(-6)).toEqual([
-        surface.main,
-        surface.modeLabel,
-        surface.statusLabel,
-        surface.workspaceLabel,
-        surface.paletteBox,
-        surface.toastBox,
-      ])
+      expect(opentui.rootChildren).toContain(surface.main)
+      expect(opentui.rootChildren).toContain(surface.modeLabel)
+      expect(opentui.rootChildren).toContain(surface.statusLabel)
+      expect(opentui.rootChildren).toContain(surface.workspaceLabel)
+      expect(opentui.rootChildren).toContain(surface.paletteBox)
+      expect(opentui.rootChildren).toContain(surface.paletteDividerOne)
+      expect(opentui.rootChildren).toContain(surface.paletteDividerTwo)
+      expect(opentui.rootChildren).toContain(surface.toastBox)
       expect(opentui.boxChildren).toContain(surface.input)
       expect(opentui.boxChildren).toContain(surface.palette)
       expect(opentui.boxChildren).toContain(surface.changedFilesText)
@@ -2142,9 +2141,9 @@ describe("Surface", () => {
       )
       expect(modeLabelText()).toBe(" ctx ╌╌╌╌╌╌╌╌ 0% ─ medium ")
       surface.update(model({ currentThreadId: "thread", mode: "medium", contextUsage: { _tag: "Loading" } }))
-      expect(modeLabelText()).toBe(" ctx ╌╌╌╌╌╌╌╌─ medium ")
+      expect(modeLabelText()).toBe(" ctx ╌╌╌╌╌╌╌╌ ─ medium ")
       surface.update(model({ currentThreadId: "thread", mode: "medium", contextUsage: { _tag: "Unavailable" } }))
-      expect(modeLabelText()).toBe(" ctx ╌╌╌╌╌╌╌╌─ medium ")
+      expect(modeLabelText()).toBe(" ctx ╌╌╌╌╌╌╌╌ ─ medium ")
       surface.update(
         model({
           currentThreadId: "thread",
@@ -2276,10 +2275,10 @@ describe("Surface", () => {
         .map((chunk) => chunk.text)
         .join("")
       expect(content).toContain("23%")
-      expect(content).toContain("Used       208.3K")
+      expect(content).toContain("Used        208.3K")
       expect(content).toContain("$1.25")
       expect(content).toContain("◷ 1m 43s")
-      expect(content).toContain("Available  713.7K")
+      expect(content).toContain("Available   713.7K")
       expect(content).toContain("Usable     922K")
       expect(content).toContain("Full       1.05M")
       expect(content).not.toContain("Processed")
@@ -2317,7 +2316,7 @@ describe("Surface", () => {
       const footer = (surface.modeLabel.content as { chunks: ReadonlyArray<{ text: string }> }).chunks
         .map((chunk) => chunk.text)
         .join("")
-      expect(footer).toBe(" ctx ╌╌╌╌╌╌╌╌─ low ")
+      expect(footer).toBe(" ctx ╌╌╌╌╌╌╌╌ ─ low ")
       expect(surface.paletteBox.titleColor).toBe(colors.low)
       const content = (surface.palette.content as { chunks: ReadonlyArray<{ text: string }> }).chunks
         .map((chunk) => chunk.text)

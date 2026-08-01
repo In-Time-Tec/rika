@@ -50,7 +50,13 @@ test(
             "narrow-mode-overlay",
             "narrow-palette-overlay",
             "context-meter",
+            "meter-scanner",
+            "meter-muncher-open",
+            "meter-muncher-closed",
+            "meter-vacuum",
+            "meter-flash",
             "context-details",
+            "compact-context-details",
           ]
           for (const scenario of evidenceScenarios) {
             expect(names).toContain(`${scenario}.frame.txt`)

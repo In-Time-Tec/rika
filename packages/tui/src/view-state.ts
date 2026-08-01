@@ -349,9 +349,17 @@ const ModePickerStateSchema = Schema.Struct({
   open: Schema.Boolean,
   selected: Schema.Finite,
   from: Schema.optional(Schema.Finite),
+  fromPosition: Schema.optional(Schema.Finite),
   turnTick: Schema.optional(Schema.Finite),
 })
 const ModeCommitAnimationSchema = Schema.Struct({ from: Mode, to: Mode, tick: Schema.Finite })
+const ContextAnimationSchema = Schema.Struct({
+  compactFromPercent: Schema.optional(Schema.Finite),
+  compactTick: Schema.optional(Schema.Finite),
+  flashTicks: Schema.Finite,
+  flashed75: Schema.Boolean,
+  flashed90: Schema.Boolean,
+})
 
 const ModeRouteLabelSchema = Schema.Struct({
   name: Schema.String,
@@ -479,6 +487,7 @@ export const Model = Schema.Struct({
   activity: Schema.optional(Activity),
   costUsd: Schema.optional(Schema.Finite),
   contextUsage: Schema.optional(ContextUsage),
+  contextAnimation: ContextAnimationSchema,
   contextDetailsOpen: Schema.Boolean,
   usageTime: Schema.optional(UsageTime),
   usageTokens: Schema.optional(
@@ -544,6 +553,8 @@ export type Message =
   | { readonly _tag: "ModeSelectorOpened" }
   | { readonly _tag: "ModeTurned"; readonly offset: number }
   | { readonly _tag: "ModeCommitted"; readonly selected?: number }
+  | { readonly _tag: "ModeHovered"; readonly selected: number }
+  | { readonly _tag: "ContextUsageReplaced"; readonly contextUsage: ContextUsage }
   | { readonly _tag: "AnimationTicked" }
   | { readonly _tag: "Pasted"; readonly text: string }
   | { readonly _tag: "ImageInserted"; readonly path: string }
@@ -762,6 +773,7 @@ export const initial: {
     cancelPending: false,
     busy: false,
     contextUsage: { _tag: "Loading" },
+    contextAnimation: { flashTicks: 0, flashed75: false, flashed90: false },
     contextDetailsOpen: false,
     paletteOpen: false,
     palette: { open: false, query: "", selected: 0 },
@@ -1130,17 +1142,70 @@ export const canSubmit = (model: Model): boolean =>
 const openModeSelector = (model: Model): Model => ({
   ...model,
   contextDetailsOpen: false,
+  threadSidebar:
+    contentColumnWidth(model) < 24 ? { ...model.threadSidebar, open: false, focused: false } : model.threadSidebar,
   paletteOpen: false,
   palette: { open: false, query: "", selected: 0 },
   modePicker: { open: true, selected: modeIds.indexOf(model.mode) },
   filePicker: { ...model.filePicker, open: false },
+  threadSwitcher: { open: false, query: "", selected: 0, kind: "switch", previewScroll: 0 },
+  threadPreview: idle,
   shortcutsOpen: false,
 })
+
+const slidePosition = (picker: Model["modePicker"]): number => {
+  const target = picker.selected
+  const from = picker.fromPosition ?? picker.from ?? target
+  const progress = Math.min(1, ((picker.turnTick ?? 4) + 1) / 4)
+  return from + (target - from) * (1 - (1 - progress) * (1 - progress))
+}
 
 const turnModeSelector = (model: Model, offset: number): Model => {
   if (!model.modePicker.open) return model
   const selected = (model.modePicker.selected + offset + modeIds.length) % modeIds.length
-  return { ...model, modePicker: { open: true, selected, from: model.modePicker.selected, turnTick: 0 } }
+  return {
+    ...model,
+    modePicker: {
+      open: true,
+      selected,
+      from: model.modePicker.selected,
+      fromPosition: slidePosition(model.modePicker),
+      turnTick: 0,
+    },
+  }
+}
+
+const contextPercent = (context: ContextUsage | undefined): number | undefined => {
+  if (context?._tag !== "Available") return undefined
+  const usable = Math.max(0, context.contextWindow - context.reserveTokens)
+  return Math.min(
+    100,
+    Math.round((usable === 0 ? (context.inputTokens > 0 ? 1 : 0) : context.inputTokens / usable) * 100),
+  )
+}
+
+const replaceContextUsage = (model: Model, contextUsage: ContextUsage): Model => {
+  const previous = contextPercent(model.contextUsage)
+  const before = previous ?? 0
+  const after = contextPercent(contextUsage)
+  const compacting = previous !== undefined && after !== undefined && after < previous
+  const crossed75 = after !== undefined && before < 75 && after >= 75
+  const crossed90 = after !== undefined && before < 90 && after >= 90
+  const flashTicks =
+    (crossed75 && !model.contextAnimation.flashed75) || (crossed90 && !model.contextAnimation.flashed90)
+      ? 2
+      : model.contextAnimation.flashTicks
+  return {
+    ...model,
+    contextUsage,
+    contextAnimation: {
+      ...model.contextAnimation,
+      ...(compacting ? { compactFromPercent: before, compactTick: 0 } : {}),
+      flashTicks,
+      flashed75: model.contextAnimation.flashed75 || crossed75,
+      flashed90: model.contextAnimation.flashed90 || crossed90,
+    },
+  }
 }
 
 const commitModeSelector = (model: Model, selected = model.modePicker.selected): Model => {
@@ -1187,15 +1252,35 @@ export const update: {
       return turnModeSelector(model, message.offset)
     case "ModeCommitted":
       return commitModeSelector(model, message.selected)
+    case "ModeHovered":
+      return model.modePicker.open && modeIds[message.selected] !== undefined
+        ? { ...model, modePicker: { ...model.modePicker, selected: message.selected } }
+        : model
+    case "ContextUsageReplaced":
+      return replaceContextUsage(model, message.contextUsage)
     case "AnimationTicked": {
       const modePicker =
         model.modePicker.turnTick === undefined || model.modePicker.turnTick >= 3
-          ? { ...model.modePicker, from: undefined, turnTick: undefined }
+          ? { ...model.modePicker, from: undefined, fromPosition: undefined, turnTick: undefined }
           : { ...model.modePicker, turnTick: model.modePicker.turnTick + 1 }
-      let modeCommit = model.modeCommit
-      if (modeCommit !== undefined)
-        modeCommit = modeCommit.tick >= 10 ? undefined : { ...modeCommit, tick: modeCommit.tick + 1 }
-      return { ...model, animationTick: model.animationTick + 1, modePicker, modeCommit }
+      const commitLength =
+        model.modeCommit === undefined ? 0 : model.modeCommit.from.length + model.modeCommit.to.length
+      const modeCommit =
+        model.modeCommit === undefined
+          ? undefined
+          : model.modeCommit.tick > commitLength
+            ? undefined
+            : { ...model.modeCommit, tick: model.modeCommit.tick + 1 }
+      const contextAnimation = {
+        ...model.contextAnimation,
+        flashTicks: Math.max(0, model.contextAnimation.flashTicks - 1),
+        ...(model.contextAnimation.compactTick === undefined
+          ? {}
+          : model.contextAnimation.compactTick >= 15
+            ? { compactFromPercent: undefined, compactTick: undefined }
+            : { compactTick: model.contextAnimation.compactTick + 1 }),
+      }
+      return { ...model, animationTick: model.animationTick + 1, modePicker, modeCommit, contextAnimation }
     }
     case "Pasted": {
       const next = insertPaste(model, message.text)
@@ -1388,7 +1473,7 @@ export const update: {
         composerHeight: Math.min(model.composerHeight, composerHeightLimit(message.height)),
         sidebarWidth: clampSidebarWidth(model.sidebarWidth, message.width),
       }
-      return resized.contextDetailsOpen && contentColumnWidth(resized) < 24
+      return (resized.contextDetailsOpen || resized.modePicker.open) && contentColumnWidth(resized) < 24
         ? { ...resized, threadSidebar: { ...resized.threadSidebar, open: false, focused: false } }
         : resized
     }
@@ -1522,6 +1607,7 @@ export const update: {
           activeTurnId: message.turnId,
           busy: true,
           activity: { _tag: "Waiting" },
+          contextAnimation: { flashTicks: 0, flashed75: false, flashed90: false },
         }
       return {
         ...model,
@@ -1535,6 +1621,7 @@ export const update: {
         activeTurnId: message.turnId,
         busy: true,
         activity: { _tag: "Waiting" },
+        contextAnimation: { flashTicks: 0, flashed75: false, flashed90: false },
       }
     }
     case "BlockAdded": {
@@ -1864,7 +1951,7 @@ export const update: {
             scrollTop: Math.max(0, currentIndex - model.height + 1),
           },
         }
-        return model.contextDetailsOpen && contentColumnWidth(opened) < 24 ? model : opened
+        return (model.contextDetailsOpen || model.modePicker.open) && contentColumnWidth(opened) < 24 ? model : opened
       }
       if (key.ctrl && key.name === "y") return toggleContextDetails(model)
       if (model.threadSidebar.open && model.threadSidebar.focused) {

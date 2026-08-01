@@ -1,7 +1,7 @@
 ╭─ Mode ───────────────────────╮
-│ medium                       │
+│ ╌╌╌╌╌╌╌╌━━━━━━╌╌╌╌╌╌╌╌╌╌╌╌╌╌ │
+│ low    medium  high    ultra │
 │ Balanced default for everyda │
-│                              │
 │                              │
 │                              │
 ╰────────────── ↔ turn ── esc ─╯

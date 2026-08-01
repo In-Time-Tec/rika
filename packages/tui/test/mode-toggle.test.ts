@@ -32,11 +32,24 @@ describe("mode cycling", () => {
     const opened = ViewState.update(ViewState.initial("/work", "medium"), { _tag: "ModeSelectorOpened" })
     expect(opened.modePicker).toMatchObject({ open: true, selected: 1 })
     const turned = ViewState.update(opened, { _tag: "ModeTurned", offset: 1 })
-    expect(turned.modePicker).toMatchObject({ open: true, selected: 2, from: 1, turnTick: 0 })
+    expect(turned.modePicker).toMatchObject({ open: true, selected: 2, from: 1, fromPosition: 1, turnTick: 0 })
     const committed = ViewState.update(turned, { _tag: "ModeCommitted" })
     expect(committed.mode).toBe("high")
     expect(committed.modeCommit).toEqual({ from: "medium", to: "high", tick: 0 })
     expect(ViewState.update(committed, { _tag: "AnimationTicked" }).modeCommit?.tick).toBe(1)
+  })
+
+  it("retargets from the current eased slide position and completes every commit glyph", () => {
+    let model = ViewState.update(ViewState.initial("/work", "medium"), { _tag: "ModeSelectorOpened" })
+    model = ViewState.update(model, { _tag: "ModeTurned", offset: 1 })
+    model = ViewState.update(model, { _tag: "AnimationTicked" })
+    const retargeted = ViewState.update(model, { _tag: "ModeTurned", offset: 1 })
+    expect(retargeted.modePicker.fromPosition).toBeGreaterThan(1)
+    expect(retargeted.modePicker.fromPosition).toBeLessThan(2)
+    let commit = ViewState.update({ ...retargeted, mode: "medium" }, { _tag: "ModeCommitted", selected: 3 })
+    for (let tick = 0; tick <= "medium".length + "ultra".length + 1; tick += 1)
+      commit = ViewState.update(commit, { _tag: "AnimationTicked" })
+    expect(commit.modeCommit).toBeUndefined()
   })
 
   it("keeps escape as a non-committing close", () => {

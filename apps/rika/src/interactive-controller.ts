@@ -546,8 +546,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
         usageRevision: event.revision,
         ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
         model: {
-          ...withoutCost,
-          contextUsage,
+          ...ViewState.update(withoutCost, { _tag: "ContextUsageReplaced", contextUsage }),
           usageCost: event.cost,
           usageTokens: event.tokens,
           usageTime: event.time,
@@ -581,6 +580,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
         ? {}
         : {
             contextUsage: { _tag: "Loading" as const },
+            contextAnimation: { flashTicks: 0, flashed75: false, flashed90: false },
             usageCost: { _tag: "Loading" as const },
             usageTokens: { _tag: "Loading" as const },
             usageTime: { _tag: "Loading" as const },

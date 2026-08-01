@@ -160,7 +160,7 @@ test(
 
         app.pressKey("y", { ctrl: true })
         const details = yield* app.waitFrame("Context & Usage")
-        expect(details).toContain("Used       56.1K")
+        expect(details).toContain("Used        56.1K")
         expect(details).toContain("Usable     244K")
         expect(details).toContain("Full       372K")
         expect(details).not.toContain("Reserved")

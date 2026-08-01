@@ -1609,6 +1609,7 @@ export interface Handlers {
   readonly contextToggle?: () => void
   readonly modeToggle?: () => void
   readonly modeCommit?: (selected: number) => void
+  readonly modeHover?: (selected: number) => void
   readonly animationTick?: () => void
   readonly composerResize?: (height: number) => void
   readonly sidebarResize?: (width: number) => void
@@ -1768,6 +1769,9 @@ export class Surface {
   readonly workspaceLabel: TextRenderable
   readonly paletteBox: BoxRenderable
   readonly palette: TextRenderable
+  readonly paletteHint: TextRenderable
+  readonly paletteDividerOne: TextRenderable
+  readonly paletteDividerTwo: TextRenderable
   readonly overlayEditor: ProjectedEditorRenderable
   readonly sidebar: TextRenderable
   readonly changedFilesBox: SidebarScrollBoxRenderable
@@ -1823,7 +1827,6 @@ export class Surface {
   private scrollProgrammatic = false
   private wheelTimer: TimerHandle | undefined
   private transcriptViewport: TranscriptViewport = initialViewport
-  private loaderPhase = 0
   private loaderTimer: TimerHandle | undefined
   private publishedWorkingFrame: string | undefined
   private workingFramePublished = false
@@ -2059,6 +2062,35 @@ export class Surface {
       overflow: "hidden",
     })
     this.palette = new TextRenderable(renderer, { content: "", fg: colors.text, wrapMode: "word" })
+    this.paletteHint = new TextRenderable(renderer, {
+      content: "",
+      position: "absolute",
+      bottom: -1,
+      right: 1,
+      zIndex: 30,
+      selectable: false,
+      wrapMode: "none",
+      backgroundColor: colors.surface,
+      visible: false,
+    })
+    this.paletteDividerOne = new TextRenderable(renderer, {
+      content: "",
+      position: "absolute",
+      left: -1,
+      zIndex: 30,
+      selectable: false,
+      wrapMode: "none",
+      visible: false,
+    })
+    this.paletteDividerTwo = new TextRenderable(renderer, {
+      content: "",
+      position: "absolute",
+      left: -1,
+      zIndex: 30,
+      selectable: false,
+      wrapMode: "none",
+      visible: false,
+    })
     this.overlayEditor = new ProjectedEditorRenderable(renderer, {
       visible: false,
       position: "absolute",
@@ -2174,6 +2206,9 @@ export class Surface {
     renderer.root.add(this.statusLabel)
     renderer.root.add(this.workspaceLabel)
     renderer.root.add(this.paletteBox)
+    renderer.root.add(this.paletteHint)
+    renderer.root.add(this.paletteDividerOne)
+    renderer.root.add(this.paletteDividerTwo)
     renderer.root.add(this.toastBox)
     this.paletteBox.onMouseScroll = (event) => {
       if (this.model?.threadSwitcher.open !== true || event.scroll === undefined) return
@@ -2458,9 +2493,12 @@ export class Surface {
         const value = ContextMeter.meter(context, { cells: contextCells })
         const glyphs = ContextMeter.animatedGlyphs(context, {
           cells: contextCells,
-          tick: model.animationTick + this.loaderPhase,
+          tick: model.contextAnimation.compactTick ?? model.animationTick,
           streaming,
-          ...(model.activity?._tag === "Compacting" ? { compactFromPercent: 100 } : {}),
+          ...(model.contextAnimation.compactFromPercent === undefined
+            ? {}
+            : { compactFromPercent: model.contextAnimation.compactFromPercent }),
+          ...(model.contextAnimation.flashTicks > 0 ? { flashTicks: model.contextAnimation.flashTicks } : {}),
         })
         const filled = value.glyphs.filter((glyph) => glyph === ContextMeter.meterGlyphs.fill).length
         const commit = model.modeCommit
@@ -2474,9 +2512,10 @@ export class Surface {
         return chunks
       }
       const glyphs = model.busy
-        ? ContextMeter.loadingMeter(model.animationTick + this.loaderPhase, { cells: contextCells })
+        ? ContextMeter.loadingMeter(model.animationTick, { cells: contextCells })
         : Array(contextCells).fill(ContextMeter.meterGlyphs.track)
       for (const glyph of glyphs) chunks.push(fg(colors[model.mode])(glyph))
+      chunks.push(fg(border)(" "))
       return chunks
     }
     const buildModeChunks = (): Array<TextChunk> => {
@@ -2493,7 +2532,7 @@ export class Surface {
           commit.tick < commit.from.length
             ? commit.from.slice(0, Math.max(0, commit.from.length - commit.tick))
             : commit.to.slice(0, Math.min(commit.to.length, commit.tick - commit.from.length))
-        if (commit.tick < commit.from.length + commit.to.length) cursor = "▮"
+        if (commit.tick >= commit.from.length && commit.tick < commit.from.length + commit.to.length) cursor = "▮"
       }
       const modeText = fg(colors[commit?.to ?? model.mode])(label + cursor)
       chunks.push(this.modeLabelHovered ? bold(modeText) : modeText)
@@ -2541,7 +2580,6 @@ export class Surface {
 
   private tickLoader(): void {
     if (this.destroyed) return
-    this.loaderPhase += 1
     this.handlers.animationTick?.()
     this.toolSpinner.step()
     const current = this.model
@@ -2550,7 +2588,7 @@ export class Surface {
       if (label !== undefined)
         this.statusLabel.content = new StyledText([
           fg(colors.text)(" "),
-          fg(colors.blue)(loaderFrame(label, this.loaderPhase)),
+          fg(colors.blue)(loaderFrame(label, current.animationTick)),
           dim(fg(colors.text)(` ${label} `)),
         ])
       const glyph = this.toolSpinner.toBraille()
@@ -2573,7 +2611,7 @@ export class Surface {
         record.renderable.content = new StyledText(chunks)
       }
       if (current.threadSidebar.open)
-        this.sidebar.content = renderSidebar(current, spinnerFrames[this.loaderPhase % spinnerFrames.length]!)
+        this.sidebar.content = renderSidebar(current, spinnerFrames[current.animationTick % spinnerFrames.length]!)
     }
     this.renderer.requestRender()
   }
@@ -3309,7 +3347,7 @@ export class Surface {
       this.inputBox.bottomTitle = ""
       this.statusLabel.content = new StyledText([
         fg(colors.text)(" "),
-        fg(colors.blue)(loaderFrame(statusName, this.loaderPhase)),
+        fg(colors.blue)(loaderFrame(statusName, model.animationTick)),
         dim(fg(colors.text)(` ${statusName} `)),
       ])
     } else {
@@ -3333,7 +3371,7 @@ export class Surface {
     this.sidebar.visible = threadSidebarVisible
     this.sidebar.width = boundedThreadSidebarWidth(model.width)
     this.sidebar.content = threadSidebarVisible
-      ? renderSidebar(model, spinnerFrames[this.loaderPhase % spinnerFrames.length]!)
+      ? renderSidebar(model, spinnerFrames[model.animationTick % spinnerFrames.length]!)
       : ""
     this.changedFilesBox.visible = sidebarVisible
     if (this.changedFilesBox.visible) {
@@ -3394,9 +3432,17 @@ export class Surface {
       model.modeCommit !== undefined ||
       (model.threadSidebar.open &&
         (model.threads as ReadonlyArray<ThreadItem>).some((thread) => isThreadBusy(thread.status)))
-    if (this.options.animate !== false && loaderActive && this.loaderTimer === undefined) {
+    if (
+      this.options.animate !== false &&
+      this.handlers.animationTick !== undefined &&
+      loaderActive &&
+      this.loaderTimer === undefined
+    ) {
       this.loaderTimer = this.clock.setInterval(() => this.tickLoader(), spinnerInterval)
-    } else if ((this.options.animate === false || !loaderActive) && this.loaderTimer !== undefined) {
+    } else if (
+      (this.options.animate === false || this.handlers.animationTick === undefined || !loaderActive) &&
+      this.loaderTimer !== undefined
+    ) {
       this.clock.clearInterval(this.loaderTimer)
       this.loaderTimer = undefined
     }
@@ -3411,6 +3457,9 @@ export class Surface {
     this.palette.visible = this.paletteBox.visible
     this.palette.onMouseDown = undefined
     this.paletteBox.bottomTitle = ""
+    this.paletteHint.visible = false
+    this.paletteDividerOne.visible = false
+    this.paletteDividerTwo.visible = false
     let cursorEditor: ProjectedEditorRenderable | undefined =
       model.shortcutsOpen || (threadSidebarVisible && model.threadSidebar.focused) ? undefined : this.composerEditor
     if (overlay === "palette") {
@@ -3429,7 +3478,7 @@ export class Surface {
       cursorEditor = this.overlayEditor
     } else if (overlay === "context") {
       const boxWidth = Math.min(68, contentWidth)
-      const boxHeight = Math.min(14, Math.max(1, composerTop))
+      const boxHeight = Math.min(contentWidth <= 24 ? 12 : 14, model.height)
       this.paletteBox.width = boxWidth
       this.paletteBox.height = boxHeight
       this.paletteBox.left = contentLeft + Math.max(0, contentWidth - boxWidth)
@@ -3438,7 +3487,19 @@ export class Surface {
       this.paletteBox.titleColor = colors[model.mode]
       this.paletteBox.titleAlignment = "left"
       this.paletteBox.bottomTitle = " Ctrl+Y toggle ── esc "
+      this.paletteHint.visible = false
       this.paletteBox.bottomTitleAlignment = "right"
+      const compactContext = boxHeight <= 12 || boxWidth < 40
+      this.paletteDividerOne.content = sectionDivider(boxWidth, "Window")
+      this.paletteDividerOne.width = boxWidth
+      this.paletteDividerOne.left = this.paletteBox.left
+      this.paletteDividerOne.top = this.paletteBox.top + (compactContext ? 4 : 6)
+      this.paletteDividerOne.visible = true
+      this.paletteDividerTwo.content = sectionDivider(boxWidth, "Session")
+      this.paletteDividerTwo.width = boxWidth
+      this.paletteDividerTwo.left = this.paletteBox.left
+      this.paletteDividerTwo.top = this.paletteBox.top + (compactContext ? 7 : 9)
+      this.paletteDividerTwo.visible = true
       this.palette.content = contextDetailsContent(
         model,
         Math.max(1, boxWidth - 4),
@@ -3448,7 +3509,7 @@ export class Surface {
       cursorEditor = undefined
     } else if (overlay === "modes") {
       const boxWidth = Math.min(58, contentWidth)
-      const boxHeight = Math.min(12, Math.max(1, composerTop))
+      const boxHeight = Math.min(11, Math.max(1, composerTop))
       this.paletteBox.width = boxWidth
       this.paletteBox.height = boxHeight
       this.paletteBox.left = contentLeft + Math.max(0, contentWidth - boxWidth)
@@ -3458,16 +3519,38 @@ export class Surface {
       this.paletteBox.titleColor = colors[hovered]
       this.paletteBox.titleAlignment = "left"
       this.paletteBox.bottomTitle = " ↔ turn ── esc "
+      this.paletteHint.visible = false
       this.paletteBox.bottomTitleAlignment = "right"
-      this.palette.content = modePickerContent(model, Math.max(1, boxWidth - 4), Math.max(1, boxHeight - 2))
-      this.palette.onMouseDown = (event) => {
-        const width = Math.max(1, boxWidth - 4)
+      const modeContentWidth = Math.max(1, boxWidth - 4)
+      const modeContentHeight = Math.max(1, boxHeight - 2)
+      this.paletteDividerOne.content = sectionDivider(boxWidth, "Route")
+      this.paletteDividerOne.width = boxWidth
+      this.paletteDividerOne.left = this.paletteBox.left
+      this.paletteDividerOne.top = this.paletteBox.top + (modeContentWidth < 40 ? 3 : 5)
+      this.paletteDividerOne.visible = modeContentHeight >= (modeContentWidth < 40 ? 7 : 9)
+      this.paletteDividerTwo.content = sectionDivider(boxWidth, "About")
+      this.paletteDividerTwo.width = boxWidth
+      this.paletteDividerTwo.left = this.paletteBox.left
+      this.paletteDividerTwo.top = this.paletteBox.top + (modeContentWidth < 40 ? 6 : 8)
+      this.paletteDividerTwo.visible = modeContentHeight >= (modeContentWidth < 40 ? 7 : 9)
+      this.palette.content = modePickerContent(model, modeContentWidth, modeContentHeight)
+      const hitMode = (event: MouseEvent): number | undefined => {
+        const compact = modeContentWidth < 40
+        const labelRow = this.palette.screenY + (compact ? 2 : 3)
+        if (event.y !== labelRow) return undefined
+        const starts = modeLabelStarts(modeContentWidth)
         const column = event.x - this.palette.screenX
-        const selected = Math.max(
-          0,
-          Math.min(modeIds.length - 1, Math.round((column * (modeIds.length - 1)) / Math.max(1, width - 5))),
-        )
-        this.handlers.modeCommit?.(selected)
+        return modeIds.findIndex((mode, index) => column >= starts[index]! && column < starts[index]! + mode.length)
+      }
+      this.palette.onMouseMove = (event) => {
+        const selected = hitMode(event)
+        this.renderer.setMousePointer(selected === undefined ? "default" : "pointer")
+        if (selected !== undefined) this.handlers.modeHover?.(selected)
+      }
+      this.palette.onMouseDown = (event) => {
+        if (event.button !== 0) return
+        const selected = hitMode(event)
+        if (selected !== undefined) this.handlers.modeCommit?.(selected)
       }
       cursorEditor = undefined
     } else if (overlay === "files") {
@@ -3764,6 +3847,22 @@ const usageTimeText = (model: Model, now: number): string => {
   return model.usageTime?._tag === "Loading" ? `${activeTimeIcon} ···` : `${activeTimeIcon} —`
 }
 
+const panelHint = (accent: ColorInput, left: string, right: string): StyledText =>
+  new StyledText([
+    fg(colors.text)("── "),
+    fg(accent)(left),
+    fg(colors.text)(" ── "),
+    fg(accent)(right),
+    fg(colors.text)(" ─"),
+  ])
+
+const sectionDivider = (width: number, title: string): StyledText =>
+  new StyledText([
+    fg(colors.text)("├─ "),
+    dim(fg(colors.text)(title)),
+    fg(colors.text)(` ${"─".repeat(Math.max(0, width - title.length - 5))}┤`),
+  ])
+
 const contextDetailsContent = (model: Model, innerWidth: number, innerHeight: number, now: number): StyledText => {
   const chunks: Array<TextChunk> = []
   const line = (text: string, style: (value: string) => TextChunk = fg(colors.text)) => {
@@ -3779,8 +3878,7 @@ const contextDetailsContent = (model: Model, innerWidth: number, innerHeight: nu
       chunks.push(bold(fg(colors[model.mode])(` ${value.percent}%`)))
     } else chunks.push(fg(colors[model.mode])(Array(cells).fill(ContextMeter.meterGlyphs.track).join("")))
   }
-  const divider = (title: string) =>
-    line(`─ ${title} ${"─".repeat(Math.max(0, innerWidth - title.length - 3))}`, (value) => dim(fg(colors.text)(value)))
+  const divider = (title: string) => line(` ${title}`)
   const context = model.contextUsage
   const usable = context?._tag === "Available" ? ContextMeter.usableTokens(context) : undefined
   const used = context?._tag === "Available" ? formatContextTokens(context.inputTokens) : "Unknown"
@@ -3792,8 +3890,8 @@ const contextDetailsContent = (model: Model, innerWidth: number, innerHeight: nu
   if (!compact) line("")
   meterLine()
   if (!compact) line("")
-  line(`Used       ${used}`)
-  line(`Available  ${available}`)
+  line(compact ? `Used       ${used}` : `Used        ${used}`)
+  line(compact ? `Available  ${available}` : `Available   ${available}`)
   divider("Window")
   line(`Usable     ${usableText}`)
   line(`Full       ${full}`)
@@ -3813,34 +3911,25 @@ const modeDescription = {
   ultra: "The most capable mode for hard, open-ended tasks",
 } as const
 
+const modeLabelStarts = (innerWidth: number): ReadonlyArray<number> =>
+  modeIds.map((_, index) => Math.floor((index * Math.max(0, innerWidth - 5)) / (modeIds.length - 1)))
+
 const modePickerContent = (model: Model, innerWidth: number, innerHeight = Number.POSITIVE_INFINITY): StyledText => {
   const selected = modeIds[model.modePicker.selected] ?? model.mode
-  if (innerWidth < 40)
-    return new StyledText([
-      bold(fg(colors[selected])(truncateToWidth(selected, innerWidth))),
-      fg(colors.text)("\n"),
-      fg(colors.muted)(truncateToWidth(modeDescription[selected], innerWidth)),
-    ])
-  if (innerHeight < 9) {
-    const routes = model.modeRoutes[selected]
-    return new StyledText([
-      bold(fg(colors[selected])(selected)),
-      fg(colors.text)("\n"),
-      fg(colors.text)(truncateToWidth(`Agent     ${routeLabel(routes?.main)}`, innerWidth)),
-      fg(colors.text)("\n"),
-      fg(colors.text)(truncateToWidth(`Oracle    ${routeLabel(routes?.oracle)}`, innerWidth)),
-    ])
-  }
+  const compact = innerWidth < 40
   const chunks: Array<TextChunk> = []
   const line = (text = "", style: (value: string) => TextChunk = fg(colors.text)) => {
     if (chunks.length > 0) chunks.push(fg(colors.text)("\n"))
     chunks.push(style(truncateToWidth(text, innerWidth)))
   }
-  const starts = modeIds.map((_, index) => Math.floor((index * Math.max(0, innerWidth - 5)) / (modeIds.length - 1)))
-  const target = starts[model.modePicker.selected] ?? 0
-  const from = starts[model.modePicker.from ?? model.modePicker.selected] ?? target
+  const starts = modeLabelStarts(innerWidth)
+  const targetPosition = model.modePicker.selected
+  const fromPosition = model.modePicker.fromPosition ?? model.modePicker.from ?? targetPosition
   const progress = Math.min(1, ((model.modePicker.turnTick ?? 4) + 1) / 4)
-  const center = Math.round(from + (target - from) * (1 - (1 - progress) * (1 - progress)))
+  const position = fromPosition + (targetPosition - fromPosition) * (1 - (1 - progress) * (1 - progress))
+  const center = Math.round((position * Math.max(0, innerWidth - 5)) / Math.max(1, modeIds.length - 1))
+  const target = starts[model.modePicker.selected] ?? 0
+  const from = Math.round((fromPosition * Math.max(0, innerWidth - 5)) / Math.max(1, modeIds.length - 1))
   const thumbWidth = selected.length
   const dial: Array<string> = Array.from({ length: innerWidth }, () => ContextMeter.meterGlyphs.track)
   for (let index = 0; index < thumbWidth; index += 1)
@@ -3849,7 +3938,7 @@ const modePickerContent = (model: Model, innerWidth: number, innerHeight = Numbe
     const edge = target >= from ? center + thumbWidth : center - 1
     if (edge >= 0 && edge < dial.length) dial[edge] = "╾"
   }
-  line("")
+  if (!compact) line("")
   line(dial.join(""), fg(colors[selected]))
   const labels: Array<TextChunk> = []
   let column = 0
@@ -3860,14 +3949,15 @@ const modePickerContent = (model: Model, innerWidth: number, innerHeight = Numbe
     column = start + mode.length
   }
   chunks.push(fg(colors.text)("\n"), ...labels)
-  line("")
-  const divider = (title: string) =>
-    line(`─ ${title} ${"─".repeat(Math.max(0, innerWidth - title.length - 3))}`, (value) => dim(fg(colors.text)(value)))
+  if (!compact) line("")
+  const divider = (title: string) => line(` ${title}`)
   const routes = model.modeRoutes[selected]
-  divider("Route")
-  line(`Agent     ${routeLabel(routes?.main)}`)
-  line(`Oracle    ${routeLabel(routes?.oracle)}`)
-  divider("About")
+  if (innerHeight >= (compact ? 7 : 9)) {
+    divider("Route")
+    line(`Agent     ${routeLabel(routes?.main)}`)
+    line(`Oracle    ${routeLabel(routes?.oracle)}`)
+    divider("About")
+  }
   line(modeDescription[selected])
   return new StyledText(chunks)
 }
