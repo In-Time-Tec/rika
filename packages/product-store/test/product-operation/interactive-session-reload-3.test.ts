@@ -3,7 +3,7 @@ import {
   RuntimeFixtures,
   TranscriptFixtures,
   Effect,
-  ExecutionIngest,
+  projectionVersion,
   subagentToolId,
   subagentChildId,
   subagentRootEvents,
@@ -93,8 +93,7 @@ describe("InteractiveSession subagent reload", () => {
       for (
         let attempt = 0;
         attempt < 400 &&
-        (yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("done")))?.projectionVersion !==
-          ExecutionIngest.projectionVersion;
+        (yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("done")))?.projectionVersion !== projectionVersion;
         attempt += 1
       )
         yield* Effect.yieldNow
@@ -145,14 +144,13 @@ describe("InteractiveSession subagent reload", () => {
       for (
         let attempt = 0;
         attempt < 400 &&
-        (yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("done")))?.projectionVersion !==
-          ExecutionIngest.projectionVersion;
+        (yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("done")))?.projectionVersion !== projectionVersion;
         attempt += 1
       )
         yield* Effect.yieldNow
       expect(rootInspections).toBeGreaterThan(1)
       const stored = yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("done"))
-      expect(stored?.projectionVersion).toBe(ExecutionIngest.projectionVersion)
+      expect(stored?.projectionVersion).toBe(projectionVersion)
       expect(stored?.executionCheckpoints.find((entry) => entry.executionKey === lateChild)).toBeUndefined()
     }),
   )
@@ -216,7 +214,7 @@ describe("InteractiveSession subagent reload", () => {
 
       yield* selectionEntriesFor(session, subagentThread.id)
       const stored = yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("done"))
-      expect(stored?.projectionVersion).toBe(ExecutionIngest.projectionVersion)
+      expect(stored?.projectionVersion).toBe(projectionVersion)
       expect(stored?.units.some((unit) => unit.content._tag === "Entry" && unit.content.text === "delegate")).toBe(true)
       expect(
         stored?.units.some(

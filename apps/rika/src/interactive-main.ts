@@ -1,4 +1,7 @@
 #!/usr/bin/env bun
+import * as ProductOperation from "@rika/product/product-operation"
+import * as InteractiveEvent from "@rika/product/interactive-event"
+import * as InteractiveSession from "@rika/product/interactive-session"
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as ModelRouteLabel from "@rika/configuration/model-route-label"
 import * as ConfigurationService from "@rika/configuration/configuration-service"
@@ -104,7 +107,7 @@ const tuiTraceEventTypes = new Set([
   "tool.result.received",
 ])
 
-const traceTuiModelEvent = (seenDeltas: Set<string>, event: Operation.InteractiveEvent) => {
+const traceTuiModelEvent = (seenDeltas: Set<string>, event: InteractiveEvent.InteractiveEvent) => {
   if (
     event._tag !== "TranscriptProjectionPatched" ||
     event.origin._tag !== "Event" ||
@@ -604,14 +607,14 @@ const failureKind = (cause: Cause.Cause<unknown>) => {
 
 const main = Command.run(command, { version }).pipe(
   Effect.catchTags({
-    OperationUnavailable: (error: Operation.OperationUnavailable) =>
+    OperationUnavailable: (error: ProductOperation.OperationUnavailable) =>
       Console.error(error.message).pipe(Effect.andThen(Effect.fail(error))),
-    InvalidInput: (error: Operation.InvalidInput) =>
+    InvalidInput: (error: ProductOperation.InvalidInput) =>
       Console.error(error.message).pipe(Effect.andThen(Effect.fail(error))),
   }),
 )
 
-const withClientWorkspaceImpl = (input: Operation.Input, workspace: string): Operation.Input => {
+const withClientWorkspaceImpl = (input: ProductOperation.Input, workspace: string): ProductOperation.Input => {
   if (input._tag === "Interactive" || input._tag === "Run" || input._tag === "Review")
     return { ...input, clientWorkspace: workspace, workspace: input.workspace ?? workspace }
   if (
@@ -629,8 +632,8 @@ const withClientWorkspaceImpl = (input: Operation.Input, workspace: string): Ope
 }
 
 export const withClientWorkspace: {
-  (workspace: string): (input: Operation.Input) => Operation.Input
-  (input: Operation.Input, workspace: string): Operation.Input
+  (workspace: string): (input: ProductOperation.Input) => ProductOperation.Input
+  (input: ProductOperation.Input, workspace: string): ProductOperation.Input
 } = Function.dual(2, withClientWorkspaceImpl)
 
 export const interruptTrackedFibers = (fibers: Iterable<Fiber.Fiber<void, never>>) =>
@@ -699,15 +702,15 @@ export const interactiveTui =
   (options: InteractiveTuiOptions) =>
   (
     input: InteractiveFeed.InteractiveInput,
-    session: Operation.InteractiveSession,
-  ): Effect.Effect<void, Operation.OperationUnavailable> =>
+    session: InteractiveSession.InteractiveSession,
+  ): Effect.Effect<void, ProductOperation.OperationUnavailable> =>
     Effect.uninterruptible(
       Effect.gen(function* () {
         if (options.makeRenderer === undefined && (!process.stdin.isTTY || !process.stdout.isTTY)) return
         const context = yield* Effect.context<never>()
         const fork = Effect.runForkWith(context)
         const resolvedModeRoutes = options.modeRoutes?.()
-        return yield* Effect.callback<void, Operation.OperationUnavailable>((resume) => {
+        return yield* Effect.callback<void, ProductOperation.OperationUnavailable>((resume) => {
           let model = initial(input.workspace ?? process.cwd(), input.mode ?? "medium")
           if (resolvedModeRoutes !== undefined) model = withModeRouteMap(model, resolvedModeRoutes)
           let workingFrame: string | undefined
@@ -725,7 +728,7 @@ export const interactiveTui =
           let initialization: Fiber.Fiber<void, never> | undefined
           let closed = false
           const recoverSession = <R>(
-            effect: Effect.Effect<void, Operation.OperationUnavailable, R>,
+            effect: Effect.Effect<void, ProductOperation.OperationUnavailable, R>,
           ): Effect.Effect<void, never, R> =>
             effect.pipe(
               Effect.catchTag("OperationUnavailable", (error) =>
@@ -789,7 +792,7 @@ export const interactiveTui =
               ),
             )
           }
-          const dispatch = (event: Operation.InteractiveEvent) => {
+          const dispatch = (event: InteractiveEvent.InteractiveEvent) => {
             if (closed) return
             if (
               event._tag === "SelectionLoaded" ||
@@ -1064,7 +1067,7 @@ export const interactiveTui =
                 event._tag === "ExecutionControlled",
             )
           }
-          const feedBatcher = InteractiveController.makeFeedFrameBatcher<Operation.InteractiveEvent>({
+          const feedBatcher = InteractiveController.makeFeedFrameBatcher<InteractiveEvent.InteractiveEvent>({
             schedule: (flush) => {
               feedTimer = fork(
                 Effect.sleep("16 millis").pipe(
@@ -1323,7 +1326,10 @@ export const interactiveTui =
               ),
             )
           }
-          const loadSelected = (effect: Effect.Effect<void, Operation.OperationUnavailable>, generation: number) =>
+          const loadSelected = (
+            effect: Effect.Effect<void, ProductOperation.OperationUnavailable>,
+            generation: number,
+          ) =>
             Effect.gen(function* () {
               yield* Effect.sync(() => {
                 if (generation !== selectionGeneration) return
@@ -1342,7 +1348,9 @@ export const interactiveTui =
                 ),
               )
             })
-          const startSelection = (select: (epoch: number) => Effect.Effect<void, Operation.OperationUnavailable>) => {
+          const startSelection = (
+            select: (epoch: number) => Effect.Effect<void, ProductOperation.OperationUnavailable>,
+          ) => {
             const generation = (selectionGeneration += 1)
             const previous = selectionFiber
             let selectedFiber: Fiber.Fiber<void, never>
@@ -1770,7 +1778,7 @@ export const interactiveTui =
                       Effect.annotateLogs("rika.failure.kind", failureKind(cause)),
                       Effect.andThen(
                         Effect.fail(
-                          Operation.OperationUnavailable.make({
+                          ProductOperation.OperationUnavailable.make({
                             operation: "Interactive",
                             message: Cause.pretty(cause),
                           }),
@@ -1914,7 +1922,7 @@ const start = () => {
                       }).pipe(
                         Effect.andThen(ResidentProcessStartup.signalRuntimeRestart(error.threadId).pipe(Effect.ignore)),
                         Effect.andThen(
-                          Operation.OperationUnavailable.make({
+                          ProductOperation.OperationUnavailable.make({
                             operation: clientInput._tag,
                             message: "Rika was upgraded; restarting this session",
                           }),
@@ -1990,9 +1998,9 @@ const start = () => {
                               : Effect.void,
                           ),
                           Effect.mapError((error) =>
-                            Schema.is(Operation.OperationUnavailable)(error)
+                            Schema.is(ProductOperation.OperationUnavailable)(error)
                               ? error
-                              : Operation.OperationUnavailable.make({
+                              : ProductOperation.OperationUnavailable.make({
                                   operation: clientInput._tag,
                                   message: Schema.is(ResidentService.ResidentRestartRequired)(error)
                                     ? "Rika was upgraded; restarting this session"
@@ -2005,7 +2013,7 @@ const start = () => {
                     }
                     if (Schema.is(ResidentService.ResidentRestartRequired)(connected.failure))
                       return yield* requestRuntimeRestart(connected.failure)
-                    return yield* Operation.OperationUnavailable.make({
+                    return yield* ProductOperation.OperationUnavailable.make({
                       operation: clientInput._tag,
                       message: connected.failure.message,
                     })
@@ -2019,9 +2027,9 @@ const start = () => {
             ),
             provideLayerScoped(BunServices.layer),
             Effect.mapError((error) =>
-              Schema.is(Operation.OperationUnavailable)(error)
+              Schema.is(ProductOperation.OperationUnavailable)(error)
                 ? error
-                : Operation.OperationUnavailable.make({ operation: input._tag, message: String(error) }),
+                : ProductOperation.OperationUnavailable.make({ operation: input._tag, message: String(error) }),
             ),
           ),
         ),

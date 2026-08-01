@@ -1,4 +1,4 @@
-import { OperationUnavailable } from "../contract/product-operation-errors"
+import { OperationUnavailable } from "../contract/product-operation"
 
 export interface ProductLayerOptions<
   ThreadError extends Error,

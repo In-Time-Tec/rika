@@ -1,12 +1,14 @@
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionInspection from "@rika/product/execution-inspection"
 import * as TurnContract from "@rika/product/turn-repository"
 import { Effect } from "effect"
 
 export const executionStarted = (
   executionId: string,
   cursor: string = `${executionId}:started`,
-): ExecutionBackend.Event => ({
+): ExecutionEvent.Event => ({
   executionId,
   cursor,
   sequence: 0,
@@ -94,7 +96,7 @@ export const backend = ExecutionBackend.Service.of({
 
 export const inspectFromTurns =
   (turns: TurnContract.Interface) =>
-  (turnId: string): Effect.Effect<ExecutionBackend.Inspection | undefined, ExecutionBackend.BackendError> =>
+  (turnId: string): Effect.Effect<ExecutionInspection.Inspection | undefined, ExecutionBackend.BackendError> =>
     turns.get(Turn.TurnId.make(turnId)).pipe(
       Effect.map((turn) =>
         turn === undefined ? undefined : { turnId, status: turn.status, waits: [], pendingTools: [], children: [] },
@@ -108,7 +110,7 @@ export const delegationEvent = (
   sequence: number,
   type: string,
   data: Record<string, unknown>,
-): ExecutionBackend.Event => ({
+): ExecutionEvent.Event => ({
   executionId,
   cursor,
   sequence,

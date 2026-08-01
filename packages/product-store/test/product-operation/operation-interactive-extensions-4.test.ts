@@ -1,3 +1,5 @@
+import * as ExecutionRequest from "@rika/product/execution-request"
+import * as ExecutionEvent from "@rika/product/execution-event"
 import type { InteractiveSession } from "@rika/product/interactive-session"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { Service } from "@rika/product/product-operation-service"
@@ -28,12 +30,12 @@ describe("interactive session extensions", () => {
         const turns = yield* TurnRepository.makeMemory()
         const registration = yield* Deferred.make<InteractiveSession>()
         const followed = yield* Ref.make<ReadonlyArray<string>>([])
-        const startEventScopes = yield* Ref.make<ReadonlyArray<ExecutionBackend.EventScope | undefined>>([])
+        const startEventScopes = yield* Ref.make<ReadonlyArray<ExecutionRequest.EventScope | undefined>>([])
         const childCallId = "agent"
         const childId = `child:execution%3Aparent-turn:${childCallId}`
         const nestedCallId = "worker"
         const nestedId = `child:${encodeURIComponent(childId)}:${nestedCallId}`
-        const childEvents: ReadonlyArray<ExecutionBackend.Event> = [
+        const childEvents: ReadonlyArray<ExecutionEvent.Event> = [
           {
             executionId: childId,
             cursor: "child-started",
@@ -84,7 +86,7 @@ describe("interactive session extensions", () => {
             timestampSource: "server",
           },
         ]
-        const nestedEvents: ReadonlyArray<ExecutionBackend.Event> = [
+        const nestedEvents: ReadonlyArray<ExecutionEvent.Event> = [
           {
             executionId: nestedId,
             cursor: "nested-started",
@@ -122,7 +124,7 @@ describe("interactive session extensions", () => {
         const backend = ExecutionBackend.Service.of({
           ...baseBackend,
           start: (input) => {
-            const parentEvents: ReadonlyArray<ExecutionBackend.Event> = [
+            const parentEvents: ReadonlyArray<ExecutionEvent.Event> = [
               {
                 executionId: input.turnId,
                 cursor: "parent-started",
@@ -177,7 +179,7 @@ describe("interactive session extensions", () => {
             )
           },
           replay: (executionId) => {
-            let events: ReadonlyArray<ExecutionBackend.Event> = []
+            let events: ReadonlyArray<ExecutionEvent.Event> = []
             if (executionId === childId) events = childEvents
             else if (executionId === nestedId) events = nestedEvents
             return Effect.succeed({ turnId: executionId, status: "completed" as const, events })

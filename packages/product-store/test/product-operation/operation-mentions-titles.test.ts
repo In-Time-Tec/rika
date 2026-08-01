@@ -8,9 +8,10 @@ import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionChildRun from "@rika/product/execution-child-run"
 import { Effect, Layer, Ref } from "effect"
 import { TestClock } from "effect/testing"
-import { ResolvedContext } from "@rika/product/product-operation-service"
+import * as ResolvedContext from "@rika/product/context-resolution-service"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { holdSession, openInteractiveSession, settleEvents } from "../support/operation-session-harness"
 import { executionStarted, backend } from "../support/operation-execution-fixtures"
@@ -56,7 +57,7 @@ describe("Operation", () => {
       const turns = yield* TurnRepository.makeMemory()
       const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const starts = yield* Ref.make<ReadonlyArray<string>>([])
-      const titleInvocations = yield* Ref.make<ReadonlyArray<ExecutionBackend.InvokeChildInput>>([])
+      const titleInvocations = yield* Ref.make<ReadonlyArray<ExecutionChildRun.InvokeChildInput>>([])
       const titleRoute = {
         ...ExecutionRouteSnapshot.testExecutionRoute("low").main,
         role: "title" as const,

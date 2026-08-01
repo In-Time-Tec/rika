@@ -1,3 +1,6 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionInspection from "@rika/product/execution-inspection"
 import { describe, expect, it } from "@effect/vitest"
 import {
   RuntimeFixtures,
@@ -14,7 +17,7 @@ import {
 describe("InteractiveSession subagent reload", () => {
   it.effect("refolds terminal child outcomes from Relay after a projection-version change", () =>
     Effect.gen(function* () {
-      const failedRootEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
+      const failedRootEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [
         ...subagentRootEvents.slice(0, 3),
         {
           executionId: "execution:done",
@@ -47,7 +50,7 @@ describe("InteractiveSession subagent reload", () => {
         projectionVersion: RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion,
       })
 
-      const reconciledParent = (entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>) =>
+      const reconciledParent = (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) =>
         entries.find(
           (entry) =>
             entry.unit.parentId === undefined &&
@@ -80,7 +83,7 @@ describe("InteractiveSession subagent reload", () => {
       const completedChildId = "child:execution%3Adone:completed"
       const failedChildId = "child:execution%3Adone:failed"
       const nestedChildId = `child:${encodeURIComponent(completedChildId)}:nested`
-      const rootEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
+      const rootEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [
         {
           executionId: "execution:done",
           cursor: "root-completed-tool",
@@ -154,7 +157,7 @@ describe("InteractiveSession subagent reload", () => {
           text: "resident was replaced during execution",
         },
       ]
-      const completedChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
+      const completedChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [
         {
           executionId: completedChildId,
           cursor: "nested-tool",
@@ -179,7 +182,7 @@ describe("InteractiveSession subagent reload", () => {
           createdAt: 7,
         },
       ]
-      const failedChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
+      const failedChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [
         {
           executionId: failedChildId,
           cursor: "failed-child",
@@ -189,7 +192,7 @@ describe("InteractiveSession subagent reload", () => {
           text: "child checks failed",
         },
       ]
-      const nestedChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
+      const nestedChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [
         {
           executionId: nestedChildId,
           cursor: "nested-answer",
@@ -211,7 +214,7 @@ describe("InteractiveSession subagent reload", () => {
         "delegate",
         rootEvents.slice(0, 4),
       )
-      const inspections: Readonly<Record<string, RuntimeFixtures.ExecutionBackend.Inspection>> = {
+      const inspections: Readonly<Record<string, RuntimeFixtures.ExecutionInspection.Inspection>> = {
         done: {
           turnId: "done",
           status: "failed",
@@ -248,7 +251,7 @@ describe("InteractiveSession subagent reload", () => {
           children: [],
         },
       }
-      const replayEvents: Readonly<Record<string, ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>>> = {
+      const replayEvents: Readonly<Record<string, ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event>>> = {
         done: rootEvents,
         [completedChildId]: completedChildEvents,
         [failedChildId]: failedChildEvents,

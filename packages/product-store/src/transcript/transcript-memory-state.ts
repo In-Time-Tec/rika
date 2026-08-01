@@ -1,8 +1,12 @@
+import type { ExecutionCheckpoint } from "@rika/product/transcript-page"
+import type { Projection } from "@rika/product/transcript-page"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Turn } from "@rika/product/turn-record"
-import type { ExecutionCheckpoint, Projection, CheckpointOptions } from "@rika/product/transcript-repository"
+import type { Interface } from "@rika/product/transcript-repository"
+type CheckpointOptions = Parameters<Interface["commitDelta"]>[3]
+
 import { support } from "./transcript-repository-support"
 
 const { clone, sameExecutionAttachment, storedProjection } = support

@@ -1,3 +1,4 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
@@ -166,8 +167,8 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
           undefined,
         )
       }
-      const collected: Array<TranscriptRepository.Entry> = []
-      let cursor: TranscriptRepository.PageCursor | undefined
+      const collected: Array<TranscriptPage.Entry> = []
+      let cursor: TranscriptPage.PageCursor | undefined
       while (true) {
         const page = yield* repository.page(threadId, { ...(cursor === undefined ? {} : { before: cursor }), limit: 2 })
         collected.unshift(...page.entries)

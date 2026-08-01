@@ -1,21 +1,22 @@
 import { Service } from "@rika/product/product-operation-service"
-import { reconcile } from "@rika/product/product-operation-service"
+import { reconcile } from "../../src/operation/dispatch/product-operation-dispatch"
 import { describe, expect, it } from "@effect/vitest"
-import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
+import * as ThreadRepository from "../../../product-store/src/thread/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
-import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
+import * as TurnRepository from "../../../product-store/src/turn/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionRequest from "@rika/product/execution-request"
 import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"
 import * as PluginRegistry from "@rika/extensions/plugin-registry"
 import { Effect, Layer, Ref } from "effect"
 
-import { executionRoute } from "../support/product-test-current-state"
-import { productLayer, provideLayer } from "../support/operation-layer-harness"
-import { reconcileDependencies } from "../support/operation-session-harness"
-import { executionStarted, backend } from "../support/operation-execution-fixtures"
+import { executionRoute } from "../../../product-store/test/support/product-test-current-state"
+import { productLayer, provideLayer } from "../../../product-store/test/support/operation-layer-harness"
+import { reconcileDependencies } from "../../../product-store/test/support/operation-session-harness"
+import { executionStarted, backend } from "../../../product-store/test/support/operation-execution-fixtures"
 
-import { turnProvenance, threadLineage } from "../support/operation-selection-fixtures"
+import { turnProvenance, threadLineage } from "../../../product-store/test/support/operation-selection-fixtures"
 
 describe("Operation", () => {
   it.effect("pins new executions, resumes pinned executions, and drains multiple queued turns", () =>
@@ -87,7 +88,7 @@ describe("Operation", () => {
             Effect.as({ pin: value, generation }),
           ),
       })
-      const starts = yield* Ref.make<ReadonlyArray<ExecutionBackend.StartInput>>([])
+      const starts = yield* Ref.make<ReadonlyArray<ExecutionRequest.StartInput>>([])
       const runBackend = ExecutionBackend.Service.of({
         ...backend,
         start: (input) =>

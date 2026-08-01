@@ -18,7 +18,10 @@ export type CurrentCreateInput = Omit<
   readonly queueCapacity?: number
 }
 
-export const create = (repository: TurnContract.Interface, input: CurrentCreateInput) =>
+export const create = (
+  repository: TurnContract.Interface,
+  input: CurrentCreateInput,
+): ReturnType<TurnContract.Interface["createForSubmission"]> =>
   repository.createForSubmission({
     executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
     ...input,

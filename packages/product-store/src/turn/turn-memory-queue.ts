@@ -3,12 +3,15 @@ import { Effect } from "effect"
 import * as ExecutionStatus from "@rika/product/execution-status"
 import { AgentExecutionTurn } from "@rika/product/turn-record"
 import { QueueFull, RepositoryError } from "@rika/product/turn-repository"
-import type { Interface, QueueClaimFinish, QueueItemChange } from "@rika/product/turn-repository"
+import type { Interface } from "@rika/product/turn-repository"
 import { queuedTurnUnavailable } from "./turn-memory-errors"
 import { clone } from "./turn-memory-state"
 import { queueState, withQueueState } from "./turn-memory-queue-state"
 import type { MemoryState, MemoryRequeueResult } from "./turn-memory-state"
 import type { TurnMemoryContext } from "./turn-memory-state-operations"
+
+type QueueClaimFinish = Effect.Success<ReturnType<Interface["finishQueuedClaim"]>>
+type QueueItemChange = Effect.Success<ReturnType<Interface["dequeue"]>>
 
 export const makeTurnMemoryQueue = ({
   readState,

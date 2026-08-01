@@ -1,3 +1,4 @@
+import * as ProductOperation from "@rika/product/product-operation"
 import * as Operation from "@rika/product/product-operation-service"
 import { Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
@@ -48,17 +49,17 @@ const continueCommand = Command.make(
   ({ last, threadIds }) =>
     Effect.gen(function* () {
       if (last && threadIds.length > 0) {
-        return yield* Operation.InvalidInput.make({
+        return yield* ProductOperation.InvalidInput.make({
           message: "threads continue accepts --last or thread ids, not both",
         })
       }
       if (!last && threadIds.length === 0) {
-        return yield* Operation.InvalidInput.make({
+        return yield* ProductOperation.InvalidInput.make({
           message: "threads continue requires --last or at least one thread id",
         })
       }
       if (threadIds.length > 1) {
-        return yield* Operation.InvalidInput.make({ message: "threads continue accepts exactly one thread id" })
+        return yield* ProductOperation.InvalidInput.make({ message: "threads continue accepts exactly one thread id" })
       }
       if (last) {
         yield* dispatch({ _tag: "Interactive", prompt: [], last: true, ephemeral: false })

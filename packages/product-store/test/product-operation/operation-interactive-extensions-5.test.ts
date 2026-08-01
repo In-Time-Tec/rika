@@ -1,3 +1,4 @@
+import * as ExecutionEvent from "@rika/product/execution-event"
 import type { InteractiveSession } from "@rika/product/interactive-session"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { Service } from "@rika/product/product-operation-service"
@@ -54,7 +55,7 @@ describe("interactive session extensions", () => {
             const cursor = typeof afterCursor === "string" ? afterCursor : afterCursor?.cursor
             if (executionId === "parent-turn")
               return Effect.succeed({ turnId: executionId, status: "running" as const, events: [] })
-            const waiting: ExecutionBackend.Event = {
+            const waiting: ExecutionEvent.Event = {
               executionId,
               cursor: "wait",
               sequence: 1,
@@ -63,7 +64,7 @@ describe("interactive session extensions", () => {
               timestampSource: "server",
               data: { wait_id: "wait-child", mode: "external_input" },
             }
-            const completed: ReadonlyArray<ExecutionBackend.Event> = [
+            const completed: ReadonlyArray<ExecutionEvent.Event> = [
               {
                 executionId,
                 cursor: "wake",
@@ -263,7 +264,7 @@ describe("interactive session extensions", () => {
                 }),
               ),
             cancel: (turnId) => {
-              const events: ReadonlyArray<ExecutionBackend.Event> = turnId.includes(":child:")
+              const events: ReadonlyArray<ExecutionEvent.Event> = turnId.includes(":child:")
                 ? [
                     {
                       executionId: turnId,

@@ -1,3 +1,5 @@
+import type { ExecutionCheckpoint } from "@rika/product/transcript-page"
+import type { Projection } from "@rika/product/transcript-page"
 import { TurnResult } from "@rika/product/thread-result"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
@@ -5,7 +7,7 @@ import * as TranscriptProjectionModel from "@rika/transcript/transcript-projecti
 import { Effect, Schema } from "effect"
 import type { SqlClient as SqlClientType } from "effect/unstable/sql/SqlClient"
 import { TurnId } from "@rika/product/turn-record"
-import type { ExecutionCheckpoint, Projection } from "@rika/product/transcript-repository"
+
 import { invalidatedProjectionVersion, RepositoryError } from "@rika/product/transcript-repository"
 import { decode } from "../turn/turn-row-codec"
 import { TranscriptCheckpointRow } from "./transcript-checkpoint-codec"

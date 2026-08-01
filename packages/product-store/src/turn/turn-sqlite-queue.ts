@@ -2,18 +2,17 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import { QueueFull, QueuedTurnUnavailable, RepositoryError } from "@rika/product/turn-repository"
-import type {
-  Interface,
-  QueueSnapshot,
-  QueueClaim,
-  QueueClaimFinish,
-  QueueItemChange,
-  QueuedTurnTake,
-  QueueWake,
-} from "@rika/product/turn-repository"
+import type { Interface } from "@rika/product/turn-repository"
 import type { AgentExecutionTurn } from "@rika/product/turn-record"
 import { decodeAgent, decodeQueueState, encodeExtensionPin } from "./turn-row-codec"
 import { queuedTurnUnavailable, repositoryError, submissionError, takeQueuedError } from "./turn-memory-errors"
+type QueueSnapshot = Effect.Success<ReturnType<Interface["readQueue"]>>
+type QueueClaim = Parameters<Interface["finishQueuedClaim"]>[0]
+type QueueClaimFinish = Effect.Success<ReturnType<Interface["finishQueuedClaim"]>>
+type QueueItemChange = Effect.Success<ReturnType<Interface["dequeue"]>>
+type QueuedTurnTake = Effect.Success<ReturnType<Interface["takeQueued"]>>
+type QueueWake = NonNullable<Effect.Success<ReturnType<Interface["requestQueueWake"]>>>
+
 export const makeTurnSqliteQueue = (
   sql: SqlClient,
 ): Pick<

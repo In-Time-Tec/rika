@@ -1,79 +1,22 @@
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionStatus from "@rika/product/execution-status"
 import { Fixtures } from "./execution-ingest-support"
-export { Fixtures }
 import { Context, Deferred, Effect, Exit, Layer, Ref, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
-import { ExecutionIngest } from "@rika/product/product-operation-service"
+import * as ExecutionIngest from "../../src/execution/ingest/execution-ingest-service"
 import * as TurnContract from "@rika/product/turn-repository"
-import { executionRoute } from "../support/product-test-current-state"
-import { storeProjection } from "../support/product-test-transcript-fixture"
+import { executionRoute } from "../../../product-store/test/support/product-test-current-state"
+import { storeProjection } from "../../../product-store/test/support/product-test-transcript-fixture"
 
-export const threadId = Fixtures.Thread.ThreadId.make("ingest-thread")
-export const rootId = Fixtures.Turn.TurnId.make("root")
-export const childId = "child:root:call_1"
-export const grandchildId = "child:child%3Aroot%3Acall_1:call_2"
-export const checkpoint = (projection: Fixtures.TranscriptRepository.Projection | undefined, key: string) =>
-  projection?.executionCheckpoints.find(
-    (entry) => entry.executionKey === Fixtures.TranscriptCorrelation.executionKey(key),
-  )
-
-export const makeTurn = (status: Fixtures.ExecutionStatus.Status): Fixtures.Turn.AgentExecutionTurn => ({
-  _tag: "AgentExecution",
-  id: rootId,
-  threadId,
-  prompt: "delegate",
-  stopIntent: "none",
-  author: { _tag: "Human" },
-  lineage: { _tag: "Original" },
-  executionRoute: executionRoute(),
-  status,
-  createdAt: 1,
-  updatedAt: 1,
-})
-
-export const event = (
-  executionId: string,
-  cursor: string,
-  sequence: number,
-  type: string,
-  extra: Partial<Fixtures.ExecutionBackend.Event> = {},
-): Fixtures.ExecutionBackend.Event => ({
-  executionId,
-  cursor,
-  sequence,
-  type,
-  createdAt: sequence,
-  timestampSource: "server",
-  ...extra,
-})
-
-export const started = (executionId: string): Fixtures.ExecutionBackend.Event =>
-  event(executionId, `${executionId}:started`, 0, "execution.started", { createdAt: 0 })
-
-export const rootEvents: ReadonlyArray<Fixtures.ExecutionBackend.Event> = [
-  started("root"),
-  event("root", "r1", 1, "tool.call.requested", {
-    data: { tool_call_id: "call_1", tool_name: "task", input: { prompt: "go" } },
-  }),
-  event("root", "r2", 2, "child_run.spawned", { data: { child_execution_id: childId, preset_name: "Oracle" } }),
-  event("root", "r3", 3, "execution.completed"),
-]
-
-export const childEvents: ReadonlyArray<Fixtures.ExecutionBackend.Event> = [
-  started(childId),
-  event(childId, "c1", 1, "tool.call.requested", {
-    data: { tool_call_id: "child_call", tool_name: "bash", input: { command: "bun test" } },
-  }),
-  event(childId, "c2", 2, "model.output.completed", { text: "child answered" }),
-  event(childId, "c3", 3, "execution.completed"),
-]
+import { ExecutionFixtures } from "./execution-ingest-fixtures"
 
 export interface ScriptEntry {
-  readonly events: ReadonlyArray<Fixtures.ExecutionBackend.Event>
-  readonly status: Fixtures.ExecutionBackend.Status
+  readonly events: ReadonlyArray<Fixtures.ExecutionEvent.Event>
+  readonly status: Fixtures.ExecutionStatus.Status
   readonly children?: ReadonlyArray<string>
   readonly hold?: Deferred.Deferred<void>
   readonly ignoreCursor?: boolean
-  readonly pages?: (after: string | undefined) => Fixtures.ExecutionBackend.EventPage
+  readonly pages?: (after: string | undefined) => Fixtures.ExecutionEvent.EventPage
 }
 
 export interface Followed {
@@ -105,7 +48,7 @@ type MakeHarnessOptions = {
   readonly script: Readonly<Record<string, ScriptEntry>>
   readonly turnStatus?: Fixtures.ExecutionStatus.Status
   readonly stored?: Fixtures.TranscriptProjectionModel.Projection
-  readonly executionCheckpoints?: ReadonlyArray<Fixtures.TranscriptRepository.ExecutionCheckpoint>
+  readonly executionCheckpoints?: ReadonlyArray<Fixtures.TranscriptPage.ExecutionCheckpoint>
   readonly consumed?: Readonly<
     Record<
       string,
@@ -114,7 +57,7 @@ type MakeHarnessOptions = {
   >
   readonly executionStates?: Readonly<Record<string, Fixtures.TranscriptProjectionModel.ProjectionState>>
   readonly storedProjectionVersion?: number
-  readonly exposeStored?: (stored: Fixtures.TranscriptRepository.Projection) => Fixtures.TranscriptRepository.Projection
+  readonly exposeStored?: (stored: Fixtures.TranscriptPage.Projection) => Fixtures.TranscriptPage.Projection
   readonly commitEvents?: number
   readonly watchCapacity?: number
   readonly commitOutcome?: "failure" | "stale"
@@ -128,7 +71,7 @@ type MakeHarnessOptions = {
 export const makeHarness: (options: MakeHarnessOptions) => Effect.Effect<Harness, object, Scope.Scope> = Effect.fn(
   "ExecutionIngestTest.makeHarness",
 )(function* (options) {
-  const turn = makeTurn(options.turnStatus ?? "completed")
+  const turn = ExecutionFixtures.makeTurn(options.turnStatus ?? "completed")
   const turns = yield* Fixtures.TurnRepository.makeMemory([turn])
   const usage = Context.get(yield* Layer.build(Fixtures.UsageRepository.memoryLayer), Fixtures.UsageRepository.Service)
   if (options.consumed !== undefined) {
@@ -136,18 +79,32 @@ export const makeHarness: (options: MakeHarnessOptions) => Effect.Effect<Harness
       (options.script[executionId]?.events ?? [])
         .filter((candidate) => candidate.sequence <= consumed.sequence)
         .map((candidate) => ({
-          threadId: String(threadId),
-          turnId: String(rootId),
+          threadId: String(ExecutionFixtures.threadId),
+          turnId: String(ExecutionFixtures.rootId),
           event: candidate,
         })),
     )
     const folded = Fixtures.UsageCost.foldBatch(Fixtures.UsageCost.empty, observations)
     if (folded._tag === "Failure") return yield* Effect.die(folded.failure)
-    yield* usage.admitSource(String(rootId), String(rootId), String(threadId))
-    yield* usage.commitSource(String(rootId), String(rootId), 0, Fixtures.UsageCost.serialize(folded.success), {
-      ...Fixtures.UsageCost.materialize(folded.success, String(rootId), String(threadId)),
-      sourceComplete: false,
-    })
+    yield* usage.admitSource(
+      String(ExecutionFixtures.rootId),
+      String(ExecutionFixtures.rootId),
+      String(ExecutionFixtures.threadId),
+    )
+    yield* usage.commitSource(
+      String(ExecutionFixtures.rootId),
+      String(ExecutionFixtures.rootId),
+      0,
+      Fixtures.UsageCost.serialize(folded.success),
+      {
+        ...Fixtures.UsageCost.materialize(
+          folded.success,
+          String(ExecutionFixtures.rootId),
+          String(ExecutionFixtures.threadId),
+        ),
+        sourceComplete: false,
+      },
+    )
   }
   const memory = yield* Fixtures.TranscriptRepository.makeMemory({ turns })
   if (options.stored !== undefined)
@@ -281,7 +238,7 @@ export const makeHarness: (options: MakeHarnessOptions) => Effect.Effect<Harness
     ...(options.onCommitted === undefined ? {} : { onCommitted: options.onCommitted }),
   })
   const projectionChanges: Array<ExecutionIngest.ProjectionChange> = []
-  const projectionWatch = yield* ingest.watchThread(threadId)
+  const projectionWatch = yield* ingest.watchThread(ExecutionFixtures.threadId)
   yield* projectionWatch.changes.pipe(
     Stream.runForEach((change) => Effect.sync(() => projectionChanges.push(change))),
     Effect.forkScoped,
@@ -306,9 +263,4 @@ export const followsOf = (follows: ReadonlyArray<Followed>, executionId: string)
   follows.filter((followed) => followed.executionId === executionId)
 
 export const settle = (ingest: ExecutionIngest.Interface) =>
-  ingest.settled(rootId).pipe(Effect.andThen(Effect.yieldNow), Effect.andThen(Effect.yieldNow))
-
-export { Context, Deferred, Effect, Exit, Layer, Ref, Scope, Stream }
-export { TestClock }
-export { ExecutionIngest }
-export { executionRoute, storeProjection }
+  ingest.settled(ExecutionFixtures.rootId).pipe(Effect.andThen(Effect.yieldNow), Effect.andThen(Effect.yieldNow))

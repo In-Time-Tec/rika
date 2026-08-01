@@ -26,7 +26,7 @@ export const create = (
   input: Omit<Parameters<TurnContract.Interface["createForSubmission"]>[0], "executionRoute" | "queueCapacity"> & {
     readonly queueCapacity?: number
   },
-) =>
+): ReturnType<TurnContract.Interface["createForSubmission"]> =>
   repository.createForSubmission({
     queueCapacity: 128,
     ...input,
@@ -255,6 +255,6 @@ export {
   Turn,
 }
 export const attachedExecutionCheckpoint = CheckpointFixtures.attachedExecutionCheckpoint
-export const commitAll = TranscriptFixtures.commitAll
+export const commitAll: typeof TranscriptFixtures.commitAll = TranscriptFixtures.commitAll
 export const executionCheckpoint = TranscriptFixtures.executionCheckpoint
 export const projectionVersion = TranscriptFixtures.projectionVersion

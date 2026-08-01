@@ -1,4 +1,4 @@
-import { Clock, Context, Crypto, Effect, Encoding, Function, Option, Redacted, Result, Schema } from "effect"
+import { Clock, Crypto, Effect, Encoding, Function, Option, Redacted, Result, Schema } from "effect"
 import * as Contract from "./openai-auth-contract"
 
 export const configuration = {
@@ -13,73 +13,52 @@ export const configuration = {
   maxCredentialFileSize: 256 * 1024,
 } as const
 
-export namespace Errors {
-  export class AuthError extends Schema.TaggedErrorClass<AuthError>()("OpenAiAuthError", {
-    kind: Schema.Literals([
-      "cancelled",
-      "timeout",
-      "host",
-      "network",
-      "protocol",
-      "account-mismatch",
-      "login-required",
-    ]),
-    message: Schema.String,
-  }) {}
+type AuthorizationResult = {
+  readonly code: Redacted.Redacted<string>
+  readonly state: Redacted.Redacted<string>
+}
 
-  export class StoreError extends Schema.TaggedErrorClass<StoreError>()("OpenAiCredentialStoreError", {
-    kind: Schema.Literals(["missing", "corrupt", "unsafe", "busy", "io"]),
-    message: Schema.String,
-  }) {}
+type DevicePrompt = {
+  readonly verificationUrl: string
+  readonly userCode: string
+  readonly warning: string
 }
 
 interface HostInterface {
   readonly authorize: (
     url: URL,
     expectedState: Redacted.Redacted<string>,
-  ) => Effect.Effect<Contract.AuthorizationResult, Errors.AuthError>
+  ) => Effect.Effect<AuthorizationResult, Contract.AuthError>
 }
-export class Host extends Context.Service<Host, HostInterface>()(
-  "@rika/product/authentication/openai-auth-flow/Host",
-) {}
 
 interface PresenterInterface {
-  readonly device: (prompt: Contract.DevicePrompt) => Effect.Effect<void, Errors.AuthError>
+  readonly device: (prompt: DevicePrompt) => Effect.Effect<void, Contract.AuthError>
 }
-export class Presenter extends Context.Service<Presenter, PresenterInterface>()(
-  "@rika/product/authentication/openai-auth-flow/Presenter",
-) {}
 
 interface HttpInterface {
   readonly exchange: (input: {
     readonly code: Redacted.Redacted<string>
     readonly verifier: Redacted.Redacted<string>
     readonly redirectUri: string
-  }) => Effect.Effect<typeof Contract.TokenResponse.Type, Errors.AuthError>
+  }) => Effect.Effect<typeof Contract.TokenResponse.Type, Contract.AuthError>
   readonly refresh: (
     refreshToken: Redacted.Redacted<string>,
-  ) => Effect.Effect<typeof Contract.TokenResponse.Type, Errors.AuthError>
-  readonly deviceStart: Effect.Effect<typeof Contract.DeviceStartResponse.Type, Errors.AuthError>
+  ) => Effect.Effect<typeof Contract.TokenResponse.Type, Contract.AuthError>
+  readonly deviceStart: Effect.Effect<typeof Contract.DeviceStartResponse.Type, Contract.AuthError>
   readonly devicePoll: (
     deviceAuthId: Redacted.Redacted<string>,
     userCode: string,
-  ) => Effect.Effect<Option.Option<typeof Contract.DevicePollResponse.Type>, Errors.AuthError>
+  ) => Effect.Effect<Option.Option<typeof Contract.DevicePollResponse.Type>, Contract.AuthError>
 }
-export class Http extends Context.Service<Http, HttpInterface>()(
-  "@rika/product/authentication/openai-auth-flow/Http",
-) {}
 
-export interface StoreInterface {
-  readonly load: Effect.Effect<Option.Option<typeof Contract.CredentialDisk.Type>, Errors.StoreError>
-  readonly save: (credential: typeof Contract.CredentialDisk.Type) => Effect.Effect<void, Errors.StoreError>
-  readonly remove: Effect.Effect<boolean, Errors.StoreError>
-  readonly serialized: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | Errors.StoreError, R>
+interface StoreInterface {
+  readonly load: Effect.Effect<Option.Option<typeof Contract.CredentialDisk.Type>, Contract.StoreError>
+  readonly save: (credential: typeof Contract.CredentialDisk.Type) => Effect.Effect<void, Contract.StoreError>
+  readonly remove: Effect.Effect<boolean, Contract.StoreError>
+  readonly serialized: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | Contract.StoreError, R>
 }
-export class Store extends Context.Service<Store, StoreInterface>()(
-  "@rika/product/authentication/openai-auth-flow/Store",
-) {}
 
-const authError = (kind: Errors.AuthError["kind"], message: string) => Errors.AuthError.make({ kind, message })
+const authError = (kind: Contract.AuthError["kind"], message: string) => Contract.AuthError.make({ kind, message })
 
 const utf8 = (value: string) =>
   Result.match(Encoding.decodeBase64(Encoding.encodeBase64(value)), {
@@ -205,7 +184,7 @@ export namespace Flow {
       } satisfies typeof Contract.CredentialDisk.Type
     }).pipe(
       Effect.mapError((error) =>
-        Schema.is(Errors.AuthError)(error) ? error : authError("protocol", "Cryptographic operation failed"),
+        Schema.is(Contract.AuthError)(error) ? error : authError("protocol", "Cryptographic operation failed"),
       ),
     )
 }

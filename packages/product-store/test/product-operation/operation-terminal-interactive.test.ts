@@ -9,9 +9,11 @@ import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-rep
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionRequest from "@rika/product/execution-request"
 import { Context, Effect, Layer, Ref } from "effect"
 import { TestConsole } from "effect/testing"
-import { ExecutionIngest } from "@rika/product/product-operation-service"
+import { projectionVersion } from "./interactive-session-base-support"
 import { executionRoute } from "../support/product-test-current-state"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { holdSession, openInteractiveSession, nonActivation } from "../support/operation-session-harness"
@@ -165,7 +167,7 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const repository = yield* ThreadRepository.makeMemory()
       const turns = yield* TurnRepository.makeMemory()
-      const starts = yield* Ref.make<ReadonlyArray<ExecutionBackend.StartInput>>([])
+      const starts = yield* Ref.make<ReadonlyArray<ExecutionRequest.StartInput>>([])
       const runningStatuses = yield* Ref.make<ReadonlyArray<ExecutionStatus.Status>>([])
       const runBackend = ExecutionBackend.Service.of({
         ...backend,
@@ -260,7 +262,7 @@ describe("Operation", () => {
         TranscriptRepository.Service,
       )
       const childId = "child:execution%3Aturn-new:call_1"
-      const childEvents: ReadonlyArray<ExecutionBackend.Event> = [
+      const childEvents: ReadonlyArray<ExecutionEvent.Event> = [
         executionStarted(childId),
         {
           executionId: childId,
@@ -431,7 +433,7 @@ describe("Operation", () => {
         nested.some((unit) => unit.content._tag === "Entry" && unit.content.text === "child finished the review"),
       ).toBe(true)
       expect(stored?.executionCheckpoints.find((entry) => entry.executionKey === childId)?.status).toBe("completed")
-      expect(stored?.projectionVersion).toBe(ExecutionIngest.projectionVersion)
+      expect(stored?.projectionVersion).toBe(projectionVersion)
     }),
   )
 })

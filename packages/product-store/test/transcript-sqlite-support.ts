@@ -1,3 +1,4 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
 import type { NestedProjectionFixture } from "./transcript-fixture-checkpoints"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as BunServices from "@effect/platform-bun/BunServices"
@@ -20,8 +21,8 @@ import { commitAll, event, projectionVersion, provideLayer, sqliteLayer, unit } 
 export const _UnitJson = Schema.fromJsonString(TranscriptUnit.Unit)
 
 export const compareExecutionCheckpoints = (
-  left: TranscriptRepository.ExecutionCheckpoint,
-  right: TranscriptRepository.ExecutionCheckpoint,
+  left: TranscriptPage.ExecutionCheckpoint,
+  right: TranscriptPage.ExecutionCheckpoint,
 ): number => {
   if (left.executionKey < right.executionKey) return -1
   if (left.executionKey > right.executionKey) return 1

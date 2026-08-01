@@ -1,3 +1,5 @@
+import * as InteractiveEvent from "@rika/product/interactive-event"
+import * as InteractiveSession from "@rika/product/interactive-session"
 import * as BehaviorMode from "@rika/configuration/behavior-mode"
 import * as ModelRoute from "@rika/configuration/model-route"
 import * as ModelRouteLabel from "@rika/configuration/model-route-label"
@@ -10,12 +12,7 @@ import type { ModelRegistry } from "@rika/relay-execution/model-provider-runtime
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { createTestRenderer } from "@opentui/core/testing"
 import { Cause, Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Redacted, Schema } from "effect"
-import {
-  productLayer,
-  Service,
-  type InteractiveEvent,
-  type InteractiveSession,
-} from "@rika/product/product-operation-service"
+import { productLayer, Service } from "@rika/product/product-operation-service"
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import * as ThreadToolService from "@rika/product/thread-tool-service"
 import * as Database from "@rika/product-store/product-database-layer"

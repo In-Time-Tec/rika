@@ -9,6 +9,8 @@ import { Database } from "bun:sqlite"
 import { Effect, FileSystem, Layer, Schema } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 
 import { start } from "./current-execution-route"
 
@@ -65,12 +67,12 @@ test(
           () =>
             Effect.gen(function* () {
               const backend = yield* ExecutionBackend.Service
-              const streamed: Array<ExecutionBackend.Event> = []
+              const streamed: Array<ExecutionEvent.Event> = []
               const first = yield* start(backend, {
                 threadId: "thread-a",
                 turnId: "turn-a",
                 prompt: "hello",
-                onEvent: (event: ExecutionBackend.Event) => streamed.push(event),
+                onEvent: (event: ExecutionEvent.Event) => streamed.push(event),
               })
               const replay = yield* backend.replay("turn-a")
               return { first, replay, streamed }
@@ -254,7 +256,7 @@ test(
         (fixture) =>
           Effect.gen(function* () {
             const backend = yield* ExecutionBackend.Service
-            const executionRoute: ExecutionBackend.ExecutionRoutePin = {
+            const executionRoute: ExecutionRouteSnapshot.ExecutionRoutePin = {
               version: 1 as const,
               mode: "test",
               main: executionModelRoute("main", fixture.selection),

@@ -1,19 +1,63 @@
+import type { ExecutionCheckpoint } from "@rika/product/transcript-page"
 import { TurnResult } from "@rika/product/thread-result"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Effect, Schema } from "effect"
+import type { Interface } from "@rika/product/transcript-repository"
+type CheckpointOptions = {
+  readonly executionCheckpoints: ReadonlyArray<import("@rika/product/transcript-page").ExecutionCheckpoint>
+  readonly projectionVersion: number
+}
+type DeltaCheckpointOptions = CheckpointOptions & { readonly expectedGeneration: number | undefined }
+type UnitDelta = Parameters<Interface["commitDelta"]>[2]
+type RefoldOptions = CheckpointOptions & {
+  readonly expectedProjectionVersion: number
+  readonly expectedGeneration: number
+}
+
 import { SqlClient } from "effect/unstable/sql/SqlClient"
+import type { SqlError } from "effect/unstable/sql/SqlError"
 import { Turn, TurnId } from "@rika/product/turn-record"
-import { ExecutionCheckpoint, RepositoryError } from "@rika/product/transcript-repository"
-import type { UnitDelta, DeltaCheckpointOptions, RefoldOptions } from "@rika/product/transcript-repository"
+import { RepositoryError } from "@rika/product/transcript-repository"
+
 import { support } from "./transcript-repository-support"
 import { decodeTranscriptExecutionCheckpoint } from "./transcript-checkpoint-codec"
 
 const { error, UnitJson, UsageCursorsJson } = support
+type CheckpointError = RepositoryError | Schema.SchemaError | SqlError
+type TurnValue = typeof Turn.Type
+type ProjectionState = Parameters<Interface["commitDelta"]>[1]
+interface CheckpointMethods {
+  readonly loadExecutionCheckpoints: (
+    turnId: TurnId,
+  ) => Effect.Effect<ReadonlyArray<ExecutionCheckpoint>, RepositoryError>
+  readonly storeUnit: (turn: TurnValue, unit: TranscriptUnit.Unit) => Effect.Effect<void, CheckpointError>
+  readonly checkpointValues: (state: ProjectionState) => Effect.Effect<{ usageCursors: string | null }, CheckpointError>
+  readonly storeExecutionCheckpoint: (
+    turn: TurnValue,
+    checkpoint: ExecutionCheckpoint,
+  ) => Effect.Effect<void, CheckpointError>
+  readonly commitCheckpoint: (
+    turn: TurnValue,
+    state: ProjectionState,
+    options: DeltaCheckpointOptions,
+  ) => Effect.Effect<boolean, CheckpointError>
+  readonly replaceCheckpointForRefold: (
+    turn: TurnValue,
+    state: ProjectionState,
+    options: RefoldOptions,
+  ) => Effect.Effect<boolean, CheckpointError>
+  readonly loadAttachmentUnits: (
+    turn: TurnValue,
+    delta: UnitDelta,
+    checkpoints: ReadonlyArray<ExecutionCheckpoint>,
+  ) => Effect.Effect<ReadonlyArray<TranscriptUnit.Unit>, CheckpointError>
+  readonly validateDurableUnitRemoval: (turn: TurnValue, key: string) => Effect.Effect<void, CheckpointError>
+}
 
-export const makeTranscriptSqliteCheckpoints = (sql: SqlClient) => {
+export const makeTranscriptSqliteCheckpoints = (sql: SqlClient): CheckpointMethods => {
   const loadExecutionCheckpoints = Effect.fn("TranscriptRepository.loadExecutionCheckpoints")(function* (
     turnId: TurnId,
   ) {
@@ -29,7 +73,7 @@ export const makeTranscriptSqliteCheckpoints = (sql: SqlClient) => {
       rows.map((value) => decodeTranscriptExecutionCheckpoint(value).pipe(Effect.mapError(error))),
     )
   })
-  const storeUnit = Effect.fn("TranscriptRepository.storeUnit")(function* (turn: Turn, unit: TranscriptUnit.Unit) {
+  const storeUnit = Effect.fn("TranscriptRepository.storeUnit")(function* (turn: TurnValue, unit: TranscriptUnit.Unit) {
     if (!TranscriptOrdering.hasIntrinsicOrder(unit))
       return yield* RepositoryError.make({ message: `Transcript unit ${unit.key} has a non-intrinsic order` })
     const encoded = yield* Schema.encodeEffect(UnitJson)(unit)
@@ -49,15 +93,13 @@ export const makeTranscriptSqliteCheckpoints = (sql: SqlClient) => {
     if (rows.length === 0)
       return yield* RepositoryError.make({ message: `Transcript unit ${unit.key} changed its intrinsic identity` })
   }, Effect.mapError(error))
-  const checkpointValues = Effect.fn("TranscriptRepository.checkpointValues")(function* (
-    state: TranscriptProjectionModel.ProjectionState,
-  ) {
+  const checkpointValues = Effect.fn("TranscriptRepository.checkpointValues")(function* (state: ProjectionState) {
     const usageCursors =
       state.usageCursors === undefined ? null : yield* Schema.encodeEffect(UsageCursorsJson)(state.usageCursors)
     return { usageCursors }
   })
   const storeExecutionCheckpoint = Effect.fn("TranscriptRepository.storeExecutionCheckpoint")(function* (
-    turn: Turn,
+    turn: TurnValue,
     checkpoint: ExecutionCheckpoint,
   ) {
     const values = yield* checkpointValues(checkpoint.state)
@@ -95,8 +137,8 @@ export const makeTranscriptSqliteCheckpoints = (sql: SqlClient) => {
       })
   })
   const commitCheckpoint = Effect.fn("TranscriptRepository.commitCheckpoint")(function* (
-    turn: Turn,
-    state: TranscriptProjectionModel.ProjectionState,
+    turn: TurnValue,
+    state: ProjectionState,
     options: DeltaCheckpointOptions,
   ) {
     const values = yield* checkpointValues(state)
@@ -125,8 +167,8 @@ export const makeTranscriptSqliteCheckpoints = (sql: SqlClient) => {
     return rows.length > 0
   })
   const replaceCheckpointForRefold = Effect.fn("TranscriptRepository.replaceCheckpointForRefold")(function* (
-    turn: Turn,
-    state: TranscriptProjectionModel.ProjectionState,
+    turn: TurnValue,
+    state: ProjectionState,
     options: RefoldOptions,
   ) {
     const values = yield* checkpointValues(state)
@@ -145,7 +187,7 @@ export const makeTranscriptSqliteCheckpoints = (sql: SqlClient) => {
     return rows.length > 0
   })
   const loadAttachmentUnits = Effect.fn("TranscriptRepository.loadAttachmentUnits")(function* (
-    turn: Turn,
+    turn: TurnValue,
     delta: UnitDelta,
     checkpoints: ReadonlyArray<ExecutionCheckpoint>,
   ) {
@@ -177,7 +219,7 @@ export const makeTranscriptSqliteCheckpoints = (sql: SqlClient) => {
     return [...delta.upsert, ...loaded]
   })
   const validateDurableUnitRemoval = Effect.fn("TranscriptRepository.validateDurableUnitRemoval")(function* (
-    turn: Turn,
+    turn: TurnValue,
     key: string,
   ) {
     const rows = yield* sql`SELECT execution_key FROM rika_transcript_execution_checkpoints

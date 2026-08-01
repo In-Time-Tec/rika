@@ -1,28 +1,22 @@
 import { describe, expect, it } from "@effect/vitest"
-import {
-  Fixtures,
-  Deferred,
-  Effect,
-  ExecutionIngest,
-  threadId,
-  rootId,
-  checkpoint,
-  event,
-  started,
-  rootEvents,
-  makeHarness,
-  settle,
-} from "./execution-ingest-behavior-support"
+import { makeHarness, settle } from "./execution-ingest-behavior-support"
+
+import { ExecutionFixtures } from "./execution-ingest-fixtures"
+
+import { Fixtures } from "./execution-ingest-support"
+import * as ExecutionIngest from "../../src/execution/ingest/execution-ingest-service"
+import { Context, Deferred, Effect, Exit, Layer, Ref, Scope, Stream } from "effect"
+import { TestClock } from "effect/testing"
 
 describe("ExecutionIngest", () => {
   it.effect("finishes a held catch-up page before recording terminal state and drops stale stored units", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>()
       const paged: ReadonlyArray<Fixtures.ExecutionBackend.Event> = [
-        started("root"),
-        event("root", "p1", 1, "model.output.completed", { text: "replayed one" }),
-        event("root", "p2", 2, "model.output.completed", { text: "replayed two" }),
-        event("root", "p3", 3, "execution.completed"),
+        ExecutionFixtures.started("root"),
+        ExecutionFixtures.event("root", "p1", 1, "model.output.completed", { text: "replayed one" }),
+        ExecutionFixtures.event("root", "p2", 2, "model.output.completed", { text: "replayed two" }),
+        ExecutionFixtures.event("root", "p3", 3, "execution.completed"),
       ]
       const { ingest, transcripts } = yield* makeHarness({
         script: {
@@ -40,20 +34,22 @@ describe("ExecutionIngest", () => {
         },
         turnStatus: "running",
         stored: Fixtures.TranscriptProjection.Projection.project("root", "stale stored prompt", [
-          event("root", "stale", 9, "model.output.completed", { text: "stale stored content" }),
+          ExecutionFixtures.event("root", "stale", 9, "model.output.completed", { text: "stale stored content" }),
         ]),
         pageHold: { after: "p1", open: gate },
       })
 
-      yield* ingest.ensure({ threadId, turnId: rootId })
+      yield* ingest.ensure({ threadId: ExecutionFixtures.threadId, turnId: ExecutionFixtures.rootId })
       for (let attempt = 0; attempt < 50; attempt += 1) yield* Effect.yieldNow
-      expect(checkpoint(yield* transcripts.get(rootId), "root")?.status).toBeUndefined()
+      expect(
+        ExecutionFixtures.checkpoint(yield* transcripts.get(ExecutionFixtures.rootId), "root")?.status,
+      ).toBeUndefined()
 
       yield* Deferred.succeed(gate, undefined)
       yield* settle(ingest)
 
-      const stored = yield* transcripts.get(rootId)
-      expect(checkpoint(stored, "root")).toEqual(
+      const stored = yield* transcripts.get(ExecutionFixtures.rootId)
+      expect(ExecutionFixtures.checkpoint(stored, "root")).toEqual(
         expect.objectContaining({ cursor: "p3", sequence: 3, status: "completed" }),
       )
       expect(
@@ -71,8 +67,8 @@ describe("ExecutionIngest", () => {
       Effect.gen(function* () {
         const failures: Array<ExecutionIngest.Failure> = []
         const paged = [
-          event("root", "r1", 1, "model.output.completed", { text: "one" }),
-          event("root", "r2", 2, "model.output.completed", { text: "two" }),
+          ExecutionFixtures.event("root", "r1", 1, "model.output.completed", { text: "one" }),
+          ExecutionFixtures.event("root", "r2", 2, "model.output.completed", { text: "two" }),
         ]
         const { ingest, transcripts } = yield* makeHarness({
           script: {
@@ -90,27 +86,29 @@ describe("ExecutionIngest", () => {
           onFailure: (failure) => failures.push(failure),
         })
 
-        yield* ingest.ensure({ threadId, turnId: rootId })
-        const failure = yield* Effect.flip(ingest.consumed(rootId))
+        yield* ingest.ensure({ threadId: ExecutionFixtures.threadId, turnId: ExecutionFixtures.rootId })
+        const failure = yield* Effect.flip(ingest.consumed(ExecutionFixtures.rootId))
 
         expect(failures).toHaveLength(1)
         expect(failure).toBe(failures[0])
         expect(failures[0]?.reason).toBe("backend")
         expect(failures[0]?.executionId).toBe("root")
         expect(failures[0]?.message).toContain("did not advance")
-        expect(checkpoint(yield* transcripts.get(rootId), "root")?.status).toBeUndefined()
+        expect(
+          ExecutionFixtures.checkpoint(yield* transcripts.get(ExecutionFixtures.rootId), "root")?.status,
+        ).toBeUndefined()
       }),
     )
 
   it.effect("ignores a queued turn and a turn that no longer exists", () =>
     Effect.gen(function* () {
       const { ingest, follows } = yield* makeHarness({
-        script: { root: { events: rootEvents, status: "completed" } },
+        script: { root: { events: ExecutionFixtures.rootEvents, status: "completed" } },
         turnStatus: "queued",
       })
 
-      yield* ingest.ensure({ threadId, turnId: rootId })
-      yield* ingest.ensure({ threadId, turnId: Fixtures.Turn.TurnId.make("absent") })
+      yield* ingest.ensure({ threadId: ExecutionFixtures.threadId, turnId: ExecutionFixtures.rootId })
+      yield* ingest.ensure({ threadId: ExecutionFixtures.threadId, turnId: Fixtures.Turn.TurnId.make("absent") })
       yield* settle(ingest)
 
       expect(follows).toHaveLength(0)

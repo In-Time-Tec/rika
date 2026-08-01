@@ -1,30 +1,22 @@
 import { describe, expect, it } from "@effect/vitest"
-import {
-  Fixtures,
-  Context,
-  Deferred,
-  Effect,
-  Layer,
-  ExecutionIngest,
-  threadId,
-  rootId,
-  childId,
-  grandchildId,
-  checkpoint,
-  makeTurn,
-  event,
-  started,
-  rootEvents,
-  childEvents,
-  makeHarness,
-  settle,
-} from "./execution-ingest-behavior-support"
+import { makeHarness, settle } from "./execution-ingest-behavior-support"
+
+import { ExecutionFixtures } from "./execution-ingest-fixtures"
+
+import { Fixtures } from "./execution-ingest-support"
+import * as ExecutionIngest from "../../src/execution/ingest/execution-ingest-service"
+import { Context, Deferred, Effect, Exit, Layer, Ref, Scope, Stream } from "effect"
+import { TestClock } from "effect/testing"
 
 describe("ExecutionIngest", () => {
   it.effect("rejects a current parent status that contradicts its child's projected outcome", () =>
     Effect.gen(function* () {
-      const root = Fixtures.TranscriptProjection.Projection.project("root", "delegate", rootEvents)
-      const child = Fixtures.TranscriptProjection.Projection.project(childId, "", childEvents)
+      const root = Fixtures.TranscriptProjection.Projection.project("root", "delegate", ExecutionFixtures.rootEvents)
+      const child = Fixtures.TranscriptProjection.Projection.project(
+        ExecutionFixtures.childId,
+        "",
+        ExecutionFixtures.childEvents,
+      )
       const stored = Fixtures.TranscriptNestedProjection.withNestedProjections(root, [
         { parentId: "root:call_1", projection: child },
       ])
@@ -33,16 +25,18 @@ describe("ExecutionIngest", () => {
         stored,
         consumed: {
           root: { cursor: "r3", sequence: 3, status: "completed" },
-          [childId]: { cursor: "c3", sequence: 3, status: "completed" },
+          [ExecutionFixtures.childId]: { cursor: "c3", sequence: 3, status: "completed" },
         },
         executionStates: {
           root: Fixtures.TranscriptProjection.Projection.projectionState(root),
-          [childId]: Fixtures.TranscriptProjection.Projection.projectionState(child),
+          [ExecutionFixtures.childId]: Fixtures.TranscriptProjection.Projection.projectionState(child),
         },
         storedProjectionVersion: ExecutionIngest.projectionVersion,
       })
 
-      const failure = yield* Effect.flip(ingest.ensure({ threadId, turnId: rootId }))
+      const failure = yield* Effect.flip(
+        ingest.ensure({ threadId: ExecutionFixtures.threadId, turnId: ExecutionFixtures.rootId }),
+      )
 
       expect(failure.reason).toBe("checkpoint")
       expect(failure.message).toContain("contradicts its stored parent")
@@ -53,26 +47,32 @@ describe("ExecutionIngest", () => {
   it.effect("rejects running descendant units beneath a failed current root outcome", () =>
     Effect.gen(function* () {
       const failedRootEvents = [
-        event("root", "tool", 1, "tool.call.requested", {
+        ExecutionFixtures.event("root", "tool", 1, "tool.call.requested", {
           data: { tool_call_id: "call_1", tool_name: "task", input: { prompt: "go" } },
         }),
-        event("root", "spawned", 2, "child_run.spawned", { data: { child_execution_id: childId } }),
-        event("root", "failed", 3, "execution.failed", { text: "root failed" }),
+        ExecutionFixtures.event("root", "spawned", 2, "child_run.spawned", {
+          data: { child_execution_id: ExecutionFixtures.childId },
+        }),
+        ExecutionFixtures.event("root", "failed", 3, "execution.failed", { text: "root failed" }),
       ]
       const runningChildEvents = [
-        event(childId, "running-tool", 1, "tool.call.requested", {
+        ExecutionFixtures.event(ExecutionFixtures.childId, "running-tool", 1, "tool.call.requested", {
           data: { tool_call_id: "shell", tool_name: "bash", input: { command: "sleep 10" } },
         }),
       ]
       const root = Fixtures.TranscriptProjection.Projection.project("root", "delegate", failedRootEvents)
-      const child = Fixtures.TranscriptProjection.Projection.project(childId, "", runningChildEvents)
+      const child = Fixtures.TranscriptProjection.Projection.project(ExecutionFixtures.childId, "", runningChildEvents)
       const nested = Fixtures.TranscriptNestedProjection.withNestedProjections(root, [
         { parentId: "root:call_1", projection: child },
       ])
       const stored = {
         ...nested,
         units: nested.units.map((unit) => {
-          if (unit.turnId !== childId || unit.content._tag !== "Block" || unit.content.block._tag !== "ToolCall")
+          if (
+            unit.turnId !== ExecutionFixtures.childId ||
+            unit.content._tag !== "Block" ||
+            unit.content.block._tag !== "ToolCall"
+          )
             return unit
           return Object.assign({}, unit, {
             content: {
@@ -83,20 +83,22 @@ describe("ExecutionIngest", () => {
         }),
       }
       const { ingest, writes } = yield* makeHarness({
-        script: { [childId]: { events: runningChildEvents, status: "running" } },
+        script: { [ExecutionFixtures.childId]: { events: runningChildEvents, status: "running" } },
         stored,
         consumed: {
           root: { cursor: "failed", sequence: 3, status: "failed" },
-          [childId]: { cursor: "running-tool", sequence: 1 },
+          [ExecutionFixtures.childId]: { cursor: "running-tool", sequence: 1 },
         },
         executionStates: {
           root: Fixtures.TranscriptProjection.Projection.projectionState(root),
-          [childId]: Fixtures.TranscriptProjection.Projection.projectionState(child),
+          [ExecutionFixtures.childId]: Fixtures.TranscriptProjection.Projection.projectionState(child),
         },
         storedProjectionVersion: ExecutionIngest.projectionVersion,
       })
 
-      const result = yield* Effect.result(ingest.ensure({ threadId, turnId: rootId }))
+      const result = yield* Effect.result(
+        ingest.ensure({ threadId: ExecutionFixtures.threadId, turnId: ExecutionFixtures.rootId }),
+      )
 
       expect(result._tag).toBe("Failure")
       if (result._tag === "Failure") {
@@ -109,13 +111,19 @@ describe("ExecutionIngest", () => {
 
   it.effect("rejects contradictory current child attachment paths instead of normalizing them", () =>
     Effect.gen(function* () {
-      const root = Fixtures.TranscriptProjection.Projection.project("root", "delegate", rootEvents)
-      const child = Fixtures.TranscriptProjection.Projection.project(childId, "", childEvents)
+      const root = Fixtures.TranscriptProjection.Projection.project("root", "delegate", ExecutionFixtures.rootEvents)
+      const child = Fixtures.TranscriptProjection.Projection.project(
+        ExecutionFixtures.childId,
+        "",
+        ExecutionFixtures.childEvents,
+      )
       const valid = Fixtures.TranscriptNestedProjection.withNestedProjections(root, [
         { parentId: "root:call_1", projection: child },
       ])
-      const childUnit = valid.units.find((unit) => unit.turnId === childId)
-      const rootPrompt = valid.units.find((unit) => unit.turnId === rootId && unit.parentId === undefined)
+      const childUnit = valid.units.find((unit) => unit.turnId === ExecutionFixtures.childId)
+      const rootPrompt = valid.units.find(
+        (unit) => unit.turnId === ExecutionFixtures.rootId && unit.parentId === undefined,
+      )
       if (childUnit === undefined || rootPrompt === undefined) return yield* Effect.die("missing attachment fixture")
       const variants: ReadonlyArray<Fixtures.TranscriptProjectionModel.Projection> = [
         {
@@ -132,7 +140,7 @@ describe("ExecutionIngest", () => {
                   ...unit,
                   order: Fixtures.TranscriptOrdering.childOrder(
                     rootPrompt.order,
-                    childId,
+                    ExecutionFixtures.childId,
                     Fixtures.TranscriptOrdering.localOrder(unit.order),
                   ),
                 }
@@ -143,22 +151,24 @@ describe("ExecutionIngest", () => {
       for (const stored of variants) {
         const { ingest, writes } = yield* makeHarness({
           script: {
-            root: { events: rootEvents, status: "completed", children: [childId] },
-            [childId]: { events: childEvents, status: "completed" },
+            root: { events: ExecutionFixtures.rootEvents, status: "completed", children: [ExecutionFixtures.childId] },
+            [ExecutionFixtures.childId]: { events: ExecutionFixtures.childEvents, status: "completed" },
           },
           stored: valid,
           exposeStored: (current) => ({ ...current, units: stored.units }),
           consumed: {
             root: { cursor: "r3", sequence: 3, status: "completed" },
-            [childId]: { cursor: "c3", sequence: 3, status: "completed" },
+            [ExecutionFixtures.childId]: { cursor: "c3", sequence: 3, status: "completed" },
           },
           executionStates: {
             root: Fixtures.TranscriptProjection.Projection.projectionState(root),
-            [childId]: Fixtures.TranscriptProjection.Projection.projectionState(child),
+            [ExecutionFixtures.childId]: Fixtures.TranscriptProjection.Projection.projectionState(child),
           },
           storedProjectionVersion: ExecutionIngest.projectionVersion,
         })
-        const failure = yield* Effect.flip(ingest.ensure({ threadId, turnId: rootId }))
+        const failure = yield* Effect.flip(
+          ingest.ensure({ threadId: ExecutionFixtures.threadId, turnId: ExecutionFixtures.rootId }),
+        )
         expect(failure.reason).toBe("attachment")
         expect(writes).toHaveLength(0)
       }
@@ -168,7 +178,7 @@ describe("ExecutionIngest", () => {
   it.effect("rejects contradictory current root projections instead of repairing them", () =>
     Effect.gen(function* () {
       const valid = Fixtures.TranscriptProjection.Projection.project("root", "delegate", [
-        event("root", "answer", 1, "model.output.completed", { text: "answer" }),
+        ExecutionFixtures.event("root", "answer", 1, "model.output.completed", { text: "answer" }),
       ])
       const promptKey = "turn:root:user"
       const variants: ReadonlyArray<Fixtures.TranscriptProjectionModel.Projection> = [
@@ -194,7 +204,9 @@ describe("ExecutionIngest", () => {
           consumed: { root: { cursor: "answer", sequence: 1, status: "completed" } },
           storedProjectionVersion: ExecutionIngest.projectionVersion,
         })
-        const failure = yield* Effect.flip(ingest.ensure({ threadId, turnId: rootId }))
+        const failure = yield* Effect.flip(
+          ingest.ensure({ threadId: ExecutionFixtures.threadId, turnId: ExecutionFixtures.rootId }),
+        )
         expect(failure.reason).toBe("checkpoint")
         expect(writes).toEqual([])
       }
@@ -206,20 +218,28 @@ describe("ExecutionIngest", () => {
       const hold = yield* Deferred.make<void>()
       const { ingest, transcripts } = yield* makeHarness({
         script: {
-          root: { events: [rootEvents[0]!, rootEvents[1]!, rootEvents[2]!], status: "running", hold },
-          [childId]: { events: childEvents, status: "completed" },
+          root: {
+            events: [
+              ExecutionFixtures.rootEvents[0]!,
+              ExecutionFixtures.rootEvents[1]!,
+              ExecutionFixtures.rootEvents[2]!,
+            ],
+            status: "running",
+            hold,
+          },
+          [ExecutionFixtures.childId]: { events: ExecutionFixtures.childEvents, status: "completed" },
         },
         turnStatus: "running",
       })
 
-      yield* ingest.ensure({ threadId, turnId: rootId })
+      yield* ingest.ensure({ threadId: ExecutionFixtures.threadId, turnId: ExecutionFixtures.rootId })
       for (let attempt = 0; attempt < 200; attempt += 1) {
-        const projection = yield* transcripts.get(rootId)
+        const projection = yield* transcripts.get(ExecutionFixtures.rootId)
         if (projection?.units.some((unit) => unit.parentId !== undefined) === true) break
         yield* Effect.yieldNow
       }
 
-      const stored = yield* transcripts.get(rootId)
+      const stored = yield* transcripts.get(ExecutionFixtures.rootId)
       const parentTool = stored?.units.find(
         (unit) =>
           unit.parentId === undefined && unit.content._tag === "Block" && unit.content.block._tag === "ToolCall",
@@ -232,10 +252,10 @@ describe("ExecutionIngest", () => {
       expect(parentId).toBeDefined()
       expect(nested.every((unit) => unit.parentId === parentId)).toBe(true)
       expect(nested.some((unit) => unit.content._tag === "Entry" && unit.content.text === "child answered")).toBe(true)
-      expect(checkpoint(stored, childId)).toEqual(
+      expect(ExecutionFixtures.checkpoint(stored, ExecutionFixtures.childId)).toEqual(
         expect.objectContaining({ cursor: "c3", sequence: 3, status: "completed" }),
       )
-      expect(checkpoint(stored, "root")?.status).toBeUndefined()
+      expect(ExecutionFixtures.checkpoint(stored, "root")?.status).toBeUndefined()
       yield* Deferred.succeed(hold, undefined)
     }),
   )
@@ -243,34 +263,41 @@ describe("ExecutionIngest", () => {
   it.effect("folds a grandchild under the child tool that requested it", () =>
     Effect.gen(function* () {
       const nestedChildEvents: ReadonlyArray<Fixtures.ExecutionBackend.Event> = [
-        started(childId),
-        event(childId, "c1", 1, "tool.call.requested", {
+        ExecutionFixtures.started(ExecutionFixtures.childId),
+        ExecutionFixtures.event(ExecutionFixtures.childId, "c1", 1, "tool.call.requested", {
           data: { tool_call_id: "call_2", tool_name: "task", input: { prompt: "deeper" } },
         }),
-        event(childId, "c2", 2, "child_run.spawned", { data: { child_execution_id: grandchildId } }),
-        event(childId, "c3", 3, "execution.completed"),
+        ExecutionFixtures.event(ExecutionFixtures.childId, "c2", 2, "child_run.spawned", {
+          data: { child_execution_id: ExecutionFixtures.grandchildId },
+        }),
+        ExecutionFixtures.event(ExecutionFixtures.childId, "c3", 3, "execution.completed"),
       ]
       const { ingest, transcripts } = yield* makeHarness({
         script: {
-          root: { events: rootEvents, status: "completed" },
-          [childId]: { events: nestedChildEvents, status: "completed" },
-          [grandchildId]: {
+          root: { events: ExecutionFixtures.rootEvents, status: "completed" },
+          [ExecutionFixtures.childId]: { events: nestedChildEvents, status: "completed" },
+          [ExecutionFixtures.grandchildId]: {
             events: [
-              started(grandchildId),
-              event(grandchildId, "g1", 1, "model.output.completed", { text: "deep answer" }),
-            ].concat(event(grandchildId, "g2", 2, "execution.completed")),
+              ExecutionFixtures.started(ExecutionFixtures.grandchildId),
+              ExecutionFixtures.event(ExecutionFixtures.grandchildId, "g1", 1, "model.output.completed", {
+                text: "deep answer",
+              }),
+            ].concat(ExecutionFixtures.event(ExecutionFixtures.grandchildId, "g2", 2, "execution.completed")),
             status: "completed",
           },
         },
       })
 
-      yield* ingest.ensure({ threadId, turnId: rootId })
+      yield* ingest.ensure({ threadId: ExecutionFixtures.threadId, turnId: ExecutionFixtures.rootId })
       yield* settle(ingest)
 
-      const stored = yield* transcripts.get(rootId)
+      const stored = yield* transcripts.get(ExecutionFixtures.rootId)
       const deep = stored?.units.find((unit) => unit.content._tag === "Entry" && unit.content.text === "deep answer")
       const childTool = stored?.units.find(
-        (unit) => unit.turnId === childId && unit.content._tag === "Block" && unit.content.block._tag === "ToolCall",
+        (unit) =>
+          unit.turnId === ExecutionFixtures.childId &&
+          unit.content._tag === "Block" &&
+          unit.content.block._tag === "ToolCall",
       )
       expect(deep?.parentId).toBeDefined()
       expect(childTool?.content._tag === "Block" ? childTool.content.block._tag : undefined).toBe("ToolCall")
@@ -280,7 +307,7 @@ describe("ExecutionIngest", () => {
           : undefined,
       )
       expect(stored?.executionCheckpoints.map((entry) => entry.executionKey).toSorted()).toEqual(
-        [childId, grandchildId, "root"].toSorted(),
+        [ExecutionFixtures.childId, ExecutionFixtures.grandchildId, "root"].toSorted(),
       )
     }),
   )
@@ -288,13 +315,17 @@ describe("ExecutionIngest", () => {
   it.effect("reports a typed failure and keeps stored state when a resumed cursor is rejected", () =>
     Effect.gen(function* () {
       const failures: Array<ExecutionIngest.Failure> = []
-      const turn = makeTurn("completed")
+      const turn = ExecutionFixtures.makeTurn("completed")
       const turns = yield* Fixtures.TurnRepository.makeMemory([turn])
       const transcripts = Context.get(
         yield* Layer.build(Fixtures.TranscriptRepository.memoryLayer),
         Fixtures.TranscriptRepository.Service,
       )
-      const partial = Fixtures.TranscriptProjection.Projection.project("root", "delegate", rootEvents.slice(0, 3))
+      const partial = Fixtures.TranscriptProjection.Projection.project(
+        "root",
+        "delegate",
+        ExecutionFixtures.rootEvents.slice(0, 3),
+      )
       yield* transcripts.commitDelta(
         turn,
         Fixtures.TranscriptProjection.Projection.projectionState(partial),
@@ -337,8 +368,8 @@ describe("ExecutionIngest", () => {
           }),
         follow: (executionId, _afterCursor, onEvent) =>
           Effect.sync(() => {
-            for (const replayed of rootEvents) onEvent?.(replayed)
-            return { turnId: executionId, status: "completed" as const, events: rootEvents }
+            for (const replayed of ExecutionFixtures.rootEvents) onEvent?.(replayed)
+            return { turnId: executionId, status: "completed" as const, events: ExecutionFixtures.rootEvents }
           }),
       })
       const ingest = yield* ExecutionIngest.make({
@@ -349,15 +380,17 @@ describe("ExecutionIngest", () => {
         onFailure: (failure) => failures.push(failure),
       })
 
-      yield* ingest.ensure({ threadId, turnId: rootId })
+      yield* ingest.ensure({ threadId: ExecutionFixtures.threadId, turnId: ExecutionFixtures.rootId })
       const failure = yield* Effect.flip(settle(ingest))
 
       expect(failures).toHaveLength(1)
       expect(failure).toBe(failures[0])
       expect(failures[0]?.reason).toBe("cursor-rejected")
       expect(failures[0]?.executionId).toBe("root")
-      const stored = yield* transcripts.get(rootId)
-      expect(checkpoint(stored, "root")).toEqual(expect.objectContaining({ cursor: "r2", sequence: 2 }))
+      const stored = yield* transcripts.get(ExecutionFixtures.rootId)
+      expect(ExecutionFixtures.checkpoint(stored, "root")).toEqual(
+        expect.objectContaining({ cursor: "r2", sequence: 2 }),
+      )
       expect(stored?.units.some((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Error")).toBe(
         false,
       )

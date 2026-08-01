@@ -5,7 +5,7 @@ import { Service } from "@rika/product/product-operation-service"
 import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"
 import { Effect, Layer, Ref } from "effect"
 import { TestClock } from "effect/testing"
-import { ResolvedContext } from "@rika/product/product-operation-service"
+import * as ResolvedContext from "@rika/product/context-resolution-service"
 
 export const collectEvents = (session: InteractiveSession, events: Array<InteractiveEvent>) =>
   Effect.gen(function* () {

@@ -9,6 +9,7 @@ import { expect, test } from "vitest"
 import { Database } from "bun:sqlite"
 import { Effect, FileSystem, Layer, Ref } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 
 import { layer } from "../src/relay/execution/relay-execution-layer"
 import { routedModel } from "./routed-model"
@@ -72,7 +73,7 @@ test("a nested subagent delegates ReadThread without broadening its Relay scope"
       const backendContext = yield* Layer.build(backendLayer)
       return yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
-        const route: ExecutionBackend.ExecutionRoutePin = {
+        const route: ExecutionRouteSnapshot.ExecutionRoutePin = {
           version: 1 as const,
           mode: "medium",
           main: executionModelRoute("main", main.selection, "xhigh"),
@@ -155,7 +156,7 @@ test("parallel Task calls fall back to the pinned main Sol route when no agent r
         ],
         { provider: "test", model: "gpt-5.6-sol", registrationKey: "sol-xhigh" },
       )
-      const executionRoute: ExecutionBackend.ExecutionRoutePin = {
+      const executionRoute: ExecutionRouteSnapshot.ExecutionRoutePin = {
         version: 1 as const,
         mode: "high",
         main: executionModelRoute("main", sol.selection, "xhigh"),

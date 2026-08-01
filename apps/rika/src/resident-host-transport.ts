@@ -1,3 +1,6 @@
+import * as ProductOperation from "@rika/product/product-operation"
+import * as InteractiveEvent from "@rika/product/interactive-event"
+import * as InteractiveSession from "@rika/product/interactive-session"
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
 import * as Operation from "@rika/product/product-operation-service"
 import { executeInteractiveCommand } from "@rika/product/interactive-command"
@@ -45,6 +48,13 @@ const interactiveFeedInFlightCapacity = 32
 const formatOutput = (values: ReadonlyArray<unknown>) =>
   `${values.map((value) => (typeof value === "string" ? value : Formatter.format(value))).join(" ")}\n`
 
+type Owner = (
+  interactive: (
+    input: InteractiveFeedOverflow.InteractiveInput,
+    session: InteractiveSession.InteractiveSession,
+  ) => Effect.Effect<void, ProductOperation.OperationUnavailable>,
+) => Effect.Effect<Operation.Interface, ResidentService.ResidentServiceError, Scope.Scope>
+
 const host = Effect.fn("ResidentTransport.host")(function* (options: {
   readonly port: number
   readonly identity: string
@@ -57,7 +67,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
   readonly stopped: Deferred.Deferred<void>
   readonly ready: Deferred.Deferred<void>
   readonly onReady: Effect.Effect<void, ResidentService.ResidentServiceError, FileSystem.FileSystem>
-  readonly owner: ResidentService.Owner
+  readonly owner: Owner
 }) {
   const crypto = yield* Crypto.Crypto
   const baseConsole = yield* Console.Console
@@ -72,9 +82,9 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
   const drainingFailure = (requestId: string, operation: string) =>
     writerFailure(
       requestId,
-      Operation.OperationUnavailable.make({ operation, message: "Resident service is draining" }),
+      ProductOperation.OperationUnavailable.make({ operation, message: "Resident service is draining" }),
     )
-  const writerFailure = (requestId: string, error: Operation.OperationUnavailable) =>
+  const writerFailure = (requestId: string, error: ProductOperation.OperationUnavailable) =>
     json({ _tag: "operation-failed", requestId, error } satisfies ResidentService.ServerMessage)
   const scheduleGrace = (generation: number, delay = options.graceMilliseconds) =>
     Effect.gen(function* () {
@@ -111,7 +121,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
     })
   const requestByInput = new WeakMap<object, { readonly requestId: string; readonly routeKey: string }>()
   type ResidentSession = {
-    readonly session: Operation.InteractiveSession
+    readonly session: InteractiveSession.InteractiveSession
     readonly ended: Deferred.Deferred<void>
     readonly feedGeneration: string
     readonly commands: Map<number, Deferred.Deferred<void>>
@@ -119,7 +129,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
     readonly commandQueue: Queue.Queue<{
       readonly sequence: number
       readonly cancelled: Deferred.Deferred<void>
-      readonly effect: Effect.Effect<void, Operation.OperationUnavailable | ResidentService.ResidentServiceError>
+      readonly effect: Effect.Effect<void, ProductOperation.OperationUnavailable | ResidentService.ResidentServiceError>
     }>
     readonly acceptCommand: (sequence: number) => boolean
     readonly acknowledge: (throughSequence: number) => Effect.Effect<boolean>
@@ -130,42 +140,44 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
       string,
       {
         readonly connectionId: string
-        readonly send: (text: string) => Effect.Effect<void, Operation.OperationUnavailable>
-        readonly sendFrames: (frames: ReadonlyArray<string>) => Effect.Effect<void, Operation.OperationUnavailable>
+        readonly send: (text: string) => Effect.Effect<void, ProductOperation.OperationUnavailable>
+        readonly sendFrames: (
+          frames: ReadonlyArray<string>,
+        ) => Effect.Effect<void, ProductOperation.OperationUnavailable>
         readonly sessions: Map<string, ResidentSession>
       }
     >(),
   )
   const interactive = Effect.fn("ResidentTransport.interactive")(function* (
     input: InteractiveFeedOverflow.InteractiveInput,
-    session: Operation.InteractiveSession,
+    session: InteractiveSession.InteractiveSession,
   ) {
     const request = requestByInput.get(input)
     if (request === undefined)
-      return yield* Operation.OperationUnavailable.make({
+      return yield* ProductOperation.OperationUnavailable.make({
         operation: "Interactive",
         message: "Missing interactive request",
       })
     const { requestId, routeKey } = request
     const route = (yield* Ref.get(routes)).get(routeKey)
     if (route === undefined)
-      return yield* Operation.OperationUnavailable.make({
+      return yield* ProductOperation.OperationUnavailable.make({
         operation: "Interactive",
         message: "Interactive client disconnected",
       })
     const sessionId = yield* crypto.randomUUIDv4.pipe(
       Effect.mapError((error) =>
-        Operation.OperationUnavailable.make({ operation: "Interactive", message: String(error) }),
+        ProductOperation.OperationUnavailable.make({ operation: "Interactive", message: String(error) }),
       ),
     )
     const feedGeneration = yield* crypto.randomUUIDv4.pipe(
       Effect.mapError((error) =>
-        Operation.OperationUnavailable.make({ operation: "Interactive", message: String(error) }),
+        ProductOperation.OperationUnavailable.make({ operation: "Interactive", message: String(error) }),
       ),
     )
     const ended = yield* Deferred.make<void>()
     const feed = yield* Queue.bounded<
-      | { readonly _tag: "Event"; readonly event: Operation.InteractiveEvent }
+      | { readonly _tag: "Event"; readonly event: InteractiveEvent.InteractiveEvent }
       | { readonly _tag: "Replay"; readonly afterSequence: number }
       | { readonly _tag: "Overflow" }
     >(options.outboundCapacity)
@@ -183,7 +195,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
     const commandQueue = yield* Queue.bounded<{
       readonly sequence: number
       readonly cancelled: Deferred.Deferred<void>
-      readonly effect: Effect.Effect<void, Operation.OperationUnavailable | ResidentService.ResidentServiceError>
+      readonly effect: Effect.Effect<void, ProductOperation.OperationUnavailable | ResidentService.ResidentServiceError>
     }>(options.outboundCapacity)
     let nextCommandSequence = 1
     let nextSequence = 1
@@ -195,7 +207,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
     let selectionEpoch = 0
     let overflow: InteractiveFeedOverflow.State | undefined
     let sentDetails = 0
-    const rememberSelection = (event: Operation.InteractiveEvent) => {
+    const rememberSelection = (event: InteractiveEvent.InteractiveEvent) => {
       let threadId: string | undefined
       if (event._tag === "SelectionLoaded") threadId = String(event.thread.id)
       else if ("threadId" in event && event.threadId !== undefined) threadId = String(event.threadId)
@@ -203,11 +215,11 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
       if ("selectionEpoch" in event) selectionEpoch = event.selectionEpoch
       return threadId
     }
-    const remember = (state: InteractiveFeedOverflow.State, event: Operation.InteractiveEvent) => {
+    const remember = (state: InteractiveFeedOverflow.State, event: InteractiveEvent.InteractiveEvent) => {
       rememberSelection(event)
       InteractiveFeedOverflow.remember(state, event)
     }
-    const dispatch = (event: Operation.InteractiveEvent) => {
+    const dispatch = (event: InteractiveEvent.InteractiveEvent) => {
       if (overflow !== undefined) {
         remember(overflow, event)
         return
@@ -250,7 +262,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
         const frames = yield* Effect.try({
           try: () => serverMessageFrames(`${feedGeneration}:${sequence}`, message),
           catch: (error) =>
-            Operation.OperationUnavailable.make({
+            ProductOperation.OperationUnavailable.make({
               operation: "InteractiveSession.events",
               message: String(error),
             }),
@@ -267,7 +279,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
         yield* route.sendFrames(frames)
         return sequence
       })
-    const sendBarrier = (events: ReadonlyArray<Operation.InteractiveEvent>) =>
+    const sendBarrier = (events: ReadonlyArray<InteractiveEvent.InteractiveEvent>) =>
       Effect.gen(function* () {
         const sequence = yield* sendNew(
           (messageSequence) => ({
@@ -345,7 +357,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
           overflow = barrierWindow
           yield* sendBarrier(state.criticalOverflowed ? [...events, ...genericRecovery(reason)] : events)
           if (state.criticalOverflowed)
-            return yield* Operation.OperationUnavailable.make({
+            return yield* ProductOperation.OperationUnavailable.make({
               operation: "InteractiveSession.events",
               message: reason,
             })
@@ -415,9 +427,9 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               Effect.flatMap((command) =>
                 Effect.raceFirst(Deferred.await(command.cancelled), command.effect).pipe(
                   Effect.mapError((failure) =>
-                    Schema.is(Operation.OperationUnavailable)(failure)
+                    Schema.is(ProductOperation.OperationUnavailable)(failure)
                       ? failure
-                      : Operation.OperationUnavailable.make({
+                      : ProductOperation.OperationUnavailable.make({
                           operation: "InteractiveSession.command",
                           message: failure.message,
                         }),
@@ -785,7 +797,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                     sessionId: message.sessionId,
                     feedGeneration: message.feedGeneration,
                     commandSequence: message.commandSequence,
-                    error: Operation.OperationUnavailable.make({
+                    error: ProductOperation.OperationUnavailable.make({
                       operation: message.command._tag,
                       message: "Resident service is draining",
                     }),
@@ -842,9 +854,9 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                           sessionId: message.sessionId,
                           feedGeneration: message.feedGeneration,
                           commandSequence: message.commandSequence,
-                          error: Schema.is(Operation.OperationUnavailable)(failure)
+                          error: Schema.is(ProductOperation.OperationUnavailable)(failure)
                             ? failure
-                            : Operation.OperationUnavailable.make({
+                            : ProductOperation.OperationUnavailable.make({
                                 operation: message.command._tag,
                                 message: String(failure),
                               }),
@@ -894,7 +906,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               const send = (frame: string) =>
                 writer(frame).pipe(
                   Effect.mapError((error) =>
-                    Operation.OperationUnavailable.make({
+                    ProductOperation.OperationUnavailable.make({
                       operation: "ResidentConnection",
                       message: error.message,
                     }),
@@ -960,14 +972,14 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                       let outcome
                       if (Exit.isFailure(delivery))
                         outcome = Exit.fail(
-                          Operation.OperationUnavailable.make({
+                          ProductOperation.OperationUnavailable.make({
                             operation: message.input._tag,
                             message: `Resident output delivery failed: ${Cause.pretty(delivery.cause)}`,
                           }),
                         )
                       else if (outputOverflowed)
                         outcome = Exit.fail(
-                          Operation.OperationUnavailable.make({
+                          ProductOperation.OperationUnavailable.make({
                             operation: message.input._tag,
                             message: "Resident client output queue is overloaded",
                           }),
@@ -976,9 +988,9 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                       yield* Exit.match(outcome, {
                         onFailure: (cause) => {
                           const failure = Cause.squash(cause)
-                          const error = Schema.is(Operation.OperationUnavailable)(failure)
+                          const error = Schema.is(ProductOperation.OperationUnavailable)(failure)
                             ? failure
-                            : Operation.OperationUnavailable.make({
+                            : ProductOperation.OperationUnavailable.make({
                                 operation: message.input._tag,
                                 message: String(failure),
                               })
@@ -1128,7 +1140,7 @@ export const serve = Effect.fn("ResidentTransport.serve")(function* (options: {
   readonly startupHoldMilliseconds?: number
   readonly outboundCapacity?: number
   readonly onReady?: Effect.Effect<void, ResidentService.ResidentServiceError, FileSystem.FileSystem>
-  readonly owner: ResidentService.Owner
+  readonly owner: Owner
 }) {
   const endpoint = yield* resolve(options.profile, options.dataRoot)
   const token = yield* readOrCreateToken(endpoint.tokenPath)

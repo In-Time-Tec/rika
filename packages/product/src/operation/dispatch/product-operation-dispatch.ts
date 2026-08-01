@@ -1,12 +1,12 @@
 import * as Thread from "@rika/product/thread-record"
 import * as AuthenticationOperation from "./authentication-operation-dispatch"
 import * as ExecutionRecovery from "./execution-recovery-dispatch"
-import * as ExtensionOperations from "./extension-operation-dispatch"
-import * as ConfigOperations from "./configuration-operation-dispatch"
+import * as ExtensionOperations from "./../contract/extension-operation"
+import * as ConfigOperations from "./../contract/configuration-operation"
 import { Console, Deferred, Effect, Layer, Schema, Scope } from "effect"
 import { awaitSessionQuiescence, hasActiveExecutionWork } from "../../execution/lifecycle/product-execution-quiescence"
 import { queuedTurnPromoteMaxAgeMs, staleQueuedTurnsError } from "../../thread/queue/pending-turn-policy"
-import { OperationUnavailable } from "../contract/product-operation-errors"
+import { OperationUnavailable } from "../contract/product-operation"
 import { Service } from "../contract/product-operation-service"
 import type { Input } from "../contract/product-operation"
 import { OperationError, operationError } from "../operation-error"
@@ -61,10 +61,6 @@ type ProductLayerError<
   | UsageError
   | OperationError
   | OperationUnavailable
-
-export { hasActiveExecutionWork } from "../../execution/lifecycle/product-execution-quiescence"
-export { stopActiveExecutionWork } from "../../execution/lifecycle/product-execution-stop"
-export { settleAbandonedRecoveredWork } from "../../execution/lifecycle/abandoned-product-work-settlement"
 
 export const productLayer = <
   ThreadError extends Error,

@@ -9,6 +9,7 @@ import { expect, test } from "vitest"
 import { Database } from "bun:sqlite"
 import { Clock, Effect, FileSystem, Layer, Ref, Schema, Stream } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 
 import { layer } from "../src/relay/execution/relay-execution-layer"
 import { routedModel } from "./routed-model"
@@ -228,7 +229,7 @@ test("ReadThread uses the Oracle route and receives the current Thread identity"
       const backendContext = yield* Layer.build(backendLayer)
       return yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
-        const route: ExecutionBackend.ExecutionRoutePin = {
+        const route: ExecutionRouteSnapshot.ExecutionRoutePin = {
           version: 1 as const,
           mode: "medium",
           main: executionModelRoute("main", main.selection, "xhigh"),

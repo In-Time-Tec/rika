@@ -6,6 +6,8 @@ import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionRequest from "@rika/product/execution-request"
+import * as ExecutionIdentifier from "@rika/product/execution-identifier"
 import { Effect, Layer, Ref } from "effect"
 
 import { executionRoute } from "../support/product-test-current-state"
@@ -76,8 +78,8 @@ describe("Operation", () => {
       const events = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const dispatch = (event: InteractiveEvent) => runSync(Ref.update(events, (all) => [...all, event]))
-      const wakes = yield* Ref.make<ReadonlyArray<ExecutionBackend.ThreadQueueWake>>([])
-      const promoters = yield* Ref.make<ReadonlyArray<ExecutionBackend.TurnPromoter>>([])
+      const wakes = yield* Ref.make<ReadonlyArray<ExecutionRequest.ThreadQueueWake>>([])
+      const promoters = yield* Ref.make<ReadonlyArray<ExecutionIdentifier.TurnPromoter>>([])
       const started = yield* Ref.make<ReadonlyArray<string>>([])
       const turnSequence = yield* Ref.make(0)
       const thread: Thread.Thread = {

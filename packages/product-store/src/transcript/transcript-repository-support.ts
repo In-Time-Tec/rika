@@ -1,4 +1,17 @@
+import { ExecutionCheckpoint } from "@rika/product/transcript-page"
+import type { Projection } from "@rika/product/transcript-page"
 import { Effect, Schema } from "effect"
+type CheckpointOptions = {
+  readonly executionCheckpoints: ReadonlyArray<import("@rika/product/transcript-page").ExecutionCheckpoint>
+  readonly projectionVersion: number
+}
+type UnitDelta = Parameters<Interface["commitDelta"]>[2]
+type RefoldOptions = CheckpointOptions & {
+  readonly expectedProjectionVersion: number
+  readonly expectedGeneration: number
+}
+type PageOptions = NonNullable<Parameters<Interface["page"]>[1]>
+
 import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
@@ -11,15 +24,9 @@ import { Turn, TurnId } from "@rika/product/turn-record"
 import type { AgentExecutionTurn } from "@rika/product/turn-record"
 import type { RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/thread-result"
 import { PageCursor, type Entry } from "@rika/product/transcript-page"
-import {
-  ExecutionCheckpoint,
-  type Projection,
-  type CheckpointOptions,
-  type UnitDelta,
-  type RefoldOptions,
-  type PageOptions,
-} from "@rika/product/transcript-repository"
+
 import { invalidatedProjectionVersion, RepositoryError } from "@rika/product/transcript-repository"
+import type { Interface } from "@rika/product/transcript-repository"
 class RefoldStale extends Schema.TaggedErrorClass<RefoldStale>()("TranscriptRefoldStale", {}) {}
 
 const ProjectionRecoveryCandidateRow = Schema.Struct({

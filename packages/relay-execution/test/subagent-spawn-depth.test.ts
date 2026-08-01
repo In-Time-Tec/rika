@@ -8,6 +8,7 @@ import { expect, test } from "vitest"
 import { Database } from "bun:sqlite"
 import { Effect, FileSystem, Layer } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 
 import { layer } from "../src/relay/execution/relay-execution-layer"
 import { routedModel } from "./routed-model"
@@ -64,7 +65,7 @@ test("depth-one Task agents can use specialists but cannot delegate more Tasks",
         layer: terra.layer,
       })
       const solRegistration = yield* ModelRegistry.registration({ ...sol.selection, layer: sol.layer })
-      const executionRoute: ExecutionBackend.ExecutionRoutePin = {
+      const executionRoute: ExecutionRouteSnapshot.ExecutionRoutePin = {
         version: 1 as const,
         mode: "test",
         main: executionModelRoute("main", terra.selection),

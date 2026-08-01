@@ -9,6 +9,9 @@ import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-rep
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionRequest from "@rika/product/execution-request"
+import * as ExecutionIdentifier from "@rika/product/execution-identifier"
 import { Clock, Deferred, Effect, Fiber, Layer, Queue, Ref } from "effect"
 import { it as rawIt } from "vitest"
 
@@ -48,8 +51,8 @@ describe("Operation", () => {
           },
         ])
         const starts = yield* Ref.make<ReadonlyArray<string>>([])
-        const promoters = yield* Ref.make<ReadonlyArray<ExecutionBackend.TurnPromoter>>([])
-        const wakes = yield* Ref.make<ReadonlyArray<ExecutionBackend.ThreadQueueWake>>([])
+        const promoters = yield* Ref.make<ReadonlyArray<ExecutionIdentifier.TurnPromoter>>([])
+        const wakes = yield* Ref.make<ReadonlyArray<ExecutionRequest.ThreadQueueWake>>([])
         const sessions = yield* Queue.unbounded<{
           readonly workspace: string
           readonly session: InteractiveSession
@@ -155,11 +158,11 @@ describe("Operation", () => {
       Effect.runPromise(
         Effect.gen(function* () {
           const eventCount = 8_300
-          const streamed: ReadonlyArray<ExecutionBackend.Event> = [
+          const streamed: ReadonlyArray<ExecutionEvent.Event> = [
             executionStarted("overflow-turn"),
             ...Array.from(
               { length: eventCount },
-              (_, index): ExecutionBackend.Event => ({
+              (_, index): ExecutionEvent.Event => ({
                 executionId: "overflow-turn",
                 cursor: `chunk-${index + 1}`,
                 sequence: index + 1,

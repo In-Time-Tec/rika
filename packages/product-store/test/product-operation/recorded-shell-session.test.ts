@@ -14,7 +14,7 @@ import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ExecutionInspection from "@rika/product/execution-inspection"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import { Context, Deferred, Effect, Fiber, Layer, Ref } from "effect"
-import { ExecutionIngest } from "@rika/product/product-operation-service"
+import { projectionVersion } from "./interactive-session-base-support"
 
 const noInspection = (): ExecutionInspection.Inspection | undefined => undefined
 
@@ -418,7 +418,7 @@ describe("recorded shell session", () => {
           },
         ],
         executionCheckpoints: [],
-        projectionVersion: ExecutionIngest.projectionVersion,
+        projectionVersion: projectionVersion,
       })
       expect(harness.events.find((event) => event._tag === "ShellCompleted")).toMatchObject({
         command: "exit 7",

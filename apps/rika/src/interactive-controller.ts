@@ -1,3 +1,4 @@
+import * as InteractiveEvent from "@rika/product/interactive-event"
 import * as TranscriptPage from "@rika/product/transcript-page"
 import type * as Operation from "@rika/product/product-operation-service"
 import type { InteractiveCommand } from "@rika/product/interactive-command"
@@ -20,7 +21,7 @@ import { applyRootUnits, applyTurnDelta } from "@rika/terminal/terminal-transcri
 import type { TranscriptBlock, TranscriptItem } from "@rika/terminal/terminal-state"
 
 type TranscriptEvent = Extract<
-  Operation.InteractiveEvent,
+  InteractiveEvent.InteractiveEvent,
   | { readonly _tag: "SelectionLoaded" }
   | { readonly _tag: "TranscriptPagePrepended" }
   | { readonly _tag: "TranscriptPageAppended" }
@@ -34,7 +35,7 @@ type TranscriptEvent = Extract<
 >
 
 type QueueEvent = Extract<
-  Operation.InteractiveEvent,
+  InteractiveEvent.InteractiveEvent,
   { readonly _tag: "QueueUpdated" } | { readonly _tag: "QueueFull" }
 >
 
@@ -429,7 +430,7 @@ const activityAfter = (
 
 const activityAfterOrigin = (
   activity: Activity | undefined,
-  origin: Extract<Operation.InteractiveEvent, { readonly _tag: "TranscriptProjectionPatched" }>["origin"],
+  origin: Extract<InteractiveEvent.InteractiveEvent, { readonly _tag: "TranscriptProjectionPatched" }>["origin"],
   state: OpenProjectionStream["state"],
   model: Model,
 ): Activity | undefined => {

@@ -1,12 +1,24 @@
 import * as OpenAiAuthContract from "@rika/product/openai-auth-contract"
-import * as OpenAiAuthFlow from "@rika/product/openai-auth-service"
+import * as OpenAiAuthService from "@rika/product/openai-auth-service"
 
 namespace OpenAiAuth {
-  export import Store = OpenAiAuthFlow.Store
-  export import StoreError = OpenAiAuthFlow.Errors.StoreError
-  export const maxCredentialFileSize = OpenAiAuthFlow.configuration.maxCredentialFileSize
+  export import Store = OpenAiAuthService.Store
+  export import StoreError = OpenAiAuthContract.StoreError
+  export const maxCredentialFileSize = OpenAiAuthService.configuration.maxCredentialFileSize
   export const CredentialDisk = OpenAiAuthContract.CredentialDisk
-  export type StoreInterface = OpenAiAuthFlow.StoreInterface
+  export type StoreInterface = {
+    readonly load: import("effect").Effect.Effect<
+      import("effect").Option.Option<typeof OpenAiAuthContract.CredentialDisk.Type>,
+      OpenAiAuthContract.StoreError
+    >
+    readonly save: (
+      credential: typeof OpenAiAuthContract.CredentialDisk.Type,
+    ) => import("effect").Effect.Effect<void, OpenAiAuthContract.StoreError>
+    readonly remove: import("effect").Effect.Effect<boolean, OpenAiAuthContract.StoreError>
+    readonly serialized: <A, E, R>(
+      effect: import("effect").Effect.Effect<A, E, R>,
+    ) => import("effect").Effect.Effect<A, E | OpenAiAuthContract.StoreError, R>
+  }
 }
 import { Clock, Effect, Function, Layer, Option, Schema, Semaphore } from "effect"
 import { randomBytes } from "node:crypto"

@@ -12,7 +12,7 @@ import * as ThreadActivity from "../../thread/query/thread-activity"
 import { staleQueuedTurnsError } from "../../thread/queue/pending-turn-policy"
 import { clampThreadTitle } from "../../thread/query/thread-title-policy"
 import { Input } from "../contract/product-operation"
-import { OperationUnavailable } from "../contract/product-operation-errors"
+import { OperationUnavailable } from "../contract/product-operation"
 import { OperationError } from "../operation-error"
 import { Cause, Clock, Console, Deferred, Effect, Fiber } from "effect"
 

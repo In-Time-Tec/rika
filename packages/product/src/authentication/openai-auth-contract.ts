@@ -28,16 +28,15 @@ export const CredentialDisk = Schema.Struct({
   refreshedAt: Schema.Finite,
 })
 
-export interface AuthorizationResult {
-  readonly code: Redacted.Redacted<string>
-  readonly state: Redacted.Redacted<string>
-}
+export class AuthError extends Schema.TaggedErrorClass<AuthError>()("OpenAiAuthError", {
+  kind: Schema.Literals(["cancelled", "timeout", "host", "network", "protocol", "account-mismatch", "login-required"]),
+  message: Schema.String,
+}) {}
 
-export interface DevicePrompt {
-  readonly verificationUrl: string
-  readonly userCode: string
-  readonly warning: string
-}
+export class StoreError extends Schema.TaggedErrorClass<StoreError>()("OpenAiCredentialStoreError", {
+  kind: Schema.Literals(["missing", "corrupt", "unsafe", "busy", "io"]),
+  message: Schema.String,
+}) {}
 
 export interface Credential {
   readonly accessToken: Redacted.Redacted<string>

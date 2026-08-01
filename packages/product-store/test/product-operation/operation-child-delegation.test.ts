@@ -8,6 +8,7 @@ import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-rep
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Context, Effect, Layer, Queue, Ref } from "effect"
 import { TestClock } from "effect/testing"
@@ -73,7 +74,7 @@ describe("Operation", () => {
       })
       const finalAvailable = yield* Ref.make(false)
       const pageRequests = yield* Ref.make<ReadonlyArray<string | undefined>>([])
-      const rootEvent = (cursor: string, sequence: number, type: string, text?: string): ExecutionBackend.Event => ({
+      const rootEvent = (cursor: string, sequence: number, type: string, text?: string): ExecutionEvent.Event => ({
         executionId: String(targetTurn.id),
         cursor: `execution:${targetTurn.id}:${cursor}`,
         sequence,

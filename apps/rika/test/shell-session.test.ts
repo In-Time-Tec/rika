@@ -1,13 +1,10 @@
+import * as InteractiveEvent from "@rika/product/interactive-event"
+import * as InteractiveSession from "@rika/product/interactive-session"
 import { MediaAnalysisError } from "@rika/coding-tools/media-view-service"
 import { analyzerTestLayer } from "@rika/coding-tools/media-view-service"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { createTestRenderer } from "@opentui/core/testing"
-import {
-  productLayer,
-  Service,
-  type InteractiveEvent,
-  type InteractiveSession,
-} from "@rika/product/product-operation-service"
+import { productLayer, Service } from "@rika/product/product-operation-service"
 import * as Database from "@rika/product-store/product-database-layer"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"

@@ -1,7 +1,11 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
+import { OperationUnavailable } from "@rika/product/product-operation"
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionStatus from "@rika/product/execution-status"
+import * as ExecutionInspection from "@rika/product/execution-inspection"
 import type { InteractiveSession } from "@rika/product/interactive-session"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { Service } from "@rika/product/product-operation-service"
-import { OperationUnavailable } from "@rika/product/product-operation-service"
 import { Context, Deferred, Effect, Fiber, Layer, Ref, Schema, Scope } from "effect"
 import * as TranscriptRepositoryContract from "@rika/product/transcript-repository"
 import * as TurnContract from "@rika/product/turn-repository"
@@ -19,12 +23,12 @@ import {
   serverEvents,
   active,
 } from "./interactive-session-base-support"
-import { ExecutionIngest } from "@rika/product/product-operation-service"
+import { projectionVersion } from "./interactive-session-base-support"
 
 export const subagentToolId = "done:call_1"
 export const subagentChildId = "child:execution%3Adone:call_1"
 
-export const subagentRootEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = serverEvents([
+export const subagentRootEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = serverEvents([
   {
     executionId: "execution:done",
     cursor: "done-started",
@@ -67,7 +71,7 @@ export const subagentRootEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.
   { executionId: "execution:done", cursor: "done-final", sequence: 5, type: "execution.completed", createdAt: 5 },
 ])
 
-export const subagentChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = serverEvents([
+export const subagentChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = serverEvents([
   {
     executionId: subagentChildId,
     cursor: "childstarted~a0",
@@ -112,7 +116,7 @@ export interface SubagentReloadHarness {
 type SubagentReloadOptions = {
   readonly storedTree: TranscriptFixtures.TranscriptProjectionModel.Projection
   readonly turnLastCursor: string
-  readonly childReplayEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>
+  readonly childReplayEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event>
   readonly consumed?: Readonly<
     Record<
       string,
@@ -121,9 +125,9 @@ type SubagentReloadOptions = {
   >
   readonly turnStatus?: RuntimeFixtures.ExecutionStatus.Status
   readonly followed?: Ref.Ref<ReadonlyArray<string>>
-  readonly inspection?: (executionId: string) => RuntimeFixtures.ExecutionBackend.Inspection | undefined
-  readonly replayEvents?: (executionId: string) => ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>
-  readonly pageEvents?: (executionId: string, after: string | undefined) => RuntimeFixtures.ExecutionBackend.EventPage
+  readonly inspection?: (executionId: string) => RuntimeFixtures.ExecutionInspection.Inspection | undefined
+  readonly replayEvents?: (executionId: string) => ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event>
+  readonly pageEvents?: (executionId: string, after: string | undefined) => RuntimeFixtures.ExecutionEvent.EventPage
   readonly projectionVersion?: number
 }
 
@@ -162,7 +166,7 @@ export const makeSubagentReloadHarness: (
       ...(options.consumed === undefined ? {} : { consumed: options.consumed }),
       ...(options.projectionVersion === undefined ? {} : { projectionVersion: options.projectionVersion }),
     })
-  const inspection = (turnId: string): RuntimeFixtures.ExecutionBackend.Inspection | undefined => {
+  const inspection = (turnId: string): RuntimeFixtures.ExecutionInspection.Inspection | undefined => {
     if (options.inspection !== undefined) return options.inspection(turnId)
     if (turnId !== "done") return { turnId, status: "completed", waits: [], pendingTools: [], children: [] }
     return {
@@ -174,7 +178,7 @@ export const makeSubagentReloadHarness: (
       children: [{ executionId: subagentChildId, status: "completed" }],
     }
   }
-  const eventsFor = (turnId: string): ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> => {
+  const eventsFor = (turnId: string): ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> => {
     const replay = options.replayEvents?.(turnId)
     if (replay !== undefined)
       return completeServerTimeline(replay).map((event) => Object.assign({}, event, { executionId: turnId }))
@@ -264,7 +268,7 @@ export interface ObservedProjectionStream {
 
 export const observedProjectionEntries = (
   stream: ObservedProjectionStream,
-): ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry> => {
+): ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry> => {
   const turn = stream.rootStatus === undefined ? stream.turn : { ...stream.turn, status: stream.rootStatus }
   return [...stream.units.values()].map((unit) => ({
     turn,
@@ -274,7 +278,7 @@ export const observedProjectionEntries = (
   }))
 }
 
-export const sortObservedEntries = (entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>) =>
+export const sortObservedEntries = (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) =>
   entries.toSorted(
     (left, right) =>
       left.turn.createdAt - right.turn.createdAt ||
@@ -283,7 +287,7 @@ export const sortObservedEntries = (entries: ReadonlyArray<RuntimeFixtures.Trans
   )
 
 export const latestSelectionEntries = (events: ReadonlyArray<InteractiveEvent>) => {
-  let entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry> | undefined
+  let entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry> | undefined
   let selectionEpoch: number | undefined
   let threadId: string | undefined
   const streams = new Map<string, ObservedProjectionStream>()
@@ -356,7 +360,7 @@ export const latestSelectionEntries = (events: ReadonlyArray<InteractiveEvent>) 
 
 export const awaitSelectionEntries = (
   events: ReadonlyArray<InteractiveEvent>,
-  until: (entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>) => boolean,
+  until: (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) => boolean,
 ) =>
   Effect.gen(function* () {
     for (let attempt = 0; attempt < 2_000; attempt += 1) {
@@ -412,10 +416,10 @@ export const awaitPrependedPage = (events: ReadonlyArray<InteractiveEvent>, prev
 export const selectionEntriesFor = (
   session: InteractiveSession,
   threadId: RuntimeFixtures.Thread.ThreadId,
-  until?: (entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>) => boolean,
+  until?: (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) => boolean,
 ): Effect.Effect<
   {
-    readonly entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>
+    readonly entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>
     readonly events: ReadonlyArray<InteractiveEvent>
   },
   OperationUnavailable
@@ -428,12 +432,12 @@ export const selectionEntriesFor = (
     return { entries, events }
   })
 
-export const nestedSubagentReady = (entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>) => {
+export const nestedSubagentReady = (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) => {
   const { nestedTool, nestedAnswer } = nestedSubagentExpectations(entries)
   return nestedTool && nestedAnswer
 }
 
-export const nestedSubagentExpectations = (entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>) => {
+export const nestedSubagentExpectations = (entries: ReadonlyArray<RuntimeFixtures.TranscriptPage.Entry>) => {
   const nested = entries.filter((entry) => entry.unit.parentId === subagentToolId)
   const nestedTool = nested.some(
     (entry) =>
@@ -465,4 +469,4 @@ export {
   serverEvents,
   active,
 }
-export { ExecutionIngest }
+export { projectionVersion }

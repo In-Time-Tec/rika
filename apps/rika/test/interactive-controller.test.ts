@@ -1,6 +1,6 @@
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as InteractiveController from "../src/interactive-controller"
-import type { InteractiveEvent } from "@rika/product/product-operation-service"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as ThreadResult from "@rika/product/thread-result"

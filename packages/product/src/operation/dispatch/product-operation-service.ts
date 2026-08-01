@@ -1,5 +1,5 @@
 import { Effect, Ref } from "effect"
-import { OperationUnavailable } from "../contract/product-operation-errors"
+import { OperationUnavailable } from "../contract/product-operation"
 import { Service } from "../contract/product-operation-service"
 import { makeProductOperationRun } from "./product-operation-run"
 

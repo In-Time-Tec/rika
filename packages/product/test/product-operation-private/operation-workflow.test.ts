@@ -1,18 +1,19 @@
 import type { Input } from "@rika/product/product-operation"
 import { Service } from "@rika/product/product-operation-service"
-import { testLayer } from "@rika/product/product-operation-service"
+import { testLayer } from "../../src/operation/dispatch/product-operation-test-layer"
 import { unavailableLayer } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
-import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
-import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
+import * as ThreadRepository from "../../../product-store/src/thread/sqlite-thread-repository"
+import * as TurnRepository from "../../../product-store/src/turn/sqlite-turn-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionWorkflow from "@rika/product/execution-workflow"
 import { Effect, Layer, Ref } from "effect"
 import { TestConsole } from "effect/testing"
 
-import { productLayer, provideLayer } from "../support/operation-layer-harness"
-import { backend } from "../support/operation-execution-fixtures"
+import { productLayer, provideLayer } from "../../../product-store/test/support/operation-layer-harness"
+import { backend } from "../../../product-store/test/support/operation-execution-fixtures"
 
-import { replacementWorkflow } from "../support/operation-selection-fixtures"
+import { replacementWorkflow } from "../../../product-store/test/support/operation-selection-fixtures"
 
 describe("Operation", () => {
   it.effect("records operations through the test layer", () =>
@@ -136,7 +137,7 @@ describe("Operation", () => {
 
   it.effect("defers replacement for a running workflow and authorizes retry after Relay reports terminal", () =>
     Effect.gen(function* () {
-      const status = yield* Ref.make<ExecutionBackend.WorkflowInspection["status"]>("running")
+      const status = yield* Ref.make<ExecutionWorkflow.WorkflowInspection["status"]>("running")
       const workflowBackend = ExecutionBackend.Service.of({
         ...backend,
         registerWorkflows: () => Effect.succeed([]),

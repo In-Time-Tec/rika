@@ -11,7 +11,7 @@ import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Effect, Layer, Ref } from "effect"
 import { TestConsole } from "effect/testing"
-import { ExecutionIngest } from "@rika/product/product-operation-service"
+import { projectionVersion } from "./interactive-session-base-support"
 
 import { provideLayer } from "../support/product-test-layer"
 
@@ -254,7 +254,7 @@ describe("Operation thread actions", () => {
           updatedAt: 4,
           result: { text: "copied", truncated: false, exitCode: 0 },
         },
-        ExecutionIngest.projectionVersion,
+        projectionVersion,
       )
       const inspected = yield* Ref.make<ReadonlyArray<string>>([])
       const forkBackend = ExecutionBackend.Service.of({
@@ -303,7 +303,7 @@ describe("Operation thread actions", () => {
           },
         ],
         executionCheckpoints: [],
-        projectionVersion: ExecutionIngest.projectionVersion,
+        projectionVersion: projectionVersion,
       })
       expect(yield* Ref.get(inspected)).toEqual(["source-agent"])
     }),
@@ -329,7 +329,7 @@ describe("Operation thread actions", () => {
           createdAt: 1,
           updatedAt: 1,
         },
-        ExecutionIngest.projectionVersion,
+        projectionVersion,
       )
       const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),

@@ -2,12 +2,13 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { Effect, Layer, Schema } from "effect"
 
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 
 const executionModelRoute = (
   role: "main" | "oracle",
   selection: { readonly provider: string; readonly model: string; readonly registrationKey?: string },
-): ExecutionBackend.ExecutionRouteModelSnapshot => ({
+): ExecutionRouteSnapshot.ExecutionRouteModelSnapshot => ({
   role,
   alias: role,
   model: selection.model,

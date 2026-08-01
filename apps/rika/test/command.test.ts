@@ -1,5 +1,7 @@
+import * as ProductOperation from "@rika/product/product-operation"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { OperationUnavailable, Service, testLayer, type Input } from "@rika/product/product-operation-service"
+import { Service } from "@rika/product/product-operation-service"
+import type { Input } from "@rika/product/product-operation"
 import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, Ref, Stream } from "effect"
 import { TestConsole } from "effect/testing"
 import { expect, it } from "@effect/vitest"
@@ -7,6 +9,16 @@ import { cleanInteractiveRuntimeExit, clientProcessExitCode, run as runClient } 
 import { parseJsonLines, readStreamInput, run } from "../src/command"
 
 const workspace = process.cwd()
+
+const testLayer = (calls: Ref.Ref<ReadonlyArray<Input>>) =>
+  Layer.succeed(
+    Service,
+    Service.of({
+      run: Effect.fn("CommandTest.run")(function* (input) {
+        yield* Ref.update(calls, (current) => [...current, input])
+      }),
+    }),
+  )
 
 it("maps pure client interruption to success without masking failures", () => {
   expect(clientProcessExitCode({ exit: Exit.interrupt(1), interruptedBySigint: true })).toBe(0)

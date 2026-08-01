@@ -1,6 +1,6 @@
 import * as ConfigurationService from "@rika/configuration/configuration-service"
-import * as ConfigOperations from "./configuration-operation-dispatch"
-import * as ExtensionOperations from "./extension-operation-dispatch"
+import * as ConfigOperations from "./../contract/configuration-operation"
+import * as ExtensionOperations from "./../contract/extension-operation"
 import type { Effect, Layer } from "effect"
 import type { OperationError } from "../operation-error"
 

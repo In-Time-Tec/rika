@@ -1,6 +1,6 @@
 export { InteractiveCommand, executeInteractiveCommand } from "../interactive/interactive-command"
 export { InteractiveEventSchema } from "../interactive/interactive-event"
-export { OperationUnavailable } from "./product-operation-errors"
+export { OperationUnavailable } from "./product-operation"
 export type { InteractiveCommand as InteractiveCommandType } from "../interactive/interactive-command"
 export type { InteractiveEvent } from "../interactive/interactive-event"
 export type { InteractiveSession } from "../interactive/interactive-session"

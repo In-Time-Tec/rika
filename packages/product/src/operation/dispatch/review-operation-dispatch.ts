@@ -8,7 +8,7 @@ import * as ExecutionStatus from "@rika/product/execution-status"
 import * as TurnRepository from "../../thread/repository/turn-repository"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import { Input } from "../contract/product-operation"
-import { OperationUnavailable } from "../contract/product-operation-errors"
+import { OperationUnavailable } from "../contract/product-operation"
 import { OperationError } from "../operation-error"
 import { Clock, Console, Effect, Fiber, Layer } from "effect"
 

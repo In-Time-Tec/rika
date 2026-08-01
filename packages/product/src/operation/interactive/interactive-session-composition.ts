@@ -1,5 +1,5 @@
 import { Effect, Fiber, Scope, Semaphore } from "effect"
-import { OperationUnavailable } from "../contract/product-operation-errors"
+import { OperationUnavailable } from "../contract/product-operation"
 
 export const makeInteractiveSessionComposition = (input: {
   readonly admission: Semaphore.Semaphore

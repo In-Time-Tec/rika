@@ -1,19 +1,19 @@
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
-import { reconcile } from "@rika/product/product-operation-service"
+import { reconcile } from "../../src/operation/dispatch/product-operation-dispatch"
 import { describe, expect, it } from "@effect/vitest"
-import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
+import * as ThreadRepository from "../../../product-store/src/thread/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
-import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
+import * as TurnRepository from "../../../product-store/src/turn/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Deferred, Effect, Fiber, Layer, Ref } from "effect"
 
-import { executionRoute } from "../support/product-test-current-state"
-import { provideLayer } from "../support/operation-layer-harness"
-import { reconcileDependencies, unusedExtensions } from "../support/operation-session-harness"
-import { backend } from "../support/operation-execution-fixtures"
+import { executionRoute } from "../../../product-store/test/support/product-test-current-state"
+import { provideLayer } from "../../../product-store/test/support/operation-layer-harness"
+import { reconcileDependencies, unusedExtensions } from "../../../product-store/test/support/operation-session-harness"
+import { backend } from "../../../product-store/test/support/operation-execution-fixtures"
 
-import { turnProvenance, selectionThread } from "../support/operation-selection-fixtures"
+import { turnProvenance, selectionThread } from "../../../product-store/test/support/operation-selection-fixtures"
 
 describe("Operation", () => {
   it.effect("keeps a durably running promoted turn running when its promoter is interrupted", () =>

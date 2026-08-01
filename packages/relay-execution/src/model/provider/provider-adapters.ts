@@ -16,6 +16,7 @@ import * as AmazonBedrock from "@batonfx/providers/amazon-bedrock"
 import * as OpenAi from "@batonfx/providers/openai"
 import { OpenAiAccountCredentialError, type OpenAiAccountCredentials } from "@batonfx/providers/openai"
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
+import * as OpenAiAuthContract from "@rika/product/openai-auth-contract"
 import { Config, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { createHash } from "node:crypto"
@@ -126,7 +127,7 @@ const credential = (
 const batonCredentials = (auth: OpenAiAuth.ServiceInterface, fingerprint: string): OpenAiAccountCredentials => {
   const adapt = (
     operation: "acquire" | "refreshRejected",
-    effect: Effect.Effect<OpenAiAuth.Credential, OpenAiAuth.Error>,
+    effect: Effect.Effect<OpenAiAuthContract.Credential, OpenAiAuthContract.AuthError | OpenAiAuthContract.StoreError>,
   ) =>
     effect.pipe(
       Effect.filterOrFail(

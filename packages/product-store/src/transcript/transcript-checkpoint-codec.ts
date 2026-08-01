@@ -1,6 +1,6 @@
+import type { ExecutionCheckpoint } from "@rika/product/transcript-page"
 import { Effect, Schema } from "effect"
 import { RepositoryError } from "@rika/product/transcript-repository"
-import type { ExecutionCheckpoint } from "@rika/product/transcript-repository"
 
 export const TranscriptCheckpointRow = Schema.Struct({
   model_phase: Schema.Finite,

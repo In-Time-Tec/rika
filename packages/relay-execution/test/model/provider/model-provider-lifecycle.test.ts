@@ -2,7 +2,7 @@ import * as ModelRouteResolution from "@rika/configuration/model-route-resolutio
 import * as SettingsDefaults from "@rika/configuration/configuration-settings"
 import { expect, test } from "vitest"
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
-import * as OpenAiAuthFlow from "@rika/product/openai-auth-service"
+import * as OpenAiAuthContract from "@rika/product/openai-auth-contract"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import { Cause, ConfigProvider, Context, Effect, Layer, Redacted, Schema, Scope } from "effect"
 import { LanguageModel } from "effect/unstable/ai"
@@ -11,7 +11,7 @@ import { bedrockAuthRefreshTestLayer } from "../../../src/model/provider/model-p
 import * as ModelProviderRuntime from "../../../src/model/provider/model-provider-runtime"
 import { normalizePinnedRuntime } from "../../../src/model/provider/provider-adapters"
 
-const credential = (fingerprint: string): OpenAiAuth.Credential => ({
+const credential = (fingerprint: string): OpenAiAuthContract.Credential => ({
   accessToken: Redacted.make("account-access-token"),
   idToken: Redacted.make("account-id-token"),
   refreshToken: Redacted.make("account-refresh-token"),
@@ -23,7 +23,7 @@ const credential = (fingerprint: string): OpenAiAuth.Credential => ({
 })
 
 const authService = (
-  status: OpenAiAuth.Status = { _tag: "Unauthenticated" },
+  status: OpenAiAuthContract.Status = { _tag: "Unauthenticated" },
   acquireFingerprint = status._tag === "Present" || status._tag === "RefreshRequired" ? status.fingerprint : "none",
 ): OpenAiAuth.ServiceInterface => ({
   loginBrowser: () => Effect.succeed(credential(acquireFingerprint)),
@@ -234,7 +234,7 @@ test("custom OpenAI and Anthropic routes never evaluate corrupt account status",
     withRuntime(
       {
         ...authService(),
-        status: Effect.fail(OpenAiAuthFlow.Errors.StoreError.make({ kind: "corrupt", message: "hidden" })),
+        status: Effect.fail(OpenAiAuthContract.StoreError.make({ kind: "corrupt", message: "hidden" })),
       },
       (runtime) =>
         Effect.gen(function* () {
@@ -257,7 +257,7 @@ test("custom OpenAI and Anthropic routes never evaluate corrupt account status",
   ))
 
 test("observes a login between prepare calls without rebuilding the runtime", () => {
-  let status: OpenAiAuth.Status = { _tag: "Unauthenticated" }
+  let status: OpenAiAuthContract.Status = { _tag: "Unauthenticated" }
   const auth = { ...authService(), status: Effect.sync(() => status), acquire: Effect.succeed(credential("account-a")) }
   return Effect.runPromise(
     withRuntime(

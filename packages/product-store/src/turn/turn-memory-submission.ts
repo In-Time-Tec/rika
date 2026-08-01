@@ -7,7 +7,9 @@ import { queueState, withQueueState } from "./turn-memory-queue-state"
 import type { MemoryState, MemorySubmissionResult } from "./turn-memory-state"
 import type { TurnMemoryContext } from "./turn-memory-state-operations"
 import type { AgentExecutionTurn } from "@rika/product/turn-record"
-import type { Interface, QueueItemChange } from "@rika/product/turn-repository"
+import type { Interface } from "@rika/product/turn-repository"
+
+type QueueItemChange = Effect.Success<ReturnType<Interface["dequeue"]>>
 
 export const makeTurnMemorySubmission = ({
   modifyState,

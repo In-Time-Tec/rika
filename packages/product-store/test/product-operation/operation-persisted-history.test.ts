@@ -1,3 +1,4 @@
+import { OperationUnavailable } from "@rika/product/product-operation"
 import type { InteractiveSession } from "@rika/product/interactive-session"
 import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"

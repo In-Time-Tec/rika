@@ -1,7 +1,7 @@
+import * as ExecutionEvent from "@rika/product/execution-event"
 import type { InteractiveSession } from "@rika/product/interactive-session"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { productLayer as makeProductLayer, Service } from "@rika/product/product-operation-service"
-import type { ProductLayerOptions } from "@rika/product/product-operation-service"
 import * as TurnContract from "@rika/product/turn-repository"
 import { Fixtures as RuntimeFixtures } from "./interactive-session-runtime-support"
 import { Fixtures as TranscriptFixtures } from "./interactive-session-transcript-support"
@@ -9,30 +9,13 @@ import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Result, Schema, Sc
 import * as ThreadRepositoryContract from "@rika/product/thread-repository"
 import * as TranscriptRepositoryContract from "@rika/product/transcript-repository"
 import { TestClock } from "effect/testing"
-import { ExecutionIngest } from "@rika/product/product-operation-service"
+type ProductLayerOptions = Parameters<typeof makeProductLayer>[0]
+export const projectionVersion = 4
 
 import { createTurn, executionRoute } from "../support/product-test-current-state"
 import { delegationUnit, invalidatedProjection, storeProjection } from "../support/product-test-transcript-fixture"
 
-export const productLayer = <
-  ThreadError extends Error,
-  TurnError extends Error,
-  BackendError extends Error,
-  ThreadSummaryError extends Error = never,
-  TranscriptError extends Error = never,
-  ThreadInteractionError extends Error = never,
-  UsageError extends Error = never,
->(
-  options: ProductLayerOptions<
-    ThreadError,
-    TurnError,
-    BackendError,
-    ThreadSummaryError,
-    TranscriptError,
-    ThreadInteractionError,
-    UsageError
-  >,
-): Layer.Layer<Service, Error, never> =>
+export const productLayer = (options: ProductLayerOptions): ReturnType<typeof makeProductLayer> =>
   makeProductLayer({
     ...options,
     threadSummaryRepositoryLayer:
@@ -89,13 +72,13 @@ export const active = (
 })
 
 export const serverEvents = (
-  events: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>,
-): ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> =>
+  events: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event>,
+): ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> =>
   events.map((event) => ({ ...event, timestampSource: "server" as const }))
 
 export const completeServerTimeline = (
-  events: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>,
-): ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> => {
+  events: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event>,
+): ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> => {
   if (events.length === 0) return events
   const stamped = serverEvents(events)
   if (stamped.some((event) => event.type === "execution.started" || event.type === "execution.accepted")) return stamped
@@ -128,7 +111,7 @@ export const storeCompletedTranscript = Effect.fn("InteractiveSessionTest.storeC
   ])
   yield* storeProjection(transcripts, turn, projection, {
     consumed: { [String(turn.id)]: { cursor, sequence: 0, status: "completed" } },
-    projectionVersion: ExecutionIngest.projectionVersion,
+    projectionVersion: projectionVersion,
   })
 })
 
@@ -154,9 +137,9 @@ export interface InteractiveHarness {
 }
 
 export const makeHarness: (
-  pagedEvents?: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>,
+  pagedEvents?: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event>,
   stalePageCursor?: boolean,
-  turnPageRequests?: Ref.Ref<ReadonlyArray<TurnContract.PageCursor | undefined>>,
+  turnPageRequests?: Ref.Ref<ReadonlyArray<typeof TurnContract.PageCursor.Type | undefined>>,
   cancelFailure?: boolean,
   initialTurnsCompleted?: boolean,
   completion?: {
@@ -166,9 +149,9 @@ export const makeHarness: (
   },
 ) => Effect.Effect<InteractiveHarness, object, Scope.Scope> = Effect.fn("InteractiveSessionTest.makeHarness")(
   function* (
-    pagedEvents?: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>,
+    pagedEvents?: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event>,
     stalePageCursor: boolean = false,
-    turnPageRequests?: Ref.Ref<ReadonlyArray<TurnContract.PageCursor | undefined>>,
+    turnPageRequests?: Ref.Ref<ReadonlyArray<typeof TurnContract.PageCursor.Type | undefined>>,
     cancelFailure: boolean = false,
     initialTurnsCompleted: boolean = false,
     completion?: {
@@ -242,11 +225,11 @@ export const makeHarness: (
         ? {
             follow: (
               turnId: string,
-              checkpoint: string | RuntimeFixtures.ExecutionBackend.ExecutionCheckpoint | undefined,
-              onEvent?: (event: RuntimeFixtures.ExecutionBackend.Event) => void,
+              checkpoint: string | RuntimeFixtures.ExecutionEvent.ExecutionCheckpoint | undefined,
+              onEvent?: (event: RuntimeFixtures.ExecutionEvent.Event) => void,
             ) => {
               const afterCursor = typeof checkpoint === "string" ? checkpoint : checkpoint?.cursor
-              const output: RuntimeFixtures.ExecutionBackend.Event = {
+              const output: RuntimeFixtures.ExecutionEvent.Event = {
                 executionId: turnId,
                 cursor: "resumed-output",
                 sequence: 2,
@@ -255,7 +238,7 @@ export const makeHarness: (
                 timestampSource: "server",
                 text: "created file",
               }
-              const completed: RuntimeFixtures.ExecutionBackend.Event = {
+              const completed: RuntimeFixtures.ExecutionEvent.Event = {
                 executionId: turnId,
                 cursor: "resumed-done",
                 sequence: 3,
@@ -402,6 +385,6 @@ export { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Result, Schema }
 export { TestClock }
 export { RuntimeFixtures }
 export { TranscriptFixtures }
-export { ExecutionIngest, TurnContract }
+export { TurnContract }
 export { createTurn, executionRoute }
 export { delegationUnit, invalidatedProjection, storeProjection }

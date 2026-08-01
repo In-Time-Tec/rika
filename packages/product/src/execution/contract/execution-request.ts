@@ -17,6 +17,13 @@ export type PromptPart = typeof PromptPart.Type
 export type EventScope = "execution" | "tree"
 export type SessionPurpose = { readonly _tag: "Conversation" }
 
+export interface ThreadQueueWake {
+  readonly threadId: string
+  readonly generation: number
+  readonly queueRevision: number
+  readonly now: number
+}
+
 export interface StartInput {
   readonly threadId: string
   readonly turnId: string

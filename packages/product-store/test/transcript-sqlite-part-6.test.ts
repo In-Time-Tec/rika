@@ -1,3 +1,4 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
 import { attachedExecutionCheckpoint } from "./transcript-fixture-checkpoints"
 import {
   expect,
@@ -89,7 +90,7 @@ it.effect("keyset-paginates a reopened nested intrinsic-order transcript without
         Effect.gen(function* () {
           const repository = yield* TranscriptRepository.Service
           const keys: Array<string> = []
-          let before: TranscriptRepository.PageCursor | undefined
+          let before: TranscriptPage.PageCursor | undefined
           while (true) {
             const page = yield* repository.page(threadId, {
               ...(before === undefined ? {} : { before }),

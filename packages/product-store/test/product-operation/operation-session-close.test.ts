@@ -1,6 +1,6 @@
+import { OperationUnavailable } from "@rika/product/product-operation"
 import type { InteractiveSession } from "@rika/product/interactive-session"
 import { Service } from "@rika/product/product-operation-service"
-import { OperationUnavailable } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"

@@ -3,9 +3,6 @@ import { ExecutionRouteSnapshot } from "../../execution/contract/execution-route
 import { ThreadId } from "../model/thread-record"
 import { TurnId } from "../model/turn-record"
 
-export const ReceiptKind = Schema.Literals(["create", "message", "steer", "cancel", "stop"])
-export type ReceiptKind = typeof ReceiptKind.Type
-
 interface Limits {
   readonly maximumDepth: number
   readonly maximumAdmissions: number

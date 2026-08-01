@@ -7,6 +7,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { ModelRegistry } from "@batonfx/core"
 import { expect, test } from "vitest"
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
+import * as OpenAiAuthContract from "@rika/product/openai-auth-contract"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { layer as relayLayer } from "../../../src/relay/execution/relay-execution-layer"
 import * as RikaToolRuntime from "@rika/coding-tools/coding-tool-runtime"
@@ -17,7 +18,7 @@ import { executionModelRoutes, executionRoutePin, modelRoutesForExecution } from
 import { bedrockAuthRefreshTestLayer } from "../../../src/model/provider/model-provider-runtime"
 import * as ModelProviderRuntime from "../../../src/model/provider/model-provider-runtime"
 
-const credential = (fingerprint: string): OpenAiAuth.Credential => ({
+const credential = (fingerprint: string): OpenAiAuthContract.Credential => ({
   accessToken: Redacted.make("account-access-token"),
   idToken: Redacted.make("account-id-token"),
   refreshToken: Redacted.make("account-refresh-token"),
@@ -29,7 +30,7 @@ const credential = (fingerprint: string): OpenAiAuth.Credential => ({
 })
 
 const authService = (
-  status: OpenAiAuth.Status = { _tag: "Unauthenticated" },
+  status: OpenAiAuthContract.Status = { _tag: "Unauthenticated" },
   acquireFingerprint = status._tag === "Present" || status._tag === "RefreshRequired" ? status.fingerprint : "none",
 ): OpenAiAuth.ServiceInterface => ({
   loginBrowser: () => Effect.succeed(credential(acquireFingerprint)),

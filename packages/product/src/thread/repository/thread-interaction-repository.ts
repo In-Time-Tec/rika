@@ -1,12 +1,5 @@
-import { Context, Effect } from "effect"
+import { Context, Effect, Schema } from "effect"
 import type { AcceptedThreadTurn, ResultRoute, ResultRouteCursor, RootResult } from "./thread-interaction-result"
-import {
-  AdmissionRejected,
-  InvocationConflict,
-  QueueFull,
-  RepositoryError,
-  ResultNotReady,
-} from "./thread-interaction-errors"
 import type {
   AppendThreadMessageInput,
   BindThreadControlInput,
@@ -21,6 +14,37 @@ import type {
 import { Thread, ThreadId } from "../model/thread-record"
 import { Turn, TurnId } from "../model/turn-record"
 import type { ThreadRelationship, RelationshipCursor } from "../model/thread-relationship"
+export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("ThreadInteractionRepositoryError", {
+  message: Schema.String,
+}) {}
+
+export class InvocationConflict extends Schema.TaggedErrorClass<InvocationConflict>()("ThreadInvocationConflict", {
+  invocationDigest: Schema.String,
+}) {}
+
+export class AdmissionRejected extends Schema.TaggedErrorClass<AdmissionRejected>()("ThreadAdmissionRejected", {
+  reason: Schema.Literals([
+    "source-unavailable",
+    "target-unavailable",
+    "self",
+    "workspace",
+    "archived",
+    "depth",
+    "admission-limit",
+    "workspace-active-limit",
+  ]),
+  message: Schema.String,
+}) {}
+
+export class QueueFull extends Schema.TaggedErrorClass<QueueFull>()("ThreadInteractionQueueFull", {
+  threadId: ThreadId,
+  capacity: Schema.Int,
+  count: Schema.Int,
+}) {}
+
+export class ResultNotReady extends Schema.TaggedErrorClass<ResultNotReady>()("ThreadResultNotReady", {
+  targetTurnId: TurnId,
+}) {}
 
 export interface Interface {
   readonly createThread: (
@@ -61,28 +85,3 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()(
   "@rika/product/thread/repository/thread-interaction-repository/Service",
 ) {}
-
-export { ResultDelivery } from "./thread-interaction-result"
-export type { RootResult, ResultRoute, ResultRouteCursor, AcceptedThreadTurn } from "./thread-interaction-result"
-export { ReceiptKind } from "./thread-interaction-admission"
-export type {
-  Invocation,
-  CreateThreadInput,
-  AppendThreadMessageInput,
-  BindThreadControlInput,
-} from "./thread-interaction-admission"
-export type {
-  BoundThreadControl,
-  DeliveredThreadResult,
-  DeliverThreadResultInput,
-  SettleThreadResultInput,
-} from "./thread-interaction-delivery"
-export {
-  RepositoryError,
-  InvocationConflict,
-  AdmissionRejected,
-  QueueFull,
-  ResultNotReady,
-} from "./thread-interaction-errors"
-export { TurnAuthor, TurnLineage } from "../model/thread-relationship"
-export type { ThreadRelationship, RelationshipCursor } from "../model/thread-relationship"

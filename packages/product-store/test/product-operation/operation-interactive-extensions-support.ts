@@ -13,17 +13,16 @@ import * as Turn from "@rika/product/turn-record"
 import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
 import * as SummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
 import * as TranscriptIdentity from "@rika/transcript/transcript-unit-identity"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { expect } from "@effect/vitest"
 import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Schema, Scope } from "effect"
-import {
-  ExecutionIngest,
-  executeInteractiveCommand,
-  InteractiveEventSchema,
-} from "@rika/product/product-operation-service"
+import { executeInteractiveCommand } from "@rika/product/interactive-command"
+import { InteractiveEventSchema } from "@rika/product/interactive-event"
+import { projectionVersion } from "./interactive-session-base-support"
 import * as UsageCost from "@rika/product/usage-projection"
 import { invalidatedProjection, storeProjection } from "../support/product-test-transcript-fixture"
 
@@ -61,7 +60,7 @@ export const providerCostEvent = (
   cursor: string,
   amount: number,
   sequence = 0,
-): ExecutionBackend.Event => ({
+): ExecutionEvent.Event => ({
   executionId,
   cursor,
   sequence,
@@ -210,12 +209,12 @@ export const terminalTransitionScenario = (
       if (oversizedProjection)
         yield* storeProjection(transcripts, target, stale, {
           consumed: { [String(target.id)]: { cursor: "terminal-cursor", sequence: 222, status: inspectedStatus } },
-          projectionVersion: ExecutionIngest.projectionVersion,
+          projectionVersion: projectionVersion,
         })
       const pageCount = pagedHistory ? 34 : 2
-      const replayEvents: ReadonlyArray<ExecutionBackend.Event> = Array.from({ length: pageCount }, (_, index) => {
+      const replayEvents: ReadonlyArray<ExecutionEvent.Event> = Array.from({ length: pageCount }, (_, index) => {
         const terminal = index === pageCount - 1
-        let type: ExecutionBackend.Event["type"]
+        let type: ExecutionEvent.Event["type"]
         if (terminal) {
           type = `execution.${inspectedStatus}` as const
         } else if (index === 0) {
@@ -331,7 +330,7 @@ export const terminalTransitionScenario = (
         expect(new Set(loadedEntries.map((entry) => entry.unit.key))).toEqual(
           new Set(stale.units.map((unit) => unit.key)),
         )
-        expect(storedProjection?.projectionVersion).toBe(ExecutionIngest.projectionVersion)
+        expect(storedProjection?.projectionVersion).toBe(projectionVersion)
         expect(storedProjection?.units.some((unit) => unit.key === `${target.id}:assistant:opening`)).toBe(true)
       }
       const stored = yield* transcripts.get(target.id)
@@ -376,5 +375,5 @@ export {
   TranscriptUnit,
 }
 export { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Schema }
-export { ExecutionIngest, executeInteractiveCommand, InteractiveEventSchema, UsageCost }
+export { projectionVersion, executeInteractiveCommand, InteractiveEventSchema, UsageCost }
 export { invalidatedProjection, storeProjection }

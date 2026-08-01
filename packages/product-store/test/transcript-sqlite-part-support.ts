@@ -1,3 +1,4 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
@@ -35,8 +36,8 @@ export const usageEvent: TranscriptSourceEvent.SourceEvent = {
 }
 
 export const _compareExecutionCheckpoints = (
-  left: TranscriptRepository.ExecutionCheckpoint,
-  right: TranscriptRepository.ExecutionCheckpoint,
+  left: TranscriptPage.ExecutionCheckpoint,
+  right: TranscriptPage.ExecutionCheckpoint,
 ): number => {
   if (left.executionKey < right.executionKey) return -1
   if (left.executionKey > right.executionKey) return 1

@@ -7,8 +7,11 @@ import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-rep
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionRequest from "@rika/product/execution-request"
+import * as ExecutionIdentifier from "@rika/product/execution-identifier"
+import * as ExecutionChildRun from "@rika/product/execution-child-run"
 import { Deferred, Effect, Layer, Ref } from "effect"
-import { ResolvedContext } from "@rika/product/product-operation-service"
+import * as ResolvedContext from "@rika/product/context-resolution-service"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { holdSession, openInteractiveSession, settleEvents } from "../support/operation-session-harness"
 import { executionStarted, backend } from "../support/operation-execution-fixtures"
@@ -22,8 +25,8 @@ describe("Operation", () => {
       const events = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])
       const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
-      const startInputs = yield* Ref.make<ReadonlyArray<ExecutionBackend.StartInput>>([])
-      const childInputs = yield* Ref.make<ReadonlyArray<ExecutionBackend.InvokeChildInput>>([])
+      const startInputs = yield* Ref.make<ReadonlyArray<ExecutionRequest.StartInput>>([])
+      const childInputs = yield* Ref.make<ReadonlyArray<ExecutionChildRun.InvokeChildInput>>([])
       const liveBackend = ExecutionBackend.Service.of({
         ...backend,
         invokeChild: (input) =>
@@ -31,7 +34,7 @@ describe("Operation", () => {
         follow: (executionId, afterCursor, onEvent, reference) => {
           if (executionId !== "child:turn-interactive:title")
             return backend.follow!(executionId, afterCursor, onEvent, reference)
-          if (reference !== ExecutionBackend.executionReference)
+          if (reference !== ExecutionIdentifier.executionReference)
             return Effect.die(new Error("title execution addressed without the execution reference"))
           return Effect.succeed({
             turnId: executionId,

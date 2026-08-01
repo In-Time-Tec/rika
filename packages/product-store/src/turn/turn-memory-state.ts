@@ -1,8 +1,13 @@
-import { Schema } from "effect"
+import type { Interface } from "@rika/product/turn-repository"
+import { Effect, Schema } from "effect"
 import { ThreadId } from "@rika/product/thread-record"
 import { Turn, TurnId } from "@rika/product/turn-record"
 import { defaultPageSize, maximumPageSize } from "@rika/product/turn-repository"
-import type { QueueItemChange, Submission, PageCursor } from "@rika/product/turn-repository"
+import { PageCursor as PageCursorSchema } from "@rika/product/turn-repository"
+type PageCursor = typeof PageCursorSchema.Type
+
+type QueueItemChange = Effect.Success<ReturnType<Interface["dequeue"]>>
+type Submission = Effect.Success<ReturnType<Interface["createForSubmission"]>>
 
 export const clone = <T extends Turn>(turn: T): T => structuredClone(turn)
 export const sameTurn = Schema.toEquivalence(Turn)

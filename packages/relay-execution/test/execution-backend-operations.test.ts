@@ -5,6 +5,7 @@ import { Deferred, Effect, Fiber, Ref, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionIdentifier from "@rika/product/execution-identifier"
 
 import { createFanOut, currentExecutionRoute } from "./current-execution-route"
 
@@ -239,7 +240,7 @@ it.effect("covers every join payload and child-prefixed execution identifiers", 
         createdAt: 1,
       })
       return {
-        replay: yield* backend.replay("child:already-prefixed", undefined, ExecutionBackend.executionReference),
+        replay: yield* backend.replay("child:already-prefixed", undefined, ExecutionIdentifier.executionReference),
         inspection: yield* backend.inspect("p"),
       }
     }).pipe(provideBackend(fixture.implementation))
@@ -267,10 +268,10 @@ it.effect("round-trips every inspected child execution identifier through execut
       const inspection = yield* backend.inspect("parent")
       const childId = inspection?.children[0]?.executionId
       if (childId === undefined) return yield* Effect.die("Missing inspected child")
-      yield* backend.replay(childId, undefined, ExecutionBackend.executionReference)
+      yield* backend.replay(childId, undefined, ExecutionIdentifier.executionReference)
       if (backend.pageEvents === undefined) return yield* Effect.die("Missing event paging")
-      yield* backend.pageEvents(childId, "forward", undefined, undefined, ExecutionBackend.executionReference)
-      yield* backend.cancel(childId, ExecutionBackend.executionReference)
+      yield* backend.pageEvents(childId, "forward", undefined, undefined, ExecutionIdentifier.executionReference)
+      yield* backend.cancel(childId, ExecutionIdentifier.executionReference)
       return childId
     }).pipe(provideBackend(fixture.implementation))
 

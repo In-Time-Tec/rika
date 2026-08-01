@@ -1,3 +1,5 @@
+import * as ExecutionRequest from "@rika/product/execution-request"
+import * as ExecutionEvent from "@rika/product/execution-event"
 import * as ThreadResult from "@rika/product/thread-result"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import type { InteractiveSession } from "@rika/product/interactive-session"
@@ -194,7 +196,7 @@ describe("interactive session extensions", () => {
           },
         ])
         const childId = "turn-synth-child"
-        const rootEvents: ReadonlyArray<ExecutionBackend.Event> = [
+        const rootEvents: ReadonlyArray<ExecutionEvent.Event> = [
           {
             executionId: "turn-synth",
             cursor: "root-answer",
@@ -204,7 +206,7 @@ describe("interactive session extensions", () => {
             text: "Delegated.",
           },
         ]
-        const childEvents: ReadonlyArray<ExecutionBackend.Event> = [
+        const childEvents: ReadonlyArray<ExecutionEvent.Event> = [
           {
             executionId: childId,
             cursor: "child-read",
@@ -249,7 +251,7 @@ describe("interactive session extensions", () => {
             return Effect.void.pipe(Effect.as(undefined))
           },
           replay: (executionId) => {
-            let events: ReadonlyArray<ExecutionBackend.Event> = []
+            let events: ReadonlyArray<ExecutionEvent.Event> = []
             if (executionId === "turn-synth") events = rootEvents
             else if (executionId === childId) events = childEvents
             return Effect.succeed({ turnId: executionId, status: "completed" as const, events })
@@ -308,7 +310,7 @@ describe("interactive session extensions", () => {
           },
         ])
         const registration = yield* Deferred.make<InteractiveSession>()
-        const starts = yield* Ref.make<ReadonlyArray<ExecutionBackend.StartInput>>([])
+        const starts = yield* Ref.make<ReadonlyArray<ExecutionRequest.StartInput>>([])
         const backend = ExecutionBackend.Service.of({
           ...baseBackend,
           start: (input) =>

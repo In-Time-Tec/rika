@@ -1,3 +1,4 @@
+import * as ProductOperation from "@rika/product/product-operation"
 import * as Operation from "@rika/product/product-operation-service"
 import { Console, Effect, FileSystem, Option, Schema, Stdio, Stream } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
@@ -29,7 +30,7 @@ const streamFlags = {
 }
 
 const optionalValue = <A>(value: Option.Option<A>): A | undefined => Option.getOrUndefined(value)
-type RunOperation = Extract<Operation.Input, { readonly _tag: "Run" }>
+type RunOperation = Extract<ProductOperation.Input, { readonly _tag: "Run" }>
 const JsonLine = Schema.UnknownFromJsonString
 
 const runInput = (values: {
@@ -60,10 +61,10 @@ const runInput = (values: {
 
 const validateRunInput = (input: RunOperation) => {
   if (input.streamJsonInput && !input.streamJson) {
-    return Effect.fail(Operation.InvalidInput.make({ message: "--stream-json-input requires --stream-json" }))
+    return Effect.fail(ProductOperation.InvalidInput.make({ message: "--stream-json-input requires --stream-json" }))
   }
   if (input.streamJsonThinking && !input.streamJson) {
-    return Effect.fail(Operation.InvalidInput.make({ message: "--stream-json-thinking requires --stream-json" }))
+    return Effect.fail(ProductOperation.InvalidInput.make({ message: "--stream-json-thinking requires --stream-json" }))
   }
   return Effect.succeed(input)
 }
@@ -73,34 +74,36 @@ export const parseJsonLines = (input: string): ReadonlyArray<string> =>
     if (line.trim().length === 0) return []
     const decoded = Schema.decodeUnknownOption(JsonLine)(line)
     if (Option.isNone(decoded)) {
-      throw Operation.InvalidInput.make({ message: `Invalid JSON on stdin line ${index + 1}` })
+      throw ProductOperation.InvalidInput.make({ message: `Invalid JSON on stdin line ${index + 1}` })
     }
     const value = decoded.value
     if (typeof value === "string") return [value]
     if (typeof value === "object" && value !== null && "prompt" in value && typeof value.prompt === "string")
       return [value.prompt]
-    throw Operation.InvalidInput.make({
+    throw ProductOperation.InvalidInput.make({
       message: `JSON on stdin line ${index + 1} must be a string or prompt object`,
     })
   })
 
 export function readStreamInput(
   stdin: AsyncIterable<unknown>,
-): (input: RunOperation) => Effect.Effect<RunOperation, Operation.InvalidInput>
+): (input: RunOperation) => Effect.Effect<RunOperation, ProductOperation.InvalidInput>
 export function readStreamInput(): (
   input: RunOperation,
-) => Effect.Effect<RunOperation, Operation.InvalidInput, Stdio.Stdio>
+) => Effect.Effect<RunOperation, ProductOperation.InvalidInput, Stdio.Stdio>
 export function readStreamInput(
   input: RunOperation,
   stdin: AsyncIterable<unknown>,
-): Effect.Effect<RunOperation, Operation.InvalidInput>
-export function readStreamInput(input: RunOperation): Effect.Effect<RunOperation, Operation.InvalidInput, Stdio.Stdio>
+): Effect.Effect<RunOperation, ProductOperation.InvalidInput>
+export function readStreamInput(
+  input: RunOperation,
+): Effect.Effect<RunOperation, ProductOperation.InvalidInput, Stdio.Stdio>
 export function readStreamInput(
   inputOrStdin?: RunOperation | AsyncIterable<unknown>,
   stdin?: AsyncIterable<unknown>,
 ):
-  | Effect.Effect<RunOperation, Operation.InvalidInput, Stdio.Stdio>
-  | ((input: RunOperation) => Effect.Effect<RunOperation, Operation.InvalidInput, Stdio.Stdio>) {
+  | Effect.Effect<RunOperation, ProductOperation.InvalidInput, Stdio.Stdio>
+  | ((input: RunOperation) => Effect.Effect<RunOperation, ProductOperation.InvalidInput, Stdio.Stdio>) {
   if (inputOrStdin === undefined || !("_tag" in inputOrStdin)) {
     const selectedStdin = inputOrStdin ?? stdin
     return selectedStdin === undefined
@@ -114,11 +117,11 @@ export function readStreamInput(
       ? Stdio.Stdio.pipe(
           Effect.flatMap((stdio) => Stream.mkString(Stream.decodeText(stdio.stdin))),
           Effect.mapError((cause) =>
-            Operation.InvalidInput.make({ message: `Unable to read JSON input: ${String(cause)}` }),
+            ProductOperation.InvalidInput.make({ message: `Unable to read JSON input: ${String(cause)}` }),
           ),
         )
       : Stream.fromAsyncIterable(stdin, (cause) =>
-          Operation.InvalidInput.make({ message: `Unable to read JSON input: ${String(cause)}` }),
+          ProductOperation.InvalidInput.make({ message: `Unable to read JSON input: ${String(cause)}` }),
         ).pipe(
           Stream.runFold(
             () => "",
@@ -130,9 +133,9 @@ export function readStreamInput(
       Effect.try({
         try: () => ({ ...input, prompt: [...input.prompt, ...parseJsonLines(content)] }),
         catch: (cause) =>
-          Schema.is(Operation.InvalidInput)(cause)
+          Schema.is(ProductOperation.InvalidInput)(cause)
             ? cause
-            : Operation.InvalidInput.make({
+            : ProductOperation.InvalidInput.make({
                 message: `Unable to parse JSON input: ${String(cause)}`,
               }),
       }),
@@ -187,7 +190,9 @@ const updateCommand = Command.make("update", {}, () =>
     host: { platform: process.platform, architecture: process.arch },
   }).pipe(
     Effect.flatMap((outcome) => Console.log(ReleaseUpdate.updateReport(outcome))),
-    Effect.mapError((error) => Operation.OperationUnavailable.make({ operation: "Update", message: error.message })),
+    Effect.mapError((error) =>
+      ProductOperation.OperationUnavailable.make({ operation: "Update", message: error.message }),
+    ),
   ),
 ).pipe(Command.withDescription("Replace this Rika install with the latest published release"))
 
@@ -206,14 +211,14 @@ export const command = Command.make(
     values,
   ): Effect.Effect<
     void,
-    Operation.InvalidInput | Operation.OperationUnavailable,
+    ProductOperation.InvalidInput | ProductOperation.OperationUnavailable,
     FileSystem.FileSystem | Operation.Service | Stdio.Stdio
   > => {
     if (values.execute)
       return validateRunInput(runInput(values)).pipe(Effect.flatMap(readStreamInput), Effect.flatMap(dispatch))
     if (values.streamJson || values.streamJsonInput || values.streamJsonThinking) {
       return Effect.fail(
-        Operation.InvalidInput.make({
+        ProductOperation.InvalidInput.make({
           message: "stream flags require --execute or the run command",
         }),
       )
@@ -221,7 +226,7 @@ export const command = Command.make(
     const selectedMode = optionalValue(values.mode)
     const selectedWorkspace = optionalValue(values.workspace)
     const selectedThread = optionalValue(values.thread)
-    const input: Operation.Input = {
+    const input: ProductOperation.Input = {
       _tag: "Interactive",
       prompt: values.prompt,
       ...(selectedMode === undefined ? {} : { mode: selectedMode }),
@@ -235,7 +240,7 @@ export const command = Command.make(
       Effect.filterOrFail(
         (result) => result._tag === "Success" && result.success.type === "Directory",
         () =>
-          Operation.InvalidInput.make({
+          ProductOperation.InvalidInput.make({
             message: `Workspace is not a directory: ${selectedWorkspace}`,
           }),
       ),

@@ -1,28 +1,25 @@
+import { EntrySchema } from "@rika/product/transcript-page"
+import type { PageCursor, ExecutionCheckpoint, Entry, Projection, Page } from "@rika/product/transcript-page"
 import { Service, RepositoryError, invalidatedProjectionVersion } from "@rika/product/transcript-repository"
-export {
-  Service,
-  RepositoryError,
-  invalidatedProjectionVersion,
-  PageCursor,
-  ExecutionCheckpoint,
-  EntrySchema,
-} from "@rika/product/transcript-repository"
-export type {
-  Interface,
-  Entry,
-  Projection,
-  Page,
-  CheckpointOptions,
-  DeltaCheckpointOptions,
-  UnitDelta,
-  RefoldOptions,
-  PageOptions,
-  ProjectionRecoveryCandidate,
-  WriteResult,
-  RefoldWriteResult,
-  RecordedShellWriteResult,
-} from "@rika/product/transcript-repository"
+import type { Interface } from "@rika/product/transcript-repository"
+export { Service, RepositoryError, invalidatedProjectionVersion } from "@rika/product/transcript-repository"
+export type { Interface } from "@rika/product/transcript-repository"
 import { Effect, Layer, Schema } from "effect"
+type CheckpointOptions = {
+  readonly executionCheckpoints: ReadonlyArray<import("@rika/product/transcript-page").ExecutionCheckpoint>
+  readonly projectionVersion: number
+}
+type DeltaCheckpointOptions = CheckpointOptions & { readonly expectedGeneration: number | undefined }
+type UnitDelta = Parameters<Interface["commitDelta"]>[2]
+type RefoldOptions = CheckpointOptions & {
+  readonly expectedProjectionVersion: number
+  readonly expectedGeneration: number
+}
+type PageOptions = NonNullable<Parameters<Interface["page"]>[1]>
+type ProjectionRecoveryCandidate = Effect.Success<ReturnType<Interface["listProjectionRecoveryCandidates"]>>[number]
+type WriteResult = Effect.Success<ReturnType<Interface["commitDelta"]>>
+type RefoldWriteResult = Effect.Success<ReturnType<Interface["replaceForRefold"]>>
+type RecordedShellWriteResult = Effect.Success<ReturnType<Interface["settleRecordedShell"]>>
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { TurnId } from "@rika/product/turn-record"
 import { support } from "./transcript-repository-support"

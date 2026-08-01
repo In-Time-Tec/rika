@@ -1,21 +1,22 @@
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
 import * as OpenAiAuthService from "@rika/product/openai-auth-service"
 import * as OpenAiAuthContract from "@rika/product/openai-auth-contract"
-import * as OpenAiAuthFlow from "@rika/product/openai-auth-service"
-
 namespace OpenAiAuth {
-  export import AuthError = OpenAiAuthFlow.Errors.AuthError
-  export import Host = OpenAiAuthFlow.Host
-  export import Http = OpenAiAuthFlow.Http
-  export import Presenter = OpenAiAuthFlow.Presenter
+  export import AuthError = OpenAiAuthContract.AuthError
+  export import Host = OpenAiAuthService.Host
+  export import Http = OpenAiAuthService.Http
+  export import Presenter = OpenAiAuthService.Presenter
   export const layer = OpenAiAuthService.layer
-  export const issuer = OpenAiAuthFlow.configuration.issuer
-  export const clientId = OpenAiAuthFlow.configuration.clientId
-  export const redirectUri = OpenAiAuthFlow.configuration.redirectUri
+  export const issuer = OpenAiAuthService.configuration.issuer
+  export const clientId = OpenAiAuthService.configuration.clientId
+  export const redirectUri = OpenAiAuthService.configuration.redirectUri
   export import TokenResponse = OpenAiAuthContract.TokenResponse
   export import DeviceStartResponse = OpenAiAuthContract.DeviceStartResponse
   export import DevicePollResponse = OpenAiAuthContract.DevicePollResponse
-  export type AuthorizationResult = OpenAiAuthContract.AuthorizationResult
+  export type AuthorizationResult = {
+    readonly code: Redacted.Redacted<string>
+    readonly state: Redacted.Redacted<string>
+  }
 }
 import { Console, Deferred, Effect, Layer, Option, Redacted, Schema } from "effect"
 import {

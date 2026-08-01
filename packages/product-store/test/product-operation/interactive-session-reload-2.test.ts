@@ -1,3 +1,6 @@
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionStatus from "@rika/product/execution-status"
+import * as ExecutionInspection from "@rika/product/execution-inspection"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { describe, expect, it } from "@effect/vitest"
 import {
@@ -52,7 +55,7 @@ describe("InteractiveSession subagent reload", () => {
     Effect.gen(function* () {
       const nestedId = `child:${encodeURIComponent(subagentChildId)}:nested`
       const followed = yield* Ref.make<ReadonlyArray<string>>([])
-      const childEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
+      const childEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [
         {
           executionId: subagentChildId,
           cursor: "nested-call",
@@ -77,7 +80,7 @@ describe("InteractiveSession subagent reload", () => {
           createdAt: 5,
         },
       ]
-      const nestedEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
+      const nestedEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [
         {
           executionId: nestedId,
           cursor: "nested-started",
@@ -87,7 +90,7 @@ describe("InteractiveSession subagent reload", () => {
           timestampSource: "server",
         },
       ]
-      const failedRootEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
+      const failedRootEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [
         ...subagentRootEvents.slice(0, 3),
         {
           executionId: "execution:done",
@@ -98,11 +101,11 @@ describe("InteractiveSession subagent reload", () => {
           text: "root failed after its descendants finished",
         },
       ]
-      const inspection = (executionId: string): RuntimeFixtures.ExecutionBackend.Inspection => {
-        let children: RuntimeFixtures.ExecutionBackend.Inspection["children"] = []
+      const inspection = (executionId: string): RuntimeFixtures.ExecutionInspection.Inspection => {
+        let children: RuntimeFixtures.ExecutionInspection.Inspection["children"] = []
         if (executionId === "done") children = [{ executionId: subagentChildId, status: "completed" }]
         else if (executionId === subagentChildId) children = [{ executionId: nestedId, status: "running" }]
-        let status: RuntimeFixtures.ExecutionBackend.Status = "running"
+        let status: RuntimeFixtures.ExecutionStatus.Status = "running"
         if (executionId === "done") status = "failed"
         else if (executionId === subagentChildId) status = "completed"
         return {
@@ -293,7 +296,7 @@ describe("InteractiveSession subagent reload", () => {
       ])
       let inspections = 0
       let eventPages = 0
-      const inspection = (executionId: string): RuntimeFixtures.ExecutionBackend.Inspection => {
+      const inspection = (executionId: string): RuntimeFixtures.ExecutionInspection.Inspection => {
         inspections += 1
         return {
           turnId: executionId,

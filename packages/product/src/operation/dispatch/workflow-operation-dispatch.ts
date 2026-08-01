@@ -1,6 +1,6 @@
 import * as ExecutionBackend from "../../execution/contract/execution-service"
 import { Input } from "../contract/product-operation"
-import { OperationUnavailable } from "../contract/product-operation-errors"
+import { OperationUnavailable } from "../contract/product-operation"
 import { operationError } from "../operation-error"
 import { Console, Context, Effect } from "effect"
 

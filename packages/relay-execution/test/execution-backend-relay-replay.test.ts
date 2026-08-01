@@ -7,6 +7,7 @@ import { expect, test } from "vitest"
 import { Effect, FileSystem, Layer } from "effect"
 import { Tool } from "effect/unstable/ai"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
 
 import { start } from "./current-execution-route"
 
@@ -61,12 +62,12 @@ test(
         const program = withBackend([TestModel.text("deterministic answer")], (fixture) =>
           Effect.gen(function* () {
             const backend = yield* ExecutionBackend.Service
-            const streamed: Array<ExecutionBackend.Event> = []
+            const streamed: Array<ExecutionEvent.Event> = []
             const input = {
               threadId: "thread-a",
               turnId: "turn-a",
               prompt: "hello",
-              onEvent: (event: ExecutionBackend.Event) => streamed.push(event),
+              onEvent: (event: ExecutionEvent.Event) => streamed.push(event),
             }
             const first = yield* start(backend, input)
             const { onEvent: _onEvent, ...duplicateInput } = input

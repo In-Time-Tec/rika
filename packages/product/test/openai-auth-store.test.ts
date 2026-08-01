@@ -4,7 +4,7 @@ import { Http, Store } from "./openai-auth-test-contract"
 import { Service } from "./openai-auth-test-service"
 import { dependencies, memoryStore, provideLayer, unusedHttp } from "./openai-auth-test-layers"
 import { disk, tokens } from "./openai-auth-test-credentials"
-import { Errors } from "../src/authentication/openai-auth-flow"
+import * as Contract from "../src/authentication/openai-auth-contract"
 import { createHash } from "node:crypto"
 
 describe("OpenAI credential state", () => {
@@ -29,11 +29,11 @@ describe("OpenAI credential state", () => {
       expect((yield* status(Effect.succeed(Option.some(disk({ expiresAt: Number.MAX_SAFE_INTEGER })))))._tag).toBe(
         "Present",
       )
-      expect((yield* status(Effect.fail(Errors.StoreError.make({ kind: "corrupt", message: "safe" }))))._tag).toBe(
+      expect((yield* status(Effect.fail(Contract.StoreError.make({ kind: "corrupt", message: "safe" }))))._tag).toBe(
         "Corrupt",
       )
       expect(
-        (yield* Effect.flip(status(Effect.fail(Errors.StoreError.make({ kind: "unsafe", message: "safe" }))))).kind,
+        (yield* Effect.flip(status(Effect.fail(Contract.StoreError.make({ kind: "unsafe", message: "safe" }))))).kind,
       ).toBe("unsafe")
     })
   })

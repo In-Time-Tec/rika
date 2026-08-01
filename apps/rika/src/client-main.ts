@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import * as ProductOperation from "@rika/product/product-operation"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Operation from "@rika/product/product-operation-service"
 import * as ResidentHandshake from "@rika/product/resident-service-handshake"
@@ -45,7 +46,7 @@ const provideLayerScoped =
       ),
     )
 
-const withClientWorkspace = (input: Operation.Input, workspace: string): Operation.Input => {
+const withClientWorkspace = (input: ProductOperation.Input, workspace: string): ProductOperation.Input => {
   if (input._tag === "Interactive" || input._tag === "Run" || input._tag === "Review")
     return { ...input, clientWorkspace: workspace, workspace: input.workspace ?? workspace }
   if (
@@ -62,10 +63,10 @@ const withClientWorkspace = (input: Operation.Input, workspace: string): Operati
   return input
 }
 
-const operationFailure = (input: Operation.Input, error: unknown) =>
-  Schema.is(Operation.OperationUnavailable)(error)
+const operationFailure = (input: ProductOperation.Input, error: unknown) =>
+  Schema.is(ProductOperation.OperationUnavailable)(error)
     ? error
-    : Operation.OperationUnavailable.make({ operation: input._tag, message: String(error) })
+    : ProductOperation.OperationUnavailable.make({ operation: input._tag, message: String(error) })
 
 export const cleanInteractiveRuntimeExit = (exitCode: number): boolean =>
   exitCode === 0 || exitCode === 130 || exitCode === 129
@@ -107,7 +108,7 @@ export const interactiveRuntimeRestartPlan = (input: {
 let interactiveSigintObserved = false
 let interactiveClientLaunch = false
 
-export const clientSigintMode = (input: Pick<Operation.Input, "_tag"> | undefined): "root" | "child" =>
+export const clientSigintMode = (input: Pick<ProductOperation.Input, "_tag"> | undefined): "root" | "child" =>
   input?._tag === "Interactive" ? "child" : "root"
 
 type InterruptibleRoot = { readonly interruptUnsafe: () => void }
@@ -184,7 +185,7 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                     delete environment[ResidentProcessStartup.runtimeRestartFdEnvironment]
                     const execve = process.execve
                     if (execve === undefined)
-                      return yield* Operation.OperationUnavailable.make({
+                      return yield* ProductOperation.OperationUnavailable.make({
                         operation: "Interactive",
                         message: "This platform cannot start the packaged interactive runtime.",
                       })
@@ -245,7 +246,7 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                     })
                     if (decision._tag === "done") return
                     if (decision._tag === "fail")
-                      return yield* Operation.OperationUnavailable.make({
+                      return yield* ProductOperation.OperationUnavailable.make({
                         operation: "Interactive",
                         message: decision.message,
                       })
@@ -296,9 +297,9 @@ export const run = Effect.fn("ClientMain.run")(function* (argv?: ReadonlyArray<s
     argv === undefined ? Command.run(command, { version }) : Command.runWith(command, { version })(argv)
   ).pipe(
     Effect.catchTags({
-      OperationUnavailable: (error: Operation.OperationUnavailable) =>
+      OperationUnavailable: (error: ProductOperation.OperationUnavailable) =>
         Console.error(error.message).pipe(Effect.andThen(Effect.fail(error))),
-      InvalidInput: (error: Operation.InvalidInput) =>
+      InvalidInput: (error: ProductOperation.InvalidInput) =>
         Console.error(error.message).pipe(Effect.andThen(Effect.fail(error))),
     }),
     Effect.annotateLogs({

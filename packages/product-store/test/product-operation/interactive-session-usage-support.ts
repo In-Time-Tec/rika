@@ -1,3 +1,5 @@
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionStatus from "@rika/product/execution-status"
 import type { InteractiveSession } from "@rika/product/interactive-session"
 import { Service } from "@rika/product/product-operation-service"
 import { Context, Deferred, Effect, Layer, Ref, Result, Schema, Scope } from "effect"
@@ -5,7 +7,7 @@ import * as TranscriptRepositoryContract from "@rika/product/transcript-reposito
 import * as TurnContract from "@rika/product/turn-repository"
 import * as UsageRepositoryContract from "@rika/product/usage-repository"
 import { TestClock } from "effect/testing"
-import { ExecutionIngest } from "@rika/product/product-operation-service"
+import { projectionVersion } from "./interactive-session-base-support"
 import { makeMemory } from "../../src/usage/memory-usage-repository"
 import {
   RuntimeFixtures,
@@ -25,13 +27,13 @@ export const spendExecutionId = String(spendTurnId)
 
 export const stamped = (
   cursor: string,
-  type: RuntimeFixtures.ExecutionBackend.Event["type"],
+  type: RuntimeFixtures.ExecutionEvent.Event["type"],
   createdAt: number,
   sequence: number,
   fields: Partial<
-    Pick<RuntimeFixtures.ExecutionBackend.Event, "childExecutionId" | "timestampSource" | "text" | "content" | "data">
+    Pick<RuntimeFixtures.ExecutionEvent.Event, "childExecutionId" | "timestampSource" | "text" | "content" | "data">
   > = {},
-): RuntimeFixtures.ExecutionBackend.Event => ({
+): RuntimeFixtures.ExecutionEvent.Event => ({
   executionId: spendExecutionId,
   cursor,
   sequence,
@@ -41,7 +43,7 @@ export const stamped = (
   ...fields,
 })
 
-export const spendEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
+export const spendEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [
   stamped("spend-started", "execution.started", 10_000, 1),
   stamped("spend-usage", "model.attempt.completed", 20_000, 2, {
     data: { model_attempt_id: "spend-attempt", attempt: 1, cost: { amount: 0.75, currency: "USD" } },
@@ -51,7 +53,7 @@ export const spendEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> 
 
 export const spendCompleted = stamped("spend-completed", "execution.completed", 40_000, 4)
 
-export const spendTimeline: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [...spendEvents, spendCompleted]
+export const spendTimeline: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [...spendEvents, spendCompleted]
 
 export const legacyUsageRow = () => {
   const folded = TranscriptFixtures.UsageCost.foldBatch(
@@ -249,7 +251,7 @@ export const makeSpendHarness: (options: SpendHarnessOptions) => Effect.Effect<S
 
 export { Context, Deferred, Effect, Layer, Ref, Result }
 export { TestClock }
-export { ExecutionIngest }
+export { projectionVersion }
 export {
   RuntimeFixtures,
   TranscriptFixtures,

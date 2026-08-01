@@ -2,6 +2,7 @@ import * as ExecutionStatus from "@rika/product/execution-status"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionWorkflow from "@rika/product/execution-workflow"
 import { executionRoute } from "./product-test-current-state"
 
 export const turnProvenance = {
@@ -37,8 +38,8 @@ export const replacementTurn = (status: ExecutionStatus.Status = "running"): Tur
 })
 
 export const replacementWorkflow = (
-  status: ExecutionBackend.WorkflowInspection["status"],
-): ExecutionBackend.WorkflowInspection => ({
+  status: ExecutionWorkflow.WorkflowInspection["status"],
+): ExecutionWorkflow.WorkflowInspection => ({
   runId: "replacement-workflow",
   workflow: "delivery",
   revision: 1,

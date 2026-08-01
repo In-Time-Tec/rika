@@ -1,3 +1,6 @@
+import * as ProductOperation from "@rika/product/product-operation"
+import * as InteractiveEvent from "@rika/product/interactive-event"
+import * as InteractiveSession from "@rika/product/interactive-session"
 import type { InteractiveCommand } from "@rika/product/interactive-command"
 import * as BunSocket from "@effect/platform-bun/BunSocket"
 import * as Operation from "@rika/product/product-operation-service"
@@ -41,7 +44,7 @@ import {
   transportError,
 } from "./resident-wire"
 
-const ignoreInteractiveEvent = (_event: Operation.InteractiveEvent) => {}
+const ignoreInteractiveEvent = (_event: InteractiveEvent.InteractiveEvent) => {}
 
 const tracedEventTypes = new Set([
   "model.reasoning.delta",
@@ -51,7 +54,7 @@ const tracedEventTypes = new Set([
   "tool.result.received",
 ])
 
-const traceInteractiveEvent = (name: string, seenDeltas: Set<string>, event: Operation.InteractiveEvent) => {
+const traceInteractiveEvent = (name: string, seenDeltas: Set<string>, event: InteractiveEvent.InteractiveEvent) => {
   if (
     event._tag !== "TranscriptProjectionPatched" ||
     event.origin._tag !== "Event" ||
@@ -114,7 +117,7 @@ type PhysicalFeed = {
   consumerAttached: boolean
 }
 const isDisconnectedOperation = (error: unknown) =>
-  Schema.is(Operation.OperationUnavailable)(error) && error.operation === "ResidentConnection"
+  Schema.is(ProductOperation.OperationUnavailable)(error) && error.operation === "ResidentConnection"
 const isReconnectableTransport = (error: unknown) =>
   Schema.is(ResidentService.ResidentServiceError)(error) &&
   (error.reason === "resident-absent" || error.reason === "resident-draining" || error.reason === "transport-failed")
@@ -175,20 +178,20 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
     new Map<
       string,
       {
-        readonly done: Deferred.Deferred<void, Operation.OperationUnavailable>
+        readonly done: Deferred.Deferred<void, ProductOperation.OperationUnavailable>
         readonly stdout?: (text: string) => Effect.Effect<void>
         readonly stderr?: (text: string) => Effect.Effect<void>
         readonly interactive?: (
           input: ResidentFeed.InteractiveInput,
-          session: Operation.InteractiveSession,
-        ) => Effect.Effect<void, Operation.OperationUnavailable>
+          session: InteractiveSession.InteractiveSession,
+        ) => Effect.Effect<void, ProductOperation.OperationUnavailable>
         readonly interactiveStarted?: Deferred.Deferred<{
           readonly sessionId: string
           readonly feedGeneration: string
-          readonly session: Operation.InteractiveSession
+          readonly session: InteractiveSession.InteractiveSession
         }>
-        readonly input: Operation.Input
-        readonly commands: Map<number, Deferred.Deferred<void, Operation.OperationUnavailable>>
+        readonly input: ProductOperation.Input
+        readonly commands: Map<number, Deferred.Deferred<void, ProductOperation.OperationUnavailable>>
         feed?: PhysicalFeed
       }
     >(),
@@ -363,11 +366,11 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                   let nextCommandSequence = 1
                   const commandWriteLock = yield* Semaphore.make(1)
                   const unavailable = (text: string) =>
-                    Operation.OperationUnavailable.make({ operation: "ResidentConnection", message: text })
+                    ProductOperation.OperationUnavailable.make({ operation: "ResidentConnection", message: text })
                   const invoke = Effect.fn("ResidentTransport.interactiveCommand")(function* (
                     command: InteractiveCommand,
                   ) {
-                    const done = yield* Deferred.make<void, Operation.OperationUnavailable>()
+                    const done = yield* Deferred.make<void, ProductOperation.OperationUnavailable>()
                     const commandSequence = yield* commandWriteLock.withPermits(1)(
                       Effect.gen(function* () {
                         const frames = yield* Effect.try({
@@ -384,7 +387,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                           catch: (error) =>
                             Schema.is(ResidentService.ResidentServiceError)(error) &&
                             error.reason === "message-too-large"
-                              ? Operation.OperationUnavailable.make({
+                              ? ProductOperation.OperationUnavailable.make({
                                   operation: command._tag,
                                   message:
                                     "The prompt and attachments exceed the 16 MiB resident message limit; remove or shrink image attachments",
@@ -429,12 +432,12 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                       ),
                     )
                   })
-                  const session: Operation.InteractiveSession = {
+                  const session: InteractiveSession.InteractiveSession = {
                     events: (dispatch) =>
                       Effect.suspend(() => {
                         if (feed.consumerAttached)
                           return Effect.fail(
-                            Operation.OperationUnavailable.make({
+                            ProductOperation.OperationUnavailable.make({
                               operation: "InteractiveSession.events",
                               message: "Interactive session already has an event consumer",
                             }),
@@ -547,7 +550,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                       command,
                       message._tag === "operation-failed"
                         ? message.error
-                        : Operation.OperationUnavailable.make({
+                        : ProductOperation.OperationUnavailable.make({
                             operation: "ResidentConnection",
                             message: "Resident operation completed before the command outcome was known",
                           }),
@@ -572,7 +575,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
       Effect.ensuring(
         Effect.gen(function* () {
           const failure = transportError("Resident connection closed", "resident-absent")
-          const operationFailure = Operation.OperationUnavailable.make({
+          const operationFailure = ProductOperation.OperationUnavailable.make({
             operation: "ResidentConnection",
             message: failure.message,
           })
@@ -642,14 +645,14 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
       Effect.acquireUseRelease(
         Effect.gen(function* () {
           const requestId = yield* crypto.randomUUIDv4
-          const done = yield* Deferred.make<void, Operation.OperationUnavailable>()
+          const done = yield* Deferred.make<void, ProductOperation.OperationUnavailable>()
           const interactiveStarted =
             runOptions?.interactive === undefined
               ? undefined
               : yield* Deferred.make<{
                   readonly sessionId: string
                   readonly feedGeneration: string
-                  readonly session: Operation.InteractiveSession
+                  readonly session: InteractiveSession.InteractiveSession
                 }>()
           yield* Ref.update(requests, (current) =>
             current.set(requestId, {
@@ -712,7 +715,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
           ),
       ).pipe(
         Effect.mapError((error) =>
-          Schema.is(Operation.OperationUnavailable)(error) ? error : transportError(String(error)),
+          Schema.is(ProductOperation.OperationUnavailable)(error) ? error : transportError(String(error)),
         ),
       ),
     closed: Deferred.await(closed),
@@ -954,7 +957,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
             const firstSession = yield* Deferred.make<void>()
             const initialChange = yield* Deferred.make<void>()
             const sessions = yield* Ref.make<{
-              readonly session: Operation.InteractiveSession | undefined
+              readonly session: InteractiveSession.InteractiveSession | undefined
               readonly changed: Deferred.Deferred<void>
             }>({ session: undefined, changed: initialChange })
             const selected = yield* Ref.make<
@@ -968,7 +971,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                 const next = Math.max(current + 1, requested ?? current + 1)
                 return [next, next]
               })
-            const awaitSession: Effect.Effect<Operation.InteractiveSession> = Effect.suspend(() =>
+            const awaitSession: Effect.Effect<InteractiveSession.InteractiveSession> = Effect.suspend(() =>
               Ref.get(sessions).pipe(
                 Effect.flatMap((state) =>
                   state.session === undefined
@@ -977,7 +980,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                 ),
               ),
             )
-            const invalidate = (session: Operation.InteractiveSession) =>
+            const invalidate = (session: InteractiveSession.InteractiveSession) =>
               Effect.gen(function* () {
                 const next = yield* Deferred.make<void>()
                 const changed = yield* Ref.modify(sessions, (state) =>
@@ -987,9 +990,11 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                 )
                 if (changed !== undefined) yield* Deferred.succeed(changed, undefined)
               })
-            const report = (event: Operation.InteractiveEvent) => eventDispatch(event)
+            const report = (event: InteractiveEvent.InteractiveEvent) => eventDispatch(event)
             const retryRead = (
-              invoke: (session: Operation.InteractiveSession) => Effect.Effect<void, Operation.OperationUnavailable>,
+              invoke: (
+                session: InteractiveSession.InteractiveSession,
+              ) => Effect.Effect<void, ProductOperation.OperationUnavailable>,
             ): Effect.Effect<void> =>
               Effect.suspend(() =>
                 awaitSession.pipe(
@@ -1012,7 +1017,9 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                 ),
               )
             const mutation = (
-              invoke: (session: Operation.InteractiveSession) => Effect.Effect<void, Operation.OperationUnavailable>,
+              invoke: (
+                session: InteractiveSession.InteractiveSession,
+              ) => Effect.Effect<void, ProductOperation.OperationUnavailable>,
             ) =>
               awaitSession.pipe(
                 Effect.flatMap((session) =>
@@ -1043,12 +1050,12 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                   ),
                 ),
               )
-            const stable: Operation.InteractiveSession = {
+            const stable: InteractiveSession.InteractiveSession = {
               events: (dispatch) =>
                 Effect.suspend(() => {
                   if (feedAttached)
                     return Effect.fail(
-                      Operation.OperationUnavailable.make({
+                      ProductOperation.OperationUnavailable.make({
                         operation: "InteractiveSession.events",
                         message: "Interactive session already has an event consumer",
                       }),
@@ -1106,7 +1113,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                   yield* retryRead((session) => session.reopenThread(epoch))
                 }),
             }
-            const publish = (session: Operation.InteractiveSession, first: boolean) =>
+            const publish = (session: InteractiveSession.InteractiveSession, first: boolean) =>
               Effect.gen(function* () {
                 if (!first) {
                   const selection = yield* Ref.get(selected)
@@ -1133,7 +1140,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
               void,
               | ResidentService.ResidentServiceError
               | ResidentService.ResidentRestartRequired
-              | Operation.OperationUnavailable
+              | ProductOperation.OperationUnavailable
             > =>
               Effect.gen(function* () {
                 const acquired = yield* Effect.exit(
@@ -1151,7 +1158,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
               cause: Cause.Cause<
                 | ResidentService.ResidentServiceError
                 | ResidentService.ResidentRestartRequired
-                | Operation.OperationUnavailable
+                | ProductOperation.OperationUnavailable
               >,
               duration: number | undefined,
               first: boolean,
@@ -1161,7 +1168,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
               void,
               | ResidentService.ResidentServiceError
               | ResidentService.ResidentRestartRequired
-              | Operation.OperationUnavailable
+              | ProductOperation.OperationUnavailable
             > =>
               Effect.gen(function* () {
                 if (Cause.hasInterruptsOnly(cause)) return yield* Effect.failCause(cause)
@@ -1193,7 +1200,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                       ...(connectionId === undefined ? {} : { "rika.resident.connection.id": connectionId }),
                     }),
                   )
-                  return yield* Operation.OperationUnavailable.make({
+                  return yield* ProductOperation.OperationUnavailable.make({
                     operation: "ResidentConnection",
                     message: `Resident connection closed ${nextFailure} times before becoming stable`,
                   })

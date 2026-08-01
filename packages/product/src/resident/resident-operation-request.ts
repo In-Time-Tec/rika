@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 import { Input } from "../operation/contract/product-operation"
-import { OperationUnavailable } from "../operation/contract/product-operation-errors"
+import { OperationUnavailable } from "../operation/contract/product-operation"
 
 const Ping = Schema.Struct({ _tag: Schema.tag("ping"), id: Schema.String })
 const Pong = Schema.Struct({ _tag: Schema.tag("pong"), id: Schema.String })

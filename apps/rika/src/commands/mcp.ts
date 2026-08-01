@@ -1,3 +1,4 @@
+import * as ProductOperation from "@rika/product/product-operation"
 import * as Operation from "@rika/product/product-operation-service"
 import { Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
@@ -32,7 +33,9 @@ const add = Command.make(
     Effect.gen(function* () {
       const selectedUrl = Option.getOrUndefined(url)
       if ((selectedUrl === undefined) === (command.length === 0)) {
-        return yield* Operation.InvalidInput.make({ message: "mcp add requires exactly one of --url or a command" })
+        return yield* ProductOperation.InvalidInput.make({
+          message: "mcp add requires exactly one of --url or a command",
+        })
       }
       const [firstCommand, ...commandArgs] = command
       if (selectedUrl !== undefined) {
@@ -42,7 +45,7 @@ const add = Command.make(
       const decodedCommand = yield* Schema.decodeUnknownEffect(Schema.NonEmptyArray(Schema.String))([
         firstCommand,
         ...commandArgs,
-      ]).pipe(Effect.mapError(() => Operation.InvalidInput.make({ message: "mcp add requires a command" })))
+      ]).pipe(Effect.mapError(() => ProductOperation.InvalidInput.make({ message: "mcp add requires a command" })))
       yield* dispatch({
         _tag: "Mcp",
         action: "add",

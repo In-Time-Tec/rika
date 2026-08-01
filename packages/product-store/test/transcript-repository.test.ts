@@ -1,3 +1,4 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
 import { nestedProjection } from "./transcript-fixture-checkpoints"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { expect, it } from "@effect/vitest"
@@ -7,8 +8,8 @@ import * as TurnRepository from "../src/turn/sqlite-turn-repository"
 import { commitAll, event, executionCheckpoint, projectionVersion, turn } from "./transcript-repository-fixtures"
 
 const _compareExecutionCheckpoints = (
-  left: TranscriptRepository.ExecutionCheckpoint,
-  right: TranscriptRepository.ExecutionCheckpoint,
+  left: TranscriptPage.ExecutionCheckpoint,
+  right: TranscriptPage.ExecutionCheckpoint,
 ): number => {
   if (left.executionKey < right.executionKey) return -1
   if (left.executionKey > right.executionKey) return 1
@@ -57,7 +58,7 @@ it.effect("loads a migration-invalidated empty projection for authoritative refo
   Effect.gen(function* () {
     expect(TranscriptRepository.invalidatedProjectionVersion).toBe(2)
     const target = turn(0)
-    const invalidated: TranscriptRepository.Projection = {
+    const invalidated: TranscriptPage.Projection = {
       turn: target,
       units: [],
       checkpointGeneration: 4,

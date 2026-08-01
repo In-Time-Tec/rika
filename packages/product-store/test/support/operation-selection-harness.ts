@@ -4,6 +4,7 @@ import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-rep
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as TurnContract from "@rika/product/turn-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
 import * as Turn from "@rika/product/turn-record"
 import { Service } from "@rika/product/product-operation-service"
 
@@ -44,7 +45,7 @@ export const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLo
       return repository.get(id)
     },
   })
-  const streamed: ReadonlyArray<ExecutionBackend.Event> = Array.from({ length: eventCount }, (_, index) => ({
+  const streamed: ReadonlyArray<ExecutionEvent.Event> = Array.from({ length: eventCount }, (_, index) => ({
     executionId: "selection-live-turn",
     cursor: `selection-live-${index + 1}`,
     sequence: index + 1,
@@ -52,7 +53,7 @@ export const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLo
     createdAt: index + 1,
     text: String(index + 1),
   }))
-  const usage: ExecutionBackend.Event = {
+  const usage: ExecutionEvent.Event = {
     executionId: "selection-live-turn",
     cursor: "selection-live-usage",
     sequence: eventCount + 1,
@@ -68,7 +69,7 @@ export const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLo
       output_tokens: 10,
     },
   }
-  const completed: ExecutionBackend.Event = {
+  const completed: ExecutionEvent.Event = {
     executionId: "selection-live-turn",
     cursor: "selection-live-completed",
     sequence: eventCount + (deferredUsage ? 2 : 1),
@@ -76,7 +77,7 @@ export const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLo
     timestampSource: "server",
     createdAt: eventCount + (deferredUsage ? 2 : 1),
   }
-  const started: ExecutionBackend.Event = {
+  const started: ExecutionEvent.Event = {
     executionId: "selection-live-turn",
     cursor: "selection-live-started",
     sequence: 0,

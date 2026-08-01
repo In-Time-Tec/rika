@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import * as ProductOperation from "@rika/product/product-operation"
 import * as ConfigurationService from "@rika/configuration/configuration-service"
 import * as SettingsDecoder from "@rika/configuration/configuration-settings"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
@@ -14,6 +15,13 @@ import * as Logging from "./logging"
 import { serve as serveResident } from "./resident-host-transport"
 import * as ResidentProcessStartup from "./resident-process-startup"
 import { version } from "./version"
+
+type Owner = (
+  interactive: (
+    input: import("@rika/product/resident-interactive-feed").InteractiveInput,
+    session: import("@rika/product/interactive-session").InteractiveSession,
+  ) => Effect.Effect<void, ProductOperation.OperationUnavailable>,
+) => Effect.Effect<Operation.Interface, ResidentService.ResidentServiceError, import("effect").Scope.Scope>
 
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -108,13 +116,13 @@ const start = () => {
     workspaceRoot: process.cwd(),
   }
   const authOptions = { globalConfig, database, profileIdentity }
-  const residentOwner: ResidentService.Owner = (interactive) =>
+  const residentOwner: Owner = (interactive) =>
     Effect.scope.pipe(
       Effect.flatMap((scope) =>
         Effect.gen(function* () {
           const productLoaded = yield* Ref.make(false)
           const bunServices = yield* Layer.buildWithScope(BunServices.layer, scope)
-          const loadProduct: Effect.Effect<Operation.Interface, Operation.OperationUnavailable, never> =
+          const loadProduct: Effect.Effect<Operation.Interface, ProductOperation.OperationUnavailable, never> =
             yield* Effect.cached(
               Clock.currentTimeMillis.pipe(
                 Effect.flatMap((startedAt) =>
@@ -122,7 +130,7 @@ const start = () => {
                     const product = yield* Effect.tryPromise({
                       try: () => import("./resident-product"),
                       catch: (cause) =>
-                        Operation.OperationUnavailable.make({
+                        ProductOperation.OperationUnavailable.make({
                           operation: "ResidentProduct",
                           message: String(cause),
                         }),
@@ -146,9 +154,9 @@ const start = () => {
                         ),
                       ),
                       Effect.mapError((error) =>
-                        Schema.is(Operation.OperationUnavailable)(error)
+                        Schema.is(ProductOperation.OperationUnavailable)(error)
                           ? error
-                          : Operation.OperationUnavailable.make({
+                          : ProductOperation.OperationUnavailable.make({
                               operation: "ResidentProduct",
                               message: String(error),
                             }),
@@ -168,9 +176,9 @@ const start = () => {
                   : Effect.succeed(false),
               ),
               Effect.mapError((error) =>
-                Schema.is(Operation.OperationUnavailable)(error)
+                Schema.is(ProductOperation.OperationUnavailable)(error)
                   ? error
-                  : Operation.OperationUnavailable.make({
+                  : ProductOperation.OperationUnavailable.make({
                       operation: "ResidentReplacement",
                       message: String(error),
                     }),
@@ -179,9 +187,9 @@ const start = () => {
             authorizeResidentReplacement: loadProduct.pipe(
               Effect.flatMap((service) => service.authorizeResidentReplacement ?? Effect.succeed("defer" as const)),
               Effect.mapError((error) =>
-                Schema.is(Operation.OperationUnavailable)(error)
+                Schema.is(ProductOperation.OperationUnavailable)(error)
                   ? error
-                  : Operation.OperationUnavailable.make({
+                  : ProductOperation.OperationUnavailable.make({
                       operation: "ResidentReplacement",
                       message: String(error),
                     }),
@@ -194,9 +202,9 @@ const start = () => {
                   : Effect.void,
               ),
               Effect.mapError((error) =>
-                Schema.is(Operation.OperationUnavailable)(error)
+                Schema.is(ProductOperation.OperationUnavailable)(error)
                   ? error
-                  : Operation.OperationUnavailable.make({
+                  : ProductOperation.OperationUnavailable.make({
                       operation: "ResidentAbandonment",
                       message: String(error),
                     }),
@@ -208,7 +216,7 @@ const start = () => {
                   const product = yield* Effect.tryPromise({
                     try: () => import("./resident-product"),
                     catch: (cause) =>
-                      Operation.OperationUnavailable.make({
+                      ProductOperation.OperationUnavailable.make({
                         operation: "Auth",
                         message: String(cause),
                       }),
@@ -216,9 +224,9 @@ const start = () => {
                   return yield* Effect.scoped(product.runResidentAuth(input, authOptions, process.cwd()))
                 }).pipe(
                   Effect.mapError((error) =>
-                    Schema.is(Operation.OperationUnavailable)(error)
+                    Schema.is(ProductOperation.OperationUnavailable)(error)
                       ? error
-                      : Operation.OperationUnavailable.make({
+                      : ProductOperation.OperationUnavailable.make({
                           operation: "Auth",
                           message: String(error),
                         }),
@@ -228,9 +236,9 @@ const start = () => {
               return loadProduct.pipe(
                 Effect.flatMap((service) => service.run(input)),
                 Effect.mapError((error) =>
-                  Schema.is(Operation.OperationUnavailable)(error)
+                  Schema.is(ProductOperation.OperationUnavailable)(error)
                     ? error
-                    : Operation.OperationUnavailable.make({
+                    : ProductOperation.OperationUnavailable.make({
                         operation: input._tag,
                         message: String(error),
                       }),

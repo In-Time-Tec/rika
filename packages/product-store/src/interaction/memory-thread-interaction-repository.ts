@@ -7,25 +7,25 @@ import { Turn, TurnId } from "@rika/product/turn-record"
 import * as ExecutionStatus from "@rika/product/execution-status"
 
 import {
-  ReceiptKind,
   RepositoryError,
   InvocationConflict,
   AdmissionRejected,
   QueueFull,
   ResultNotReady,
 } from "@rika/product/thread-interaction-repository"
-import type {
-  CreateThreadInput,
-  AppendThreadMessageInput,
-  BindThreadControlInput,
-  AcceptedThreadTurn,
-  BoundThreadControl,
-  DeliveredThreadResult,
-  RootResult,
-  ResultRoute,
-  ThreadRelationship,
-} from "@rika/product/thread-interaction-repository"
+import type { Interface } from "@rika/product/thread-interaction-repository"
 
+type CreateThreadInput = Parameters<Interface["createThread"]>[0]
+type AppendThreadMessageInput = Parameters<Interface["appendMessage"]>[0]
+type BindThreadControlInput = Parameters<Interface["bindSteer"]>[0]
+type AcceptedThreadTurn = Effect.Success<ReturnType<Interface["createThread"]>>
+type BoundThreadControl = Effect.Success<ReturnType<Interface["bindSteer"]>>
+type DeliveredThreadResult = Effect.Success<ReturnType<Interface["deliverResult"]>>
+type RootResult = NonNullable<Effect.Success<ReturnType<Interface["getRootResult"]>>>
+type ResultRoute = NonNullable<Effect.Success<ReturnType<Interface["getResultRoute"]>>>
+type ThreadRelationship = Effect.Success<ReturnType<Interface["listRelationships"]>>[number]
+
+type ReceiptKind = "create" | "message" | "steer" | "cancel" | "stop"
 type Failure = RepositoryError | InvocationConflict | AdmissionRejected | QueueFull
 interface Receipt {
   readonly digest: string

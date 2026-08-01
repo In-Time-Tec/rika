@@ -1,3 +1,4 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
 import { invalidCheckpointGraphs, nestedProjection } from "./transcript-fixture-checkpoints"
 import type { NestedProjectionFixture } from "./transcript-fixture-checkpoints"
 import * as ThreadResult from "@rika/product/thread-result"
@@ -28,7 +29,7 @@ it.effect("atomically couples an attached child to its parent SQLite unit", () =
       const filename = `${directory}/rika.db`
       const threadId = Thread.ThreadId.make("thread-nested")
       const turnId = Turn.TurnId.make("turn-nested")
-      let before: TranscriptRepository.Projection | undefined
+      let before: TranscriptPage.Projection | undefined
 
       yield* Effect.scoped(
         Effect.gen(function* () {
@@ -79,7 +80,7 @@ it.effect("requires a complete root-connected SQLite checkpoint graph for refold
       const filename = `${directory}/rika.db`
       const threadId = Thread.ThreadId.make("thread-refold-graph")
       const turnId = Turn.TurnId.make("turn-refold-graph")
-      let before: TranscriptRepository.Projection | undefined
+      let before: TranscriptPage.Projection | undefined
       let replacement: NestedProjectionFixture | undefined
 
       yield* Effect.scoped(

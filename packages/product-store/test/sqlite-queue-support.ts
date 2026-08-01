@@ -23,7 +23,7 @@ export const create = (
   input: Omit<Parameters<TurnContract.Interface["createForSubmission"]>[0], "executionRoute" | "queueCapacity"> & {
     readonly queueCapacity?: number
   },
-) =>
+): ReturnType<TurnContract.Interface["createForSubmission"]> =>
   repository.createForSubmission({
     queueCapacity: 128,
     ...input,

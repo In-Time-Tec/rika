@@ -1,7 +1,7 @@
 import * as SettingsDefaults from "@rika/configuration/configuration-settings"
 import * as ConfigurationService from "@rika/configuration/configuration-service"
 import { expect, it } from "@effect/vitest"
-import * as ConfigOperations from "../src/operation/dispatch/configuration-operation-dispatch"
+import * as ConfigOperations from "../src/operation/contract/configuration-operation"
 import { Effect, Layer, Redacted, Ref } from "effect"
 import { TestConsole } from "effect/testing"
 import { provideLayer } from "./product-test-layer"

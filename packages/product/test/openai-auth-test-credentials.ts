@@ -1,6 +1,6 @@
 import { Crypto, Effect, Encoding, Layer } from "effect"
 import { createHash } from "node:crypto"
-import * as Flow from "../src/authentication/openai-auth-flow"
+import * as Flow from "../src/authentication/openai-auth-service"
 import * as Contract from "../src/authentication/openai-auth-contract"
 
 export const digest = (_algorithm: string, data: Uint8Array) =>

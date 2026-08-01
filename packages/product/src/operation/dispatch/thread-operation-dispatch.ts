@@ -13,7 +13,7 @@ import * as UsageRepository from "../../thread/repository/usage-repository"
 import * as ThreadActivity from "../../thread/query/thread-activity"
 import { clampThreadTitle } from "../../thread/query/thread-title-policy"
 import { Input } from "../contract/product-operation"
-import { OperationUnavailable } from "../contract/product-operation-errors"
+import { OperationUnavailable } from "../contract/product-operation"
 import { operationError } from "../operation-error"
 import { Clock, Context, Effect, Semaphore, Console } from "effect"
 

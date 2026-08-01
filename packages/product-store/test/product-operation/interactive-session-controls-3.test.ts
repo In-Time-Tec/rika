@@ -1,3 +1,5 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
+import * as ExecutionEvent from "@rika/product/execution-event"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { describe, expect, it } from "@effect/vitest"
 import {
@@ -7,7 +9,7 @@ import {
   Effect,
   Ref,
   Schema,
-  ExecutionIngest,
+  projectionVersion,
   createTurn,
   delegationUnit,
   storeProjection,
@@ -51,7 +53,7 @@ describe("InteractiveSession controls", () => {
     Effect.gen(function* () {
       const pagedEvents = Array.from(
         { length: 450 },
-        (_, index): RuntimeFixtures.ExecutionBackend.Event => ({
+        (_, index): RuntimeFixtures.ExecutionEvent.Event => ({
           executionId: "execution:active",
           cursor: `cursor-${index + 1}`,
           sequence: index + 1,
@@ -88,7 +90,7 @@ describe("InteractiveSession controls", () => {
     Effect.gen(function* () {
       const pagedEvents = Array.from(
         { length: 450 },
-        (_, index): RuntimeFixtures.ExecutionBackend.Event => ({
+        (_, index): RuntimeFixtures.ExecutionEvent.Event => ({
           executionId: "execution:active",
           cursor: `cursor-${index + 1}`,
           sequence: index + 1,
@@ -138,7 +140,7 @@ describe("InteractiveSession controls", () => {
         updatedAt: 4,
         result: { text: "output:recorded", truncated: false },
       }
-      yield* transcripts.copyRecordedShell(shell, ExecutionIngest.projectionVersion)
+      yield* transcripts.copyRecordedShell(shell, projectionVersion)
       yield* completeActive(turns, transcripts, 5)
       const events: Array<InteractiveEvent> = []
       yield* collectEvents(session, events)
@@ -162,7 +164,7 @@ describe("InteractiveSession controls", () => {
 
   it.effect("bounds the initial page and exhausts older pages without duplicate units", () =>
     Effect.gen(function* () {
-      const turnPageRequests = yield* Ref.make<ReadonlyArray<TurnContract.PageCursor | undefined>>([])
+      const turnPageRequests = yield* Ref.make<ReadonlyArray<typeof TurnContract.PageCursor.Type | undefined>>([])
       const { session, turns, transcripts, older } = yield* makeHarness(undefined, false, turnPageRequests)
       yield* completeActive(turns, transcripts, 2)
       for (let index = 0; index < 240; index += 1) {
@@ -401,7 +403,7 @@ describe("InteractiveSession controls", () => {
         ),
       )
 
-      const olderEntries: Array<RuntimeFixtures.TranscriptRepository.Entry> = []
+      const olderEntries: Array<RuntimeFixtures.TranscriptPage.Entry> = []
       let hasOlder = initial.hasOlder
       let before = cursor
       for (let page = 0; page < 20 && hasOlder; page += 1) {

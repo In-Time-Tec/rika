@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+import * as ProductOperation from "@rika/product/product-operation"
+import * as InteractiveSession from "@rika/product/interactive-session"
 import * as ThreadToolkits from "@rika/coding-tools/thread-tool-contract"
 import * as ResidentFeed from "@rika/product/resident-interactive-feed"
 import { MediaAnalysisError } from "@rika/coding-tools/media-view-service"
@@ -950,7 +952,7 @@ export const createAuthOperations = (options: {
 })
 
 const runResidentAuthImpl = (
-  input: Extract<Operation.Input, { readonly _tag: "Auth" }>,
+  input: Extract<ProductOperation.Input, { readonly _tag: "Auth" }>,
   options: {
     readonly globalConfig: string
     readonly database: string
@@ -967,9 +969,9 @@ export const runResidentAuth: {
       readonly profileIdentity: string
     },
     defaultWorkspace: string,
-  ): (input: Extract<Operation.Input, { readonly _tag: "Auth" }>) => ReturnType<typeof runResidentAuthImpl>
+  ): (input: Extract<ProductOperation.Input, { readonly _tag: "Auth" }>) => ReturnType<typeof runResidentAuthImpl>
   (
-    input: Extract<Operation.Input, { readonly _tag: "Auth" }>,
+    input: Extract<ProductOperation.Input, { readonly _tag: "Auth" }>,
     options: {
       readonly globalConfig: string
       readonly database: string
@@ -983,8 +985,8 @@ const createOperationLayerImpl = (
   options: ResidentProductOptions,
   injectedInteractive: (
     input: ResidentFeed.InteractiveInput,
-    session: Operation.InteractiveSession,
-  ) => Effect.Effect<void, Operation.OperationUnavailable>,
+    session: InteractiveSession.InteractiveSession,
+  ) => Effect.Effect<void, ProductOperation.OperationUnavailable>,
 ) => {
   const {
     environment,
@@ -1336,14 +1338,14 @@ export const createOperationLayer: {
   (
     injectedInteractive: (
       input: ResidentFeed.InteractiveInput,
-      session: Operation.InteractiveSession,
-    ) => Effect.Effect<void, Operation.OperationUnavailable>,
+      session: InteractiveSession.InteractiveSession,
+    ) => Effect.Effect<void, ProductOperation.OperationUnavailable>,
   ): (options: ResidentProductOptions) => ReturnType<typeof createOperationLayerImpl>
   (
     options: ResidentProductOptions,
     injectedInteractive: (
       input: ResidentFeed.InteractiveInput,
-      session: Operation.InteractiveSession,
-    ) => Effect.Effect<void, Operation.OperationUnavailable>,
+      session: InteractiveSession.InteractiveSession,
+    ) => Effect.Effect<void, ProductOperation.OperationUnavailable>,
   ): ReturnType<typeof createOperationLayerImpl>
 } = Function.dual(2, createOperationLayerImpl)

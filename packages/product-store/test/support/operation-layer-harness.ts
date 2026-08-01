@@ -1,4 +1,3 @@
-import type { ProductLayerOptions } from "@rika/product/product-operation-service"
 import { productLayer as makeProductLayer } from "@rika/product/product-operation-service"
 import * as ProductStoreSummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
 import * as ProductStoreUsageRepository from "@rika/product-store/sqlite-usage-repository"
@@ -6,25 +5,9 @@ import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-rep
 
 import { Effect, Layer } from "effect"
 
-export const productLayer = <
-  ThreadError extends Error,
-  TurnError extends Error,
-  BackendError extends Error,
-  ThreadSummaryError extends Error = never,
-  TranscriptError extends Error = never,
-  ThreadInteractionError extends Error = never,
-  UsageError extends Error = never,
->(
-  options: ProductLayerOptions<
-    ThreadError,
-    TurnError,
-    BackendError,
-    ThreadSummaryError,
-    TranscriptError,
-    ThreadInteractionError,
-    UsageError
-  >,
-): ReturnType<typeof makeProductLayer> =>
+type ProductLayerOptions = Parameters<typeof makeProductLayer>[0]
+
+export const productLayer = (options: ProductLayerOptions): ReturnType<typeof makeProductLayer> =>
   makeProductLayer({
     ...options,
     threadSummaryRepositoryLayer:

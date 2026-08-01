@@ -1,6 +1,7 @@
 import { ModelRegistry } from "@batonfx/core"
 import { Client, Content, Ids, type Resident } from "@relayfx/sdk"
-import { BackendError, type ThreadQueueWake } from "@rika/product/execution-service"
+import { BackendError } from "@rika/product/execution-service"
+import type { ThreadQueueWake } from "@rika/product/execution-request"
 import { Cause, Crypto, Effect, Layer, PlatformError, Ref, Schema, Semaphore, Stream } from "effect"
 import { LanguageModel, Response, Tool, Toolkit } from "effect/unstable/ai"
 import { hostSelection, waitToolName } from "./relay-thread-host-constants"

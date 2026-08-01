@@ -1,4 +1,6 @@
 import { Service, RepositoryError } from "@rika/product/turn-repository"
+import type { Interface } from "@rika/product/turn-repository"
+type PageResult = Effect.Success<ReturnType<Interface["page"]>>
 export { Service, RepositoryError }
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
@@ -51,10 +53,7 @@ export const layer = Layer.effect(
       page: Effect.fn("TurnRepository.page")(function* (
         threadId,
         options = {},
-      ): Effect.fn.Return<
-        import("@rika/product/turn-repository").PageResult,
-        import("@rika/product/turn-repository").RepositoryError
-      > {
+      ): Effect.fn.Return<PageResult, import("@rika/product/turn-repository").RepositoryError> {
         const limit = pageSize(options.limit)
         const rows =
           options.before === undefined

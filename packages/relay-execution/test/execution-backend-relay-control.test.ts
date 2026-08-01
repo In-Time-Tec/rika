@@ -8,6 +8,7 @@ import { Database } from "bun:sqlite"
 import { Effect, FileSystem, Layer, Schedule } from "effect"
 import { Tool } from "effect/unstable/ai"
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 
 import { createFanOut, start } from "./current-execution-route"
 
@@ -197,7 +198,7 @@ test(
               model: "oracle-model",
               registrationKey: "oracle",
             })
-            const executionRoute: ExecutionBackend.ExecutionRoutePin = {
+            const executionRoute: ExecutionRouteSnapshot.ExecutionRoutePin = {
               version: 1 as const,
               mode: "test",
               tokenBudget: 1_000,

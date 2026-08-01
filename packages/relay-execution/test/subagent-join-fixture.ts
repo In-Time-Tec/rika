@@ -1,12 +1,13 @@
 import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 
 const encodeJson = (value: unknown) => JSON.stringify(value)
 
 const executionModelRoute = (
-  role: ExecutionBackend.ExecutionRouteModelSnapshot["role"],
+  role: ExecutionRouteSnapshot.ExecutionRouteModelSnapshot["role"],
   selection: { readonly provider: string; readonly model: string; readonly registrationKey?: string },
-): ExecutionBackend.ExecutionRouteModelSnapshot => ({
+): ExecutionRouteSnapshot.ExecutionRouteModelSnapshot => ({
   role,
   alias: role,
   model: selection.model,

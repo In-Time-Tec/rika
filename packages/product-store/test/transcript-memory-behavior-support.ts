@@ -1,10 +1,11 @@
+import * as TranscriptPage from "@rika/product/transcript-page"
 import * as TranscriptRepository from "../src/transcript/sqlite-transcript-repository"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { commitAll } from "./transcript-fixture-persistence"
 
 export const compareExecutionCheckpoints = (
-  left: TranscriptRepository.ExecutionCheckpoint,
-  right: TranscriptRepository.ExecutionCheckpoint,
+  left: TranscriptPage.ExecutionCheckpoint,
+  right: TranscriptPage.ExecutionCheckpoint,
 ): number => {
   if (left.executionKey < right.executionKey) return -1
   if (left.executionKey > right.executionKey) return 1

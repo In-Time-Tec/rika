@@ -1,15 +1,18 @@
+import type { Projection } from "@rika/product/transcript-page"
 import { TurnResult } from "@rika/product/thread-result"
 import { Service } from "@rika/product/transcript-repository"
+import type { Interface } from "@rika/product/transcript-repository"
 export { Service }
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Effect, Layer, Ref } from "effect"
+type WriteResult = Effect.Success<ReturnType<Interface["commitDelta"]>>
 import * as TurnRepository from "../turn/memory-turn-repository"
 import type { Interface as TurnRepositoryInterface } from "@rika/product/turn-repository"
 import { Turn, TurnId } from "@rika/product/turn-record"
 import type { RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/thread-result"
-import type { Projection, WriteResult } from "@rika/product/transcript-repository"
+
 import { invalidatedProjectionVersion, RepositoryError } from "@rika/product/transcript-repository"
 import { support } from "./transcript-repository-support"
 import { materializeMemory, memoryEntry, sameAttachment } from "./transcript-memory-state"
@@ -70,6 +73,7 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
       const options = {
         executionCheckpoints: projection.executionCheckpoints,
         projectionVersion: projection.projectionVersion,
+        expectedGeneration: undefined,
       }
       yield* validateProjectionVersion(projection.turn.id, projection.projectionVersion)
       yield* validateStateScalars(
@@ -159,7 +163,12 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
           state,
           (entries): readonly [TurnRepository.MemoryRefoldWrite<Projection>, Map<TurnId, MemoryEntry>] => {
             if (entries.has(storedTurn.id)) return [{ _tag: "Stale" as const }, entries] as const
-            const entry = memoryEntry(storedTurn, projection, { executionCheckpoints: [], projectionVersion }, 0)
+            const entry = memoryEntry(
+              storedTurn,
+              projection,
+              { executionCheckpoints: [], projectionVersion, expectedGeneration: undefined },
+              0,
+            )
             entries.set(storedTurn.id, entry)
             return [{ _tag: "Commit" as const, value: materializeMemory(entry) }, entries] as const
           },
@@ -429,7 +438,7 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
                 const entry = memoryEntry(
                   storedTurn,
                   projection,
-                  { executionCheckpoints: [], projectionVersion },
+                  { executionCheckpoints: [], projectionVersion, expectedGeneration: undefined },
                   current.projection.checkpointGeneration + 1,
                 )
                 entries.set(storedTurn.id, entry)

@@ -18,11 +18,9 @@ import { ChildProcessSpawner } from "effect/unstable/process"
 import * as Feed from "./resident-interactive-feed"
 import * as Request from "./resident-operation-request"
 import * as Handshake from "./resident-service-handshake"
-import { OperationUnavailable } from "../operation/contract/product-operation-errors"
+import { OperationUnavailable } from "../operation/contract/product-operation"
 import { Input } from "../operation/contract/product-operation"
 import type { InteractiveSession } from "../operation/interactive/interactive-session"
-import type { Interface as OperationInterface } from "../operation/contract/product-operation-service"
-import type { InteractiveInput } from "./resident-interactive-feed"
 
 const ClientMessage = Schema.Union([
   Handshake.HandshakeProtocol.Handshake,
@@ -266,6 +264,3 @@ const makeLifecycle = (changed: (state: LifecycleState) => Effect.Effect<void>) 
 const ServiceRuntime = { runtimeRestartExitCode, testLayer, canonicalServiceIdentity, makeLifecycle } as const
 
 export { ClientMessage, ServerMessage, ResidentServiceError, ResidentRestartRequired, Service, ServiceRuntime }
-export type Owner = (
-  interactive: (input: InteractiveInput, session: InteractiveSession) => Effect.Effect<void, OperationUnavailable>,
-) => Effect.Effect<OperationInterface, ResidentServiceError, Scope.Scope>

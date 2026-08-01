@@ -10,25 +10,26 @@ import * as TurnRepository from "../src/turn/sqlite-turn-repository"
 import { executionCheckpoint } from "./transcript-fixture-checkpoints"
 import { projectionVersion } from "./transcript-fixture-core"
 
-export const commitAll = Effect.fn("TranscriptRepositoryTest.commitAll")(function* (
+export const commitAll = (
   repository: TranscriptRepository.Interface,
   target: Turn.AgentExecutionTurn,
   projection: TranscriptProjectionModel.Projection,
   expectedGeneration: number | undefined,
   version: number = projectionVersion,
   checkpoints: ReadonlyArray<TranscriptPage.ExecutionCheckpoint> = [executionCheckpoint(target, projection)],
-) {
-  return yield* repository.commitDelta(
-    target,
-    TranscriptProjection.Projection.projectionState(projection),
-    { upsert: projection.units, remove: [] },
-    {
-      executionCheckpoints: checkpoints,
-      projectionVersion: version,
-      expectedGeneration,
-    },
-  )
-})
+): ReturnType<TranscriptRepository.Interface["commitDelta"]> =>
+  Effect.gen(function* () {
+    return yield* repository.commitDelta(
+      target,
+      TranscriptProjection.Projection.projectionState(projection),
+      { upsert: projection.units, remove: [] },
+      {
+        executionCheckpoints: checkpoints,
+        projectionVersion: version,
+        expectedGeneration,
+      },
+    )
+  })
 
 export const sqliteLayer = (filename: string) => {
   const database = Database.layer(filename)

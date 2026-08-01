@@ -7,7 +7,7 @@ import {
   Effect,
   Ref,
   TestClock,
-  ExecutionIngest,
+  projectionVersion,
   collectEvents,
   spendThread,
   spendTurnId,
@@ -119,7 +119,7 @@ describe("InteractiveSession persisted usage", () => {
       const availability = updates.map((event) => event.time._tag)
       const shown = updates.flatMap((event) => (event.cost._tag === "Available" ? [event.cost.usd] : []))
 
-      expect(refolded?.projectionVersion).toBe(ExecutionIngest.projectionVersion)
+      expect(refolded?.projectionVersion).toBe(projectionVersion)
       expect(
         refolded?.executionCheckpoints.find(
           (entry) => entry.executionKey === TranscriptFixtures.TranscriptCorrelation.executionKey(String(spendTurnId)),

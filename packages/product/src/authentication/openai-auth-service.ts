@@ -2,17 +2,69 @@ import { Clock, Context, Crypto, Effect, Layer, Option, Redacted } from "effect"
 import * as Contract from "./openai-auth-contract"
 import * as Flow from "./openai-auth-flow"
 
-export type Credential = Contract.Credential
-export type Status = Contract.Status
-export type Error = Flow.Errors.AuthError | Flow.Errors.StoreError
+interface AuthorizationResult {
+  readonly code: Redacted.Redacted<string>
+  readonly state: Redacted.Redacted<string>
+}
+interface DevicePrompt {
+  readonly verificationUrl: string
+  readonly userCode: string
+  readonly warning: string
+}
+interface HostInterface {
+  readonly authorize: (
+    url: URL,
+    expectedState: Redacted.Redacted<string>,
+  ) => Effect.Effect<AuthorizationResult, Contract.AuthError>
+}
+export class Host extends Context.Service<Host, HostInterface>()(
+  "@rika/product/authentication/openai-auth-service/Host",
+) {}
+interface PresenterInterface {
+  readonly device: (prompt: DevicePrompt) => Effect.Effect<void, Contract.AuthError>
+}
+export class Presenter extends Context.Service<Presenter, PresenterInterface>()(
+  "@rika/product/authentication/openai-auth-service/Presenter",
+) {}
+interface HttpInterface {
+  readonly exchange: (input: {
+    readonly code: Redacted.Redacted<string>
+    readonly verifier: Redacted.Redacted<string>
+    readonly redirectUri: string
+  }) => Effect.Effect<typeof Contract.TokenResponse.Type, Contract.AuthError>
+  readonly refresh: (
+    refreshToken: Redacted.Redacted<string>,
+  ) => Effect.Effect<typeof Contract.TokenResponse.Type, Contract.AuthError>
+  readonly deviceStart: Effect.Effect<typeof Contract.DeviceStartResponse.Type, Contract.AuthError>
+  readonly devicePoll: (
+    deviceAuthId: Redacted.Redacted<string>,
+    userCode: string,
+  ) => Effect.Effect<Option.Option<typeof Contract.DevicePollResponse.Type>, Contract.AuthError>
+}
+export class Http extends Context.Service<Http, HttpInterface>()(
+  "@rika/product/authentication/openai-auth-service/Http",
+) {}
+interface StoreInterface {
+  readonly load: Effect.Effect<Option.Option<typeof Contract.CredentialDisk.Type>, Contract.StoreError>
+  readonly save: (credential: typeof Contract.CredentialDisk.Type) => Effect.Effect<void, Contract.StoreError>
+  readonly remove: Effect.Effect<boolean, Contract.StoreError>
+  readonly serialized: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | Contract.StoreError, R>
+}
+export class Store extends Context.Service<Store, StoreInterface>()(
+  "@rika/product/authentication/openai-auth-service/Store",
+) {}
+
+type Credential = Contract.Credential
+type Status = Contract.Status
+type Error = Contract.AuthError | Contract.StoreError
 
 export interface ServiceInterface {
   readonly loginBrowser: (redirect?: string) => Effect.Effect<Credential, Error>
   readonly loginDevice: Effect.Effect<Credential, Error>
-  readonly status: Effect.Effect<Status, Flow.Errors.StoreError>
+  readonly status: Effect.Effect<Status, Contract.StoreError>
   readonly logout: Effect.Effect<
     { readonly removed: boolean; readonly revocationSupported: false },
-    Flow.Errors.StoreError
+    Contract.StoreError
   >
   readonly acquire: Effect.Effect<Credential, Error>
   readonly refreshRejected: (generation: string) => Effect.Effect<Credential, Error>
@@ -36,19 +88,16 @@ const publicCredential = (value: typeof Contract.CredentialDisk.Type): Credentia
   refreshedAt: value.refreshedAt,
 })
 
-export { TokenResponse, DeviceStartResponse, DevicePollResponse, CredentialDisk } from "./openai-auth-contract"
-export type { AuthorizationResult, DevicePrompt } from "./openai-auth-contract"
-export { configuration, Errors, Host, Presenter, Http, Store, Flow } from "./openai-auth-flow"
-export type { StoreInterface } from "./openai-auth-flow"
+export const configuration = Flow.configuration
 
 export const layer = (options: TimingOptions = {}) =>
   Layer.effect(
     Service,
     Effect.gen(function* () {
-      const host = yield* Flow.Host
-      const presenter = yield* Flow.Presenter
-      const http = yield* Flow.Http
-      const store = yield* Flow.Store
+      const host = yield* Host
+      const presenter = yield* Presenter
+      const http = yield* Http
+      const store = yield* Store
       const crypto = yield* Crypto.Crypto
       const persist = (response: typeof Contract.TokenResponse.Type, previous?: typeof Contract.CredentialDisk.Type) =>
         Effect.gen(function* () {
@@ -61,12 +110,12 @@ export const layer = (options: TimingOptions = {}) =>
           Effect.gen(function* () {
             const current = yield* store.load
             if (Option.isNone(current))
-              return yield* Flow.Errors.AuthError.make({ kind: "login-required", message: "Login is required" })
+              return yield* Contract.AuthError.make({ kind: "login-required", message: "Login is required" })
             if (current.value.generation !== generation) {
               const separator = generation.lastIndexOf(".")
               const expectedFingerprint = separator < 0 ? undefined : generation.slice(0, separator)
               if (expectedFingerprint !== undefined && expectedFingerprint !== current.value.fingerprint) {
-                return yield* Flow.Errors.AuthError.make({
+                return yield* Contract.AuthError.make({
                   kind: "account-mismatch",
                   message: "OpenAI account changed while the request was active; start the turn again",
                 })
@@ -86,7 +135,7 @@ export const layer = (options: TimingOptions = {}) =>
               pkce.state,
             )
             if (Redacted.value(result.state) !== Redacted.value(pkce.state)) {
-              return yield* Flow.Errors.AuthError.make({
+              return yield* Contract.AuthError.make({
                 kind: "protocol",
                 message: "Authorization state did not match",
               })
@@ -105,7 +154,7 @@ export const layer = (options: TimingOptions = {}) =>
           const normalizedInterval = start.interval.trim()
           const interval = /^\d+$/.test(normalizedInterval) ? Number(normalizedInterval) : Number.NaN
           if (!Number.isSafeInteger(interval) || interval < 1) {
-            return yield* Flow.Errors.AuthError.make({
+            return yield* Contract.AuthError.make({
               kind: "protocol",
               message: "Device authorization interval is invalid",
             })
@@ -116,13 +165,13 @@ export const layer = (options: TimingOptions = {}) =>
             yield* Effect.sleep(`${interval} seconds`)
             const remaining = deadline - (yield* Clock.currentTimeMillis)
             if (remaining <= 0) {
-              return yield* Flow.Errors.AuthError.make({ kind: "timeout", message: "Device authorization expired" })
+              return yield* Contract.AuthError.make({ kind: "timeout", message: "Device authorization expired" })
             }
             const polled = yield* http
               .devicePoll(Redacted.make(start.device_auth_id), start.user_code)
               .pipe(Effect.timeoutOption(remaining))
             if (Option.isNone(polled) || (yield* Clock.currentTimeMillis) >= deadline) {
-              return yield* Flow.Errors.AuthError.make({ kind: "timeout", message: "Device authorization expired" })
+              return yield* Contract.AuthError.make({ kind: "timeout", message: "Device authorization expired" })
             }
             if (Option.isSome(polled.value)) {
               result = polled.value.value
@@ -158,7 +207,7 @@ export const layer = (options: TimingOptions = {}) =>
         acquire: Effect.gen(function* () {
           const entry = yield* store.load
           if (Option.isNone(entry))
-            return yield* Flow.Errors.AuthError.make({ kind: "login-required", message: "Login is required" })
+            return yield* Contract.AuthError.make({ kind: "login-required", message: "Login is required" })
           const now = yield* Clock.currentTimeMillis
           return entry.value.expiresAt <= now + 300_000
             ? yield* refreshGeneration(entry.value.generation)

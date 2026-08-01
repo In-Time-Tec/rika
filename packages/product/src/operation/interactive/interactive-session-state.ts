@@ -1,6 +1,6 @@
 import * as Thread from "@rika/product/thread-record"
 import { Effect, Fiber, Ref, Scope, Semaphore } from "effect"
-import { OperationUnavailable } from "../contract/product-operation-errors"
+import { OperationUnavailable } from "../contract/product-operation"
 import { makeInteractiveOperationFeed } from "./interactive-operation-feed"
 import { makeInteractiveSessionComposition } from "./interactive-session-composition"
 import { makeInteractiveSelectionProjection } from "./interactive-selection-projection"

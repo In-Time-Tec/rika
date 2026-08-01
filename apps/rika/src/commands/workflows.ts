@@ -1,3 +1,4 @@
+import * as ProductOperation from "@rika/product/product-operation"
 import * as Operation from "@rika/product/product-operation-service"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import { Option } from "effect"
@@ -12,7 +13,7 @@ const start = Command.make(
   },
   ({ name, runId, revision }) => {
     const selectedRevision = Option.getOrUndefined(revision)
-    const input: Operation.Input = {
+    const input: ProductOperation.Input = {
       _tag: "Workflow",
       action: "start",
       name,

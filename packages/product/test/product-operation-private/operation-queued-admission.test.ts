@@ -1,58 +1,38 @@
-import * as ThreadResult from "@rika/product/thread-result"
-import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
-import type { InteractiveSession } from "@rika/product/interactive-session"
-import { reconcile } from "@rika/product/product-operation-service"
+import { reconcile } from "../../src/operation/dispatch/product-operation-dispatch"
 import { describe, expect, it } from "@effect/vitest"
-import * as SettingsDefaults from "@rika/configuration/configuration-settings"
-import * as SettingsDecoder from "@rika/configuration/configuration-settings"
-import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
-import * as Thread from "@rika/product/thread-record"
-import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
-import * as Turn from "@rika/product/turn-record"
-import * as ExecutionBackend from "@rika/product/execution-service"
 import { Deferred, Effect, Fiber, Layer, Ref } from "effect"
 import { TestClock } from "effect/testing"
-
-import { queuedTurnPromoteMaxAgeMs } from "@rika/product/pending-turn"
-import { createTurn, executionRoute } from "../support/product-test-current-state"
-import { productLayer, provideLayer } from "../support/operation-layer-harness"
-import {
-  holdSession,
-  openInteractiveSession,
-  reconcileDependencies,
-  unusedExtensions,
-} from "../support/operation-session-harness"
-import { backend } from "../support/operation-execution-fixtures"
-
-import { turnProvenance, selectionThread } from "../support/operation-selection-fixtures"
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import { Repositories } from "./operation-queued-admission-repositories"
+import { Helpers } from "./operation-queued-admission-helpers"
 
 describe("Operation", () => {
   it.effect("rejects secret-bearing config before execution_route_json persistence", () =>
     Effect.gen(function* () {
       const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
-      const turns = yield* TurnRepository.makeMemory([])
+      const turns = yield* Repositories.TurnRepository.makeMemory([])
       const writes = yield* Ref.make(0)
-      const repository = TurnRepository.Service.of({
+      const repository = Repositories.TurnRepository.Service.of({
         ...turns,
         createForSubmission: (input) =>
-          Ref.update(writes, (count) => count + 1).pipe(Effect.andThen(createTurn(turns, input))),
+          Ref.update(writes, (count) => count + 1).pipe(Effect.andThen(Helpers.createTurn(turns, input))),
       })
       yield* Effect.gen(function* () {
-        const session = yield* openInteractiveSession(sessions, {
+        const session = yield* Helpers.openInteractiveSession(sessions, {
           _tag: "Interactive",
           prompt: [],
           ephemeral: false,
         })
         yield* session.submit("must not persist")
       }).pipe(
-        provideLayer(
-          productLayer({
-            repositoryLayer: ThreadRepository.memoryLayer(),
-            turnRepositoryLayer: Layer.succeed(TurnRepository.Service, repository),
-            backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+        Helpers.provideLayer(
+          Helpers.productLayer({
+            repositoryLayer: Repositories.ThreadRepository.memoryLayer(),
+            turnRepositoryLayer: Layer.succeed(Repositories.TurnRepository.Service, repository),
+            backendLayer: Layer.succeed(Repositories.ExecutionBackend.Service, Helpers.backend),
             resolveExecutionRoute: () =>
               Effect.try(() => {
-                SettingsDecoder.Decoder.decodeSettingsInput("settings.json", {
+                Repositories.SettingsDecoder.Decoder.decodeSettingsInput("settings.json", {
                   models: {
                     unsafe: {
                       ...SettingsDefaults.Defaults.defaults.models.luna,
@@ -60,63 +40,65 @@ describe("Operation", () => {
                     },
                   },
                 })
-                return ExecutionRouteSnapshot.testExecutionRoute("medium")
+                return Repositories.ExecutionRouteSnapshot.testExecutionRoute("medium")
               }),
             defaultWorkspace: "/work",
-            makeThreadId: Effect.succeed(Thread.ThreadId.make("thread-rejected-config")),
-            makeTurnId: Effect.succeed(Turn.TurnId.make("turn-rejected-config")),
-            interactive: holdSession(sessions),
+            makeThreadId: Effect.succeed(Repositories.Thread.ThreadId.make("thread-rejected-config")),
+            makeTurnId: Effect.succeed(Repositories.Turn.TurnId.make("turn-rejected-config")),
+            interactive: Helpers.holdSession(sessions),
           }),
         ),
       )
       expect(yield* Ref.get(writes)).toBe(0)
-      expect(yield* turns.get(Turn.TurnId.make("turn-rejected-config"))).toBeUndefined()
+      expect(yield* turns.get(Repositories.Turn.TurnId.make("turn-rejected-config"))).toBeUndefined()
     }),
   )
 
-  it.effect("keeps one backend layer alive for sequential interactive submissions", () =>
+  it.effect("keeps one Helpers.backend layer alive for sequential interactive submissions", () =>
     Effect.gen(function* () {
       const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const starts = yield* Ref.make<ReadonlyArray<string>>([])
       const acquisitions = yield* Ref.make(0)
       const turnIds = yield* Ref.make(0)
-      const turns = yield* TurnRepository.makeMemory([])
+      const turns = yield* Repositories.TurnRepository.makeMemory([])
       const backendLayer = Layer.effect(
-        ExecutionBackend.Service,
+        Repositories.ExecutionBackend.Service,
         Ref.updateAndGet(acquisitions, (value) => value + 1).pipe(
           Effect.map((generation) =>
-            ExecutionBackend.Service.of({
-              ...backend,
+            Repositories.ExecutionBackend.Service.of({
+              ...Helpers.backend,
               start: (input) =>
                 Ref.update(starts, (values) => [...values, `${generation}:${input.prompt}`]).pipe(
-                  Effect.andThen(backend.start(input)),
+                  Effect.andThen(Helpers.backend.start(input)),
                 ),
             }),
           ),
         ),
       )
       yield* Effect.gen(function* () {
-        const session = yield* openInteractiveSession(sessions, {
+        const session = yield* Helpers.openInteractiveSession(sessions, {
           _tag: "Interactive",
           prompt: [],
           ephemeral: false,
         })
         yield* session.submit("First turn", "low")
-        while ((yield* turns.get(Turn.TurnId.make("turn-1")))?.status !== "completed") yield* Effect.yieldNow
+        while ((yield* turns.get(Repositories.Turn.TurnId.make("turn-1")))?.status !== "completed")
+          yield* Effect.yieldNow
         yield* session.submit("Second turn", "ultra")
-        while ((yield* turns.get(Turn.TurnId.make("turn-2")))?.status !== "completed") yield* Effect.yieldNow
+        while ((yield* turns.get(Repositories.Turn.TurnId.make("turn-2")))?.status !== "completed")
+          yield* Effect.yieldNow
       }).pipe(
-        provideLayer(
-          productLayer({
-            repositoryLayer: ThreadRepository.memoryLayer(),
-            turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+        Helpers.provideLayer(
+          Helpers.productLayer({
+            repositoryLayer: Repositories.ThreadRepository.memoryLayer(),
+            turnRepositoryLayer: Layer.succeed(Repositories.TurnRepository.Service, turns),
             backendLayer,
             defaultWorkspace: "/work",
-            makeThreadId: Effect.succeed(Thread.ThreadId.make("thread-sequential")),
+            makeThreadId: Effect.succeed(Repositories.Thread.ThreadId.make("thread-sequential")),
             makeTurnId: Ref.updateAndGet(turnIds, (value) => value + 1).pipe(
-              Effect.map((value) => Turn.TurnId.make(`turn-${value}`)),
+              Effect.map((value) => Repositories.Turn.TurnId.make(`turn-${value}`)),
             ),
-            interactive: holdSession(sessions),
+            interactive: Helpers.holdSession(sessions),
           }),
         ),
       )
@@ -125,33 +107,33 @@ describe("Operation", () => {
         "1:First turn",
         "1:Second turn",
       ])
-      const firstTurn = yield* turns.get(Turn.TurnId.make("turn-1"))
-      const secondTurn = yield* turns.get(Turn.TurnId.make("turn-2"))
+      const firstTurn = yield* turns.get(Repositories.Turn.TurnId.make("turn-1"))
+      const secondTurn = yield* turns.get(Repositories.Turn.TurnId.make("turn-2"))
       expect(
-        firstTurn !== undefined && ThreadResult.TurnResult.isAgentExecution(firstTurn)
+        firstTurn !== undefined && Repositories.ThreadResult.TurnResult.isAgentExecution(firstTurn)
           ? firstTurn.executionRoute.mode
           : undefined,
       ).toBe("low")
       expect(
-        secondTurn !== undefined && ThreadResult.TurnResult.isAgentExecution(secondTurn)
+        secondTurn !== undefined && Repositories.ThreadResult.TurnResult.isAgentExecution(secondTurn)
           ? secondTurn.executionRoute.mode
           : undefined,
       ).toBe("ultra")
-      expect((yield* turns.get(Turn.TurnId.make("turn-2")))?.status).toBe("completed")
+      expect((yield* turns.get(Repositories.Turn.TurnId.make("turn-2")))?.status).toBe("completed")
     }),
   )
 
-  it.effect("re-prepares an accepted Turn once and starts with its pinned route", () =>
+  it.effect("re-prepares an accepted Repositories.Turn once and starts with its pinned route", () =>
     Effect.gen(function* () {
       const pinnedRoute = {
-        ...executionRoute(),
-        main: { ...executionRoute().main, model: "pinned-recovery-model" },
+        ...Helpers.executionRoute(),
+        main: { ...Helpers.executionRoute().main, model: "pinned-recovery-model" },
       }
-      const turns = yield* TurnRepository.makeMemory([
+      const turns = yield* Repositories.TurnRepository.makeMemory([
         {
-          id: Turn.TurnId.make("turn-restart"),
-          ...turnProvenance,
-          threadId: Thread.ThreadId.make("thread-restart"),
+          id: Repositories.Turn.TurnId.make("turn-restart"),
+          ...Helpers.turnProvenance,
+          threadId: Repositories.Thread.ThreadId.make("thread-restart"),
           prompt: "resume",
           executionRoute: pinnedRoute,
           status: "accepted",
@@ -160,16 +142,16 @@ describe("Operation", () => {
           updatedAt: 2,
         },
       ])
-      const starts = yield* Ref.make<ReadonlyArray<ExecutionBackend.StartInput>>([])
+      const starts = yield* Ref.make<ReadonlyArray<Repositories.ExecutionBackend.StartInput>>([])
       const preparations = yield* Ref.make(0)
-      const restartBackend = ExecutionBackend.Service.of({
-        ...backend,
+      const restartBackend = Repositories.ExecutionBackend.Service.of({
+        ...Helpers.backend,
         start: (input) =>
           Ref.update(starts, (values) => [...values, input]).pipe(
             Effect.as({ turnId: input.turnId, status: "completed" as const, events: [] }),
           ),
       })
-      yield* reconcile(unusedExtensions, (turn) =>
+      yield* reconcile(Helpers.unusedExtensions, (turn) =>
         Ref.update(preparations, (count) => count + 1).pipe(
           Effect.as({
             prompt: `${turn.prompt} with recomputed context`,
@@ -178,12 +160,12 @@ describe("Operation", () => {
           }),
         ),
       ).pipe(
-        provideLayer(
+        Helpers.provideLayer(
           Layer.mergeAll(
-            reconcileDependencies(unusedExtensions),
-            ThreadRepository.memoryLayer([selectionThread("thread-restart")]),
-            Layer.succeed(TurnRepository.Service, turns),
-            Layer.succeed(ExecutionBackend.Service, restartBackend),
+            Helpers.reconcileDependencies(Helpers.unusedExtensions),
+            Repositories.ThreadRepository.memoryLayer([Helpers.selectionThread("thread-restart")]),
+            Layer.succeed(Repositories.TurnRepository.Service, turns),
+            Layer.succeed(Repositories.ExecutionBackend.Service, restartBackend),
           ),
         ),
       )
@@ -197,28 +179,28 @@ describe("Operation", () => {
       ])
       expect(yield* Ref.get(preparations)).toBe(1)
       expect((yield* Ref.get(starts))[0]?.executionRoute).toEqual(pinnedRoute)
-      expect((yield* turns.get(Turn.TurnId.make("turn-restart")))?.status).toBe("completed")
+      expect((yield* turns.get(Repositories.Turn.TurnId.make("turn-restart")))?.status).toBe("completed")
     }),
   )
 
-  it.effect("does not start an accepted Turn when cancellation wins the durable claim", () =>
+  it.effect("does not start an accepted Repositories.Turn when cancellation wins the durable claim", () =>
     Effect.gen(function* () {
-      const thread = selectionThread("cancelled-restart-thread")
-      const turn: Turn.Turn = {
-        id: Turn.TurnId.make("cancelled-restart-turn"),
-        ...turnProvenance,
+      const thread = Helpers.selectionThread("cancelled-restart-thread")
+      const turn: Repositories.Turn.Turn = {
+        id: Repositories.Turn.TurnId.make("cancelled-restart-turn"),
+        ...Helpers.turnProvenance,
         threadId: thread.id,
         prompt: "do not resume",
-        executionRoute: executionRoute(),
+        executionRoute: Helpers.executionRoute(),
         status: "accepted",
         stopIntent: "none",
         createdAt: 1,
         updatedAt: 1,
       }
-      const turns = yield* TurnRepository.makeMemory([turn])
+      const turns = yield* Repositories.TurnRepository.makeMemory([turn])
       const claimEntered = yield* Deferred.make<void>()
       const releaseClaim = yield* Deferred.make<void>()
-      const delayedTurns = TurnRepository.Service.of({
+      const delayedTurns = Repositories.TurnRepository.Service.of({
         ...turns,
         startAccepted: (id, now) =>
           Deferred.succeed(claimEntered, undefined).pipe(
@@ -227,23 +209,23 @@ describe("Operation", () => {
           ),
       })
       const starts = yield* Ref.make(0)
-      const restartBackend = ExecutionBackend.Service.of({
-        ...backend,
+      const restartBackend = Repositories.ExecutionBackend.Service.of({
+        ...Helpers.backend,
         start: (input) =>
           Ref.update(starts, (count) => count + 1).pipe(
             Effect.as({ turnId: input.turnId, status: "completed" as const, events: [] }),
           ),
       })
       const repair = yield* Effect.forkChild(
-        reconcile(unusedExtensions, (current) =>
+        reconcile(Helpers.unusedExtensions, (current) =>
           Effect.succeed({ prompt: current.prompt, promptParts: undefined, extensionPin: undefined }),
         ).pipe(
-          provideLayer(
+          Helpers.provideLayer(
             Layer.mergeAll(
-              reconcileDependencies(unusedExtensions),
-              ThreadRepository.memoryLayer([thread]),
-              Layer.succeed(TurnRepository.Service, delayedTurns),
-              Layer.succeed(ExecutionBackend.Service, restartBackend),
+              Helpers.reconcileDependencies(Helpers.unusedExtensions),
+              Repositories.ThreadRepository.memoryLayer([thread]),
+              Layer.succeed(Repositories.TurnRepository.Service, delayedTurns),
+              Layer.succeed(Repositories.ExecutionBackend.Service, restartBackend),
             ),
           ),
         ),
@@ -261,23 +243,23 @@ describe("Operation", () => {
 
   it.effect("does not restart a turn dequeued after the reconcile scan", () =>
     Effect.gen(function* () {
-      const turnId = Turn.TurnId.make("stale-reconcile-turn")
-      const threadId = Thread.ThreadId.make("stale-reconcile-thread")
-      const queued: Turn.Turn = {
+      const turnId = Repositories.Turn.TurnId.make("stale-reconcile-turn")
+      const threadId = Repositories.Thread.ThreadId.make("stale-reconcile-thread")
+      const queued: Repositories.Turn.Turn = {
         id: turnId,
         threadId,
         prompt: "do not restart",
-        ...turnProvenance,
-        executionRoute: executionRoute(),
+        ...Helpers.turnProvenance,
+        executionRoute: Helpers.executionRoute(),
         status: "queued",
         stopIntent: "none",
         createdAt: 1,
         updatedAt: 1,
       }
-      const turns = yield* TurnRepository.makeMemory([queued])
+      const turns = yield* Repositories.TurnRepository.makeMemory([queued])
       const scanned = yield* Deferred.make<void>()
       const continueReconcile = yield* Deferred.make<void>()
-      const delayedTurns = TurnRepository.Service.of({
+      const delayedTurns = Repositories.TurnRepository.Service.of({
         ...turns,
         listNonterminal: Deferred.succeed(scanned, undefined).pipe(
           Effect.andThen(Deferred.await(continueReconcile)),
@@ -285,8 +267,8 @@ describe("Operation", () => {
         ),
       })
       const starts = yield* Ref.make(0)
-      const staleBackend = ExecutionBackend.Service.of({
-        ...backend,
+      const staleBackend = Repositories.ExecutionBackend.Service.of({
+        ...Helpers.backend,
         start: (input) =>
           Ref.update(starts, (count) => count + 1).pipe(
             Effect.as({ turnId: input.turnId, status: "completed" as const, events: [] }),
@@ -294,12 +276,12 @@ describe("Operation", () => {
       })
       const repair = yield* Effect.forkChild(
         reconcile().pipe(
-          provideLayer(
+          Helpers.provideLayer(
             Layer.mergeAll(
-              reconcileDependencies(unusedExtensions),
-              ThreadRepository.memoryLayer(),
-              Layer.succeed(TurnRepository.Service, delayedTurns),
-              Layer.succeed(ExecutionBackend.Service, staleBackend),
+              Helpers.reconcileDependencies(Helpers.unusedExtensions),
+              Repositories.ThreadRepository.memoryLayer(),
+              Layer.succeed(Repositories.TurnRepository.Service, delayedTurns),
+              Layer.succeed(Repositories.ExecutionBackend.Service, staleBackend),
             ),
           ),
         ),
@@ -317,48 +299,48 @@ describe("Operation", () => {
 
   it.effect("refuses to auto-promote queued turns older than the promotion window", () =>
     Effect.gen(function* () {
-      const thread = selectionThread("stale-queue-thread")
-      const active: Turn.Turn = {
-        id: Turn.TurnId.make("stale-queue-active"),
+      const thread = Helpers.selectionThread("stale-queue-thread")
+      const active: Repositories.Turn.Turn = {
+        id: Repositories.Turn.TurnId.make("stale-queue-active"),
         threadId: thread.id,
         prompt: "waiting",
-        ...turnProvenance,
-        executionRoute: executionRoute(),
+        ...Helpers.turnProvenance,
+        executionRoute: Helpers.executionRoute(),
         status: "waiting",
         stopIntent: "none",
         createdAt: 1,
         updatedAt: 1,
       }
-      const staleQueued: Turn.Turn = {
-        id: Turn.TurnId.make("stale-queue-turn"),
+      const staleQueued: Repositories.Turn.Turn = {
+        id: Repositories.Turn.TurnId.make("stale-queue-turn"),
         threadId: thread.id,
         prompt: "old queued prompt",
-        ...turnProvenance,
-        executionRoute: executionRoute(),
+        ...Helpers.turnProvenance,
+        executionRoute: Helpers.executionRoute(),
         status: "queued",
         stopIntent: "none",
         createdAt: 1,
         updatedAt: 1,
       }
-      const turns = yield* TurnRepository.makeMemory([active, staleQueued])
+      const turns = yield* Repositories.TurnRepository.makeMemory([active, staleQueued])
       const starts = yield* Ref.make<ReadonlyArray<string>>([])
-      const recordingBackend = ExecutionBackend.Service.of({
-        ...backend,
+      const recordingBackend = Repositories.ExecutionBackend.Service.of({
+        ...Helpers.backend,
         start: (input) =>
           Ref.update(starts, (values) => [...values, input.turnId]).pipe(
             Effect.as({ turnId: input.turnId, status: "completed" as const, events: [] }),
           ),
       })
-      yield* TestClock.adjust(`${queuedTurnPromoteMaxAgeMs + 1_000} millis`)
+      yield* TestClock.adjust(`${Repositories.queuedTurnPromoteMaxAgeMs + 1_000} millis`)
       yield* reconcile(undefined, () =>
         Effect.succeed({ prompt: staleQueued.prompt, promptParts: undefined, extensionPin: undefined }),
       ).pipe(
-        provideLayer(
+        Helpers.provideLayer(
           Layer.mergeAll(
-            reconcileDependencies(unusedExtensions),
-            ThreadRepository.memoryLayer([thread]),
-            Layer.succeed(TurnRepository.Service, turns),
-            Layer.succeed(ExecutionBackend.Service, recordingBackend),
+            Helpers.reconcileDependencies(Helpers.unusedExtensions),
+            Repositories.ThreadRepository.memoryLayer([thread]),
+            Layer.succeed(Repositories.TurnRepository.Service, turns),
+            Layer.succeed(Repositories.ExecutionBackend.Service, recordingBackend),
           ),
         ),
       )
@@ -369,30 +351,30 @@ describe("Operation", () => {
 
   it.effect("releases an interrupted preparation claim without terminalizing the queued turn", () =>
     Effect.gen(function* () {
-      const thread = selectionThread("interrupted-preparation-thread")
-      const queued: Turn.Turn = {
-        id: Turn.TurnId.make("interrupted-preparation-turn"),
+      const thread = Helpers.selectionThread("interrupted-preparation-thread")
+      const queued: Repositories.Turn.Turn = {
+        id: Repositories.Turn.TurnId.make("interrupted-preparation-turn"),
         threadId: thread.id,
         prompt: "retry after interruption",
-        ...turnProvenance,
-        executionRoute: executionRoute(),
+        ...Helpers.turnProvenance,
+        executionRoute: Helpers.executionRoute(),
         status: "queued",
         stopIntent: "none",
         createdAt: 1,
         updatedAt: 1,
       }
-      const turns = yield* TurnRepository.makeMemory([queued])
+      const turns = yield* Repositories.TurnRepository.makeMemory([queued])
       const preparationEntered = yield* Deferred.make<void>()
       const repair = yield* Effect.forkChild(
         reconcile(undefined, () =>
           Deferred.succeed(preparationEntered, undefined).pipe(Effect.andThen(Effect.never)),
         ).pipe(
-          provideLayer(
+          Helpers.provideLayer(
             Layer.mergeAll(
-              reconcileDependencies(unusedExtensions),
-              ThreadRepository.memoryLayer([thread]),
-              Layer.succeed(TurnRepository.Service, turns),
-              Layer.succeed(ExecutionBackend.Service, backend),
+              Helpers.reconcileDependencies(Helpers.unusedExtensions),
+              Repositories.ThreadRepository.memoryLayer([thread]),
+              Layer.succeed(Repositories.TurnRepository.Service, turns),
+              Layer.succeed(Repositories.ExecutionBackend.Service, Helpers.backend),
             ),
           ),
         ),

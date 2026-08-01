@@ -1,4 +1,5 @@
 import { Service, RepositoryError } from "@rika/product/thread-interaction-repository"
+import type { Interface } from "@rika/product/thread-interaction-repository"
 export { Service, RepositoryError }
 import { Effect, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
@@ -7,21 +8,22 @@ import { decode } from "../turn/turn-row-codec"
 import { TurnId } from "@rika/product/turn-record"
 
 import {
-  ReceiptKind,
   InvocationConflict,
   AdmissionRejected,
   QueueFull,
   ResultNotReady,
 } from "@rika/product/thread-interaction-repository"
-import type {
-  Invocation,
+type ReceiptKind = "create" | "message" | "steer" | "cancel" | "stop"
+type CreateThreadInput = Parameters<Interface["createThread"]>[0]
+type AppendThreadMessageInput = Parameters<Interface["appendMessage"]>[0]
+type BindThreadControlInput = Parameters<Interface["bindSteer"]>[0]
+type Invocation = Pick<
   CreateThreadInput,
-  AppendThreadMessageInput,
-  BindThreadControlInput,
-  AcceptedThreadTurn,
-  BoundThreadControl,
-  ResultRoute,
-} from "@rika/product/thread-interaction-repository"
+  "invocationDigest" | "schemaInputDigest" | "sourceThreadId" | "sourceRootTurnId" | "now"
+>
+type AcceptedThreadTurn = Effect.Success<ReturnType<Interface["createThread"]>>
+type BoundThreadControl = Effect.Success<ReturnType<Interface["bindSteer"]>>
+type ResultRoute = NonNullable<Effect.Success<ReturnType<Interface["getResultRoute"]>>>
 type Failure = RepositoryError | InvocationConflict | AdmissionRejected | QueueFull
 interface ResultRouteBase {
   readonly targetTurnId: TurnId

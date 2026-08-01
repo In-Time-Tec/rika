@@ -1,17 +1,18 @@
 import * as ExecutionStatus from "@rika/product/execution-status"
 import { Service } from "@rika/product/product-operation-service"
-import { hasActiveExecutionWork } from "@rika/product/product-operation-service"
+import { hasActiveExecutionWork } from "../../src/execution/lifecycle/product-execution-quiescence"
 import { describe, expect, it } from "@effect/vitest"
-import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
-import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
+import * as ThreadRepository from "../../../product-store/src/thread/sqlite-thread-repository"
+import * as TurnRepository from "../../../product-store/src/turn/sqlite-turn-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
-import { AgentDepth } from "@rika/product/execution-service"
+import * as ExecutionInspection from "@rika/product/execution-inspection"
+import { AgentDepth } from "@rika/product/execution-identifier"
 import { Effect, Layer, Ref } from "effect"
 
-import { productLayer, provideLayer } from "../support/operation-layer-harness"
-import { backend } from "../support/operation-execution-fixtures"
+import { productLayer, provideLayer } from "../../../product-store/test/support/operation-layer-harness"
+import { backend } from "../../../product-store/test/support/operation-execution-fixtures"
 
-import { selectionThread, replacementTurn } from "../support/operation-selection-fixtures"
+import { selectionThread, replacementTurn } from "../../../product-store/test/support/operation-selection-fixtures"
 
 describe("Operation", () => {
   it.effect("reconciles a stale nonterminal row from authoritative Relay state", () =>
@@ -45,8 +46,8 @@ describe("Operation", () => {
       const threads = yield* ThreadRepository.makeMemory([selectionThread(String(turn.threadId))])
       const child = AgentDepth.childExecutionId(turn.id, "task")
       const grandchild = AgentDepth.childExecutionId(child, "oracle")
-      const inspection = (turnId: string): ExecutionBackend.Inspection => {
-        let children: ExecutionBackend.Inspection["children"] = []
+      const inspection = (turnId: string): ExecutionInspection.Inspection => {
+        let children: ExecutionInspection.Inspection["children"] = []
         if (turnId === turn.id) children = [{ executionId: child, status: "completed" }]
         else if (turnId === child) children = [{ executionId: grandchild, status: "running" }]
         return { turnId, status: "completed", waits: [], pendingTools: [], children }
