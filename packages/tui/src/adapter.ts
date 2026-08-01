@@ -2231,24 +2231,26 @@ export class Surface {
     renderer.on(CliRenderEvents.FRAME, this.recordRenderedTranscriptScroll)
   }
 
-  private renderOverlayHints(labels: readonly string[], color: string): void {
+  private renderOverlayHints(
+    labels: readonly string[],
+    color: string,
+    bounds: { readonly left: number; readonly top: number; readonly width: number; readonly height: number },
+  ): void {
     const hints = [this.paletteHint, this.paletteHintSecond]
     for (const hint of hints) hint.visible = false
-    const boxLeft = Number(this.paletteBox.left)
-    const boxTop = Number(this.paletteBox.top)
-    const boxRight = Math.min(this.renderer.terminalWidth - 1, boxLeft + Number(this.paletteBox.width) - 1)
-    let cursor = boxRight
+    const boxRight = Math.min(this.renderer.terminalWidth - 1, bounds.left + bounds.width - 1)
+    let cursor = boxRight - 1
     for (let index = labels.length - 1; index >= 0; index -= 1) {
       const label = labels[index]!
       const hint = hints[labels.length - 1 - index]
       if (hint === undefined) continue
-      const width = stringWidth(label)
-      if (cursor - width < boxLeft + 1) continue
+      const width = stringWidth(label.replaceAll("↔", "x"))
+      if (cursor - width < bounds.left + 1) continue
       cursor -= width
       hint.content = label
       hint.width = width
       hint.left = cursor
-      hint.top = boxTop + Number(this.paletteBox.height) - 1
+      hint.top = bounds.top + bounds.height - 1
       hint.fg = color
       hint.bg = colors.surface
       hint.visible = true
@@ -2514,7 +2516,7 @@ export class Surface {
   private renderModeLabel(model: Model): void {
     const previousRight = this.modeLabel.screenX + this.modeLabel.width
     const availableWidth = contentColumnWidth(model)
-    const contextVisible = model.currentThreadId !== undefined && availableWidth >= 24
+    const contextVisible = availableWidth >= 24 && (model.currentThreadId !== undefined || model.modePicker.open)
     const contextCells = availableWidth < 40 ? 4 : 8
     const contextPrefix = availableWidth < 40 ? " " : " ctx "
     const border = colors.text
@@ -3514,14 +3516,21 @@ export class Surface {
     } else if (overlay === "context") {
       const boxWidth = Math.min(68, contentWidth)
       const boxHeight = Math.min(contentWidth <= 24 ? 12 : 14, model.height)
+      const boxLeft = contentLeft + Math.max(0, contentWidth - boxWidth)
+      const boxTop = Math.max(0, composerTop - boxHeight)
       this.paletteBox.width = boxWidth
       this.paletteBox.height = boxHeight
-      this.paletteBox.left = contentLeft + Math.max(0, contentWidth - boxWidth)
-      this.paletteBox.top = Math.max(0, composerTop - boxHeight)
+      this.paletteBox.left = boxLeft
+      this.paletteBox.top = boxTop
       this.paletteBox.title = " Context & Usage "
       this.paletteBox.titleColor = colors[model.mode]
       this.paletteBox.titleAlignment = "left"
-      this.renderOverlayHints([" Ctrl+Y toggle ", " esc "], colors[model.mode])
+      this.renderOverlayHints([" Ctrl+Y toggle ", " esc "], colors[model.mode], {
+        left: boxLeft,
+        top: boxTop,
+        width: boxWidth,
+        height: boxHeight,
+      })
       const compactContext = boxHeight <= 12 || boxWidth < 40
       this.paletteDividerOne.content = sectionDivider(boxWidth, "Window")
       this.paletteDividerOne.width = boxWidth
@@ -3543,15 +3552,22 @@ export class Surface {
     } else if (overlay === "modes") {
       const boxWidth = Math.min(58, contentWidth)
       const boxHeight = Math.min(11, Math.max(1, composerTop))
+      const boxLeft = contentLeft + Math.max(0, contentWidth - boxWidth)
+      const boxTop = Math.max(0, composerTop - boxHeight)
       this.paletteBox.width = boxWidth
       this.paletteBox.height = boxHeight
-      this.paletteBox.left = contentLeft + Math.max(0, contentWidth - boxWidth)
-      this.paletteBox.top = Math.max(0, composerTop - boxHeight)
+      this.paletteBox.left = boxLeft
+      this.paletteBox.top = boxTop
       const hovered = modeIds[model.modePicker.selected] ?? model.mode
       this.paletteBox.title = " Mode "
       this.paletteBox.titleColor = colors[hovered]
       this.paletteBox.titleAlignment = "left"
-      this.renderOverlayHints([" ↔ turn ", " esc "], colors[hovered])
+      this.renderOverlayHints([" ↔ turn ", " esc "], colors[hovered], {
+        left: boxLeft,
+        top: boxTop,
+        width: boxWidth,
+        height: boxHeight,
+      })
       const modeContentWidth = Math.max(1, boxWidth - 4)
       const modeContentHeight = Math.max(1, boxHeight - 2)
       this.paletteDividerOne.content = sectionDivider(boxWidth, "Route")
@@ -3601,13 +3617,20 @@ export class Surface {
     } else if (overlay === "threads") {
       const overlayWidth = Math.max(1, Math.min(140, model.width - 4))
       const overlayHeight = Math.min(Math.max(1, composerTop), Math.max(6, composerTop - 2))
+      const boxLeft = Math.max(0, Math.floor((model.width - overlayWidth) / 2))
+      const boxTop = Math.max(0, composerTop - overlayHeight)
       this.paletteBox.width = overlayWidth
       this.paletteBox.height = overlayHeight
-      this.paletteBox.left = Math.max(0, Math.floor((model.width - overlayWidth) / 2))
-      this.paletteBox.top = Math.max(0, composerTop - overlayHeight)
+      this.paletteBox.left = boxLeft
+      this.paletteBox.top = boxTop
       this.paletteBox.title = model.threadSwitcher.kind === "mention" ? " Mention Thread " : " Switch Thread "
       this.paletteBox.titleAlignment = "left"
-      this.renderOverlayHints([" Opt+W/Ctrl+T all workspaces ", " Esc close "], colors[model.mode])
+      this.renderOverlayHints([" Opt+W/Ctrl+T all workspaces ", " Esc close "], colors[model.mode], {
+        left: boxLeft,
+        top: boxTop,
+        width: overlayWidth,
+        height: overlayHeight,
+      })
       const switcherContentWidth = Math.max(1, overlayWidth - 4)
       const contentHeight = Math.max(1, overlayHeight - 2)
       const minute = Math.floor(this.currentTimeMillis() / 60_000)
