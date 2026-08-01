@@ -59,6 +59,7 @@ export interface TuiAppOptions {
   readonly width?: number
   readonly height?: number
   readonly holdExecutionFollows?: Deferred.Deferred<void>
+  readonly mapExecutionEvent?: (event: ExecutionBackend.Event) => ExecutionBackend.Event
 }
 
 export const makeProjectionsLegacy = Effect.fn("TuiApp.makeProjectionsLegacy")(function* (root: string) {
@@ -180,8 +181,9 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
     toolRuntimeLayer: toolRuntimeLayer(workspace),
   }).pipe(Layer.provide(BunServices.layer), Layer.orDie)
   const held = options.holdExecutionFollows
+  const mapExecutionEvent = options.mapExecutionEvent
   const backendLayer =
-    held === undefined
+    held === undefined && mapExecutionEvent === undefined
       ? relayBackendLayer
       : Layer.effect(
           ExecutionBackend.Service,
@@ -190,15 +192,37 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
             const follow = backend.follow
             return ExecutionBackend.Service.of({
               ...backend,
+              ...(mapExecutionEvent === undefined
+                ? {}
+                : {
+                    start: (input) =>
+                      backend
+                        .start({
+                          ...input,
+                          ...(input.onEvent === undefined
+                            ? {}
+                            : { onEvent: (event) => input.onEvent?.(mapExecutionEvent(event)) }),
+                        })
+                        .pipe(
+                          Effect.map((result) => ({
+                            ...result,
+                            events: result.events.map(mapExecutionEvent),
+                          })),
+                        ),
+                  }),
               ...(follow === undefined
                 ? {}
                 : {
-                    follow: (turnId, afterCursor, onEvent, reference, eventScope) =>
-                      Deferred.await(held).pipe(
-                        Effect.andThen(
-                          Effect.suspend(() => follow(turnId, afterCursor, onEvent, reference, eventScope)),
-                        ),
-                      ),
+                    follow: (turnId, afterCursor, onEvent, reference, eventScope) => {
+                      const mappedOnEvent =
+                        onEvent === undefined || mapExecutionEvent === undefined
+                          ? onEvent
+                          : (event: ExecutionBackend.Event) => onEvent(mapExecutionEvent(event))
+                      const followed = Effect.suspend(() =>
+                        follow(turnId, afterCursor, mappedOnEvent, reference, eventScope),
+                      )
+                      return held === undefined ? followed : Deferred.await(held).pipe(Effect.andThen(followed))
+                    },
                   }),
             })
           }),

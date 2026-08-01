@@ -310,6 +310,19 @@ export const routedToolRuntimeLayer: {
 const modelSelectionKey = (selection: ModelRegistry.ModelSelection) =>
   JSON.stringify([selection.provider, selection.model, selection.registrationKey ?? null])
 
+const attachToolJsonSchemaCompiler = (
+  registration: ModelRegistry.Registration,
+  context: Context.Context<ModelRegistry.ModelEnvironment>,
+) => {
+  if (registration.toolJsonSchemaCompiler === undefined) return context
+  const model = Context.get(context, LanguageModel.LanguageModel)
+  return Context.add(
+    context,
+    LanguageModel.LanguageModel,
+    ModelRegistry.withToolJsonSchemaCompiler(model, registration.toolJsonSchemaCompiler),
+  )
+}
+
 export const lazyModelRegistryLayer = (
   registrations: ReadonlyArray<ModelRegistry.Registration>,
 ): Layer.Layer<ModelRegistry.ModelRegistry> =>
@@ -350,13 +363,17 @@ export const lazyModelRegistryLayer = (
         )
       const operate: ModelRegistry.Interface["operate"] = (selection, operation) =>
         find(selection).pipe(
-          Effect.flatMap((entry) => entry.context),
+          Effect.flatMap((entry) =>
+            entry.context.pipe(Effect.map((context) => attachToolJsonSchemaCompiler(entry.registration, context))),
+          ),
           Effect.flatMap((context) => operation.pipe(Effect.provide(context))),
         )
       const stream = ((selection: ModelRegistry.ModelSelection, operation: Stream.Stream<unknown, unknown, unknown>) =>
         Stream.unwrap(
           find(selection).pipe(
-            Effect.flatMap((entry) => entry.context),
+            Effect.flatMap((entry) =>
+              entry.context.pipe(Effect.map((context) => attachToolJsonSchemaCompiler(entry.registration, context))),
+            ),
             Effect.map((context) => operation.pipe(Stream.provideContext(context))),
           ),
         )) as ModelRegistry.Interface["stream"]
@@ -382,9 +399,12 @@ export const lazyModelRegistryLayer = (
     }),
   )
 
-export const defaultModelResilience: ModelResilience.Interface = ModelResilience.make({
+export const defaultModelResilience: ModelResilience.Interface = {
+  ...ModelResilience.none,
+  classify: ModelResilience.defaultClassify,
+  invalidToolCallCorrectionLimit: 2,
   retrySchedule: Schedule.exponential("500 millis", 2).pipe(Schedule.jittered, Schedule.upTo({ times: 3 })),
-})
+}
 
 const withResilience = (
   registration: ModelRegistry.Registration,

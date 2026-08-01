@@ -78,6 +78,7 @@ export const registeredTool = (options: JoinOptions): RelayToolRuntime.Registere
     input: AgentTools.AwaitSubagentsInput,
     output: AgentTools.AwaitSubagentsResult,
     needsApproval: false,
+    resumableWait: true,
     run: (input, context) =>
       join({ ...options, executionId: String(context.executionId), requested: input.subagents ?? undefined }),
   })

@@ -820,7 +820,7 @@ test.skipIf(!("reasoning" in TestModel))(
 )
 
 test(
-  "corrects unknown and malformed tool calls at the durable model boundary",
+  "keeps provider-rejected unknown and malformed tool calls terminal",
   () =>
     runNative(
       Effect.gen(function* () {
@@ -838,15 +838,16 @@ test(
                   const result = yield* start(backend, { threadId: turnId, turnId, prompt: "call tool" })
                   return { result, requests: yield* fixture.requests }
                 }),
+              {
+                registration: (fixture) => ({
+                  ...fixture.registration,
+                  toolJsonSchemaCompiler: (tool) => Effect.sync(() => Tool.getJsonSchema(tool)),
+                }),
+              },
             )
-            expect(outcome.result.status).toBe("completed")
-            expect(
-              outcome.result.events
-                .filter((event) => event.type === "model.cycle.completed")
-                .map((event) => event.text)
-                .join(""),
-            ).toBe("corrected")
-            expect(outcome.requests).toHaveLength(2)
+            expect(outcome.result.status).toBe("failed")
+            expect(outcome.requests).toHaveLength(1)
+            expect(outcome.result.events.some((event) => event.type === "model.cycle.completed")).toBe(false)
           }),
         )
       }),
@@ -1048,7 +1049,13 @@ test(
               })
               return { result, requests: yield* fixture.requests }
             }),
-          { modelResilience: ModelResilience.make({ retrySchedule: Schedule.recurs(1) }) },
+          {
+            modelResilience: {
+              ...ModelResilience.none,
+              classify: ModelResilience.defaultClassify,
+              retrySchedule: Schedule.recurs(1),
+            },
+          },
         )
         const result = yield* program
         expect(result.result.status).toBe("completed")

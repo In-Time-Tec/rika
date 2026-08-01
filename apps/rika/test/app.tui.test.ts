@@ -68,12 +68,16 @@ test(
 )
 
 test(
-  "keeps the accumulated cost visible after an attempt settles without usage",
+  "marks the total unknown when an unpriced attempt follows a priced attempt",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
           script: [TuiApp.model.text("PRICED_TURN_COMPLETE"), TuiApp.model.failure("UNPRICED_TURN_FAILED")],
+          mapExecutionEvent: (event) =>
+            event.type === "model.attempt.completed"
+              ? { ...event, data: { ...event.data, cost: { amount: 0, currency: "USD" } } }
+              : event,
         })
 
         yield* Effect.promise(() => app.type("Price this turn."))
@@ -87,9 +91,8 @@ test(
         app.pressEnter()
         yield* app.waitFrame("UNPRICED_TURN_FAILED")
         yield* app.settled
-        const settledFrame = yield* app.waitCost
-        expect(settledFrame.match(/\$[0-9][^ ]*/u)?.[0]).toBe("$0.00")
-        expect(settledFrame).not.toContain("$\u2014")
+        const settledFrame = yield* app.waitFrame("$\u2014")
+        expect(settledFrame).not.toMatch(/\$[0-9]/u)
         yield* app.quit
       }),
     ),

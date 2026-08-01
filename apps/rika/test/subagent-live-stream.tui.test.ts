@@ -1,7 +1,33 @@
+import type { Projection } from "@rika/persistence/transcript-repository"
 import * as Turn from "@rika/persistence/turn"
 import { Effect } from "effect"
 import { expect, test } from "vitest"
 import * as TuiApp from "./tui-app"
+
+const hasDurableChildOutput = (projection: Projection) =>
+  projection.units.some(
+    (unit) => unit.content._tag === "Entry" && unit.content.text.includes("CHILD_STREAMED_BEFORE_ROOT"),
+  )
+
+const waitForDurableChildOutput = Effect.fn("TuiApp.waitForDurableChildOutput")(function* (
+  app: TuiApp.TuiApp,
+  turnId: Turn.TurnId,
+) {
+  const started = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
+  for (;;) {
+    const projection = yield* app.transcript(turnId)
+    if (
+      projection !== undefined &&
+      projection.executionCheckpoints.length === 2 &&
+      projection.executionCheckpoints.every((checkpoint) => checkpoint.status === "completed") &&
+      hasDurableChildOutput(projection)
+    )
+      return projection
+    const now = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
+    if (now - started >= 5_000) return yield* Effect.die("child output was not durably persisted")
+    yield* Effect.sleep("20 millis")
+  }
+})
 
 test(
   "streams child progress before the root execution completes",
@@ -54,22 +80,7 @@ test(
         yield* app.waitFrame("ROOT_FINISHED_AFTER_CHILD_STREAM")
 
         const turnId = Turn.TurnId.make("tui-turn-0")
-        const durable = yield* Effect.gen(function* () {
-          const started = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
-          for (;;) {
-            const projection = yield* app.transcript(turnId)
-            if (
-              projection !== undefined &&
-              projection.executionCheckpoints.length === 2 &&
-              projection.executionCheckpoints.every((checkpoint) => checkpoint.status === "completed") &&
-              JSON.stringify(projection.units).includes("CHILD_STREAMED_BEFORE_ROOT")
-            )
-              return projection
-            const now = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
-            if (now - started >= 5_000) return yield* Effect.die("child output was not durably persisted")
-            yield* Effect.sleep("20 millis")
-          }
-        })
+        const durable = yield* waitForDurableChildOutput(app, turnId)
         expect(durable.executionCheckpoints.some((checkpoint) => checkpoint.attachment !== undefined)).toBe(true)
 
         yield* Effect.sleep("300 millis")

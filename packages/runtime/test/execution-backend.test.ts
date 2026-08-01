@@ -1,13 +1,13 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { vi } from "vitest"
-import { ModelResilience } from "@batonfx/core"
+import { ModelRegistry, ModelResilience } from "@batonfx/core"
 import { TestModel } from "@batonfx/test"
 import { ChildFanOutHost, Client, Content, Execution, Ids, WorkflowDefinitionHost } from "@relayfx/sdk"
 import { ThreadTools } from "@rika/tools"
 import { Deferred, Effect, Exit, Fiber, Layer, Logger, Redacted, Ref, Schedule, Schema, Stream, Tracer } from "effect"
 import { TestClock } from "effect/testing"
-import { AiError, Tool, Toolkit } from "effect/unstable/ai"
+import { AiError, LanguageModel, Tool, Toolkit } from "effect/unstable/ai"
 import * as ExecutionBackend from "../src/execution-contract"
 import * as RelayExecutionBackend from "../src/execution-backend"
 import { createFanOut, currentExecutionRoute, start } from "./current-execution-route"
@@ -2316,6 +2316,26 @@ describe("ExecutionBackend Relay client adapter", () => {
     }),
   )
 
+  it.effect("preserves a registration's tool JSON Schema compiler through the lazy registry", () =>
+    Effect.gen(function* () {
+      const model = yield* TestModel.make([])
+      const compiler: ModelRegistry.ToolJsonSchemaCompiler = (tool) => Effect.succeed(Tool.getJsonSchema(tool))
+      const registration = { ...model.registration, toolJsonSchemaCompiler: compiler }
+      const context = yield* Layer.build(RelayExecutionBackend.lazyModelRegistryLayer([registration]))
+      const observed = yield* Effect.gen(function* () {
+        const registry = yield* ModelRegistry.ModelRegistry
+        return yield* registry.operate(
+          model.selection,
+          Effect.gen(function* () {
+            const activeModel = yield* LanguageModel.LanguageModel
+            return ModelRegistry.toolJsonSchemaCompiler(activeModel)
+          }),
+        )
+      }).pipe(Effect.provide(context))
+      expect(observed).toBe(compiler)
+    }),
+  )
+
   it.effect.each([
     [false, false],
     [true, false],
@@ -2350,7 +2370,15 @@ describe("ExecutionBackend Relay client adapter", () => {
           workspace: "/tmp",
           registration: model.registration,
           selection: model.selection,
-          ...(resilience ? { modelResilience: ModelResilience.make({ retrySchedule: Schedule.recurs(0) }) } : {}),
+          ...(resilience
+            ? {
+                modelResilience: {
+                  ...ModelResilience.none,
+                  classify: ModelResilience.defaultClassify,
+                  retrySchedule: Schedule.recurs(0),
+                },
+              }
+            : {}),
           ...(extensions ? { additionalToolkit: Toolkit.make(), additionalHandlerLayer: Layer.empty } : {}),
         }).pipe(Layer.provide(BunServices.layer), Layer.build, Effect.exit)
         expect(result._tag).toBe("Success")

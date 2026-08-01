@@ -475,7 +475,9 @@ const runtimeLayer = (workspace: string) =>
                     nextAction: "Correct the regular expression or set regex to false",
                   })
                 return bounded(
-                  page.items.map((match) => `${match.relativePath}:${match.lineNumber}:${match.lineContent}`).join("\n"),
+                  page.items
+                    .map((match) => `${match.relativePath}:${match.lineNumber}:${match.lineContent}`)
+                    .join("\n"),
                 )
               }
               case "Read": {

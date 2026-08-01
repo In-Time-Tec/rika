@@ -218,25 +218,26 @@ test("a silent subagent is collected as a no-report verdict", () => {
   )
 }, 60_000)
 
-test("one root batch can start more than four delegations", () => {
+test("one root batch can start and collect twenty-four delegations", () => {
   const program = Effect.scoped(
     Effect.gen(function* () {
+      const delegationCount = 24
       const fileSystem = yield* FileSystem.FileSystem
       const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-subagent-unbounded-" })
       const main = yield* TestModel.make(
         [
           TestModel.turn(
-            Array.from({ length: 6 }, (_, index) =>
+            Array.from({ length: delegationCount }, (_, index) =>
               TestModel.toolCall("oracle", { prompt: `Explore ${index}.` }, { id: `call-${index}` }),
             ),
           ),
           TestModel.toolCall("await_subagents", {}, { id: "call-join" }),
-          TestModel.text("Root collected the bounded batch."),
+          TestModel.text("Root collected the parallel batch."),
         ],
         { provider: "test", model: "gpt-5.6-terra", registrationKey: "terra-medium" },
       )
       const child = yield* TestModel.make(
-        Array.from({ length: 6 }, (_, index) => TestModel.text(`Child ${index} reported.`)),
+        Array.from({ length: delegationCount }, (_, index) => TestModel.text(`Child ${index} reported.`)),
         { provider: "test", model: "gpt-5.6-sol", registrationKey: "sol-medium" },
       )
       const backendLayer = RelayExecutionBackend.layer({
@@ -253,7 +254,7 @@ test("one root batch can start more than four delegations", () => {
         const settled = yield* start(backend, {
           threadId: "thread-budget",
           turnId: "turn-budget",
-          prompt: "Explore six things at once.",
+          prompt: "Explore twenty-four things at once.",
           executionRoute: {
             mode: "test",
             main: executionModelRoute("main", main.selection),
@@ -273,7 +274,7 @@ test("one root batch can start more than four delegations", () => {
             []
           >("select result.error from relay_tool_calls call join relay_tool_results result on result.tool_call_id = call.id where call.name = 'oracle' order by call.id")
           .all()
-        return { settled, children, results }
+        return { settled, children, results, delegationCount }
       }).pipe(Effect.provide(backendContext))
     }),
   )
@@ -284,19 +285,19 @@ test("one root batch can start more than four delegations", () => {
         return yield* program.pipe(Effect.provide(bunContext))
       }),
     ).pipe(
-      Effect.tap(({ settled, children, results }) =>
+      Effect.tap(({ settled, children, results, delegationCount }) =>
         Effect.sync(() => {
           expect(settled.status, encodeJson(settled.events.filter((event) => event.type === "execution.failed"))).toBe(
             "completed",
           )
-          expect(children).toHaveLength(6)
-          expect(results).toHaveLength(6)
+          expect(children).toHaveLength(delegationCount)
+          expect(results).toHaveLength(delegationCount)
           expect(results.every((result) => result.error === null)).toBe(true)
         }),
       ),
     ),
   )
-}, 60_000)
+}, 120_000)
 
 test("collecting one batch allows a later delegation", () => {
   const program = Effect.scoped(
@@ -476,7 +477,7 @@ test("await_subagents suspends on an open child and resumes when the child termi
           expect(settled.status, encodeJson(settled.events.filter((event) => event.type === "execution.failed"))).toBe(
             "completed",
           )
-          expect(attempts?.count).toBeGreaterThan(1)
+          expect(attempts?.count).toBe(1)
           expect(join?.error).toBeNull()
           expect(join?.output_json).toContain("Held child reported.")
         }),

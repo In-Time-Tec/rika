@@ -179,9 +179,14 @@ const filterContained = (
   })
 
 const paginatePaths = (relativePaths: ReadonlyArray<string>, options?: GlobOptions | SearchOptions): SearchResult => {
-  const pageSize = Math.max(1, options && "pageSize" in options && options.pageSize !== undefined ? options.pageSize : 50)
+  const pageSize = Math.max(
+    1,
+    options !== undefined && "pageSize" in options && options.pageSize !== undefined ? options.pageSize : 50,
+  )
   const pageIndex =
-    options && "pageIndex" in options && options.pageIndex !== undefined ? Math.max(0, options.pageIndex) : 0
+    options !== undefined && "pageIndex" in options && options.pageIndex !== undefined
+      ? Math.max(0, options.pageIndex)
+      : 0
   const start = pageIndex * pageSize
   const page = relativePaths.slice(start, start + pageSize)
   const items = page.map(pathItem)
@@ -221,14 +226,14 @@ const makeService = (workspace: string) =>
       glob: (pattern, options) =>
         Effect.gen(function* () {
           const listed = yield* listFiles("glob", root, pattern)
-          const relativePaths = (yield* filterContained("glob", root, path, fileSystem, listed)).toSorted((left, right) =>
-            left.localeCompare(right),
+          const relativePaths = (yield* filterContained("glob", root, path, fileSystem, listed)).toSorted(
+            (left, right) => left.localeCompare(right),
           )
           return paginatePaths(relativePaths, options)
         }),
       grep: (query, options) =>
         Effect.gen(function* () {
-          if (options?.cursor) return emptyGrep(0)
+          if (options?.cursor !== undefined && options.cursor !== null && options.cursor.length > 0) return emptyGrep(0)
           const pageSize = Math.max(1, options?.pageSize ?? 1_000)
           const maxMatchesPerFile = Math.max(1, options?.maxMatchesPerFile ?? 1_000)
           const mode = options?.mode ?? "plain"
@@ -250,7 +255,8 @@ const makeService = (workspace: string) =>
               return emptyGrep(0, message || "invalid regular expression")
             return yield* indexError("grep", message || `rg exited with code ${result.code}`)
           }
-          if (result.code > 2) return yield* indexError("grep", result.stderr.trim() || `rg exited with code ${result.code}`)
+          if (result.code > 2)
+            return yield* indexError("grep", result.stderr.trim() || `rg exited with code ${result.code}`)
           const parsed: Array<GrepMatch> = []
           for (const line of result.stdout.split("\n")) {
             if (line.length === 0) continue
@@ -267,18 +273,15 @@ const makeService = (workspace: string) =>
             })
             if (parsed.length >= pageSize) break
           }
-          const items = yield* Effect.gen(function* () {
-            const kept: Array<GrepMatch> = []
-            for (const match of parsed) {
-              if (
-                yield* containedRelativePath(root, match.relativePath, path, fileSystem).pipe(
-                  Effect.mapError((cause) => indexError("grep", cause)),
-                )
+          const items: Array<GrepMatch> = []
+          for (const match of parsed) {
+            if (
+              yield* containedRelativePath(root, match.relativePath, path, fileSystem).pipe(
+                Effect.mapError((cause) => indexError("grep", cause)),
               )
-                kept.push(match)
-            }
-            return kept
-          })
+            )
+              items.push(match)
+          }
           return {
             items,
             totalMatched: items.length,
