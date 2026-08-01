@@ -1875,6 +1875,7 @@ it("projects selected-thread active time and ignores stale selection updates", (
     selectionEpoch: 1,
     threadId: thread.id,
     revision: 1,
+    context: { _tag: "Available", inputTokens: 208_294, contextWindow: 1_050_000, reserveTokens: 128_000 },
     cost: { _tag: "Unavailable" },
     tokens: { _tag: "Unavailable" },
     time: { _tag: "Available", accumulatedMillis: 5_000, activeSince: 10_000 },
@@ -1884,11 +1885,18 @@ it("projects selected-thread active time and ignores stale selection updates", (
     selectionEpoch: 0,
     threadId: thread.id,
     revision: 2,
+    context: { _tag: "Unavailable" },
     cost: { _tag: "Unavailable" },
     tokens: { _tag: "Unavailable" },
     time: { _tag: "Available", accumulatedMillis: 99_000 },
   })
 
+  expect(active.state.model.contextUsage).toEqual({
+    _tag: "Available",
+    inputTokens: 208_294,
+    contextWindow: 1_050_000,
+    reserveTokens: 128_000,
+  })
   expect(active.state.model.usageTime).toEqual({
     _tag: "Available",
     accumulatedMillis: 5_000,
@@ -1914,6 +1922,7 @@ it("keeps the newest committed usage revision and drops older ones", () => {
       selectionEpoch: 1,
       threadId: thread.id,
       revision,
+      context: { _tag: "Unavailable" },
       cost: { _tag: "Available", usd, unpricedAttempts: 0 },
       tokens: { _tag: "Unavailable" },
       time: { _tag: "Available", accumulatedMillis },
@@ -1955,6 +1964,7 @@ it("shows the session total and updates it when child usage arrives", () => {
     selectionEpoch: 1,
     threadId: thread.id,
     revision: 1,
+    context: { _tag: "Unavailable" },
     cost: { _tag: "Available", usd: 0.75, unpricedAttempts: 0 },
     tokens: { _tag: "Unavailable" },
     time: { _tag: "Unavailable" },
@@ -1983,6 +1993,7 @@ it("applies a usage aggregate without lowering the semantic projection revision"
     selectionEpoch: 1,
     threadId: thread.id,
     revision: 1,
+    context: { _tag: "Unavailable" },
     cost: { _tag: "Available", usd: 0.75, unpricedAttempts: 0 },
     tokens: { _tag: "Unavailable" },
     time: { _tag: "Unavailable" },

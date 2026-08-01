@@ -543,6 +543,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
         ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
         model: {
           ...withoutCost,
+          contextUsage: event.context,
           usageCost: event.cost,
           usageTokens: event.tokens,
           usageTime: event.time,
@@ -575,6 +576,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       ...(sameSelection
         ? {}
         : {
+            contextUsage: { _tag: "Loading" as const },
             usageCost: { _tag: "Loading" as const },
             usageTokens: { _tag: "Loading" as const },
             usageTime: { _tag: "Loading" as const },

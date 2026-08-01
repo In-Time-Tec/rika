@@ -83,14 +83,18 @@ test(
         yield* Effect.promise(() => app.type("Price this turn."))
         app.pressEnter()
         yield* app.waitFrame("PRICED_TURN_COMPLETE")
-        const priced = yield* app.waitCost
-        expect(priced.match(/\$[0-9][^ ]*/u)?.[0]).toBe("$0.00")
+        yield* app.settled
+        app.pressKey("y", { ctrl: true })
+        const priced = yield* app.waitFrame("$0.00")
         expect(priced).not.toContain("$\u2014")
+        app.pressEscape()
+        yield* app.waitGone("Context & Usage")
 
         yield* Effect.promise(() => app.type("Fail this turn."))
         app.pressEnter()
         yield* app.waitFrame("UNPRICED_TURN_FAILED")
         yield* app.settled
+        app.pressKey("y", { ctrl: true })
         const settledFrame = yield* app.waitFrame("$\u2014")
         expect(settledFrame).not.toMatch(/\$[0-9]/u)
         yield* app.quit
@@ -108,16 +112,55 @@ test(
 
         yield* Effect.promise(() => app.type("Measure this turn."))
         app.pressEnter()
-        yield* app.waitFrame("$")
-        yield* app.clickText("$")
-        yield* app.waitFrame("tok")
-        yield* app.clickText("tok")
+        app.pressKey("y", { ctrl: true })
+        yield* app.waitFrame("Context & Usage")
         const active = yield* app.waitFrameMatch((frame) => activeTimePattern.test(frame))
         expect(active).toMatch(/◷ [0-9]+s/u)
         expect(active).not.toContain("◷ ····")
         yield* app.waitFrame("TIMER_COMPLETE")
         yield* app.settled
         expect(yield* app.waitFrameMatch((frame) => activeTimePattern.test(frame))).toMatch(activeTimePattern)
+        yield* app.quit
+      }),
+    ),
+  240_000,
+)
+
+test(
+  "shows exact context pressure and opens its details command",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const app = yield* TuiApp.tuiApp({
+          script: [TuiApp.model.text("CONTEXT_METER_COMPLETE")],
+          mapExecutionEvent: (event) =>
+            event.type === "model.usage.reported"
+              ? {
+                  ...event,
+                  data: {
+                    ...event.data,
+                    input_tokens: 56_120,
+                    input_tokens_uncached: 56_120,
+                    input_tokens_cache_read: 0,
+                    input_tokens_cache_write: 0,
+                    output_tokens: 100,
+                  },
+                }
+              : event,
+        })
+
+        yield* Effect.promise(() => app.type("Measure context pressure."))
+        app.pressEnter()
+        yield* app.waitFrame("CONTEXT_METER_COMPLETE")
+        yield* app.settled
+        expect(yield* app.waitFrame("ctx █▊░░░░░░ 23%")).toContain("medium")
+
+        app.pressKey("y", { ctrl: true })
+        const details = yield* app.waitFrame("Context & Usage")
+        expect(details).toContain("56.1K used")
+        expect(details).toContain("244K usable")
+        expect(details).toContain("372K window")
+        expect(details).toContain("128K reserved")
         yield* app.quit
       }),
     ),
@@ -147,11 +190,9 @@ test(
             })
             yield* Effect.promise(() => app.type("Persist this timer."))
             app.pressEnter()
-            yield* app.waitFrame("$")
-            yield* app.clickText("$")
-            yield* app.waitFrame("tok")
-            yield* app.clickText("tok")
             yield* app.waitFrame("PERSISTED_TIMER_COMPLETE")
+            app.pressKey("y", { ctrl: true })
+            yield* app.waitFrame("Context & Usage")
             yield* app.settled
             const settledFrame = yield* app.waitFrameMatch((frame) => activeTimePattern.test(frame))
             expect(settledFrame).toMatch(activeTimePattern)
@@ -162,10 +203,8 @@ test(
         yield* Effect.scoped(
           Effect.gen(function* () {
             const app = yield* TuiApp.tuiApp({ root, initialThreadId: "tui-thread-0", idStart: 10, script: [] })
-            yield* app.waitFrame("$")
-            yield* app.clickText("$")
-            yield* app.waitFrame("tok")
-            yield* app.clickText("tok")
+            app.pressKey("y", { ctrl: true })
+            yield* app.waitFrame("Context & Usage")
             const restoredFrame = yield* app.waitFrameMatch((frame) => activeTimePattern.test(frame))
             const restored = restoredFrame.match(activeTimePattern)![0]
             expect(restored).not.toBe("◷ —")
@@ -475,9 +514,19 @@ test(
         const applied = yield* app.waitGone("Deep reasoning")
         expect(applied).toContain("high")
 
+        app.pressKey("y", { ctrl: true })
+        const context = yield* app.waitFrame("Context & Usage")
+        expect(context).toContain("Cost")
+        expect(context).toContain("Active")
+        expect(context).toContain("Tokens")
+        expect(context).toContain("Ctrl+Y toggle")
+        app.pressEscape()
+        yield* app.waitGone("Context & Usage")
+
         app.pressKey("o", { ctrl: true })
         const palette = yield* app.waitFrame("Command Palette")
         expect(palette).toContain("switch")
+        expect(palette).toContain("show context and usage")
         expect(palette).toContain("toggle fast mode")
         expect(palette).toContain("quit")
         app.pressEscape()
@@ -533,12 +582,12 @@ test(
         const completed = yield* app.waitFrame("APPROVAL_COMPLETE")
         expect(completed).not.toContain("[pending]")
         expect(completed).not.toContain("Allow once")
-        yield* app.clickText("$")
-        yield* app.waitFrame("tok")
-        yield* app.clickText("tok")
-        expect(yield* app.waitFrame("◷ ")).toMatch(/◷ [0-9]+s/u)
         yield* app.settled
-        expect(app.frame()).toMatch(/◷ [0-9]+s/u)
+        app.pressKey("y", { ctrl: true })
+        yield* app.waitFrame("Context & Usage")
+        expect(yield* app.waitFrame("◷ ")).toMatch(/◷ [0-9]+s/u)
+        app.pressEscape()
+        yield* app.waitGone("Context & Usage")
 
         yield* Effect.promise(() => app.type("Run the shell tool."))
         app.pressEnter()

@@ -22,7 +22,7 @@ export type InteractiveInput = Extract<Input, { readonly _tag: "Interactive" }>
 
 declare const RIKA_BUILD_IDENTITY: string | undefined
 
-export const protocolVersion = 7
+export const protocolVersion = 8
 export const buildIdentity = typeof RIKA_BUILD_IDENTITY === "string" ? RIKA_BUILD_IDENTITY : "rika-development-build"
 export const replacementGuard = "active-execution-v1" as const
 export const ClientKind = Schema.Literals(["interactive", "run", "review", "workflow", "thread-continue", "product"])

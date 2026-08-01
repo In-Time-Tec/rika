@@ -49,6 +49,8 @@ test(
             "thread-switcher-stacked",
             "narrow-mode-overlay",
             "narrow-palette-overlay",
+            "context-meter",
+            "context-details",
           ]
           for (const scenario of evidenceScenarios) {
             expect(names).toContain(`${scenario}.frame.txt`)

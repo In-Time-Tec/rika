@@ -132,6 +132,7 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
   const controls = yield* Ref.make<ReadonlyArray<ReadonlyArray<unknown>>>([])
   const hiddenExecutions = yield* Ref.make<ReadonlySet<string>>(new Set())
   const transcripts = yield* TranscriptRepository.makeMemory({ turns })
+  const usage = yield* UsageRepository.makeMemory()
   if (initialTurnsCompleted)
     yield* Effect.forEach(initialTurns, (turn) => storeCompletedTranscript(transcripts, turn, turn.lastCursor!), {
       discard: true,
@@ -316,6 +317,7 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
     repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),
     turnRepositoryLayer: Layer.succeed(TurnRepository.Service, selectionTurns),
     transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
+    usageRepositoryLayer: Layer.succeed(UsageRepository.Service, usage),
     backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
     defaultWorkspace: "/work",
     makeThreadId: Effect.die("unused"),
@@ -330,7 +332,7 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
   yield* Ref.set(controls, [])
   const session = (yield* Ref.get(sessions))[0]
   if (session === undefined) return yield* Effect.die("Missing interactive session")
-  return { session, repositories, turns, transcripts, controls, hiddenExecutions, older, latest }
+  return { session, repositories, turns, transcripts, usage, controls, hiddenExecutions, older, latest }
 })
 
 describe("InteractiveSession controls", () => {
@@ -1198,6 +1200,7 @@ describe("InteractiveSession controls", () => {
         selectionEpoch: 2,
         threadId: "latest",
         revision: 0,
+        context: { _tag: "Unavailable" },
         cost: { _tag: "Unavailable" },
         tokens: { _tag: "Unavailable" },
         time: { _tag: "Unavailable" },
@@ -1276,7 +1279,7 @@ describe("InteractiveSession controls", () => {
 
   it.effect("keeps queued turns in the queue and out of the transcript when selecting a thread", () =>
     Effect.gen(function* () {
-      const { session, turns, transcripts, controls, older } = yield* makeHarness()
+      const { session, turns, transcripts, usage, controls, older } = yield* makeHarness()
       const queued = yield* createTurn(turns, {
         id: Turn.TurnId.make("queued-selection"),
         threadId: older.id,
@@ -1299,6 +1302,64 @@ describe("InteractiveSession controls", () => {
       }
       yield* transcripts.copyRecordedShell(shell, ExecutionIngest.projectionVersion)
       yield* completeActive(turns, transcripts, 5)
+      const contextFold = UsageCost.foldBatch(
+        UsageCost.empty,
+        [
+          {
+            threadId: String(older.id),
+            turnId: "active",
+            event: {
+              executionId: "active",
+              cursor: "active-started",
+              sequence: 1,
+              type: "execution.started",
+              createdAt: 3,
+              timestampSource: "server",
+            },
+          },
+          {
+            threadId: String(older.id),
+            turnId: "active",
+            event: {
+              executionId: "active",
+              cursor: "active-usage",
+              sequence: 2,
+              type: "model.usage.reported",
+              createdAt: 4,
+              timestampSource: "server",
+              data: {
+                model_call_id: "active:conversation",
+                model_attempt_id: "active-attempt",
+                attempt: 1,
+                input_tokens: 100,
+                output_tokens: 10,
+              },
+            },
+          },
+          {
+            threadId: String(older.id),
+            turnId: "active",
+            event: {
+              executionId: "active",
+              cursor: "active-completed",
+              sequence: 3,
+              type: "execution.completed",
+              createdAt: 5,
+              timestampSource: "server",
+            },
+          },
+        ],
+        new Set(["active"]),
+      )
+      if (Result.isFailure(contextFold)) return yield* contextFold.failure
+      const source = yield* usage.admitSource("active", "active", String(older.id))
+      yield* usage.commitSource(
+        "active",
+        "active",
+        source.revision,
+        UsageCost.serialize(contextFold.success),
+        UsageCost.materialize(contextFold.success, "active", String(older.id)),
+      )
       const events: Array<Operation.InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
@@ -1315,6 +1376,10 @@ describe("InteractiveSession controls", () => {
       ])
       expect(entries.some((entry) => entry.turn.id === queued.id)).toBe(false)
       expect(entries.some((entry) => entry.turn.id === shell.id)).toBe(true)
+      while (!events.some((event) => event._tag === "ThreadUsageUpdated")) yield* Effect.yieldNow
+      expect(events.find((event) => event._tag === "ThreadUsageUpdated")).toMatchObject({
+        context: { _tag: "Available", inputTokens: 100 },
+      })
       expect(yield* Ref.get(controls)).toEqual([])
     }),
   )
@@ -2420,6 +2485,7 @@ describe("InteractiveSession subagent reload", () => {
         _tag: "ThreadUsageUpdated",
         selectionEpoch: 1,
         threadId: "subagent-thread",
+        context: { _tag: "Available", inputTokens: 20, contextWindow: 372_000, reserveTokens: 128_000 },
         cost: { _tag: "Available", usd: 1.25, unpricedAttempts: 0 },
         tokens: { _tag: "Available", total: 30, uncountedAttempts: 0 },
         time: { _tag: "Available" },
@@ -2957,10 +3023,19 @@ const spendEvents: ReadonlyArray<ExecutionBackend.Event> = [
   stamped("spend-usage", "model.attempt.completed", 20_000, 2, {
     data: { model_attempt_id: "spend-attempt", attempt: 1, cost: { amount: 0.75, currency: "USD" } },
   }),
-  stamped("spend-answer", "model.output.completed", 30_000, 3, { text: "spent" }),
+  stamped("spend-tokens", "model.usage.reported", 25_000, 3, {
+    data: {
+      model_call_id: "spend-call:conversation",
+      model_attempt_id: "spend-attempt",
+      attempt: 1,
+      input_tokens: 100,
+      output_tokens: 10,
+    },
+  }),
+  stamped("spend-answer", "model.output.completed", 30_000, 4, { text: "spent" }),
 ]
 
-const spendCompleted = stamped("spend-completed", "execution.completed", 40_000, 4)
+const spendCompleted = stamped("spend-completed", "execution.completed", 40_000, 5)
 
 const spendTimeline: ReadonlyArray<ExecutionBackend.Event> = [...spendEvents, spendCompleted]
 
@@ -2998,6 +3073,7 @@ const makeSpendHarness = Effect.fn("InteractiveSessionTest.makeSpendHarness")(fu
   readonly gate?: Deferred.Deferred<void>
   readonly turnStatus?: Turn.Status
   readonly legacy?: boolean
+  readonly historyUnavailable?: boolean
 }) {
   const spendTurn: Turn.AgentExecutionTurn = {
     _tag: "AgentExecution",
@@ -3016,14 +3092,27 @@ const makeSpendHarness = Effect.fn("InteractiveSessionTest.makeSpendHarness")(fu
   const repositories = yield* ThreadRepository.makeMemory([spendThread])
   const turns = yield* TurnRepository.makeMemory([spendTurn])
   const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+  const storedProjection = Transcript.project(String(spendTurnId), spendTurn.prompt, spendTimeline)
   const transcripts =
     options.legacy === true
       ? yield* TranscriptRepository.makeMemory({
           initial: [
-            invalidatedProjection(
-              spendTurn,
-              Transcript.project(String(spendTurnId), spendTurn.prompt, spendTimeline).revision,
-            ),
+            {
+              ...invalidatedProjection(spendTurn, storedProjection.revision),
+              units: storedProjection.units,
+              ...Transcript.projectionState(storedProjection),
+              executionCheckpoints: [
+                {
+                  executionKey: Transcript.executionKey(String(spendTurnId)),
+                  executionId: String(spendTurnId),
+                  cursor: spendCompleted.cursor,
+                  sequence: spendCompleted.sequence,
+                  status: "completed",
+                  state: Transcript.projectionState(storedProjection),
+                },
+              ],
+              projectionVersion: ExecutionIngest.projectionVersion,
+            },
           ],
           turns,
         })
@@ -3110,12 +3199,16 @@ const makeSpendHarness = Effect.fn("InteractiveSessionTest.makeSpendHarness")(fu
     pageEvents: (turnId, _direction, cursor) =>
       Ref.update(blocked, (count) => count + 1).pipe(
         Effect.andThen(options.gate === undefined ? Effect.void : Deferred.await(options.gate)),
-        Effect.as({
-          events: cursor === undefined ? spendTimeline : [],
-          hasMore: false,
-          newestCursor: "spend-completed",
-          turnId: String(turnId),
-        }),
+        Effect.andThen(
+          options.historyUnavailable === true
+            ? Effect.fail(ExecutionBackend.BackendError.make({ message: "execution history unavailable" }))
+            : Effect.succeed({
+                events: cursor === undefined ? spendTimeline : [],
+                hasMore: false,
+                newestCursor: "spend-completed",
+                turnId: String(turnId),
+              }),
+        ),
       ),
     resolveInvocationSource: () => Effect.die("unused"),
   })
@@ -3211,7 +3304,7 @@ describe("InteractiveSession persisted usage", () => {
   it.effect("recomputes cost and elapsed time for a legacy turn whose stored fold is unreadable", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>()
-      const { session, usage, transcripts, follows } = yield* makeSpendHarness({
+      const { session, usage, transcripts, follows, blocked } = yield* makeSpendHarness({
         turnStatus: "completed",
         legacy: true,
         gate,
@@ -3222,19 +3315,18 @@ describe("InteractiveSession persisted usage", () => {
         Effect.andThen(TestClock.adjust("1 second")),
         Effect.andThen(Effect.forEach(Array.from({ length: 100 }), () => Effect.yieldNow, { discard: true })),
       )
-      expect((yield* transcripts.get(spendTurnId))?.projectionVersion).toBe(
-        TranscriptRepository.invalidatedProjectionVersion,
-      )
-      expect((yield* transcripts.get(spendTurnId))?.executionCheckpoints).toEqual([])
+      expect((yield* transcripts.get(spendTurnId))?.projectionVersion).toBe(ExecutionIngest.projectionVersion)
+      expect((yield* transcripts.get(spendTurnId))?.executionCheckpoints).toMatchObject([
+        { executionId: spendExecutionId, status: "completed" },
+      ])
       expect((yield* usage.readTurn(String(spendTurnId)))?.costNanoUsd).toBe(750_000_000)
       expect((yield* usage.readTurn(String(spendTurnId)))?.activeMillis).toBeUndefined()
       expect((yield* usage.readThread(String(spendThread.id))).activeMillis).toBeUndefined()
 
       yield* session.selectThread(spendThread.id, 1)
       for (let attempt = 0; attempt < 5; attempt += 1) yield* settle
-      const beforeRefold = events.flatMap((event) => (event._tag === "ThreadUsageUpdated" ? [event] : []))
-      expect(beforeRefold.length).toBeGreaterThan(0)
-      expect(beforeRefold.every((event) => event.time._tag === "Unavailable")).toBe(true)
+      expect(events.some((event) => event._tag === "SelectionLoaded")).toBe(true)
+      expect(events.some((event) => event._tag === "ThreadUsageUpdated")).toBe(false)
 
       yield* Deferred.succeed(gate, undefined)
       for (let attempt = 0; attempt < 10; attempt += 1) yield* settle
@@ -3258,18 +3350,26 @@ describe("InteractiveSession persisted usage", () => {
       expect(availability).toContain("Available")
       expect(availability.slice(availability.indexOf("Available")).includes("Unavailable")).toBe(false)
       expect(updates.at(-1)?.time).toEqual({ _tag: "Available", accumulatedMillis: 30_000 })
+      expect(updates.at(-1)?.context).toEqual({
+        _tag: "Available",
+        inputTokens: 100,
+        contextWindow: 372_000,
+        reserveTokens: 128_000,
+      })
       expect(shown.length).toBeGreaterThan(0)
       expect(Math.max(...shown)).toBe(0.75)
       expect(shown.every((usd) => usd <= 0.75)).toBe(true)
       expect(events.some((event) => event._tag === "ExecutionFailed")).toBe(false)
-      expect(yield* Ref.get(follows)).toBe(1)
+      expect(yield* Ref.get(follows)).toBe(0)
+      expect(yield* Ref.get(blocked)).toBeGreaterThan(0)
     }),
   )
 
-  it.effect("announces the refold while a legacy thread rebuilds and withdraws it once the projection lands", () =>
+  it.effect("backfills legacy usage without invalidating its current transcript", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>()
-      const { session } = yield* makeSpendHarness({ turnStatus: "completed", legacy: true, gate })
+      const { session, transcripts } = yield* makeSpendHarness({ turnStatus: "completed", legacy: true, gate })
+      const before = yield* transcripts.get(spendTurnId)
       const events: Array<Operation.InteractiveEvent> = []
       yield* collectEvents(session, events)
       const settle = Effect.forEach(Array.from({ length: 100 }), () => Effect.yieldNow, { discard: true }).pipe(
@@ -3279,17 +3379,41 @@ describe("InteractiveSession persisted usage", () => {
 
       yield* session.selectThread(spendThread.id, 1)
       for (let attempt = 0; attempt < 5; attempt += 1) yield* settle
-      const announced = events.flatMap((event) => (event._tag === "ThreadRefolding" ? [event] : []))
-      expect(announced.map((event) => event.refolding)).toEqual([true])
-      expect(announced.every((event) => event.threadId === spendThread.id)).toBe(true)
+      expect(events.some((event) => event._tag === "SelectionLoaded")).toBe(true)
+      expect(events.some((event) => event._tag === "ThreadRefolding" && event.refolding)).toBe(false)
 
       yield* Deferred.succeed(gate, undefined)
       for (let attempt = 0; attempt < 10; attempt += 1) yield* settle
 
-      expect(events.flatMap((event) => (event._tag === "ThreadRefolding" ? [event.refolding] : []))).toEqual([
-        true,
-        false,
-      ])
+      expect(events.find((event) => event._tag === "ThreadUsageUpdated")).toMatchObject({
+        context: { _tag: "Available", inputTokens: 100 },
+      })
+      expect(yield* transcripts.get(spendTurnId)).toEqual(before)
+    }),
+  )
+
+  it.effect("keeps a current transcript readable when legacy execution history is unavailable", () =>
+    Effect.gen(function* () {
+      const { session, usage, transcripts } = yield* makeSpendHarness({
+        turnStatus: "completed",
+        legacy: true,
+        historyUnavailable: true,
+      })
+      const before = yield* transcripts.get(spendTurnId)
+      const events: Array<Operation.InteractiveEvent> = []
+      yield* collectEvents(session, events)
+      yield* session.selectThread(spendThread.id, 1)
+      for (let attempt = 0; attempt < 20; attempt += 1) yield* Effect.yieldNow
+
+      expect(events.some((event) => event._tag === "SelectionLoaded")).toBe(true)
+      expect(events.find((event) => event._tag === "ThreadUsageUpdated")).toMatchObject({
+        context: { _tag: "Unavailable" },
+      })
+      expect(events.some((event) => event._tag === "ExecutionFailed")).toBe(false)
+      expect(yield* transcripts.get(spendTurnId)).toEqual(before)
+      expect((yield* usage.loadSourceFold(String(spendTurnId), String(spendTurnId)))?.projectionVersion).toBe(
+        UsageRepository.projectionVersion - 1,
+      )
     }),
   )
 

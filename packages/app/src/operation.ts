@@ -829,6 +829,7 @@ const initializeSelectedUsage = (threadId: Thread.ThreadId, request: number): Th
   selectionEpoch: request,
   threadId,
   revision: 0,
+  context: { _tag: "Unavailable" },
   cost: { _tag: "Unavailable" },
   tokens: { _tag: "Unavailable" },
   time: { _tag: "Unavailable" },
@@ -836,7 +837,9 @@ const initializeSelectedUsage = (threadId: Thread.ThreadId, request: number): Th
 
 const persistedThreadUsage = (
   value: UsageRepository.Aggregate,
-): Pick<ThreadUsageEvent, "cost" | "tokens" | "time"> => ({
+  context: ThreadUsageEvent["context"],
+): Pick<ThreadUsageEvent, "context" | "cost" | "tokens" | "time"> => ({
+  context,
   cost:
     value.costNanoUsd === undefined
       ? { _tag: "Unavailable" }
@@ -1321,11 +1324,41 @@ export const productLayer = <
         ExecutionBackend.Service,
       )
       const usageRepository = Context.get(dependencyContext, UsageRepository.Service)
+      const turnRepository = Context.get(dependencyContext, TurnRepository.Service)
+      let backfillThreadUsage = (_root: ExecutionIngest.Root): Effect.Effect<void> => Effect.void
+      const readThreadContext = Effect.fn("Operation.readThreadContext")(function* (threadId: string) {
+        const turns = yield* turnRepository.list(Thread.ThreadId.make(threadId))
+        const turn = turns
+          .filter(Turn.isAgentExecution)
+          .filter((candidate) => candidate.status !== "queued")
+          .toSorted(
+            (left, right) => right.createdAt - left.createdAt || String(right.id).localeCompare(String(left.id)),
+          )[0]
+        if (turn === undefined) return { _tag: "Unavailable" as const }
+        let source = yield* usageRepository.loadSourceFold(String(turn.id), String(turn.id))
+        if (source !== undefined && source.projectionVersion < UsageRepository.projectionVersion) {
+          yield* backfillThreadUsage({ threadId: turn.threadId, turnId: turn.id })
+          source = yield* usageRepository.loadSourceFold(String(turn.id), String(turn.id))
+        }
+        if (source?.foldJson === undefined || source.projectionVersion !== UsageRepository.projectionVersion)
+          return { _tag: "Unavailable" as const }
+        const decoded = UsageCost.deserialize(source.foldJson)
+        if (Result.isFailure(decoded)) return { _tag: "Unavailable" as const }
+        const reading = UsageCost.executionContext(decoded.success, String(turn.id))
+        if (reading === undefined) return { _tag: "Unavailable" as const }
+        return {
+          _tag: "Available" as const,
+          inputTokens: reading.inputTokens,
+          contextWindow: turn.executionRoute.main.compaction.contextWindow,
+          reserveTokens: turn.executionRoute.main.compaction.reserveTokens,
+        }
+      })
       const publishThreadUsage = Effect.fn("Operation.publishThreadUsage")(function* (
         value: UsageRepository.TurnUsage | undefined,
       ) {
         if (value === undefined) return
         const thread = yield* usageRepository.readThread(value.threadId)
+        const context = yield* readThreadContext(value.threadId)
         const global = yield* usageRepository.readGlobal
         if (thread.costNanoUsd === undefined && thread.tokens === undefined && thread.activeMillis === undefined) return
         publishInteractiveActivity(0, {
@@ -1333,7 +1366,7 @@ export const productLayer = <
           selectionEpoch: 0,
           threadId: Thread.ThreadId.make(value.threadId),
           revision: thread.revision,
-          ...persistedThreadUsage(thread),
+          ...persistedThreadUsage(thread, context),
         })
         if (value.costNanoUsd !== undefined && thread.costNanoUsd !== undefined && global.costNanoUsd !== undefined)
           publishInteractiveActivity(0, {
@@ -1487,6 +1520,7 @@ export const productLayer = <
             message: ingestFailureMessage,
           }),
       })
+      backfillThreadUsage = executionIngest.backfillUsage
       yield* Effect.forkIn(
         Effect.gen(function* () {
           while (true) {
@@ -3048,13 +3082,14 @@ export const productLayer = <
               yield* Effect.forkIn(
                 Effect.gen(function* () {
                   const totals = yield* usageRepository.readThread(String(state.thread.id))
+                  const context = yield* readThreadContext(String(state.thread.id))
                   if (activeSelectionState !== state) return
                   dispatch({
                     _tag: "ThreadUsageUpdated",
                     selectionEpoch: state.epoch,
                     threadId: state.thread.id,
                     revision: totals.revision,
-                    ...persistedThreadUsage(totals),
+                    ...persistedThreadUsage(totals, context),
                   })
                 }).pipe(Effect.provide(executionDependencies)),
                 sessionScope,

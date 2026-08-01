@@ -107,6 +107,29 @@ const fold = (
   events.reduce((current, event) => UsageCost.observe(current, { ...input, event }), snapshot)
 
 describe("UsageCost", () => {
+  it("tracks the latest exact input context for each execution without summing root and child contexts", () => {
+    const snapshot = fold([
+      { ...reportedTokens("root-1", "gpt-5.6-sol", 100, 10), executionId: "execution:turn", sequence: 1 },
+      { ...reportedTokens("child-1", "gpt-5.6-sol", 800, 20), executionId: "child:turn:call", sequence: 2 },
+      { ...reportedTokens("root-2", "gpt-5.6-sol", 240, 30), executionId: "execution:turn", sequence: 3 },
+      {
+        ...reportedTokens("summary", "gpt-5.6-sol", 900, 40, {
+          model_call_id: "execution:turn:model-call:3:compaction-summary",
+        }),
+        executionId: "execution:turn",
+        sequence: 4,
+      },
+    ])
+
+    expect(UsageCost.executionContext(snapshot, "turn")).toMatchObject({ inputTokens: 240, sequence: 3 })
+    expect(UsageCost.executionContext(snapshot, "child:turn:call")).toMatchObject({ inputTokens: 800, sequence: 2 })
+    expect(UsageCost.executionContext(UsageCost.deserialize(UsageCost.serialize(snapshot)), "turn")).toMatchObject({
+      inputTokens: 240,
+      sequence: 3,
+    })
+    expect(UsageCost.threadTotals(snapshot, "thread").tokens).toBe(2_140)
+  })
+
   it.each([
     ["missing-server-stamp", unstampedLifecycle("execution", "start", "execution.started", 1, 1)],
     ["invalid-identity", lifecycle("", "start", "execution.started", 1, 1)],

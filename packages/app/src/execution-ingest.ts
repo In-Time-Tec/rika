@@ -112,6 +112,7 @@ export interface Options {
 
 export interface Interface {
   readonly ensure: (root: Root) => Effect.Effect<void, Failure>
+  readonly backfillUsage: (root: Root) => Effect.Effect<void>
   readonly watchThread: (threadId: Thread.ThreadId) => Effect.Effect<ProjectionWatch, never, Scope.Scope>
   readonly deliver: (turnId: Turn.TurnId, event: ExecutionBackend.Event) => void
   readonly consumed: (turnId: Turn.TurnId) => Effect.Effect<void, Failure>
@@ -435,6 +436,8 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
   const commitEvents = Math.max(1, Math.floor(options.commitEvents ?? defaultCommitEvents))
   const watchCapacity = Math.max(1, Math.floor(options.watchCapacity ?? defaultWatchCapacity))
   const admission = yield* Semaphore.make(1)
+  const usageBackfillAdmission = yield* Semaphore.make(1)
+  const usageBackfills = new Map<string, Deferred.Deferred<void>>()
   const pipelines = new Map<string, Pipeline>()
   const failedPipelines = new Map<string, Failure>()
   const watchers = new Map<string, Map<number, Watcher>>()
@@ -1167,6 +1170,90 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
       }
     })
 
+  const readUsageBackfillEvents = (executionId: string, reference: ExecutionBackend.ExecutionReference | undefined) =>
+    Effect.gen(function* () {
+      if (options.backend.pageEvents === undefined)
+        return (yield* options.backend.replay(executionId, undefined, reference)).events.toSorted(bySequence)
+      const events: Array<ExecutionBackend.Event> = []
+      const cursors = new Set<string>()
+      let after: string | undefined
+      while (true) {
+        const page = yield* options.backend.pageEvents(executionId, "forward", after, 200, reference)
+        events.push(...page.events.toSorted(bySequence))
+        if (!page.hasMore) return events
+        const next = page.newestCursor
+        if (page.events.length === 0 || next === undefined || next === after || cursors.has(next))
+          return yield* ExecutionBackend.BackendError.make({
+            message: `Execution ${executionId} usage backfill did not advance after ${after ?? "start"}`,
+          })
+        cursors.add(next)
+        after = next
+      }
+    })
+
+  const backfillStoredUsage = Effect.fn("ExecutionIngest.backfillStoredUsage")(function* (
+    root: Root,
+    stored: TranscriptRepository.Projection,
+    source: UsageRepository.SourceUsage,
+  ) {
+    const checkpoints = [
+      ...new Map(stored.executionCheckpoints.map((checkpoint) => [checkpoint.executionId, checkpoint])).values(),
+    ]
+    const replayed = yield* Effect.result(
+      Effect.forEach(checkpoints, (checkpoint) =>
+        readUsageBackfillEvents(
+          checkpoint.executionId,
+          checkpoint.executionId === String(root.turnId) ? undefined : ExecutionBackend.executionReference,
+        ),
+      ),
+    )
+    if (replayed._tag === "Failure") return
+    const events = replayed.success.flat()
+    const terminalExecutions = new Set(
+      checkpoints.flatMap((checkpoint) => (checkpoint.status === undefined ? [] : [checkpoint.executionId])),
+    )
+    const folded = UsageCost.foldBatch(
+      UsageCost.empty,
+      events.map((event) => ({ threadId: String(root.threadId), turnId: String(root.turnId), event })),
+      terminalExecutions,
+    )
+    if (Result.isFailure(folded)) return
+    const totals = {
+      ...UsageCost.materialize(folded.success, String(root.turnId), String(root.threadId)),
+      sourceComplete: true,
+    }
+    const replacement = yield* Effect.result(
+      options.usage.replaceSource(
+        String(root.turnId),
+        String(root.turnId),
+        String(root.threadId),
+        source.projectionVersion,
+        source.revision,
+        UsageCost.serialize(folded.success),
+        totals,
+      ),
+    )
+    if (replacement._tag === "Failure") {
+      yield* Effect.logWarning("execution.usage_backfill.commit_failed").pipe(
+        Effect.annotateLogs({
+          "rika.thread.id": String(root.threadId),
+          "rika.turn.id": String(root.turnId),
+          ...Diagnostic.failure("UsageProjectionFailure"),
+        }),
+      )
+      return
+    }
+    if (replacement.success._tag === "Applied")
+      options.onCommitted?.({
+        threadId: root.threadId,
+        rootTurnId: root.turnId,
+        revision: stored.revision,
+        terminal: true,
+        usageChanged: true,
+        refolded: false,
+      })
+  })
+
   const followNode = (pipeline: Pipeline, node: Node) =>
     Effect.gen(function* () {
       if (node.status !== undefined) return
@@ -1583,8 +1670,53 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
     )
   })
 
+  const backfillUsage = Effect.fn("ExecutionIngest.backfillUsage")(function* (root: Root) {
+    const key = String(root.turnId)
+    const claim = yield* usageBackfillAdmission.withPermits(1)(
+      Effect.gen(function* () {
+        const active = usageBackfills.get(key)
+        if (active !== undefined) return { owner: false as const, deferred: active }
+        const deferred = yield* Deferred.make<void>()
+        usageBackfills.set(key, deferred)
+        return { owner: true as const, deferred }
+      }),
+    )
+    if (!claim.owner) return yield* Deferred.await(claim.deferred)
+    const loaded = Effect.result(
+      Effect.gen(function* () {
+        const turn = yield* options.turns.get(root.turnId)
+        if (turn === undefined || !Turn.isAgentExecution(turn) || !isTerminalStatus(turn.status)) return
+        const stored = yield* options.transcripts.get(root.turnId)
+        if (stored === undefined || stored.projectionVersion !== projectionVersion) return
+        const source = yield* options.usage.readSource(String(root.turnId), String(root.turnId))
+        if (source === undefined || source.projectionVersion >= UsageRepository.projectionVersion) return
+        yield* backfillStoredUsage(root, stored, source)
+      }),
+    ).pipe(
+      Effect.flatMap((result) =>
+        result._tag === "Failure"
+          ? Effect.logWarning("execution.usage_backfill.load_failed").pipe(
+              Effect.annotateLogs({
+                "rika.thread.id": String(root.threadId),
+                "rika.turn.id": String(root.turnId),
+                ...Diagnostic.failure("UsageProjectionFailure"),
+              }),
+            )
+          : Effect.void,
+      ),
+      Effect.ensuring(
+        Effect.sync(() => usageBackfills.delete(key)).pipe(
+          Effect.andThen(Deferred.succeed(claim.deferred, undefined)),
+          Effect.asVoid,
+        ),
+      ),
+    )
+    yield* loaded
+  })
+
   return {
     ensure,
+    backfillUsage,
     watchThread,
     deliver: (turnId, event) => {
       const pipeline = pipelines.get(String(turnId))

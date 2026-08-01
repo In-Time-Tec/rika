@@ -66,10 +66,64 @@ const busyQueueModel = (model: ViewState.Model): ViewState.Model => ({
 })
 
 describe("ViewState", () => {
-  test("cycles cost, tokens, and active time", () => {
-    expect(ViewState.nextUsageDisplay("cost")).toBe("tokens")
-    expect(ViewState.nextUsageDisplay("tokens")).toBe("time")
-    expect(ViewState.nextUsageDisplay("time")).toBe("cost")
+  test("toggles context details with Ctrl+Y and Escape", () => {
+    const initial = ViewState.initial("/work")
+    const clicked = ViewState.update(
+      {
+        ...initial,
+        threadSwitcher: { open: true, query: "old", selected: 0, kind: "switch", previewScroll: 0 },
+        shortcutsOpen: true,
+      },
+      { _tag: "ContextDetailsToggled" },
+    )
+    expect(clicked.contextDetailsOpen).toBe(true)
+    expect(clicked.threadSwitcher.open).toBe(false)
+    expect(clicked.shortcutsOpen).toBe(false)
+    const fromSwitcher = ViewState.update(
+      {
+        ...initial,
+        threadSwitcher: { open: true, query: "old", selected: 0, kind: "switch", previewScroll: 0 },
+      },
+      { _tag: "KeyPressed", key: key({ name: "y", ctrl: true }) },
+    )
+    expect(fromSwitcher.contextDetailsOpen).toBe(true)
+    expect(fromSwitcher.threadSwitcher.open).toBe(false)
+    const fromNarrowSidebar = ViewState.update(
+      {
+        ...initial,
+        width: 24,
+        threadSidebar: { open: true, focused: true, selected: 0, scrollTop: 0 },
+      },
+      { _tag: "ContextDetailsToggled" },
+    )
+    expect(fromNarrowSidebar.contextDetailsOpen).toBe(true)
+    expect(fromNarrowSidebar.threadSidebar.open).toBe(false)
+    const sidebarReopen = ViewState.update(fromNarrowSidebar, {
+      _tag: "KeyPressed",
+      key: key({ name: "\\", sequence: "\u001c", ctrl: true }),
+    })
+    expect(sidebarReopen.threadSidebar.open).toBe(false)
+    const resized = ViewState.update(
+      {
+        ...initial,
+        contextDetailsOpen: true,
+        threadSidebar: { open: true, focused: false, selected: 0, scrollTop: 0 },
+      },
+      { _tag: "Resized", width: 24, height: 12 },
+    )
+    expect(resized.threadSidebar.open).toBe(false)
+    const open = ViewState.update(initial, { _tag: "KeyPressed", key: key({ name: "y", ctrl: true }) })
+    expect(open.contextDetailsOpen).toBe(true)
+    const closed = ViewState.update(open, { _tag: "KeyPressed", key: key({ name: "escape" }) })
+    expect(closed.contextDetailsOpen).toBe(false)
+    const palette = {
+      ...closed,
+      paletteOpen: true,
+      palette: { open: true, query: "context", selected: 0 },
+    }
+    expect(ViewState.update(palette, { _tag: "KeyPressed", key: key({ name: "return" }) }).contextDetailsOpen).toBe(
+      true,
+    )
   })
 
   test.each([
@@ -154,7 +208,7 @@ describe("ViewState", () => {
     )
   })
 
-  test("exposes only thread switch, mode change, fast mode, and quit in the command palette", () => {
+  test("exposes thread, mode, context, fast mode, and quit in the command palette", () => {
     expect(Palette.commands).toEqual([
       {
         id: "threads",
@@ -169,6 +223,13 @@ describe("ViewState", () => {
         label: "change mode",
         keybinding: "Ctrl+S",
         action: { _tag: "OpenModePicker" },
+      },
+      {
+        id: "context",
+        category: "usage",
+        label: "show context and usage",
+        keybinding: "Ctrl+Y",
+        action: { _tag: "ToggleContextDetails" },
       },
       { id: "fast-mode", category: "rika", label: "toggle fast mode", action: { _tag: "ToggleFastMode" } },
       {

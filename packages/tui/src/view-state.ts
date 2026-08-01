@@ -36,16 +36,19 @@ export const UsageTime = Schema.Union([
 ])
 export type UsageTime = typeof UsageTime.Type
 
-export const UsageDisplay = Schema.Literals(["cost", "tokens", "time"])
-export type UsageDisplay = typeof UsageDisplay.Type
+export const ContextUsage = Schema.Union([
+  Schema.Struct({ _tag: Schema.tag("Loading") }),
+  Schema.Struct({ _tag: Schema.tag("Unavailable") }),
+  Schema.Struct({
+    _tag: Schema.tag("Available"),
+    inputTokens: Schema.Finite,
+    contextWindow: Schema.Finite,
+    reserveTokens: Schema.Finite,
+  }),
+])
+export type ContextUsage = typeof ContextUsage.Type
 
 export const nextMode = (mode: Mode): Mode => modeIds[(modeIds.indexOf(mode) + 1) % modeIds.length]!
-
-export const nextUsageDisplay = (display: UsageDisplay | undefined): UsageDisplay => {
-  if (display === "cost" || display === undefined) return "tokens"
-  if (display === "tokens") return "time"
-  return "cost"
-}
 
 export const activeTimeAt: {
   (time: Extract<UsageTime, { readonly _tag: "Available" }>, now: number): Duration.Duration
@@ -462,7 +465,8 @@ export const Model = Schema.Struct({
   busy: Schema.Boolean,
   activity: Schema.optional(Activity),
   costUsd: Schema.optional(Schema.Finite),
-  usageDisplay: Schema.optional(UsageDisplay),
+  contextUsage: Schema.optional(ContextUsage),
+  contextDetailsOpen: Schema.Boolean,
   usageTime: Schema.optional(UsageTime),
   usageTokens: Schema.optional(
     Schema.Union([
@@ -521,6 +525,7 @@ export type Model = typeof Model.Type
 
 export type Message =
   | { readonly _tag: "KeyPressed"; readonly key: Key }
+  | { readonly _tag: "ContextDetailsToggled" }
   | { readonly _tag: "Pasted"; readonly text: string }
   | { readonly _tag: "ImageInserted"; readonly path: string }
   | { readonly _tag: "ImageRemoved"; readonly path: string }
@@ -737,7 +742,8 @@ export const initial: {
     pendingSteering: [],
     cancelPending: false,
     busy: false,
-    usageDisplay: "cost",
+    contextUsage: { _tag: "Loading" },
+    contextDetailsOpen: false,
     paletteOpen: false,
     palette: { open: false, query: "", selected: 0 },
     modePicker: { open: false, selected: 0 },
@@ -1096,14 +1102,37 @@ export const canSubmit = (model: Model): boolean =>
   !model.palette.open &&
   !model.modePicker.open &&
   !model.filePicker.open &&
+  !model.contextDetailsOpen &&
   !model.shortcutsOpen &&
   !(model.cursor > 0 && model.input[model.cursor - 1] === "\\")
+
+const toggleContextDetails = (model: Model): Model => {
+  const open = !model.contextDetailsOpen
+  return {
+    ...model,
+    contextDetailsOpen: open,
+    threadSidebar:
+      open && contentColumnWidth(model) < 24
+        ? { ...model.threadSidebar, open: false, focused: false }
+        : model.threadSidebar,
+    paletteOpen: false,
+    palette: { open: false, query: "", selected: 0 },
+    modePicker: { ...model.modePicker, open: false },
+    filePicker: { ...model.filePicker, open: false, query: "", selected: 0 },
+    threadSwitcher: { open: false, query: "", selected: 0, kind: "switch", previewScroll: 0 },
+    threadPreview: idle,
+    shortcutsOpen: false,
+    shortcutsTrigger: undefined,
+  }
+}
 
 export const update: {
   (model: Model, message: Message): Model
   (message: Message): (model: Model) => Model
 } = Function.dual(2, (model: Model, message: Message): Model => {
   switch (message._tag) {
+    case "ContextDetailsToggled":
+      return toggleContextDetails(model)
     case "Pasted": {
       const next = insertPaste(model, message.text)
       return model.shortcutsOpen ? continueShortcutsAfterEdit(model, next) : next
@@ -1287,14 +1316,18 @@ export const update: {
           ...(model.busy ? { activity: activityForIncomingBlock() } : {}),
         }
       }
-    case "Resized":
-      return {
+    case "Resized": {
+      const resized = {
         ...model,
         width: message.width,
         height: message.height,
         composerHeight: Math.min(model.composerHeight, composerHeightLimit(message.height)),
         sidebarWidth: clampSidebarWidth(model.sidebarWidth, message.width),
       }
+      return resized.contextDetailsOpen && contentColumnWidth(resized) < 24
+        ? { ...resized, threadSidebar: { ...resized.threadSidebar, open: false, focused: false } }
+        : resized
+    }
     case "ComposerHeightChanged":
       return {
         ...model,
@@ -1758,7 +1791,7 @@ export const update: {
           }
           return { ...model, threadSidebar: { ...model.threadSidebar, focused: true } }
         }
-        return {
+        const opened = {
           ...model,
           threadSidebar: {
             open: true,
@@ -1767,7 +1800,9 @@ export const update: {
             scrollTop: Math.max(0, currentIndex - model.height + 1),
           },
         }
+        return model.contextDetailsOpen && contentColumnWidth(opened) < 24 ? model : opened
       }
+      if (key.ctrl && key.name === "y") return toggleContextDetails(model)
       if (model.threadSidebar.open && model.threadSidebar.focused) {
         if (key.name === "escape") return { ...model, threadSidebar: { ...model.threadSidebar, focused: false } }
         if (key.name === "up") return update(model, { _tag: "ThreadSidebarSelectionMoved", offset: -1 })
@@ -1786,6 +1821,7 @@ export const update: {
         )
         return {
           ...model,
+          contextDetailsOpen: false,
           threadSwitcher: { open, query: "", selected, kind: "switch", previewScroll: 0 },
           paletteOpen: false,
           palette: { open: false, query: "", selected: 0 },
@@ -1900,6 +1936,7 @@ export const update: {
         const open = !model.palette.open
         return {
           ...model,
+          contextDetailsOpen: false,
           paletteOpen: open,
           palette: { open, query: "", selected: 0 },
           modePicker: { ...model.modePicker, open: false },
@@ -1911,6 +1948,7 @@ export const update: {
         return insert(
           {
             ...model,
+            contextDetailsOpen: false,
             paletteOpen: false,
             palette: { open: false, query: "", selected: 0 },
             modePicker: { ...model.modePicker, open: false },
@@ -1924,6 +1962,7 @@ export const update: {
           return { ...model, modePicker: { open: true, selected: (model.modePicker.selected + 1) % 4 } }
         return {
           ...model,
+          contextDetailsOpen: false,
           paletteOpen: false,
           palette: { open: false, query: "", selected: 0 },
           modePicker: { open: true, selected: modeIds.indexOf(model.mode) },
@@ -1957,10 +1996,15 @@ export const update: {
       if (key.alt && key.name === "s") return update(model, { _tag: "SidebarViewToggled" })
       if (
         key.name === "escape" &&
-        (model.palette.open || model.modePicker.open || model.filePicker.open || model.shortcutsOpen)
+        (model.contextDetailsOpen ||
+          model.palette.open ||
+          model.modePicker.open ||
+          model.filePicker.open ||
+          model.shortcutsOpen)
       )
         return {
           ...model,
+          contextDetailsOpen: false,
           paletteOpen: false,
           palette: { open: false, query: "", selected: 0 },
           modePicker: { ...model.modePicker, open: false },
@@ -1968,6 +2012,7 @@ export const update: {
           shortcutsOpen: false,
           shortcutsTrigger: undefined,
         }
+      if (model.contextDetailsOpen) return model
       if (model.shortcutsOpen) {
         if (questionKey(key)) return { ...model, shortcutsOpen: false, shortcutsTrigger: undefined }
         if (isPrintable(key)) return insertWhileShortcutsOpen(model, key.sequence)
@@ -2027,6 +2072,7 @@ export const update: {
               palette: { open: false, query: "", selected: 0 },
               fastMode: !model.fastMode,
             }
+          if (action._tag === "ToggleContextDetails") return toggleContextDetails(model)
           return {
             ...model,
             paletteOpen: false,

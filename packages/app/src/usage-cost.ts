@@ -26,6 +26,14 @@ export const noTotals: Totals = {
   uncountedAttempts: 0,
 }
 
+export interface ContextReading {
+  readonly inputTokens: number
+  readonly sequence: number
+  readonly modelCallId: string
+  readonly modelAttemptId: string
+  readonly attempt: number
+}
+
 export interface Snapshot {
   readonly turns: ReadonlyMap<string, Totals>
   readonly threads: ReadonlyMap<string, Totals>
@@ -33,6 +41,7 @@ export interface Snapshot {
   readonly deliveries: ReadonlyMap<string, DeliveryIdentity>
   readonly attempts: ReadonlyMap<string, AttemptCost>
   readonly executionAttempts: ReadonlyMap<string, ReadonlySet<string>>
+  readonly executionContexts: ReadonlyMap<string, ContextReading>
   readonly activeEvents: ReadonlyMap<string, ActiveEvent>
   readonly executionEvents: ReadonlyMap<string, ReadonlyArray<ActiveEvent>>
 }
@@ -145,7 +154,7 @@ export interface AttemptCost {
   readonly tokens: AttemptTokens
 }
 
-export const foldVersion = 6
+export const foldVersion = 7
 
 export const empty: Snapshot = {
   turns: new Map(),
@@ -154,6 +163,7 @@ export const empty: Snapshot = {
   deliveries: new Map(),
   attempts: new Map(),
   executionAttempts: new Map(),
+  executionContexts: new Map(),
   activeEvents: new Map(),
   executionEvents: new Map(),
 }
@@ -171,6 +181,7 @@ interface MutableUsage {
   deliveries: Map<string, DeliveryIdentity>
   attempts: Map<string, AttemptCost>
   executionAttempts: Map<string, Set<string>>
+  executionContexts: Map<string, ContextReading>
   activeEvents: Map<string, ActiveEvent>
   executionEvents: Map<string, Array<ActiveEvent>>
 }
@@ -182,6 +193,7 @@ interface UsageChanged {
   deliveries: boolean
   attempts: boolean
   executionAttempts: boolean
+  executionContexts: boolean
   activeEvents: boolean
   executionEvents: boolean
 }
@@ -214,6 +226,7 @@ const mutableFromSnapshot = (snapshot: Snapshot): MutableUsage => ({
   deliveries: new Map(snapshot.deliveries),
   attempts: new Map(snapshot.attempts),
   executionAttempts: cloneExecutionAttempts(snapshot.executionAttempts),
+  executionContexts: new Map(snapshot.executionContexts),
   activeEvents: new Map(snapshot.activeEvents),
   executionEvents: cloneExecutionEvents(snapshot.executionEvents),
 })
@@ -225,6 +238,7 @@ const unchangedUsageChanged = (): UsageChanged => ({
   deliveries: false,
   attempts: false,
   executionAttempts: false,
+  executionContexts: false,
   activeEvents: false,
   executionEvents: false,
 })
@@ -264,6 +278,7 @@ export const usageFoldChanged = (fold: UsageFold): boolean => {
     changed.deliveries ||
     changed.attempts ||
     changed.executionAttempts ||
+    changed.executionContexts ||
     changed.activeEvents ||
     changed.executionEvents
   )
@@ -281,6 +296,9 @@ export const snapshotUsageFold = (fold: UsageFold): Snapshot => {
     executionAttempts: value.changed.executionAttempts
       ? cloneExecutionAttempts(value.mutable.executionAttempts)
       : value.published.executionAttempts,
+    executionContexts: value.changed.executionContexts
+      ? new Map(value.mutable.executionContexts)
+      : value.published.executionContexts,
     activeEvents: value.changed.activeEvents ? new Map(value.mutable.activeEvents) : value.published.activeEvents,
     executionEvents: value.changed.executionEvents
       ? cloneExecutionEvents(value.mutable.executionEvents)
@@ -300,6 +318,7 @@ type SerializedSnapshot = {
   readonly deliveries: ReadonlyArray<readonly [string, DeliveryIdentity]>
   readonly attempts: ReadonlyArray<readonly [string, AttemptCost]>
   readonly executionAttempts: ReadonlyArray<readonly [string, ReadonlyArray<string>]>
+  readonly executionContexts: ReadonlyArray<readonly [string, ContextReading]>
   readonly activeEvents: ReadonlyArray<readonly [string, ActiveEvent]>
   readonly executionEvents: ReadonlyArray<readonly [string, ReadonlyArray<ActiveEvent>]>
 }
@@ -313,6 +332,7 @@ export const serialize = (snapshot: Snapshot): string =>
     deliveries: [...snapshot.deliveries],
     attempts: [...snapshot.attempts],
     executionAttempts: [...snapshot.executionAttempts].map(([key, values]) => [key, [...values]]),
+    executionContexts: [...snapshot.executionContexts],
     activeEvents: [...snapshot.activeEvents],
     executionEvents: [...snapshot.executionEvents],
   } satisfies SerializedSnapshot)
@@ -340,6 +360,7 @@ export const deserialize = (json: string): Result.Result<Snapshot, ProjectionFai
       deliveries: new Map(value.deliveries),
       attempts: new Map(value.attempts),
       executionAttempts: new Map(value.executionAttempts.map(([key, values]) => [key, new Set(values)])),
+      executionContexts: new Map(value.executionContexts),
       activeEvents: new Map(value.activeEvents),
       executionEvents: new Map(value.executionEvents),
     })
@@ -387,6 +408,13 @@ const isAttempt = (value: unknown): value is AttemptCost =>
   isString(value.turnId) &&
   isPricing(value.cost) &&
   isTokens(value.tokens)
+const isContextReading = (value: unknown): value is ContextReading =>
+  isRecord(value) &&
+  isFiniteNumber(value.inputTokens) &&
+  isFiniteNumber(value.sequence) &&
+  isString(value.modelCallId) &&
+  isString(value.modelAttemptId) &&
+  isFiniteNumber(value.attempt)
 const isActiveEvent = (value: unknown): value is ActiveEvent =>
   isRecord(value) &&
   isString(value.key) &&
@@ -404,6 +432,7 @@ const isSerializedSnapshot = (value: Readonly<Record<string, unknown>>): value i
   isEntries(value.deliveries, isDelivery) &&
   isEntries(value.attempts, isAttempt) &&
   isEntries(value.executionAttempts, (item) => Array.isArray(item) && item.every(isString)) &&
+  isEntries(value.executionContexts, isContextReading) &&
   isEntries(value.activeEvents, isActiveEvent) &&
   isEntries(value.executionEvents, (item) => Array.isArray(item) && item.every(isActiveEvent))
 
@@ -617,6 +646,14 @@ const stringField = (data: Readonly<Record<string, unknown>> | undefined, name: 
   return typeof value === "string" && value.length > 0 ? value : undefined
 }
 
+const integerField = (data: Readonly<Record<string, unknown>> | undefined, name: string) => {
+  const value = data?.[name]
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined
+}
+
+const isConversationCall = (modelCallId: string): boolean =>
+  !modelCallId.endsWith(":compaction-summary") && !modelCallId.endsWith(":structured-output")
+
 const canonicalJson = (value: unknown): string => {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`
   if (isRecord(value))
@@ -725,6 +762,13 @@ export const threadTotals: {
   (snapshot: Snapshot, threadId: string): Totals
   (threadId: string): (snapshot: Snapshot) => Totals
 } = Function.dual(2, (snapshot: Snapshot, threadId: string): Totals => snapshot.threads.get(threadId) ?? noTotals)
+
+export const executionContext: {
+  (snapshot: Snapshot, executionId: string): ContextReading | undefined
+  (executionId: string): (snapshot: Snapshot) => ContextReading | undefined
+} = Function.dual(2, (snapshot: Snapshot, executionId: string): ContextReading | undefined =>
+  snapshot.executionContexts.get(Transcript.executionKey(executionId)),
+)
 
 const addScopeMutable = (scope: Map<string, Totals>, key: string, delta: Totals): void => {
   scope.set(key, accumulate(scope.get(key) ?? noTotals, delta))
@@ -988,6 +1032,42 @@ const applyAttempt = (
         decoded._tag === "Available"
           ? countedTokens(current.tokens, decoded.total)
           : uncountable(current.tokens, "usage-uncountable"),
+    }
+    const inputTokens = Transcript.usageInputTokens(event.data ?? {})
+    const modelCallId = stringField(event.data, "model_call_id")
+    const attempt = integerField(event.data, "attempt")
+    if (
+      inputTokens._tag === "Available" &&
+      modelCallId !== undefined &&
+      isConversationCall(modelCallId) &&
+      attempt !== undefined &&
+      Number.isSafeInteger(event.sequence) &&
+      event.sequence >= 0
+    ) {
+      const reading: ContextReading = {
+        inputTokens: inputTokens.total,
+        sequence: event.sequence,
+        modelCallId,
+        modelAttemptId: attemptId,
+        attempt,
+      }
+      const previousReading = value.mutable.executionContexts.get(event.executionId)
+      if (previousReading?.sequence === event.sequence && canonicalJson(previousReading) !== canonicalJson(reading))
+        return Result.fail(
+          ProjectionFailure.make({
+            reason: "duplicate-sequence",
+            message: "Context usage sequence has conflicting content",
+            threadId: input.threadId,
+            turnId: input.turnId,
+            executionId: event.executionId,
+            cursor: event.cursor,
+            sequence: event.sequence,
+          }),
+        )
+      if (previousReading === undefined || event.sequence > previousReading.sequence) {
+        value.mutable.executionContexts.set(event.executionId, reading)
+        value.changed.executionContexts = true
+      }
     }
   } else if (event.type === "model.attempt.failed") {
     next = settle(current, "attempt-failed")

@@ -2112,7 +2112,7 @@ describe("Surface", () => {
       for (const [mode] of modeColors) {
         surface.update(model({ mode, busy: true, activity: { _tag: "Sending" } }))
         expect(surface.inputBox.title).toBe("")
-        expect(modeLabelText()).toBe(` $···· ─ ${mode} `)
+        expect(modeLabelText()).toBe(` ${mode} `)
         expect(surface.inputBox.borderColor).toEqual(opentui.RGBA.fromIndex(7))
         expect(surface.statusLabel.content).toEqual(
           expect.objectContaining({
@@ -2120,63 +2120,37 @@ describe("Surface", () => {
           }),
         )
       }
-      surface.update(model({ mode: "medium", busy: false, costUsd: 0.0074 }))
-      expect(modeLabelText()).toBe(" $0.007 ─ medium ")
       surface.update(
         model({
+          currentThreadId: "thread",
           mode: "medium",
-          busy: false,
-          costUsd: 5.4449,
-          usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 2 },
+          contextUsage: {
+            _tag: "Available",
+            inputTokens: 208_294,
+            contextWindow: 1_050_000,
+            reserveTokens: 128_000,
+          },
         }),
       )
-      expect(modeLabelText()).toBe(" $— ─ medium ")
+      expect(modeLabelText()).toBe(" ctx █▊░░░░░░ 23% ─ medium ")
+      surface.update(model({ currentThreadId: "thread", mode: "medium", contextUsage: { _tag: "Loading" } }))
+      expect(modeLabelText()).toBe(" ctx ◆·······   — ─ medium ")
+      surface.update(model({ currentThreadId: "thread", mode: "medium", contextUsage: { _tag: "Unavailable" } }))
+      expect(modeLabelText()).toBe(" ctx ░░░░░░░░   — ─ medium ")
       surface.update(
         model({
+          currentThreadId: "thread",
           mode: "medium",
-          busy: false,
-          costUsd: 0.0074,
-          usageCost: { _tag: "Available", usd: 0.0074, unpricedAttempts: 1 },
+          activity: { _tag: "Compacting" },
+          contextUsage: {
+            _tag: "Available",
+            inputTokens: 900_000,
+            contextWindow: 1_050_000,
+            reserveTokens: 128_000,
+          },
         }),
       )
-      expect(modeLabelText()).toBe(" $— ─ medium ")
-      surface.update(
-        model({
-          mode: "medium",
-          busy: false,
-          usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 2 },
-        }),
-      )
-      expect(modeLabelText()).toBe(" $— ─ medium ")
-      surface.update(model({ mode: "medium", busy: false, costUsd: 5.4449, fastMode: true }))
-      expect(modeLabelText()).toBe(" $5.44 ─ ↯medium ")
-      const globalTotalUsd = 12.34
-      surface.update(model({ mode: "medium", busy: false, costUsd: globalTotalUsd }))
-      expect(modeLabelText()).toBe(" $12.34 ─ medium ")
-      surface.update(model({ mode: "medium", usageCost: { _tag: "Loading" } }))
-      expect(modeLabelText()).toBe(" $···· ─ medium ")
-      surface.update(model({ mode: "medium", usageCost: { _tag: "Unavailable" } }))
-      expect(modeLabelText()).toBe(" $— ─ medium ")
-      surface.update(
-        model({
-          mode: "medium",
-          usageDisplay: "tokens",
-          usageTokens: { _tag: "Available", total: 40_100_000, uncountedAttempts: 0 },
-        }),
-      )
-      expect(modeLabelText()).toBe(" 40.1M tok ─ medium ")
-      surface.update(
-        model({
-          mode: "medium",
-          usageDisplay: "time",
-          usageTime: { _tag: "Available", accumulatedMillis: 103_000 },
-        }),
-      )
-      expect(modeLabelText()).toBe(" ◷ 1m 43s ─ medium ")
-      surface.update(model({ mode: "medium", usageDisplay: "time", usageTime: { _tag: "Loading" } }))
-      expect(modeLabelText()).toBe(" ◷ ···· ─ medium ")
-      surface.update(model({ mode: "medium", usageDisplay: "time", usageTime: { _tag: "Unavailable" } }))
-      expect(modeLabelText()).toBe(" ◷ — ─ medium ")
+      expect(modeLabelText()).toBe(" ctx ▓▒▓▒▓▒▓▒   ↻ ─ medium ")
 
       surface.update(
         model({
@@ -2211,26 +2185,109 @@ describe("Surface", () => {
         .join("")
       expect(paletteText).toContain("thread")
       expect(paletteText).toContain("change mode")
+      expect(paletteText).toContain("show context and usage")
       expect(paletteText).toContain("toggle fast mode")
       expect(paletteText).toContain("quit")
       expect(paletteText).not.toContain("run prompt")
-      expect(paletteText).not.toContain("show context and cost")
       expect(paletteText).not.toContain("review workspace changes")
       expect(paletteText).not.toContain("changed files")
       expect(opentui.requestRender.mock.calls.length).toBeGreaterThanOrEqual(7)
     }),
   )
 
-  it.effect("routes usage-label clicks to the local display toggle", () =>
+  it.effect("keeps the context pointer target fixed across lifecycle states", () =>
     Effect.gen(function* () {
-      const usageToggle = vi.fn()
-      const { surface } = yield* createScoped({ ...handlers(), usageToggle })
-      surface.update(model({ usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 0 } }))
+      const { surface } = yield* createScoped(handlers())
+      const states: ReadonlyArray<Partial<Model>> = [
+        { contextUsage: { _tag: "Loading" } },
+        { contextUsage: { _tag: "Unavailable" } },
+        {
+          contextUsage: {
+            _tag: "Available",
+            inputTokens: 208_294,
+            contextWindow: 1_050_000,
+            reserveTokens: 128_000,
+          },
+        },
+        {
+          activity: { _tag: "Compacting" },
+          contextUsage: {
+            _tag: "Available",
+            inputTokens: 900_000,
+            contextWindow: 1_050_000,
+            reserveTokens: 128_000,
+          },
+        },
+      ]
+      const widths = states.map((state) => {
+        surface.update(model({ ...state, currentThreadId: "thread", mode: "medium" }))
+        return surface.modeLabel.width
+      })
+      expect(new Set(widths)).toEqual(new Set([27]))
+    }),
+  )
+
+  it.effect("routes context-meter clicks to the details toggle", () =>
+    Effect.gen(function* () {
+      const contextToggle = vi.fn()
+      const { surface } = yield* createScoped({ ...handlers(), contextToggle })
+      surface.update(
+        model({
+          currentThreadId: "thread",
+          contextUsage: { _tag: "Available", inputTokens: 208_294, contextWindow: 1_050_000, reserveTokens: 128_000 },
+        }),
+      )
       Object.assign(surface.modeLabel, { screenX: 20 })
       surface.modeLabel.onMouseDown?.({ x: 20 } as never)
-      expect(usageToggle).toHaveBeenCalledOnce()
-      surface.modeLabel.onMouseDown?.({ x: 27 } as never)
-      expect(usageToggle).toHaveBeenCalledOnce()
+      expect(contextToggle).toHaveBeenCalledOnce()
+      surface.modeLabel.onMouseDown?.({ x: 41 } as never)
+      expect(contextToggle).toHaveBeenCalledOnce()
+    }),
+  )
+
+  it.effect("opens context, cost, time, and processed-token details in the mode overlay position", () =>
+    Effect.gen(function* () {
+      const { surface } = yield* createScoped(handlers())
+      surface.update(
+        model({
+          currentThreadId: "thread",
+          contextDetailsOpen: true,
+          contextUsage: { _tag: "Available", inputTokens: 208_294, contextWindow: 1_050_000, reserveTokens: 128_000 },
+          usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 0 },
+          usageTime: { _tag: "Available", accumulatedMillis: 103_000 },
+          usageTokens: { _tag: "Available", total: 40_100_000, uncountedAttempts: 0 },
+        }),
+      )
+
+      expect(surface.paletteBox.visible).toBe(true)
+      expect(surface.paletteBox.title).toBe(" Context & Usage ")
+      expect(surface.paletteBox.bottomTitle).toBe(" Ctrl+Y toggle · esc ")
+      const content = (surface.palette.content as { chunks: ReadonlyArray<{ text: string }> }).chunks
+        .map((chunk) => chunk.text)
+        .join("")
+      expect(content).toContain("23%")
+      expect(content).toContain("208.3K used")
+      expect(content).toContain("$1.25")
+      expect(content).toContain("◷ 1m 43s")
+      expect(content).toContain("40.1M processed")
+      const contextGeometry = {
+        x: surface.paletteBox.x,
+        y: surface.paletteBox.y,
+        width: surface.paletteBox.width,
+        height: surface.paletteBox.height,
+      }
+      surface.update(
+        model({
+          contextDetailsOpen: false,
+          modePicker: { open: true, selected: 1 },
+        }),
+      )
+      expect({
+        x: surface.paletteBox.x,
+        y: surface.paletteBox.y,
+        width: surface.paletteBox.width,
+        height: surface.paletteBox.height,
+      }).toEqual(contextGeometry)
     }),
   )
 
@@ -2239,12 +2296,12 @@ describe("Surface", () => {
       const { surface } = yield* createScoped(handlers())
       surface.update(
         model({
+          currentThreadId: "thread",
           mode: "medium",
-          usageDisplay: "time",
-          usageTime: { _tag: "Available", accumulatedMillis: 103_000 },
+          contextUsage: { _tag: "Available", inputTokens: 208_294, contextWindow: 1_050_000, reserveTokens: 128_000 },
         }),
       )
-      expect(surface.modeLabel.width).toBe(19)
+      expect(surface.modeLabel.width).toBe(27)
       Object.assign(surface.modeLabel, { screenX: 20 })
       expect(
         (surface.modeLabel.content as { chunks: ReadonlyArray<{ attributes?: number }> }).chunks[0]?.attributes,
@@ -2263,59 +2320,62 @@ describe("Surface", () => {
     }),
   )
 
-  it.effect("routes clicks on the usage and mode segments to their own handlers", () =>
+  it.effect("routes clicks on the context and mode segments to their own handlers", () =>
     Effect.gen(function* () {
-      const usageToggle = vi.fn()
+      const contextToggle = vi.fn()
       const modeToggle = vi.fn()
-      const { surface } = yield* createScoped({ ...handlers(), usageToggle, modeToggle })
+      const { surface } = yield* createScoped({ ...handlers(), contextToggle, modeToggle })
       surface.update(
         model({
+          currentThreadId: "thread",
           mode: "medium",
-          usageDisplay: "time",
-          usageTime: { _tag: "Available", accumulatedMillis: 103_000 },
+          contextUsage: { _tag: "Available", inputTokens: 208_294, contextWindow: 1_050_000, reserveTokens: 128_000 },
         }),
       )
       Object.assign(surface.modeLabel, { screenX: 20 })
 
       surface.modeLabel.onMouseDown?.({ x: 20 } as never)
-      expect(usageToggle).toHaveBeenCalledTimes(1)
+      expect(contextToggle).toHaveBeenCalledTimes(1)
       expect(modeToggle).toHaveBeenCalledTimes(0)
 
-      surface.modeLabel.onMouseDown?.({ x: 31 } as never)
+      surface.modeLabel.onMouseDown?.({ x: 42 } as never)
       expect(modeToggle).toHaveBeenCalledTimes(1)
-      expect(usageToggle).toHaveBeenCalledTimes(1)
+      expect(contextToggle).toHaveBeenCalledTimes(1)
     }),
   )
 
-  it.effect("clears usage hover when a narrower selector moves away from the pointer", () =>
+  it.effect("clears context hover when the selected thread is cleared", () =>
     Effect.gen(function* () {
       const { surface } = yield* createScoped(handlers())
       surface.update(
-        model({ usageDisplay: "tokens", usageTokens: { _tag: "Available", total: 123_456, uncountedAttempts: 0 } }),
+        model({
+          currentThreadId: "thread",
+          contextUsage: { _tag: "Available", inputTokens: 208_294, contextWindow: 1_050_000, reserveTokens: 128_000 },
+        }),
       )
       Object.assign(surface.modeLabel, { screenX: 20 })
       surface.modeLabel.onMouseOver?.({ x: 20 } as never)
       expect(opentui.renderer.setMousePointer).toHaveBeenLastCalledWith("pointer")
 
-      surface.update(model({ usageCost: { _tag: "Available", usd: 0, unpricedAttempts: 0 } }))
+      surface.update(model({ currentThreadId: undefined }))
       expect(opentui.renderer.setMousePointer).toHaveBeenLastCalledWith("default")
-      expect(
-        (surface.modeLabel.content as { chunks: ReadonlyArray<{ attributes?: number }> }).chunks[0]?.attributes,
-      ).toBe(2)
     }),
   )
 
-  it.effect("clears usage hover after layout moves a right-anchored label under a stationary pointer", () =>
+  it.effect("clears context hover after layout moves a right-anchored label under a stationary pointer", () =>
     Effect.gen(function* () {
       const { surface } = yield* createScoped(handlers())
       surface.update(
-        model({ usageDisplay: "tokens", usageTokens: { _tag: "Available", total: 123_456, uncountedAttempts: 0 } }),
+        model({
+          currentThreadId: "thread",
+          contextUsage: { _tag: "Available", inputTokens: 208_294, contextWindow: 1_050_000, reserveTokens: 128_000 },
+        }),
       )
       Object.assign(surface.modeLabel, { screenX: 20 })
       surface.modeLabel.onMouseOver?.({ x: 21 } as never)
       expect(opentui.renderer.setMousePointer).toHaveBeenLastCalledWith("pointer")
 
-      Object.assign(surface.modeLabel, { screenX: 5 })
+      Object.assign(surface.modeLabel, { screenX: 0 })
       for (const frame of opentui.frameHandlers) frame()
 
       expect(opentui.renderer.setMousePointer).toHaveBeenLastCalledWith("default")

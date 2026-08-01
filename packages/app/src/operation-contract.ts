@@ -297,6 +297,14 @@ export type InteractiveEvent =
       readonly selectionEpoch: number
       readonly threadId: Thread.ThreadId
       readonly revision: number
+      readonly context:
+        | {
+            readonly _tag: "Available"
+            readonly inputTokens: number
+            readonly contextWindow: number
+            readonly reserveTokens: number
+          }
+        | { readonly _tag: "Unavailable" }
       readonly cost:
         | { readonly _tag: "Available"; readonly usd: number; readonly unpricedAttempts: number }
         | { readonly _tag: "Unavailable" }
@@ -506,6 +514,15 @@ export const InteractiveEventSchema = Schema.Union([
     selectionEpoch: Schema.Int,
     threadId: Thread.ThreadId,
     revision: Schema.Int,
+    context: Schema.Union([
+      Schema.Struct({
+        _tag: Schema.tag("Available"),
+        inputTokens: Schema.Finite,
+        contextWindow: Schema.Finite,
+        reserveTokens: Schema.Finite,
+      }),
+      Schema.Struct({ _tag: Schema.tag("Unavailable") }),
+    ]),
     cost: Schema.Union([
       Schema.Struct({ _tag: Schema.tag("Available"), usd: Schema.Finite, unpricedAttempts: Schema.Int }),
       Schema.Struct({ _tag: Schema.tag("Unavailable") }),

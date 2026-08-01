@@ -1895,7 +1895,43 @@ test("ticks Amp status and running-tool spinners every 200ms without rebuilding 
     }),
   ))
 
-test("advances selected-thread active time with the injected clock and freezes closed intervals", () =>
+test("animates a fixed-width context shimmer while work is active", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const clock = new ManualClock()
+      const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30, clock }))
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { clock })
+      try {
+        surface.update({
+          ...initial("/work", "medium"),
+          width: 100,
+          height: 30,
+          currentThreadId: "thread",
+          busy: true,
+          activity: { _tag: "Thinking", bytes: 20 },
+          contextUsage: {
+            _tag: "Available",
+            inputTokens: 208_294,
+            contextWindow: 1_050_000,
+            reserveTokens: 128_000,
+          },
+        })
+        const before = [...(surface.modeLabel.content as { readonly chunks: ReadonlyArray<unknown> }).chunks]
+        const text = styledTextValue(surface.modeLabel.content)
+        clock.advance(200)
+        const after = [...(surface.modeLabel.content as { readonly chunks: ReadonlyArray<unknown> }).chunks]
+
+        expect(styledTextValue(surface.modeLabel.content)).toBe(text)
+        expect(after).not.toEqual(before)
+        expect(text).toContain("ctx █▊░░░░░░ 23%")
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
+test("advances active time in context details with the injected clock and freezes closed intervals", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const clock = new ManualClock()
@@ -1910,21 +1946,23 @@ test("advances selected-thread active time with the injected clock and freezes c
         ...initial("/work", "high"),
         width: 100,
         height: 30,
-        usageDisplay: "time",
+        currentThreadId: "thread",
+        contextDetailsOpen: true,
+        contextUsage: { _tag: "Available", inputTokens: 208_294, contextWindow: 1_050_000, reserveTokens: 128_000 },
         usageTime: { _tag: "Available", accumulatedMillis: 0, activeSince: epoch },
       }
       try {
         surface.update(active)
-        expect(styledTextValue(surface.modeLabel.content)).toContain("◷ 0s")
+        expect(styledTextValue(surface.palette.content)).toContain("◷ 0s")
         clock.advance(1_000)
-        expect(styledTextValue(surface.modeLabel.content)).toContain("◷ 1s")
+        expect(styledTextValue(surface.palette.content)).toContain("◷ 1s")
 
         surface.update({
           ...active,
           usageTime: { _tag: "Available", accumulatedMillis: 1_000 },
         })
         clock.advance(2_000)
-        expect(styledTextValue(surface.modeLabel.content)).toContain("◷ 1s")
+        expect(styledTextValue(surface.palette.content)).toContain("◷ 1s")
       } finally {
         surface.destroy()
         setup.renderer.destroy()
@@ -2926,17 +2964,79 @@ test("keeps the mode label and picker grouped with the narrowed composer", () =>
           ...initial("/work", "high"),
           width: 100,
           height: 24,
-          costUsd: 0.004,
+          currentThreadId: "thread",
+          contextUsage: {
+            _tag: "Available",
+            inputTokens: 208_294,
+            contextWindow: 1_050_000,
+            reserveTokens: 128_000,
+          },
           changedFilesOpen: true,
           changedFiles: ready([{ path: "src/main.ts", status: "M", added: 2, removed: 1 }]),
           modePicker: { open: true, selected: 2 },
         })
         yield* openTui(() => setup.renderOnce())
-        expect(setup.captureCharFrame()).toContain(" $0.004 ─ high ")
+        expect(setup.captureCharFrame()).toContain(" ctx █▊░░░░░░ 23% ─ high ")
         const composerRight = surface.inputBox.x + surface.inputBox.width
         expect(surface.modeLabel.x + surface.modeLabel.width).toBeLessThanOrEqual(composerRight)
         expect(surface.paletteBox.x + surface.paletteBox.width).toBeLessThanOrEqual(composerRight)
         expect(surface.paletteBox.x + surface.paletteBox.width).toBeLessThanOrEqual(surface.changedFilesBox.x)
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
+test("keeps the context meter and every compact usage metric visible at 24x12", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 24, height: 12 }))
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      const compact: Model = {
+        ...initial("/work", "high"),
+        width: 24,
+        height: 12,
+        currentThreadId: "thread",
+        contextUsage: { _tag: "Available", inputTokens: 56_120, contextWindow: 372_000, reserveTokens: 128_000 },
+        usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 0 },
+        usageTime: { _tag: "Available", accumulatedMillis: 103_000 },
+        usageTokens: { _tag: "Available", total: 6_811_999, uncountedAttempts: 0 },
+      }
+      try {
+        surface.update(compact)
+        yield* openTui(() => setup.renderOnce())
+        expect(styledTextValue(surface.modeLabel.content)).toBe(" ▉░░░ 23% ─ high ")
+        expect(surface.modeLabel.width).toBeLessThanOrEqual(surface.inputBox.width)
+
+        const detailsModel = update(
+          {
+            ...compact,
+            threadSidebar: { open: true, focused: true, selected: 0, scrollTop: 0 },
+          },
+          { _tag: "ContextDetailsToggled" },
+        )
+        expect(detailsModel.threadSidebar.open).toBe(false)
+        const afterSidebarShortcut = update(detailsModel, {
+          _tag: "KeyPressed",
+          key: {
+            name: "\\",
+            sequence: "\u001c",
+            ctrl: true,
+            shift: false,
+            meta: false,
+            alt: false,
+            eventType: "press",
+          },
+        })
+        expect(afterSidebarShortcut.threadSidebar.open).toBe(false)
+        surface.update(afterSidebarShortcut)
+        yield* openTui(() => setup.renderOnce())
+        const details = styledTextValue(surface.palette.content)
+        expect(details).toContain("23%")
+        expect(details).toContain("56.1K / 244K")
+        expect(details).toContain("372K window")
+        expect(details).toContain("$1.25 ◷1m43s 6.81M")
       } finally {
         surface.destroy()
         setup.renderer.destroy()

@@ -1547,11 +1547,8 @@ export const interactiveTui =
                 model = ViewState.update(model, { _tag: "DetailToggled", id: unit })
                 renderer?.surface.update(model)
               },
-              usageToggle: () => {
-                model = {
-                  ...model,
-                  usageDisplay: ViewState.nextUsageDisplay(model.usageDisplay),
-                }
+              contextToggle: () => {
+                model = ViewState.update(model, { _tag: "ContextDetailsToggled" })
                 render()
               },
               modeToggle: () => {

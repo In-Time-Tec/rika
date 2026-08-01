@@ -88,6 +88,7 @@ import {
 import {
   escapeControlCharacters,
   formatBytes,
+  formatContextTokens,
   formatTokens,
   homeRelativePath,
   plural,
@@ -101,6 +102,7 @@ import { highlightShellCommand } from "./syntax-highlight"
 import { wrapStyledLine } from "./styled-text"
 import { renderToolSummary } from "./tool-summary"
 import { modeIds } from "@rika/config/modes"
+import * as ContextMeter from "./context-meter"
 import {
   agentToolSummary,
   escapePathTarget,
@@ -121,6 +123,12 @@ import {
 } from "./transcript-presenter"
 
 export const spinnerFrames: ReadonlyArray<string> = cliSpinners.dots.frames
+
+const contextToneColor = (tone: ContextMeter.Tone) => {
+  if (tone === "critical") return colors.red
+  if (tone === "warning") return colors.amber
+  return colors.teal
+}
 
 export const probeNativeAsset = (): string => {
   const buffer = OptimizedBuffer.create(1, 1, "wcwidth")
@@ -1604,7 +1612,7 @@ export interface Handlers {
   readonly pasteImage?: (image?: { readonly bytes: Uint8Array; readonly mediaType?: string }) => void
   readonly expandPaste?: (token: string) => void
   readonly clickToggle?: (unit: string) => void
-  readonly usageToggle?: () => void
+  readonly contextToggle?: () => void
   readonly modeToggle?: () => void
   readonly composerResize?: (height: number) => void
   readonly sidebarResize?: (width: number) => void
@@ -1977,7 +1985,7 @@ export class Surface {
     })
     this.modeLabel.onMouseDown = (event) => {
       const column = event.x - this.modeLabel.screenX
-      if (column >= 0 && column < this.usageLabelWidth) this.handlers.usageToggle?.()
+      if (column >= 0 && column < this.usageLabelWidth) this.handlers.contextToggle?.()
       else if (column >= this.modeSegmentStart && column < this.modeLabel.width) this.handlers.modeToggle?.()
     }
     const updateUsageHover = (event: MouseEvent) => {
@@ -2439,52 +2447,76 @@ export class Surface {
   }
 
   private renderModeLabel(model: Model): void {
-    let usageText = ""
-    if (model.usageDisplay === "time") {
-      if (model.usageTime?._tag === "Available")
-        usageText = formatActiveTime(activeTimeAt(model.usageTime, this.currentTimeMillis()))
-      else if (model.usageTime?._tag === "Unavailable") usageText = `${activeTimeIcon} —`
-      else usageText = `${activeTimeIcon} ····`
-    } else if (model.usageDisplay === "tokens") {
-      if (model.usageTokens?._tag === "Available")
-        usageText =
-          model.usageTokens.uncountedAttempts > 0
-            ? formatTokens(model.usageTokens.total).replace(/ tok$/, "+ tok")
-            : formatTokens(model.usageTokens.total)
-      else if (model.usageTokens?._tag === "Unavailable") usageText = "— tok"
-      else usageText = "···· tok"
-    } else {
-      if (model.usageCost?._tag === "Available" && model.usageCost.unpricedAttempts > 0) usageText = "$—"
-      else if (model.costUsd !== undefined) usageText = formatCost(model.costUsd)
-      else if (model.usageCost?._tag === "Available") usageText = formatCost(model.usageCost.usd)
-      else if (model.usageCost?._tag === "Unavailable") usageText = "$—"
-      else if (model.usageCost?._tag === "Loading" || model.busy) usageText = "$····"
-    }
-    const modeChunks: Array<TextChunk> = []
     const previousRight = this.modeLabel.screenX + this.modeLabel.width
-    this.usageLabelWidth = usageText.length === 0 ? 0 : modeLabelWidth(` ${usageText} `)
-    if (usageText.length > 0) {
-      const usage = fg(colors.text)(` ${usageText} `)
-      modeChunks.push(this.usageLabelHovered ? usage : dim(usage))
-      modeChunks.push(fg(colors.text)("─"))
+    const availableWidth = contentColumnWidth(model)
+    const contextVisible = model.currentThreadId !== undefined && availableWidth >= 24
+    const contextCells = availableWidth < 40 ? 4 : 8
+    const contextPrefix = availableWidth < 40 ? " " : " ctx "
+    const buildContextChunks = (hovered: boolean): Array<TextChunk> => {
+      if (!contextVisible) return []
+      const chunks: Array<TextChunk> = []
+      const context = model.contextUsage
+      const compacting = model.activity?._tag === "Compacting"
+      const decorate = (chunk: TextChunk, highlighted = false) => {
+        if (highlighted) return bold(chunk)
+        return hovered ? chunk : dim(chunk)
+      }
+      chunks.push(decorate(fg(colors.text)(contextPrefix)))
+      if (compacting) {
+        for (let index = 0; index < contextCells; index += 1) {
+          const glyph = (index + this.loaderPhase) % 2 === 0 ? "▓" : "▒"
+          chunks.push(decorate(fg(colors.amber)(glyph), index === this.loaderPhase % contextCells))
+        }
+        chunks.push(decorate(fg(colors.amber)(`${"↻".padStart(4)} `)))
+        return chunks
+      }
+      if (context?._tag === "Available") {
+        const value = ContextMeter.meter(context, {
+          cells: contextCells,
+          phase: this.loaderPhase,
+          animated: model.busy || model.activity !== undefined,
+        })
+        const tone = contextToneColor(value.tone)
+        for (const [index, glyph] of value.glyphs.entries())
+          chunks.push(decorate(fg(index === value.highlight ? colors.text : tone)(glyph), index === value.highlight))
+        chunks.push(decorate(fg(tone)(`${`${value.percent}%`.padStart(4)} `)))
+        return chunks
+      }
+      const glyphs =
+        context?._tag === "Loading"
+          ? ContextMeter.loadingMeter(this.loaderPhase, { cells: contextCells })
+          : Array(contextCells).fill("░")
+      for (const [index, glyph] of glyphs.entries())
+        chunks.push(
+          decorate(fg(index === this.loaderPhase % contextCells ? colors.text : colors.muted)(glyph), glyph === "◆"),
+        )
+      chunks.push(decorate(fg(colors.muted)(`${"—".padStart(4)} `)))
+      return chunks
     }
-    this.modeSegmentStart = usageText.length === 0 ? 0 : this.usageLabelWidth + 1
-    modeChunks.push(fg(colors.text)(" "))
-    if (model.fastMode) modeChunks.push(fg(colors.amber)("↯"))
-    const modeText = fg(colors[model.mode])(model.mode)
-    modeChunks.push(this.modeLabelHovered ? bold(modeText) : modeText)
-    modeChunks.push(fg(colors.text)(" "))
-    const width = modeChunks.reduce((total, chunk) => total + modeLabelWidth(chunk.text), 0)
+    const buildModeChunks = (hovered: boolean): Array<TextChunk> => {
+      const contextChunks = buildContextChunks(hovered)
+      const chunks = [...contextChunks]
+      if (contextChunks.length > 0) chunks.push(fg(colors.text)("─"))
+      chunks.push(fg(colors.text)(" "))
+      if (model.fastMode) chunks.push(fg(colors.amber)("↯"))
+      const modeText = fg(colors[model.mode])(model.mode)
+      chunks.push(this.modeLabelHovered ? bold(modeText) : modeText)
+      chunks.push(fg(colors.text)(" "))
+      return chunks
+    }
+    const initialContext = buildContextChunks(this.usageLabelHovered)
+    this.usageLabelWidth = initialContext.reduce((total, chunk) => total + modeLabelWidth(chunk.text), 0)
+    this.modeSegmentStart = this.usageLabelWidth === 0 ? 0 : this.usageLabelWidth + 1
+    let modeChunks = buildModeChunks(this.usageLabelHovered)
+    let width = modeChunks.reduce((total, chunk) => total + modeLabelWidth(chunk.text), 0)
     if (this.usagePointerX !== undefined && this.modeLabel.width > 0) {
       const screenX = previousRight - width
       const hovered = this.usagePointerX >= screenX && this.usagePointerX < screenX + this.usageLabelWidth
       if (hovered !== this.usageLabelHovered) {
         this.usageLabelHovered = hovered
         this.renderer.setMousePointer(hovered ? "pointer" : "default")
-        if (usageText.length > 0) {
-          const usage = fg(colors.text)(` ${usageText} `)
-          modeChunks[0] = hovered ? usage : dim(usage)
-        }
+        modeChunks = buildModeChunks(hovered)
+        width = modeChunks.reduce((total, chunk) => total + modeLabelWidth(chunk.text), 0)
       }
     }
     this.modeLabel.width = width
@@ -2526,7 +2558,14 @@ export class Surface {
         ])
       const glyph = this.toolSpinner.toBraille()
       if (current.busy) this.publishWorkingFrame(glyph)
-      if (current.usageDisplay === "time" && current.usageTime?._tag === "Available") this.renderModeLabel(current)
+      if (current.currentThreadId !== undefined) this.renderModeLabel(current)
+      if (current.contextDetailsOpen)
+        this.palette.content = contextDetailsContent(
+          current,
+          Math.max(1, Number(this.paletteBox.width) - 4),
+          Math.max(1, Number(this.paletteBox.height) - 2),
+          this.currentTimeMillis(),
+        )
       for (const record of this.transcriptRecords.values()) {
         if (record.spinnerChunk === undefined) continue
         const content = record.renderable.content
@@ -3353,9 +3392,8 @@ export class Surface {
       model.busy ||
       model.activity !== undefined ||
       panelLoadingLabel !== undefined ||
-      (model.usageDisplay === "time" &&
-        model.usageTime?._tag === "Available" &&
-        model.usageTime.activeSince !== undefined) ||
+      (model.usageTime?._tag === "Available" && model.usageTime.activeSince !== undefined) ||
+      model.contextUsage?._tag === "Loading" ||
       (model.threadSidebar.open &&
         (model.threads as ReadonlyArray<ThreadItem>).some((thread) => isThreadBusy(thread.status)))
     if (this.options.animate !== false && loaderActive && this.loaderTimer === undefined) {
@@ -3365,10 +3403,11 @@ export class Surface {
       this.loaderTimer = undefined
     }
     const composerTop = model.height - renderedInputHeight
-    let overlay: "threads" | "files" | "modes" | "palette" | undefined
+    let overlay: "threads" | "files" | "modes" | "context" | "palette" | undefined
     if (model.threadSwitcher.open) overlay = "threads"
     else if (model.filePicker.open) overlay = "files"
     else if (model.modePicker.open) overlay = "modes"
+    else if (model.contextDetailsOpen) overlay = "context"
     else if (model.palette.open || model.paletteOpen) overlay = "palette"
     this.paletteBox.visible = overlay !== undefined
     this.palette.visible = this.paletteBox.visible
@@ -3389,6 +3428,25 @@ export class Surface {
       this.palette.content = paletteContent(model, results, Math.max(1, boxWidth - 4), Math.max(1, boxHeight - 2))
       this.syncOverlayEditor(`> ${model.palette.query}`, 2 + model.palette.query.length, 0, boxHeight - 2, boxWidth - 4)
       cursorEditor = this.overlayEditor
+    } else if (overlay === "context") {
+      const boxWidth = Math.min(58, contentWidth)
+      const boxHeight = Math.min(9, Math.max(1, composerTop))
+      this.paletteBox.width = boxWidth
+      this.paletteBox.height = boxHeight
+      this.paletteBox.left = contentLeft + Math.max(0, contentWidth - boxWidth)
+      this.paletteBox.top = Math.max(0, composerTop - boxHeight)
+      this.paletteBox.title = " Context & Usage "
+      this.paletteBox.titleColor = colors.teal
+      this.paletteBox.titleAlignment = "left"
+      this.paletteBox.bottomTitle = " Ctrl+Y toggle · esc "
+      this.paletteBox.bottomTitleAlignment = "right"
+      this.palette.content = contextDetailsContent(
+        model,
+        Math.max(1, boxWidth - 4),
+        Math.max(1, boxHeight - 2),
+        this.currentTimeMillis(),
+      )
+      cursorEditor = undefined
     } else if (overlay === "modes") {
       const boxWidth = Math.min(58, contentWidth)
       const boxHeight = Math.min(9, Math.max(1, composerTop))
@@ -3583,7 +3641,10 @@ const shortcutRows: ReadonlyArray<ReadonlyArray<readonly [string, string]>> = [
     ["Ctrl+V", "paste images"],
     ["Shift+Enter", "newline"],
   ],
-  [["Ctrl+S", "switch modes"]],
+  [
+    ["Ctrl+S", "switch modes"],
+    ["Ctrl+Y", "context & usage"],
+  ],
   [
     ["Ctrl+G", "edit in $EDITOR"],
     ["Opt+T", "toggle file tree"],
@@ -3677,6 +3738,89 @@ const paletteContent = (
       chunks.push(fg(colors.text)(" "))
     }
   })
+  return new StyledText(chunks)
+}
+
+const usageCostText = (model: Model): string => {
+  if (model.usageCost?._tag === "Available" && model.usageCost.unpricedAttempts > 0) return "$—"
+  if (model.usageCost?._tag === "Available") return formatCost(model.usageCost.usd)
+  if (model.costUsd !== undefined) return formatCost(model.costUsd)
+  return model.usageCost?._tag === "Loading" ? "$···" : "$—"
+}
+
+const usageTimeText = (model: Model, now: number): string => {
+  if (model.usageTime?._tag === "Available") return formatActiveTime(activeTimeAt(model.usageTime, now))
+  return model.usageTime?._tag === "Loading" ? `${activeTimeIcon} ···` : `${activeTimeIcon} —`
+}
+
+const processedTokensText = (model: Model): string => {
+  if (model.usageTokens?._tag === "Available")
+    return `${formatTokens(model.usageTokens.total).replace(/ tok$/, model.usageTokens.uncountedAttempts > 0 ? "+" : "")} processed`
+  return model.usageTokens?._tag === "Loading" ? "··· processed" : "— processed"
+}
+
+const contextDetailsContent = (model: Model, innerWidth: number, innerHeight: number, now: number): StyledText => {
+  const chunks: Array<TextChunk> = []
+  const line = (text: string, style: (value: string) => TextChunk = fg(colors.text)) => {
+    if (chunks.length > 0) chunks.push(fg(colors.text)("\n"))
+    chunks.push(style(truncateToWidth(text, innerWidth)))
+  }
+  const context = model.contextUsage
+  const compact = innerWidth < 40 || innerHeight < 6
+  if (compact) {
+    if (context?._tag === "Available") {
+      const cells = Math.max(4, Math.min(12, innerWidth - 5))
+      const value = ContextMeter.meter(context, { cells })
+      const tone = contextToneColor(value.tone)
+      chunks.push(fg(tone)(value.glyphs.join("")))
+      chunks.push(bold(fg(tone)(` ${value.percent}%`)))
+      const usable = ContextMeter.usableTokens(context)
+      if (innerHeight >= 3) line(`${formatContextTokens(context.inputTokens)} / ${formatContextTokens(usable)} usable`)
+      if (innerHeight >= 4)
+        line(
+          `${formatContextTokens(context.contextWindow)} window · ${formatContextTokens(context.reserveTokens)} reserve`,
+          fg(colors.muted),
+        )
+    } else {
+      const loading = context?._tag === "Loading"
+      chunks.push(fg(colors.muted)(`${loading ? "········" : "░░░░░░░░"} —`))
+      if (innerHeight >= 3) line(loading ? "Waiting for model usage" : "Context unavailable", fg(colors.muted))
+      if (innerHeight >= 4) line("Output capacity is reserved", fg(colors.muted))
+    }
+    if (innerHeight >= 2) {
+      let tokens = "—"
+      if (model.usageTokens?._tag === "Available") {
+        tokens = formatContextTokens(model.usageTokens.total)
+        if (model.usageTokens.uncountedAttempts > 0) tokens += "+"
+      }
+      const time = usageTimeText(model, now).replaceAll(" ", "")
+      line(`${usageCostText(model)} ${time} ${tokens}`)
+    }
+    return new StyledText(chunks)
+  }
+  if (context?._tag === "Available") {
+    const cells = Math.max(8, Math.min(28, innerWidth - 7))
+    const value = ContextMeter.meter(context, { cells })
+    const tone = contextToneColor(value.tone)
+    chunks.push(fg(tone)(value.glyphs.join("")))
+    chunks.push(bold(fg(tone)(` ${value.percent}%`)))
+    const usable = ContextMeter.usableTokens(context)
+    line(
+      `${formatContextTokens(context.inputTokens)} used  ·  ${formatContextTokens(Math.max(0, usable - context.inputTokens))} available`,
+    )
+    line(
+      `${formatContextTokens(usable)} usable  ·  ${formatContextTokens(context.contextWindow)} window  ·  ${formatContextTokens(context.reserveTokens)} reserved`,
+      fg(colors.muted),
+    )
+  } else {
+    const loading = context?._tag === "Loading"
+    chunks.push(fg(colors.muted)(`${loading ? "········" : "░░░░░░░░"} —`))
+    line(loading ? "Waiting for the first model usage report" : "Context is unavailable", fg(colors.muted))
+    line("Usable context reserves the model's output allowance", fg(colors.muted))
+  }
+  line("")
+  line(`Cost  ${usageCostText(model)}     Active  ${usageTimeText(model, now)}`)
+  line(`Tokens  ${processedTokensText(model)}`, fg(colors.muted))
   return new StyledText(chunks)
 }
 

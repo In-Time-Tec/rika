@@ -1,7 +1,7 @@
 import { Clock, Context, Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 
-export const projectionVersion = 3
+export const projectionVersion = 4
 
 export interface ActiveInterval {
   readonly start: number

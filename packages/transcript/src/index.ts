@@ -20,7 +20,7 @@ export * from "./schema"
 export * from "./unit-order"
 export * from "./unit-identity"
 export * from "./recorded-shell"
-export { pricingVersion, usageTokens, type UsageTokens } from "./model-cost"
+export { pricingVersion, usageInputTokens, usageTokens, type UsageTokens } from "./model-cost"
 export { partialInputRecord } from "./partial-input"
 export { childParentMatch, executionKey, isTransientEvent }
 export {
