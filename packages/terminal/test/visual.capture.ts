@@ -1,7 +1,7 @@
 import { createTestRenderer } from "@opentui/core/testing"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Effect, FileSystem, Path, Schema } from "effect"
-import { Surface } from "../src/adapter"
+import { Surface } from "../src/opentui/surface/opentui-surface"
 import {
   initial,
   ready,
@@ -10,7 +10,7 @@ import {
   type Model,
   type ThreadItem,
   type TranscriptBlock,
-} from "../src/view-state"
+} from "../src/state/model/terminal-state"
 
 export const visualMetadata = {
   schema: 2,

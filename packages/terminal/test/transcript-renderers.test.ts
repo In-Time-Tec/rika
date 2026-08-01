@@ -1,9 +1,9 @@
-import { TextAttributes, type TextChunk } from "@opentui/core"
+import { TextAttributes, type TerminalTextChunk as TextChunk } from "../src/presentation/markdown/styled-text"
 import stringWidth from "string-width"
 import { describe, expect, test } from "vitest"
-import { renderMarkdown, renderMarkdownStyled } from "../src/markdown-renderer"
-import { renderDiff } from "../src/diff-renderer"
-import { colors } from "../src/theme"
+import { renderMarkdown, renderMarkdownStyled } from "../src/presentation/markdown/markdown-renderer"
+import { renderDiff } from "../src/presentation/tool/diff-renderer"
+import { colors } from "../src/presentation/terminal/terminal-theme"
 
 const chunkFor = (chunks: ReadonlyArray<TextChunk>, text: string): TextChunk => {
   const chunk = chunks.find((candidate) => candidate.text.includes(text))
@@ -84,7 +84,7 @@ describe("transcript renderers", () => {
     expect(lines.map((line) => line.slice(4)).join("")).toBe(sourceLine)
 
     const styled = renderMarkdownStyled(`\`\`\`ts\n${sourceLine}\n\`\`\``, 20)
-    expect(chunkFor(styled.chunks, "const").fg?.equals(colors.blue)).toBe(true)
+    expect(chunkFor(styled.chunks, "const").fg === colors.blue).toBe(true)
   })
 
   test("wraps table rows without losing cell content or styling", () => {
@@ -106,7 +106,7 @@ describe("transcript renderers", () => {
     expect(hasAttribute(boldChunk, TextAttributes.BOLD)).toBe(true)
     expect(hasAttribute(italicChunk, TextAttributes.ITALIC)).toBe(true)
     expect(hasAttribute(codeChunk, TextAttributes.BOLD)).toBe(true)
-    expect(codeChunk.fg?.equals(colors.amber)).toBe(true)
+    expect(codeChunk.fg === colors.amber).toBe(true)
   })
 
   test("stacks table cells when a minimum-width grid cannot fit", () => {
@@ -137,7 +137,7 @@ describe("transcript renderers", () => {
     expect(hasAttribute(boldChunk, TextAttributes.BOLD)).toBe(true)
     expect(hasAttribute(italicChunk, TextAttributes.ITALIC)).toBe(true)
     expect(hasAttribute(codeChunk, TextAttributes.BOLD)).toBe(true)
-    expect(codeChunk.fg?.equals(colors.amber)).toBe(true)
+    expect(codeChunk.fg === colors.amber).toBe(true)
     expect(hasAttribute(linkChunk, TextAttributes.UNDERLINE)).toBe(true)
     expect(linkChunk.link?.url).toBe("https://rika.dev")
 

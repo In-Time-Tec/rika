@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest"
-import { execute, type Action, type Adapter } from "../src/session"
+import { execute, type Action, type Adapter } from "../src/terminal-session"
 
 test("dispatches every session action and reports absent optional callbacks", () => {
   const adapter: Adapter = {

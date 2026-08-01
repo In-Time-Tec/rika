@@ -29,7 +29,7 @@ import {
   type ViewportEvent,
   type ViewportState,
   type WheelPhase,
-} from "../src/transcript-viewport"
+} from "../src/presentation/transcript/transcript-viewport"
 
 const anchor = (unitId: string, offset: number): ViewportAnchor => ({ unitId, offset })
 const metrics = (scrollTop: number, scrollHeight: number, viewportHeight: number) => ({

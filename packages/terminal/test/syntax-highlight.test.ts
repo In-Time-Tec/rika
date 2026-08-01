@@ -1,7 +1,7 @@
-import { TextAttributes, type TextChunk } from "@opentui/core"
+import { TextAttributes, type TerminalTextChunk as TextChunk } from "../src/presentation/markdown/styled-text"
 import { describe, expect, test } from "vitest"
-import { highlightShellCommand } from "../src/syntax-highlight"
-import { colors } from "../src/theme"
+import { highlightShellCommand } from "../src/presentation/markdown/syntax-highlighter"
+import { colors } from "../src/presentation/terminal/terminal-theme"
 
 const flat = (command: string): ReadonlyArray<TextChunk> => highlightShellCommand(command).flat()
 
@@ -21,9 +21,9 @@ describe("shell command highlighting", () => {
     expect(commands).toHaveLength(2)
     for (const command of commands) expect(hasAttribute(command, TextAttributes.BOLD)).toBe(true)
     expect(chunkFor(chunks, "log").attributes ?? TextAttributes.NONE).toBe(TextAttributes.NONE)
-    expect(chunkFor(chunks, "--oneline").fg?.equals(colors.amber)).toBe(true)
-    expect(chunkFor(chunks, "-3").fg?.equals(colors.amber)).toBe(true)
-    expect(chunkFor(chunks, "--short").fg?.equals(colors.amber)).toBe(true)
+    expect(chunkFor(chunks, "--oneline").fg === colors.amber).toBe(true)
+    expect(chunkFor(chunks, "-3").fg === colors.amber).toBe(true)
+    expect(chunkFor(chunks, "--short").fg === colors.amber).toBe(true)
     expect(hasAttribute(chunkFor(chunks, "&&"), TextAttributes.DIM)).toBe(true)
   })
 
@@ -31,25 +31,25 @@ describe("shell command highlighting", () => {
     const chunks = flat('echo "a && b"')
     const quoted = chunkFor(chunks, "&&")
     expect(quoted.text).toBe('"a && b"')
-    expect(quoted.fg?.equals(colors.green)).toBe(true)
+    expect(quoted.fg === colors.green).toBe(true)
   })
 
   test("splits flag values and colors quoted values green", () => {
     const chunks = flat("git commit --message='fix: x'")
-    expect(chunkFor(chunks, "--message=").fg?.equals(colors.amber)).toBe(true)
-    expect(chunkFor(chunks, "'fix: x'").fg?.equals(colors.green)).toBe(true)
+    expect(chunkFor(chunks, "--message=").fg === colors.amber).toBe(true)
+    expect(chunkFor(chunks, "'fix: x'").fg === colors.green).toBe(true)
   })
 
   test("colors environment assignments and keeps the following command bold", () => {
     const chunks = flat("GIT_EDITOR=true git rebase --continue")
-    expect(chunkFor(chunks, "GIT_EDITOR=").fg?.equals(colors.amber)).toBe(true)
+    expect(chunkFor(chunks, "GIT_EDITOR=").fg === colors.amber).toBe(true)
     expect(hasAttribute(chunkFor(chunks, "git"), TextAttributes.BOLD)).toBe(true)
-    expect(chunkFor(chunks, "--continue").fg?.equals(colors.amber)).toBe(true)
+    expect(chunkFor(chunks, "--continue").fg === colors.amber).toBe(true)
   })
 
   test("keeps command position after a quoted assignment value", () => {
     const chunks = flat('GIT_EDITOR="vim -n" git rebase')
-    expect(chunkFor(chunks, '"vim -n"').fg?.equals(colors.green)).toBe(true)
+    expect(chunkFor(chunks, '"vim -n"').fg === colors.green).toBe(true)
     expect(hasAttribute(chunkFor(chunks, "git"), TextAttributes.BOLD)).toBe(true)
   })
 
@@ -60,22 +60,22 @@ describe("shell command highlighting", () => {
     const chunks = lines.flat()
     expect(hasAttribute(chunkFor(chunks, "python3"), TextAttributes.BOLD)).toBe(true)
     expect(hasAttribute(chunkFor(chunks, "<<"), TextAttributes.DIM)).toBe(true)
-    expect(chunkFor(chunks, "'PY'").fg?.equals(colors.muted)).toBe(true)
-    expect(chunkFor(chunks, "import sys").fg?.equals(colors.muted)).toBe(true)
-    expect(chunkFor(chunks, 'print("hi && bye")').fg?.equals(colors.muted)).toBe(true)
+    expect(chunkFor(chunks, "'PY'").fg === colors.muted).toBe(true)
+    expect(chunkFor(chunks, "import sys").fg === colors.muted).toBe(true)
+    expect(chunkFor(chunks, 'print("hi && bye")').fg === colors.muted).toBe(true)
     expect(lines[3]![0]!.text).toBe("PY")
-    expect(lines[3]![0]!.fg?.equals(colors.muted)).toBe(true)
+    expect(lines[3]![0]!.fg === colors.muted).toBe(true)
   })
 
   test("mutes comments", () => {
     const chunks = flat("ls # list files")
-    expect(chunkFor(chunks, "# list files").fg?.equals(colors.muted)).toBe(true)
+    expect(chunkFor(chunks, "# list files").fg === colors.muted).toBe(true)
   })
 
   test("dims backslash continuations and classifies continuation-line words", () => {
     const flagged = flat("git log \\\n    --oneline")
     expect(hasAttribute(chunkFor(flagged, "\\"), TextAttributes.DIM)).toBe(true)
-    expect(chunkFor(flagged, "--oneline").fg?.equals(colors.amber)).toBe(true)
+    expect(chunkFor(flagged, "--oneline").fg === colors.amber).toBe(true)
     const bolded = flat("docker run \\\n    nginx")
     expect(hasAttribute(chunkFor(bolded, "nginx"), TextAttributes.BOLD)).toBe(true)
   })
@@ -85,7 +85,7 @@ describe("shell command highlighting", () => {
     expect(hasAttribute(chunkFor(chunks, ">"), TextAttributes.DIM)).toBe(true)
     const target = chunkFor(chunks, "out.txt")
     expect(target.attributes ?? TextAttributes.NONE).toBe(TextAttributes.NONE)
-    expect(target.fg?.equals(colors.text)).toBe(true)
+    expect(target.fg === colors.text).toBe(true)
   })
 
   test("bolds commands after command substitution and pipes", () => {

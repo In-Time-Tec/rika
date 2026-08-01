@@ -23,7 +23,7 @@ import * as TranscriptProjectionModel from "@rika/transcript/transcript-projecti
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Palette, Session, ViewState } from "@rika/terminal/terminal-state"
 import { create as createTui, probeNativeAsset } from "@rika/terminal/opentui-surface"
-import type { PathTarget } from "@rika/terminal/terminal-state"
+import type { PathTarget } from "@rika/terminal/terminal-transcript-presentation"
 import { FetchHttpClient } from "effect/unstable/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import {

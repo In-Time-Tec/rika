@@ -5,14 +5,14 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./terminal-performance-evaluation": "./src/performance.ts",
-    "./terminal-transcript-presentation": "./src/transcript-presenter.ts",
-    "./transcript-viewport": "./src/transcript-viewport.ts",
-    "./opentui-surface": "./src/adapter.ts",
-    "./terminal-message": "./src/view-state.ts",
-    "./terminal-state": "./src/terminal-state.ts",
-    "./terminal-state-reducer": "./src/view-state.ts",
-    "./terminal-session": "./src/session.ts"
+    "./terminal-performance-evaluation": "./src/performance/terminal-performance-evaluation.ts",
+    "./terminal-transcript-presentation": "./src/presentation/transcript/terminal-transcript-presentation.ts",
+    "./transcript-viewport": "./src/presentation/transcript/transcript-viewport.ts",
+    "./opentui-surface": "./src/opentui/surface/opentui-surface.ts",
+    "./terminal-message": "./src/state/model/terminal-message.ts",
+    "./terminal-state": "./src/state/model/terminal-state.ts",
+    "./terminal-state-reducer": "./src/state/reducer/terminal-state-reducer.ts",
+    "./terminal-session": "./src/terminal-session.ts"
   },
   "dependencies": {
     "@opentui/core": "catalog:",

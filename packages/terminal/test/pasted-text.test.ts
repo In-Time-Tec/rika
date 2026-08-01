@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Session, ViewState } from "@rika/terminal/terminal-state"
+import { Session, ViewState } from "../src/state/model/terminal-state"
 
 describe("pasted text attachments", () => {
   it("collapses multiline, carriage-return, and long paste while preserving short paste", () => {
