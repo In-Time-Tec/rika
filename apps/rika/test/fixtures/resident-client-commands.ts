@@ -6,6 +6,7 @@ import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as ViewState from "@rika/terminal/terminal-state"
 import * as TerminalMessage from "@rika/terminal/terminal-message"
 import * as ResidentService from "@rika/product/resident-service"
+import * as InteractiveController from "../../src/interactive/controller/interactive-controller"
 import { Clock, Deferred, Effect, FileSystem, Fiber, Path, Queue, Ref, Stdio, Stream } from "effect"
 
 export const runResidentClientCommands = Effect.fn("ResidentClient.runCommands")(function* (input: {
