@@ -1002,6 +1002,7 @@
         "./interactive-session",
         "./model-registration-identity",
         "./openai-auth-contract",
+        "./openai-auth-flow",
         "./openai-auth-service",
         "./pending-turn",
         "./product-agent-service",
@@ -2879,7 +2880,7 @@
       "package": "@rika/product",
       "kind": "source",
       "production": true,
-      "publicExports": []
+      "publicExports": ["./openai-auth-flow"]
     },
     {
       "id": "packages/product/src/authentication/openai-auth-service.ts",
@@ -6670,14 +6671,6 @@
     },
     {
       "from": "apps/rika/src/interactive-controller.ts",
-      "to": "packages/product-store/src/transcript/sqlite-transcript-repository.ts",
-      "specifier": "@rika/product-store/sqlite-transcript-repository",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/interactive-controller.ts",
       "to": "packages/product/src/thread/model/thread-result.ts",
       "specifier": "@rika/product/thread-result",
       "kind": "import",
@@ -6928,14 +6921,6 @@
       "from": "apps/rika/src/interactive-main.ts",
       "to": "packages/configuration/src/settings/configuration-settings.ts",
       "specifier": "@rika/configuration/configuration-settings",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/interactive-main.ts",
-      "to": "packages/product-store/src/transcript/sqlite-transcript-repository.ts",
-      "specifier": "@rika/product-store/sqlite-transcript-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -24781,14 +24766,6 @@
       "from": "packages/relay-execution/test/multi-agent-process.ts",
       "to": "packages/product/src/agent/product-agent-service.ts",
       "specifier": "@rika/product/product-agent-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/relay-execution/test/multi-agent-process.ts",
-      "to": "packages/product/src/thread/model/turn-record.ts",
-      "specifier": "@rika/product/turn-record",
       "kind": "import",
       "relationship": "runtime",
       "production": true

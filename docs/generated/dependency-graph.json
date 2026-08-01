@@ -1462,6 +1462,7 @@
         "./interactive-session",
         "./model-registration-identity",
         "./openai-auth-contract",
+        "./openai-auth-flow",
         "./openai-auth-service",
         "./pending-turn",
         "./product-agent-service",
@@ -4529,7 +4530,7 @@
       "package": "@rika/product",
       "kind": "source",
       "production": true,
-      "publicExports": []
+      "publicExports": ["./openai-auth-flow"]
     },
     {
       "id": "packages/product/src/authentication/openai-auth-service.ts",
@@ -10421,14 +10422,6 @@
     },
     {
       "from": "apps/rika/src/interactive-controller.ts",
-      "to": "packages/product-store/src/transcript/sqlite-transcript-repository.ts",
-      "specifier": "@rika/product-store/sqlite-transcript-repository",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/interactive-controller.ts",
       "to": "packages/product/src/operation/contract/product-operation-service.ts",
       "specifier": "@rika/product/product-operation-service",
       "kind": "import",
@@ -10687,14 +10680,6 @@
       "from": "apps/rika/src/interactive-main.ts",
       "to": "packages/configuration/src/settings/configuration-settings.ts",
       "specifier": "@rika/configuration/configuration-settings",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/interactive-main.ts",
-      "to": "packages/product-store/src/transcript/sqlite-transcript-repository.ts",
-      "specifier": "@rika/product-store/sqlite-transcript-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12693,14 +12678,6 @@
     },
     {
       "from": "apps/rika/test/interactive-controller.test.ts",
-      "to": "packages/product-store/src/transcript/sqlite-transcript-repository.ts",
-      "specifier": "@rika/product-store/sqlite-transcript-repository",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/interactive-controller.test.ts",
       "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
       "specifier": "@rika/product/execution-route-snapshot",
       "kind": "import",
@@ -13055,14 +13032,6 @@
       "from": "apps/rika/test/model-provider-runtime.test.ts",
       "to": "packages/product/src/operation/contract/product-operation.ts",
       "specifier": "@rika/product/product-operation",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/model-provider-runtime.test.ts",
-      "to": "packages/product/src/thread/model/turn-record.ts",
-      "specifier": "@rika/product/turn-record",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -41789,14 +41758,6 @@
     },
     {
       "from": "packages/relay-execution/test/multi-agent-process.ts",
-      "to": "packages/product/src/thread/model/turn-record.ts",
-      "specifier": "@rika/product/turn-record",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/relay-execution/test/multi-agent-process.ts",
       "to": "packages/relay-execution/src/model/routing/relay-model-registry.ts",
       "specifier": "../src/model/routing/relay-model-registry",
       "kind": "import",
@@ -42111,14 +42072,6 @@
       "from": "packages/relay-execution/test/specialty-transcripts.test.ts",
       "to": "packages/product/src/execution/contract/execution-service.ts",
       "specifier": "@rika/product/execution-service",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/relay-execution/test/specialty-transcripts.test.ts",
-      "to": "packages/product/src/thread/model/turn-record.ts",
-      "specifier": "@rika/product/turn-record",
       "kind": "import",
       "relationship": "test",
       "production": false
