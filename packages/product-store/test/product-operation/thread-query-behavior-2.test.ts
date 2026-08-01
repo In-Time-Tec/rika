@@ -1,3 +1,4 @@
+import * as ThreadQuery from "@rika/product/thread-query-service"
 import {
   describe,
   expect,
@@ -6,7 +7,6 @@ import {
   Layer,
   Schema,
   Stream,
-  ThreadQuery,
   ThreadToolHandlers,
   provideLayer,
   delegationUnit,
@@ -230,10 +230,10 @@ describe("ThreadQuery", () => {
       expect(rendered).toContain("second-answer")
       expect(rendered).not.toContain("sibling-answer")
       expect(pages.at(-1)?.omissions).toEqual([])
-      expect(firstText.length).toBeLessThanOrEqual(ThreadQuery.transcriptBudget)
+      expect(firstText.length).toBeLessThanOrEqual(ThreadQuery.QueryPolicy.transcriptBudget)
       for (const page of pages)
         expect((yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(page)).length).toBeLessThanOrEqual(
-          ThreadQuery.transcriptBudget,
+          ThreadQuery.QueryPolicy.transcriptBudget,
         )
     }).pipe(provideLayer(queryLayer)),
   )
@@ -322,7 +322,7 @@ describe("ThreadQuery", () => {
       provideLayer(
         ThreadToolHandlers.findHandlerLayerForWorkspace((executionId) =>
           Effect.succeed(executionId === "acme-execution" ? workspace : "/work/other"),
-        ).pipe(Layer.provide(ThreadQuery.factoryLayer.pipe(Layer.provide(repositories)))),
+        ).pipe(Layer.provide(ThreadQuery.Runtime.factoryLayer.pipe(Layer.provide(repositories)))),
       ),
     ),
   )

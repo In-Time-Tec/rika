@@ -1,3 +1,6 @@
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
+import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -7,7 +10,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Clock, Deferred, Effect, Fiber, Layer, Queue, Ref } from "effect"
 import { it as rawIt } from "vitest"
-import { Operation } from "@rika/product/product-operation-service"
+
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { collectEvents, openInteractiveSession, settleEvents } from "../support/operation-session-harness"
 import { executionStarted, backend } from "../support/operation-execution-fixtures"
@@ -48,9 +51,9 @@ describe("Operation", () => {
         const wakes = yield* Ref.make<ReadonlyArray<ExecutionBackend.ThreadQueueWake>>([])
         const sessions = yield* Queue.unbounded<{
           readonly workspace: string
-          readonly session: Operation.InteractiveSession
+          readonly session: InteractiveSession
         }>()
-        const events = new Map<string, Array<Operation.InteractiveEvent>>()
+        const events = new Map<string, Array<InteractiveEvent>>()
         const feedCompleted = Symbol("feed-completed")
         const streamed = [
           executionStarted("promoted-turn"),
@@ -106,7 +109,7 @@ describe("Operation", () => {
             }),
         })
         yield* Effect.gen(function* () {
-          const operation = yield* Operation.Service
+          const operation = yield* Service
           const coordinate = Effect.gen(function* () {
             const one = yield* Queue.take(sessions)
             const two = yield* Queue.take(sessions)
@@ -175,7 +178,7 @@ describe("Operation", () => {
           ]
           const turns = yield* TurnRepository.makeMemory()
           const transcripts = yield* TranscriptRepository.makeMemory({ turns })
-          let recovered: Extract<Operation.InteractiveEvent, { readonly _tag: "SelectionLoaded" }> | undefined
+          let recovered: Extract<InteractiveEvent, { readonly _tag: "SelectionLoaded" }> | undefined
           let resyncRequested = false
           const overflowBackend = ExecutionBackend.Service.of({
             ...backend,
@@ -199,7 +202,7 @@ describe("Operation", () => {
             interactive: (_, session) =>
               Effect.gen(function* () {
                 yield* session.submit("overflow")
-                const received = yield* Queue.unbounded<Operation.InteractiveEvent>()
+                const received = yield* Queue.unbounded<InteractiveEvent>()
                 const recover = Effect.gen(function* () {
                   while (true) {
                     const event = yield* Queue.take(received)
@@ -220,7 +223,7 @@ describe("Operation", () => {
               }),
           })
           yield* Effect.gen(function* () {
-            const operation = yield* Operation.Service
+            const operation = yield* Service
             yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
           }).pipe(provideLayer(layer))
           expect(recovered).toBeDefined()
@@ -253,7 +256,7 @@ describe("Operation", () => {
           prompt: [],
           ephemeral: false,
         })
-        const received: Array<Operation.InteractiveEvent> = []
+        const received: Array<InteractiveEvent> = []
         yield* collectEvents(selecting, received)
         yield* source.selectThread(harness.target.id, 1)
         yield* selecting.selectThread(harness.previous.id, 1)

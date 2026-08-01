@@ -1,3 +1,7 @@
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
+import { Service } from "@rika/product/product-operation-service"
+import { productLayer } from "@rika/product/product-operation-service"
 import { expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -11,7 +15,7 @@ import * as ExecutionChildRun from "@rika/product/execution-child-run"
 import * as ExecutionInspection from "@rika/product/execution-inspection"
 import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
 import { Context, Deferred, Effect, Layer, Queue, Ref, Schema } from "effect"
-import { Operation } from "@rika/product/product-operation-service"
+
 import { executionRoute } from "../support/product-test-current-state"
 
 const busyThreadId = Thread.ThreadId.make("busy-thread")
@@ -102,12 +106,12 @@ const awaitCondition = <E>(condition: Effect.Effect<boolean, E>) =>
     return yield* condition
   })
 
-const selectionLoaded = (events: ReadonlyArray<Operation.InteractiveEvent>, threadId: Thread.ThreadId) =>
+const selectionLoaded = (events: ReadonlyArray<InteractiveEvent>, threadId: Thread.ThreadId) =>
   Effect.sync(() => events.some((event) => event._tag === "SelectionLoaded" && event.thread.id === threadId))
 
 type Client = {
-  readonly session: Operation.InteractiveSession
-  readonly events: Array<Operation.InteractiveEvent>
+  readonly session: InteractiveSession
+  readonly events: Array<InteractiveEvent>
   readonly turns: TurnContract.Interface
   readonly usage: UsageRepository.Interface
 }
@@ -121,10 +125,10 @@ const runHarness = <A, E, R>(
     const turns = yield* TurnRepository.makeMemory(initialTurns)
     const usage = Context.get(yield* Layer.build(UsageRepository.memoryLayer), UsageRepository.Service)
     const registrations = yield* Queue.unbounded<{
-      readonly session: Operation.InteractiveSession
-      readonly events: Array<Operation.InteractiveEvent>
+      readonly session: InteractiveSession
+      readonly events: Array<InteractiveEvent>
     }>()
-    const layer = Operation.productLayer({
+    const layer = productLayer({
       repositoryLayer: ThreadRepository.memoryLayer([thread(busyThreadId), thread(openThreadId)]),
       turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
       usageRepositoryLayer: Layer.succeed(UsageRepository.Service, usage),
@@ -134,7 +138,7 @@ const runHarness = <A, E, R>(
       makeTurnId: Effect.succeed(busyTurnId),
       interactive: (_, session) =>
         Effect.gen(function* () {
-          const events: Array<Operation.InteractiveEvent> = []
+          const events: Array<InteractiveEvent> = []
           yield* Queue.offer(registrations, { session, events })
           yield* session.events((event) => events.push(event))
         }),
@@ -143,7 +147,7 @@ const runHarness = <A, E, R>(
       Effect.gen(function* () {
         const context = yield* Layer.build(layer)
         return yield* Effect.gen(function* () {
-          const operation = yield* Operation.Service
+          const operation = yield* Service
           yield* Effect.forkChild(operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }))
           return yield* body({ ...(yield* Queue.take(registrations)), turns, usage })
         }).pipe(Effect.provide(context))

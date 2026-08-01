@@ -1,10 +1,14 @@
+import type { Input } from "@rika/product/product-operation"
+import { Service } from "@rika/product/product-operation-service"
+import { testLayer } from "@rika/product/product-operation-service"
+import { unavailableLayer } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Effect, Layer, Ref } from "effect"
 import { TestConsole } from "effect/testing"
-import { Operation } from "@rika/product/product-operation-service"
+
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { backend } from "../support/operation-execution-fixtures"
 
@@ -13,18 +17,18 @@ import { replacementWorkflow } from "../support/operation-selection-fixtures"
 describe("Operation", () => {
   it.effect("records operations through the test layer", () =>
     Effect.gen(function* () {
-      const calls = yield* Ref.make<ReadonlyArray<Operation.Input>>([])
+      const calls = yield* Ref.make<ReadonlyArray<Input>>([])
       yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* operation.run({ _tag: "Doctor" })
-      }).pipe(provideLayer(Operation.testLayer(calls)))
+      }).pipe(provideLayer(testLayer(calls)))
       expect(yield* Ref.get(calls)).toEqual([{ _tag: "Doctor" }])
     }),
   )
 
   it.effect("reports unavailable operations as expected failures", () =>
     Effect.gen(function* () {
-      const operation = yield* Operation.Service
+      const operation = yield* Service
       const unavailable = yield* Effect.result(operation.run({ _tag: "Doctor" }))
       const run = yield* Effect.result(
         operation.run({
@@ -38,7 +42,7 @@ describe("Operation", () => {
       )
       expect(unavailable._tag).toBe("Failure")
       expect(run._tag).toBe("Failure")
-    }).pipe(provideLayer(Operation.unavailableLayer)),
+    }).pipe(provideLayer(unavailableLayer)),
   )
 
   it.effect("starts, inspects, cancels, and reports missing workflow runs", () =>
@@ -104,7 +108,7 @@ describe("Operation", () => {
         }),
       )
       const output = yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* operation.run({
           _tag: "Workflow",
           action: "start",
@@ -151,7 +155,7 @@ describe("Operation", () => {
         }),
       )
       yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* operation.run({
           _tag: "Workflow",
           action: "start",
@@ -194,7 +198,7 @@ describe("Operation", () => {
         }),
       )
       yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* operation.run({
           _tag: "Workflow",
           action: "start",

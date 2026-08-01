@@ -1,3 +1,4 @@
+import * as ThreadQuery from "@rika/product/thread-query-service"
 import {
   describe,
   expect,
@@ -6,7 +7,6 @@ import {
   Effect,
   Layer,
   Schema,
-  ThreadQuery,
   provideLayer,
   Fixtures,
   workspace,
@@ -69,7 +69,7 @@ describe("ThreadQuery", () => {
         Layer.succeed(Fixtures.ThreadInteractionRepository.Service, interactions),
       )
       const layer = Layer.merge(
-        ThreadQuery.layerForWorkspace(workspace).pipe(Layer.provide(dependencies)),
+        ThreadQuery.Runtime.layerForWorkspace(workspace).pipe(Layer.provide(dependencies)),
         dependencies,
       )
 
@@ -114,7 +114,7 @@ describe("ThreadQuery", () => {
         schemaVersion: 2,
         threadId: "one",
       })
-      expect(legacy.text.length).toBeLessThanOrEqual(ThreadQuery.transcriptBudget)
+      expect(legacy.text.length).toBeLessThanOrEqual(ThreadQuery.QueryPolicy.transcriptBudget)
     }).pipe(provideLayer(queryLayer)),
   )
 

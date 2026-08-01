@@ -1,3 +1,4 @@
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, test } from "vitest"
 import { Database as NativeDatabase } from "bun:sqlite"
@@ -11,7 +12,9 @@ const _id = Thread.ThreadId.make("thread-a")
 
 const _create = (
   repository: TurnContract.Interface,
-  input: Omit<TurnContract.CreateInput, "executionRoute" | "queueCapacity"> & { readonly queueCapacity?: number },
+  input: Omit<Parameters<TurnContract.Interface["createForSubmission"]>[0], "executionRoute" | "queueCapacity"> & {
+    readonly queueCapacity?: number
+  },
 ) =>
   repository.createForSubmission({
     queueCapacity: 128,
@@ -27,7 +30,7 @@ const provideLayer =
       return yield* effect.pipe(Effect.provide(context))
     })
 
-const legacyModel = (model: Turn.ExecutionModelRoute) => {
+const legacyModel = (model: ExecutionRouteSnapshot.ExecutionModelRoute) => {
   const { providerConnection, registrationIdentity, ...rest } = model
   return {
     ...rest,

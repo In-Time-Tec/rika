@@ -1,3 +1,4 @@
+import { Service } from "@rika/product/product-operation-service"
 import * as AgentOutcomes from "@rika/coding-tools/agent-tool-contract"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
@@ -10,7 +11,7 @@ import * as ExecutionBackend from "@rika/product/execution-service"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Context, Effect, Layer, Queue, Ref } from "effect"
 import { TestClock } from "effect/testing"
-import { Operation } from "@rika/product/product-operation-service"
+
 import { executionRoute } from "../support/product-test-current-state"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { settleEvents } from "../support/operation-session-harness"
@@ -145,7 +146,7 @@ describe("Operation", () => {
       })
 
       yield* Effect.gen(function* () {
-        yield* Operation.Service
+        yield* Service
         yield* settleEvents
         expect(yield* interactions.getResultRoute(targetTurn.id)).toMatchObject({ delivery: "awaiting-result" })
         expect(yield* interactions.getRootResult(targetTurn.id)).toBeUndefined()
@@ -273,7 +274,7 @@ describe("Operation", () => {
       })
 
       yield* Effect.gen(function* () {
-        yield* Operation.Service
+        yield* Service
         yield* settleEvents
 
         expect(yield* interactions.getResultRoute(failedTurn.id)).toMatchObject({ delivery: "failed" })
@@ -344,7 +345,7 @@ describe("Operation", () => {
             }),
         })
         yield* Effect.gen(function* () {
-          const operation = yield* Operation.Service
+          const operation = yield* Service
           yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
         }).pipe(provideLayer(layer))
 

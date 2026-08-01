@@ -1,3 +1,6 @@
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
+import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import {
   ThreadRepository,
@@ -14,7 +17,6 @@ import {
   Fiber,
   Layer,
   Schema,
-  Operation,
   storeProjection,
   baseBackend,
   thread,
@@ -99,7 +101,7 @@ describe("interactive session extensions", () => {
           follow: (executionId) =>
             Effect.succeed({ turnId: String(executionId), status: "running" as const, events: [] }),
         })
-        const registration = yield* Deferred.make<Operation.InteractiveSession>()
+        const registration = yield* Deferred.make<InteractiveSession>()
         const context = yield* Layer.build(
           interactiveLayer(
             repository,
@@ -111,12 +113,12 @@ describe("interactive session extensions", () => {
             transcripts,
           ),
         )
-        const operation = Context.get(context, Operation.Service)
+        const operation = Context.get(context, Service)
         const operationFiber = yield* Effect.forkChild(
           operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }),
         )
         const session = yield* Deferred.await(registration)
-        const events: Array<Operation.InteractiveEvent> = []
+        const events: Array<InteractiveEvent> = []
         const feed = yield* Effect.forkChild(session.events((event) => events.push(event)))
 
         yield* session.previewThread(String(previewed.id))
@@ -179,7 +181,7 @@ describe("interactive session extensions", () => {
           start: (input) =>
             Deferred.succeed(submissionStarted, undefined).pipe(Effect.andThen(baseBackend.start(input))),
         })
-        const registration = yield* Deferred.make<Operation.InteractiveSession>()
+        const registration = yield* Deferred.make<InteractiveSession>()
         const context = yield* Layer.build(
           interactiveLayer(
             repository,
@@ -192,7 +194,7 @@ describe("interactive session extensions", () => {
             usage,
           ),
         )
-        const operation = Context.get(context, Operation.Service)
+        const operation = Context.get(context, Service)
         const operationFiber = yield* Effect.forkChild(
           operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }),
         )

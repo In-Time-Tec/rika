@@ -1,3 +1,4 @@
+import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -7,7 +8,7 @@ import * as ExecutionBackend from "@rika/product/execution-service"
 import { Catalog as ToolCatalog } from "@rika/coding-tools/coding-tool-catalog"
 import { Effect, Layer, Ref, Schema } from "effect"
 import { TestConsole } from "effect/testing"
-import { Operation } from "@rika/product/product-operation-service"
+
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { backend } from "../support/operation-execution-fixtures"
 
@@ -36,7 +37,7 @@ describe("Operation", () => {
         }),
       )
       const output = yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* operation.run({ _tag: "Thread", action: "new", clientWorkspace: "/client-work" })
         yield* operation.run({ _tag: "Thread", action: "rename", threadId: "thread-a", title: "\nNamed\tthread\u001b" })
         yield* operation.run({ _tag: "Thread", action: "label", threadId: "thread-a", labels: ["one"] })

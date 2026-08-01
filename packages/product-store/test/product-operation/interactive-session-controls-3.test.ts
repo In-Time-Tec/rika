@@ -1,3 +1,4 @@
+import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { describe, expect, it } from "@effect/vitest"
 import {
   TurnContract,
@@ -7,7 +8,6 @@ import {
   Ref,
   Schema,
   ExecutionIngest,
-  Operation,
   createTurn,
   delegationUnit,
   storeProjection,
@@ -22,7 +22,7 @@ describe("InteractiveSession controls", () => {
   it.effect("selects a thread and reopens the latest persisted projection without raw replay", () =>
     Effect.gen(function* () {
       const { session, controls, older } = yield* makeHarness(undefined, false, undefined, false, true)
-      const events: Array<Operation.InteractiveEvent> = []
+      const events: Array<InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
       yield* session.reopenThread(2)
@@ -61,7 +61,7 @@ describe("InteractiveSession controls", () => {
         }),
       )
       const { session, controls, older } = yield* makeHarness(pagedEvents)
-      const events: Array<Operation.InteractiveEvent> = []
+      const events: Array<InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
       yield* Effect.yieldNow
@@ -98,7 +98,7 @@ describe("InteractiveSession controls", () => {
         }),
       )
       const { session, controls, older } = yield* makeHarness(pagedEvents, true)
-      const events: Array<Operation.InteractiveEvent> = []
+      const events: Array<InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
       yield* Effect.yieldNow
@@ -140,7 +140,7 @@ describe("InteractiveSession controls", () => {
       }
       yield* transcripts.copyRecordedShell(shell, ExecutionIngest.projectionVersion)
       yield* completeActive(turns, transcripts, 5)
-      const events: Array<Operation.InteractiveEvent> = []
+      const events: Array<InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
       yield* Effect.yieldNow
@@ -175,7 +175,7 @@ describe("InteractiveSession controls", () => {
         const completed = yield* turns.setStatus(created.id, "completed", undefined, index + 10)
         yield* storeCompletedTranscript(transcripts, completed, `history-${index}-done`)
       }
-      const events: Array<Operation.InteractiveEvent> = []
+      const events: Array<InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
       yield* Effect.yieldNow
@@ -268,7 +268,7 @@ describe("InteractiveSession controls", () => {
           revision: 72,
         })
       }
-      const events: Array<Operation.InteractiveEvent> = []
+      const events: Array<InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
       const initial = yield* awaitSelectionLoaded(
@@ -376,7 +376,7 @@ describe("InteractiveSession controls", () => {
         units,
         revision: 262,
       })
-      const events: Array<Operation.InteractiveEvent> = []
+      const events: Array<InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
       const initial = yield* awaitSelectionLoaded(

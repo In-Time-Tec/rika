@@ -1,3 +1,6 @@
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import { Service } from "@rika/product/product-operation-service"
+import { OperationUnavailable } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -6,7 +9,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Deferred, Effect, Fiber, Layer, Ref } from "effect"
 import { it as rawIt } from "vitest"
-import { Operation } from "@rika/product/product-operation-service"
+
 import { createTurn } from "../support/product-test-current-state"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { backend } from "../support/operation-execution-fixtures"
@@ -16,7 +19,7 @@ import { threadLineage } from "../support/operation-selection-fixtures"
 describe("Operation", () => {
   it.effect("rejects every action after an interactive session closes", () =>
     Effect.gen(function* () {
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const writes = yield* Ref.make(0)
       const starts = yield* Ref.make(0)
       const turns = yield* TurnRepository.makeMemory([])
@@ -30,7 +33,7 @@ describe("Operation", () => {
         start: (input) => Ref.update(starts, (count) => count + 1).pipe(Effect.andThen(backend.start(input))),
       })
       yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
         const session = (yield* Ref.get(sessions))[0]
         if (session === undefined) return yield* Effect.die("missing session")
@@ -101,7 +104,7 @@ describe("Operation", () => {
         }
         const started = yield* Deferred.make<void>()
         const release = yield* Deferred.make<void>()
-        const submitted = yield* Deferred.make<Fiber.Fiber<void, Operation.OperationUnavailable>>()
+        const submitted = yield* Deferred.make<Fiber.Fiber<void, OperationUnavailable>>()
         const starts = yield* Ref.make(0)
         const turns = yield* TurnRepository.makeMemory([])
         const admittedBackend = ExecutionBackend.Service.of({
@@ -114,7 +117,7 @@ describe("Operation", () => {
             ),
         })
         yield* Effect.gen(function* () {
-          const operation = yield* Operation.Service
+          const operation = yield* Service
           yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
           expect(yield* Ref.get(starts)).toBe(1)
           yield* Deferred.succeed(release, undefined)

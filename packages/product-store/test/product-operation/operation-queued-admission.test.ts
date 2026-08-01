@@ -1,3 +1,5 @@
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import { reconcile } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as SettingsDefaults from "@rika/configuration/configuration-settings"
 import * as SettingsDecoder from "@rika/configuration/configuration-settings"
@@ -8,7 +10,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Deferred, Effect, Fiber, Layer, Ref } from "effect"
 import { TestClock } from "effect/testing"
-import { Operation } from "@rika/product/product-operation-service"
+
 import { queuedTurnPromoteMaxAgeMs } from "@rika/product/pending-turn"
 import { createTurn, executionRoute } from "../support/product-test-current-state"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
@@ -25,7 +27,7 @@ import { turnProvenance, selectionThread } from "../support/operation-selection-
 describe("Operation", () => {
   it.effect("rejects secret-bearing config before execution_route_json persistence", () =>
     Effect.gen(function* () {
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const turns = yield* TurnRepository.makeMemory([])
       const writes = yield* Ref.make(0)
       const repository = TurnRepository.Service.of({
@@ -72,7 +74,7 @@ describe("Operation", () => {
 
   it.effect("keeps one backend layer alive for sequential interactive submissions", () =>
     Effect.gen(function* () {
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const starts = yield* Ref.make<ReadonlyArray<string>>([])
       const acquisitions = yield* Ref.make(0)
       const turnIds = yield* Ref.make(0)
@@ -161,7 +163,7 @@ describe("Operation", () => {
             Effect.as({ turnId: input.turnId, status: "completed" as const, events: [] }),
           ),
       })
-      yield* Operation.reconcile(unusedExtensions, (turn) =>
+      yield* reconcile(unusedExtensions, (turn) =>
         Ref.update(preparations, (count) => count + 1).pipe(
           Effect.as({
             prompt: `${turn.prompt} with recomputed context`,
@@ -227,7 +229,7 @@ describe("Operation", () => {
           ),
       })
       const repair = yield* Effect.forkChild(
-        Operation.reconcile(unusedExtensions, (current) =>
+        reconcile(unusedExtensions, (current) =>
           Effect.succeed({ prompt: current.prompt, promptParts: undefined, extensionPin: undefined }),
         ).pipe(
           provideLayer(
@@ -285,7 +287,7 @@ describe("Operation", () => {
           ),
       })
       const repair = yield* Effect.forkChild(
-        Operation.reconcile().pipe(
+        reconcile().pipe(
           provideLayer(
             Layer.mergeAll(
               reconcileDependencies(unusedExtensions),
@@ -342,7 +344,7 @@ describe("Operation", () => {
           ),
       })
       yield* TestClock.adjust(`${queuedTurnPromoteMaxAgeMs + 1_000} millis`)
-      yield* Operation.reconcile(undefined, () =>
+      yield* reconcile(undefined, () =>
         Effect.succeed({ prompt: staleQueued.prompt, promptParts: undefined, extensionPin: undefined }),
       ).pipe(
         provideLayer(
@@ -376,7 +378,7 @@ describe("Operation", () => {
       const turns = yield* TurnRepository.makeMemory([queued])
       const preparationEntered = yield* Deferred.make<void>()
       const repair = yield* Effect.forkChild(
-        Operation.reconcile(undefined, () =>
+        reconcile(undefined, () =>
           Deferred.succeed(preparationEntered, undefined).pipe(Effect.andThen(Effect.never)),
         ).pipe(
           provideLayer(

@@ -16,7 +16,7 @@ export const checkpoint = (projection: Fixtures.TranscriptRepository.Projection 
     (entry) => entry.executionKey === Fixtures.TranscriptCorrelation.executionKey(key),
   )
 
-export const makeTurn = (status: Fixtures.Turn.Status): Fixtures.Turn.AgentExecutionTurn => ({
+export const makeTurn = (status: Fixtures.ExecutionStatus.Status): Fixtures.Turn.AgentExecutionTurn => ({
   _tag: "AgentExecution",
   id: rootId,
   threadId,
@@ -103,7 +103,7 @@ export interface Harness {
 
 type MakeHarnessOptions = {
   readonly script: Readonly<Record<string, ScriptEntry>>
-  readonly turnStatus?: Fixtures.Turn.Status
+  readonly turnStatus?: Fixtures.ExecutionStatus.Status
   readonly stored?: Fixtures.TranscriptProjectionModel.Projection
   readonly executionCheckpoints?: ReadonlyArray<Fixtures.TranscriptRepository.ExecutionCheckpoint>
   readonly consumed?: Readonly<

@@ -1,9 +1,20 @@
-import { Context, Effect, Layer, Runtime, Schema } from "effect"
+import { Context, Effect, Layer } from "effect"
 import { Input } from "./product-operation"
+import { InvalidInput, OperationUnavailable } from "./product-operation-errors"
 
 export { Input }
 export type { Input as OperationInput } from "./product-operation"
-export { productLayer, testLayer, runAuth, reconcile } from "../dispatch/product-operation-dispatch"
+export {
+  productLayer,
+  testLayer,
+  runAuth,
+  reconcile,
+  hasActiveExecutionWork,
+  stopActiveExecutionWork,
+  settleAbandonedRecoveredWork,
+  rootExecutionEvents,
+} from "../dispatch/product-operation-dispatch"
+
 export * as Operation from "../dispatch/product-operation-dispatch"
 export type { ProductLayerOptions } from "../dispatch/product-operation-dispatch"
 export type { AuthOperationOptions } from "../dispatch/authentication-operation-dispatch"
@@ -23,20 +34,7 @@ export { executeInteractiveCommand, InteractiveCommand } from "../interactive/in
 export { InteractiveEventSchema } from "../interactive/interactive-event"
 export type { InteractiveEvent } from "../interactive/interactive-event"
 
-export class OperationUnavailable extends Schema.TaggedErrorClass<OperationUnavailable>()("OperationUnavailable", {
-  operation: Schema.String,
-  message: Schema.String,
-}) {
-  override readonly [Runtime.errorExitCode] = 2
-  override readonly [Runtime.errorReported] = false
-}
-
-export class InvalidInput extends Schema.TaggedErrorClass<InvalidInput>()("InvalidInput", {
-  message: Schema.String,
-}) {
-  override readonly [Runtime.errorExitCode] = 2
-  override readonly [Runtime.errorReported] = false
-}
+export { OperationUnavailable, InvalidInput }
 
 export interface Interface {
   readonly run: (input: Input) => Effect.Effect<void, OperationUnavailable>

@@ -1,3 +1,7 @@
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
+import { productLayer as makeProductLayer, Service } from "@rika/product/product-operation-service"
+import type { ProductLayerOptions } from "@rika/product/product-operation-service"
 import * as TurnContract from "@rika/product/turn-repository"
 import { Fixtures as RuntimeFixtures } from "./interactive-session-runtime-support"
 import { Fixtures as TranscriptFixtures } from "./interactive-session-transcript-support"
@@ -6,7 +10,7 @@ import * as ThreadRepositoryContract from "@rika/product/thread-repository"
 import * as TranscriptRepositoryContract from "@rika/product/transcript-repository"
 import { TestClock } from "effect/testing"
 import { ExecutionIngest } from "@rika/product/product-operation-service"
-import { Operation } from "@rika/product/product-operation-service"
+
 import { createTurn, executionRoute } from "../support/product-test-current-state"
 import { delegationUnit, invalidatedProjection, storeProjection } from "../support/product-test-transcript-fixture"
 
@@ -19,7 +23,7 @@ export const productLayer = <
   ThreadInteractionError extends Error = never,
   UsageError extends Error = never,
 >(
-  options: Operation.ProductLayerOptions<
+  options: ProductLayerOptions<
     ThreadError,
     TurnError,
     BackendError,
@@ -28,8 +32,8 @@ export const productLayer = <
     ThreadInteractionError,
     UsageError
   >,
-): Layer.Layer<Operation.Service, Error, never> =>
-  Operation.productLayer({
+): Layer.Layer<Service, Error, never> =>
+  makeProductLayer({
     ...options,
     threadSummaryRepositoryLayer:
       options.threadSummaryRepositoryLayer ??
@@ -46,10 +50,10 @@ export const productLayer = <
     usageRepositoryLayer: options.usageRepositoryLayer ?? RuntimeFixtures.UsageRepository.memoryLayer.pipe(Layer.orDie),
   })
 
-export const collectEvents = (session: Operation.InteractiveSession, events: Array<Operation.InteractiveEvent>) =>
+export const collectEvents = (session: InteractiveSession, events: Array<InteractiveEvent>) =>
   Effect.forkChild(session.events((event) => events.push(event))).pipe(Effect.andThen(Effect.yieldNow))
 
-export const waitForSessions = (sessions: Ref.Ref<ReadonlyArray<Operation.InteractiveSession>>, count = 1) =>
+export const waitForSessions = (sessions: Ref.Ref<ReadonlyArray<InteractiveSession>>, count = 1) =>
   Effect.gen(function* () {
     while ((yield* Ref.get(sessions)).length < count) yield* Effect.yieldNow
   })
@@ -139,7 +143,7 @@ export const completeActive = Effect.fn("InteractiveSessionTest.completeActive")
 })
 
 export interface InteractiveHarness {
-  readonly session: Operation.InteractiveSession
+  readonly session: InteractiveSession
   readonly repositories: ThreadRepositoryContract.Interface
   readonly turns: TurnContract.Interface
   readonly transcripts: TranscriptRepositoryContract.Interface
@@ -186,7 +190,7 @@ export const makeHarness: (
     )
     const repositories = yield* RuntimeFixtures.ThreadRepository.makeMemory([older, latest])
     const turns = yield* RuntimeFixtures.TurnRepository.makeMemory(initialTurns)
-    const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+    const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
     const controls = yield* Ref.make<ReadonlyArray<ReadonlyArray<unknown>>>([])
     const hiddenExecutions = yield* Ref.make<ReadonlySet<string>>(new Set())
     const transcripts = yield* RuntimeFixtures.TranscriptRepository.makeMemory({ turns })
@@ -384,7 +388,7 @@ export const makeHarness: (
         Ref.update(sessions, (values) => [...values, session]).pipe(Effect.andThen(Effect.never)),
     })
     const context = yield* Layer.build(layer)
-    const operation = Context.get(context, Operation.Service)
+    const operation = Context.get(context, Service)
     yield* Effect.forkChild(operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }))
     yield* waitForSessions(sessions)
     yield* Ref.set(controls, [])
@@ -398,6 +402,6 @@ export { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Result, Schema }
 export { TestClock }
 export { RuntimeFixtures }
 export { TranscriptFixtures }
-export { ExecutionIngest, Operation, TurnContract }
+export { ExecutionIngest, TurnContract }
 export { createTurn, executionRoute }
 export { delegationUnit, invalidatedProjection, storeProjection }

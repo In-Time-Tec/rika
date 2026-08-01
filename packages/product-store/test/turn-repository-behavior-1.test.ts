@@ -1,3 +1,4 @@
+import * as ExecutionStatus from "@rika/product/execution-status"
 import {
   expect,
   it,
@@ -223,7 +224,9 @@ it.effect("memory terminal status is immutable against every stale lifecycle upd
       now: 1,
     })
     yield* repository.setStatus(created.id, "completed", "terminal-cursor", 2)
-    for (const [index, staleStatus] of Turn.Status.literals.filter((candidate) => candidate !== "queued").entries()) {
+    for (const [index, staleStatus] of ExecutionStatus.Status.literals
+      .filter((candidate) => candidate !== "queued")
+      .entries()) {
       const unchanged = yield* repository.setStatus(created.id, staleStatus, `stale-${staleStatus}`, index + 3)
       expect(unchanged).toMatchObject({ status: "completed", lastCursor: "terminal-cursor", updatedAt: 2 })
     }

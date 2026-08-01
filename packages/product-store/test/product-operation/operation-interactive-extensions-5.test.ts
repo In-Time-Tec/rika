@@ -1,3 +1,6 @@
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
+import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import {
   ThreadRepository,
@@ -12,7 +15,6 @@ import {
   Layer,
   Queue,
   Ref,
-  Operation,
   baseBackend,
   thread,
   interactiveLayer,
@@ -26,7 +28,7 @@ describe("interactive session extensions", () => {
       Effect.gen(function* () {
         const repository = yield* ThreadRepository.makeMemory()
         const turns = yield* TurnRepository.makeMemory()
-        const registration = yield* Deferred.make<Operation.InteractiveSession>()
+        const registration = yield* Deferred.make<InteractiveSession>()
         const childId = "child:execution%3Aparent-turn:worker"
         const childFollows = yield* Ref.make<ReadonlyArray<string | undefined>>([])
         const childFollowCount = yield* Ref.make(0)
@@ -132,12 +134,12 @@ describe("interactive session extensions", () => {
           Effect.succeed(Turn.TurnId.make("parent-turn")),
         )
         const context = yield* Layer.build(layer)
-        const operation = Context.get(context, Operation.Service)
+        const operation = Context.get(context, Service)
         const operationFiber = yield* Effect.forkChild(
           operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }),
         )
         const session = yield* Deferred.await(registration)
-        const events: Array<Operation.InteractiveEvent> = []
+        const events: Array<InteractiveEvent> = []
         const feed = yield* Effect.forkChild(session.events((event) => events.push(event)))
         yield* Effect.yieldNow
 
@@ -186,7 +188,7 @@ describe("interactive session extensions", () => {
           const second = thread("second")
           const repository = yield* ThreadRepository.makeMemory([first, second])
           const turns = yield* TurnRepository.makeMemory()
-          const registration = yield* Deferred.make<Operation.InteractiveSession>()
+          const registration = yield* Deferred.make<InteractiveSession>()
           const followed = yield* Queue.unbounded<{ readonly executionId: string; readonly afterCursor?: string }>()
           const stopped = yield* Queue.unbounded<string>()
           const cancelled = yield* Ref.make<ReadonlyArray<string>>([])
@@ -298,12 +300,12 @@ describe("interactive session extensions", () => {
           yield* Effect.scoped(
             Effect.gen(function* () {
               const context = yield* Layer.build(layer)
-              const operation = Context.get(context, Operation.Service)
+              const operation = Context.get(context, Service)
               const operationFiber = yield* Effect.forkChild(
                 operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }),
               )
               const session = yield* Deferred.await(registration)
-              const events: Array<Operation.InteractiveEvent> = []
+              const events: Array<InteractiveEvent> = []
               const feed = yield* Effect.forkChild(session.events((event) => events.push(event)))
               yield* session.selectThread(first.id, 1)
 

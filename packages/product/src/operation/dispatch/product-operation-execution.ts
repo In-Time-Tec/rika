@@ -8,15 +8,18 @@ import { makeExecutionReview } from "./product-operation-execution-review"
 import { makeExecutionContext } from "./product-operation-execution-context"
 import { makeThreadResultReconciliation } from "./thread-result-reconciliation"
 
-export const makeProductOperationExecution = (input: any) =>
+export const makeProductOperationExecution = (
+  input: any,
+): Effect.Effect<Readonly<Record<string, unknown>>, Error, never> =>
   Effect.gen(function* () {
     const threadInteractions =
       input.options.threadInteractionRepositoryLayer === undefined
         ? undefined
         : Context.get(input.dependencyContext, ThreadInteractionRepository.Service)
-    yield* Effect.provide(
+    yield* Effect.provideService(
       Context.get(input.dependencyContext, TurnRepository.Service).resetQueueClaims,
-      input.executionDependencies,
+      TurnRepository.Service,
+      Context.get(input.dependencyContext, TurnRepository.Service),
     )
     const lifecycle = yield* makeExecutionLifecycle(input)
     const projection = yield* makeExecutionProjection({ ...input, ...lifecycle })
@@ -40,4 +43,4 @@ export const makeProductOperationExecution = (input: any) =>
       isTerminalStatus: ExecutionStatus.isTerminalStatus,
     })
     return { ...lifecycle, ...projection, ...review, ...context, reconcileThreadResults }
-  })
+  }).pipe(Effect.mapError((error) => new Error(String(error))))

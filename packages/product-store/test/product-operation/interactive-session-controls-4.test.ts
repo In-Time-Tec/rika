@@ -1,9 +1,9 @@
+import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { describe, expect, it } from "@effect/vitest"
 import {
   RuntimeFixtures,
   TranscriptFixtures,
   Effect,
-  Operation,
   createTurn,
   delegationUnit,
   storeProjection,
@@ -71,7 +71,7 @@ describe("InteractiveSession controls", () => {
           revision: units.length,
         })
       }
-      const events: Array<Operation.InteractiveEvent> = []
+      const events: Array<InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
       const expectedRootKeys = conversation.flatMap((entry) => [`turn:${entry.id}:user`, `assistant:${entry.id}:0`])
@@ -97,7 +97,7 @@ describe("InteractiveSession controls", () => {
   it.effect("projects control failures instead of failing the session effect", () =>
     Effect.gen(function* () {
       const { session } = yield* makeHarness()
-      const events: Array<Operation.InteractiveEvent> = []
+      const events: Array<InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread("missing", 1)
       yield* session.steer("nowhere")
@@ -114,7 +114,7 @@ describe("InteractiveSession controls", () => {
   it.effect("keeps the active turn running when the cancellation request fails", () =>
     Effect.gen(function* () {
       const { session, turns, older } = yield* makeHarness(undefined, false, undefined, true)
-      const events: Array<Operation.InteractiveEvent> = []
+      const events: Array<InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
       events.length = 0

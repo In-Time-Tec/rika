@@ -1,3 +1,5 @@
+import { Service } from "@rika/product/product-operation-service"
+import { reconcile } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -7,7 +9,7 @@ import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"
 import * as PluginRegistry from "@rika/extensions/plugin-registry"
 import { Effect, Layer, Ref } from "effect"
-import { Operation } from "@rika/product/product-operation-service"
+
 import { executionRoute } from "../support/product-test-current-state"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { reconcileDependencies } from "../support/operation-session-harness"
@@ -116,7 +118,7 @@ describe("Operation", () => {
           ),
       })
       yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* operation.run({
           _tag: "Run",
           prompt: ["initial"],
@@ -168,7 +170,7 @@ describe("Operation", () => {
       })
       const run = (resumeFails: boolean) =>
         Effect.gen(function* () {
-          const operation = yield* Operation.Service
+          const operation = yield* Service
           return yield* Effect.result(
             operation.run({
               _tag: "Run",
@@ -214,7 +216,7 @@ describe("Operation", () => {
           extensionPin: pin,
         },
       ])
-      const failure = yield* Operation.reconcile(extensions).pipe(
+      const failure = yield* reconcile(extensions).pipe(
         provideLayer(
           Layer.mergeAll(
             reconcileDependencies(extensions),
@@ -272,7 +274,7 @@ describe("Operation", () => {
           lastCursor: "old",
         },
       ])
-      yield* Operation.reconcile(extensions).pipe(
+      yield* reconcile(extensions).pipe(
         provideLayer(
           Layer.mergeAll(
             reconcileDependencies(extensions),

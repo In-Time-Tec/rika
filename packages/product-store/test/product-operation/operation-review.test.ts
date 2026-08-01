@@ -1,3 +1,6 @@
+import type { Input } from "@rika/product/product-operation"
+import { Service } from "@rika/product/product-operation-service"
+import { productLayer } from "@rika/product/product-operation-service"
 import * as RuntimeContract from "@rika/coding-tools/coding-tool-runtime"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
@@ -11,7 +14,7 @@ import * as ExecutionWorkflow from "@rika/product/execution-workflow"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import { Context, Deferred, Effect, Fiber, Layer, Ref, Schema } from "effect"
 import { TestClock, TestConsole } from "effect/testing"
-import { Operation, ProductAgent } from "@rika/product/product-operation-service"
+import * as ProductAgent from "@rika/product/product-agent-service"
 import { provideLayer } from "../support/product-test-layer"
 import { createTurn } from "../support/product-test-current-state"
 
@@ -32,7 +35,7 @@ const backend = ExecutionBackend.Service.of({
   resolveInvocationSource: () => Effect.die("unused"),
 })
 
-const input = (overrides: Partial<Extract<Operation.Input, { readonly _tag: "Review" }>> = {}) => ({
+const input = (overrides: Partial<Extract<Input, { readonly _tag: "Review" }>> = {}) => ({
   _tag: "Review" as const,
   staged: false,
   ephemeral: false,
@@ -63,7 +66,7 @@ const layer = (
 ) =>
   Layer.mergeAll(
     TestConsole.layer,
-    Operation.productLayer({
+    productLayer({
       repositoryLayer: options.repositoryLayer ?? ThreadRepository.memoryLayer(),
       turnRepositoryLayer: options.turnRepositoryLayer ?? TurnRepository.memoryLayer(),
       backendLayer: Layer.succeed(ExecutionBackend.Service, options.backend ?? backend),
@@ -79,12 +82,12 @@ const layer = (
 describe("Operation review dispatcher", () => {
   it.effect("rejects review when no local tool runtime is configured", () =>
     Effect.gen(function* () {
-      const operation = yield* Operation.Service
+      const operation = yield* Service
       const error = yield* Effect.flip(operation.run(input()))
       expect(error.message).toBe("Review requires the local tool runtime")
     }).pipe(
       provideLayer(
-        Operation.productLayer({
+        productLayer({
           repositoryLayer: ThreadRepository.memoryLayer(),
           turnRepositoryLayer: TurnRepository.memoryLayer(),
           backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
@@ -106,7 +109,7 @@ describe("Operation review dispatcher", () => {
           ),
       })
       const output = yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* operation.run(input({ staged: true, paths: ["src"] }))
         yield* operation.run(input({ base: "main", json: true }))
         return yield* TestConsole.logLines
@@ -133,7 +136,7 @@ describe("Operation review dispatcher", () => {
         ),
       )
       yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* operation.run(input())
         expect(yield* Ref.get(acquisitions)).toBe(1)
         expect(yield* Ref.get(releases)).toBe(1)
@@ -154,7 +157,7 @@ describe("Operation review dispatcher", () => {
       ]) {
         const tool = ToolRuntime.Service.of({ run: () => Effect.succeed(result) })
         const error = yield* Effect.gen(function* () {
-          const operation = yield* Operation.Service
+          const operation = yield* Service
           return yield* Effect.flip(operation.run(input()))
         }).pipe(provideLayer(layer(tool)))
         expect(error.operation).toBe("Review")
@@ -170,7 +173,7 @@ describe("Operation review dispatcher", () => {
           Ref.update(requests, (all) => [...all, request]).pipe(Effect.as({ text: "", truncated: false, exitCode: 0 })),
       })
       const errors = yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         return yield* Effect.forEach(
           [input({ staged: true, base: "main" }), input({ base: "--output=/tmp/review" })],
           (review) => Effect.flip(operation.run(review)),
@@ -231,7 +234,7 @@ describe("Operation review dispatcher", () => {
         run: () => Effect.succeed({ text: "diff --git a/a b/a", truncated: false, exitCode: 0 }),
       })
       const output = yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* operation.run(input())
         return yield* TestConsole.logLines
       }).pipe(
@@ -300,7 +303,7 @@ describe("Operation review dispatcher", () => {
       const context = yield* Layer.build(
         Layer.mergeAll(
           TestConsole.layer,
-          Operation.productLayer({
+          productLayer({
             repositoryLayer: ThreadRepository.memoryLayer(),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
             backendLayer: Layer.succeed(ExecutionBackend.Service, missingBackend),
@@ -312,7 +315,7 @@ describe("Operation review dispatcher", () => {
           }),
         ),
       )
-      const operation = Context.get(context, Operation.Service)
+      const operation = Context.get(context, Service)
       const error = yield* Effect.flip(operation.run(input()))
       expect(error.message).toContain("Review review:review-turn disappeared")
       expect((yield* turns.get(Turn.TurnId.make("review-turn")))?.status).toBe("failed")
@@ -383,7 +386,7 @@ describe("Operation review dispatcher", () => {
           backend: reviewBackend,
         }),
       )
-      const operation = Context.get(context, Operation.Service)
+      const operation = Context.get(context, Service)
       const review = yield* Effect.forkChild(operation.run(input()))
       yield* Deferred.await(reviewStarted)
 
@@ -444,7 +447,7 @@ describe("Operation review dispatcher", () => {
       const context = yield* Layer.build(
         Layer.mergeAll(
           TestConsole.layer,
-          Operation.productLayer({
+          productLayer({
             repositoryLayer: ThreadRepository.memoryLayer(),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, reviewTurns),
             backendLayer: Layer.succeed(ExecutionBackend.Service, residentBackend),
@@ -456,7 +459,7 @@ describe("Operation review dispatcher", () => {
           }),
         ),
       )
-      const operation = Context.get(context, Operation.Service)
+      const operation = Context.get(context, Service)
       const request = yield* Effect.forkChild(operation.run(input()))
       yield* Deferred.await(persisted)
       const cancellation = yield* Effect.forkChild(Fiber.interrupt(request))

@@ -13,7 +13,10 @@ export const provideLayer =
       return yield* effect.pipe(Effect.provide(context))
     })
 
-export type CurrentCreateInput = Omit<TurnContract.CreateInput, "executionRoute" | "queueCapacity"> & {
+export type CurrentCreateInput = Omit<
+  Parameters<TurnContract.Interface["createForSubmission"]>[0],
+  "executionRoute" | "queueCapacity"
+> & {
   readonly executionRoute?: Turn.ExecutionRoutePin
   readonly queueCapacity?: number
 }

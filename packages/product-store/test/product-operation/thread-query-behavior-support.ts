@@ -1,7 +1,8 @@
+import * as ThreadQuery from "@rika/product/thread-query-service"
 import { describe, expect, it } from "@effect/vitest"
 import { Fixtures } from "./thread-query-support"
 import { Context, Effect, Layer, Schema, Stream } from "effect"
-import { ThreadQuery, ThreadToolHandlers } from "@rika/product/product-operation-service"
+import { ThreadToolHandlers } from "@rika/product/product-operation-service"
 import * as ThreadSearchRepository from "@rika/product/thread-search-repository"
 import { provideLayer } from "../support/product-test-layer"
 import { delegationUnit, storeProjection } from "../support/product-test-transcript-fixture"
@@ -73,7 +74,7 @@ export const stateThreads = (["waiting", "running", "queued", "failed"] as const
 export const search = Fixtures.ThreadSearchRepository.Service.of({
   search: (input) =>
     Effect.sync(() => {
-      let results: ThreadSearchRepository.SearchPage["results"] = []
+      let results: Effect.Success<ReturnType<ThreadSearchRepository.Interface["search"]>>["results"] = []
       if (input.workspace === workspace && input.query === "states") {
         results = stateThreads.map(({ thread }) => ({
           schemaVersion: 2,
@@ -128,7 +129,7 @@ export const repositories = Layer.mergeAll(
   ),
 )
 export const queryLayer = Layer.merge(
-  ThreadQuery.layerForWorkspace(workspace).pipe(Layer.provide(repositories)),
+  ThreadQuery.Runtime.layerForWorkspace(workspace).pipe(Layer.provide(repositories)),
   repositories,
 )
 

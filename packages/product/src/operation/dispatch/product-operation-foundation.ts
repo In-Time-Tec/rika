@@ -1,9 +1,10 @@
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
+import * as ThreadInteractionRepository from "@rika/product/thread-interaction-repository"
 import * as RootTurnOwner from "../../thread/queue/root-turn-owner"
 import * as ThreadToolService from "../../thread/tool/thread-tool-service"
-import { Context, Effect, Layer, Ref, Semaphore } from "effect"
+import { Context, Effect, Layer, Ref, Scope, Semaphore } from "effect"
 import { buildProductOperationDependencies } from "./product-operation-foundation-dependencies"
 import { makeProductOperationAdmission } from "./product-operation-admission"
 import { makeProductOperationIngest } from "./product-operation-ingest"
@@ -12,8 +13,13 @@ const workflowReplacementKey = (runId: string, ownerTurnId?: string, workspace?:
   JSON.stringify([runId, ownerTurnId, workspace])
 
 export const makeProductOperationFoundation = Effect.fn("ProductOperation.makeFoundation")(function* (input: any) {
-  const { options, ownerScope, publishInteractiveActivity } = input
-  const dependencies = yield* buildProductOperationDependencies({ options, ownerScope })
+  const { options, ownerScope: rawOwnerScope, publishInteractiveActivity } = input
+  const ownerScope: Scope.Scope = rawOwnerScope
+  const threadToolGateway: ThreadToolService.Gateway | undefined = options.threadToolGateway
+  const dependencies = yield* buildProductOperationDependencies<Error, Error, Error, Error, Error, Error, Error>({
+    options,
+    ownerScope,
+  })
   const replacementAdmission = yield* Semaphore.make(1)
   const replacementState = yield* Ref.make({ closed: false, active: 0 })
   const activeWorkflows = new Map<
@@ -33,13 +39,18 @@ export const makeProductOperationFoundation = Effect.fn("ProductOperation.makeFo
     Context.get(dependencyContext, TurnRepository.Service),
     acquiredBackend,
     ownerScope,
-  )
+  ).pipe(Effect.provideService(Scope.Scope, ownerScope))
   const backendLayer = Layer.succeed(ExecutionBackend.Service, acquiredBackend)
-  if (options.threadToolGateway !== undefined) {
+  if (threadToolGateway !== undefined) {
     const threadToolService = yield* ThreadToolService.make({ scheduler: rootTurnOwner }).pipe(
-      Effect.provide(Context.merge(dependencyContext, Context.make(ExecutionBackend.Service, acquiredBackend))),
+      Effect.provideService(
+        ThreadInteractionRepository.Service,
+        Context.get(dependencyContext, ThreadInteractionRepository.Service),
+      ),
+      Effect.provideService(TurnRepository.Service, Context.get(dependencyContext, TurnRepository.Service)),
+      Effect.provideService(ExecutionBackend.Service, acquiredBackend),
     )
-    yield* options.threadToolGateway.install(threadToolService)
+    yield* threadToolGateway.install(threadToolService)
   }
   const usage = yield* makeProductOperationIngest({
     acquiredBackend,

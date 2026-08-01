@@ -1,9 +1,12 @@
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
+import { OperationUnavailable } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Deferred, Effect, Fiber, Layer, Ref, Scheduler } from "effect"
-import { Operation } from "@rika/product/product-operation-service"
+
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import {
   collectEvents,
@@ -32,7 +35,7 @@ describe("Operation", () => {
           prompt: [],
           ephemeral: false,
         })
-        const received: Array<Operation.InteractiveEvent> = []
+        const received: Array<InteractiveEvent> = []
         yield* collectEvents(selecting, received)
         yield* source.selectThread(harness.previous.id, 1)
         yield* selecting.selectThread(harness.previous.id, 1)
@@ -76,7 +79,7 @@ describe("Operation", () => {
           prompt: [],
           ephemeral: false,
         })
-        const received: Array<Operation.InteractiveEvent> = []
+        const received: Array<InteractiveEvent> = []
         yield* collectEvents(selecting, received)
         yield* source.selectThread(harness.previous.id, 1)
         yield* selecting.selectThread(harness.previous.id, 1)
@@ -125,7 +128,7 @@ describe("Operation", () => {
               prompt: [],
               ephemeral: false,
             })
-            const received: Array<Operation.InteractiveEvent> = []
+            const received: Array<InteractiveEvent> = []
             yield* collectEvents(selecting, received)
             yield* source.selectThread(harness.previous.id, 1)
             yield* selecting.selectThread(harness.previous.id, 1)
@@ -134,7 +137,7 @@ describe("Operation", () => {
             yield* settleEvents
             received.length = 0
 
-            let candidate: Fiber.Fiber<void, Operation.OperationUnavailable> | undefined
+            let candidate: Fiber.Fiber<void, OperationUnavailable> | undefined
             if (mode === "failed") {
               yield* harness.failTargetPage
               yield* selecting.selectThread(harness.target.id, 2)
@@ -194,7 +197,7 @@ describe("Operation", () => {
             ? Deferred.succeed(failedLookup, undefined).pipe(Effect.as(undefined))
             : repository.get(id),
       })
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, interleavingRepository),
         turnRepositoryLayer: TurnRepository.memoryLayer(),
@@ -211,7 +214,7 @@ describe("Operation", () => {
           prompt: [],
           ephemeral: false,
         })
-        const received: Array<Operation.InteractiveEvent> = []
+        const received: Array<InteractiveEvent> = []
         yield* collectEvents(session, received)
         yield* session.selectThread(previous.id, 1)
         received.length = 0
@@ -254,7 +257,7 @@ describe("Operation", () => {
           prompt: [],
           ephemeral: false,
         })
-        const received: Array<Operation.InteractiveEvent> = []
+        const received: Array<InteractiveEvent> = []
         yield* collectEvents(selecting, received)
         yield* source.selectThread(harness.target.id, 1)
         yield* selecting.selectThread(harness.previous.id, 1)
@@ -364,7 +367,7 @@ describe("Operation", () => {
           prompt: [],
           ephemeral: false,
         })
-        const received: Array<Operation.InteractiveEvent> = []
+        const received: Array<InteractiveEvent> = []
         yield* collectEvents(selecting, received)
         yield* source.selectThread(harness.target.id, 1)
         yield* selecting.selectThread(harness.previous.id, 1)
@@ -424,7 +427,7 @@ describe("Operation", () => {
           threadId: harness.target.id,
           ephemeral: false,
         })
-        const received: Array<Operation.InteractiveEvent> = []
+        const received: Array<InteractiveEvent> = []
         yield* collectEvents(initial, received)
         yield* source.selectThread(harness.target.id, 1)
         received.length = 0

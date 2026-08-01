@@ -3,7 +3,7 @@ import { InteractiveCommand } from "../operation/interactive/interactive-command
 import { InteractiveEventSchema } from "../operation/interactive/interactive-event"
 import { Input } from "../operation/contract/product-operation"
 import * as Overflow from "../operation/interactive/interactive-feed-overflow"
-import { OperationUnavailable } from "../operation/contract/product-operation-service"
+import { OperationUnavailable } from "../operation/contract/product-operation-errors"
 
 type InteractiveInput = Extract<Input, { readonly _tag: "Interactive" }>
 const PositiveSequence = Schema.Int.check(Schema.isGreaterThan(0))

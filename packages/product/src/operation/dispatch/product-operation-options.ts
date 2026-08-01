@@ -1,13 +1,13 @@
 import { OperationUnavailable } from "../contract/product-operation-service"
 
 export interface ProductLayerOptions<
-  ThreadError,
-  TurnError,
-  BackendError,
-  ThreadSummaryError = never,
-  TranscriptError = never,
-  ThreadInteractionError = never,
-  UsageError = never,
+  ThreadError extends Error,
+  TurnError extends Error,
+  BackendError extends Error,
+  ThreadSummaryError extends Error = never,
+  TranscriptError extends Error = never,
+  ThreadInteractionError extends Error = never,
+  UsageError extends Error = never,
 > {
   readonly repositoryLayer: import("effect").Layer.Layer<import("@rika/product/thread-repository").Service, ThreadError>
   readonly turnRepositoryLayer: import("effect").Layer.Layer<import("@rika/product/turn-repository").Service, TurnError>

@@ -1,10 +1,12 @@
+import type { InteractiveSession } from "@rika/product/interactive-session"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as TurnContract from "@rika/product/turn-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as Turn from "@rika/product/turn-record"
-import { Operation } from "@rika/product/product-operation-service"
+import { Service } from "@rika/product/product-operation-service"
+
 import { Deferred, Effect, Layer, Ref } from "effect"
 import { productLayer } from "./operation-layer-harness"
 import { backend } from "./operation-execution-fixtures"
@@ -24,7 +26,7 @@ export const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLo
   const liveEventsEmitted = yield* Deferred.make<void>()
   const usageRequested = yield* Deferred.make<void>()
   const releaseExecution = yield* Deferred.make<void>()
-  const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+  const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
   let targetGetBlocked = false
   let targetGetFailed = false
   let targetPageBlocked = false
@@ -119,7 +121,7 @@ export const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLo
     replay: (turnId) => Effect.succeed({ turnId, status: "running" as const, events: [] }),
   })
   const transcripts = yield* TranscriptRepository.makeMemory({ turns: selectionTurns })
-  const layer = productLayer({
+  const layer: Layer.Layer<Service, Error, never> = productLayer({
     repositoryLayer: Layer.succeed(ThreadRepository.Service, delayedRepository),
     turnRepositoryLayer: Layer.succeed(TurnRepository.Service, selectionTurns),
     transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),

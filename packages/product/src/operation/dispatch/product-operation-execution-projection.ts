@@ -123,4 +123,4 @@ export const makeExecutionProjection = (input: any) =>
       setTurnStatus,
       repairThreadSummaries,
     }
-  })
+  }).pipe(Effect.mapError((error) => new Error(String(error))))

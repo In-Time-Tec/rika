@@ -1,9 +1,11 @@
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import { Service } from "@rika/product/product-operation-service"
 import { Context, Deferred, Effect, Layer, Ref, Result, Schema, Scope } from "effect"
 import * as TranscriptRepositoryContract from "@rika/product/transcript-repository"
 import * as TurnContract from "@rika/product/turn-repository"
 import * as UsageRepositoryContract from "@rika/product/usage-repository"
 import { TestClock } from "effect/testing"
-import { ExecutionIngest, Operation } from "@rika/product/product-operation-service"
+import { ExecutionIngest } from "@rika/product/product-operation-service"
 import {
   RuntimeFixtures,
   TranscriptFixtures,
@@ -83,7 +85,7 @@ export const legacyUsageRow = () => {
 }
 
 export interface SpendHarness {
-  readonly session: Operation.InteractiveSession
+  readonly session: InteractiveSession
   readonly usage: UsageRepositoryContract.Interface
   readonly turns: TurnContract.Interface
   readonly transcripts: TranscriptRepositoryContract.Interface
@@ -93,7 +95,7 @@ export interface SpendHarness {
 
 type SpendHarnessOptions = {
   readonly gate?: Deferred.Deferred<void>
-  readonly turnStatus?: RuntimeFixtures.Turn.Status
+  readonly turnStatus?: RuntimeFixtures.ExecutionStatus.Status
   readonly legacy?: boolean
 }
 
@@ -115,7 +117,7 @@ export const makeSpendHarness: (options: SpendHarnessOptions) => Effect.Effect<S
     }
     const repositories = yield* RuntimeFixtures.ThreadRepository.makeMemory([spendThread])
     const turns = yield* RuntimeFixtures.TurnRepository.makeMemory([spendTurn])
-    const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+    const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
     const transcripts =
       options.legacy === true
         ? yield* RuntimeFixtures.TranscriptRepository.makeMemory({
@@ -236,7 +238,7 @@ export const makeSpendHarness: (options: SpendHarnessOptions) => Effect.Effect<S
         Ref.update(sessions, (values) => [...values, session]).pipe(Effect.andThen(Effect.never)),
     })
     const context = yield* Layer.build(layer)
-    const operation = Context.get(context, Operation.Service)
+    const operation = Context.get(context, Service)
     yield* Effect.forkChild(operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }))
     yield* waitForSessions(sessions)
     const session = (yield* Ref.get(sessions))[0]
@@ -246,7 +248,7 @@ export const makeSpendHarness: (options: SpendHarnessOptions) => Effect.Effect<S
 
 export { Context, Deferred, Effect, Layer, Ref, Result }
 export { TestClock }
-export { ExecutionIngest, Operation }
+export { ExecutionIngest }
 export {
   RuntimeFixtures,
   TranscriptFixtures,

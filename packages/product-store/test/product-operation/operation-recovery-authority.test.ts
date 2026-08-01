@@ -1,11 +1,13 @@
+import * as ExecutionStatus from "@rika/product/execution-status"
+import { Service } from "@rika/product/product-operation-service"
+import { hasActiveExecutionWork } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
-import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { AgentDepth } from "@rika/product/execution-service"
 import { Effect, Layer, Ref } from "effect"
-import { Operation } from "@rika/product/product-operation-service"
+
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { backend } from "../support/operation-execution-fixtures"
 
@@ -18,7 +20,7 @@ describe("Operation", () => {
         const stale = replacementTurn(status)
         const turns = yield* TurnRepository.makeMemory([stale])
         const threads = yield* ThreadRepository.makeMemory([selectionThread(String(stale.threadId))])
-        const result = yield* Operation.hasActiveExecutionWork().pipe(
+        const result = yield* hasActiveExecutionWork().pipe(
           provideLayer(
             Layer.mergeAll(
               Layer.succeed(ThreadRepository.Service, threads),
@@ -49,7 +51,7 @@ describe("Operation", () => {
         else if (turnId === child) children = [{ executionId: grandchild, status: "running" }]
         return { turnId, status: "completed", waits: [], pendingTools: [], children }
       }
-      const result = yield* Operation.hasActiveExecutionWork().pipe(
+      const result = yield* hasActiveExecutionWork().pipe(
         provideLayer(
           Layer.mergeAll(
             Layer.succeed(ThreadRepository.Service, threads),
@@ -73,7 +75,7 @@ describe("Operation", () => {
         const turns = yield* TurnRepository.makeMemory([turn])
         const threads = yield* ThreadRepository.makeMemory([selectionThread(String(turn.threadId))])
         const child = AgentDepth.childExecutionId(turn.id, `terminal-${status}`)
-        const childStatus = yield* Ref.make<Turn.Status | "absent">("running")
+        const childStatus = yield* Ref.make<ExecutionStatus.Status | "absent">("running")
         const inspectedBackend = ExecutionBackend.Service.of({
           ...backend,
           inspect: (turnId) =>
@@ -99,11 +101,11 @@ describe("Operation", () => {
           Layer.succeed(ExecutionBackend.Service, inspectedBackend),
         )
 
-        expect(yield* Operation.hasActiveExecutionWork().pipe(provideLayer(layer))).toBe(true)
+        expect(yield* hasActiveExecutionWork().pipe(provideLayer(layer))).toBe(true)
         yield* Ref.set(childStatus, "completed")
-        expect(yield* Operation.hasActiveExecutionWork().pipe(provideLayer(layer))).toBe(false)
+        expect(yield* hasActiveExecutionWork().pipe(provideLayer(layer))).toBe(false)
         yield* Ref.set(childStatus, "absent")
-        expect(yield* Operation.hasActiveExecutionWork().pipe(provideLayer(layer))).toBe(false)
+        expect(yield* hasActiveExecutionWork().pipe(provideLayer(layer))).toBe(false)
         expect((yield* turns.get(turn.id))?.status).toBe(status)
       }
     }),
@@ -114,7 +116,7 @@ describe("Operation", () => {
       const turn = replacementTurn()
       const turns = yield* TurnRepository.makeMemory([turn])
       const threads = yield* ThreadRepository.makeMemory([selectionThread(String(turn.threadId))])
-      const status = yield* Ref.make<Turn.Status>("running")
+      const status = yield* Ref.make<ExecutionStatus.Status>("running")
       const inspectedBackend = ExecutionBackend.Service.of({
         ...backend,
         inspect: (turnId) =>
@@ -127,16 +129,16 @@ describe("Operation", () => {
         Layer.succeed(TurnRepository.Service, turns),
         Layer.succeed(ExecutionBackend.Service, inspectedBackend),
       )
-      expect(yield* Operation.hasActiveExecutionWork().pipe(provideLayer(layer))).toBe(true)
+      expect(yield* hasActiveExecutionWork().pipe(provideLayer(layer))).toBe(true)
       yield* Ref.set(status, "completed")
-      expect(yield* Operation.hasActiveExecutionWork().pipe(provideLayer(layer))).toBe(false)
+      expect(yield* hasActiveExecutionWork().pipe(provideLayer(layer))).toBe(false)
       expect((yield* turns.get(turn.id))?.status).toBe("completed")
 
       const active = replacementTurn()
       const failingTurns = yield* TurnRepository.makeMemory([active])
       const failingThreads = yield* ThreadRepository.makeMemory([selectionThread(String(active.threadId))])
       const failed = yield* Effect.result(
-        Operation.hasActiveExecutionWork().pipe(
+        hasActiveExecutionWork().pipe(
           provideLayer(
             Layer.mergeAll(
               Layer.succeed(ThreadRepository.Service, failingThreads),
@@ -180,7 +182,7 @@ describe("Operation", () => {
             children: turnId === turn.id ? [{ executionId: child, status: "completed" as const }] : [],
           }),
       })
-      const result = yield* Operation.hasActiveExecutionWork().pipe(
+      const result = yield* hasActiveExecutionWork().pipe(
         provideLayer(
           Layer.mergeAll(
             Layer.succeed(ThreadRepository.Service, threads),
@@ -229,7 +231,7 @@ describe("Operation", () => {
           makeTurnId: Effect.die("unused"),
         })
         yield* Effect.gen(function* () {
-          const operation = yield* Operation.Service
+          const operation = yield* Service
           const failed = yield* Effect.result(operation.authorizeResidentReplacement!)
           expect(failed._tag).toBe("Failure")
           expect((yield* turns.get(turn.id))?.status).toBe("running")

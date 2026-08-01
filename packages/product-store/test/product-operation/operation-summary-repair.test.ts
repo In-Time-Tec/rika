@@ -1,3 +1,6 @@
+import type { InteractiveEvent } from "@rika/product/interactive-event"
+import type { Input } from "@rika/product/product-operation"
+import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -6,7 +9,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref } from "effect"
 import { TestClock } from "effect/testing"
-import { Operation } from "@rika/product/product-operation-service"
+
 import { executionRoute } from "../support/product-test-current-state"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { settleEvents } from "../support/operation-session-harness"
@@ -17,15 +20,15 @@ import { turnProvenance, selectionThread } from "../support/operation-selection-
 describe("Operation", () => {
   it.effect("uses the configured interactive operation", () =>
     Effect.gen(function* () {
-      const received = yield* Ref.make<ReadonlyArray<Operation.Input>>([])
-      const input: Operation.Input = {
+      const received = yield* Ref.make<ReadonlyArray<Input>>([])
+      const input: Input = {
         _tag: "Interactive",
         prompt: ["hello"],
         workspace: "/interactive",
         ephemeral: false,
       }
       yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* operation.run(input)
       }).pipe(
         provideLayer(
@@ -86,7 +89,7 @@ describe("Operation", () => {
           }),
       })
       yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* operation.run({
           _tag: "Run",
           prompt: ["continue"],
@@ -153,7 +156,7 @@ describe("Operation", () => {
             interactive: () => Deferred.succeed(opened, undefined).pipe(Effect.andThen(Effect.never)),
           }),
         )
-        const operation = Context.get(context, Operation.Service)
+        const operation = Context.get(context, Service)
         const operationFiber = yield* Effect.forkChild(
           operation.run({ _tag: "Interactive", prompt: [], workspace: "/work", ephemeral: false }),
         )
@@ -213,7 +216,7 @@ describe("Operation", () => {
       })
 
       yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         const reconnects = yield* Effect.forEach(["/one", "/two"], (workspace) =>
           Effect.forkChild(operation.run({ _tag: "Interactive", prompt: [], workspace, ephemeral: false })),
         )
@@ -269,7 +272,7 @@ describe("Operation", () => {
       })
 
       yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* Effect.forEach(
           Array.from({ length: 20 }),
           (_, index) =>
@@ -294,7 +297,7 @@ describe("Operation", () => {
 
   it.effect("retains a complete submission before the event feed attaches", () =>
     Effect.gen(function* () {
-      const received = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
+      const received = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const layer = productLayer({
         repositoryLayer: ThreadRepository.memoryLayer(),
@@ -318,7 +321,7 @@ describe("Operation", () => {
           }),
       })
       yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
       }).pipe(provideLayer(layer))
       const events = yield* Ref.get(received)

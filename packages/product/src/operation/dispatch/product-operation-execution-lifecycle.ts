@@ -10,7 +10,7 @@ import { failureKind } from "../operation-error"
 import { titleInteractiveThread } from "../interactive/thread-title-composition"
 import type { InteractiveEvent } from "../interactive/interactive-event"
 
-export const makeExecutionLifecycle = (input: any) =>
+export const makeExecutionLifecycle = (input: any): Effect.Effect<Readonly<Record<string, unknown>>, Error, never> =>
   Effect.gen(function* () {
     const {
       executionDependencies,
@@ -67,9 +67,10 @@ export const makeExecutionLifecycle = (input: any) =>
         }
       },
     )
-    yield* Effect.provide(
+    yield* Effect.provideService(
       Context.get(dependencyContext, TurnRepository.Service).resetQueueClaims,
-      executionDependencies,
+      TurnRepository.Service,
+      Context.get(dependencyContext, TurnRepository.Service),
     )
     const notifyThreadSummaries = Effect.gen(function* () {
       const summaries = yield* ThreadSummaryRepository.Service
@@ -117,4 +118,4 @@ export const makeExecutionLifecycle = (input: any) =>
       )
     })
     return { stopActiveExecutionWorkWithProjection, notifyThreadSummaries, titleThread }
-  })
+  }).pipe(Effect.mapError((error) => new Error(String(error))))

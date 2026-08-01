@@ -1,3 +1,4 @@
+import * as ExecutionStatus from "@rika/product/execution-status"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
@@ -23,7 +24,7 @@ export const selectionThread = (id: string): Thread.Thread => ({
   updatedAt: 1,
 })
 
-export const replacementTurn = (status: Turn.Status = "running"): Turn.Turn => ({
+export const replacementTurn = (status: ExecutionStatus.Status = "running"): Turn.Turn => ({
   ...turnProvenance,
   id: Turn.TurnId.make("replacement-turn"),
   threadId: Thread.ThreadId.make("replacement-thread"),

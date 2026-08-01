@@ -1,3 +1,6 @@
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
+import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -6,7 +9,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Effect, Layer, Ref } from "effect"
 import { TestClock } from "effect/testing"
-import { Operation, ResolvedContext } from "@rika/product/product-operation-service"
+import { ResolvedContext } from "@rika/product/product-operation-service"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { holdSession, openInteractiveSession, settleEvents } from "../support/operation-session-harness"
 import { executionStarted, backend } from "../support/operation-execution-fixtures"
@@ -18,7 +21,7 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const repository = yield* ThreadRepository.makeMemory()
       const turns = yield* TurnRepository.makeMemory()
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const inputs = yield* Ref.make<ReadonlyArray<ResolvedContext.Input>>([])
       const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
@@ -50,7 +53,7 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const repository = yield* ThreadRepository.makeMemory()
       const turns = yield* TurnRepository.makeMemory()
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const starts = yield* Ref.make<ReadonlyArray<string>>([])
       const titleInvocations = yield* Ref.make<ReadonlyArray<ExecutionBackend.InvokeChildInput>>([])
       const titleRoute = {
@@ -167,8 +170,8 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const repository = yield* ThreadRepository.makeMemory()
       const turns = yield* TurnRepository.makeMemory()
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
-      const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
+      const events = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const titleFailingBackend = ExecutionBackend.Service.of({
         ...backend,
@@ -266,7 +269,7 @@ describe("Operation", () => {
           ),
       })
       yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* Effect.forkChild(operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }))
         yield* TestClock.adjust("2 seconds")
         while ((yield* repository.get(thread.id))?.title !== "Recovered Durable Title") yield* Effect.yieldNow
@@ -293,8 +296,8 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const repository = yield* ThreadRepository.makeMemory()
       const turns = yield* TurnRepository.makeMemory()
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
-      const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
+      const events = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const promotionFailingBackend = ExecutionBackend.Service.of({
         ...backend,

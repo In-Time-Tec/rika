@@ -1,3 +1,7 @@
+import * as ExecutionStatus from "@rika/product/execution-status"
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
+import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -7,7 +11,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Context, Effect, Layer, Ref } from "effect"
 import { TestConsole } from "effect/testing"
-import { ExecutionIngest, Operation } from "@rika/product/product-operation-service"
+import { ExecutionIngest } from "@rika/product/product-operation-service"
 import { executionRoute } from "../support/product-test-current-state"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { holdSession, openInteractiveSession, nonActivation } from "../support/operation-session-harness"
@@ -22,8 +26,8 @@ describe("Operation", () => {
         Effect.gen(function* () {
           const repository = yield* ThreadRepository.makeMemory()
           const turns = yield* TurnRepository.makeMemory()
-          const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
-          const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+          const events = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])
+          const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
           const runSync = Effect.runSyncWith(yield* Effect.context<never>())
           const caseBackend = ExecutionBackend.Service.of({
             ...backend,
@@ -162,7 +166,7 @@ describe("Operation", () => {
       const repository = yield* ThreadRepository.makeMemory()
       const turns = yield* TurnRepository.makeMemory()
       const starts = yield* Ref.make<ReadonlyArray<ExecutionBackend.StartInput>>([])
-      const runningStatuses = yield* Ref.make<ReadonlyArray<Turn.Status>>([])
+      const runningStatuses = yield* Ref.make<ReadonlyArray<ExecutionStatus.Status>>([])
       const runBackend = ExecutionBackend.Service.of({
         ...backend,
         start: (input) =>
@@ -216,7 +220,7 @@ describe("Operation", () => {
         }),
       )
       const output = yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* operation.run({
           _tag: "Run",
           prompt: [],
@@ -385,7 +389,7 @@ describe("Operation", () => {
           }),
       })
       yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* operation.run({
           _tag: "Run",
           prompt: [],

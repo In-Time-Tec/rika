@@ -1,3 +1,6 @@
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
+import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import {
   RuntimeFixtures,
@@ -9,7 +12,6 @@ import {
   Layer,
   Ref,
   Result,
-  Operation,
   createTurn,
   productLayer,
   collectEvents,
@@ -24,7 +26,7 @@ describe("InteractiveSession controls", () => {
   it.effect("steers and cancels the selected active turn", () =>
     Effect.gen(function* () {
       const { session, turns, controls, older } = yield* makeHarness()
-      const events: Array<Operation.InteractiveEvent> = []
+      const events: Array<InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
       yield* session.steer("change course")
@@ -86,7 +88,7 @@ describe("InteractiveSession controls", () => {
       yield* turns.requestStop(RuntimeFixtures.Turn.TurnId.make("active"), 2)
       yield* turns.setStatus(RuntimeFixtures.Turn.TurnId.make("active"), "cancelled", "cancel-cursor", 3)
       expect(yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("active"))).toBeUndefined()
-      const events: Array<Operation.InteractiveEvent> = []
+      const events: Array<InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
       const loaded = yield* awaitSelectionLoaded(events, (event) =>
@@ -107,7 +109,7 @@ describe("InteractiveSession controls", () => {
           (unit) => unit.key === "turn:active:user",
         ),
       ).toBe(true)
-      const events: Array<Operation.InteractiveEvent> = []
+      const events: Array<InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
       const loaded = yield* awaitSelectionLoaded(events, (event) =>
@@ -231,7 +233,7 @@ describe("InteractiveSession controls", () => {
           ),
         resolveInvocationSource: () => Effect.die("unused"),
       })
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const layer = productLayer({
         repositoryLayer: RuntimeFixtures.ThreadRepository.memoryLayer([older]),
         turnRepositoryLayer: Layer.succeed(RuntimeFixtures.TurnRepository.Service, turns),
@@ -243,12 +245,12 @@ describe("InteractiveSession controls", () => {
           Ref.update(sessions, (values) => [...values, value]).pipe(Effect.andThen(Effect.never)),
       })
       const context = yield* Layer.build(layer)
-      const operation = Context.get(context, Operation.Service)
+      const operation = Context.get(context, Service)
       yield* Effect.forkChild(operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }))
       yield* waitForSessions(sessions)
       const checkingSession = (yield* Ref.get(sessions))[0]
       if (checkingSession === undefined) return yield* Effect.die("Missing interactive session")
-      const events: Array<Operation.InteractiveEvent> = []
+      const events: Array<InteractiveEvent> = []
       yield* collectEvents(checkingSession, events)
       yield* checkingSession.selectThread(older.id, 1)
       yield* checkingSession.interruptAndSend("next prompt")
@@ -285,7 +287,7 @@ describe("InteractiveSession controls", () => {
         finished,
         finalTurnId,
       })
-      const events: Array<Operation.InteractiveEvent> = []
+      const events: Array<InteractiveEvent> = []
       yield* turns.setStatus(RuntimeFixtures.Turn.TurnId.make("active"), "waiting", "wait-cursor", 2)
       for (const [index, id] of ["promoted-one", "promoted-two", "promoted-three"].entries())
         yield* createTurn(turns, {
@@ -315,7 +317,7 @@ describe("InteractiveSession controls", () => {
       Effect.gen(function* () {
         const repositories = yield* RuntimeFixtures.ThreadRepository.makeMemory()
         const turns = yield* RuntimeFixtures.TurnRepository.makeMemory()
-        const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+        const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
         const commands = yield* Ref.make<ReadonlyArray<string>>([])
         let turnNumber = 0
         const layer = productLayer({
@@ -354,14 +356,14 @@ describe("InteractiveSession controls", () => {
             Ref.update(sessions, (values) => [...values, session]).pipe(Effect.andThen(Effect.never)),
         })
         const context = yield* Layer.build(layer)
-        const operation = Context.get(context, Operation.Service)
+        const operation = Context.get(context, Service)
         yield* Effect.forkChild(
           operation.run({ _tag: "Interactive", prompt: [], ephemeral: false, workspace: "/client-shell" }),
         )
         yield* waitForSessions(sessions)
         const session = (yield* Ref.get(sessions))[0]
         if (session === undefined) return yield* Effect.die("Missing interactive session")
-        const allEvents: Array<Operation.InteractiveEvent> = []
+        const allEvents: Array<InteractiveEvent> = []
         yield* collectEvents(session, allEvents)
 
         const runShell = Effect.fn("InteractiveSessionTest.runShell")(function* (command: string, incognito: boolean) {

@@ -1,3 +1,4 @@
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
@@ -19,7 +20,9 @@ export const id = Thread.ThreadId.make("thread-a")
 
 export const create = (
   repository: TurnContract.Interface,
-  input: Omit<TurnContract.CreateInput, "executionRoute" | "queueCapacity"> & { readonly queueCapacity?: number },
+  input: Omit<Parameters<TurnContract.Interface["createForSubmission"]>[0], "executionRoute" | "queueCapacity"> & {
+    readonly queueCapacity?: number
+  },
 ) =>
   repository.createForSubmission({
     queueCapacity: 128,
@@ -35,7 +38,7 @@ export const provideLayer =
       return yield* effect.pipe(Effect.provide(context))
     })
 
-export const legacyModel = (model: Turn.ExecutionModelRoute) => {
+export const legacyModel = (model: ExecutionRouteSnapshot.ExecutionModelRoute) => {
   const { providerConnection, registrationIdentity, ...rest } = model
   return {
     ...rest,

@@ -1,3 +1,5 @@
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -6,7 +8,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Effect, Fiber, Layer, Ref } from "effect"
 import { TestClock } from "effect/testing"
-import { Operation } from "@rika/product/product-operation-service"
+
 import { executionRoute } from "../support/product-test-current-state"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { collectEvents, holdSession, openInteractiveSession, settleEvents } from "../support/operation-session-harness"
@@ -58,8 +60,8 @@ describe("Operation", () => {
         inspect: (turnId) => Effect.succeed({ turnId, status: "running", waits: [], pendingTools: [], children: [] }),
         steer: () => Effect.fail(ExecutionBackend.BackendError.make({ message: "forced steer failure" })),
       })
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
-      const received: Array<Operation.InteractiveEvent> = []
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
+      const received: Array<InteractiveEvent> = []
 
       yield* Effect.gen(function* () {
         const session = yield* openInteractiveSession(sessions, {
@@ -128,8 +130,8 @@ describe("Operation", () => {
           updatedAt: 1,
         },
       ])
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
-      const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
+      const events = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       yield* Effect.gen(function* () {
         const session = yield* openInteractiveSession(sessions, {
@@ -209,7 +211,7 @@ describe("Operation", () => {
         start: (input) =>
           Ref.update(starts, (all) => [...all, String(input.turnId)]).pipe(Effect.andThen(backend.start(input))),
       })
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       yield* Effect.gen(function* () {
         const session = yield* openInteractiveSession(sessions, {
           _tag: "Interactive",

@@ -1,3 +1,5 @@
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -6,7 +8,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Deferred, Effect, Fiber, Layer, Ref } from "effect"
 import { TestConsole } from "effect/testing"
-import { Operation } from "@rika/product/product-operation-service"
+
 import { executionRoute } from "../support/product-test-current-state"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { holdSession, openInteractiveSession, settleEvents } from "../support/operation-session-harness"
@@ -51,7 +53,7 @@ describe("Operation", () => {
         }),
       )
       const output = yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* operation.run({ _tag: "Thread", action: "continue", last: true })
         yield* operation.run({ _tag: "Thread", action: "continue", threadIds: ["thread-a"] })
         yield* operation.run({ _tag: "Thread", action: "search", query: ["project", "urgent"] })
@@ -117,7 +119,7 @@ describe("Operation", () => {
         makeTurnId: Effect.succeed(Turn.TurnId.make("fork-turn")),
       })
       yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* operation.run({ _tag: "Thread", action: "fork", threadId: "source", atTurn: "one" })
       }).pipe(provideLayer(layer))
       expect(yield* turns.list(Thread.ThreadId.make("fork"))).toMatchObject([{ prompt: "one", status: "completed" }])
@@ -179,7 +181,7 @@ describe("Operation", () => {
       })
 
       yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* operation.run({ _tag: "Thread", action: "fork", threadId: source.id })
       }).pipe(provideLayer(layer))
 
@@ -228,7 +230,7 @@ describe("Operation", () => {
       })
 
       const result = yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         return yield* Effect.result(operation.run({ _tag: "Thread", action: "fork", threadId: source.id }))
       }).pipe(provideLayer(layer))
 
@@ -287,7 +289,7 @@ describe("Operation", () => {
         replay: (turnId) => Effect.succeed({ turnId, status: "running", events: [] }),
         start: (input) => Effect.succeed({ turnId: input.turnId, status: "running", events: [] }),
       })
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const turnSequence = yield* Ref.make(0)
       const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
@@ -303,7 +305,7 @@ describe("Operation", () => {
       })
 
       const forkResult = yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         const session = yield* openInteractiveSession(sessions, {
           _tag: "Interactive",
           prompt: [],

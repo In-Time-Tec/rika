@@ -4,7 +4,7 @@ import * as TurnRepositoryContract from "../../thread/repository/turn-repository
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionStatus from "@rika/product/execution-status"
 import * as ExecutionChildRun from "@rika/product/execution-child-run"
-import { Effect, Fiber, PubSub, Semaphore } from "effect"
+import { Effect, Fiber, PubSub, Scope, Semaphore } from "effect"
 import { makeProductOperationFoundation } from "./product-operation-foundation"
 import { makeProductOperationExecution } from "./product-operation-execution"
 import {
@@ -21,9 +21,12 @@ const watchedThreadIds = (sessionThreadViews: Map<number, () => string | undefin
     }),
   )
 
-export const buildProductOperationExecutionState = (input: any) =>
-  Effect.gen(function* () {
-    const { options, ownerScope, publishInteractiveActivity, sessionThreadViews } = input
+export const buildProductOperationExecutionState = (
+  input: any,
+): Effect.Effect<Readonly<Record<string, unknown>>, Error, never> =>
+  Effect.gen(function* (): Effect.gen.Return<Readonly<Record<string, unknown>>, Error, never> {
+    const { options, ownerScope: rawOwnerScope, publishInteractiveActivity, sessionThreadViews } = input
+    const ownerScope: Scope.Scope = rawOwnerScope
     const pendingTurnCapacity = Math.max(0, Math.floor(options.pendingTurnCapacity ?? 64))
     const reviewSettlementAdmission = yield* Semaphore.make(1)
     const reviewSettlements = new Map<string, Fiber.Fiber<ExecutionChildRun.FanOutInspection, any>>()
@@ -33,7 +36,10 @@ export const buildProductOperationExecutionState = (input: any) =>
     const turnChanges = yield* PubSub.sliding<void>(1)
     const dirtyTurnObservers = new Set<Turn.TurnId>()
     const watched = () => watchedThreadIds(sessionThreadViews)
-    const foundation = yield* makeProductOperationFoundation({ options, ownerScope, publishInteractiveActivity })
+    const foundation = yield* makeProductOperationFoundation({ options, ownerScope, publishInteractiveActivity }).pipe(
+      Effect.provideService(Scope.Scope, ownerScope),
+      Effect.mapError((error) => new Error(String(error))),
+    )
     const {
       rootTurnOwner,
       titleExecutionId,

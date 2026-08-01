@@ -22,7 +22,7 @@ const layer = Layer.merge(repositories, ThreadSummaryRepository.memoryLayer.pipe
 
 const create = (
   repository: TurnContract.Interface,
-  input: Omit<TurnContract.CreateInput, "executionRoute" | "queueCapacity">,
+  input: Omit<Parameters<TurnContract.Interface["createForSubmission"]>[0], "executionRoute" | "queueCapacity">,
 ) => repository.createForSubmission({ ...input, executionRoute: Turn.testExecutionRoute(), queueCapacity: 128 })
 
 describe("memory thread summaries", () => {

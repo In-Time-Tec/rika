@@ -1,3 +1,7 @@
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
+import { Service } from "@rika/product/product-operation-service"
+import { productLayer } from "@rika/product/product-operation-service"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
@@ -17,7 +21,6 @@ import {
   ExecutionIngest,
   executeInteractiveCommand,
   InteractiveEventSchema,
-  Operation,
 } from "@rika/product/product-operation-service"
 import * as UsageCost from "@rika/product/usage-projection"
 import { invalidatedProjection, storeProjection } from "../support/product-test-transcript-fixture"
@@ -69,12 +72,12 @@ export const interactiveLayer: (
   repository: ThreadRepository.Interface,
   turns: TurnContract.Interface,
   backend: ExecutionBackend.Interface,
-  registration: Deferred.Deferred<Operation.InteractiveSession>,
+  registration: Deferred.Deferred<InteractiveSession>,
   makeThreadId?: Effect.Effect<Thread.ThreadId>,
   makeTurnId?: Effect.Effect<Turn.TurnId>,
   transcripts?: TranscriptRepository.Interface,
   usage?: UsageRepository.Interface,
-) => Layer.Layer<Operation.Service, object, never> = (
+) => Layer.Layer<Service, object, never> = (
   repository,
   turns,
   backend,
@@ -84,7 +87,7 @@ export const interactiveLayer: (
   transcripts,
   usage,
 ) =>
-  Operation.productLayer({
+  productLayer({
     repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
     turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
     threadSummaryRepositoryLayer: SummaryRepository.memoryLayer.pipe(
@@ -251,7 +254,7 @@ export const terminalTransitionScenario = (
           })
         },
       })
-      const registration = yield* Deferred.make<Operation.InteractiveSession>()
+      const registration = yield* Deferred.make<InteractiveSession>()
       const context = yield* Layer.build(
         interactiveLayer(
           repository,
@@ -263,16 +266,16 @@ export const terminalTransitionScenario = (
           transcripts,
         ),
       )
-      const operation = Context.get(context, Operation.Service)
+      const operation = Context.get(context, Service)
       const operationFiber = yield* Effect.forkChild(
         operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }),
       )
       const session = yield* Deferred.await(registration)
-      const events = yield* Queue.unbounded<Operation.InteractiveEvent>()
+      const events = yield* Queue.unbounded<InteractiveEvent>()
       const feed = yield* Effect.forkChild(session.events((event) => Queue.offerUnsafe(events, event)))
 
       yield* session.selectThread(selected.id, 1)
-      let selectedEvent: Extract<Operation.InteractiveEvent, { readonly _tag: "SelectionLoaded" }> | undefined
+      let selectedEvent: Extract<InteractiveEvent, { readonly _tag: "SelectionLoaded" }> | undefined
       let refoldStopped = false
       let refoldStarted = false
       let refoldFinished = false
@@ -369,5 +372,5 @@ export {
   TranscriptUnit,
 }
 export { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Schema }
-export { ExecutionIngest, Operation, executeInteractiveCommand, InteractiveEventSchema, UsageCost }
+export { ExecutionIngest, executeInteractiveCommand, InteractiveEventSchema, UsageCost }
 export { invalidatedProjection, storeProjection }

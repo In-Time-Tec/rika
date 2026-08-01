@@ -1,3 +1,8 @@
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
+import { Service } from "@rika/product/product-operation-service"
+import { OperationUnavailable } from "@rika/product/product-operation-service"
+import { productLayer } from "@rika/product/product-operation-service"
 import { expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -6,12 +11,11 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ExecutionEvent from "@rika/product/execution-event"
 import { Deferred, Effect, Fiber, Layer, Queue, Schema } from "effect"
-import { Operation } from "@rika/product/product-operation-service"
 
 type Client = {
-  readonly session: Operation.InteractiveSession
-  readonly fiber: Fiber.Fiber<void, Operation.OperationUnavailable>
-  readonly events: Array<Operation.InteractiveEvent>
+  readonly session: InteractiveSession
+  readonly fiber: Fiber.Fiber<void, OperationUnavailable>
+  readonly events: Array<InteractiveEvent>
   readonly selected: Queue.Queue<void>
 }
 
@@ -119,11 +123,11 @@ it.effect("delivers each joined subscriber suffix exactly once through subscribe
       resolveInvocationSource: () => Effect.die("unused"),
     })
     const registrations = yield* Queue.unbounded<{
-      readonly session: Operation.InteractiveSession
-      readonly events: Array<Operation.InteractiveEvent>
+      readonly session: InteractiveSession
+      readonly events: Array<InteractiveEvent>
       readonly selected: Queue.Queue<void>
     }>()
-    const layer = Operation.productLayer({
+    const layer = productLayer({
       repositoryLayer: ThreadRepository.memoryLayer([thread]),
       turnRepositoryLayer: TurnRepository.memoryLayer(),
       backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
@@ -132,7 +136,7 @@ it.effect("delivers each joined subscriber suffix exactly once through subscribe
       makeTurnId: Effect.succeed(Turn.TurnId.make("churn-turn")),
       interactive: (_, session) =>
         Effect.gen(function* () {
-          const events: Array<Operation.InteractiveEvent> = []
+          const events: Array<InteractiveEvent> = []
           const selected = yield* Queue.unbounded<void>()
           yield* Queue.offer(registrations, { session, events, selected })
           yield* session.events((event) => {
@@ -145,7 +149,7 @@ it.effect("delivers each joined subscriber suffix exactly once through subscribe
       Effect.gen(function* () {
         const context = yield* Layer.build(layer)
         yield* Effect.gen(function* () {
-          const operation = yield* Operation.Service
+          const operation = yield* Service
           const open = Effect.fn("OperationChurnTest.open")(function* (select: boolean) {
             const fiber = yield* Effect.forkChild(
               operation.run({

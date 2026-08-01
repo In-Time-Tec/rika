@@ -1,10 +1,12 @@
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Deferred, Effect, Fiber, Layer, Ref } from "effect"
-import { Operation, ResolvedContext } from "@rika/product/product-operation-service"
+import { ResolvedContext } from "@rika/product/product-operation-service"
 import { executionRoute } from "../support/product-test-current-state"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { collectEvents, holdSession, openInteractiveSession, settleEvents } from "../support/operation-session-harness"
@@ -42,8 +44,8 @@ describe("Operation", () => {
           updatedAt: 2,
         },
       ])
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
-      const events: Array<Operation.InteractiveEvent> = []
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
+      const events: Array<InteractiveEvent> = []
       const preparationEntered = yield* Deferred.make<void>()
       const releasePreparation = yield* Deferred.make<void>()
       const preparations = yield* Ref.make(0)
@@ -147,8 +149,8 @@ describe("Operation", () => {
           updatedAt: 3,
         },
       ])
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
-      const events: Array<Operation.InteractiveEvent> = []
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
+      const events: Array<InteractiveEvent> = []
       const preparationEntered = yield* Deferred.make<void>()
       const releasePreparation = yield* Deferred.make<void>()
       const preparations = yield* Ref.make(0)
@@ -254,7 +256,7 @@ describe("Operation", () => {
             Effect.as({ steeringMessageId: `steering:${turnId}:steering:0`, sequence: 0 }),
           ),
       })
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       yield* Effect.gen(function* () {
         const session = yield* openInteractiveSession(sessions, {
           _tag: "Interactive",

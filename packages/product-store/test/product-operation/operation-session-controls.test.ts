@@ -1,3 +1,5 @@
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -5,7 +7,7 @@ import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Effect, Layer, Ref } from "effect"
-import { Operation } from "@rika/product/product-operation-service"
+
 import { executionRoute } from "../support/product-test-current-state"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { holdSession, openInteractiveSession, settleEvents } from "../support/operation-session-harness"
@@ -15,10 +17,10 @@ import { turnProvenance, threadLineage } from "../support/operation-selection-fi
 describe("Operation", () => {
   it.effect("exercises every interactive session control and its safe failure path", () =>
     Effect.gen(function* () {
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
-      const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
+      const events = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
-      const dispatch = (event: Operation.InteractiveEvent) => runSync(Ref.update(events, (all) => [...all, event]))
+      const dispatch = (event: InteractiveEvent) => runSync(Ref.update(events, (all) => [...all, event]))
       const layer = productLayer({
         repositoryLayer: ThreadRepository.memoryLayer(),
         turnRepositoryLayer: TurnRepository.memoryLayer([
@@ -70,10 +72,10 @@ describe("Operation", () => {
 
   it.effect("admits 100 queued turns with constant-size deltas and no per-submit host wake", () =>
     Effect.gen(function* () {
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
-      const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
+      const events = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
-      const dispatch = (event: Operation.InteractiveEvent) => runSync(Ref.update(events, (all) => [...all, event]))
+      const dispatch = (event: InteractiveEvent) => runSync(Ref.update(events, (all) => [...all, event]))
       const wakes = yield* Ref.make<ReadonlyArray<ExecutionBackend.ThreadQueueWake>>([])
       const promoters = yield* Ref.make<ReadonlyArray<ExecutionBackend.TurnPromoter>>([])
       const started = yield* Ref.make<ReadonlyArray<string>>([])
@@ -211,11 +213,10 @@ describe("Operation", () => {
           updatedAt: 3,
         },
       ])
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
-      const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
+      const events = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
-      const dispatch = (event: Operation.InteractiveEvent) =>
-        runSync(Ref.update(events, (current) => [...current, event]))
+      const dispatch = (event: InteractiveEvent) => runSync(Ref.update(events, (current) => [...current, event]))
       const controlBackend = ExecutionBackend.Service.of({
         ...backend,
         inspect: inspectFromTurns(turns),

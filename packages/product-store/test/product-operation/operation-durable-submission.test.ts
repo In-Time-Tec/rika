@@ -1,3 +1,5 @@
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -6,7 +8,7 @@ import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Deferred, Effect, Layer, Ref } from "effect"
-import { Operation, ResolvedContext } from "@rika/product/product-operation-service"
+import { ResolvedContext } from "@rika/product/product-operation-service"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { holdSession, openInteractiveSession, settleEvents } from "../support/operation-session-harness"
 import { executionStarted, backend } from "../support/operation-execution-fixtures"
@@ -17,8 +19,8 @@ describe("Operation", () => {
       const repository = yield* ThreadRepository.makeMemory()
       const turns = yield* TurnRepository.makeMemory()
       const transcripts = yield* TranscriptRepository.makeMemory({ turns })
-      const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const events = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const startInputs = yield* Ref.make<ReadonlyArray<ExecutionBackend.StartInput>>([])
       const childInputs = yield* Ref.make<ReadonlyArray<ExecutionBackend.InvokeChildInput>>([])
@@ -179,8 +181,8 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const repository = yield* ThreadRepository.makeMemory()
       const turns = yield* TurnRepository.makeMemory()
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
-      const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
+      const events = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])
       const starts = yield* Ref.make(0)
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const layer = productLayer({
@@ -220,8 +222,8 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const repository = yield* ThreadRepository.makeMemory()
       const turns = yield* TurnRepository.makeMemory()
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
-      const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
+      const events = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])
       const starts = yield* Ref.make(0)
       const cancellations = yield* Ref.make(0)
       const preparationEntered = yield* Deferred.make<void>()

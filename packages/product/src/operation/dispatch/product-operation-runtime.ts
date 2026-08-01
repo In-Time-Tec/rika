@@ -3,12 +3,13 @@ import * as AuthenticationOperation from "./authentication-operation-dispatch"
 import * as ExecutionRecovery from "./execution-recovery-dispatch"
 import * as ExtensionOperations from "./extension-operation-dispatch"
 import * as ConfigOperations from "./configuration-operation-dispatch"
-import { Console, Deferred, Effect, Layer, Schema } from "effect"
+import { Console, Deferred, Effect, Layer, Schema, Scope } from "effect"
 import { awaitSessionQuiescence, hasActiveExecutionWork } from "../../execution/lifecycle/product-execution-quiescence"
 import { queuedTurnPromoteMaxAgeMs, staleQueuedTurnsError } from "../../thread/queue/pending-turn-policy"
 import { OperationUnavailable, Service } from "../contract/product-operation-service"
 import type { Input } from "../contract/product-operation"
-import { operationError } from "../operation-error"
+import { OperationError, operationError } from "../operation-error"
+import type { Interface } from "../contract/product-operation-service"
 import { isTerminalStatus } from "../../execution/contract/execution-status"
 import { makeProductOperationSchedule } from "./product-operation-schedule"
 import { makeProductOperationRuntimeState } from "./product-operation-runtime-state"
@@ -42,14 +43,33 @@ export type { ProductLayerOptions } from "./product-operation-options"
 export const runAuth = AuthenticationOperation.run
 export const reconcile = ExecutionRecovery.reconcile
 
+type ProductLayerError<
+  ThreadError extends Error,
+  TurnError extends Error,
+  BackendError extends Error,
+  ThreadSummaryError extends Error,
+  TranscriptError extends Error,
+  ThreadInteractionError extends Error,
+  UsageError extends Error,
+> =
+  | ThreadError
+  | TurnError
+  | BackendError
+  | ThreadSummaryError
+  | TranscriptError
+  | ThreadInteractionError
+  | UsageError
+  | OperationError
+  | OperationUnavailable
+
 export const productLayer = <
-  ThreadError,
-  TurnError,
-  BackendError,
-  ThreadSummaryError = never,
-  TranscriptError = never,
-  ThreadInteractionError = never,
-  UsageError = never,
+  ThreadError extends Error,
+  TurnError extends Error,
+  BackendError extends Error,
+  ThreadSummaryError extends Error = never,
+  TranscriptError extends Error = never,
+  ThreadInteractionError extends Error = never,
+  UsageError extends Error = never,
 >(
   options: ProductLayerOptions<
     ThreadError,
@@ -60,10 +80,34 @@ export const productLayer = <
     ThreadInteractionError,
     UsageError
   >,
-) =>
+): Layer.Layer<
+  Service,
+  | ThreadError
+  | TurnError
+  | BackendError
+  | ThreadSummaryError
+  | TranscriptError
+  | ThreadInteractionError
+  | UsageError
+  | OperationError
+  | OperationUnavailable,
+  never
+> =>
   Layer.effect(
     Service,
-    Effect.gen(function* () {
+    Effect.gen(function* (): Effect.gen.Return<
+      Interface,
+      ProductLayerError<
+        ThreadError,
+        TurnError,
+        BackendError,
+        ThreadSummaryError,
+        TranscriptError,
+        ThreadInteractionError,
+        UsageError
+      >,
+      Scope.Scope
+    > {
       const ownerScope = yield* Effect.scope
       let activitySequence = 0
       const interactiveSinks = new Map<number, (origin: number, event: any) => void>()
@@ -85,7 +129,7 @@ export const productLayer = <
         awaitSessionQuiescence,
         staleQueuedTurnsError,
         queuedTurnPromoteMaxAgeMs,
-      })
+      }).pipe(Effect.mapError((error) => operationError(String(error))))
       const schedule = yield* makeProductOperationSchedule({
         options,
         ...state,
@@ -96,10 +140,19 @@ export const productLayer = <
         queueMutationEvent: state.queueMutationEvent,
       })
       yield* state.rootTurnOwner.install({
-        run: schedule.scheduleReconcile.pipe(Effect.flatMap((value: any) => Deferred.await(value))) as any,
-        reconcile: schedule.scheduleReconcile.pipe(Effect.flatMap((value: any) => Deferred.await(value))) as any,
+        run: schedule.scheduleReconcile.pipe(
+          Effect.flatMap((value: Deferred.Deferred<void>) => Deferred.await(value)),
+          Effect.asVoid,
+          Effect.mapError((error) => operationError(String(error))),
+        ),
+        reconcile: schedule.scheduleReconcile.pipe(
+          Effect.flatMap((value: Deferred.Deferred<void>) => Deferred.await(value)),
+          Effect.asVoid,
+          Effect.mapError((error) => operationError(String(error))),
+        ),
       })
-      yield* Effect.forkIn(state.rootTurnOwner.reconcile, ownerScope)
+      const rootReconcile: Effect.Effect<void, Error> = state.rootTurnOwner.reconcile
+      yield* Effect.forkIn(rootReconcile, ownerScope).pipe(Effect.mapError((error) => operationError(String(error))))
       return makeProductOperationService({
         options,
         state,

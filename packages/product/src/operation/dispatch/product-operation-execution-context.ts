@@ -140,4 +140,4 @@ export const makeExecutionContext = (input: any) =>
       Effect.mapError((error) => operationError(String(error))),
     )
     return { resolveExecutionRoute, executionPrompt, prepareExecution, reconcileExecutions }
-  })
+  }).pipe(Effect.mapError((error) => new Error(String(error))))

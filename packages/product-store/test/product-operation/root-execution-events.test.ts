@@ -1,6 +1,6 @@
+import { rootExecutionEvents } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as ExecutionBackend from "@rika/product/execution-service"
-import { Operation } from "@rika/product/product-operation-service"
 
 const usageEventAt = (executionId: string, cursor: string, sequence: number): ExecutionBackend.Event => ({
   executionId,
@@ -27,7 +27,7 @@ describe("rootExecutionEvents", () => {
       usageEventAt(turnId, "YmFyZQ~40Cd", 40),
       usageEventAt("execution:other-turn", "b3RoZXI~41Ef", 41),
     ]
-    const filtered = Operation.rootExecutionEvents(turnId, events)
+    const filtered = rootExecutionEvents(turnId, events)
     expect(filtered.map((value) => value.sequence)).toEqual([9, 30, 40])
   })
 
@@ -38,7 +38,7 @@ describe("rootExecutionEvents", () => {
       usageEventAt(childOf(rootId, "call_a"), "cG9pc29u~4Wq", 4526),
       usageEventAt(rootId, "cm9vdA~9Zk", 9),
     ]
-    expect(Operation.rootExecutionEvents(turnId, events).every((value) => value.sequence <= 9)).toBe(true)
+    expect(rootExecutionEvents(turnId, events).every((value) => value.sequence <= 9)).toBe(true)
   })
 
   it("attributes by execution identity alone and never reads the cursor", () => {
@@ -50,7 +50,7 @@ describe("rootExecutionEvents", () => {
       usageEventAt(childOf(rootId, "call_a"), `execution:${turnId}:model:3:usage`, 3),
       usageEventAt("execution:other-turn", `execution:${turnId}:model:4:usage`, 4),
     ]
-    const filtered = Operation.rootExecutionEvents(turnId, events)
+    const filtered = rootExecutionEvents(turnId, events)
     expect(filtered.map((value) => value.sequence)).toEqual([1, 2])
   })
 
@@ -62,9 +62,6 @@ describe("rootExecutionEvents", () => {
       usageEventAt(childOf(rootId, "call_a"), opaqueCursor(2), 2),
       usageEventAt(rootId, opaqueCursor(3), 3),
     ]
-    expect(Operation.rootExecutionEvents(turnId, events).map((value) => value.cursor)).toEqual([
-      opaqueCursor(1),
-      opaqueCursor(3),
-    ])
+    expect(rootExecutionEvents(turnId, events).map((value) => value.cursor)).toEqual([opaqueCursor(1), opaqueCursor(3)])
   })
 })

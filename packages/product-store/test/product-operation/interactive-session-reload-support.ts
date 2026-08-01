@@ -1,3 +1,7 @@
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
+import { Service } from "@rika/product/product-operation-service"
+import { OperationUnavailable } from "@rika/product/product-operation-service"
 import { Context, Deferred, Effect, Fiber, Layer, Ref, Schema, Scope } from "effect"
 import * as TranscriptRepositoryContract from "@rika/product/transcript-repository"
 import * as TurnContract from "@rika/product/turn-repository"
@@ -15,7 +19,7 @@ import {
   serverEvents,
   active,
 } from "./interactive-session-base-support"
-import { ExecutionIngest, Operation } from "@rika/product/product-operation-service"
+import { ExecutionIngest } from "@rika/product/product-operation-service"
 
 export const subagentToolId = "done:call_1"
 export const subagentChildId = "child:execution%3Adone:call_1"
@@ -99,7 +103,7 @@ export const subagentChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend
 ])
 
 export interface SubagentReloadHarness {
-  readonly session: Operation.InteractiveSession
+  readonly session: InteractiveSession
   readonly subagentThread: RuntimeFixtures.Thread.Thread
   readonly transcripts: TranscriptRepositoryContract.Interface
   readonly turns: TurnContract.Interface
@@ -115,7 +119,7 @@ type SubagentReloadOptions = {
       { readonly cursor: string; readonly sequence: number; readonly status?: "completed" | "failed" | "cancelled" }
     >
   >
-  readonly turnStatus?: RuntimeFixtures.Turn.Status
+  readonly turnStatus?: RuntimeFixtures.ExecutionStatus.Status
   readonly followed?: Ref.Ref<ReadonlyArray<string>>
   readonly inspection?: (executionId: string) => RuntimeFixtures.ExecutionBackend.Inspection | undefined
   readonly replayEvents?: (executionId: string) => ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>
@@ -145,7 +149,7 @@ export const makeSubagentReloadHarness: (
   }
   const repositories = yield* RuntimeFixtures.ThreadRepository.makeMemory([subagentThread])
   const turns = yield* RuntimeFixtures.TurnRepository.makeMemory([doneTurn])
-  const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+  const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
   const transcripts =
     options.projectionVersion === RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion
       ? yield* RuntimeFixtures.TranscriptRepository.makeMemory({
@@ -241,7 +245,7 @@ export const makeSubagentReloadHarness: (
       Ref.update(sessions, (values) => [...values, session]).pipe(Effect.andThen(Effect.never)),
   })
   const context = yield* Layer.build(layer)
-  const operation = Context.get(context, Operation.Service)
+  const operation = Context.get(context, Service)
   yield* Effect.forkChild(operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }))
   yield* waitForSessions(sessions)
   const session = (yield* Ref.get(sessions))[0]
@@ -253,7 +257,7 @@ export interface ObservedProjectionStream {
   readonly turn: RuntimeFixtures.Turn.AgentExecutionTurn
   readonly streamId: string
   readonly patchRevision: number
-  readonly state: Extract<Operation.InteractiveEvent, { readonly _tag: "TranscriptProjectionStarted" }>["state"]
+  readonly state: Extract<InteractiveEvent, { readonly _tag: "TranscriptProjectionStarted" }>["state"]
   readonly units: ReadonlyMap<string, TranscriptFixtures.TranscriptUnit.Unit>
   readonly rootStatus?: "completed" | "failed" | "cancelled"
 }
@@ -278,7 +282,7 @@ export const sortObservedEntries = (entries: ReadonlyArray<RuntimeFixtures.Trans
       TranscriptFixtures.TranscriptOrdering.compareUnitOrder(left.unit.order, right.unit.order),
   )
 
-export const latestSelectionEntries = (events: ReadonlyArray<Operation.InteractiveEvent>) => {
+export const latestSelectionEntries = (events: ReadonlyArray<InteractiveEvent>) => {
   let entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry> | undefined
   let selectionEpoch: number | undefined
   let threadId: string | undefined
@@ -351,7 +355,7 @@ export const latestSelectionEntries = (events: ReadonlyArray<Operation.Interacti
 }
 
 export const awaitSelectionEntries = (
-  events: ReadonlyArray<Operation.InteractiveEvent>,
+  events: ReadonlyArray<InteractiveEvent>,
   until: (entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>) => boolean,
 ) =>
   Effect.gen(function* () {
@@ -363,11 +367,11 @@ export const awaitSelectionEntries = (
     return latestSelectionEntries(events) ?? []
   })
 
-type SelectionLoadedEvent = Extract<Operation.InteractiveEvent, { readonly _tag: "SelectionLoaded" }>
-type TranscriptPagePrependedEvent = Extract<Operation.InteractiveEvent, { readonly _tag: "TranscriptPagePrepended" }>
+type SelectionLoadedEvent = Extract<InteractiveEvent, { readonly _tag: "SelectionLoaded" }>
+type TranscriptPagePrependedEvent = Extract<InteractiveEvent, { readonly _tag: "TranscriptPagePrepended" }>
 
 export const awaitSelectionLoaded = (
-  events: ReadonlyArray<Operation.InteractiveEvent>,
+  events: ReadonlyArray<InteractiveEvent>,
   until: (event: SelectionLoadedEvent) => boolean,
 ) =>
   Effect.gen(function* () {
@@ -393,7 +397,7 @@ export const awaitSelectionLoaded = (
     return yield* Effect.die(`selection did not load the expected transcript page: ${encoded}`)
   })
 
-export const awaitPrependedPage = (events: ReadonlyArray<Operation.InteractiveEvent>, previousCount: number) =>
+export const awaitPrependedPage = (events: ReadonlyArray<InteractiveEvent>, previousCount: number) =>
   Effect.gen(function* () {
     for (let attempt = 0; attempt < 2_000; attempt += 1) {
       const pages = events.filter(
@@ -406,18 +410,18 @@ export const awaitPrependedPage = (events: ReadonlyArray<Operation.InteractiveEv
   })
 
 export const selectionEntriesFor = (
-  session: Operation.InteractiveSession,
+  session: InteractiveSession,
   threadId: RuntimeFixtures.Thread.ThreadId,
   until?: (entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>) => boolean,
 ): Effect.Effect<
   {
     readonly entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>
-    readonly events: ReadonlyArray<Operation.InteractiveEvent>
+    readonly events: ReadonlyArray<InteractiveEvent>
   },
-  Operation.OperationUnavailable
+  OperationUnavailable
 > =>
   Effect.gen(function* () {
-    const events: Array<Operation.InteractiveEvent> = []
+    const events: Array<InteractiveEvent> = []
     yield* collectEvents(session, events)
     yield* session.selectThread(threadId, 1)
     const entries = yield* awaitSelectionEntries(events, (loaded) => until === undefined || until(loaded))
@@ -461,4 +465,4 @@ export {
   serverEvents,
   active,
 }
-export { ExecutionIngest, Operation }
+export { ExecutionIngest }

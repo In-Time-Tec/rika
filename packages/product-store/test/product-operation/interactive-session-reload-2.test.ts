@@ -1,10 +1,10 @@
+import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { describe, expect, it } from "@effect/vitest"
 import {
   RuntimeFixtures,
   TranscriptFixtures,
   Effect,
   Ref,
-  Operation,
   collectEvents,
   subagentToolId,
   subagentChildId,
@@ -142,7 +142,7 @@ describe("InteractiveSession subagent reload", () => {
           return []
         },
       })
-      const events: Array<Operation.InteractiveEvent> = []
+      const events: Array<InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(subagentThread.id, 1)
       for (

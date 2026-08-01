@@ -1,3 +1,4 @@
+import { reconcile } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -5,7 +6,7 @@ import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Deferred, Effect, Fiber, Layer, Ref } from "effect"
-import { Operation } from "@rika/product/product-operation-service"
+
 import { executionRoute } from "../support/product-test-current-state"
 import { provideLayer } from "../support/operation-layer-harness"
 import { reconcileDependencies, unusedExtensions } from "../support/operation-session-harness"
@@ -35,7 +36,7 @@ describe("Operation", () => {
         start: () => Deferred.succeed(backendEntered, undefined).pipe(Effect.andThen(Effect.never)),
       })
       const repair = yield* Effect.forkChild(
-        Operation.reconcile(undefined, () =>
+        reconcile(undefined, () =>
           Effect.succeed({ prompt: queued.prompt, promptParts: undefined, extensionPin: undefined }),
         ).pipe(
           provideLayer(
@@ -103,9 +104,9 @@ describe("Operation", () => {
         Layer.succeed(TurnRepository.Service, turns),
         Layer.succeed(ExecutionBackend.Service, routeOwnerBackend),
       )
-      yield* Operation.reconcile().pipe(provideLayer(dependencies))
+      yield* reconcile().pipe(provideLayer(dependencies))
       expect((yield* turns.get(owner))?.status).toBe("running")
-      yield* Operation.reconcile().pipe(provideLayer(dependencies))
+      yield* reconcile().pipe(provideLayer(dependencies))
       expect((yield* turns.get(owner))?.status).toBe("failed")
       expect(yield* Ref.get(starts)).toBe(0)
     }),
@@ -147,7 +148,7 @@ describe("Operation", () => {
           )
         },
       })
-      yield* Operation.reconcile().pipe(
+      yield* reconcile().pipe(
         provideLayer(
           Layer.mergeAll(
             reconcileDependencies(unusedExtensions),
@@ -194,7 +195,7 @@ describe("Operation", () => {
             }),
           ),
       })
-      yield* Operation.reconcile().pipe(
+      yield* reconcile().pipe(
         provideLayer(
           Layer.mergeAll(
             reconcileDependencies(unusedExtensions),

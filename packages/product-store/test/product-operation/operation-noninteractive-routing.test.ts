@@ -1,3 +1,4 @@
+import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -6,7 +7,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Effect, Layer, Ref } from "effect"
 import { TestConsole } from "effect/testing"
-import { Operation } from "@rika/product/product-operation-service"
+
 import { executionRoute } from "../support/product-test-current-state"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { executionStarted, backend } from "../support/operation-execution-fixtures"
@@ -58,7 +59,7 @@ describe("Operation", () => {
           ),
       })
       yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* operation.run({
           _tag: "Run",
           prompt: ["compare", "@mentioned"],
@@ -124,7 +125,7 @@ describe("Operation", () => {
         }),
       )
       yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* operation.run({ _tag: "Thread", action: "last" })
         yield* operation.run({ _tag: "Thread", action: "top" })
         yield* operation.run({ _tag: "Thread", action: "list", limit: 1 })
@@ -156,7 +157,7 @@ describe("Operation", () => {
         makeTurnId: Effect.succeed(Turn.TurnId.make("mode-turn")),
       })
       yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         yield* operation.run({
           _tag: "Run",
           prompt: ["mode"],
@@ -184,7 +185,7 @@ describe("Operation", () => {
         makeTurnId: Effect.die("unused"),
       })
       const result = yield* Effect.gen(function* () {
-        const operation = yield* Operation.Service
+        const operation = yield* Service
         const workflow = yield* Effect.result(operation.run({ _tag: "Workflow", action: "inspect", runId: "defect" }))
         const skill = yield* Effect.result(operation.run({ _tag: "Skill", action: "list" }))
         return [workflow, skill]

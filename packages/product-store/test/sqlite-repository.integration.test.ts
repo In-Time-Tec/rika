@@ -1,3 +1,5 @@
+import * as ExecutionStatus from "@rika/product/execution-status"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { expect, test } from "vitest"
@@ -17,7 +19,9 @@ const id = Thread.ThreadId.make("thread-a")
 
 const create = (
   repository: TurnContract.Interface,
-  input: Omit<TurnContract.CreateInput, "executionRoute" | "queueCapacity"> & { readonly queueCapacity?: number },
+  input: Omit<Parameters<TurnContract.Interface["createForSubmission"]>[0], "executionRoute" | "queueCapacity"> & {
+    readonly queueCapacity?: number
+  },
 ) =>
   repository.createForSubmission({
     queueCapacity: 128,
@@ -33,7 +37,7 @@ const provideLayer =
       return yield* effect.pipe(Effect.provide(context))
     })
 
-const legacyModel = (model: Turn.ExecutionModelRoute) => {
+const legacyModel = (model: ExecutionRouteSnapshot.ExecutionModelRoute) => {
   const { providerConnection, registrationIdentity, ...rest } = model
   return {
     ...rest,
@@ -402,7 +406,9 @@ test("turn SQL mutations, ordering, and rejection branches", () => {
         expect(yield* turns.cancelAccepted(active.id, 8)).toBe(false)
         expect(yield* turns.startAccepted(active.id, 9)).toBe(false)
         yield* turns.setStatus(active.id, "completed", "terminal-cursor", 7)
-        for (const [index, staleStatus] of Turn.Status.literals.filter((candidate) => candidate !== "queued").entries())
+        for (const [index, staleStatus] of ExecutionStatus.Status.literals
+          .filter((candidate) => candidate !== "queued")
+          .entries())
           expect(yield* turns.setStatus(active.id, staleStatus, `stale-${staleStatus}`, index + 8)).toMatchObject({
             status: "completed",
             lastCursor: "terminal-cursor",

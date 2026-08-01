@@ -1,3 +1,8 @@
+import * as ExecutionStatus from "@rika/product/execution-status"
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
+import { stopActiveExecutionWork } from "@rika/product/product-operation-service"
+import { settleAbandonedRecoveredWork } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -9,7 +14,7 @@ import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlatio
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Deferred, Duration, Effect, Layer, Ref } from "effect"
 import { TestClock } from "effect/testing"
-import { ExecutionIngest, Operation } from "@rika/product/product-operation-service"
+import { ExecutionIngest } from "@rika/product/product-operation-service"
 import { executionRoute } from "../support/product-test-current-state"
 import { storeProjection, withNestedProjections } from "../support/product-test-transcript-fixture"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
@@ -59,8 +64,8 @@ describe("Operation", () => {
             Effect.as({ turnId, status: "running" as const, events: [] }),
           ),
       })
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
-      const received: Array<Operation.InteractiveEvent> = []
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
+      const received: Array<InteractiveEvent> = []
 
       yield* Effect.gen(function* () {
         const session = yield* openInteractiveSession(sessions, {
@@ -221,7 +226,7 @@ describe("Operation", () => {
             }),
           ),
       })
-      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
 
       yield* Effect.gen(function* () {
         const session = yield* openInteractiveSession(sessions, {
@@ -262,7 +267,7 @@ describe("Operation", () => {
 
   it.effect("records a stop intent for every nonterminal turn before settling it as cancelled", () =>
     Effect.gen(function* () {
-      const quitTurn = (id: string, status: Turn.Status): Turn.Turn => ({
+      const quitTurn = (id: string, status: ExecutionStatus.Status): Turn.Turn => ({
         ...turnProvenance,
         id: Turn.TurnId.make(id),
         threadId: Thread.ThreadId.make("quit-thread"),
@@ -287,7 +292,7 @@ describe("Operation", () => {
             Effect.as({ turnId, status: "cancelled" as const, events: [] }),
           ),
       })
-      yield* Operation.stopActiveExecutionWork().pipe(
+      yield* stopActiveExecutionWork().pipe(
         provideLayer(
           Layer.mergeAll(
             Layer.succeed(TurnRepository.Service, turns),
@@ -336,7 +341,7 @@ describe("Operation", () => {
             Effect.as({ turnId, status: "cancelled" as const, events: [] }),
           ),
       })
-      yield* Operation.settleAbandonedRecoveredWork(Duration.zero, () => new Set(["watched-thread"])).pipe(
+      yield* settleAbandonedRecoveredWork(Duration.zero, () => new Set(["watched-thread"])).pipe(
         provideLayer(
           Layer.mergeAll(
             Layer.succeed(TurnRepository.Service, turns),
@@ -370,7 +375,7 @@ describe("Operation", () => {
             Effect.as({ turnId, status: "cancelled" as const, events: [] }),
           ),
       })
-      yield* Operation.settleAbandonedRecoveredWork(Duration.zero, () => new Set()).pipe(
+      yield* settleAbandonedRecoveredWork(Duration.zero, () => new Set()).pipe(
         provideLayer(
           Layer.mergeAll(
             Layer.succeed(TurnRepository.Service, turns),

@@ -1,3 +1,4 @@
+import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { describe, expect, it } from "@effect/vitest"
 import {
   RuntimeFixtures,
@@ -7,7 +8,6 @@ import {
   Ref,
   TestClock,
   ExecutionIngest,
-  Operation,
   collectEvents,
   spendThread,
   spendTurnId,
@@ -18,7 +18,7 @@ describe("InteractiveSession persisted usage", () => {
   it.effect("never displays more than the persisted total when the same events are delivered again", () =>
     Effect.gen(function* () {
       const { session, usage, follows } = yield* makeSpendHarness({})
-      const events: Array<Operation.InteractiveEvent> = []
+      const events: Array<InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(spendThread.id, 1)
       const settle = Effect.forEach(Array.from({ length: 100 }), () => Effect.yieldNow, { discard: true }).pipe(
@@ -46,7 +46,7 @@ describe("InteractiveSession persisted usage", () => {
   it.effect("holds the displayed total when the persisted projection is reselected", () =>
     Effect.gen(function* () {
       const { session, usage } = yield* makeSpendHarness({ turnStatus: "completed" })
-      const events: Array<Operation.InteractiveEvent> = []
+      const events: Array<InteractiveEvent> = []
       yield* collectEvents(session, events)
       const settle = Effect.forEach(Array.from({ length: 100 }), () => Effect.yieldNow, { discard: true }).pipe(
         Effect.andThen(TestClock.adjust("1 second")),
@@ -90,7 +90,7 @@ describe("InteractiveSession persisted usage", () => {
         legacy: true,
         gate,
       })
-      const events: Array<Operation.InteractiveEvent> = []
+      const events: Array<InteractiveEvent> = []
       yield* collectEvents(session, events)
       const settle = Effect.forEach(Array.from({ length: 100 }), () => Effect.yieldNow, { discard: true }).pipe(
         Effect.andThen(TestClock.adjust("1 second")),
@@ -144,7 +144,7 @@ describe("InteractiveSession persisted usage", () => {
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>()
       const { session } = yield* makeSpendHarness({ turnStatus: "completed", legacy: true, gate })
-      const events: Array<Operation.InteractiveEvent> = []
+      const events: Array<InteractiveEvent> = []
       yield* collectEvents(session, events)
       const settle = Effect.forEach(Array.from({ length: 100 }), () => Effect.yieldNow, { discard: true }).pipe(
         Effect.andThen(TestClock.adjust("1 second")),
@@ -171,7 +171,7 @@ describe("InteractiveSession persisted usage", () => {
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>()
       const { session, turns, blocked } = yield* makeSpendHarness({ gate, turnStatus: "completed" })
-      const events: Array<Operation.InteractiveEvent> = []
+      const events: Array<InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(spendThread.id, 1)
       for (let attempt = 0; attempt < 400 && !events.some((event) => event._tag === "SelectionLoaded"); attempt += 1)

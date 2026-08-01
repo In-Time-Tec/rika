@@ -50,4 +50,4 @@ export const makeExecutionReview = (input: any) =>
       )
     })
     return { settleReviewOwner, startReviewSettlement }
-  })
+  }).pipe(Effect.mapError((error) => new Error(String(error))))

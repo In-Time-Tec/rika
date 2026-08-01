@@ -1,3 +1,7 @@
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
+import { Service } from "@rika/product/product-operation-service"
+import { productLayer } from "@rika/product/product-operation-service"
 import * as RuntimeContract from "@rika/coding-tools/coding-tool-runtime"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
@@ -11,7 +15,6 @@ import * as ExecutionInspection from "@rika/product/execution-inspection"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import { Context, Deferred, Effect, Fiber, Layer, Ref } from "effect"
 import { ExecutionIngest } from "@rika/product/product-operation-service"
-import { Operation } from "@rika/product/product-operation-service"
 
 const noInspection = (): ExecutionInspection.Inspection | undefined => undefined
 
@@ -45,9 +48,9 @@ const makeHarness = Effect.fn("RecordedShellSessionTest.makeHarness")(function* 
   const threads = yield* ThreadRepository.makeMemory()
   const turns = yield* TurnRepository.makeMemory()
   const transcripts = yield* TranscriptRepository.makeMemory({ turns })
-  const sessionReady = yield* Deferred.make<Operation.InteractiveSession>()
+  const sessionReady = yield* Deferred.make<InteractiveSession>()
   const releaseSession = yield* Deferred.make<void>()
-  const events: Array<Operation.InteractiveEvent> = []
+  const events: Array<InteractiveEvent> = []
   const summaries = ThreadSummaryRepository.Service.of({
     list: () => Effect.succeed([]),
     ensureTurn: options.ensureSummary ?? (() => Effect.void),
@@ -55,7 +58,7 @@ const makeHarness = Effect.fn("RecordedShellSessionTest.makeHarness")(function* 
     markRead: () => Effect.void,
     listRepairCandidates: () => Effect.succeed([]),
   })
-  const layer = Operation.productLayer({
+  const layer = productLayer({
     repositoryLayer: Layer.succeed(ThreadRepository.Service, threads),
     turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
     threadSummaryRepositoryLayer: Layer.succeed(ThreadSummaryRepository.Service, summaries),
@@ -71,12 +74,12 @@ const makeHarness = Effect.fn("RecordedShellSessionTest.makeHarness")(function* 
     interactive: (_, session) =>
       Deferred.succeed(sessionReady, session).pipe(Effect.andThen(Deferred.await(releaseSession))),
   })
-  const operation = Context.get(yield* Layer.build(layer), Operation.Service)
+  const operation = Context.get(yield* Layer.build(layer), Service)
   const operationFiber = yield* Effect.forkChild(operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }))
   const session = yield* Deferred.await(sessionReady)
   yield* Effect.forkChild(session.events((event) => events.push(event)))
   yield* Effect.yieldNow
-  const waitForEvent = (predicate: (event: Operation.InteractiveEvent) => boolean) =>
+  const waitForEvent = (predicate: (event: InteractiveEvent) => boolean) =>
     Effect.gen(function* () {
       while (!events.some(predicate)) yield* Effect.yieldNow
     })

@@ -1,3 +1,6 @@
+import type { InteractiveSession } from "@rika/product/interactive-session"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
+import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import {
   ThreadRepository,
@@ -13,7 +16,6 @@ import {
   Fiber,
   Layer,
   Queue,
-  Operation,
   storeProjection,
   baseBackend,
   thread,
@@ -70,7 +72,7 @@ describe("interactive session extensions", () => {
           },
           replay: (executionId) => Effect.succeed({ turnId: executionId, status: "completed" as const, events: [] }),
         })
-        const registration = yield* Deferred.make<Operation.InteractiveSession>()
+        const registration = yield* Deferred.make<InteractiveSession>()
         const context = yield* Layer.build(
           interactiveLayer(
             repository,
@@ -82,12 +84,12 @@ describe("interactive session extensions", () => {
             transcripts,
           ),
         )
-        const operation = Context.get(context, Operation.Service)
+        const operation = Context.get(context, Service)
         const operationFiber = yield* Effect.forkChild(
           operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }),
         )
         const session = yield* Deferred.await(registration)
-        const events = yield* Queue.unbounded<Operation.InteractiveEvent>()
+        const events = yield* Queue.unbounded<InteractiveEvent>()
         const feed = yield* Effect.forkChild(session.events((event) => Queue.offerUnsafe(events, event)))
 
         yield* session.selectThread(selected.id, 1)
@@ -158,14 +160,14 @@ describe("interactive session extensions", () => {
             }),
           replay: (executionId) => Effect.succeed({ turnId: executionId, status: "running" as const, events: [] }),
         })
-        const registration = yield* Deferred.make<Operation.InteractiveSession>()
+        const registration = yield* Deferred.make<InteractiveSession>()
         const context = yield* Layer.build(interactiveLayer(repository, selectionTurns, backend, registration))
-        const operation = Context.get(context, Operation.Service)
+        const operation = Context.get(context, Service)
         const operationFiber = yield* Effect.forkChild(
           operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }),
         )
         const session = yield* Deferred.await(registration)
-        const events: Array<Operation.InteractiveEvent> = []
+        const events: Array<InteractiveEvent> = []
         const feed = yield* Effect.forkChild(session.events((event) => events.push(event)))
 
         selectingFirst = true
