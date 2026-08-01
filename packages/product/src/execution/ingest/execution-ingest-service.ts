@@ -16,6 +16,11 @@ import * as IngestFailureRuntime from "./execution-ingest-failure"
 import { IngestFailure, type Failure } from "./execution-ingest-failure"
 import * as IngestStop from "./execution-ingest-stop"
 
+export type { Commit, Refold } from "./execution-ingest-commit"
+export type { ProjectionChange } from "./execution-ingest-event"
+export type { ProjectionWatch } from "./execution-ingest-watch"
+export type { Failure } from "./execution-ingest-failure"
+
 export const projectionVersion = 4
 
 export const defaultCommitWindow = Duration.millis(250)

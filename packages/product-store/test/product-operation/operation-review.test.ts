@@ -11,7 +11,7 @@ import * as ExecutionWorkflow from "@rika/product/execution-workflow"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import { Context, Deferred, Effect, Fiber, Layer, Ref, Schema } from "effect"
 import { TestClock, TestConsole } from "effect/testing"
-import { Operation, ProductAgent } from "@rika/product/product-operation"
+import { Operation, ProductAgent } from "@rika/product/product-operation-service"
 import { provideLayer } from "../support/product-test-layer"
 import { createTurn } from "../support/product-test-current-state"
 
@@ -248,7 +248,9 @@ describe("Operation review dispatcher", () => {
       expect(submitted).toMatchObject({ workspace: "/work", executionRoute: route })
       const reviewTurn = yield* turns.get(Turn.TurnId.make("review-turn"))
       expect(
-        reviewTurn !== undefined && ThreadResult.TurnResult.isAgentExecution(reviewTurn) ? reviewTurn.executionRoute : undefined,
+        reviewTurn !== undefined && ThreadResult.TurnResult.isAgentExecution(reviewTurn)
+          ? reviewTurn.executionRoute
+          : undefined,
       ).toEqual(route)
       expect(yield* turns.get(Turn.TurnId.make("review-turn"))).toMatchObject({
         status: "completed",

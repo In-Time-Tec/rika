@@ -46,4 +46,3 @@ export const migration013 = Effect.gen(function* () {
     yield* sql`UPDATE rika_turns SET execution_route_json = ${route} WHERE id = ${row.id}`
   }
 })
-

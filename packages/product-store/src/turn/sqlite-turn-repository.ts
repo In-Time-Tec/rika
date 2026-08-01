@@ -1,5 +1,5 @@
-import { Service } from "@rika/product/turn-repository"
-export { Service }
+import { Service, RepositoryError } from "@rika/product/turn-repository"
+export { Service, RepositoryError }
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { TurnId } from "@rika/product/turn-record"
@@ -21,22 +21,39 @@ export const layer = Layer.effect(
       ...makeTurnSqliteQueue(sql),
       ...makeTurnSqliteState(sql),
       get,
-      list: Effect.fn("TurnRepository.list")(function* (threadId) {
+      list: Effect.fn("TurnRepository.list")(function* (threadId): Effect.fn.Return<
+        ReadonlyArray<import("@rika/product/turn-record").Turn>,
+        import("@rika/product/turn-repository").RepositoryError
+      > {
         const rows =
           yield* sql`SELECT * FROM rika_turns WHERE thread_id = ${threadId} ORDER BY created_at ASC, rowid ASC`.pipe(
             Effect.mapError(repositoryError),
           )
         return yield* Effect.all(rows.map(decode))
       }),
-      listRecentNonqueued: Effect.fn("TurnRepository.listRecentNonqueued")(function* (threadId, limit) {
-        const rows = yield* sql`SELECT * FROM rika_turns
+      listRecentNonqueued: Effect.fn("TurnRepository.listRecentNonqueued")(
+        function* (
+          threadId,
+          limit,
+        ): Effect.fn.Return<
+          ReadonlyArray<import("@rika/product/turn-record").Turn>,
+          import("@rika/product/turn-repository").RepositoryError
+        > {
+          const rows = yield* sql`SELECT * FROM rika_turns
           WHERE thread_id = ${threadId} AND status <> 'queued'
           ORDER BY created_at DESC, id DESC LIMIT ${Math.max(0, Math.floor(limit))}`.pipe(
-          Effect.mapError(repositoryError),
-        )
-        return (yield* Effect.all(rows.map(decode))).toReversed()
-      }),
-      page: Effect.fn("TurnRepository.page")(function* (threadId, options = {}) {
+            Effect.mapError(repositoryError),
+          )
+          return (yield* Effect.all(rows.map(decode))).toReversed()
+        },
+      ),
+      page: Effect.fn("TurnRepository.page")(function* (
+        threadId,
+        options = {},
+      ): Effect.fn.Return<
+        import("@rika/product/turn-repository").PageResult,
+        import("@rika/product/turn-repository").RepositoryError
+      > {
         const limit = pageSize(options.limit)
         const rows =
           options.before === undefined
@@ -54,7 +71,10 @@ export const layer = Layer.effect(
           newestCursor: cursorFor(turns.at(-1)),
         }
       }),
-      findActive: Effect.fn("TurnRepository.findActive")(function* (threadId) {
+      findActive: Effect.fn("TurnRepository.findActive")(function* (threadId): Effect.fn.Return<
+        import("@rika/product/turn-record").AgentExecutionTurn | undefined,
+        import("@rika/product/turn-repository").RepositoryError
+      > {
         const rows =
           yield* sql`SELECT * FROM rika_turns WHERE thread_id = ${threadId} AND turn_kind = 'AgentExecution' AND status IN ('accepted', 'running', 'waiting') ORDER BY created_at ASC, rowid ASC LIMIT 1`.pipe(
             Effect.mapError(repositoryError),
@@ -67,7 +87,10 @@ export const layer = Layer.effect(
       listStopRequested: listAgentTurns(sql, "requested", repositoryError).pipe(
         Effect.withSpan("TurnRepository.listStopRequested"),
       ),
-      requestStop: Effect.fn("TurnRepository.requestStop")(function* (id, now) {
+      requestStop: Effect.fn("TurnRepository.requestStop")(function* (id, now): Effect.fn.Return<
+        import("@rika/product/turn-record").AgentExecutionTurn | undefined,
+        import("@rika/product/turn-repository").RepositoryError
+      > {
         const rows = yield* sql`UPDATE rika_turns SET stop_intent = 'requested', updated_at = ${now}
           WHERE id = ${id} AND turn_kind = 'AgentExecution' AND status IN ('queued', 'accepted', 'running', 'waiting') RETURNING *`.pipe(
           Effect.mapError(repositoryError),

@@ -3,7 +3,7 @@ import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Deferred, Effect, Fiber, Layer, Ref, Scheduler } from "effect"
-import { Operation } from "@rika/product/product-operation"
+import { Operation } from "@rika/product/product-operation-service"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import {
   collectEvents,

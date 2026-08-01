@@ -1,9 +1,9 @@
 import * as TranscriptPage from "@rika/product/transcript-page"
-import * as Database from "../../packages/product-store/src/product-database"
+import * as Database from "@rika/product-store/product-database-layer"
 import * as Thread from "@rika/product/thread-record"
-import * as ThreadRepository from "../../packages/product-store/src/thread-repository"
-import * as TranscriptRepository from "../../packages/product-store/src/transcript-repository"
-import * as TurnRepository from "../../packages/product-store/src/turn-repository"
+import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
+import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
+import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
@@ -11,7 +11,7 @@ import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
 import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import { projectionVersion } from "../../packages/product/src/execution-ingest"
+import { ExecutionIngest } from "@rika/product/product-operation-service"
 import { Context, Effect, FileSystem, Layer } from "effect"
 import type { BenchMeasurement } from "./baseline"
 import { cpuSample, summarizeLatencies } from "./stats"
@@ -102,7 +102,7 @@ const prepareTurn = Effect.fn("Bench.prepareTurn")(function* (
     { upsert: empty.units, remove: [] },
     {
       executionCheckpoints: [executionCheckpoint(turn, TranscriptProjection.Projection.projectionState(empty))],
-      projectionVersion,
+      projectionVersion: ExecutionIngest.projectionVersion,
       expectedGeneration: undefined,
     },
   )
@@ -126,7 +126,7 @@ const commitBatch = Effect.fn("Bench.commitBatch")(function* (
     { upsert, remove },
     {
       executionCheckpoints: [executionCheckpoint(turn, state)],
-      projectionVersion,
+      projectionVersion: ExecutionIngest.projectionVersion,
       expectedGeneration,
     },
   )

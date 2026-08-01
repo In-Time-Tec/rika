@@ -1,8 +1,8 @@
-import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
+import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ExecutionIdentifier from "@rika/product/execution-identifier"
 import { Context, Effect, Fiber, Layer, Ref } from "effect"
 
-export const lazyBackendLayer = <E>(backendLayer: Layer.Layer<ExecutionBackend.Service, E>) =>
+export const lazyBackendLayer = <E>(backendLayer: Layer.Layer<ExecutionBackend.Interface, E>) =>
   Layer.effect(
     ExecutionBackend.Service,
     Effect.gen(function* () {

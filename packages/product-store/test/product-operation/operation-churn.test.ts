@@ -6,7 +6,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ExecutionEvent from "@rika/product/execution-event"
 import { Deferred, Effect, Fiber, Layer, Queue, Schema } from "effect"
-import { Operation } from "@rika/product/product-operation"
+import { Operation } from "@rika/product/product-operation-service"
 
 type Client = {
   readonly session: Operation.InteractiveSession

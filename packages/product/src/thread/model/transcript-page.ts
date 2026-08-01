@@ -3,7 +3,7 @@ import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Schema } from "effect"
 import { Turn, TurnId } from "./turn-record"
 import type { AgentExecutionTurn } from "./turn-record"
-import type { ExecutionAttachment } from "./thread-result"
+import { ExecutionAttachment } from "./thread-result"
 
 export interface Entry {
   readonly turn: Turn
@@ -33,15 +33,16 @@ export const PageCursor = Schema.Struct({
   orderKey: Schema.NonEmptyString,
 })
 
-export interface ExecutionCheckpoint {
-  readonly executionKey: string
-  readonly executionId: string
-  readonly cursor: string
-  readonly sequence: number
-  readonly status?: "completed" | "failed" | "cancelled"
-  readonly state: TranscriptProjectionModel.ProjectionState
-  readonly attachment?: ExecutionAttachment
-}
+export const ExecutionCheckpoint = Schema.Struct({
+  executionKey: Schema.String,
+  executionId: Schema.String,
+  cursor: Schema.String,
+  sequence: Schema.Finite,
+  status: Schema.optionalKey(Schema.Literals(["completed", "failed", "cancelled"])),
+  state: TranscriptProjectionModel.ProjectionState,
+  attachment: Schema.optionalKey(ExecutionAttachment),
+})
+export interface ExecutionCheckpoint extends Schema.Schema.Type<typeof ExecutionCheckpoint> {}
 
 export interface Projection {
   readonly turn: Turn

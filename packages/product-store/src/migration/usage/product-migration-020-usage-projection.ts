@@ -36,4 +36,3 @@ export const migration020 = Effect.gen(function* () {
   FROM rika_turns t
   WHERE t.status <> 'queued'`
 })
-

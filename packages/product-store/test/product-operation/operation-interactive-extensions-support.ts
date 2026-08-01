@@ -18,7 +18,7 @@ import {
   executeInteractiveCommand,
   InteractiveEventSchema,
   Operation,
-} from "@rika/product/product-operation"
+} from "@rika/product/product-operation-service"
 import * as UsageCost from "@rika/product/usage-projection"
 import { invalidatedProjection, storeProjection } from "../support/product-test-transcript-fixture"
 

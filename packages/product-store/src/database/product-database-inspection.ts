@@ -67,9 +67,11 @@ export const inspectExisting = (filename: string) =>
         Effect.gen(function* () {
           if (yield* fileSystem.exists(`${inspectionFilename}-wal`)) return initial
           const path = yield* Path.Path
-          const fileUrl = yield* path.toFileUrl(inspectionFilename).pipe(
-            Effect.mapError((error) => fail(`Could not resolve the Rika product database path: ${String(error)}`)),
-          )
+          const fileUrl = yield* path
+            .toFileUrl(inspectionFilename)
+            .pipe(
+              Effect.mapError((error) => fail(`Could not resolve the Rika product database path: ${String(error)}`)),
+            )
           fileUrl.searchParams.set("immutable", "1")
           return yield* inspect(fileUrl.href)
         }),

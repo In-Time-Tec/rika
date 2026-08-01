@@ -5,8 +5,8 @@ import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Result, Schema, Sc
 import * as ThreadRepositoryContract from "@rika/product/thread-repository"
 import * as TranscriptRepositoryContract from "@rika/product/transcript-repository"
 import { TestClock } from "effect/testing"
-import { ExecutionIngest } from "@rika/product/product-operation"
-import { Operation } from "@rika/product/product-operation"
+import { ExecutionIngest } from "@rika/product/product-operation-service"
+import { Operation } from "@rika/product/product-operation-service"
 import { createTurn, executionRoute } from "../support/product-test-current-state"
 import { delegationUnit, invalidatedProjection, storeProjection } from "../support/product-test-transcript-fixture"
 

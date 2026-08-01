@@ -5,41 +5,48 @@ import { ThreadId } from "@rika/product/thread-record"
 import { Turn, TurnId } from "@rika/product/turn-record"
 import type { AgentExecutionTurn } from "@rika/product/turn-record"
 import type { RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/thread-result"
-import type {
-  ExecutionCheckpoint,
+import { EntrySchema, PageCursor } from "@rika/product/transcript-page"
+import type { Entry, ExecutionCheckpoint, Page, Projection, RefoldWriteResult } from "@rika/product/transcript-page"
+import type { ExecutionAttachment } from "@rika/product/thread-result"
+
+export { EntrySchema, PageCursor, ExecutionCheckpoint } from "@rika/product/transcript-page"
+export { ExecutionAttachment } from "@rika/product/thread-result"
+export type {
+  Entry,
+  ExecutionAttachment as ExecutionAttachmentType,
+  ExecutionCheckpoint as ExecutionCheckpointType,
   Page,
-  PageCursor,
   Projection,
   RefoldWriteResult,
-} from "@rika/product/transcript-page"
+}
 
-interface CheckpointOptions {
+export interface CheckpointOptions {
   readonly executionCheckpoints: ReadonlyArray<ExecutionCheckpoint>
   readonly projectionVersion: number
 }
 
-interface DeltaCheckpointOptions extends CheckpointOptions {
+export interface DeltaCheckpointOptions extends CheckpointOptions {
   readonly expectedGeneration: number | undefined
 }
 
-interface UnitDelta {
+export interface UnitDelta {
   readonly upsert: ReadonlyArray<TranscriptUnit.Unit>
   readonly remove: ReadonlyArray<string>
 }
 
-interface RefoldOptions extends CheckpointOptions {
+export interface RefoldOptions extends CheckpointOptions {
   readonly expectedProjectionVersion: number
   readonly expectedGeneration: number
 }
 
-interface PageOptions {
+export interface PageOptions {
   readonly before?: PageCursor | undefined
   readonly after?: PageCursor | undefined
   readonly limit?: number
   readonly projectionVersion?: number
 }
 
-interface ProjectionRecoveryCandidate {
+export interface ProjectionRecoveryCandidate {
   readonly threadId: ThreadId
   readonly turnId: TurnId
 }
@@ -48,8 +55,9 @@ export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()(
   message: Schema.String,
 }) {}
 
-type WriteResult = "committed" | "stale"
-type RecordedShellWriteResult =
+export type WriteResult = "committed" | "stale"
+export const invalidatedProjectionVersion = -1
+export type RecordedShellWriteResult =
   | { readonly _tag: "Committed"; readonly projection: Projection }
   | { readonly _tag: "Stale" }
 

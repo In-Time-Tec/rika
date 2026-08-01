@@ -28,4 +28,3 @@ export const migration017 = Effect.gen(function* () {
     '', '', '', ''
   FROM rika_threads t`
 })
-

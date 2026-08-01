@@ -69,7 +69,7 @@ export class Http extends Context.Service<Http, HttpInterface>()(
   "@rika/product/authentication/openai-auth-flow/Http",
 ) {}
 
-interface StoreInterface {
+export interface StoreInterface {
   readonly load: Effect.Effect<Option.Option<typeof Contract.CredentialDisk.Type>, Errors.StoreError>
   readonly save: (credential: typeof Contract.CredentialDisk.Type) => Effect.Effect<void, Errors.StoreError>
   readonly remove: Effect.Effect<boolean, Errors.StoreError>

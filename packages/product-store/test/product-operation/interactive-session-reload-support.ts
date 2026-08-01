@@ -15,7 +15,7 @@ import {
   serverEvents,
   active,
 } from "./interactive-session-base-support"
-import { ExecutionIngest, Operation } from "@rika/product/product-operation"
+import { ExecutionIngest, Operation } from "@rika/product/product-operation-service"
 
 export const subagentToolId = "done:call_1"
 export const subagentChildId = "child:execution%3Adone:call_1"

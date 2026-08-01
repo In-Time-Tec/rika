@@ -5,4 +5,3 @@ export const migration005 = Effect.gen(function* () {
   const sql = yield* SqlClient
   yield* sql`ALTER TABLE rika_turns ADD COLUMN prompt_parts_json TEXT`
 })
-

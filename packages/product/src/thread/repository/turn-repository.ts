@@ -4,14 +4,64 @@ import { Context, Effect, Schema } from "effect"
 import { ThreadId } from "@rika/product/thread-record"
 import { AgentExecutionTurn, Turn, TurnId } from "@rika/product/turn-record"
 import type { CreateInput } from "./turn-repository-contract"
-import type { PageOptions, PageResult, QueueSnapshot, QueueWake } from "../queue/turn-queue-state"
-import type {
-  QueueClaim,
-  QueueClaimFinish,
-  QueueItemChange,
-  QueuedTurnTake,
-  Submission,
-} from "../queue/turn-queue-promotion"
+
+export const PageCursor = Schema.Struct({ createdAt: Schema.Finite, id: TurnId })
+export interface PageCursor extends Schema.Schema.Type<typeof PageCursor> {}
+
+export interface PageOptions {
+  readonly before?: PageCursor | undefined
+  readonly limit?: number
+}
+
+export interface PageResult {
+  readonly turns: ReadonlyArray<Turn>
+  readonly hasOlder: boolean
+  readonly oldestCursor: PageCursor | undefined
+  readonly newestCursor: PageCursor | undefined
+}
+
+export interface QueueSnapshot {
+  readonly threadId: ThreadId
+  readonly revision: number
+  readonly queuedCount: number
+  readonly turns: ReadonlyArray<AgentExecutionTurn>
+}
+
+export interface QueueWake {
+  readonly threadId: ThreadId
+  readonly generation: number
+  readonly queueRevision: number
+}
+
+export interface QueueItemChange {
+  readonly threadId: ThreadId
+  readonly revision: number
+  readonly queuedCount: number
+  readonly becameNonempty: boolean
+  readonly change:
+    | { readonly _tag: "Added"; readonly turn: AgentExecutionTurn }
+    | { readonly _tag: "Updated"; readonly turn: AgentExecutionTurn }
+    | { readonly _tag: "Removed"; readonly turnId: TurnId }
+}
+
+export type Submission = AgentExecutionTurn & { readonly queue?: QueueItemChange }
+
+export interface QueueClaim {
+  readonly turn: AgentExecutionTurn
+  readonly token: string
+}
+
+export type QueueClaimFinish =
+  | { readonly _tag: "Transitioned"; readonly turn: AgentExecutionTurn; readonly queue: QueueItemChange }
+  | { readonly _tag: "Unavailable" }
+
+export interface QueuedTurnTake {
+  readonly turn: AgentExecutionTurn
+  readonly queue: QueueItemChange
+}
+
+export const defaultPageSize = 50
+export const maximumPageSize = 200
 
 export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("TurnRepositoryError", {
   message: Schema.String,

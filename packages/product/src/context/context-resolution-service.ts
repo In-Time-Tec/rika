@@ -4,6 +4,7 @@ import * as LocalPath from "@rika/coding-tools/local-path"
 import * as ContextFileSystem from "./context-file-system"
 import { Diagnostic, Source } from "./resolved-context"
 import type { Input, Result } from "./resolved-context"
+export type { Input, Result } from "./resolved-context"
 const maximumReferenceFiles = 1_000
 export type GlobLookup = (
   workspace: string,

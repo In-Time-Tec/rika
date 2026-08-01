@@ -3,7 +3,7 @@ import * as TranscriptRepositoryContract from "@rika/product/transcript-reposito
 import * as TurnContract from "@rika/product/turn-repository"
 import * as UsageRepositoryContract from "@rika/product/usage-repository"
 import { TestClock } from "effect/testing"
-import { ExecutionIngest, Operation } from "@rika/product/product-operation"
+import { ExecutionIngest, Operation } from "@rika/product/product-operation-service"
 import {
   RuntimeFixtures,
   TranscriptFixtures,

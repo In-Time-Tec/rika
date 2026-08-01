@@ -75,7 +75,8 @@ type AgentTranscriptEntry = Omit<TranscriptPage.Entry, "turn"> & {
 }
 
 const asRunningEntry = (entry: TranscriptPage.Entry): AgentTranscriptEntry => {
-  if (!ThreadResult.TurnResult.isAgentExecution(entry.turn)) throw new TypeError("Running transcript fixture requires an agent turn")
+  if (!ThreadResult.TurnResult.isAgentExecution(entry.turn))
+    throw new TypeError("Running transcript fixture requires an agent turn")
   return { ...entry, turn: { ...entry.turn, status: "running" } }
 }
 

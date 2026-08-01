@@ -3,7 +3,7 @@ import * as ConfigurationService from "@rika/configuration/configuration-service
 import * as SettingsDecoder from "@rika/configuration/configuration-settings"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as Operation from "@rika/product/product-operation"
+import * as Operation from "@rika/product/product-operation-service"
 import * as ResidentService from "@rika/product/resident-service"
 import { globalPaths, workspacePaths } from "@rika/configuration/configuration-paths"
 import { resolveProfileDataPaths } from "@rika/configuration/profile-data-paths"

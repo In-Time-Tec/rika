@@ -62,4 +62,3 @@ export const migration018 = Effect.gen(function* () {
     CHECK ((state = 'WaitingReady' AND cursor IS NOT NULL) OR state <> 'WaitingReady')
   )`
 })
-

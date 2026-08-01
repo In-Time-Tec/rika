@@ -6,7 +6,9 @@ import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 import { Effect, Function } from "effect"
 
-const model = (role: ExecutionRouteSnapshot.ExecutionModelRoute["role"]): ExecutionRouteSnapshot.ExecutionModelRoute => ({
+const model = (
+  role: ExecutionRouteSnapshot.ExecutionModelRoute["role"],
+): ExecutionRouteSnapshot.ExecutionModelRoute => ({
   role,
   alias: role,
   model: "test",

@@ -20,4 +20,3 @@ export const migration001 = Effect.gen(function* () {
   )`
   yield* sql`CREATE INDEX rika_threads_listing ON rika_threads (pinned DESC, updated_at DESC, id ASC)`
 })
-

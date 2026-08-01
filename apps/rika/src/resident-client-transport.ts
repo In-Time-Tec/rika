@@ -1,5 +1,5 @@
 import * as BunSocket from "@effect/platform-bun/BunSocket"
-import * as Operation from "@rika/product/product-operation"
+import * as Operation from "@rika/product/product-operation-service"
 import * as ResidentHandshake from "@rika/product/resident-service-handshake"
 import * as ResidentFeed from "@rika/product/resident-interactive-feed"
 import * as ResidentService from "@rika/product/resident-service"

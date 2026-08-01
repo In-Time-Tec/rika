@@ -31,4 +31,3 @@ export const migration023 = Effect.gen(function* () {
   yield* sql`DROP TABLE rika_transcript_checkpoints`
   yield* sql`ALTER TABLE rika_transcript_checkpoints_next RENAME TO rika_transcript_checkpoints`
 })
-

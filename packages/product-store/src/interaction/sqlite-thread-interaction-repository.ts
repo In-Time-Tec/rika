@@ -1,5 +1,5 @@
-import { Service } from "@rika/product/thread-interaction-repository"
-export { Service }
+import { Service, RepositoryError } from "@rika/product/thread-interaction-repository"
+export { Service, RepositoryError }
 import { Effect, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { ThreadId } from "@rika/product/thread-record"
@@ -8,7 +8,6 @@ import { TurnId } from "@rika/product/turn-record"
 
 import {
   ReceiptKind,
-  RepositoryError,
   InvocationConflict,
   AdmissionRejected,
   QueueFull,

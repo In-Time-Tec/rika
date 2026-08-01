@@ -8,8 +8,8 @@ import { Context, Crypto, Deferred, Duration, Effect, Layer, PlatformError } fro
 import { Tool } from "effect/unstable/ai"
 import { BackendError } from "@rika/product/execution-service"
 import * as DataBlobStore from "../../data-blob-store"
+import * as ExecutionServiceContract from "@rika/product/execution-service"
 import { Service as ExecutionService } from "@rika/product/execution-service"
-import type { Service as ExecutionServiceType } from "@rika/product/execution-service"
 import type { ToolRuntimeRequirements, ExternalToolRuntimeRequirements, LayerOptions } from "./relay-execution-adapter"
 import { makeDelegationLayer } from "./relay-execution-delegation-layer"
 import { makePromptAssemblerLayer } from "./relay-execution-prompt-layer"
@@ -19,7 +19,7 @@ import { makeToolComposition } from "./relay-tool-composition"
 import { buildModelContext, makeModelRuntimeComposition } from "./relay-runtime-composition"
 import { makeHostRuntime } from "./relay-host-composition"
 const addressId = Ids.AddressId.make("address:rika")
-type Service = ExecutionServiceType
+type Service = ExecutionServiceContract.Interface
 const Service = ExecutionService
 export const makeRelayLayer = <
   AdditionalTools extends Record<string, Tool.Any> = {},

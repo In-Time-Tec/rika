@@ -34,7 +34,6 @@ const legacyExecutionRoute = JSON.stringify({
   },
 })
 
-
 export const migration012 = Effect.gen(function* () {
   const sql = yield* SqlClient
   yield* sql`UPDATE rika_turns SET execution_route_json = ${legacyExecutionRoute} WHERE execution_route_json IS NULL`
@@ -54,4 +53,3 @@ export const migration012 = Effect.gen(function* () {
     WHERE status = 'queued'
     GROUP BY thread_id`
 })
-

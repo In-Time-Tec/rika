@@ -8,4 +8,3 @@ export const migration022 = Effect.gen(function* () {
   yield* sql`ALTER TABLE rika_transcript_checkpoints ADD COLUMN projection_generation INTEGER NOT NULL DEFAULT 0
     CHECK (projection_generation >= 0)`
 })
-

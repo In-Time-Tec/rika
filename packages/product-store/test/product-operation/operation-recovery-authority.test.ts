@@ -5,7 +5,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { AgentDepth } from "@rika/product/execution-service"
 import { Effect, Layer, Ref } from "effect"
-import { Operation } from "@rika/product/product-operation"
+import { Operation } from "@rika/product/product-operation-service"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { backend } from "../support/operation-execution-fixtures"
 

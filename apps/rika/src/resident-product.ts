@@ -22,7 +22,7 @@ import {
   ThreadQuery,
   ThreadToolHandlers,
   ThreadToolService,
-} from "@rika/product/product-operation"
+} from "@rika/product/product-operation-service"
 import * as McpOAuthService from "@rika/extensions/mcp-oauth-service"
 import * as SkillRegistry from "@rika/extensions/skill-registry"
 import * as Database from "@rika/product-store/product-database-layer"
@@ -38,7 +38,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as ThreadResult from "@rika/product/thread-result"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
-import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
+import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ExecutionRequest from "@rika/product/execution-request"
 import * as RelayExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import * as ReadWebPage from "@rika/coding-tools/read-web-page-service"
@@ -444,7 +444,9 @@ const causeMessage = (cause: Cause.Cause<unknown>) => {
   return failure instanceof Error ? failure.message : String(failure)
 }
 
-export const executionModelRoutes = (route: ExecutionRouteSnapshot.ExecutionRoutePin): ReadonlyArray<ExecutionRouteSnapshot.ExecutionModelRoute> => [
+export const executionModelRoutes = (
+  route: ExecutionRouteSnapshot.ExecutionRoutePin,
+): ReadonlyArray<ExecutionRouteSnapshot.ExecutionModelRoute> => [
   route.main,
   route.oracle,
   ...(route.title === undefined ? [] : [route.title]),
@@ -505,7 +507,10 @@ export const withPinnedRouteRegistration = Effect.fn("Main.withPinnedRouteRegist
   options: {
     readonly resolveLegacyRoute?: (
       input: ExecutionRequest.StartInput,
-    ) => Effect.Effect<{ readonly executionRoute: ExecutionRouteSnapshot.ExecutionRoutePin }, ExecutionBackend.BackendError>
+    ) => Effect.Effect<
+      { readonly executionRoute: ExecutionRouteSnapshot.ExecutionRoutePin },
+      ExecutionBackend.BackendError
+    >
     readonly unavailable?: ReadonlyArray<PersistedRouteRegistrationFailure>
     readonly registeredRoutes?: ReadonlyArray<ExecutionRouteSnapshot.ExecutionModelRoute>
     readonly registerPinnedRoutes?: (
@@ -839,7 +844,7 @@ export const persistedModelRoutesForStartup = (turns: ReadonlyArray<Turn.Turn>) 
   turns.filter(ThreadResult.TurnResult.isAgentExecution).flatMap((turn) => executionModelRoutes(turn.executionRoute))
 
 const persistedExecutionRouteRow = Schema.Struct({ execution_route_json: Schema.String })
-const persistedExecutionRouteJson = Schema.fromJsonString(ExecutionRouteSnapshot.ExecutionRoutePin)
+const persistedExecutionRouteJson = Schema.fromJsonString(ExecutionRouteSnapshot.ExecutionRouteSnapshot)
 
 export const persistedTitleModelRoutesForStartup = Effect.gen(function* () {
   const sql = yield* SqlClient
@@ -1208,7 +1213,7 @@ const createOperationLayerImpl = (
         Effect.orDie,
         provideLayerScoped(BunCrypto.layer),
       )
-      const operationLayer: Layer.Layer<Operation.Service, OperationProductError, never> = Operation.productLayer({
+      const operationLayer = Operation.productLayer({
         repositoryLayer: repositories,
         turnRepositoryLayer: repositories,
         threadSummaryRepositoryLayer: repositories,

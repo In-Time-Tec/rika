@@ -1,7 +1,7 @@
 import * as ProductStoreSummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
 import * as ProductStoreUsageRepository from "@rika/product-store/sqlite-usage-repository"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
-import { Operation } from "@rika/product/product-operation"
+import { Operation } from "@rika/product/product-operation-service"
 import { Effect, Layer } from "effect"
 
 export const productLayer = <

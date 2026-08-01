@@ -25,11 +25,13 @@ export const isFreshDatabaseFile = Effect.fn("ProductDatabase.isFreshDatabaseFil
     fileSystem.exists(`${filename}-shm`),
   ]).pipe(Effect.mapError((error) => fail(`Could not inspect the Rika product database files: ${String(error)}`)))
   if (!walExists && !shmExists) return true
-  if (bytes.length === 0 || !walExists) return yield* fail("Rika product database does not match the current schema. Use a fresh Rika data root.")
+  if (bytes.length === 0 || !walExists)
+    return yield* fail("Rika product database does not match the current schema. Use a fresh Rika data root.")
   const wal = yield* readPrefix(`${filename}-wal`, 32).pipe(
     Effect.mapError((error) => fail(`Could not inspect the Rika product database WAL: ${String(error)}`)),
   )
-  if (wal.length < 32) return yield* fail("Rika product database does not match the current schema. Use a fresh Rika data root.")
+  if (wal.length < 32)
+    return yield* fail("Rika product database does not match the current schema. Use a fresh Rika data root.")
   const walMagic = new DataView(wal.buffer, wal.byteOffset, wal.byteLength).getUint32(0)
   if (walMagic !== 0x377f0682 && walMagic !== 0x377f0683)
     return yield* fail("Rika product database does not match the current schema. Use a fresh Rika data root.")

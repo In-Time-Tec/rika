@@ -1,5 +1,5 @@
 import * as ExecutionBackend from "@rika/product/execution-service"
-import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
+import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 
 const encodeJson = (value: unknown) => JSON.stringify(value)
 

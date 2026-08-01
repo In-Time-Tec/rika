@@ -4,7 +4,7 @@ import { Execution, Ids } from "@relayfx/sdk"
 import { Effect, Ref } from "effect"
 
 import * as ExecutionBackend from "@rika/product/execution-service"
-import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
+import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 import { currentExecutionRoute, start } from "./current-execution-route"
 
 import { fixture as testSupport } from "./execution-backend-fixture"

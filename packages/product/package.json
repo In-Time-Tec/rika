@@ -8,7 +8,6 @@
     "./agent-profile": "./src/agent/agent-profile.ts",
     "./product-agent-service": "./src/agent/product-agent-service.ts",
     "./openai-auth-contract": "./src/authentication/openai-auth-contract.ts",
-    "./openai-auth-flow": "./src/authentication/openai-auth-flow.ts",
     "./openai-auth-service": "./src/authentication/openai-auth-service.ts",
     "./context-file-system": "./src/context/context-file-system.ts",
     "./context-resolution-service": "./src/context/context-resolution-service.ts",
@@ -61,8 +60,7 @@
     "./usage-snapshot": "./src/usage/usage-snapshot.ts",
     "./usage-snapshot-codec": "./src/usage/usage-snapshot-codec.ts",
     "./workflow-definition": "./src/workflow/workflow-definition.ts",
-    "./workflow-service": "./src/workflow/workflow-service.ts",
-    "./product-operation": "./src/operation/contract/product-operation.ts"
+    "./workflow-service": "./src/workflow/workflow-service.ts"
   },
   "dependencies": {
     "@rika/configuration": "workspace:*",

@@ -4,7 +4,7 @@ import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Effect, Layer, Ref } from "effect"
 import { TestConsole } from "effect/testing"
-import { Operation } from "@rika/product/product-operation"
+import { Operation } from "@rika/product/product-operation-service"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { backend } from "../support/operation-execution-fixtures"
 

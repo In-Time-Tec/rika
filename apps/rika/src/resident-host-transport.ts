@@ -1,5 +1,5 @@
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
-import * as Operation from "@rika/product/product-operation"
+import * as Operation from "@rika/product/product-operation-service"
 import * as InteractiveFeedOverflow from "@rika/product/resident-interactive-feed"
 import * as ResidentHandshake from "@rika/product/resident-service-handshake"
 import * as ResidentService from "@rika/product/resident-service"

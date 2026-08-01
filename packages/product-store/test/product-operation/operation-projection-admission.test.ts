@@ -11,7 +11,7 @@ import * as ExecutionChildRun from "@rika/product/execution-child-run"
 import * as ExecutionInspection from "@rika/product/execution-inspection"
 import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
 import { Context, Deferred, Effect, Layer, Queue, Ref, Schema } from "effect"
-import { Operation } from "@rika/product/product-operation"
+import { Operation } from "@rika/product/product-operation-service"
 import { executionRoute } from "../support/product-test-current-state"
 
 const busyThreadId = Thread.ThreadId.make("busy-thread")

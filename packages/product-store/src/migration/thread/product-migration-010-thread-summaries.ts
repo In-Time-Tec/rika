@@ -20,4 +20,3 @@ export const migration010 = Effect.gen(function* () {
     last_read_at INTEGER NOT NULL
   )`
 })
-

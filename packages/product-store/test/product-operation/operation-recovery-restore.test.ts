@@ -9,7 +9,7 @@ import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlatio
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Deferred, Duration, Effect, Layer, Ref } from "effect"
 import { TestClock } from "effect/testing"
-import { ExecutionIngest, Operation } from "@rika/product/product-operation"
+import { ExecutionIngest, Operation } from "@rika/product/product-operation-service"
 import { executionRoute } from "../support/product-test-current-state"
 import { storeProjection, withNestedProjections } from "../support/product-test-transcript-fixture"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"

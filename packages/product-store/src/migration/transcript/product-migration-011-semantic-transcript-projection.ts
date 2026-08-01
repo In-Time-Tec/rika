@@ -32,4 +32,3 @@ export const migration011 = Effect.gen(function* () {
     turn_id, unit_sequence ASC, unit_part ASC, unit_key ASC
   )`
 })
-

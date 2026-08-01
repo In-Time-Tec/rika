@@ -142,3 +142,5 @@ export const layer = Layer.effect(
     })
   }),
 )
+
+export const ProductAgent = { Profile, Service, layer }

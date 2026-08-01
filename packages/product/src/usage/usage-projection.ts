@@ -5,7 +5,12 @@ import * as ActiveTime from "./usage-active-time"
 import * as UsageEvent from "./usage-event"
 import * as UsageFold from "./usage-fold"
 import type { RootExecution } from "./usage-event"
+import * as UsageSnapshot from "./usage-snapshot"
 import type { Snapshot } from "./usage-snapshot"
+import { empty } from "./usage-snapshot"
+import { serialize, deserialize } from "./usage-snapshot-codec"
+export { empty, serialize, deserialize }
+export const foldVersion = UsageSnapshot.projectionVersion
 import { noTotals, type Totals } from "./usage-total"
 
 export const materialize: {

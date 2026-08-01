@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Fixtures } from "./thread-query-support"
 import { Context, Effect, Layer, Schema, Stream } from "effect"
-import { ThreadQuery, ThreadToolHandlers } from "@rika/product/product-operation"
+import { ThreadQuery, ThreadToolHandlers } from "@rika/product/product-operation-service"
 import * as ThreadSearchRepository from "@rika/product/thread-search-repository"
 import { provideLayer } from "../support/product-test-layer"
 import { delegationUnit, storeProjection } from "../support/product-test-transcript-fixture"

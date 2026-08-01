@@ -2,7 +2,13 @@ import * as ModelRoute from "@rika/configuration/model-route"
 import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
 import * as SettingsDefaults from "@rika/configuration/configuration-settings"
 import type { ProviderRuntimePin, RuntimeModelRoute } from "./model-provider-route"
-import { isNativeOpenAiRoute, normalizedBaseUrl, RuntimeError } from "./model-provider-route"
+import type { ExecutionRouteModelSnapshot } from "@rika/product/execution-route-snapshot"
+import {
+  isNativeOpenAiRoute,
+  normalizedBaseUrl as normalizeBaseUrl,
+  runtimeRouteFromSnapshot as decodeRuntimeRoute,
+  RuntimeError,
+} from "./model-provider-route"
 import { Compaction, ModelRegistry } from "@batonfx/core"
 import * as AmazonBedrock from "@batonfx/providers/amazon-bedrock"
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
@@ -12,6 +18,7 @@ import { createHash } from "node:crypto"
 import * as BedrockAuthRefresh from "./bedrock-auth-refresh"
 import { ProviderAdapters, type Adapter as ProviderAdapter } from "./provider-adapters"
 const { adapters, authRefreshFingerprint, canonical, normalizePinnedRuntime, unavailableRestore } = ProviderAdapters
+export const bedrockAuthRefreshLiveLayer = BedrockAuthRefresh.liveLayer
 type Adapter = ProviderAdapter
 
 interface Account {
@@ -36,7 +43,7 @@ const accountStatus = (auth: OpenAiAuth.ServiceInterface) =>
     ),
   )
 
-interface PreparedRoutes {
+export interface PreparedRoutes {
   readonly routes: ReadonlyArray<ModelRouteResolution.ResolvedModelRoute>
   readonly plans: ReadonlyArray<ReturnType<typeof plan>>
   readonly registrations: ReadonlyArray<ModelRegistry.Registration>
@@ -55,7 +62,7 @@ const plan = (route: ModelRouteResolution.ResolvedModelRoute, adapter: Adapter, 
           runtime.connectionIdentity ??
           (route.providerConnection.protocol === "amazon-bedrock"
             ? {}
-            : { baseUrl: normalizedBaseUrl(route.providerConnection.baseUrl) }),
+            : { baseUrl: normalizeBaseUrl(route.providerConnection.baseUrl) }),
         model: route.model,
         effort: route.effort,
         fast: route.fast,
@@ -91,6 +98,9 @@ const purePlan = (route: ModelRouteResolution.ResolvedModelRoute, fingerprint?: 
   )
 }
 
+export const normalizedBaseUrl = (value: string) => normalizeBaseUrl(value)
+export const runtimeRouteFromSnapshot = (route: ExecutionRouteModelSnapshot) => decodeRuntimeRoute(route)
+
 export const modelRoutePlan = Function.dual((args) => typeof args[0] === "object", purePlan) as {
   (route: ModelRouteResolution.ResolvedModelRoute, fingerprint?: string): ReturnType<typeof plan>
   (fingerprint?: string): (route: ModelRouteResolution.ResolvedModelRoute) => ReturnType<typeof plan>
@@ -110,7 +120,11 @@ export const requestOptions = Function.dual(
   (fingerprint?: string): (route: ModelRouteResolution.ResolvedModelRoute) => Readonly<Record<string, unknown>>
 }
 
-interface ServiceInterface {
+export type ModelRegistration = ModelRegistry.Registration
+export type ModelSelection = ModelRegistry.ModelSelection
+export type CompactionOptions = Compaction.DefaultOptions
+
+export interface ServiceInterface {
   readonly prepare: (
     routes: ReadonlyArray<ModelRouteResolution.ResolvedModelRoute>,
   ) => Effect.Effect<PreparedRoutes, RuntimeError>
@@ -253,7 +267,7 @@ export class Service extends Context.Service<Service, ServiceInterface>()(
   )
 }
 
-const _bypassLayer = Layer.succeed(
+export const bypassLayer = Layer.succeed(
   Service,
   Service.of({
     prepare: () => Effect.die("Model provider runtime is unavailable for test models"),

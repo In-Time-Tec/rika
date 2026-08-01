@@ -129,5 +129,5 @@ export const productLayer = <
         staleQueuedTurnsError,
         queuedTurnPromoteMaxAgeMs,
       })
-    }) as any,
+    }),
   )

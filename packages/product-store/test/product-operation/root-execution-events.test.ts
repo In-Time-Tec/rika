@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as ExecutionBackend from "@rika/product/execution-service"
-import { Operation } from "@rika/product/product-operation"
+import { Operation } from "@rika/product/product-operation-service"
 
 const usageEventAt = (executionId: string, cursor: string, sequence: number): ExecutionBackend.Event => ({
   executionId,

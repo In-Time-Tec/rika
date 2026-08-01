@@ -2,7 +2,7 @@ import { Fixtures } from "./execution-ingest-support"
 export { Fixtures }
 import { Context, Deferred, Effect, Exit, Layer, Ref, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
-import { ExecutionIngest } from "@rika/product/product-operation"
+import { ExecutionIngest } from "@rika/product/product-operation-service"
 import * as TurnContract from "@rika/product/turn-repository"
 import { executionRoute } from "../support/product-test-current-state"
 import { storeProjection } from "../support/product-test-transcript-fixture"

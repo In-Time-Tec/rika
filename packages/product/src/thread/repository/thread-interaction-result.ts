@@ -15,7 +15,7 @@ export type ResultDelivery = typeof ResultDelivery.Type
 export type RootResult =
   | { readonly status: "completed"; readonly cursor: string; readonly sequence: number; readonly output: string }
   | { readonly status: "failed"; readonly cursor: string; readonly sequence: number; readonly reason?: string }
-  | ({ readonly status: "cancelled"; readonly cursor?: string; readonly sequence?: number; readonly reason?: string })
+  | { readonly status: "cancelled"; readonly cursor?: string; readonly sequence?: number; readonly reason?: string }
 
 interface ResultRouteBase {
   readonly targetTurnId: TurnId

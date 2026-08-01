@@ -201,4 +201,3 @@ export const migration021 = Effect.gen(function* () {
       WHERE thread_id = OLD.thread_id;
     END`
 })
-

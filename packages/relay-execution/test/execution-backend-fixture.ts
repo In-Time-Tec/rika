@@ -8,7 +8,7 @@ import { Effect, Layer, Ref, Stream } from "effect"
 
 import { Tool } from "effect/unstable/ai"
 import * as ExecutionBackend from "@rika/product/execution-service"
-import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
+import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 import { layer } from "../src/relay/execution/relay-execution-layer"
 import { layerFromClient } from "../src/relay/execution/relay-execution-client-layer"
 import { buildChildRunInput } from "../src/relay/execution/relay-execution-input"

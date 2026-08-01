@@ -18,7 +18,7 @@ import {
   type RefoldOptions,
   type PageOptions,
 } from "@rika/product/transcript-repository"
-import { RepositoryError } from "@rika/product/transcript-repository"
+import { invalidatedProjectionVersion, RepositoryError } from "@rika/product/transcript-repository"
 class RefoldStale extends Schema.TaggedErrorClass<RefoldStale>()("TranscriptRefoldStale", {}) {}
 
 const ProjectionRecoveryCandidateRow = Schema.Struct({
@@ -212,7 +212,8 @@ const validateStateScalars = (turnId: TurnId, owner: string, state: TranscriptPr
 }
 
 const validateProjectionVersion = (turnId: TurnId, projectionVersion: number) =>
-  Number.isSafeInteger(projectionVersion) && projectionVersion >= 1
+  Number.isSafeInteger(projectionVersion) &&
+  (projectionVersion === invalidatedProjectionVersion || projectionVersion >= 1)
     ? Effect.void
     : Effect.fail(RepositoryError.make({ message: `Transcript ${turnId} has an invalid projection version` }))
 

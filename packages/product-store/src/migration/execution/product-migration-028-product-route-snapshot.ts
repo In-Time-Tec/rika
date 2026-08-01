@@ -1,7 +1,4 @@
-import {
-  ExecutionRouteSnapshot,
-  type ExecutionRouteModelSnapshot,
-} from "@rika/product/execution-route-snapshot"
+import { ExecutionRouteSnapshot, type ExecutionRouteModelSnapshot } from "@rika/product/execution-route-snapshot"
 import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"

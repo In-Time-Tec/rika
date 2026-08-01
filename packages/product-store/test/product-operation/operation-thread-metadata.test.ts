@@ -7,7 +7,7 @@ import * as ExecutionBackend from "@rika/product/execution-service"
 import { Catalog as ToolCatalog } from "@rika/coding-tools/coding-tool-catalog"
 import { Effect, Layer, Ref, Schema } from "effect"
 import { TestConsole } from "effect/testing"
-import { Operation } from "@rika/product/product-operation"
+import { Operation } from "@rika/product/product-operation-service"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { backend } from "../support/operation-execution-fixtures"
 

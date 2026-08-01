@@ -1,7 +1,17 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import { QueueFull, RepositoryError } from "@rika/product/turn-repository"
-import type { Interface } from "@rika/product/turn-repository"
+import type { SqlError } from "effect/unstable/sql/SqlError"
+import { QueueFull, QueuedTurnUnavailable, RepositoryError } from "@rika/product/turn-repository"
+import type {
+  Interface,
+  QueueSnapshot,
+  QueueClaim,
+  QueueClaimFinish,
+  QueueItemChange,
+  QueuedTurnTake,
+  QueueWake,
+} from "@rika/product/turn-repository"
+import type { AgentExecutionTurn } from "@rika/product/turn-record"
 import { decodeAgent, decodeQueueState, encodeExtensionPin } from "./turn-row-codec"
 import { queuedTurnUnavailable, repositoryError, submissionError, takeQueuedError } from "./turn-memory-support"
 
@@ -21,10 +31,13 @@ export const makeTurnSqliteQueue = (
   | "requestQueueWake"
   | "consumeQueueWake"
 > => ({
-  readQueue: Effect.fn("TurnRepository.readQueue")(function* (threadId) {
+  readQueue: Effect.fn("TurnRepository.readQueue")(function* (threadId): Effect.fn.Return<
+    QueueSnapshot,
+    RepositoryError
+  > {
     return yield* sql
       .withTransaction(
-        Effect.gen(function* () {
+        Effect.gen(function* (): Effect.fn.Return<QueueSnapshot, SqlError | RepositoryError> {
           const stateRows = yield* sql`SELECT * FROM rika_thread_queue_state WHERE thread_id = ${threadId}`
           const state = stateRows[0] === undefined ? undefined : yield* decodeQueueState(stateRows[0])
           const rows =
@@ -40,7 +53,10 @@ export const makeTurnSqliteQueue = (
       )
       .pipe(Effect.mapError(repositoryError))
   }),
-  claimNextQueued: Effect.fn("TurnRepository.claimNextQueued")(function* (threadId, _now) {
+  claimNextQueued: Effect.fn("TurnRepository.claimNextQueued")(function* (threadId, _now): Effect.fn.Return<
+    QueueClaim | undefined,
+    RepositoryError
+  > {
     return yield* sql
       .withTransaction(
         Effect.gen(function* () {
@@ -58,7 +74,7 @@ export const makeTurnSqliteQueue = (
       .pipe(Effect.mapError(repositoryError))
   }),
   finishQueuedClaim: Effect.fn("TurnRepository.finishQueuedClaim")(
-    function* (claim, status, lastCursor, extensionPin, now) {
+    function* (claim, status, lastCursor, extensionPin, now): Effect.fn.Return<QueueClaimFinish, RepositoryError> {
       const encodedPin = extensionPin === undefined ? undefined : yield* encodeExtensionPin(extensionPin)
       return yield* sql
         .withTransaction(
@@ -89,7 +105,10 @@ export const makeTurnSqliteQueue = (
         .pipe(Effect.mapError(repositoryError))
     },
   ),
-  releaseQueuedClaim: Effect.fn("TurnRepository.releaseQueuedClaim")(function* (claim) {
+  releaseQueuedClaim: Effect.fn("TurnRepository.releaseQueuedClaim")(function* (claim): Effect.fn.Return<
+    void,
+    RepositoryError
+  > {
     yield* sql`UPDATE rika_turns SET queue_claim_token = NULL
     WHERE id = ${claim.turn.id} AND turn_kind = 'AgentExecution' AND status = 'queued' AND queue_claim_token = ${claim.token}`.pipe(
       Effect.asVoid,
@@ -101,7 +120,10 @@ export const makeTurnSqliteQueue = (
       Effect.asVoid,
       Effect.mapError(repositoryError),
     ),
-  editQueued: Effect.fn("TurnRepository.editQueued")(function* (id, prompt, now) {
+  editQueued: Effect.fn("TurnRepository.editQueued")(function* (id, prompt, now): Effect.fn.Return<
+    AgentExecutionTurn & { readonly queue: QueueItemChange },
+    RepositoryError
+  > {
     return yield* sql
       .withTransaction(
         Effect.gen(function* () {
@@ -129,7 +151,10 @@ export const makeTurnSqliteQueue = (
       )
       .pipe(Effect.mapError(repositoryError))
   }),
-  takeQueued: Effect.fn("TurnRepository.takeQueued")(function* (id) {
+  takeQueued: Effect.fn("TurnRepository.takeQueued")(function* (id): Effect.fn.Return<
+    QueuedTurnTake,
+    RepositoryError | QueuedTurnUnavailable
+  > {
     return yield* sql
       .withTransaction(
         Effect.gen(function* () {
@@ -157,7 +182,7 @@ export const makeTurnSqliteQueue = (
       )
       .pipe(Effect.mapError(takeQueuedError))
   }),
-  dequeue: Effect.fn("TurnRepository.dequeue")(function* (id) {
+  dequeue: Effect.fn("TurnRepository.dequeue")(function* (id): Effect.fn.Return<QueueItemChange, RepositoryError> {
     return yield* sql
       .withTransaction(
         Effect.gen(function* () {
@@ -182,7 +207,10 @@ export const makeTurnSqliteQueue = (
       )
       .pipe(Effect.mapError(repositoryError))
   }),
-  requeueAccepted: Effect.fn("TurnRepository.requeueAccepted")(function* (id, queueCapacity, now) {
+  requeueAccepted: Effect.fn("TurnRepository.requeueAccepted")(function* (id, queueCapacity, now): Effect.fn.Return<
+    AgentExecutionTurn & { readonly queue: QueueItemChange },
+    RepositoryError | QueueFull
+  > {
     return yield* sql
       .withTransaction(
         Effect.gen(function* () {
@@ -231,7 +259,10 @@ export const makeTurnSqliteQueue = (
       )
       .pipe(Effect.mapError(submissionError))
   }),
-  requestQueueWake: Effect.fn("TurnRepository.requestQueueWake")(function* (threadId) {
+  requestQueueWake: Effect.fn("TurnRepository.requestQueueWake")(function* (threadId): Effect.fn.Return<
+    QueueWake | undefined,
+    RepositoryError
+  > {
     return yield* sql
       .withTransaction(
         Effect.gen(function* () {
@@ -253,7 +284,10 @@ export const makeTurnSqliteQueue = (
       )
       .pipe(Effect.mapError(repositoryError))
   }),
-  consumeQueueWake: Effect.fn("TurnRepository.consumeQueueWake")(function* (threadId, generation) {
+  consumeQueueWake: Effect.fn("TurnRepository.consumeQueueWake")(function* (threadId, generation): Effect.fn.Return<
+    boolean,
+    RepositoryError
+  > {
     const rows = yield* sql`UPDATE rika_thread_queue_state SET wake_pending = 0
     WHERE thread_id = ${threadId} AND wake_pending = 1 AND wake_generation = ${generation}
     RETURNING thread_id`.pipe(Effect.mapError(repositoryError))

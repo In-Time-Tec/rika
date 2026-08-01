@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
-import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
+import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 
 const terminal = (status: string) => status === "completed" || status === "failed" || status === "cancelled"
 const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString)

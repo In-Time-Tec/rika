@@ -2,7 +2,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { Effect, Layer, Schema } from "effect"
 
 import * as ExecutionBackend from "@rika/product/execution-service"
-import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
+import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 
 const executionModelRoute = (
   role: "main" | "oracle",

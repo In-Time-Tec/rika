@@ -17,4 +17,3 @@ export const migration003 = Effect.gen(function* () {
   yield* sql`ALTER TABLE rika_turns_next RENAME TO rika_turns`
   yield* sql`CREATE INDEX rika_turns_thread ON rika_turns (thread_id, created_at ASC, id ASC)`
 })
-

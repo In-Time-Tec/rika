@@ -8,12 +8,13 @@ export const RecordedShellResult = Schema.Struct({
 })
 export type RecordedShellResult = typeof RecordedShellResult.Type
 
-export interface ExecutionAttachment {
-  readonly parentExecutionKey: string
-  readonly parentUnitKey: string
-  readonly parentId: string
-  readonly parentOrderKey: string
-}
+export const ExecutionAttachment = Schema.Struct({
+  parentExecutionKey: Schema.String,
+  parentUnitKey: Schema.String,
+  parentId: Schema.String,
+  parentOrderKey: Schema.String,
+})
+export interface ExecutionAttachment extends Schema.Schema.Type<typeof ExecutionAttachment> {}
 
 type RecordedShellTurn = Extract<Turn, { readonly _tag: "RecordedShell" }>
 export type RunningRecordedShellTurn = Extract<RecordedShellTurn, { readonly status: "running" }>

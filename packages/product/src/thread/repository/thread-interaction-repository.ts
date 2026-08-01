@@ -3,7 +3,44 @@ import { Context, Effect, Schema } from "effect"
 import { Thread, ThreadId } from "@rika/product/thread-record"
 import { Turn, TurnId } from "@rika/product/turn-record"
 import type { ThreadRelationship, RelationshipCursor } from "../model/thread-relationship"
-import type { AcceptedThreadTurn, ResultRoute, ResultRouteCursor, RootResult } from "./thread-interaction-result"
+export type { ThreadRelationship } from "../model/thread-relationship"
+
+export type RootResult =
+  | { readonly status: "completed"; readonly cursor: string; readonly sequence: number; readonly output: string }
+  | { readonly status: "failed"; readonly cursor: string; readonly sequence: number; readonly reason?: string }
+  | { readonly status: "cancelled"; readonly cursor?: string; readonly sequence?: number; readonly reason?: string }
+
+interface ResultRouteBase {
+  readonly targetTurnId: TurnId
+  readonly kind: "manual" | "reply"
+  readonly sourceThreadId?: ThreadId
+  readonly sourceTurnId?: TurnId
+  readonly createdAt: number
+  readonly updatedAt: number
+}
+
+export type ResultRoute =
+  | (ResultRouteBase & { readonly delivery: "awaiting-result" | "failed" | "cancelled" })
+  | (ResultRouteBase & { readonly delivery: "ready"; readonly readySequence: number })
+  | (ResultRouteBase & {
+      readonly delivery: "delivered" | "source-unavailable"
+      readonly readySequence: number
+      readonly deliveredTurnId?: TurnId
+    })
+
+export interface ResultRouteCursor {
+  readonly targetTurnId: TurnId
+}
+
+export interface AcceptedThreadTurn {
+  readonly threadId: ThreadId
+  readonly turnId: TurnId
+  readonly status: "accepted" | "queued"
+  readonly queueRevision?: number
+}
+
+export const ReceiptKind = Schema.Literals(["create", "message", "steer", "cancel", "stop"])
+export type ReceiptKind = typeof ReceiptKind.Type
 
 export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("ThreadInteractionRepositoryError", {
   message: Schema.String,
@@ -33,7 +70,7 @@ export class ResultNotReady extends Schema.TaggedErrorClass<ResultNotReady>()("T
   targetTurnId: TurnId,
 }) {}
 
-interface Invocation {
+export interface Invocation {
   readonly invocationDigest: string
   readonly schemaInputDigest: string
   readonly sourceThreadId: ThreadId
@@ -51,39 +88,39 @@ interface TurnInput {
   readonly prompt: string
   readonly executionRoute: ExecutionRoutePin
 }
-interface CreateThreadInput extends Invocation, Limits, TurnInput {
+export interface CreateThreadInput extends Invocation, Limits, TurnInput {
   readonly threadId: ThreadId
   readonly title: string
   readonly resultDelivery: "manual" | "reply"
   readonly threadCreationDepth: number
 }
-interface AppendThreadMessageInput extends Invocation, Limits, TurnInput {
+export interface AppendThreadMessageInput extends Invocation, Limits, TurnInput {
   readonly targetThreadId: ThreadId
   readonly resultDelivery: "manual" | "reply"
   readonly threadCreationDepth: number
 }
-interface BindThreadControlInput extends Invocation {
+export interface BindThreadControlInput extends Invocation {
   readonly targetThreadId: ThreadId
 }
-interface DeliverThreadResultInput {
+export interface DeliverThreadResultInput {
   readonly targetTurnId: TurnId
   readonly deliveredTurnId: TurnId
   readonly queueCapacity: number
   readonly now: number
 }
-interface SettleThreadResultInput {
+export interface SettleThreadResultInput {
   readonly targetTurnId: TurnId
   readonly result: RootResult
   readonly now: number
 }
-interface BoundThreadControl {
+export interface BoundThreadControl {
   readonly targetThreadId: ThreadId
   readonly targetTurnId?: TurnId
   readonly outcome: "bound" | "no-active" | "already-terminal"
   readonly queueRevision?: number
   readonly stoppedTurnIds?: ReadonlyArray<TurnId>
 }
-interface DeliveredThreadResult {
+export interface DeliveredThreadResult {
   readonly targetTurnId: TurnId
   readonly delivery: "delivered" | "source-unavailable"
   readonly deliveredTurnId?: TurnId

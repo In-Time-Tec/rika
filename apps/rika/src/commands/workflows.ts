@@ -1,4 +1,4 @@
-import * as Operation from "@rika/product/product-operation"
+import * as Operation from "@rika/product/product-operation-service"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import { Option } from "effect"
 import { dispatch } from "./shared"

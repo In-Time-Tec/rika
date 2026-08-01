@@ -4,7 +4,8 @@ import { Effect, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { ThreadId } from "@rika/product/thread-record"
 import { EditTotals, RepairCandidate, ThreadSummary } from "@rika/product/thread-summary"
-import { Status, TurnId } from "@rika/product/turn-record"
+import { TurnId } from "@rika/product/turn-record"
+import { Status } from "@rika/product/execution-status"
 import * as ThreadState from "@rika/product/thread-state"
 
 export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("ThreadSummaryRepositoryError", {

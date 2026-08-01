@@ -9,8 +9,8 @@ import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Effect, Layer, Ref } from "effect"
 import { TestConsole } from "effect/testing"
-import { ExecutionIngest } from "@rika/product/product-operation"
-import { Operation } from "@rika/product/product-operation"
+import { ExecutionIngest } from "@rika/product/product-operation-service"
+import { Operation } from "@rika/product/product-operation-service"
 import { provideLayer } from "../support/product-test-layer"
 
 const backend = ExecutionBackend.Service.of({

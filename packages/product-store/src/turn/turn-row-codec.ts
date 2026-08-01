@@ -1,17 +1,13 @@
 import { Effect, Schema } from "effect"
 import { ThreadId } from "@rika/product/thread-record"
-import {
-  ExecutionExtensionPin,
-  ExecutionRoutePin,
-  PromptPart,
-  Status,
-  StopIntent,
-  Turn,
-  TurnAuthor,
-  TurnId,
-  TurnLineage,
-  isAgentExecution,
-} from "@rika/product/turn-record"
+import { Turn, TurnId, isAgentExecution } from "@rika/product/turn-record"
+import { ExecutionExtensionPin } from "@rika/product/execution-workflow"
+import { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
+import { PromptPart } from "@rika/product/execution-request"
+import { Status } from "@rika/product/execution-status"
+import { TurnAuthor, TurnLineage } from "@rika/product/thread-relationship"
+import type { ExecutionRoutePin } from "@rika/product/execution-route-snapshot"
+import type { StopIntent } from "@rika/product/thread-state"
 import { RepositoryError } from "@rika/product/turn-repository"
 
 const Row = Schema.Struct({
@@ -46,7 +42,7 @@ const QueueStateRow = Schema.Struct({
 
 export const ExtensionPinJson = Schema.fromJsonString(ExecutionExtensionPin)
 export const PromptPartsJson = Schema.fromJsonString(Schema.Array(PromptPart))
-export const ExecutionRouteJson = Schema.fromJsonString(ExecutionRoutePin)
+export const ExecutionRouteJson = Schema.fromJsonString(ExecutionRouteSnapshot)
 export const AuthorJson = Schema.fromJsonString(TurnAuthor)
 export const LineageJson = Schema.fromJsonString(TurnLineage)
 
