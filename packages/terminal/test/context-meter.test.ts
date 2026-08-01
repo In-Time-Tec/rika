@@ -23,7 +23,7 @@ describe("ContextMeter", () => {
     expect(idle.glyphs.join("")).toBe("█▊░░░░░░")
     expect(active.glyphs).toEqual(idle.glyphs)
     expect(active.highlight).toBe(1)
-    expect(ContextMeter.loadingMeter(3).join("")).toBe("···◆····")
+    expect(ContextMeter.loadingMeter(3).join("")).toBe("░░░▓░░░░")
   })
 
   test("caps the visual indicator while preserving over-budget pressure", () => {
