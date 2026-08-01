@@ -44,6 +44,10 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
     if (event.selectionEpoch !== state.selectionEpoch || event.threadId !== state.model.currentThreadId)
       return unchanged(state)
     if (state.usageRevision !== undefined && event.revision < state.usageRevision) return unchanged(state)
+    const contextUsage =
+      event.context._tag === "Unavailable" && state.model.contextUsage?._tag === "Available"
+        ? state.model.contextUsage
+        : event.context
     const availableUsageCost = event.cost._tag === "Available" ? event.cost : state.lastAvailableUsageCost
     const threadCostUsd =
       availableUsageCost?._tag === "Available" ? availableUsageCost.usd : (state.threadCostUsd ?? state.model.costUsd)
@@ -61,7 +65,7 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
           usageCost,
           usageTokens: event.tokens,
           usageTime: event.time,
-          contextUsage: event.context,
+          contextUsage,
           ...(threadCostUsd === undefined ? {} : { costUsd: threadCostUsd }),
         },
       },
