@@ -13,7 +13,7 @@ import * as TranscriptProjectionModel from "@rika/transcript/transcript-projecti
 import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Context, Effect, FileSystem, Layer, Scope, pipe } from "effect"
-import type { BenchMeasurement } from "./benchmark-baseline"
+import type { BenchMeasurement } from "./benchmark-measurement"
 import { cpuSample, summarizeLatencies } from "./benchmark-statistics"
 
 const cpuElapsedSeconds = (before: ReturnType<typeof cpuSample>, after: ReturnType<typeof cpuSample>): number =>

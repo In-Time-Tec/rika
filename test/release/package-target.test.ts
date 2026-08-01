@@ -3,14 +3,13 @@ import { fileURLToPath } from "node:url"
 import { access, readFile, readdir, stat } from "node:fs/promises"
 import { describe, expect, test } from "vitest"
 import {
+  expectedArchiveNames,
+  ownedTargetEntries,
+  validateArchiveSet,
   archiveName,
   archiveRoot,
-  expectedArchiveNames,
-  isPackageTarget,
-  ownedTargetEntries,
-  targets,
-  validateArchiveSet,
-} from "../../scripts/packaging/package-target"
+} from "../../scripts/packaging/release-archive"
+import { isPackageTarget, targets } from "../../scripts/packaging/package-target-contract"
 
 const sourceImports = (source: string) => {
   const imports = new Set<string>()

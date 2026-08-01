@@ -2,14 +2,9 @@ import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Effect, Layer, pipe } from "effect"
 import { Command, Flag } from "effect/unstable/cli"
-import {
-  baselinePath,
-  compareBaseline,
-  loadBaseline,
-  measurementToBaseline,
-  saveBaseline,
-  type BenchMeasurement,
-} from "./benchmark-baseline"
+import { baselinePath, compareBaseline, loadBaseline, saveBaseline } from "./benchmark-baseline"
+import { measurementToBaseline } from "./benchmark-baseline-measurement"
+import type { BenchMeasurement } from "./benchmark-measurement"
 import {
   defaultCommitBatch,
   defaultEventCount,

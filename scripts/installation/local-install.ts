@@ -1,14 +1,8 @@
 import { Config, Console, Data, Effect, FileSystem, Option, Path, Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { validatePackageArchive } from "../packaging/archive-contract"
-import {
-  archiveCommandName,
-  binDirEnv,
-  binDirSegments,
-  devCommandName,
-  devRootSegments,
-  installRootEnv,
-} from "./install-contract"
+import { archiveCommandName, devCommandName } from "./install-command-names"
+import { binDirEnv, binDirSegments, devRootSegments, installRootEnv } from "./install-paths"
 
 export class LocalInstallError extends Data.TaggedError("LocalInstallError")<{
   readonly operation: string
