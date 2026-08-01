@@ -6,7 +6,8 @@ import {
   interactiveRuntimeRestartLimit,
   interactiveRuntimeRestartPlan,
 } from "../src/client/interactive-runtime-restart"
-import { interactivePty, run } from "./client-main-harness"
+import { interactivePty } from "./client-pty-scenario"
+import { run } from "./client-process-test-runtime"
 
 test("restart plan respawns on exit 75 with a restart message", () => {
   expect(

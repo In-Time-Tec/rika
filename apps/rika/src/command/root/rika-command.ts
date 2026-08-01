@@ -15,7 +15,7 @@ import { dispatch, type CliOperationService } from "./cli-operation-dispatch"
 import { executeRun, runCommand } from "./noninteractive-run-command"
 import { reviewCommand } from "./review-command"
 import * as ReleaseUpdate from "../../release/release-update"
-import { version } from "../../version"
+import { version } from "../../application-version"
 
 export { version }
 

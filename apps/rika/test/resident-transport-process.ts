@@ -1,83 +1,9 @@
-import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect } from "vitest"
 import { fileURLToPath } from "node:url"
-import {
-  Cause,
-  Config,
-  Data,
-  Duration,
-  Effect,
-  FileSystem,
-  Function,
-  Layer,
-  Queue,
-  Ref,
-  Schema,
-  Scope,
-  Stream,
-} from "effect"
+import { Effect, Function, Queue, Ref, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-
-export type Event = {
-  type: string
-  role?: string | undefined
-  id?: string | undefined
-  clientPid?: number | undefined
-  hostPid?: number | undefined
-  text?: string | undefined
-  tag?: string | undefined
-  error?: string | undefined
-  callbacks?: number | undefined
-  tags?: ReadonlyArray<string> | undefined
-  outcome?: string | undefined
-}
-
-export class FixtureFailure extends Data.TaggedError("FixtureFailure")<{
-  readonly operation: string
-  readonly cause: unknown
-}> {}
-
-export const provide: {
-  <A, E, R, ROut, E2, RIn>(
-    effect: Effect.Effect<A, E, R>,
-    layer: Layer.Layer<ROut, E2, RIn>,
-  ): Effect.Effect<A, E | E2, Exclude<RIn | Exclude<R, ROut>, Scope.Scope>>
-  <ROut, E2, RIn>(
-    layer: Layer.Layer<ROut, E2, RIn>,
-  ): <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | E2, Exclude<RIn | Exclude<R, ROut>, Scope.Scope>>
-} = Function.dual(
-  2,
-  <A, E, R, ROut, E2, RIn>(
-    effect: Effect.Effect<A, E, R>,
-    layer: Layer.Layer<ROut, E2, RIn>,
-  ): Effect.Effect<A, E | E2, Exclude<RIn | Exclude<R, ROut>, Scope.Scope>> =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const context = yield* Layer.build(layer)
-        return yield* Effect.provide(effect, context)
-      }),
-    ),
-)
-
-export const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | Scope.Scope>) =>
-  Effect.runPromise(provide(effect, BunServices.layer))
-
-export const EventSchema = Schema.Struct({
-  type: Schema.String,
-  role: Schema.optional(Schema.String),
-  id: Schema.optional(Schema.String),
-  clientPid: Schema.optional(Schema.Finite),
-  hostPid: Schema.optional(Schema.Finite),
-  text: Schema.optional(Schema.String),
-  tag: Schema.optional(Schema.String),
-  error: Schema.optional(Schema.String),
-  callbacks: Schema.optional(Schema.Finite),
-  tags: Schema.optional(Schema.Array(Schema.String)),
-  outcome: Schema.optional(Schema.String),
-})
-
-const decodeEventLine = Schema.decodeUnknownEffect(Schema.fromJsonString(EventSchema))
-export const decodeEvent = (input: unknown) => decodeEventLine(input)
+import { Event, FixtureFailure, decodeEvent, waitUntil } from "./resident-transport-runtime"
+import { fileExists } from "./resident-transport-files"
 
 export const hostPids = new Set<number>()
 
@@ -89,55 +15,6 @@ export const alive = (pid: number) => {
     return false
   }
 }
-
-export const waitUntil: {
-  <E, R>(condition: Effect.Effect<boolean, E, R>, timeout?: number): Effect.Effect<undefined, E, R>
-  (timeout?: number): <E, R>(condition: Effect.Effect<boolean, E, R>) => Effect.Effect<undefined, E, R>
-} = Function.dual(
-  (args) => Effect.isEffect(args[0]),
-  <E, R>(condition: Effect.Effect<boolean, E, R>, timeout = 2_000): Effect.Effect<undefined, E, R> =>
-    Effect.gen(function* () {
-      const started = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
-      while (!(yield* condition)) {
-        const now = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
-        if (now - started >= timeout) return yield* Effect.die("condition timed out")
-        yield* Effect.sleep("20 millis")
-      }
-    }),
-)
-
-export const makeRoot = Effect.gen(function* () {
-  const fileSystem = yield* FileSystem.FileSystem
-  const temporaryDirectory = yield* Config.string("TMPDIR").pipe(Config.withDefault("/tmp"))
-  return yield* fileSystem.makeTempDirectory({ directory: temporaryDirectory, prefix: "rika-resident-" })
-})
-
-export const cleanRoot = (root: string) =>
-  FileSystem.FileSystem.pipe(
-    Effect.flatMap((fileSystem) => fileSystem.remove(root, { recursive: true, force: true })),
-    Effect.mapError((cause) => new FixtureFailure({ operation: "clean fixture root", cause })),
-  )
-
-export const readText = (path: string) =>
-  Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.readFileString(path))
-export const fileStat = (path: string) => Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.stat(path))
-export const fileExists = (path: string) =>
-  Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.exists(path))
-
-export const legacyClose = (url: string) =>
-  Effect.callback<{ readonly code: number; readonly reason: string }, FixtureFailure>((resume) => {
-    const socket = new WebSocket(url)
-    socket.addEventListener("close", (event) => resume(Effect.succeed({ code: event.code, reason: event.reason })))
-    socket.addEventListener("error", (cause) =>
-      resume(Effect.fail(new FixtureFailure({ operation: "connect legacy resident client", cause }))),
-    )
-    return Effect.sync(() => socket.close())
-  }).pipe(
-    Effect.timeoutOrElse({
-      duration: "2 seconds",
-      orElse: () => Effect.fail(new FixtureFailure({ operation: "wait for legacy close", cause: "timed out" })),
-    }),
-  )
 
 export const startOldResident = Effect.fn("ResidentTransportTest.startOldResident")(function* (
   root: string,
@@ -322,27 +199,3 @@ export const nextTypeEffect: {
       return event.type === type ? event : yield* nextTypeEffect(client, type)
     }),
 )
-
-const exitPoll = Duration.millis(20)
-const exitTimeout = Duration.seconds(10)
-
-export const awaitExit = (pids: ReadonlyArray<number>) =>
-  Effect.gen(function* () {
-    let remaining = pids.filter(alive)
-    while (remaining.length > 0) {
-      yield* Effect.sleep(exitPoll)
-      remaining = remaining.filter(alive)
-    }
-    return remaining
-  }).pipe(Effect.timeoutOrElse({ duration: exitTimeout, orElse: () => Effect.sync(() => pids.filter(alive)) }))
-
-export const killTrackedHosts = () => {
-  const pids = [...hostPids]
-  hostPids.clear()
-  for (const pid of pids) {
-    try {
-      globalThis.process.kill(pid, "SIGKILL")
-    } catch {}
-  }
-  return Effect.runPromise(awaitExit(pids))
-}

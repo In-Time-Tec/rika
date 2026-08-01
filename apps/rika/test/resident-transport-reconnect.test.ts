@@ -1,17 +1,9 @@
 import { afterEach, describe, expect, test } from "vitest"
 import { Effect } from "effect"
-import {
-  attachedEffect,
-  cleanRoot,
-  fileExists,
-  killTrackedHosts,
-  makeRoot,
-  nextTypeEffect,
-  readText,
-  run,
-  start,
-  waitUntil,
-} from "./resident-transport-harness"
+import { makeRoot, run, waitUntil } from "./resident-transport-runtime"
+import { cleanRoot, fileExists, readText } from "./resident-transport-files"
+import { attachedEffect, nextTypeEffect, start } from "./resident-transport-process"
+import { killTrackedHosts } from "./resident-process-exit"
 
 afterEach(() => killTrackedHosts())
 

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url"
 import { Effect, FileSystem, Layer, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { claimStartup } from "../src/resident/process/resident-startup"
-import { reapResidents } from "./client-main-harness"
+import { reapResidents } from "./client-process-test-runtime"
 
 const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices>) =>
   Effect.runPromise(

@@ -1,33 +1,8 @@
-import * as BunServices from "@effect/platform-bun/BunServices"
-import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient"
-import * as Reactivity from "effect/unstable/reactivity/Reactivity"
-import { expect } from "vitest"
 import { fileURLToPath } from "node:url"
-import { Cause, Config, Duration, Effect, FileSystem, Function, Layer, Schema, Scope, Stream } from "effect"
+import { Config, Duration, Effect, FileSystem, Schema, Stream } from "effect"
+import { expect } from "vitest"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import * as ResidentEndpoint from "../src/resident/process/resident-endpoint"
-import { alive, awaitExit } from "./resident-transport-harness"
-
-export const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | Scope.Scope>) =>
-  Effect.runPromise(
-    Effect.scoped(Layer.build(BunServices.layer).pipe(Effect.flatMap((context) => Effect.provide(effect, context)))),
-  )
-
-export const waitUntil: {
-  <E, R>(condition: Effect.Effect<boolean, E, R>, timeout?: number): Effect.Effect<undefined, E, R>
-  (timeout?: number): <E, R>(condition: Effect.Effect<boolean, E, R>) => Effect.Effect<undefined, E, R>
-} = Function.dual(
-  (args) => Effect.isEffect(args[0]),
-  <E, R>(condition: Effect.Effect<boolean, E, R>, timeout = 10_000): Effect.Effect<undefined, E, R> =>
-    Effect.gen(function* () {
-      const started = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
-      while (!(yield* condition)) {
-        const now = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
-        if (now - started >= timeout) return yield* Effect.die("condition timed out")
-        yield* Effect.sleep("20 millis")
-      }
-    }),
-)
+import { reapResidents, waitUntil } from "./client-process-test-runtime"
 
 export const PtyResult = Schema.fromJsonString(
   Schema.Struct({
@@ -59,19 +34,6 @@ export const stripTerminalControl = (text: string) =>
     .replaceAll(new RegExp(`${escape}\\][^${bell}]*(?:${bell}|${escape}\\\\)`, "g"), "")
     .replaceAll(new RegExp(`${escape}\\[[0-?]*[ -/]*[@-~]`, "g"), "")
     .replaceAll(new RegExp(`${escape}[@-_]`, "g"), "")
-
-// A live resident keeps an open diagnostics log under its own data root, so the isolated root names
-// every resident this harness is responsible for without inspecting ports or shelling out.
-export const reapResidents = (dataRoot: string) =>
-  Effect.gen(function* () {
-    const endpoint = yield* ResidentEndpoint.resolve("default", dataRoot)
-    const recorded = yield* ResidentEndpoint.recordedResidentProcesses(endpoint)
-    const pids = recorded.map((entry) => entry.pid).filter(alive)
-    yield* Effect.forEach(pids, (pid) => Effect.ignore(Effect.sync(() => process.kill(pid, "SIGKILL"))), {
-      discard: true,
-    })
-    yield* awaitExit(pids)
-  }).pipe(Effect.ignore)
 
 export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(function* (
   actions: ReadonlyArray<{
@@ -165,36 +127,4 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
     workspaceFiles,
     database: `${state}/rika.db`,
   }
-})
-
-export const turnStatus = Effect.fn("ClientMainTest.turnStatus")(function* (database: string, prompt: string) {
-  const reactivity = yield* Reactivity.make
-  const client = yield* SqliteClient.make({ filename: database, readonly: true }).pipe(
-    Effect.provideService(Reactivity.Reactivity, reactivity),
-  )
-  const rows = yield* client<{ readonly status: string }>`SELECT status FROM rika_turns WHERE prompt = ${prompt}`
-  return rows[0]?.status
-})
-
-export const awaitTurnStatus = Effect.fn("ClientMainTest.awaitTurnStatus")(function* (
-  database: string,
-  prompt: string,
-  status: string,
-  timeout = 30_000,
-) {
-  let observed = "unread"
-  yield* waitUntil(
-    Effect.gen(function* () {
-      observed = yield* turnStatus(database, prompt).pipe(
-        Effect.map((value) => value ?? "absent"),
-        Effect.catchCause((cause) => Effect.succeed(Cause.pretty(cause))),
-      )
-      return observed === status
-    }).pipe(Effect.scoped),
-    timeout,
-  ).pipe(
-    Effect.catchCause(() =>
-      Effect.die(`turn "${prompt}" settled as ${observed} instead of ${status} within ${timeout}ms`),
-    ),
-  )
 })
