@@ -1,9 +1,11 @@
 import { Effect, Ref, Semaphore } from "effect"
 import { ThreadId } from "@rika/product/thread-record"
 import { TurnId, AgentExecutionTurn, Turn, isAgentExecution, isRunningRecordedShell } from "@rika/product/turn-record"
-import { clone, emptyQueueState, MemoryCoordinatorTypeId, sameTurn } from "./turn-memory-support"
-import type { MemoryCoordinator, MemoryQueueState, MemoryState } from "./turn-memory-support"
-
+import { MemoryCoordinatorTypeId } from "./turn-memory-coordination"
+import { clone, sameTurn } from "./turn-memory-state"
+import { emptyQueueState } from "./turn-memory-queue-state"
+import type { MemoryCoordinator } from "./turn-memory-coordination"
+import type { MemoryQueueState, MemoryState } from "./turn-memory-state"
 export interface TurnMemoryContext {
   readonly readState: Effect.Effect<MemoryState>
   readonly modifyState: <A>(f: (state: MemoryState) => readonly [A, MemoryState]) => Effect.Effect<A>

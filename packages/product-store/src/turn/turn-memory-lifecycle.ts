@@ -2,9 +2,11 @@ import { Effect, Schema } from "effect"
 import { AgentExecutionTurn, isAgentExecution } from "@rika/product/turn-record"
 import { RepositoryError } from "@rika/product/turn-repository"
 import type { Interface } from "@rika/product/turn-repository"
-import { ExtensionPinJson } from "./turn-row-codec"
-import { clone, isTerminalStatus, missing, repositoryError } from "./turn-memory-support"
-import type { MemoryState } from "./turn-memory-support"
+import { turnRowJson } from "./turn-row-json-codec"
+import { isTerminalStatus } from "./turn-memory-coordination"
+import { missing, repositoryError } from "./turn-memory-errors"
+import { clone } from "./turn-memory-state"
+import type { MemoryState } from "./turn-memory-state"
 import type { TurnMemoryContext } from "./turn-memory-state-operations"
 
 export const makeTurnMemoryLifecycle = ({
@@ -17,7 +19,7 @@ export const makeTurnMemoryLifecycle = ({
   "setExtensionPin" | "setStatus" | "startAccepted" | "cancelAccepted" | "repairCursor"
 > => ({
   setExtensionPin: Effect.fn("TurnRepository.setExtensionPin")(function* (id, pin) {
-    const encoded = yield* Schema.encodeEffect(ExtensionPinJson)(pin).pipe(Effect.mapError(repositoryError))
+    const encoded = yield* Schema.encodeEffect(turnRowJson.extensionPin)(pin).pipe(Effect.mapError(repositoryError))
     return yield* withLock(
       Effect.gen(function* () {
         const currentState = yield* readUnlocked
@@ -25,7 +27,7 @@ export const makeTurnMemoryLifecycle = ({
         if (current === undefined || !isAgentExecution(current)) return yield* missing(id)
         if (
           current.extensionPin !== undefined &&
-          (yield* Schema.encodeEffect(ExtensionPinJson)(current.extensionPin).pipe(
+          (yield* Schema.encodeEffect(turnRowJson.extensionPin)(current.extensionPin).pipe(
             Effect.mapError(repositoryError),
           )) !== encoded
         )

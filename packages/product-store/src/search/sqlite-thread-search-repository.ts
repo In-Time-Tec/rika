@@ -1,83 +1,30 @@
 import { Service } from "@rika/product/thread-search-repository"
 export { Service }
-import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Effect, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { Thread, ThreadId, ThreadLineage } from "@rika/product/thread-record"
-import { Turn } from "@rika/product/turn-record"
+import { SearchModel } from "./thread-search-model"
+import { ThreadSearchRow as Row } from "./thread-search-row-codec"
 
-export const schemaVersion = 2 as const
-export const defaultPageSize = 50
-export const maximumPageSize = 200
-export const maximumSnippetLength = 240
-export const maximumSnippets = 8
-
-export const MatchSource = Schema.Literals([
-  "title",
-  "label",
-  "humanPrompt",
-  "agentPrompt",
-  "rootAssistant",
-  "childAssistant",
-  "file",
-])
-export type MatchSource = typeof MatchSource.Type
-
-export const OmissionReason = Schema.Literals(["snippetLimit", "snippetLength"])
-export type OmissionReason = typeof OmissionReason.Type
-
-export const Cursor = Schema.Struct({ updatedAt: Schema.Finite, threadId: ThreadId })
-export type Cursor = typeof Cursor.Type
-
-export const Snippet = Schema.Struct({ source: MatchSource, text: Schema.String })
-export type Snippet = typeof Snippet.Type
-
-export const Result = Schema.Struct({
-  schemaVersion: Schema.Literal(2),
-  threadId: ThreadId,
-  title: Schema.String,
-  workspace: Schema.String,
-  createdAt: Schema.Finite,
-  updatedAt: Schema.Finite,
-  archived: Schema.Boolean,
-  matchedBy: Schema.Array(MatchSource),
-  snippets: Schema.Array(Snippet),
-  omissionReasons: Schema.Array(OmissionReason),
-})
-export type Result = typeof Result.Type
-
-export interface SearchInput {
-  readonly workspace: string
-  readonly query: string
-  readonly includeArchived?: boolean
-  readonly label?: string
-  readonly after?: number
-  readonly before?: number
-  readonly cursor?: Cursor
-  readonly limit?: number
-}
-
-export interface SearchPage {
-  readonly schemaVersion: 2
-  readonly results: ReadonlyArray<Result>
-  readonly nextCursor: Cursor | undefined
-}
-
-export interface RebuildInput {
-  readonly thread: Thread
-  readonly turns: ReadonlyArray<Turn>
-  readonly units: ReadonlyArray<TranscriptUnit.Unit>
-}
-
-export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("ThreadSearchRepositoryError", {
-  message: Schema.String,
-}) {}
-
-export interface Interface {
-  readonly search: (input: SearchInput) => Effect.Effect<SearchPage, RepositoryError>
-  readonly rebuildThread: (input: RebuildInput) => Effect.Effect<void, RepositoryError>
-  readonly removeThread: (threadId: ThreadId) => Effect.Effect<void, RepositoryError>
-}
+export type Interface = SearchModel.Interface
+const {
+  schemaVersion,
+  defaultPageSize,
+  maximumPageSize,
+  maximumSnippetLength,
+  maximumSnippets,
+  MatchSource,
+  Snippet,
+  Result,
+} = SearchModel
+type MatchSource = SearchModel.MatchSource
+type Result = SearchModel.Result
+type Snippet = SearchModel.Snippet
+type SearchInput = SearchModel.SearchInput
+type SearchPage = SearchModel.SearchPage
+type RebuildInput = SearchModel.RebuildInput
+const RepositoryError = SearchModel.RepositoryError
+type RepositoryError = SearchModel.RepositoryError
 
 interface Document {
   readonly thread: Thread
@@ -219,7 +166,6 @@ const selected = (documents: ReadonlyArray<Document>, input: SearchInput, parsed
       results.length > limit && last !== undefined ? { updatedAt: last.updatedAt, threadId: last.threadId } : undefined,
   }
 }
-import { ThreadSearchRow as Row } from "./thread-search-row-codec"
 const LabelsJson = Schema.fromJsonString(Schema.Array(Schema.String))
 const LineageJson = Schema.fromJsonString(ThreadLineage)
 export const layer = Layer.effect(

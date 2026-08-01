@@ -13,8 +13,7 @@ import type {
 } from "@rika/product/turn-repository"
 import type { AgentExecutionTurn } from "@rika/product/turn-record"
 import { decodeAgent, decodeQueueState, encodeExtensionPin } from "./turn-row-codec"
-import { queuedTurnUnavailable, repositoryError, submissionError, takeQueuedError } from "./turn-memory-support"
-
+import { queuedTurnUnavailable, repositoryError, submissionError, takeQueuedError } from "./turn-memory-errors"
 export const makeTurnSqliteQueue = (
   sql: SqlClient,
 ): Pick<

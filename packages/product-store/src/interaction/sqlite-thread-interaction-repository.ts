@@ -3,7 +3,7 @@ export { Service, RepositoryError }
 import { Effect, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { ThreadId } from "@rika/product/thread-record"
-import { decodeStoredTurn } from "../turn/turn-row-codec"
+import { decode } from "../turn/turn-row-codec"
 import { TurnId } from "@rika/product/turn-record"
 
 import {
@@ -369,7 +369,7 @@ export const layer = Layer.effect(
         ),
       getMessages: (id) =>
         sql<any>`SELECT * FROM rika_turns WHERE thread_id=${id} ORDER BY created_at ASC, id ASC`.pipe(
-          Effect.flatMap((rows) => Effect.forEach(rows, decodeStoredTurn)),
+          Effect.flatMap((rows) => Effect.forEach(rows, decode)),
           Effect.mapError(error),
         ),
       getResultRoute: getRoute,

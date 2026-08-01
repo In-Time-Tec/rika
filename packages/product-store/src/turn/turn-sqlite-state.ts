@@ -2,14 +2,14 @@ import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { RepositoryError } from "@rika/product/turn-repository"
 import type { Interface } from "@rika/product/turn-repository"
-import { decodeAgent, ExtensionPinJson } from "./turn-row-codec"
-import { missing, repositoryError } from "./turn-memory-support"
-
+import { decodeAgent } from "./turn-row-codec"
+import { turnRowJson } from "./turn-row-json-codec"
+import { missing, repositoryError } from "./turn-memory-errors"
 export const makeTurnSqliteState = (
   sql: SqlClient,
 ): Pick<Interface, "setExtensionPin" | "setStatus" | "startAccepted" | "cancelAccepted" | "repairCursor"> => ({
   setExtensionPin: Effect.fn("TurnRepository.setExtensionPin")(function* (id, pin) {
-    const encoded = yield* Schema.encodeEffect(ExtensionPinJson)(pin).pipe(Effect.mapError(repositoryError))
+    const encoded = yield* Schema.encodeEffect(turnRowJson.extensionPin)(pin).pipe(Effect.mapError(repositoryError))
     const rows = yield* sql`UPDATE rika_turns SET extension_pin_json = ${encoded}
       WHERE id = ${id} AND turn_kind = 'AgentExecution'
         AND (extension_pin_json IS NULL OR extension_pin_json = ${encoded}) RETURNING *`.pipe(

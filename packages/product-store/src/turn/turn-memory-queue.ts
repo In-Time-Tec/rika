@@ -3,8 +3,10 @@ import * as ExecutionStatus from "@rika/product/execution-status"
 import { AgentExecutionTurn, isAgentExecution } from "@rika/product/turn-record"
 import { QueueFull, RepositoryError } from "@rika/product/turn-repository"
 import type { Interface, QueueClaimFinish, QueueItemChange } from "@rika/product/turn-repository"
-import { clone, queueState, queuedTurnUnavailable, withQueueState } from "./turn-memory-support"
-import type { MemoryState, MemoryRequeueResult } from "./turn-memory-support"
+import { queuedTurnUnavailable } from "./turn-memory-errors"
+import { clone } from "./turn-memory-state"
+import { queueState, withQueueState } from "./turn-memory-queue-state"
+import type { MemoryState, MemoryRequeueResult } from "./turn-memory-state"
 import type { TurnMemoryContext } from "./turn-memory-state-operations"
 
 export const makeTurnMemoryQueue = ({

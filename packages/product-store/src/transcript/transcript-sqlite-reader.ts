@@ -6,7 +6,7 @@ import type { SqlClient as SqlClientType } from "effect/unstable/sql/SqlClient"
 import { TurnId, isRecordedShell } from "@rika/product/turn-record"
 import type { ExecutionCheckpoint, Projection } from "@rika/product/transcript-repository"
 import { invalidatedProjectionVersion, RepositoryError } from "@rika/product/transcript-repository"
-import { decodeStoredTurn } from "../turn/turn-row-codec"
+import { decode } from "../turn/turn-row-codec"
 import { TranscriptCheckpointRow } from "./transcript-checkpoint-codec"
 import { TranscriptStoredUnitRow } from "./transcript-unit-row-codec"
 import { support } from "./transcript-repository-support"
@@ -42,7 +42,7 @@ export const readTranscriptProjection = (
     const row = yield* Schema.decodeUnknownEffect(TranscriptCheckpointRow)(checkpointRows[0]).pipe(
       Effect.mapError(error),
     )
-    const turn = yield* decodeStoredTurn(checkpointRows[0]).pipe(Effect.mapError(error))
+    const turn = yield* decode(checkpointRows[0]).pipe(Effect.mapError(error))
     const unitRows = yield* sql`
       SELECT unit_key, execution_key, turn_id, parent_id, tool_id, unit_json, unit_order_key
       FROM rika_transcript_units

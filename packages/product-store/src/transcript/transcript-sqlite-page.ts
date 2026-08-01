@@ -5,7 +5,7 @@ import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { TurnId, isRecordedShell } from "@rika/product/turn-record"
 import type { Entry, Interface } from "@rika/product/transcript-repository"
 import { RepositoryError } from "@rika/product/transcript-repository"
-import { decodeStoredTurn } from "../turn/turn-row-codec"
+import { decode } from "../turn/turn-row-codec"
 import { TranscriptUnitRow } from "./transcript-unit-row-codec"
 import { support } from "./transcript-repository-support"
 
@@ -100,7 +100,7 @@ export const makeTranscriptSqlitePage = (sql: SqlClient): Pick<Interface, "page"
             Effect.gen(function* () {
               const unit = yield* Schema.decodeUnknownEffect(UnitJson)(row.unit_json)
               const turnId = yield* Schema.decodeUnknownEffect(TurnId)(row.turn_id)
-              const turn = yield* decodeStoredTurn(value).pipe(Effect.mapError(error))
+              const turn = yield* decode(value).pipe(Effect.mapError(error))
               const toolId =
                 unit.content._tag === "Block" && unit.content.block._tag === "ToolCall" ? unit.content.block.id : null
               if (
