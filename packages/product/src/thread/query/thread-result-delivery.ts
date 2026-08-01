@@ -1,6 +1,6 @@
 import type { Selector } from "./thread-query-input"
 import type { PageCursor as TranscriptCursor } from "../model/transcript-page"
-import type { PageCursor as TurnCursor } from "../queue/turn-queue-state"
+import type { PageCursor as TurnCursor } from "../repository/turn-repository-pagination"
 
 export interface Result {
   readonly text: string

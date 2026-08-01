@@ -54,11 +54,7 @@ export const ExecutionRouteSnapshot = Schema.Struct({
   ),
 })
 export type ExecutionRouteSnapshot = typeof ExecutionRouteSnapshot.Type
-export const ExecutionRoutePin = ExecutionRouteSnapshot
-export type ExecutionModelRoute = ExecutionRouteModelSnapshot
-export type ExecutionRoutePin = ExecutionRouteSnapshot
-
-export const testExecutionRoute = (mode = "test"): ExecutionRoutePin => {
+export const testExecutionRoute = (mode = "test"): ExecutionRouteSnapshot => {
   const route = {
     alias: "test",
     model: "test",
@@ -68,7 +64,7 @@ export const testExecutionRoute = (mode = "test"): ExecutionRoutePin => {
       baseUrl: "test://model",
       authentication: "none" as const,
     },
-    registrationIdentity: "test" as ExecutionModelRoute["registrationIdentity"],
+    registrationIdentity: "test" as ExecutionRouteModelSnapshot["registrationIdentity"],
     effort: "medium",
     fast: false,
     requestVariant: "test",

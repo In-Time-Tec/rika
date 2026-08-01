@@ -1,4 +1,4 @@
-import { OperationUnavailable } from "../contract/product-operation-service"
+import { OperationUnavailable } from "../contract/product-operation-errors"
 
 export interface ProductLayerOptions<
   ThreadError extends Error,
@@ -34,7 +34,7 @@ export interface ProductLayerOptions<
     tuning?: { readonly fastMode?: boolean },
     workspace?: string,
   ) => import("effect").Effect.Effect<
-    import("@rika/product/execution-route-snapshot").ExecutionRoutePin,
+    import("@rika/product/execution-route-snapshot").ExecutionRouteSnapshot,
     import("../operation-error").OperationError,
     import("@rika/product/execution-service").Service
   >

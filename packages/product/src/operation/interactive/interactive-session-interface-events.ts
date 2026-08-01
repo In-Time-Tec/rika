@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import { OperationUnavailable } from "../contract/product-operation-service"
+import { OperationUnavailable } from "../contract/product-operation-errors"
 import type { InteractiveSession } from "./interactive-session"
 import { makeInteractiveShell } from "./interactive-shell-session"
 

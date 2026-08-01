@@ -1,19 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
-import {
-  Effect,
-  Host,
-  Http,
-  Redacted,
-  Schema,
-  Service,
-  TokenResponse,
-  dependencies,
-  expiryJwt,
-  memoryStore,
-  provideLayer,
-  unusedHttp,
-  jwt,
-} from "./openai-auth-support"
+import { Effect, Redacted, Schema } from "effect"
+import { Host, Http } from "./openai-auth-test-contract"
+import { Service, TokenResponse } from "./openai-auth-test-service"
+import { dependencies, memoryStore, provideLayer, unusedHttp } from "./openai-auth-test-layers"
+import { expiryJwt, jwt } from "./openai-auth-test-credentials"
 
 describe("OpenAI token credentials", () => {
   it.effect("uses access-token expiry without requiring identity claims in that token", () => {

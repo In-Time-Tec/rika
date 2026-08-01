@@ -1,16 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Exit, Option, Redacted, Schema } from "./openai-auth-support"
-import {
-  AuthError,
-  Host,
-  Http,
-  Service,
-  dependencies,
-  memoryStore,
-  provideLayer,
-  tokens,
-  unusedHttp,
-} from "./openai-auth-support"
+import { Effect, Exit, Option, Redacted, Schema } from "effect"
+import { AuthError, Host, Http } from "./openai-auth-test-contract"
+import { Service } from "./openai-auth-test-service"
+import { dependencies, memoryStore, provideLayer, unusedHttp } from "./openai-auth-test-layers"
+import { tokens } from "./openai-auth-test-credentials"
 
 describe("OpenAI browser authentication", () => {
   it.effect("persists browser identity while returning redacted secrets and a generated fingerprint", () => {

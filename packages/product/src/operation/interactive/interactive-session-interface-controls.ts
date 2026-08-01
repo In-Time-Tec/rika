@@ -7,7 +7,7 @@ import { Clock, Effect, Ref } from "effect"
 import { operationError, operationFailureDetail } from "../operation-error"
 import { steerInteractiveTurn } from "./interactive-session-steer"
 import type { InteractiveSession } from "./interactive-session"
-import { OperationUnavailable } from "../contract/product-operation-service"
+import { OperationUnavailable } from "../contract/product-operation-errors"
 import { agentResponseArrived } from "./interactive-session-interface-support"
 
 export const makeInteractiveSessionControls = (

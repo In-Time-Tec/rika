@@ -1,6 +1,6 @@
 import * as OpenAiAuth from "../../authentication/openai-auth-service"
 import { Console, Context, Effect, Layer } from "effect"
-import { OperationUnavailable } from "../contract/product-operation-service"
+import { OperationUnavailable } from "../contract/product-operation-errors"
 import type { Input } from "../contract/product-operation"
 
 export interface AuthOperationOptions {

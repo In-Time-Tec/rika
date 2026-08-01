@@ -10,6 +10,7 @@ import * as IngestProjection from "./execution-projection-state"
 import type { Pipeline, Node } from "./execution-ingest-state"
 import type { Options } from "./execution-ingest-state"
 import type { IngestFailure } from "./execution-ingest-failure"
+import type { RefoldWriteResult } from "../../thread/repository/transcript-repository-results"
 import * as UsageProjection from "../../usage/usage-projection"
 import * as UsageFold from "../../usage/usage-fold"
 import * as UsageSnapshot from "../../usage/usage-snapshot"
@@ -264,51 +265,50 @@ export const make = (dependencies: CommitDependencies) => {
               Deferred.doneUnsafe(pipeline.rootCommitted, Effect.void)
             return
           }
-          const write: Effect.Effect<TranscriptPage.RefoldWriteResult, TranscriptRepository.RepositoryError> =
-            pipeline.refolding
-              ? dependencies.options.transcripts.replaceForRefold(
-                  turn,
-                  {
-                    ...projectionState,
-                    units: IngestProjection.globalProjectionUnits(
-                      pipeline.nodes,
-                      pipeline.order,
-                      new Map(
-                        [...pipeline.nodes].flatMap(([key, node]) =>
-                          node.attachment === undefined ? [] : [[key, node.attachment] as const],
-                        ),
+          const write: Effect.Effect<RefoldWriteResult, TranscriptRepository.RepositoryError> = pipeline.refolding
+            ? dependencies.options.transcripts.replaceForRefold(
+                turn,
+                {
+                  ...projectionState,
+                  units: IngestProjection.globalProjectionUnits(
+                    pipeline.nodes,
+                    pipeline.order,
+                    new Map(
+                      [...pipeline.nodes].flatMap(([key, node]) =>
+                        node.attachment === undefined ? [] : [[key, node.attachment] as const],
                       ),
                     ),
+                  ),
+                },
+                {
+                  executionCheckpoints: [...pipeline.nodes.values()]
+                    .filter((node) => node.parentKey === undefined || node.attachment !== undefined)
+                    .map(checkpoint),
+                  projectionVersion: dependencies.projectionVersion,
+                  expectedProjectionVersion: pipeline.refoldFromVersion!,
+                  expectedGeneration: pipeline.persistedGeneration!,
+                },
+              )
+            : dependencies.options.transcripts
+                .commitDelta(
+                  turn,
+                  projectionState,
+                  {
+                    upsert,
+                    remove: removals,
                   },
                   {
-                    executionCheckpoints: [...pipeline.nodes.values()]
-                      .filter((node) => node.parentKey === undefined || node.attachment !== undefined)
-                      .map(checkpoint),
+                    executionCheckpoints: changedCheckpoints,
                     projectionVersion: dependencies.projectionVersion,
-                    expectedProjectionVersion: pipeline.refoldFromVersion!,
-                    expectedGeneration: pipeline.persistedGeneration!,
+                    expectedGeneration: pipeline.persistedGeneration,
                   },
                 )
-              : dependencies.options.transcripts
-                  .commitDelta(
-                    turn,
-                    projectionState,
-                    {
-                      upsert,
-                      remove: removals,
-                    },
-                    {
-                      executionCheckpoints: changedCheckpoints,
-                      projectionVersion: dependencies.projectionVersion,
-                      expectedGeneration: pipeline.persistedGeneration,
-                    },
-                  )
-                  .pipe(
-                    Effect.map(
-                      (result): TranscriptPage.RefoldWriteResult =>
-                        result === "stale" ? { _tag: "Stale" } : { _tag: "Committed", turn },
-                    ),
-                  )
+                .pipe(
+                  Effect.map(
+                    (result): RefoldWriteResult =>
+                      result === "stale" ? { _tag: "Stale" } : { _tag: "Committed", turn },
+                  ),
+                )
           const result = yield* Effect.result(write)
           if (result._tag === "Failure") {
             dependencies.fail(pipeline, root, "repository", String(result.failure))

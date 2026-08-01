@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Crypto, Effect, Encoding, Redacted, Flow } from "./openai-auth-support"
-import { digest } from "./openai-auth-support"
+import { Crypto, Effect, Encoding, Redacted } from "effect"
+import { Flow } from "./openai-auth-test-contract"
+import { digest } from "./openai-auth-test-credentials"
 
 describe("OpenAI authentication flow", () => {
   it.effect("creates independent deterministic PKCE values and the exact S256 challenge", () =>

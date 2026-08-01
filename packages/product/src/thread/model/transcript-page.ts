@@ -2,7 +2,6 @@ import * as TranscriptProjectionModel from "@rika/transcript/transcript-projecti
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Schema } from "effect"
 import { Turn, TurnId } from "./turn-record"
-import type { AgentExecutionTurn } from "./turn-record"
 import { ExecutionAttachment } from "./thread-result"
 
 export interface Entry {
@@ -68,7 +67,3 @@ export interface Page {
   readonly newestCursor?: PageCursor | undefined
   readonly threadCostUsd: number
 }
-
-export type RefoldWriteResult =
-  | { readonly _tag: "Committed"; readonly turn: AgentExecutionTurn }
-  | { readonly _tag: "Stale" }
