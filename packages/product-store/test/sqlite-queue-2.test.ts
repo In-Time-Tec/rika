@@ -1,24 +1,17 @@
-import {
-  expect,
-  test,
-  BunServices,
-  TranscriptCorrelation,
-  TranscriptProjection,
-  Effect,
-  FileSystem,
-  Layer,
-  SqlClient,
-  Database,
-  ThreadRepository,
-  ThreadSummaryRepository,
-  TurnRepository,
-  TranscriptRepository,
-  Turn,
-  id,
-  create,
-  provideLayer,
-  commitAll,
-} from "./sqlite-queue-support"
+import { expect, test } from "vitest"
+import * as BunServices from "@effect/platform-bun/BunServices"
+import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import { Effect, FileSystem, Layer } from "effect"
+import { SqlClient } from "effect/unstable/sql/SqlClient"
+import * as Database from "@rika/product-store/product-database-layer"
+import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
+import * as ThreadSummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
+import * as TurnRepository from "../src/turn/sqlite-turn-repository"
+import * as TranscriptRepository from "../src/transcript/sqlite-transcript-repository"
+import * as Turn from "@rika/product/turn-record"
+import { id, create, provideLayer } from "./sqlite-queue-support"
+import { commitAll } from "./transcript-repository-fixtures"
 
 test("thread creation rolls back its workspace when the thread insert fails", () => {
   const program = Effect.scoped(

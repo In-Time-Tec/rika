@@ -1,11 +1,7 @@
-import * as ExecutionEvent from "@rika/product/execution-event"
-import * as ExecutionStatus from "@rika/product/execution-status"
 import { Fixtures } from "./execution-ingest-support"
-import { Context, Deferred, Effect, Exit, Layer, Ref, Scope, Stream } from "effect"
-import { TestClock } from "effect/testing"
+import { Context, Deferred, Effect, Layer, Ref, Scope, Stream } from "effect"
 import * as ExecutionIngest from "../../src/execution/ingest/execution-ingest-service"
 import * as TurnContract from "@rika/product/turn-repository"
-import { executionRoute } from "../../../product-store/test/support/product-test-current-state"
 import { storeProjection } from "../../../product-store/test/support/product-test-transcript-fixture"
 
 import { ExecutionFixtures } from "./execution-ingest-fixtures"

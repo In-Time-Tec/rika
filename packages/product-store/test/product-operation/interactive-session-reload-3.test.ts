@@ -1,9 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
+import { Effect } from "effect"
+import { Fixtures as RuntimeFixtures } from "./interactive-session-runtime-support"
+import { Fixtures as TranscriptFixtures } from "./interactive-session-transcript-support"
+import { projectionVersion } from "./interactive-session-base-support"
 import {
-  RuntimeFixtures,
-  TranscriptFixtures,
-  Effect,
-  projectionVersion,
   subagentToolId,
   subagentChildId,
   subagentRootEvents,

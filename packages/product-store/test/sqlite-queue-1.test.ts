@@ -1,24 +1,16 @@
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
-import {
-  expect,
-  test,
-  BunServices,
-  Effect,
-  FileSystem,
-  Layer,
-  Schema,
-  SqlClient,
-  Database,
-  Thread,
-  ThreadRepository,
-  ThreadSummaryRepository,
-  TurnRepository,
-  TurnContract,
-  Turn,
-  id,
-  create,
-  provideLayer,
-} from "./sqlite-queue-support"
+import { expect, test } from "vitest"
+import * as BunServices from "@effect/platform-bun/BunServices"
+import { Effect, FileSystem, Layer, Schema } from "effect"
+import { SqlClient } from "effect/unstable/sql/SqlClient"
+import * as Database from "@rika/product-store/product-database-layer"
+import * as Thread from "@rika/product/thread-record"
+import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
+import * as ThreadSummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
+import * as TurnRepository from "../src/turn/sqlite-turn-repository"
+import * as TurnContract from "@rika/product/turn-repository"
+import * as Turn from "@rika/product/turn-record"
+import { id, create, provideLayer } from "./sqlite-queue-support"
 
 test("dequeue removes the queued turn activity from the materialized summary", () => {
   const program = Effect.scoped(

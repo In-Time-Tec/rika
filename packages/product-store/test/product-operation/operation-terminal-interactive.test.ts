@@ -1,7 +1,3 @@
-import * as ExecutionStatus from "@rika/product/execution-status"
-import type { InteractiveSession } from "@rika/product/interactive-session"
-import type { InteractiveEvent } from "@rika/product/interactive-event"
-import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -10,14 +6,15 @@ import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ExecutionEvent from "@rika/product/execution-event"
-import * as ExecutionRequest from "@rika/product/execution-request"
-import { Context, Effect, Layer, Ref } from "effect"
+import { Effect, Layer, Ref } from "effect"
 import { TestConsole } from "effect/testing"
 import { projectionVersion } from "./interactive-session-base-support"
 import { executionRoute } from "../support/product-test-current-state"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { holdSession, openInteractiveSession, nonActivation } from "../support/operation-session-harness"
 import { executionStarted, backend } from "../support/operation-execution-fixtures"
+import { memoryTranscripts, operationService } from "./operation-terminal-interactive-support"
+import type { Event, RunningStatus, Session, StartInput } from "./operation-terminal-interactive-support"
 
 import { turnProvenance } from "../support/operation-selection-fixtures"
 
@@ -28,8 +25,8 @@ describe("Operation", () => {
         Effect.gen(function* () {
           const repository = yield* ThreadRepository.makeMemory()
           const turns = yield* TurnRepository.makeMemory()
-          const events = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])
-          const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
+          const events = yield* Ref.make<ReadonlyArray<Event>>([])
+          const sessions = yield* Ref.make<ReadonlyArray<Session>>([])
           const runSync = Effect.runSyncWith(yield* Effect.context<never>())
           const caseBackend = ExecutionBackend.Service.of({
             ...backend,
@@ -167,8 +164,8 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const repository = yield* ThreadRepository.makeMemory()
       const turns = yield* TurnRepository.makeMemory()
-      const starts = yield* Ref.make<ReadonlyArray<ExecutionRequest.StartInput>>([])
-      const runningStatuses = yield* Ref.make<ReadonlyArray<ExecutionStatus.Status>>([])
+      const starts = yield* Ref.make<ReadonlyArray<StartInput>>([])
+      const runningStatuses = yield* Ref.make<ReadonlyArray<RunningStatus>>([])
       const runBackend = ExecutionBackend.Service.of({
         ...backend,
         start: (input) =>
@@ -222,7 +219,7 @@ describe("Operation", () => {
         }),
       )
       const output = yield* Effect.gen(function* () {
-        const operation = yield* Service
+        const operation = yield* operationService
         yield* operation.run({
           _tag: "Run",
           prompt: [],
@@ -257,10 +254,7 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const repository = yield* ThreadRepository.makeMemory()
       const turns = yield* TurnRepository.makeMemory()
-      const transcripts = Context.get(
-        yield* Layer.build(TranscriptRepository.memoryLayer),
-        TranscriptRepository.Service,
-      )
+      const transcripts = yield* memoryTranscripts
       const childId = "child:execution%3Aturn-new:call_1"
       const childEvents: ReadonlyArray<ExecutionEvent.Event> = [
         executionStarted(childId),
@@ -391,7 +385,7 @@ describe("Operation", () => {
           }),
       })
       yield* Effect.gen(function* () {
-        const operation = yield* Service
+        const operation = yield* operationService
         yield* operation.run({
           _tag: "Run",
           prompt: [],

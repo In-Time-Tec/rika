@@ -1,26 +1,12 @@
 import * as ThreadQuery from "@rika/product/thread-query-service"
-import {
-  describe,
-  expect,
-  it,
-  Effect,
-  Layer,
-  Schema,
-  Stream,
-  ThreadToolHandlers,
-  provideLayer,
-  delegationUnit,
-  storeProjection,
-  Fixtures,
-  workspace,
-  invocation,
-  storedThread,
-  storedTurn,
-  projection,
-  relatedThread,
-  repositories,
-  queryLayer,
-} from "./thread-query-behavior-support"
+import { describe, expect, it } from "@effect/vitest"
+import { Effect, Layer, Schema, Stream } from "effect"
+import { ThreadToolHandlers } from "@rika/product/product-operation-service"
+import { provideLayer } from "../support/product-test-layer"
+import { delegationUnit, storeProjection } from "../support/product-test-transcript-fixture"
+import { Fixtures } from "./thread-query-support"
+import { workspace, invocation, storedThread, storedTurn, projection, relatedThread } from "./thread-query-fixtures"
+import { repositories, queryLayer } from "./thread-query-behavior-support"
 
 describe("ThreadQuery", () => {
   it.effect("reads a standalone ChildAgent subtree through the same child selector as delegated tools", () =>

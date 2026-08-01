@@ -3,25 +3,15 @@ import type { InteractiveSession } from "@rika/product/interactive-session"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
-import {
-  ThreadRepository,
-  TranscriptRepository,
-  TurnRepository,
-  TurnContract,
-  Turn,
-  ExecutionBackend,
-  TranscriptProjection,
-  Context,
-  Deferred,
-  Effect,
-  Fiber,
-  Layer,
-  Queue,
-  storeProjection,
-  baseBackend,
-  thread,
-  interactiveLayer,
-} from "./operation-interactive-extensions-support"
+import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
+import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
+import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
+import * as TurnContract from "@rika/product/turn-repository"
+import * as Turn from "@rika/product/turn-record"
+import * as ExecutionBackend from "@rika/product/execution-service"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import { Context, Deferred, Effect, Fiber, Layer, Queue } from "effect"
+import { storeProjection, baseBackend, thread, interactiveLayer } from "./operation-interactive-extensions-support"
 
 describe("interactive session extensions", () => {
   it.effect("uses current Relay replay without rewriting a persisted checkpoint", () =>

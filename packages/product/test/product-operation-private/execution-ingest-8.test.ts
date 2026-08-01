@@ -4,9 +4,7 @@ import { makeHarness, settle } from "./execution-ingest-behavior-support"
 import { ExecutionFixtures } from "./execution-ingest-fixtures"
 
 import { Fixtures } from "./execution-ingest-support"
-import * as ExecutionIngest from "../../src/execution/ingest/execution-ingest-service"
-import { Context, Deferred, Effect, Exit, Layer, Ref, Scope, Stream } from "effect"
-import { TestClock } from "effect/testing"
+import { Effect } from "effect"
 
 describe("ExecutionIngest", () => {
   it.effect("replaces invalidated units only with projections derived from Relay events", () =>

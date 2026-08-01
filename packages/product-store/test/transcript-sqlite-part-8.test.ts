@@ -1,24 +1,17 @@
-import {
-  expect,
-  it,
-  BunServices,
-  TranscriptCorrelation,
-  TranscriptOrdering,
-  TranscriptProjection,
-  Effect,
-  FileSystem,
-  Schema,
-  SqlClient,
-  Thread,
-  TranscriptRepository,
-  Turn,
-  UnitJson,
-  createTurn,
-  commitAll,
-  event,
-  provideLayer,
-  sqliteLayer,
-} from "./transcript-sqlite-part-support"
+import { expect, it } from "@effect/vitest"
+import * as BunServices from "@effect/platform-bun/BunServices"
+import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import { Effect, FileSystem, Schema } from "effect"
+import { SqlClient } from "effect/unstable/sql/SqlClient"
+import * as Thread from "@rika/product/thread-record"
+import * as TranscriptRepository from "../src/transcript/sqlite-transcript-repository"
+import * as Turn from "@rika/product/turn-record"
+import { UnitJson } from "./transcript-sqlite-part-support"
+import { createTurn } from "./transcript-sqlite-support"
+import { commitAll, event, sqliteLayer } from "./transcript-repository-fixtures"
+import { provideLayer } from "./sqlite-schema-support"
 
 it.effect("returns typed errors for malformed durable transcript state", () =>
   Effect.scoped(

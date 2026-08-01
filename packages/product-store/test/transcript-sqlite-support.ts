@@ -1,22 +1,12 @@
 import * as TranscriptPage from "@rika/product/transcript-page"
-import type { NestedProjectionFixture } from "./transcript-fixture-checkpoints"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
-import * as BunServices from "@effect/platform-bun/BunServices"
-import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
-import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
 import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import { expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Schema } from "effect"
-import { SqlClient } from "effect/unstable/sql/SqlClient"
+import { Effect, Schema } from "effect"
 import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "../src/thread/sqlite-thread-repository"
-import * as TranscriptRepository from "../src/transcript/sqlite-transcript-repository"
 import * as TurnRepository from "../src/turn/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
-import { commitAll, event, projectionVersion, provideLayer, sqliteLayer, unit } from "./transcript-repository-fixtures"
 
 export const _UnitJson = Schema.fromJsonString(TranscriptUnit.Unit)
 
@@ -64,24 +54,3 @@ export const _usageEvent: TranscriptSourceEvent.SourceEvent = {
     output_tokens: 0,
   },
 }
-
-export { expect, it }
-export { Effect, FileSystem, Schema }
-export {
-  BunServices,
-  TranscriptCorrelation,
-  TranscriptOrdering,
-  TranscriptProjection,
-  TranscriptProjectionModel,
-  TranscriptSourceEvent,
-  TranscriptUnit,
-  SqlClient,
-  Thread,
-  ThreadRepository,
-  TranscriptRepository,
-  TurnRepository,
-  Turn,
-}
-export { commitAll, event, projectionVersion, provideLayer, sqliteLayer, unit }
-export type { NestedProjectionFixture }
-export { executionCheckpoint } from "./transcript-fixture-checkpoints"

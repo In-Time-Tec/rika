@@ -3,27 +3,17 @@ import type { InteractiveSession } from "@rika/product/interactive-session"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
-import {
-  ThreadRepository,
-  TranscriptRepository,
-  TurnRepository,
-  Turn,
-  UsageRepository,
-  ExecutionBackend,
-  TranscriptProjection,
-  TranscriptUnit,
-  Context,
-  Deferred,
-  Effect,
-  Fiber,
-  Layer,
-  Schema,
-  storeProjection,
-  baseBackend,
-  thread,
-  interactiveLayer,
-  terminalTransitionScenario,
-} from "./operation-interactive-extensions-support"
+import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
+import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
+import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
+import * as Turn from "@rika/product/turn-record"
+import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
+import * as ExecutionBackend from "@rika/product/execution-service"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
+import { Context, Deferred, Effect, Fiber, Layer, Schema } from "effect"
+import { storeProjection, baseBackend, thread, interactiveLayer } from "./operation-interactive-extensions-support"
+import { terminalTransitionScenario } from "./operation-interactive-extension-terminal-support"
 
 describe("interactive session extensions", () => {
   it.effect("adopts completed to failed and cancelled transitions through authoritative refold", () =>

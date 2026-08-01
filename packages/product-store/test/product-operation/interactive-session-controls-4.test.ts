@@ -1,17 +1,14 @@
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { describe, expect, it } from "@effect/vitest"
-import {
-  RuntimeFixtures,
-  TranscriptFixtures,
-  Effect,
-  createTurn,
-  delegationUnit,
-  storeProjection,
-  collectEvents,
-  completeActive,
-  makeHarness,
-} from "./interactive-session-base-support"
-import { awaitSelectionLoaded } from "./interactive-session-reload-support"
+import { Fixtures as RuntimeFixtures } from "./interactive-session-runtime-support"
+import { Fixtures as TranscriptFixtures } from "./interactive-session-transcript-support"
+import { Effect } from "effect"
+import { createTurn } from "../support/product-test-current-state"
+import { delegationUnit, storeProjection } from "../support/product-test-transcript-fixture"
+import { collectEvents } from "./interactive-session-base-support"
+import { completeActive } from "./interactive-session-completion-support"
+import { makeHarness } from "./interactive-session-harness-support"
+import { awaitSelectionLoaded } from "./interactive-session-selection-support"
 
 describe("InteractiveSession controls", () => {
   it.effect("keeps earlier conversation Turns when a cancelled Turn's child units outnumber the wire page", () =>

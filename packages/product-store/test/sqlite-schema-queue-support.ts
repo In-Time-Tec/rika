@@ -1,26 +1,17 @@
-import {
-  expect,
-  test,
-  BunServices,
-  TranscriptCorrelation,
-  TranscriptProjection,
-  NativeDatabase,
-  Effect,
-  FileSystem,
-  Layer,
-  Database,
-  ThreadRepository,
-  TurnRepository,
-  TranscriptRepository,
-  Turn,
-  id,
-  create,
-  provideLayer,
-  commitAll,
-  attachedExecutionCheckpoint,
-  executionCheckpoint,
-  projectionVersion,
-} from "./sqlite-schema-support"
+import { expect, test } from "@effect/vitest"
+import * as BunServices from "@effect/platform-bun/BunServices"
+import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import { Database as NativeDatabase } from "bun:sqlite"
+import { Effect, FileSystem, Layer } from "effect"
+import * as Database from "@rika/product-store/product-database-layer"
+import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
+import * as TurnRepository from "../src/turn/sqlite-turn-repository"
+import * as TranscriptRepository from "../src/transcript/sqlite-transcript-repository"
+import * as Turn from "@rika/product/turn-record"
+import { id, create, provideLayer } from "./sqlite-schema-support"
+import { commitAll, executionCheckpoint, projectionVersion } from "./transcript-repository-fixtures"
+import { attachedExecutionCheckpoint } from "./transcript-fixture-checkpoints"
 import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
 
 test("reopens a completed nested transcript through the SQLite page", () => {

@@ -1,31 +1,21 @@
-import * as ExecutionEvent from "@rika/product/execution-event"
-import * as ExecutionStatus from "@rika/product/execution-status"
 import type { InteractiveSession } from "@rika/product/interactive-session"
 import { Service } from "@rika/product/product-operation-service"
 import { Context, Deferred, Effect, Layer, Ref, Result, Schema, Scope } from "effect"
 import * as TranscriptRepositoryContract from "@rika/product/transcript-repository"
 import * as TurnContract from "@rika/product/turn-repository"
 import * as UsageRepositoryContract from "@rika/product/usage-repository"
-import { TestClock } from "effect/testing"
-import { projectionVersion } from "./interactive-session-base-support"
 import { makeMemory } from "../../src/usage/memory-usage-repository"
-import {
-  RuntimeFixtures,
-  TranscriptFixtures,
-  executionRoute,
-  invalidatedProjection,
-  storeProjection,
-  thread,
-  waitForSessions,
-  productLayer,
-  collectEvents,
-} from "./interactive-session-base-support"
+import { Fixtures as RuntimeFixtures } from "./interactive-session-runtime-support"
+import { Fixtures as TranscriptFixtures } from "./interactive-session-transcript-support"
+import { thread, waitForSessions, productLayer } from "./interactive-session-base-support"
+import { executionRoute } from "../support/product-test-current-state"
+import { invalidatedProjection } from "../support/product-test-transcript-fixture"
 
 export const spendThread = thread("spend-thread", 1)
 export const spendTurnId = RuntimeFixtures.Turn.TurnId.make("spend-turn")
-export const spendExecutionId = String(spendTurnId)
+const spendExecutionId = String(spendTurnId)
 
-export const stamped = (
+const stamped = (
   cursor: string,
   type: RuntimeFixtures.ExecutionEvent.Event["type"],
   createdAt: number,
@@ -43,7 +33,7 @@ export const stamped = (
   ...fields,
 })
 
-export const spendEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [
+const spendEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [
   stamped("spend-started", "execution.started", 10_000, 1),
   stamped("spend-usage", "model.attempt.completed", 20_000, 2, {
     data: { model_attempt_id: "spend-attempt", attempt: 1, cost: { amount: 0.75, currency: "USD" } },
@@ -51,11 +41,11 @@ export const spendEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = 
   stamped("spend-answer", "model.output.completed", 30_000, 3, { text: "spent" }),
 ]
 
-export const spendCompleted = stamped("spend-completed", "execution.completed", 40_000, 4)
+const spendCompleted = stamped("spend-completed", "execution.completed", 40_000, 4)
 
-export const spendTimeline: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [...spendEvents, spendCompleted]
+const spendTimeline: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [...spendEvents, spendCompleted]
 
-export const legacyUsageRow = () => {
+const legacyUsageRow = () => {
   const folded = TranscriptFixtures.UsageCost.foldBatch(
     TranscriptFixtures.UsageCost.empty,
     spendTimeline.map((event) => ({
@@ -248,18 +238,3 @@ export const makeSpendHarness: (options: SpendHarnessOptions) => Effect.Effect<S
     if (session === undefined) return yield* Effect.die("Missing interactive session")
     return { session, usage, turns, transcripts, follows, blocked }
   })
-
-export { Context, Deferred, Effect, Layer, Ref, Result }
-export { TestClock }
-export { projectionVersion }
-export {
-  RuntimeFixtures,
-  TranscriptFixtures,
-  executionRoute,
-  invalidatedProjection,
-  storeProjection,
-  thread,
-  waitForSessions,
-  productLayer,
-  collectEvents,
-}

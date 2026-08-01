@@ -4,23 +4,14 @@ import type { InteractiveSession } from "@rika/product/interactive-session"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
-import {
-  ThreadRepository,
-  Thread,
-  TurnRepository,
-  Turn,
-  ExecutionBackend,
-  TranscriptIdentity,
-  Context,
-  Deferred,
-  Effect,
-  Fiber,
-  Layer,
-  Ref,
-  baseBackend,
-  providerCostEvent,
-  interactiveLayer,
-} from "./operation-interactive-extensions-support"
+import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
+import * as Thread from "@rika/product/thread-record"
+import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
+import * as Turn from "@rika/product/turn-record"
+import * as ExecutionBackend from "@rika/product/execution-service"
+import * as TranscriptIdentity from "@rika/transcript/transcript-unit-identity"
+import { Context, Deferred, Effect, Fiber, Layer, Ref } from "effect"
+import { baseBackend, providerCostEvent, interactiveLayer } from "./operation-interactive-extensions-support"
 
 describe("interactive session extensions", () => {
   it.effect("forwards child and nested child events once under normalized execution ids", () =>

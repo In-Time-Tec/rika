@@ -1,6 +1,5 @@
 import { rootExecutionEvents } from "../../src/execution/lifecycle/root-execution-event"
 import { describe, expect, it } from "@effect/vitest"
-import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ExecutionEvent from "@rika/product/execution-event"
 
 const usageEventAt = (executionId: string, cursor: string, sequence: number): ExecutionEvent.Event => ({

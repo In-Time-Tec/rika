@@ -1,14 +1,10 @@
-import * as ExecutionEvent from "@rika/product/execution-event"
-import * as ExecutionStatus from "@rika/product/execution-status"
-import * as ExecutionInspection from "@rika/product/execution-inspection"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { describe, expect, it } from "@effect/vitest"
+import { Effect, Ref } from "effect"
+import { Fixtures as RuntimeFixtures } from "./interactive-session-runtime-support"
+import { Fixtures as TranscriptFixtures } from "./interactive-session-transcript-support"
+import { collectEvents } from "./interactive-session-base-support"
 import {
-  RuntimeFixtures,
-  TranscriptFixtures,
-  Effect,
-  Ref,
-  collectEvents,
   subagentToolId,
   subagentChildId,
   subagentRootEvents,

@@ -1,20 +1,15 @@
-import {
-  expect,
-  it,
-  BunServices,
-  TranscriptProjection,
-  TranscriptProjectionModel,
-  Effect,
-  FileSystem,
-  Thread,
-  TranscriptRepository,
-  Turn,
-  usageEvent,
-  createTurn,
-  commitAll,
-  provideLayer,
-  sqliteLayer,
-} from "./transcript-sqlite-part-support"
+import { expect, it } from "@effect/vitest"
+import * as BunServices from "@effect/platform-bun/BunServices"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
+import { Effect, FileSystem } from "effect"
+import * as Thread from "@rika/product/thread-record"
+import * as TranscriptRepository from "../src/transcript/sqlite-transcript-repository"
+import * as Turn from "@rika/product/turn-record"
+import { usageEvent } from "./transcript-sqlite-part-support"
+import { createTurn } from "./transcript-sqlite-support"
+import { commitAll, sqliteLayer } from "./transcript-repository-fixtures"
+import { provideLayer } from "./sqlite-schema-support"
 
 it.effect("restores usage dedup state before a redelivered usage event", () =>
   Effect.scoped(

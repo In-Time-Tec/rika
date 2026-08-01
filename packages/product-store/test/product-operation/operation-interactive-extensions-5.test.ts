@@ -3,19 +3,13 @@ import type { InteractiveSession } from "@rika/product/interactive-session"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
+import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
+import * as Thread from "@rika/product/thread-record"
+import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
+import * as Turn from "@rika/product/turn-record"
+import * as ExecutionBackend from "@rika/product/execution-service"
+import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref } from "effect"
 import {
-  ThreadRepository,
-  Thread,
-  TurnRepository,
-  Turn,
-  ExecutionBackend,
-  Context,
-  Deferred,
-  Effect,
-  Fiber,
-  Layer,
-  Queue,
-  Ref,
   baseBackend,
   thread,
   interactiveLayer,

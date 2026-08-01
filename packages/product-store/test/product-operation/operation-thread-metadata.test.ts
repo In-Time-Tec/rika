@@ -1,4 +1,3 @@
-import { OperationUnavailable } from "@rika/product/product-operation"
 import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
