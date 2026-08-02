@@ -3509,6 +3509,16 @@
       "testKind": "fixture"
     },
     {
+      "id": "packages/terminal/test/fixtures/visual/compact-context-details.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/compact-context-details.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
       "id": "packages/terminal/test/fixtures/visual/context-details.styles.json",
       "path": "packages/terminal/test/fixtures/visual/context-details.styles.json",
       "workspace": "@rika/terminal",
@@ -3601,6 +3611,56 @@
     {
       "id": "packages/terminal/test/fixtures/visual/metadata.json",
       "path": "packages/terminal/test/fixtures/visual/metadata.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/meter-flash.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/meter-flash.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/meter-muncher-closed.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/meter-muncher-closed.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/meter-muncher-open.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/meter-muncher-open.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/meter-scanner.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/meter-scanner.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
+      "id": "packages/terminal/test/fixtures/visual/meter-vacuum.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/meter-vacuum.styles.json",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "asset",
