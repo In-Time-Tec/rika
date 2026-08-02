@@ -20,6 +20,8 @@ import { tuiToolRuntimeLayer } from "./tui-app-tool-runtime"
 
 const activityMarkers = ["Waiting", "Streaming", "Running 1 tool", "Thinking"] as const
 
+type SessionEvent = Parameters<Parameters<InteractiveSession.InteractiveSession["events"]>[0]>[0]
+
 export interface TuiAppOptions {
   readonly script?: Script
   readonly lanes?: ReadonlyArray<TuiAppLane>
@@ -31,6 +33,7 @@ export interface TuiAppOptions {
   readonly width?: number
   readonly height?: number
   readonly holdExecutionFollows?: Deferred.Deferred<void>
+  readonly mapInteractiveEvent?: (event: SessionEvent) => SessionEvent
 }
 
 export type CapturedSpans = ReturnType<Awaited<ReturnType<typeof createTestRenderer>>["captureSpans"]>
@@ -155,8 +158,9 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
         ...current,
         events: (dispatch) =>
           current.events((event) => {
-            dispatch(event)
-            if (event._tag === "SelectionLoaded" && event.selectionEpoch === 100)
+            const delivered = options.mapInteractiveEvent?.(event) ?? event
+            dispatch(delivered)
+            if (delivered._tag === "SelectionLoaded" && delivered.selectionEpoch === 100)
               runSync(Deferred.succeed(reloadLoaded, undefined))
           }),
       })

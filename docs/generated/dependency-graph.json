@@ -17712,6 +17712,14 @@
     },
     {
       "from": "apps/rika/test/interactive-controller-projection-reload.test.ts",
+      "to": "packages/transcript/src/ordering/transcript-unit-order.ts",
+      "specifier": "@rika/transcript/transcript-unit-order",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-projection-reload.test.ts",
       "to": "packages/transcript/src/projection/nested-transcript-projection.ts",
       "specifier": "@rika/transcript/nested-transcript-projection",
       "kind": "import",
@@ -17722,6 +17730,14 @@
       "from": "apps/rika/test/interactive-controller-projection-reload.test.ts",
       "to": "packages/transcript/src/projection/transcript-projection.ts",
       "specifier": "@rika/transcript/transcript-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-projection-reload.test.ts",
+      "to": "packages/transcript/src/schema/transcript-projection-model.ts",
+      "specifier": "@rika/transcript/transcript-projection-model",
       "kind": "import",
       "relationship": "test",
       "production": false

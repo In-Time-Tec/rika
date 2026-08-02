@@ -4,6 +4,25 @@ import { expect, test } from "vitest"
 import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
 
+const waitForCompletedProjection = Effect.fn("TuiApp.waitForCompletedProjection")(function* (
+  app: TuiApp.TuiApp,
+  turnId: Turn.TurnId,
+) {
+  const started = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
+  for (;;) {
+    const projection = yield* app.transcript(turnId)
+    if (
+      projection !== undefined &&
+      projection.executionCheckpoints.length > 0 &&
+      projection.executionCheckpoints.every((checkpoint) => checkpoint.status === "completed")
+    )
+      return projection
+    const now = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
+    if (now - started >= 5_000) return yield* Effect.die(`turn ${turnId} was not durably completed`)
+    yield* Effect.sleep("20 millis")
+  }
+})
+
 const waitForDurableChildOutput = Effect.fn("TuiApp.waitForDurableChildOutput")(function* (
   app: TuiApp.TuiApp,
   turnId: Turn.TurnId,
@@ -94,6 +113,87 @@ test(
           )
         }
         expect(exited).toBe(true)
+      }),
+    ),
+  240_000,
+)
+
+test(
+  "retains prior turns across an active-only resync at realistic tool and child volume",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const toolCalls = Array.from({ length: 65 }, (_, index) =>
+          model.toolCall("read", { path: "volume.txt" }, `volume-read-${index}`),
+        )
+        let reloadActiveTurnId: string | undefined
+        let reloadEntryTurnIds: ReadonlyArray<string> = []
+        const app = yield* TuiApp.tuiApp({
+          inspectTranscript: true,
+          height: 600,
+          workspaceFiles: { "volume.txt": "realistic tool output\n".repeat(30) },
+          mapInteractiveEvent: (event) => {
+            if (event._tag !== "SelectionLoaded" || event.selectionEpoch !== 100 || event.activeTurn === undefined)
+              return event
+            const entries = event.entries.filter((entry) => entry.turn.id === event.activeTurn?.id)
+            reloadActiveTurnId = event.activeTurn.id
+            reloadEntryTurnIds = entries.map((entry) => entry.turn.id)
+            return { ...event, entries, hasOlder: true }
+          },
+          lanes: [
+            {
+              script: [
+                model.turn(toolCalls),
+                model.text("PRIOR_TURN_HISTORY_MARKER"),
+                model.turn(
+                  [
+                    model.toolCall("task", { prompt: "Volume child A" }, "volume-child-a"),
+                    model.toolCall("task", { prompt: "Volume child B" }, "volume-child-b"),
+                    model.toolCall("await_subagents", {}, "volume-join"),
+                  ],
+                  { delay: "1 second" },
+                ),
+                model.text("REALISTIC_VOLUME_ROOT_FINISHED", 500),
+              ],
+            },
+            {
+              when: (prompt) => !prompt.includes("Run realistic volume") && prompt.includes("Volume child A"),
+              script: [model.text(`VOLUME_CHILD_A_STREAM ${"child A output ".repeat(300)}`, 300)],
+            },
+            {
+              when: (prompt) => !prompt.includes("Run realistic volume") && prompt.includes("Volume child B"),
+              script: [model.text(`VOLUME_CHILD_B_STREAM ${"child B output ".repeat(300)}`, 600)],
+            },
+          ],
+        })
+
+        yield* Effect.promise(() => app.type("First turn"))
+        app.pressEnter()
+        yield* app.waitFrame("PRIOR_TURN_HISTORY_MARKER")
+        yield* waitForCompletedProjection(app, Turn.TurnId.make("tui-turn-0"))
+        yield* app.settled
+
+        yield* Effect.promise(() => app.type("Run realistic volume"))
+        app.pressEnter()
+        yield* app.waitFrame("Run realistic volume")
+        yield* app.waitFrame("Waiting")
+        yield* app.reload
+        expect(reloadActiveTurnId).toBe("tui-turn-1")
+        expect(new Set(reloadEntryTurnIds)).toEqual(new Set(["tui-turn-1"]))
+        yield* Effect.sleep("200 millis")
+        const reloaded = app.frame()
+        const retainedAfterReload = reloaded.includes("PRIOR_TURN_HISTORY_MARKER")
+        expect(reloaded).not.toContain("Execution failed")
+        for (let page = 0; page < 3; page += 1) app.pressKey("\u001b[5~")
+        const pagedHistory = yield* Effect.exit(app.waitFrame("PRIOR_TURN_HISTORY_MARKER", 2_000))
+        for (let page = 0; page < 3; page += 1) app.pressKey("\u001b[6~")
+
+        yield* app.waitFrame("REALISTIC_VOLUME_ROOT_FINISHED", 20_000)
+        const final = yield* app.settled
+        expect(final).not.toContain("Execution failed")
+        yield* app.quit
+        expect(retainedAfterReload).toBe(true)
+        expect(pagedHistory._tag).toBe("Success")
       }),
     ),
   240_000,
