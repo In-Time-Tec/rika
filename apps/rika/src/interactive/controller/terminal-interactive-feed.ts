@@ -258,9 +258,10 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
           projectionStreams: new Map(),
           hasOlder: event.hasOlder || retained.evicted,
           oldestCursor:
-            retained.evicted || state.oldestCursor === undefined
-              ? cursorForEntry(retained.entries[0])
-              : state.oldestCursor,
+            state.oldestCursor !== undefined &&
+            retained.entries.some((entry) => sameCursor(cursorForEntry(entry), state.oldestCursor))
+              ? state.oldestCursor
+              : cursorForEntry(retained.entries[0]),
           newestCursor: cursorForEntry(retained.entries.at(-1)),
           ...(selectedCostUsd === undefined ? {} : { threadCostUsd: selectedCostUsd }),
           ...(preservedUsageCost === undefined ? {} : { lastAvailableUsageCost: preservedUsageCost }),

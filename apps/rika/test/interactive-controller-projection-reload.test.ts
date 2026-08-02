@@ -140,7 +140,7 @@ it("keeps prior turns when a same-thread resync reload contains only the active 
   expect(reloaded.state.selectionEpoch).toBe(2)
   expect(reloaded.state.activitySequence).toBe(1)
   expect(reloaded.state.projectionStreams).toEqual(new Map())
-  expect(reloaded.state.oldestCursor).toEqual(retainedBoundary)
+  expect(reloaded.state.oldestCursor).toEqual(cursor(reloaded.state.entries[0]!))
 
   const settled = InteractiveController.update(reloaded.state, {
     _tag: "TurnSettled",
@@ -242,6 +242,74 @@ it("rebuilds bounded retained history and cursors before paging into an evicted 
   expect(prepended.state.newestCursor).toEqual(cursor(prepended.state.entries.at(-1)!))
   expect(prepended.state.model.entries.map((value) => value.text)).toContain("bounded-h0")
   expect(prepended.state.hasNewer).toBe(true)
+})
+
+it("preserves a surviving pagination boundary when retaining semantic entries evicts an older entry", () => {
+  const semanticOldest = entries("semantic-oldest", 0)[0]!
+  const semanticBeforeBoundary = entries("semantic-before-boundary", 10)[0]!
+  const contiguous = Array.from({ length: 398 }, (_, index) => entries(`contiguous-${index + 100}`, index + 100)[0]!)
+  const boundary = contiguous[0]!
+  const active = { ...runningTurn("surviving-boundary-active"), createdAt: 600, updatedAt: 600 }
+  const streamed = entries("surviving-boundary-stream", 500)[0]!
+  const selected = InteractiveController.update(initialState(), {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 1,
+    activitySequence: 0,
+    queueRevision: 0,
+    queue: [],
+    thread,
+    entries: [semanticOldest, semanticBeforeBoundary, ...contiguous],
+    hasOlder: true,
+    oldestCursor: cursor(boundary),
+    activeTurn: active,
+  })
+  const streamedProjection: TranscriptProjectionModel.Projection = {
+    units: [streamed.unit],
+    revision: 1,
+    modelPhase: 0,
+  }
+  const reloaded = InteractiveController.update(
+    {
+      ...selected.state,
+      replayTurns: new Map([...selected.state.replayTurns, [streamed.turn.id, streamed.turn] as const]),
+      liveProjections: new Map([[streamed.turn.id, streamedProjection]]),
+    },
+    {
+      _tag: "SelectionLoaded",
+      selectionEpoch: 2,
+      activitySequence: 1,
+      queueRevision: 0,
+      queue: [],
+      thread,
+      entries: entries(active.id, active.createdAt).map(asRunningEntry),
+      hasOlder: true,
+      activeTurn: active,
+    },
+  )
+
+  expect(reloaded.discarded).toBe(true)
+  expect(reloaded.state.entries).toHaveLength(InteractiveController.transcriptWindowEntryBudget)
+  expect(reloaded.state.entries.map((entry) => entry.turn.id)).not.toContain(semanticOldest.turn.id)
+  expect(reloaded.state.entries.map((entry) => entry.turn.id)).toContain(boundary.turn.id)
+  expect(reloaded.state.oldestCursor).toEqual(cursor(boundary))
+
+  const contiguousInterval = Array.from(
+    { length: 89 },
+    (_, index) => entries(`contiguous-${index + 11}`, index + 11)[0]!,
+  )
+  const prepended = InteractiveController.update(reloaded.state, {
+    _tag: "TranscriptPagePrepended",
+    selectionEpoch: 2,
+    threadId: thread.id,
+    entries: [semanticOldest, ...contiguousInterval],
+    hasOlder: false,
+    oldestCursor: cursor(semanticOldest),
+  })
+
+  expect(prepended.state.entries.map((entry) => entry.turn.id)).toEqual(
+    expect.arrayContaining(contiguousInterval.map((entry) => entry.turn.id)),
+  )
+  expect(prepended.state.oldestCursor).toEqual(cursor(semanticOldest))
 })
 
 it("repaints live patches for the in-flight turn after a reload that renders nothing", () => {
