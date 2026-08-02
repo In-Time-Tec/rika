@@ -3869,6 +3869,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/terminal/test/integration/opentui-queue-cache.integration.test.ts",
+      "path": "packages/terminal/test/integration/opentui-queue-cache.integration.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "integration-test"
+    },
+    {
       "id": "packages/terminal/test/integration/opentui-surface-characterization-1.test-behavior-2.test.ts",
       "path": "packages/terminal/test/integration/opentui-surface-characterization-1.test-behavior-2.test.ts",
       "workspace": "@rika/terminal",
@@ -12331,6 +12341,30 @@
     },
     {
       "from": "packages/terminal/test/format.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-queue-cache.integration.test.ts",
+      "to": "external:@opentui/core/testing",
+      "specifier": "@opentui/core/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-queue-cache.integration.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-queue-cache.integration.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",

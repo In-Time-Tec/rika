@@ -115,6 +115,11 @@ export abstract class SurfaceLifecycleLayout extends SurfaceInput {
       previousModel.editingTurnId !== model.editingTurnId ||
       previousModel.mode !== model.mode ||
       previousModel.width !== model.width ||
+      previousModel.height !== model.height ||
+      previousModel.input !== model.input ||
+      previousModel.pastedText !== model.pastedText ||
+      previousModel.composerHeight !== model.composerHeight ||
+      previousModel.shortcutsOpen !== model.shortcutsOpen ||
       previousModel.sidebarWidth !== model.sidebarWidth
     if (queueChanged) this.queueText.content = new StyledText(queueChunks)
     this.queueHint.top = hintTop
