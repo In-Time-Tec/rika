@@ -13,6 +13,7 @@ import { ModeId } from "@rika/config/modes"
 
 export interface Options {
   readonly scheduler: Pick<RootTurnOwner.Interface, "accepted">
+  readonly settled?: (turn: Turn.Turn, agentResponseArrived?: boolean) => Effect.Effect<void>
   readonly id?: () => string
 }
 
@@ -223,7 +224,10 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
             yield* backend.steer(bound.targetTurnId, messageText, invocation.idempotencyKeyDigest)
           if (input.action !== "steer" && bound.targetTurnId !== undefined) {
             const cancelledBeforeStart = yield* turns.cancelAccepted(bound.targetTurnId, invocation.createdAt)
-            if (!cancelledBeforeStart) yield* backend.cancel(bound.targetTurnId)
+            if (cancelledBeforeStart) {
+              const cancelled = yield* turns.get(bound.targetTurnId)
+              if (cancelled !== undefined) yield* options.settled?.(cancelled, false) ?? Effect.void
+            } else yield* backend.cancel(bound.targetTurnId)
           }
           return {
             schemaVersion: 2 as const,

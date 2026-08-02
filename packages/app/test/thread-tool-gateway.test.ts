@@ -57,6 +57,7 @@ const serviceHarness = Effect.gen(function* () {
   const turns = yield* TurnRepository.makeMemory([sourceTurn])
   const scheduled = yield* Ref.make<ReadonlyArray<string>>([])
   const controls = yield* Ref.make<ReadonlyArray<ReadonlyArray<unknown>>>([])
+  const settled = yield* Ref.make<ReadonlyArray<Turn.Turn>>([])
   const identifiers = [
     "target",
     "target-turn",
@@ -92,13 +93,14 @@ const serviceHarness = Effect.gen(function* () {
     scheduler: {
       accepted: (turnId) => Ref.update(scheduled, (items) => [...items, turnId]),
     },
+    settled: (turn) => Ref.update(settled, (items) => [...items, turn]),
     id: () => identifiers.shift() ?? "exhausted",
   }).pipe(
     Effect.provideService(ThreadInteractionRepository.Service, interactions),
     Effect.provideService(TurnRepository.Service, turns),
     Effect.provideService(ExecutionBackend.Service, backend),
   )
-  return { service, interactions, turns, scheduled, controls }
+  return { service, interactions, turns, scheduled, controls, settled }
 })
 
 describe("ThreadToolService gateway", () => {
@@ -147,7 +149,7 @@ describe("ThreadToolService gateway", () => {
 
   it.effect("creates once, queues messages, previews with a cursor, and binds controls", () =>
     Effect.gen(function* () {
-      const { service, turns, scheduled, controls } = yield* serviceHarness
+      const { service, turns, scheduled, controls, settled } = yield* serviceHarness
       const created = yield* service.createThread(invocation, input)
       yield* turns.createForSubmission({
         id: Turn.TurnId.make(created.turnId),
@@ -202,6 +204,9 @@ describe("ThreadToolService gateway", () => {
       )
       expect(yield* Ref.get(controls)).toEqual([["steer", "target-turn", "Focus", "steer-key"]])
       expect(yield* turns.get(Turn.TurnId.make("target-turn"))).toEqual(
+        expect.objectContaining({ id: "target-turn", status: "cancelled" }),
+      )
+      expect(yield* Ref.get(settled)).toContainEqual(
         expect.objectContaining({ id: "target-turn", status: "cancelled" }),
       )
     }),

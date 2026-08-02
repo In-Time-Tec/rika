@@ -579,7 +579,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       model = ViewState.update(state.model, {
         _tag: "ExecutionCancelled",
         turnId: String(event.turnId),
-        agentResponseArrived: false,
+        agentResponseArrived: event.agentResponseArrived ?? false,
       })
     return {
       state: { ...state, activitySequence: event.activitySequence, model },

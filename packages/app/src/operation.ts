@@ -1468,12 +1468,6 @@ export const productLayer = <
         ownerScope,
       )
       const backendLayer = Layer.succeed(ExecutionBackend.Service, acquiredBackend)
-      if (options.threadToolGateway !== undefined) {
-        const threadToolService = yield* ThreadToolService.make({ scheduler: rootTurnOwner }).pipe(
-          Effect.provide(Context.merge(dependencyContext, Context.make(ExecutionBackend.Service, acquiredBackend))),
-        )
-        yield* options.threadToolGateway.install(threadToolService)
-      }
       const extensionService =
         options.executionExtensions === undefined
           ? undefined
@@ -1730,7 +1724,7 @@ export const productLayer = <
         yield* summaries.replaceTurn(ThreadActivity.projectionInput(threadId, result, yield* Clock.currentTimeMillis))
         yield* notifyThreadSummaries
       })
-      const publishTurnSettled = (turn: Turn.Turn) => {
+      const publishTurnSettled = (turn: Turn.Turn, responseArrived?: boolean) => {
         const status = turn.status
         if (status !== "completed" && status !== "failed" && status !== "cancelled") return Effect.void
         return activityPublicationAdmission.withPermits(1)(
@@ -1742,6 +1736,7 @@ export const productLayer = <
               threadId: turn.threadId,
               turnId: turn.id,
               status,
+              ...(responseArrived === undefined ? {} : { agentResponseArrived: responseArrived }),
             }),
           ).pipe(
             Effect.andThen(
@@ -1761,14 +1756,24 @@ export const productLayer = <
         status: Turn.Status,
         lastCursor: string | undefined,
         now: number,
+        responseArrived?: boolean,
       ) {
         const turns = yield* TurnRepository.Service
         const turn = yield* turns.setStatus(id, status, lastCursor, now)
         yield* notifyThreadSummaries
         yield* notifyTurnChanged(turn)
-        yield* publishTurnSettled(turn)
+        yield* publishTurnSettled(turn, responseArrived)
         return turn
       })
+      if (options.threadToolGateway !== undefined) {
+        const threadToolService = yield* ThreadToolService.make({
+          scheduler: rootTurnOwner,
+          settled: publishTurnSettled,
+        }).pipe(
+          Effect.provide(Context.merge(dependencyContext, Context.make(ExecutionBackend.Service, acquiredBackend))),
+        )
+        yield* options.threadToolGateway.install(threadToolService)
+      }
       const repairThreadSummaries = Effect.fn("Operation.repairThreadSummaries")(function* () {
         const summaries = yield* ThreadSummaryRepository.Service
         const backend = yield* ExecutionBackend.Service
@@ -3701,7 +3706,7 @@ export const productLayer = <
                   yield* notifyThreadSummaries
                   if (cancelled !== undefined) {
                     yield* notifyTurnChanged(cancelled)
-                    yield* publishTurnSettled(cancelled)
+                    yield* publishTurnSettled(cancelled, false)
                   }
                 } else {
                   const result = yield* backend.cancel(turn.id)
@@ -3757,7 +3762,7 @@ export const productLayer = <
               yield* notifyThreadSummaries
               if (cancelled !== undefined) {
                 yield* notifyTurnChanged(cancelled)
-                yield* publishTurnSettled(cancelled)
+                yield* publishTurnSettled(cancelled, false)
               }
             }
             yield* setTurnStatus(
@@ -3765,6 +3770,7 @@ export const productLayer = <
               result.status,
               ThreadActivity.latestCursor(turn.id, result.events) ?? turn.lastCursor,
               yield* Clock.currentTimeMillis,
+              agentResponseArrived(result.events),
             )
             yield* projectExecutionResult(turn.threadId, result)
             if (isTerminalStatus(result.status)) yield* ensureIngest(turn.threadId, turn.id)

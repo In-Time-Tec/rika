@@ -2492,3 +2492,87 @@ it("applies cancelled settlement terminal semantics and remains idempotent", () 
   expect(settled.model).toMatchObject({ busy: false, activeTurnId: undefined, cancelPending: false })
   expect(duplicate.model).toEqual(settled.model)
 })
+
+const cancellableSettlementState = (turn: Turn.AgentExecutionTurn): InteractiveController.State => {
+  let model = ViewState.initial("/work", "medium")
+  model = ViewState.update(model, { _tag: "Submitted" })
+  model = ViewState.update(model, { _tag: "SubmissionAdmitted", turnId: String(turn.id) })
+  model = ViewState.update(model, { _tag: "TurnStarted", turnId: String(turn.id), prompt: turn.prompt })
+  return {
+    ...initialState(),
+    selectionEpoch: 1,
+    model: { ...model, currentThreadId: String(thread.id) },
+    replayTurns: new Map([[String(turn.id), turn]]),
+  }
+}
+
+it("converges cancelled settlement and legacy cancellation in either delivery order", () => {
+  const turn = runningTurn("cancel-order-false")
+  const event: Extract<Operation.InteractiveEvent, { readonly _tag: "TurnSettled" }> = {
+    _tag: "TurnSettled",
+    selectionEpoch: 1,
+    activitySequence: 1,
+    threadId: thread.id,
+    turnId: turn.id,
+    status: "cancelled",
+    agentResponseArrived: false,
+  }
+  const settlementFirst = ViewState.update(
+    InteractiveController.update(cancellableSettlementState(turn), event).state.model,
+    {
+      _tag: "ExecutionCancelled",
+      turnId: String(turn.id),
+      agentResponseArrived: false,
+    },
+  )
+  const legacyFirstState = cancellableSettlementState(turn)
+  const legacyFirst = InteractiveController.update(
+    {
+      ...legacyFirstState,
+      model: ViewState.update(legacyFirstState.model, {
+        _tag: "ExecutionCancelled",
+        turnId: String(turn.id),
+        agentResponseArrived: false,
+      }),
+    },
+    event,
+  ).state.model
+
+  expect(settlementFirst).toEqual(legacyFirst)
+})
+
+it("converges cancelled settlement with agent response already arrived", () => {
+  const turn = runningTurn("cancel-order-true")
+  const event: Extract<Operation.InteractiveEvent, { readonly _tag: "TurnSettled" }> = {
+    _tag: "TurnSettled",
+    selectionEpoch: 1,
+    activitySequence: 1,
+    threadId: thread.id,
+    turnId: turn.id,
+    status: "cancelled",
+    agentResponseArrived: true,
+  }
+  const settlementFirst = ViewState.update(
+    InteractiveController.update(cancellableSettlementState(turn), event).state.model,
+    {
+      _tag: "ExecutionCancelled",
+      turnId: String(turn.id),
+      agentResponseArrived: true,
+    },
+  )
+  const legacyFirstState = cancellableSettlementState(turn)
+  const legacyFirst = InteractiveController.update(
+    {
+      ...legacyFirstState,
+      model: ViewState.update(legacyFirstState.model, {
+        _tag: "ExecutionCancelled",
+        turnId: String(turn.id),
+        agentResponseArrived: true,
+      }),
+    },
+    event,
+  ).state.model
+
+  expect(settlementFirst).toEqual(legacyFirst)
+  expect(settlementFirst.input).toBe("")
+})
