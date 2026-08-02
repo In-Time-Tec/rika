@@ -242,10 +242,7 @@ const runSystemOperationImpl = (
       encodeJson: factory.encodeJson,
       unavailable: (operationInput: Input, message: string) => unavailable(factory, operationInput, message),
     }
-    return ThreadOperation.run(input, threadDependencies).pipe(
-      Effect.provide(typedSystemExecutionDependencies),
-      Effect.provideService(Console.Console, factory.console),
-    )
+    return ThreadOperation.run(input, threadDependencies).pipe(Effect.provide(typedSystemExecutionDependencies))
   }
   return unavailable(factory, input)
 }

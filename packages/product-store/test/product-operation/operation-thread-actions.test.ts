@@ -9,7 +9,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionStatus from "@rika/product/execution-status"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionBackend from "@rika/product/execution-service"
-import { Effect, Layer, Ref } from "effect"
+import { Console, Effect, Layer, Ref } from "effect"
 import { TestConsole } from "effect/testing"
 import { projectionVersion } from "./interactive-session-base-support"
 
@@ -96,7 +96,14 @@ describe("Operation thread actions", () => {
       )
       yield* Effect.gen(function* () {
         const operation = yield* Service
-        yield* operation.run({ _tag: "Thread", action: "list" })
+        const routedOutput: Array<string> = []
+        const requestConsole = Object.assign(Object.create(globalThis.console), {
+          log: (...values: ReadonlyArray<unknown>) => routedOutput.push(values.map(String).join(" ")),
+        }) as Console.Console
+        yield* operation
+          .run({ _tag: "Thread", action: "list" })
+          .pipe(Effect.provideService(Console.Console, requestConsole))
+        expect(routedOutput).toHaveLength(1)
         yield* operation.run({ _tag: "Thread", action: "list", includeArchived: false, limit: 1 })
         yield* operation.run({ _tag: "Thread", action: "list", includeArchived: true, limit: 100 })
         yield* operation.run({ _tag: "Thread", action: "search", query: ["alpha", "urgent"] })
