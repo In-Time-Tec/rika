@@ -34397,7 +34397,8 @@
       "name": "initialized-empty-plus-wal",
       "outcome": "rejected-unchanged",
       "recipe": {
-        "kind": "initialized-empty-sqlite",
+        "kind": "fixture",
+        "fixture": "initialized-empty-sqlite",
         "sidecars": {
           "wal": {
             "text": "recovery-state",
@@ -34406,7 +34407,7 @@
         }
       },
       "expected": {
-        "fileSha256": "generated",
+        "fileSha256": "c9eb9d107f261a8ef684b67e66d801ddae0aa2d1503cfd64e430f52ad70de412",
         "sidecarSha256": "13a236673ae8088533b8c1d17d983428957968044ff254b293a1145655312605"
       }
     },
@@ -34426,8 +34427,8 @@
       "name": "partial-rika-workspaces",
       "outcome": "rejected-unchanged",
       "recipe": {
-        "kind": "sqlite-sql",
-        "statements": ["CREATE TABLE rika_workspaces (path TEXT PRIMARY KEY NOT NULL, created_at INTEGER NOT NULL)"],
+        "kind": "fixture",
+        "fixture": "partial-rika-workspaces",
         "sidecars": {}
       },
       "expected": {
@@ -34438,24 +34439,20 @@
       "name": "future-schema-and-product-state",
       "outcome": "rejected-unchanged",
       "recipe": {
-        "kind": "current-v27-plus-sql",
-        "statements": [
-          "DELETE FROM rika_migrations WHERE migration_id = 15",
-          "INSERT INTO rika_migrations (migration_id, name) VALUES (15, 'future_schema')",
-          "CREATE TABLE future_product_state (id TEXT PRIMARY KEY)"
-        ],
+        "kind": "fixture",
+        "fixture": "future-schema-and-product-state",
         "sidecars": {}
       },
       "expected": {
-        "fileSha256": "generated"
+        "fileSha256": "13025c6f400b2c94c29c7b730fb415501e5107cb0ccfd297f58a67e4edae1f65"
       }
     },
     {
       "name": "arbitrary-old-sessions-schema",
       "outcome": "rejected-unchanged",
       "recipe": {
-        "kind": "sqlite-sql",
-        "statements": ["CREATE TABLE old_sessions (id TEXT PRIMARY KEY)"],
+        "kind": "fixture",
+        "fixture": "arbitrary-old-sessions-schema",
         "sidecars": {}
       },
       "expected": {
@@ -34496,14 +34493,14 @@
       "name": "initialized-empty-sqlite-file",
       "outcome": "accepted",
       "recipe": {
-        "kind": "initialized-empty-sqlite",
-        "fileBytes": "SQLite database created by Bun sqlite with no user tables",
+        "kind": "fixture",
+        "fixture": "initialized-empty-sqlite",
         "sidecars": {}
       },
       "expected": {
         "migrationRows": 27,
         "tables": ["rika_migrations", "rika_threads", "rika_transcript_units"],
-        "fileSha256": "generated"
+        "fileSha256": "c9eb9d107f261a8ef684b67e66d801ddae0aa2d1503cfd64e430f52ad70de412"
       }
     },
     {
@@ -34546,7 +34543,8 @@
       "name": "initialized-empty-plus-wal",
       "outcome": "rejected-unchanged",
       "recipe": {
-        "kind": "initialized-empty-sqlite",
+        "kind": "fixture",
+        "fixture": "initialized-empty-sqlite",
         "sidecars": {
           "wal": {
             "text": "recovery-state",
@@ -34555,7 +34553,7 @@
         }
       },
       "expected": {
-        "fileSha256": "generated",
+        "fileSha256": "c9eb9d107f261a8ef684b67e66d801ddae0aa2d1503cfd64e430f52ad70de412",
         "sidecarSha256": "13a236673ae8088533b8c1d17d983428957968044ff254b293a1145655312605"
       }
     },
@@ -34575,8 +34573,8 @@
       "name": "partial-rika-workspaces",
       "outcome": "rejected-unchanged",
       "recipe": {
-        "kind": "sqlite-sql",
-        "statements": ["CREATE TABLE rika_workspaces (path TEXT PRIMARY KEY NOT NULL, created_at INTEGER NOT NULL)"],
+        "kind": "fixture",
+        "fixture": "partial-rika-workspaces",
         "sidecars": {}
       },
       "expected": {
@@ -34587,24 +34585,20 @@
       "name": "future-schema-and-product-state",
       "outcome": "rejected-unchanged",
       "recipe": {
-        "kind": "current-v27-plus-sql",
-        "statements": [
-          "DELETE FROM rika_migrations WHERE migration_id = 15",
-          "INSERT INTO rika_migrations (migration_id, name) VALUES (15, 'future_schema')",
-          "CREATE TABLE future_product_state (id TEXT PRIMARY KEY)"
-        ],
+        "kind": "fixture",
+        "fixture": "future-schema-and-product-state",
         "sidecars": {}
       },
       "expected": {
-        "fileSha256": "generated"
+        "fileSha256": "13025c6f400b2c94c29c7b730fb415501e5107cb0ccfd297f58a67e4edae1f65"
       }
     },
     {
       "name": "arbitrary-old-sessions-schema",
       "outcome": "rejected-unchanged",
       "recipe": {
-        "kind": "sqlite-sql",
-        "statements": ["CREATE TABLE old_sessions (id TEXT PRIMARY KEY)"],
+        "kind": "fixture",
+        "fixture": "arbitrary-old-sessions-schema",
         "sidecars": {}
       },
       "expected": {

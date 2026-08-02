@@ -6597,14 +6597,6 @@
     },
     {
       "from": "packages/product-store/test/product-migration-oracle-v27.test.ts",
-      "to": "external:bun:sqlite",
-      "specifier": "bun:sqlite",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-migration-oracle-v27.test.ts",
       "to": "external:crypto",
       "specifier": "crypto",
       "kind": "import",

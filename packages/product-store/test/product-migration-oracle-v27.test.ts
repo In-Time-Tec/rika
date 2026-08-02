@@ -2,11 +2,37 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { Effect, FileSystem, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { expect, it } from "@effect/vitest"
-import { Database as NativeDatabase } from "bun:sqlite"
 import { createHash } from "node:crypto"
 import * as Database from "@rika/product-store/product-database-layer"
 import oracle from "./fixtures/product-migration-oracle-v27.fixture.json"
 
+const preflightFixturePaths = {
+  "initialized-empty-sqlite": new URL(
+    "./fixtures/product-migration-oracle-v27/initialized-empty-sqlite.db",
+    import.meta.url,
+  ).pathname,
+  "partial-rika-workspaces": new URL(
+    "./fixtures/product-migration-oracle-v27/partial-rika-workspaces.db",
+    import.meta.url,
+  ).pathname,
+  "future-schema-and-product-state": new URL(
+    "./fixtures/product-migration-oracle-v27/future-schema-and-product-state.db",
+    import.meta.url,
+  ).pathname,
+  "arbitrary-old-sessions-schema": new URL(
+    "./fixtures/product-migration-oracle-v27/arbitrary-old-sessions-schema.db",
+    import.meta.url,
+  ).pathname,
+} as const
+
+const preflightFixtureSha256 = {
+  "initialized-empty-sqlite": "c9eb9d107f261a8ef684b67e66d801ddae0aa2d1503cfd64e430f52ad70de412",
+  "partial-rika-workspaces": "1f6ab994dcd85a21f3df4fafbb9f909b736646ec77a910f6efaaaa1d27437d3e",
+  "future-schema-and-product-state": "13025c6f400b2c94c29c7b730fb415501e5107cb0ccfd297f58a67e4edae1f65",
+  "arbitrary-old-sessions-schema": "debfe169353212fed80ebd2744e428dcdcfcc6619097745554f73ce14e75ece5",
+} as const
+
+type PreflightFixture = keyof typeof preflightFixturePaths
 type PreflightRecipe =
   | { readonly kind: "missing-file"; readonly sidecars: Record<string, never> }
   | {
@@ -14,12 +40,10 @@ type PreflightRecipe =
       readonly fileBytesHex: string
       readonly sidecars: Record<string, { text: string; sha256?: string }>
     }
-  | { readonly kind: "initialized-empty-sqlite"; readonly sidecars: Record<string, { text: string; sha256?: string }> }
-  | { readonly kind: "sqlite-sql"; readonly statements: readonly string[]; readonly sidecars: Record<string, never> }
   | {
-      readonly kind: "current-v27-plus-sql"
-      readonly statements: readonly string[]
-      readonly sidecars: Record<string, never>
+      readonly kind: "fixture"
+      readonly fixture: PreflightFixture
+      readonly sidecars: Record<string, { text: string; sha256?: string }>
     }
 type PreflightCase = {
   readonly name: string
@@ -54,33 +78,18 @@ const readObjects = (filename: string) =>
     }),
   )
 
-const writeRecipe = (filename: string, recipe: PreflightCase["recipe"]) =>
+const writeRecipe = (filename: string, recipe: PreflightCase["recipe"], fixturePathsRead: Set<string>) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem
     if (recipe.kind === "missing-file") return
     if (recipe.kind === "bytes") {
       yield* fileSystem.writeFile(filename, Uint8Array.fromHex(recipe.fileBytesHex))
-    } else if (recipe.kind === "initialized-empty-sqlite") {
-      yield* Effect.sync(() => new NativeDatabase(filename).close())
-    } else if (recipe.kind === "sqlite-sql") {
-      yield* Effect.sync(() => {
-        const database = new NativeDatabase(filename)
-        for (const statement of recipe.statements) database.exec(statement)
-        database.close()
-      })
-    } else if (recipe.kind === "current-v27-plus-sql") {
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const context = yield* Layer.build(Database.layer(filename))
-          yield* Effect.gen(function* () {
-            const sql = yield* SqlClient
-            yield* sql`PRAGMA journal_mode = DELETE`
-            yield* sql`DELETE FROM rika_migrations WHERE migration_id = 15`
-            yield* sql`INSERT INTO rika_migrations (migration_id, name) VALUES (15, 'future_schema')`
-            yield* sql`CREATE TABLE future_product_state (id TEXT PRIMARY KEY)`
-          }).pipe(Effect.provide(context))
-        }),
-      )
+    } else {
+      const fixturePath = preflightFixturePaths[recipe.fixture]
+      const fixtureBytes = yield* fileSystem.readFile(fixturePath)
+      fixturePathsRead.add(fixturePath)
+      expect(sha256(fixtureBytes), `fixture ${recipe.fixture}`).toBe(preflightFixtureSha256[recipe.fixture])
+      yield* fileSystem.writeFile(filename, fixtureBytes)
     }
     for (const [suffix, sidecar] of Object.entries(recipe.sidecars)) {
       if (sidecar !== undefined && sidecar !== null)
@@ -132,11 +141,12 @@ it.layer(BunServices.layer)("v27 migration and preflight oracle", (test) => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem
         const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-v27-preflight-" })
+        const fixturePathsRead = new Set<string>()
         for (const recipeCase of preflightCases) {
           const filename = `${directory}/${recipeCase.name}/rika.db`
           if (recipeCase.recipe.kind !== "missing-file")
             yield* fileSystem.makeDirectory(`${directory}/${recipeCase.name}`, { recursive: true })
-          yield* writeRecipe(filename, recipeCase.recipe)
+          yield* writeRecipe(filename, recipeCase.recipe, fixturePathsRead)
           const before = yield* fileSystem.readFile(filename).pipe(Effect.orElseSucceed(() => new Uint8Array()))
           const sidecarsBefore = yield* Effect.all(
             (["wal", "shm"] as const).map((suffix) =>
@@ -172,6 +182,16 @@ it.layer(BunServices.layer)("v27 migration and preflight oracle", (test) => {
             }
           }
         }
+        expect([...fixturePathsRead].toSorted()).toEqual(
+          [
+            ...new Set(
+              preflightCases.flatMap((recipeCase) => {
+                if (recipeCase.recipe.kind !== "fixture") return []
+                return [preflightFixturePaths[recipeCase.recipe.fixture]]
+              }),
+            ),
+          ].toSorted(),
+        )
       }),
     ),
   )
