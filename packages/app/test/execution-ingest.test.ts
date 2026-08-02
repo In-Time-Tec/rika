@@ -1564,6 +1564,56 @@ describe("ExecutionIngest", () => {
     }),
   )
 
+  it.effect("leaves a future-version incomplete usage source outside lazy backfill", () =>
+    Effect.gen(function* () {
+      const futureUsage = yield* UsageRepository.makeMemory({
+        initial: [
+          {
+            sourceId: String(rootId),
+            turnId: String(rootId),
+            threadId: String(threadId),
+            revision: 0,
+            projectionVersion: UsageRepository.projectionVersion + 1,
+            pricedAttempts: 0,
+            unpricedAttempts: 0,
+            countedAttempts: 0,
+            uncountedAttempts: 0,
+            sourceComplete: false,
+          },
+        ],
+      })
+      const events = [
+        event("root", "accepted", 0, "execution.accepted"),
+        event("root", "started", 1, "execution.started"),
+        event("root", "done", 2, "execution.completed"),
+      ]
+      const stored = Transcript.project("root", "delegate", events)
+      const { ingest } = yield* makeHarness({
+        script: { root: { events, status: "completed" } },
+        stored,
+        storedProjectionVersion: ExecutionIngest.projectionVersion,
+        executionCheckpoints: [
+          {
+            executionKey: "root",
+            executionId: "root",
+            cursor: "done",
+            sequence: 2,
+            status: "completed",
+            state: Transcript.projectionState(stored),
+          },
+        ],
+        mapUsage: () => futureUsage,
+      })
+
+      yield* ingest.backfillUsage({ threadId, turnId: rootId })
+
+      expect(yield* futureUsage.readSource(String(rootId), String(rootId))).toMatchObject({
+        projectionVersion: UsageRepository.projectionVersion + 1,
+        sourceComplete: false,
+      })
+    }),
+  )
+
   it.effect("degrades usage without interrupting live transcript delivery", () => {
     const lines: Array<string> = []
     const logger = Logger.make((options) => lines.push(Logger.formatJson.log(options)))

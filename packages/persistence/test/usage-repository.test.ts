@@ -86,6 +86,41 @@ it.layer(Usage.memoryLayer)("memory usage repository", (test) => {
   )
 })
 
+it.effect("memory usage repository keeps future incomplete sources fail-closed", () =>
+  Effect.gen(function* () {
+    const repository = yield* Usage.makeMemory({
+      initial: [
+        {
+          sourceId: "future",
+          turnId: "turn",
+          threadId: "thread",
+          revision: 0,
+          projectionVersion: Usage.projectionVersion + 1,
+          pricedAttempts: 0,
+          unpricedAttempts: 0,
+          countedAttempts: 0,
+          uncountedAttempts: 0,
+          sourceComplete: false,
+        },
+      ],
+    })
+    expect(
+      yield* repository.replaceSource(
+        "future",
+        "turn",
+        "thread",
+        Usage.projectionVersion + 1,
+        0,
+        "replacement",
+        complete,
+      ),
+    ).toMatchObject({
+      _tag: "Conflict",
+      value: { projectionVersion: Usage.projectionVersion + 1, sourceComplete: false },
+    })
+  }),
+)
+
 it.layer(BunServices.layer)("SQLite usage repository", (test) => {
   test.effect("matches memory semantics, cascades, and survives reopen", () =>
     Effect.scoped(
@@ -103,6 +138,23 @@ it.layer(BunServices.layer)("SQLite usage repository", (test) => {
         ('turn-a', 'thread', 'A', 'completed', 1, 1, '{}'), ('turn-b', 'thread', 'B', 'completed', 2, 2, '{}')`
           const usage = Context.get(yield* Layer.build(Usage.layer).pipe(Effect.provide(database)), Usage.Service)
           yield* exercise(usage)
+          yield* sql`INSERT INTO rika_turn_usage
+          (source_id, turn_id, thread_id, revision, projection_version, source_complete, updated_at)
+          VALUES ('future', 'turn-b', 'thread', 0, ${Usage.projectionVersion + 1}, 0, 1)`
+          expect(
+            yield* usage.replaceSource(
+              "future",
+              "turn-b",
+              "thread",
+              Usage.projectionVersion + 1,
+              0,
+              "replacement",
+              complete,
+            ),
+          ).toMatchObject({
+            _tag: "Conflict",
+            value: { projectionVersion: Usage.projectionVersion + 1, sourceComplete: false },
+          })
           yield* sql`UPDATE rika_turn_usage SET thread_id = 'other-thread' WHERE turn_id = 'turn-a' AND source_id = 'title'`
           expect(yield* Effect.exit(usage.readTurn("turn-a"))).toMatchObject({ _tag: "Failure" })
           expect(yield* Effect.exit(usage.readThread("thread"))).toMatchObject({ _tag: "Failure" })

@@ -1768,7 +1768,8 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
         const source = yield* options.usage.readSource(String(root.turnId), String(root.turnId))
         if (
           source === undefined ||
-          (source.projectionVersion >= UsageRepository.projectionVersion && source.sourceComplete)
+          (source.projectionVersion >= UsageRepository.projectionVersion &&
+            (source.projectionVersion !== UsageRepository.projectionVersion || source.sourceComplete))
         )
           return
         yield* backfillStoredUsage(root, stored, source)

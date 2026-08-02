@@ -65,7 +65,13 @@ export interface Interface {
     sourceId: string,
     turnId: string,
   ) => Effect.Effect<
-    { readonly revision: number; readonly projectionVersion: number; readonly foldJson?: string } | undefined,
+    | {
+        readonly revision: number
+        readonly projectionVersion: number
+        readonly sourceComplete: boolean
+        readonly foldJson?: string
+      }
+    | undefined,
     RepositoryError
   >
   readonly commitSource: (
@@ -244,7 +250,8 @@ export const makeMemory = (options: MemoryOptions = {}) =>
             previous !== undefined &&
             (previous.projectionVersion !== expectedVersion ||
               previous.revision !== expectedRevision ||
-              (previous.projectionVersion === projectionVersion && previous.sourceComplete))
+              (previous.projectionVersion >= projectionVersion &&
+                (previous.projectionVersion !== projectionVersion || previous.sourceComplete)))
           )
             return [{ _tag: "Conflict", value: previous === undefined ? undefined : clone(previous) }, current]
           const value: SourceUsage = clone({
@@ -294,6 +301,7 @@ export const makeMemory = (options: MemoryOptions = {}) =>
           : {
               revision: value.revision,
               projectionVersion: value.projectionVersion,
+              sourceComplete: value.sourceComplete,
               ...(value.foldJson === undefined ? {} : { foldJson: value.foldJson }),
             }
       }),
@@ -440,6 +448,7 @@ export const layer = Layer.effect(
           : {
               revision: value.revision,
               projectionVersion: value.projectionVersion,
+              sourceComplete: value.sourceComplete,
               ...(value.foldJson === undefined ? {} : { foldJson: value.foldJson }),
             }
       }),
@@ -462,7 +471,8 @@ export const layer = Layer.effect(
           uncounted_attempts = ${totals.uncountedAttempts}, source_complete = ${totals.sourceComplete ? 1 : 0}, updated_at = ${now}
         WHERE rika_turn_usage.projection_version = ${expectedVersion} AND rika_turn_usage.revision = ${expectedRevision}
           AND rika_turn_usage.thread_id = ${threadId}
-          AND (rika_turn_usage.projection_version < ${projectionVersion} OR rika_turn_usage.source_complete = 0) RETURNING *`.pipe(
+          AND (rika_turn_usage.projection_version < ${projectionVersion} OR
+            (rika_turn_usage.projection_version = ${projectionVersion} AND rika_turn_usage.source_complete = 0)) RETURNING *`.pipe(
             Effect.mapError(error),
           )
           return changed.length === 0

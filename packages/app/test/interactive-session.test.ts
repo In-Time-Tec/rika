@@ -114,6 +114,7 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
     readonly finished: Deferred.Deferred<void, never>
     readonly finalTurnId: Turn.TurnId
   },
+  initialUsage?: ReadonlyArray<UsageRepository.SourceUsage>,
 ) {
   const older = thread("older", 1)
   const latest = thread("latest", 2)
@@ -132,7 +133,7 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
   const controls = yield* Ref.make<ReadonlyArray<ReadonlyArray<unknown>>>([])
   const hiddenExecutions = yield* Ref.make<ReadonlySet<string>>(new Set())
   const transcripts = yield* TranscriptRepository.makeMemory({ turns })
-  const usage = yield* UsageRepository.makeMemory()
+  const usage = yield* UsageRepository.makeMemory(initialUsage === undefined ? undefined : { initial: initialUsage })
   if (initialTurnsCompleted)
     yield* Effect.forEach(initialTurns, (turn) => storeCompletedTranscript(transcripts, turn, turn.lastCursor!), {
       discard: true,
@@ -336,6 +337,96 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
 })
 
 describe("InteractiveSession controls", () => {
+  it.effect("backfills a current-version incomplete usage source when selection reads thread context", () =>
+    Effect.gen(function* () {
+      const sourceId = "latest-active"
+      const source: UsageRepository.SourceUsage = {
+        sourceId,
+        turnId: sourceId,
+        threadId: "latest",
+        revision: 0,
+        projectionVersion: UsageRepository.projectionVersion,
+        pricedAttempts: 0,
+        unpricedAttempts: 0,
+        countedAttempts: 0,
+        uncountedAttempts: 0,
+        sourceComplete: false,
+      }
+      const events: ReadonlyArray<ExecutionBackend.Event> = [
+        {
+          executionId: sourceId,
+          cursor: "accepted",
+          sequence: 0,
+          type: "execution.accepted",
+          createdAt: 0,
+          timestampSource: "server",
+        },
+        {
+          executionId: sourceId,
+          cursor: "started",
+          sequence: 1,
+          type: "execution.started",
+          createdAt: 1,
+          timestampSource: "server",
+        },
+        {
+          executionId: sourceId,
+          cursor: "usage",
+          sequence: 2,
+          type: "model.usage.reported",
+          createdAt: 2,
+          data: {
+            model_call_id: "latest-call",
+            model_attempt_id: "latest-attempt",
+            attempt: 1,
+            provider: "openai",
+            model: "gpt-5.6-sol",
+            input_tokens: 100,
+            input_tokens_uncached: 100,
+            input_tokens_cache_read: 0,
+            input_tokens_cache_write: 0,
+            output_tokens: 10,
+          },
+        },
+        {
+          executionId: sourceId,
+          cursor: "completed",
+          sequence: 3,
+          type: "execution.completed",
+          createdAt: 3,
+          timestampSource: "server",
+        },
+      ]
+      const { latest, session, usage } = yield* makeHarness(events, false, undefined, false, true, undefined, [source])
+      const interactiveEvents: Array<Operation.InteractiveEvent> = []
+      yield* collectEvents(session, interactiveEvents)
+      yield* session.selectThread(latest.id, 1)
+      for (let attempt = 0; attempt < 2_000; attempt += 1) {
+        const recovered = yield* usage.readSource(sourceId, sourceId)
+        if (recovered?.sourceComplete === true) break
+        yield* Effect.yieldNow
+      }
+
+      const recovered = yield* usage.readSource(sourceId, sourceId)
+      expect(recovered).toMatchObject({
+        projectionVersion: UsageRepository.projectionVersion,
+        sourceComplete: true,
+      })
+      let update = interactiveEvents.find(
+        (event): event is Extract<Operation.InteractiveEvent, { readonly _tag: "ThreadUsageUpdated" }> =>
+          event._tag === "ThreadUsageUpdated" && event.selectionEpoch === 1,
+      )
+      for (let attempt = 0; attempt < 2_000 && update === undefined; attempt += 1) {
+        yield* Effect.yieldNow
+        update = interactiveEvents.find(
+          (event): event is Extract<Operation.InteractiveEvent, { readonly _tag: "ThreadUsageUpdated" }> =>
+            event._tag === "ThreadUsageUpdated" && event.selectionEpoch === 1,
+        )
+      }
+      expect(update?.context).toMatchObject({ _tag: "Available", inputTokens: 100 })
+    }),
+  )
+
   it.effect("publishes live thread summaries and clears unread state when a thread is selected", () =>
     Effect.gen(function* () {
       const { session, older } = yield* makeHarness()
@@ -1347,13 +1438,10 @@ describe("InteractiveSession controls", () => {
       )
       if (Result.isFailure(contextFold)) return yield* contextFold.failure
       const source = yield* usage.admitSource("active", "active", String(older.id))
-      yield* usage.commitSource(
-        "active",
-        "active",
-        source.revision,
-        UsageCost.serialize(contextFold.success),
-        UsageCost.materialize(contextFold.success, "active", String(older.id)),
-      )
+      yield* usage.commitSource("active", "active", source.revision, UsageCost.serialize(contextFold.success), {
+        ...UsageCost.materialize(contextFold.success, "active", String(older.id)),
+        sourceComplete: true,
+      })
       const withoutUsage = yield* createTurn(turns, {
         id: Turn.TurnId.make("newer-without-usage"),
         threadId: older.id,

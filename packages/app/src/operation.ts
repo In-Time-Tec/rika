@@ -1336,7 +1336,11 @@ export const productLayer = <
           )
         for (const turn of candidates) {
           let source = yield* usageRepository.loadSourceFold(String(turn.id), String(turn.id))
-          if (source !== undefined && source.projectionVersion < UsageRepository.projectionVersion) {
+          if (
+            source !== undefined &&
+            (source.projectionVersion < UsageRepository.projectionVersion ||
+              (source.projectionVersion === UsageRepository.projectionVersion && !source.sourceComplete))
+          ) {
             yield* backfillThreadUsage({ threadId: turn.threadId, turnId: turn.id })
             source = yield* usageRepository.loadSourceFold(String(turn.id), String(turn.id))
           }
