@@ -46,7 +46,7 @@ const performanceCommand = Command.make("performance", {}, () =>
     else if (import.meta.path.startsWith("/$bunfs/"))
       runtime = { executable: path.join(path.dirname(process.execPath), ".rika-performance"), arguments: [] }
     else
-      runtime = { executable: process.execPath, arguments: [path.join(import.meta.dir, "..", "performance-main.ts")] }
+      runtime = { executable: process.execPath, arguments: [path.join(import.meta.dir, "..", "..", "performance-main.ts")] }
     const output = yield* spawner.string(
       ChildProcess.make(runtime.executable, runtime.arguments, {
         stdin: "ignore",
