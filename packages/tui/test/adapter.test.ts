@@ -2139,7 +2139,7 @@ describe("Surface", () => {
           contextUsage: { _tag: "Available", inputTokens: 4_400, contextWindow: 1_050_000, reserveTokens: 128_000 },
         }),
       )
-      expect(modeLabelText()).toBe(" ctx ╌╌╌╌╌╌╌╌ 0% ─ medium ")
+      expect(modeLabelText()).toBe(" ctx ━╌╌╌╌╌╌╌ 0% ─ medium ")
       surface.update(model({ currentThreadId: "thread", mode: "medium", contextUsage: { _tag: "Loading" } }))
       expect(modeLabelText()).toBe(" ctx ╌╌╌╌╌╌╌╌ ─ medium ")
       surface.update(model({ currentThreadId: "thread", mode: "medium", contextUsage: { _tag: "Unavailable" } }))

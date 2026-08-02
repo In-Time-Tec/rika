@@ -60,7 +60,7 @@ export const meter: {
     const cells = Math.max(1, Math.floor(options.cells ?? 8))
     const value = pressure(reading)
     const bounded = Math.min(1, value)
-    const filled = Math.min(cells, Math.round(bounded * cells))
+    const filled = Math.max(value > 0 ? 1 : 0, Math.min(cells, Math.round(bounded * cells)))
     const glyphs = Array.from({ length: cells }, (_, index) => (index < filled ? meterGlyphs.fill : meterGlyphs.track))
     let tone: Tone = "calm"
     if (value >= 0.9) tone = "critical"

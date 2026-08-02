@@ -2013,7 +2013,7 @@
           "width": 1
         },
         {
-          "text": "Run verification …",
+          "text": "Run verificatio…",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -2031,7 +2031,7 @@
             }
           },
           "attributes": 1,
-          "width": 18
+          "width": 16
         },
         {
           "text": " ",
@@ -2051,7 +2051,7 @@
               "3": 255
             }
           },
-          "attributes": 2,
+          "attributes": 0,
           "width": 1
         },
         {
@@ -2076,7 +2076,7 @@
           "width": 5
         },
         {
-          "text": " to steer · ",
+          "text": " to steer",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -2094,7 +2094,28 @@
             }
           },
           "attributes": 2,
-          "width": 12
+          "width": 9
+        },
+        {
+          "text": " ── ",
+          "fg": {
+            "buffer": {
+              "0": 1984,
+              "1": 448,
+              "2": 192,
+              "3": 255
+            }
+          },
+          "bg": {
+            "buffer": {
+              "0": 0,
+              "1": 512,
+              "2": 0,
+              "3": 255
+            }
+          },
+          "attributes": 0,
+          "width": 4
         },
         {
           "text": "Backspace",
@@ -2118,7 +2139,7 @@
           "width": 9
         },
         {
-          "text": " to dequeue · ",
+          "text": " to dequeue",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -2136,7 +2157,28 @@
             }
           },
           "attributes": 2,
-          "width": 14
+          "width": 11
+        },
+        {
+          "text": " ── ",
+          "fg": {
+            "buffer": {
+              "0": 1984,
+              "1": 448,
+              "2": 192,
+              "3": 255
+            }
+          },
+          "bg": {
+            "buffer": {
+              "0": 0,
+              "1": 512,
+              "2": 0,
+              "3": 255
+            }
+          },
+          "attributes": 0,
+          "width": 4
         },
         {
           "text": "Ctrl+E",

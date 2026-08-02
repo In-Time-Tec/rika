@@ -23,6 +23,7 @@ describe("ContextMeter", () => {
     expect(value.glyphs.join("")).toBe("━━╌╌╌╌╌╌")
     expect(ContextMeter.loadingMeter(0).join("")).toBe("╌╌╌╌╌╌╌━")
     expect(ContextMeter.loadingMeter(7).join("")).toBe("━╌╌╌╌╌╌╌")
+    expect(ContextMeter.meter(reading(4_400)).glyphs.join("")).toBe("━╌╌╌╌╌╌╌")
   })
 
   test("uses deterministic scanner, muncher, vacuum, and flash glyphs", () => {
@@ -38,17 +39,56 @@ describe("ContextMeter", () => {
     expect(ContextMeter.animatedGlyphs(reading(208_294), { cells: 8, tick: 0, flashTicks: 2 }).join("")).toContain("✦")
   })
 
-  test("tracks compaction and threshold flash transitions in view state", () => {
+  test("renders each threshold flash once per turn and shrinks a vacuum from the retained fill", () => {
+    const glyphs = (model: ViewState.Model) => {
+      const context = model.contextUsage
+      if (context?._tag !== "Available") return ContextMeter.loadingMeter(model.animationTick, { cells: 8 }).join("")
+      return ContextMeter.animatedGlyphs(context, {
+        cells: 8,
+        tick: model.contextAnimation.compactTick ?? model.animationTick,
+        ...(model.contextAnimation.compactFromPercent === undefined
+          ? {}
+          : { compactFromPercent: model.contextAnimation.compactFromPercent }),
+        flashTicks: model.contextAnimation.flashTicks,
+      }).join("")
+    }
     const low = { _tag: "Available" as const, ...reading(600_000) }
-    const high = { _tag: "Available" as const, ...reading(850_000) }
+    const at75 = { _tag: "Available" as const, ...reading(700_000) }
+    const at90 = { _tag: "Available" as const, ...reading(850_000) }
     const compacted = { _tag: "Available" as const, ...reading(208_294) }
     let model: ViewState.Model = { ...ViewState.initial("/work"), busy: true, contextUsage: low }
-    model = ViewState.update(model, { _tag: "ContextUsageReplaced", contextUsage: high })
-    expect(model.contextAnimation).toMatchObject({ flashTicks: 2, flashed75: true, flashed90: true })
+
+    model = ViewState.update(model, { _tag: "ContextUsageReplaced", contextUsage: at75 })
+    expect(glyphs(model)).toContain("✦")
     model = ViewState.update(model, { _tag: "AnimationTicked" })
-    expect(model.contextAnimation.flashTicks).toBe(1)
+    expect(glyphs(model)).toContain("✦")
+    model = ViewState.update(model, { _tag: "AnimationTicked" })
+    expect(glyphs(model)).not.toContain("✦")
+    model = ViewState.update(model, { _tag: "ContextUsageReplaced", contextUsage: at75 })
+    expect(glyphs(model)).not.toContain("✦")
+
+    model = ViewState.update(model, { _tag: "ContextUsageReplaced", contextUsage: at90 })
+    expect(glyphs(model)).toContain("✦")
+    model = ViewState.update(model, { _tag: "AnimationTicked" })
+    expect(glyphs(model)).toContain("✦")
+    model = ViewState.update(model, { _tag: "AnimationTicked" })
+    expect(glyphs(model)).not.toContain("✦")
+
+    model = ViewState.update(model, { _tag: "TurnStarted", turnId: "next", prompt: "next" })
+    model = ViewState.update(model, { _tag: "ContextUsageReplaced", contextUsage: low })
+    model = ViewState.update(model, { _tag: "ContextUsageReplaced", contextUsage: at75 })
+    expect(glyphs(model)).toContain("✦")
+
+    model = ViewState.update(model, { _tag: "ContextUsageReplaced", contextUsage: at90 })
     model = ViewState.update(model, { _tag: "ContextUsageReplaced", contextUsage: compacted })
-    expect(model.contextAnimation).toMatchObject({ compactFromPercent: 92, compactTick: 0 })
+    const frames = [glyphs(model)]
+    for (let tick = 0; tick < 5; tick += 1) {
+      model = ViewState.update(model, { _tag: "AnimationTicked" })
+      frames.push(glyphs(model))
+    }
+    expect(frames[0]).toContain("≪")
+    expect(frames.some((frame) => frame !== frames[0] && frame.includes("≪"))).toBe(true)
+    expect(frames.filter((frame) => frame.includes("≪")).length).toBeGreaterThan(1)
   })
 
   test("exports the pinned ASCII muncher fallback", () => {

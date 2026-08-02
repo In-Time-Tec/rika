@@ -3613,14 +3613,14 @@ test("joins the durable queue to the composer like Amp", () =>
         const frame = setup.captureCharFrame()
         const rows = frame.split("\n")
         expect(frame).toContain("First queued prompt")
-        expect(frame).toContain("Selected queued p…")
+        expect(frame).toContain("Selected queued…")
         expect(frame).not.toContain("queued 1/2")
         expect(frame).not.toContain("queued 2/2")
         expect(frame).toContain("Enter to steer")
         expect(frame).toContain("Backspace to dequeue")
         expect(frame).toContain("Ctrl+E to edit")
         expect(rows.findIndex((row) => row.includes("Enter to steer"))).toBe(
-          rows.findIndex((row) => row.includes("Selected queued p…")),
+          rows.findIndex((row) => row.includes("Selected queued…")),
         )
         expect(rows.find((row) => row.includes("Enter to steer"))).toMatch(/Ctrl\+E to edit  │ $/)
         expect(surface.queueBox.height).toBe(4)
@@ -3649,7 +3649,7 @@ test("renders an inline hint on the selected queued row as the queue window move
         const topRows = top.split("\n")
         expect(top).not.toContain("queued 1/8")
         expect(topRows.findIndex((row) => row.includes("Enter to steer"))).toBe(
-          topRows.findIndex((row) => row.includes("prompt number 0")),
+          topRows.findIndex((row) => row.includes("prompt number…")),
         )
         surface.update({ ...base, queueSelection: "q7" })
         yield* openTui(() => setup.renderOnce())
@@ -3657,7 +3657,7 @@ test("renders an inline hint on the selected queued row as the queue window move
         const bottomRows = bottom.split("\n")
         expect(bottom).not.toContain("queued 8/8")
         expect(bottomRows.findIndex((row) => row.includes("Enter to steer"))).toBe(
-          bottomRows.findIndex((row) => row.includes("prompt number 7")),
+          bottomRows.findIndex((row) => row.includes("prompt number…")),
         )
         expect(bottom).not.toContain("prompt number 0")
       } finally {
@@ -3790,6 +3790,144 @@ test("drops the inline queue hint before hiding message text in a very narrow te
         expect(frame).not.toContain("Enter to steer")
         expect(frame).not.toContain("Backspace to dequeue")
         expect(frame).not.toContain("Ctrl+E to edit")
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
+test("routes actual mode-label clicks and hover through the selector", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      let model: Model = update(initial("/work", "low"), { _tag: "ModeSelectorOpened" })
+      const surface = new Surface(setup.renderer, {
+        key: () => undefined,
+        resize: () => undefined,
+        modeHover: (selected) => {
+          model = update(model, { _tag: "ModeHovered", selected })
+          surface.update(model)
+        },
+        modeCommit: (selected) => {
+          model = update(model, { _tag: "ModeCommitted", selected })
+          surface.update(model)
+        },
+        modeToggle: () => {
+          model = update(model, { _tag: "ModeSelectorOpened" })
+          surface.update(model)
+        },
+      })
+      try {
+        surface.update(model)
+        yield* openTui(() => setup.renderOnce())
+        const frame = setup.captureCharFrame().split("\n")
+        const labelY = frame.findIndex((row) => row.includes("low") && row.includes("ultra"))
+        const highColumn = frame[labelY]!.indexOf("high")
+        yield* openTui(() => setup.mockMouse.moveTo(highColumn, labelY))
+        yield* openTui(() => setup.renderOnce())
+        expect(model.modePicker.selected).toBe(2)
+        expect(setup.captureCharFrame()).toContain("Deep reasoning for hard tasks")
+        yield* openTui(() => setup.mockMouse.click(highColumn, labelY + 1))
+        expect(model.modePicker.open).toBe(true)
+        yield* openTui(() => setup.mockMouse.click(highColumn, labelY))
+        expect(model.mode).toBe("high")
+
+        model = {
+          ...initial("/work", "high"),
+          threadSwitcher: { open: true, query: "", selected: 0, kind: "switch", previewScroll: 0 },
+        }
+        surface.update(model)
+        yield* openTui(() => setup.renderOnce())
+        yield* openTui(() =>
+          setup.mockMouse.click(surface.modeLabel.screenX + surface.modeLabel.width - 2, surface.modeLabel.screenY),
+        )
+        expect(model.threadSwitcher.open).toBe(false)
+        expect(model.modePicker.open).toBe(true)
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
+test("renders a scanner only before a thread has retained context and keeps retained fill on its next turn", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      try {
+        let fresh: Model = update(
+          { ...initial("/work", "high"), currentThreadId: "fresh", width: 80, height: 24 },
+          { _tag: "TurnStarted", turnId: "fresh-turn", prompt: "first" },
+        )
+        surface.update(fresh)
+        yield* openTui(() => setup.renderOnce())
+        expect(styledTextValue(surface.modeLabel.content)).toBe(" ctx ╌╌╌╌╌╌╌━ ─ high ")
+
+        let retained: Model = {
+          ...initial("/work", "high"),
+          currentThreadId: "retained",
+          width: 80,
+          height: 24,
+          contextUsage: { _tag: "Available", inputTokens: 208_294, contextWindow: 1_050_000, reserveTokens: 128_000 },
+        }
+        retained = update(retained, { _tag: "TurnStarted", turnId: "retained-turn", prompt: "next" })
+        surface.update(retained)
+        yield* openTui(() => setup.renderOnce())
+        const rendered = styledTextValue(surface.modeLabel.content)
+        expect(rendered).toContain("ᗧ")
+        expect(rendered).not.toBe(" ctx ╌╌╌╌╌╌╌━ ─ high ")
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
+test("renders selector slide retargeting and the complete footer commit sequence", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      let model: Model = update(initial("/work", "medium"), { _tag: "ModeSelectorOpened" })
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      try {
+        model = update(model, { _tag: "ModeTurned", offset: 1 })
+        const dialFrames: Array<string> = []
+        for (let tick = 0; tick < 2; tick += 1) {
+          surface.update(model)
+          yield* openTui(() => setup.renderOnce())
+          dialFrames.push(
+            setup
+              .captureCharFrame()
+              .split("\n")
+              .find((row) => row.includes("╾")) ?? "",
+          )
+          model = update(model, { _tag: "AnimationTicked" })
+        }
+        model = update(model, { _tag: "ModeTurned", offset: 1 })
+        surface.update(model)
+        yield* openTui(() => setup.renderOnce())
+        dialFrames.push(
+          setup
+            .captureCharFrame()
+            .split("\n")
+            .find((row) => row.includes("╾")) ?? "",
+        )
+        expect(new Set(dialFrames).size).toBeGreaterThan(1)
+
+        model = update({ ...model, mode: "medium" }, { _tag: "ModeCommitted", selected: 3 })
+        const commitFrames: Array<string> = []
+        for (let tick = 0; tick < 12; tick += 1) {
+          surface.update(model)
+          yield* openTui(() => setup.renderOnce())
+          commitFrames.push(styledTextValue(surface.modeLabel.content))
+          model = update(model, { _tag: "AnimationTicked" })
+        }
+        expect(commitFrames).toContain(" medium ")
+        expect(commitFrames).toContain(" mediu ")
+        expect(commitFrames.some((frame) => frame.includes("▮"))).toBe(true)
+        expect(commitFrames).toContain(" ultra ")
       } finally {
         surface.destroy()
         setup.renderer.destroy()

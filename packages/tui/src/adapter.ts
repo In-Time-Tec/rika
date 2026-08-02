@@ -204,7 +204,7 @@ const queueEditingHint: ReadonlyArray<QueueHintSegment> = [
 const minimumInlineQueueMessageWidth = 12
 
 const queueHintWidth = (segments: ReadonlyArray<QueueHintSegment>): number =>
-  stringWidth(` ${segments.map((segment) => `${segment.accent}${segment.suffix}`).join(" · ")} `)
+  stringWidth(` ${segments.map((segment) => `${segment.accent}${segment.suffix}`).join(" ── ")} `.replaceAll("─", "-"))
 
 const fittingQueueHint = (
   segments: ReadonlyArray<QueueHintSegment>,
@@ -2238,14 +2238,32 @@ export class Surface {
   ): void {
     const hints = [this.paletteHint, this.paletteHintSecond]
     for (const hint of hints) hint.visible = false
+    const widthOf = (label: string): number => stringWidth(label.replaceAll("↔", "x"))
+    const available = Math.max(0, bounds.width - 4)
+    const fitted: Array<string> = []
+    let used = 0
+    let truncated = false
+    for (const label of labels) {
+      const separator = fitted.length === 0 ? 0 : 2
+      const remaining = available - used - separator
+      if (remaining <= 0) break
+      const width = widthOf(label)
+      let value = label
+      if (width > remaining) value = remaining === 1 ? "…" : `${truncateToWidth(label, remaining - 1)}…`
+      fitted.push(value)
+      used += separator + widthOf(value)
+      if (width > remaining) {
+        truncated = true
+        break
+      }
+    }
     const boxRight = Math.min(this.renderer.terminalWidth - 1, bounds.left + bounds.width - 1)
-    let cursor = boxRight - 1
-    for (let index = labels.length - 1; index >= 0; index -= 1) {
-      const label = labels[index]!
-      const hint = hints[labels.length - 1 - index]
+    let cursor = truncated || fitted.length < labels.length ? boxRight : boxRight - 1
+    for (let index = fitted.length - 1; index >= 0; index -= 1) {
+      const label = fitted[index]!
+      const hint = hints[fitted.length - 1 - index]
       if (hint === undefined) continue
-      const width = stringWidth(label.replaceAll("↔", "x"))
-      if (cursor - width < bounds.left + 1) continue
+      const width = widthOf(label)
       cursor -= width
       hint.content = label
       hint.width = width
@@ -3360,7 +3378,7 @@ export class Surface {
     this.queueHint.top = hintTop
     const hintChunks: Array<TextChunk> = []
     for (const [index, segment] of hintSegments.entries()) {
-      hintChunks.push(dim(fg(colors.text)(index === 0 ? " " : " · ")))
+      hintChunks.push(fg(colors.text)(index === 0 ? " " : " ── "))
       hintChunks.push(fg(colors[model.mode])(segment.accent))
       if (segment.suffix.length > 0) hintChunks.push(dim(fg(colors.text)(segment.suffix)))
     }
@@ -3583,7 +3601,7 @@ export class Surface {
       this.palette.content = modePickerContent(model, modeContentWidth, modeContentHeight)
       const hitMode = (event: MouseEvent): number | undefined => {
         const compact = modeContentWidth < 40
-        const labelRow = this.palette.screenY + (compact ? 2 : 3)
+        const labelRow = this.palette.screenY + (compact ? 1 : 2)
         if (event.y !== labelRow) return undefined
         const starts = modeLabelStarts(modeContentWidth)
         const column = event.x - this.palette.screenX
