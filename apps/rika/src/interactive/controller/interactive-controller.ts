@@ -17,6 +17,7 @@ export type TranscriptEvent = Extract<
   | { readonly _tag: "TranscriptProjectionStopped" }
   | { readonly _tag: "TranscriptProjectionFailed" }
   | { readonly _tag: "TranscriptResyncRequired" }
+  | { readonly _tag: "TurnSettled" }
   | { readonly _tag: "ThreadUsageUpdated" }
   | { readonly _tag: "ThreadRefolding" }
 >
@@ -24,6 +25,7 @@ export type TranscriptEvent = Extract<
 export interface State {
   readonly model: Model
   readonly selectionEpoch: number
+  readonly activitySequence?: number
   readonly replayTurns: ReadonlyMap<string, Turn.Turn>
   readonly entries: ReadonlyArray<TranscriptPage.Entry>
   readonly revisions: ReadonlyMap<string, number>
@@ -79,6 +81,7 @@ export interface Update {
   readonly unattached?: ReadonlyArray<string>
   readonly discarded?: boolean
   readonly resync?: boolean
+  readonly rejection?: "epoch" | "thread" | "stream" | "patchRevision" | "rootStatus"
 }
 
 export const warnUnattached = (unattached: ReadonlyArray<string>): Effect.Effect<void> =>

@@ -181,6 +181,19 @@ const unreadableMutable = (value: OwnedUsageFold, input: RootExecution, key: str
   })
 }
 
+const lifecycleTimestamp = (event: ActiveEvent, previous: number | undefined) =>
+  event.type === "wait.created" && previous !== undefined ? Math.max(previous, event.createdAt) : event.createdAt
+
+const timestampsRegress = (events: ReadonlyArray<ActiveEvent>): boolean => {
+  let previous: number | undefined
+  for (const event of events.toSorted((left, right) => left.sequence - right.sequence)) {
+    const createdAt = lifecycleTimestamp(event, previous)
+    if (previous !== undefined && createdAt < previous) return true
+    previous = createdAt
+  }
+  return false
+}
+
 const applyActive = (
   value: OwnedUsageFold,
   input: RootExecution & { readonly event: ExecutionEvent.Event },
@@ -258,19 +271,6 @@ const applyActive = (
         ...context,
       }),
     )
-  const before = executionEvents[index - 1]
-  const after = executionEvents[index]
-  if (
-    (before !== undefined && before.createdAt > event.createdAt) ||
-    (after !== undefined && after.createdAt < event.createdAt)
-  )
-    return Result.fail(
-      ProjectionFailure.make({
-        reason: "timestamp-regression",
-        message: "Lifecycle timestamp regresses relative to its sequence",
-        ...context,
-      }),
-    )
   const activeEvent: ActiveEvent = {
     key,
     executionId: event.executionId,
@@ -281,6 +281,14 @@ const applyActive = (
     sequence: event.sequence,
   }
   const nextExecutionEvents = [...executionEvents.slice(0, index), activeEvent, ...executionEvents.slice(index)]
+  if (timestampsRegress(nextExecutionEvents))
+    return Result.fail(
+      ProjectionFailure.make({
+        reason: "timestamp-regression",
+        message: "Lifecycle timestamp regresses relative to its sequence",
+        ...context,
+      }),
+    )
   const invalid = Lifecycle.failure(nextExecutionEvents)
   if (invalid !== undefined && executionEvents.length > 0 && index === executionEvents.length)
     return Result.fail(

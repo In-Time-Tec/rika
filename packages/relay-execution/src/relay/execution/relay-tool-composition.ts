@@ -10,7 +10,10 @@ import * as WebSearch from "@rika/coding-tools/web-search-service"
 import * as MediaAnalyzerRuntime from "../../model/provider/media-analysis-adapter"
 import * as SubagentJoin from "./relay-child-result"
 import * as ChildResult from "./relay-child-result"
+import * as AgentTools from "@rika/coding-tools/agent-tool-contract"
 import type { LayerOptions, ToolRuntimeRequirements } from "./relay-execution-layer"
+import * as IdentifierCodec from "./relay-execution-id-codec"
+import type { ChildRun } from "./relay-child-join-plan"
 
 type RikaToolRuntimeLayer<RuntimeRequirements> = Layer.Layer<
   import("@rika/coding-tools/coding-tool-runtime").Service,
@@ -85,12 +88,21 @@ export const makeToolComposition = <
     childRuns: (execution) =>
       Deferred.await(relayClient).pipe(
         Effect.flatMap((client) => client.executions.inspect(Ids.ExecutionId.make(execution))),
-        Effect.map((inspection) =>
-          inspection.child_runs.map((child) => ({
-            childExecutionId: String(child.child_execution_id),
-            status: child.status,
-          })),
-        ),
+        Effect.map((inspection) => {
+          const children = new Map<string, ChildRun>()
+          for (const call of inspection.pending_tool_calls) {
+            if (!AgentTools.AgentContract.isDelegationToolName(call.tool_name)) continue
+            const childExecutionId = String(
+              IdentifierCodec.makeChildExecutionId({ parentTurnId: execution, childId: String(call.tool_call_id) }),
+            )
+            children.set(childExecutionId, { childExecutionId, status: "running" })
+          }
+          for (const child of inspection.child_runs) {
+            const childExecutionId = String(child.child_execution_id)
+            children.set(childExecutionId, { childExecutionId, status: child.status })
+          }
+          return [...children.values()]
+        }),
         Effect.mapError(String),
       ),
     resolveChild: (childExecutionId) =>

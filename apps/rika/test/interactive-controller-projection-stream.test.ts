@@ -179,7 +179,15 @@ it("keeps the visible projection at a terminal boundary and rejects later patche
     delta: { upsert: [], remove: [] },
     rootStatus: "completed",
   })
-  const stopped = InteractiveController.update(terminal.state, {
+  const settled = InteractiveController.update(terminal.state, {
+    _tag: "TurnSettled",
+    selectionEpoch: 1,
+    activitySequence: 1,
+    threadId: thread.id,
+    turnId: active.id,
+    status: "completed",
+  })
+  const stopped = InteractiveController.update(settled.state, {
     _tag: "TranscriptProjectionStopped",
     selectionEpoch: 1,
     threadId: thread.id,

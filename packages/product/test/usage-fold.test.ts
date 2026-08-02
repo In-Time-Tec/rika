@@ -24,15 +24,10 @@ describe("UsageCost", () => {
       Support.Fixtures.lifecycle("execution", "start", "execution.started", 1, 1),
       Support.Fixtures.lifecycle("execution", "wait", "wait.created", 0, 2),
     ].map((event) => ({ threadId: "thread", turnId: "turn", event }))
-    const failed = Support.RawUsageCost.foldBatch(Support.RawUsageCost.empty, observations)
-    expect(Result.isFailure(failed)).toBe(true)
-    if (Result.isFailure(failed)) expect(failed.failure.reason).toBe("timestamp-regression")
+    const folded = Support.RawUsageCost.foldBatch(Support.RawUsageCost.empty, observations)
+    expect(Result.isSuccess(folded)).toBe(true)
+    if (Result.isSuccess(folded)) expect(folded.success.activeEvents.size).toBe(2)
     expect(Support.RawUsageCost.empty.activeEvents.size).toBe(0)
-    const recovered = Support.RawUsageCost.foldBatch(Support.RawUsageCost.empty, [
-      observations[0]!,
-      { ...observations[1]!, event: Support.Fixtures.lifecycle("execution", "wait", "wait.created", 2, 2) },
-    ])
-    expect(Result.isSuccess(recovered)).toBe(true)
   })
 
   it("validates a Relay root alias against its canonical execution identity", () => {

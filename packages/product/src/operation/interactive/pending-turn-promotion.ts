@@ -101,6 +101,7 @@ export const promotePendingTurns = (input: {
           input.emit(input.dispatch, {
             _tag: "TurnStarted",
             selectionEpoch: 0,
+            activitySequence: 0,
             threadId: input.thread.id,
             turn: transition.turn,
           })

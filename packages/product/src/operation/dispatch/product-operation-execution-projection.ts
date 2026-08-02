@@ -55,11 +55,14 @@ export const makeExecutionProjection = (input: any) =>
       status: ExecutionStatus.Status,
       lastCursor: string | undefined,
       now: number,
+      responseArrived?: boolean,
     ) {
       const turns = yield* TurnRepository.Service
       const turn = yield* turns.setStatus(id, status, lastCursor, now)
       yield* typedNotifyThreadSummaries
       yield* notifyTurnChanged(turn)
+      if (status === "completed" || status === "failed" || status === "cancelled")
+        yield* input.publishTurnSettled?.(turn, responseArrived) ?? Effect.void
       return turn
     })
     const repairThreadSummaries = Effect.fn("ProductOperation.repairThreadSummaries")(function* () {

@@ -12,6 +12,7 @@ import * as ThreadActivity from "../../thread/query/thread-activity"
 import { staleQueuedTurnsError } from "../../thread/queue/pending-turn-policy"
 import { clampThreadTitle } from "../../thread/query/thread-title-policy"
 import { Input } from "../contract/product-operation"
+import { agentResponseArrived } from "../interactive/interactive-session-interface-support"
 import { OperationUnavailable } from "../contract/product-operation"
 import { OperationError } from "../operation-error"
 import { Cause, Clock, Console, Context, Deferred, Effect, Fiber } from "effect"
@@ -36,6 +37,7 @@ export interface Dependencies {
     status: any,
     cursor: string | undefined,
     now: number,
+    responseArrived?: boolean,
   ) => Effect.Effect<Turn.Turn, OperationError, never>
   readonly publishInteractiveActivity: (origin: number, event: any) => void
   readonly rootTurnOwner: RootTurnOwner.Interface
@@ -139,6 +141,7 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
         dependencies.publishInteractiveActivity(0, {
           _tag: "TurnStarted",
           selectionEpoch: 0,
+          activitySequence: 0,
           threadId: thread.id,
           turn: runningTurn,
         })
@@ -219,6 +222,7 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
           result.status,
           result.checkpoint?.cursor ?? ThreadActivity.latestCursor(turn.id, result.events) ?? turn.lastCursor,
           completedAt,
+          result.status === "cancelled" ? agentResponseArrived(result.events) : undefined,
         )
         yield* dependencies.projectExecutionResult(thread.id, result)
         yield* dependencies.ensureIngest(updated.threadId, updated.id)

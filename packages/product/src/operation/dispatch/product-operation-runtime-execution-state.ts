@@ -26,7 +26,13 @@ export const buildProductOperationExecutionState = (
   input: any,
 ): Effect.Effect<Readonly<Record<string, unknown>>, Error, never> =>
   Effect.gen(function* (): Effect.gen.Return<Readonly<Record<string, unknown>>, Error, never> {
-    const { options, ownerScope: rawOwnerScope, publishInteractiveActivity, sessionThreadViews } = input
+    const {
+      options,
+      ownerScope: rawOwnerScope,
+      publishInteractiveActivity,
+      publishTurnSettled,
+      sessionThreadViews,
+    } = input
     const ownerScope: Scope.Scope = rawOwnerScope
     const pendingTurnCapacity = Math.max(0, Math.floor(options.pendingTurnCapacity ?? 64))
     const reviewSettlementAdmission = yield* Semaphore.make(1)
@@ -39,7 +45,12 @@ export const buildProductOperationExecutionState = (
     const turnChanges = yield* PubSub.sliding<void>(1)
     const dirtyTurnObservers = new Set<Turn.TurnId>()
     const watched = () => watchedThreadIds(sessionThreadViews)
-    const foundation = yield* makeProductOperationFoundation({ options, ownerScope, publishInteractiveActivity }).pipe(
+    const foundation = yield* makeProductOperationFoundation({
+      options,
+      ownerScope,
+      publishInteractiveActivity,
+      publishTurnSettled,
+    }).pipe(
       Effect.provideService(Scope.Scope, ownerScope),
       Effect.mapError((error) => operationError(String(error), error)),
     )
@@ -119,6 +130,7 @@ export const buildProductOperationExecutionState = (
       flushIngest,
       deliverResultEvents,
       publishInteractiveActivity,
+      publishTurnSettled,
       createObservedSubmission,
       claimTurnObserver,
       releaseTurnObserver,

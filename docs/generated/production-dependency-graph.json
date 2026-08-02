@@ -21950,6 +21950,14 @@
     },
     {
       "from": "packages/product/src/operation/dispatch/noninteractive-operation-dispatch.ts",
+      "to": "packages/product/src/operation/interactive/interactive-session-interface-support.ts",
+      "specifier": "../interactive/interactive-session-interface-support",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/noninteractive-operation-dispatch.ts",
       "to": "packages/product/src/operation/operation-error.ts",
       "specifier": "../operation-error",
       "kind": "import",
@@ -24856,6 +24864,14 @@
       "from": "packages/product/src/operation/interactive/interactive-session-submission-stages.ts",
       "to": "packages/product/src/operation/interactive/interactive-event.ts",
       "specifier": "./interactive-event",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-submission-stages.ts",
+      "to": "packages/product/src/operation/interactive/interactive-session-interface-support.ts",
+      "specifier": "./interactive-session-interface-support",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -30846,6 +30862,14 @@
     },
     {
       "from": "packages/relay-execution/src/relay/execution/relay-tool-composition.ts",
+      "to": "packages/coding-tools/src/delegation/agent-tool-contract.ts",
+      "specifier": "@rika/coding-tools/agent-tool-contract",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-tool-composition.ts",
       "to": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
       "specifier": "@rika/coding-tools/coding-tool-runtime",
       "kind": "dynamic-import",
@@ -30886,8 +30910,24 @@
     },
     {
       "from": "packages/relay-execution/src/relay/execution/relay-tool-composition.ts",
+      "to": "packages/relay-execution/src/relay/execution/relay-child-join-plan.ts",
+      "specifier": "./relay-child-join-plan",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-tool-composition.ts",
       "to": "packages/relay-execution/src/relay/execution/relay-child-result.ts",
       "specifier": "./relay-child-result",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/src/relay/execution/relay-tool-composition.ts",
+      "to": "packages/relay-execution/src/relay/execution/relay-execution-id-codec.ts",
+      "specifier": "./relay-execution-id-codec",
       "kind": "import",
       "relationship": "runtime",
       "production": true

@@ -36,6 +36,7 @@ export interface InteractiveLoop {
   transcriptNewestCursor: TranscriptPage.PageCursor | undefined
   appliedDeltas: Set<string>
   activeSelectionEpoch: number
+  activitySequence: number
   submissionSequence: number
   fibers: Set<Fiber.Fiber<void, never>>
   selectionFiber: Fiber.Fiber<void, never> | undefined

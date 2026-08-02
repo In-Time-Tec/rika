@@ -2,7 +2,7 @@ import { Function, Schema } from "effect"
 
 declare const RIKA_BUILD_IDENTITY: string | undefined
 
-const protocolVersion = 7
+const protocolVersion = 8
 const buildIdentity = typeof RIKA_BUILD_IDENTITY === "string" ? RIKA_BUILD_IDENTITY : "rika-development-build"
 const replacementGuard = "active-execution-v1" as const
 const ClientKind = Schema.Literals(["interactive", "run", "review", "workflow", "thread-continue", "product"])

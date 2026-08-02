@@ -15,6 +15,9 @@ export interface ActiveTime {
 
 export type ActiveTimeAvailability = ({ readonly _tag: "Available" } & ActiveTime) | { readonly _tag: "Unavailable" }
 
+const lifecycleTimestamp = (event: ActiveEvent, previous: number | undefined) =>
+  event.type === "wait.created" && previous !== undefined ? Math.max(previous, event.createdAt) : event.createdAt
+
 export const executionIntervals = (events: ReadonlyArray<ActiveEvent>): ReadonlyArray<Interval> | undefined => {
   const ordered = events.toSorted(
     (left, right) => left.sequence - right.sequence || left.type.localeCompare(right.type),
@@ -28,10 +31,11 @@ export const executionIntervals = (events: ReadonlyArray<ActiveEvent>): Readonly
   let previousSequence: number | undefined
   let previousCreatedAt: number | undefined
   for (const event of ordered) {
-    if (previousSequence === event.sequence || (previousCreatedAt !== undefined && event.createdAt < previousCreatedAt))
+    const createdAt = lifecycleTimestamp(event, previousCreatedAt)
+    if (previousSequence === event.sequence || (previousCreatedAt !== undefined && createdAt < previousCreatedAt))
       return undefined
     previousSequence = event.sequence
-    previousCreatedAt = event.createdAt
+    previousCreatedAt = createdAt
     if (terminal) return undefined
     if (event.type === "execution.accepted") {
       if (accepted || started) return undefined
@@ -41,7 +45,7 @@ export const executionIntervals = (events: ReadonlyArray<ActiveEvent>): Readonly
     if (event.type === "execution.started") {
       if (started) return undefined
       started = true
-      activeSince = event.createdAt
+      activeSince = createdAt
       continue
     }
     if (!started) {
@@ -53,7 +57,7 @@ export const executionIntervals = (events: ReadonlyArray<ActiveEvent>): Readonly
     }
     if (event.type === "wait.created") {
       if (outstandingWaits === 0 && activeSince !== undefined) {
-        intervals.push({ start: activeSince, end: event.createdAt })
+        intervals.push({ start: activeSince, end: createdAt })
         activeSince = undefined
       }
       outstandingWaits += 1
@@ -62,11 +66,11 @@ export const executionIntervals = (events: ReadonlyArray<ActiveEvent>): Readonly
     if (event.type === "wait.woken" || event.type === "wait.timed_out" || event.type === "wait.cancelled") {
       if (outstandingWaits === 0) return undefined
       outstandingWaits -= 1
-      if (outstandingWaits === 0) activeSince = event.createdAt
+      if (outstandingWaits === 0) activeSince = createdAt
       continue
     }
     if (activeSince !== undefined) {
-      intervals.push({ start: activeSince, end: event.createdAt })
+      intervals.push({ start: activeSince, end: createdAt })
       activeSince = undefined
     }
     if (Lifecycle.isTerminalEventType(event.type)) terminal = true

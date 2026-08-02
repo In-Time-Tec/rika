@@ -364,7 +364,6 @@ describe("UsageCost", () => {
     expect(Support.UsageCost.activeTime(snapshot, "thread")).toEqual({
       _tag: "Available",
       accumulated: Duration.zero,
-      activeSince: 10_000,
     })
   })
 })

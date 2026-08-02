@@ -40,7 +40,14 @@ it("clears working state when the semantic event stream reaches a terminal event
     TranscriptProjection.Projection.empty(activeTurn.id, activeTurn.prompt),
   )
   feed.apply({ cursor: "completed", sequence: 1, type: "execution.completed", createdAt: 3 })
-  const completed = feed.stop("completed")
+  const completed = InteractiveController.update(feed.state, {
+    _tag: "TurnSettled",
+    selectionEpoch: 1,
+    activitySequence: 1,
+    threadId: thread.id,
+    turnId: activeTurn.id,
+    status: "completed",
+  })
 
   expect(completed.state.model).toMatchObject({ busy: false, activity: undefined, activeTurnId: undefined })
 })

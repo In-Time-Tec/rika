@@ -41,6 +41,7 @@ export const makeEventRouter = (runtime: Runtime) => {
       event._tag === "TranscriptProjectionStopped" ||
       event._tag === "TranscriptProjectionFailed" ||
       event._tag === "TranscriptResyncRequired" ||
+      event._tag === "TurnSettled" ||
       event._tag === "ThreadUsageUpdated" ||
       event._tag === "ThreadRefolding"
     ) {
@@ -51,6 +52,7 @@ export const makeEventRouter = (runtime: Runtime) => {
         {
           model: loop.model,
           selectionEpoch: loop.activeSelectionEpoch,
+          activitySequence: loop.activitySequence,
           replayTurns: loop.replayTurns,
           entries: loop.loadedTranscriptEntries,
           revisions: loop.projectionRevisions,
@@ -67,6 +69,7 @@ export const makeEventRouter = (runtime: Runtime) => {
       )
       loop.model = controlled.state.model
       loop.activeSelectionEpoch = controlled.state.selectionEpoch
+      loop.activitySequence = controlled.state.activitySequence ?? loop.activitySequence
       loop.replayTurns = new Map(controlled.state.replayTurns)
       loop.loadedTranscriptEntries = controlled.state.entries
       loop.projectionRevisions = new Map(controlled.state.revisions)
@@ -143,9 +146,11 @@ export const makeEventRouter = (runtime: Runtime) => {
         requestQueueResync(event.threadId)
     } else if (event._tag === "TurnStarted") {
       if (
+        event.activitySequence > loop.activitySequence &&
         event.selectionEpoch === loop.activeSelectionEpoch &&
         (loop.model.currentThreadId === undefined || loop.model.currentThreadId === event.threadId)
       ) {
+        loop.activitySequence = event.activitySequence
         const known = loop.replayTurns.get(event.turn.id)
         if (
           known?.status === "completed" ||

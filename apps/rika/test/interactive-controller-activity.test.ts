@@ -75,7 +75,14 @@ it("keeps one of five status labels from submit until the turn completes", () =>
   patch(10, "execution.completed")
   expectStatus("Waiting")
   expect(state.model.busy).toBe(true)
-  state = feed.stop("completed").state
+  state = InteractiveController.update(state, {
+    _tag: "TurnSettled",
+    selectionEpoch: 1,
+    activitySequence: 1,
+    threadId: thread.id,
+    turnId: turn.id,
+    status: "completed",
+  }).state
   expect(Message.formatActivity(state.model.activity)).toBeUndefined()
   expect(state.model.busy).toBe(false)
 })

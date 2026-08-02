@@ -13,6 +13,7 @@ import { admitInteractiveTurn } from "./interactive-turn-submission"
 import { OperationError, failureKind, operationError } from "../operation-error"
 import type { ModeId } from "@rika/configuration/behavior-mode"
 import type { InteractiveEvent } from "./interactive-event"
+import { agentResponseArrived } from "./interactive-session-interface-support"
 
 const emitEvent = (input: any, dispatch: (event: InteractiveEvent) => void, event: InteractiveEvent) =>
   input.emit(dispatch, event)
@@ -117,6 +118,7 @@ const settleInteractiveSubmissionImpl = (input: any, state: any) => {
     status: import("@rika/product/execution-status").Status,
     cursor: string | undefined,
     now: number,
+    responseArrived?: boolean,
   ) => Effect.Effect<Turn.Turn, OperationError, never> = setTurnStatus
   const typedProjectExecutionResult: (
     threadId: Turn.Turn["threadId"],
@@ -158,6 +160,7 @@ const settleInteractiveSubmissionImpl = (input: any, state: any) => {
         result.status,
         result.checkpoint?.cursor ?? ThreadActivity.latestCursor(turn.id, result.events) ?? turn.lastCursor,
         yield* Clock.currentTimeMillis,
+        result.status === "cancelled" ? agentResponseArrived(result.events) : undefined,
       )
       yield* typedProjectExecutionResult(thread.id, result)
       yield* typedEnsureIngest(updated.threadId, updated.id)
@@ -234,6 +237,7 @@ const executeInteractiveSubmissionImpl = (
     status: import("@rika/product/execution-status").Status,
     cursor: string | undefined,
     now: number,
+    responseArrived?: boolean,
   ) => Effect.Effect<Turn.Turn, OperationError, never> = setTurnStatus
   const typedEnsureIngest: (
     threadId: Turn.Turn["threadId"],
@@ -273,6 +277,7 @@ const executeInteractiveSubmissionImpl = (
         emitEvent(input, dispatch, {
           _tag: "TurnStarted",
           selectionEpoch: 0,
+          activitySequence: 0,
           threadId: thread.id,
           turn: running,
           ...(submissionId === undefined ? {} : { submissionId }),

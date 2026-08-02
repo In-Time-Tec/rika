@@ -197,7 +197,8 @@ describe("InteractiveSession controls", () => {
           (event) =>
             event._tag !== "ThreadsListed" &&
             event._tag !== "TranscriptProjectionStarted" &&
-            event._tag !== "TranscriptProjectionStopped",
+            event._tag !== "TranscriptProjectionStopped" &&
+            event._tag !== "TurnSettled",
         ),
       ).toMatchObject([
         { _tag: "ThreadActivated", threadId: "created", title: "New thread" },

@@ -85,6 +85,37 @@ describe("interactive feed overflow", () => {
     )
   })
 
+  it("coalesces terminal settlements by turn and sequence", () => {
+    const state = InteractiveFeedOverflow.make()
+    InteractiveFeedOverflow.remember(state, {
+      _tag: "TurnSettled",
+      selectionEpoch: 1,
+      activitySequence: 2,
+      threadId: turn.threadId,
+      turnId: turn.id,
+      status: "completed",
+    })
+    InteractiveFeedOverflow.remember(state, {
+      _tag: "TurnSettled",
+      selectionEpoch: 1,
+      activitySequence: 1,
+      threadId: turn.threadId,
+      turnId: turn.id,
+      status: "failed",
+    })
+
+    expect(InteractiveFeedOverflow.events(state, 1, "bounded")).toEqual([
+      {
+        _tag: "TurnSettled",
+        selectionEpoch: 1,
+        activitySequence: 2,
+        threadId: turn.threadId,
+        turnId: turn.id,
+        status: "completed",
+      },
+    ])
+  })
+
   it("coalesces usage snapshots without overflowing the recovery window", () => {
     const state = InteractiveFeedOverflow.make()
     for (let index = 0; index < InteractiveFeedOverflow.capacity + 20; index += 1)

@@ -64,6 +64,7 @@ export const interactiveTui =
             transcriptNewestCursor: undefined as TranscriptPage.PageCursor | undefined,
             appliedDeltas: new Set<string>(),
             activeSelectionEpoch: 0,
+            activitySequence: 0,
             submissionSequence: 0,
             fibers: new Set<Fiber.Fiber<void, never>>(),
             selectionFiber: undefined as Fiber.Fiber<void, never> | undefined,

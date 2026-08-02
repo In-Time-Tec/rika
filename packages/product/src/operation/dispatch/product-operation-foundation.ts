@@ -13,7 +13,7 @@ const workflowReplacementKey = (runId: string, ownerTurnId?: string, workspace?:
   JSON.stringify([runId, ownerTurnId, workspace])
 
 export const makeProductOperationFoundation = Effect.fn("ProductOperation.makeFoundation")(function* (input: any) {
-  const { options, ownerScope: rawOwnerScope, publishInteractiveActivity } = input
+  const { options, ownerScope: rawOwnerScope, publishInteractiveActivity, publishTurnSettled } = input
   const ownerScope: Scope.Scope = rawOwnerScope
   const threadToolGateway: ThreadToolService.Gateway | undefined = options.threadToolGateway
   const dependencies = yield* buildProductOperationDependencies<Error, Error, Error, Error, Error, Error, Error>({
@@ -42,7 +42,10 @@ export const makeProductOperationFoundation = Effect.fn("ProductOperation.makeFo
   ).pipe(Effect.provideService(Scope.Scope, ownerScope))
   const backendLayer = Layer.succeed(ExecutionBackend.Service, acquiredBackend)
   if (threadToolGateway !== undefined) {
-    const threadToolService = yield* ThreadToolService.make({ scheduler: rootTurnOwner }).pipe(
+    const threadToolService = yield* ThreadToolService.make({
+      scheduler: rootTurnOwner,
+      settled: publishTurnSettled,
+    }).pipe(
       Effect.provideService(
         ThreadInteractionRepository.Service,
         Context.get(dependencyContext, ThreadInteractionRepository.Service),

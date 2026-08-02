@@ -1,8 +1,31 @@
 import * as Turn from "@rika/product/turn-record"
-import { Effect, Schema } from "effect"
+import { Deferred, Effect, Schema } from "effect"
 import { expect, test } from "vitest"
 import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
+
+const waitForDurableChildOutput = Effect.fn("TuiApp.waitForDurableChildOutput")(function* (
+  app: TuiApp.TuiApp,
+  turnId: Turn.TurnId,
+) {
+  const started = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
+  for (;;) {
+    const projection = yield* app.transcript(turnId)
+    const encodedUnits =
+      projection === undefined ? undefined : yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(projection.units)
+    if (
+      projection !== undefined &&
+      projection.executionCheckpoints.length === 2 &&
+      projection.executionCheckpoints.every((checkpoint) => checkpoint.status === "completed") &&
+      encodedUnits !== undefined &&
+      encodedUnits.includes("CHILD_STREAMED_BEFORE_ROOT")
+    )
+      return projection
+    const now = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
+    if (now - started >= 5_000) return yield* Effect.die("child output was not durably persisted")
+    yield* Effect.sleep("20 millis")
+  }
+})
 
 test(
   "streams child progress before the root execution completes",
@@ -55,28 +78,7 @@ test(
         yield* app.waitFrame("ROOT_FINISHED_AFTER_CHILD_STREAM")
 
         const turnId = Turn.TurnId.make("tui-turn-0")
-        const started = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
-        let durable: NonNullable<Effect.Success<ReturnType<typeof app.transcript>>>
-        for (;;) {
-          const projection = yield* app.transcript(turnId)
-          const encodedUnits =
-            projection === undefined
-              ? undefined
-              : yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(projection.units)
-          if (
-            projection !== undefined &&
-            projection.executionCheckpoints.length === 2 &&
-            projection.executionCheckpoints.every((checkpoint) => checkpoint.status === "completed") &&
-            encodedUnits !== undefined &&
-            encodedUnits.includes("CHILD_STREAMED_BEFORE_ROOT")
-          ) {
-            durable = projection
-            break
-          }
-          const now = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
-          if (now - started >= 5_000) return yield* Effect.die("child output was not durably persisted")
-          yield* Effect.sleep("20 millis")
-        }
+        const durable = yield* waitForDurableChildOutput(app, turnId)
         expect(durable.executionCheckpoints.some((checkpoint) => checkpoint.attachment !== undefined)).toBe(true)
 
         yield* Effect.sleep("300 millis")
@@ -92,6 +94,57 @@ test(
           )
         }
         expect(exited).toBe(true)
+      }),
+    ),
+  240_000,
+)
+
+test(
+  "settles activity before a held child projection follower drains",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const hold = yield* Deferred.make<void>()
+        const app = yield* TuiApp.tuiApp({
+          inspectTranscript: true,
+          holdExecutionFollows: hold,
+          lanes: [
+            {
+              script: [
+                model.toolCall("task", { prompt: "Held child prompt" }, "held-child"),
+                model.toolCall("await_subagents", {}, "held-child-join"),
+                model.text("ROOT_SETTLED_BEFORE_CHILD_PROJECTION"),
+              ],
+            },
+            {
+              when: (prompt) => !prompt.includes("Hold child projection after root completion."),
+              script: [model.text("CHILD_STREAMED_BEFORE_ROOT")],
+            },
+          ],
+        })
+
+        yield* Effect.promise(() => app.type("Hold child projection after root completion."))
+        app.pressEnter()
+        yield* app.waitFrame("Subagent working")
+        app.pressKey("\t")
+        app.pressEnter()
+        yield* app.waitFrame("ROOT_SETTLED_BEFORE_CHILD_PROJECTION")
+        const settled = yield* app.settled
+        for (const marker of ["Waiting", "Streaming", "Thinking", "Sending", "Running 1 subagent"])
+          expect(settled).not.toContain(marker)
+
+        const rootId = Turn.TurnId.make("tui-turn-0")
+        const open = yield* app.transcript(rootId)
+        expect(open?.executionCheckpoints.some((checkpoint) => checkpoint.executionKey !== String(rootId))).toBe(true)
+        expect(open?.executionCheckpoints.some((checkpoint) => checkpoint.status !== "completed")).toBe(true)
+
+        yield* Deferred.succeed(hold, undefined)
+        const durable = yield* waitForDurableChildOutput(app, rootId)
+        expect(durable.executionCheckpoints.every((checkpoint) => checkpoint.status === "completed")).toBe(true)
+        const final = yield* app.settled
+        for (const marker of ["Waiting", "Streaming", "Thinking", "Sending", "Running 1 subagent"])
+          expect(final).not.toContain(marker)
+        yield* app.quit
       }),
     ),
   240_000,

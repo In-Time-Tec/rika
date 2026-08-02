@@ -33,6 +33,7 @@ export const makeInteractiveSessionControls = (
     status: import("@rika/product/execution-status").Status,
     cursor: string | undefined,
     now: number,
+    responseArrived?: boolean,
   ) => Effect.Effect<Turn.Turn, OperationError, never> = input.setTurnStatus
   const typedProjectExecutionResult: (
     threadId: Turn.Turn["threadId"],
@@ -46,6 +47,8 @@ export const makeInteractiveSessionControls = (
   const typedNotifyTurnChanged: (
     turn: Pick<Turn.Turn, "id" | "threadId">,
   ) => Effect.Effect<void, OperationError, never> = input.notifyTurnChanged
+  const publishTurnSettled: ((turn: Turn.Turn, responseArrived?: boolean) => Effect.Effect<void>) | undefined =
+    input.publishTurnSettled
   const typedExecutionDependencies: Context.Context<TurnRepository.Service | ExecutionBackend.Service> =
     input.executionDependencies
   const typedInteractiveThread: Ref.Ref<Thread.Thread | undefined> = input.interactiveThread
@@ -98,7 +101,10 @@ export const makeInteractiveSessionControls = (
         if (cancelledBeforeStart) {
           const cancelled = yield* turns.get(turn.id)
           yield* typedNotifyThreadSummaries
-          if (cancelled !== undefined) yield* typedNotifyTurnChanged(cancelled)
+          if (cancelled !== undefined) {
+            yield* typedNotifyTurnChanged(cancelled)
+            yield* publishTurnSettled?.(cancelled, false) ?? Effect.void
+          }
         } else {
           const result = yield* backend.cancel(turn.id)
           input.deliverResultEvents(turn.id, result.events)
@@ -145,13 +151,17 @@ export const makeInteractiveSessionControls = (
       if (beforeStart) {
         const cancelled = yield* turns.get(turn.id)
         yield* typedNotifyThreadSummaries
-        if (cancelled !== undefined) yield* typedNotifyTurnChanged(cancelled)
+        if (cancelled !== undefined) {
+          yield* typedNotifyTurnChanged(cancelled)
+          yield* publishTurnSettled?.(cancelled, false) ?? Effect.void
+        }
       }
       yield* typedSetTurnStatus(
         turn.id,
         result.status,
         ThreadActivity.latestCursor(turn.id, result.events) ?? turn.lastCursor,
         yield* Clock.currentTimeMillis,
+        result.status === "cancelled" ? agentResponseArrived(result.events) : undefined,
       )
       yield* typedProjectExecutionResult(turn.threadId, result)
       if (typedIsTerminalStatus(result.status) === true) yield* typedEnsureIngest(turn.threadId, turn.id)

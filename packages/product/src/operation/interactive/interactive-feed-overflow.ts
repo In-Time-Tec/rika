@@ -8,6 +8,7 @@ export interface State {
   readonly transcriptThreadIds: Set<string>
   readonly queueThreadIds: Set<string>
   readonly critical: Array<InteractiveEvent>
+  readonly settlements: Map<string, Extract<InteractiveEvent, { readonly _tag: "TurnSettled" }>>
   readonly usage: Map<string, Extract<InteractiveEvent, { readonly _tag: "ThreadUsageUpdated" }>>
   readonly refolds: Map<string, Extract<InteractiveEvent, { readonly _tag: "ThreadRefolding" }>>
   criticalOverflowed: boolean
@@ -19,6 +20,7 @@ export const make = (): State => ({
   transcriptThreadIds: new Set(),
   queueThreadIds: new Set(),
   critical: [],
+  settlements: new Map(),
   usage: new Map(),
   refolds: new Map(),
   criticalOverflowed: false,
@@ -52,6 +54,7 @@ export const isCritical = (event: InteractiveEvent): boolean => {
     case "ThreadTitled":
     case "ThreadPreviewLoaded":
     case "ThreadUsageUpdated":
+    case "TurnSettled":
       return true
     case "ThreadsListed":
     case "ThreadRefolding":
@@ -73,6 +76,12 @@ export const isCritical = (event: InteractiveEvent): boolean => {
 }
 
 const rememberImpl = (state: State, event: InteractiveEvent) => {
+  if (event._tag === "TurnSettled") {
+    const key = `${event.threadId}:${event.turnId}`
+    const previous = state.settlements.get(key)
+    if (previous === undefined || previous.activitySequence < event.activitySequence) state.settlements.set(key, event)
+    return
+  }
   if (state.criticalOverflowed) return
   const id = threadId(event)
   switch (event._tag) {
@@ -128,6 +137,9 @@ const eventsImpl = (state: State, selectionEpoch: number, reason: string): Reado
   if (state.activated !== undefined) recovered.push(state.activated)
   if (state.summaries !== undefined) recovered.push(state.summaries)
   recovered.push(...state.critical)
+  recovered.push(
+    ...[...state.settlements.values()].toSorted((left, right) => left.activitySequence - right.activitySequence),
+  )
   recovered.push(...state.usage.values())
   recovered.push(...state.refolds.values())
   for (const id of state.transcriptThreadIds)

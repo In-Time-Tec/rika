@@ -17,6 +17,7 @@ const withEpoch = (event: InteractiveEvent, epoch: number): InteractiveEvent => 
     case "QueueResyncRequired":
     case "QueueFull":
     case "TurnStarted":
+    case "TurnSettled":
     case "ContextDiagnostics":
     case "ExecutionFailed":
     case "ExecutionControlFailed":
@@ -81,7 +82,7 @@ const eventThreadId = (event: InteractiveEvent): string | undefined => {
 export const makeInteractiveOperationFeed = (input: {
   readonly sessionId: number
   readonly sessionScope: import("effect").Scope.Scope
-  readonly publishActivity: (origin: number, event: InteractiveEvent) => void
+  readonly publishActivity: (origin: number, event: InteractiveEvent) => InteractiveEvent
   readonly selectionAdmission: Semaphore.Semaphore
   readonly selectionRequest: import("effect").Ref.Ref<number>
   readonly selectionLoad: {
@@ -185,8 +186,8 @@ export const makeInteractiveOperationFeed = (input: {
       return true
     }
     const emit = (dispatch: (event: InteractiveEvent) => void, event: InteractiveEvent) => {
-      dispatch(event)
-      input.publishActivity(input.sessionId, event)
+      const published = input.publishActivity(input.sessionId, event)
+      dispatch(published)
     }
     const events = (
       dispatch: (event: InteractiveEvent) => void,

@@ -115,14 +115,34 @@ export const productLayer = <
       let activitySequence = 0
       const interactiveSinks = new Map<number, (origin: number, event: any) => void>()
       const sessionThreadViews = new Map<number, () => string | undefined>()
-      const publishInteractiveActivity = (origin: number, event: any) => {
-        activitySequence += 1
-        for (const [sessionId, sink] of interactiveSinks) if (sessionId !== origin) sink(origin, event)
+      const publishInteractiveActivity = (origin: number, event: any): any => {
+        const published =
+          event._tag === "TurnStarted" || event._tag === "TurnSettled"
+            ? { ...event, activitySequence: (activitySequence += 1) }
+            : event
+        for (const [sessionId, sink] of interactiveSinks) if (sessionId !== origin) sink(origin, published)
+        return published
+      }
+      const publishTurnSettled = (turn: any, responseArrived?: boolean) => {
+        const status = turn.status
+        if (status !== "completed" && status !== "failed" && status !== "cancelled") return Effect.void
+        return Effect.sync(() =>
+          publishInteractiveActivity(0, {
+            _tag: "TurnSettled",
+            selectionEpoch: 0,
+            activitySequence: 0,
+            threadId: turn.threadId,
+            turnId: turn.id,
+            status,
+            ...(responseArrived === undefined ? {} : { agentResponseArrived: responseArrived }),
+          }),
+        ).pipe(Effect.asVoid)
       }
       const state = yield* makeProductOperationRuntimeState({
         options,
         ownerScope,
         publishInteractiveActivity,
+        publishTurnSettled,
         interactiveSinks,
         sessionThreadViews,
         activitySequence,
