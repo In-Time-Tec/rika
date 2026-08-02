@@ -20,15 +20,15 @@ describe("ConfigContract", () => {
     expect(ConfigContract.defaults.models.luna).toMatchObject({
       provider: "openai",
       candidates: ["gpt-5.6-luna"],
-      limits: { maxInputTokens: 922_000, maxOutputTokens: 128_000, keepRecentTokens: 32_000 },
+      limits: { contextWindow: 272_000, maxInputTokens: 258_400, maxOutputTokens: 128_000, keepRecentTokens: 32_000 },
     })
-    expect(Models.catalog.gpt56Sol.limits.contextWindow).toBe(1_050_000)
+    expect(Models.catalog.gpt56Sol.limits.contextWindow).toBe(272_000)
     expect(ConfigContract.resolveModelRoute(ConfigContract.defaults, "medium", "main")).toMatchObject({
       alias: "terra",
       providerId: "openai",
       model: "gpt-5.6-terra",
       options: { reasoning: { effort: "xhigh" } },
-      compaction: { contextWindow: 1_050_000, reserveTokens: 128_000, keepRecentTokens: 32_000 },
+      compaction: { contextWindow: 272_000, reserveTokens: 13_600, keepRecentTokens: 32_000 },
     })
     expect(ConfigContract.resolveCompactionSummaryRoute(ConfigContract.defaults)).toMatchObject({
       alias: "sol",

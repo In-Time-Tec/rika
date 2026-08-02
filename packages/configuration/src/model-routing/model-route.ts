@@ -53,6 +53,7 @@ export namespace ModelRoute {
     readonly provider: ProviderId
     readonly candidates: ReadonlyArray<string>
     readonly limits: {
+      readonly contextWindow?: number
       readonly maxInputTokens: number
       readonly maxOutputTokens: number
       readonly keepRecentTokens: number

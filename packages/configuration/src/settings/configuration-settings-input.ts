@@ -10,6 +10,7 @@ export interface ModelAliasInput {
   readonly displayName?: string
   readonly supportsMedia?: boolean
   readonly limits?: {
+    readonly contextWindow?: number
     readonly maxInputTokens: number
     readonly maxOutputTokens: number
     readonly keepRecentTokens: number

@@ -25,8 +25,8 @@ test("rejects web search provider IDs that are not installed", () =>
 
 test("uses production compaction defaults and route overrides", () => {
   expect(productionCompaction()).toEqual({
-    contextWindow: 1_050_000,
-    reserveTokens: 128_000,
+    contextWindow: 272_000,
+    reserveTokens: 13_600,
     keepRecentTokens: 32_000,
   })
   expect(

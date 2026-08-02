@@ -20,8 +20,8 @@ export const providerDefaults = {
 } as const
 
 export const defaultCompaction = {
-  contextWindow: 1_050_000,
-  reserveTokens: 128_000,
+  contextWindow: 272_000,
+  reserveTokens: 13_600,
   keepRecentTokens: 32_000,
 }
 

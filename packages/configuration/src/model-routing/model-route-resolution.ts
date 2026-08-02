@@ -65,8 +65,10 @@ const resolveRoute = (
     candidates: alias.candidates,
     model,
     compaction: {
-      contextWindow: alias.limits.maxInputTokens + alias.limits.maxOutputTokens,
-      reserveTokens: alias.limits.maxOutputTokens,
+      contextWindow: alias.limits.contextWindow ?? alias.limits.maxInputTokens + alias.limits.maxOutputTokens,
+      reserveTokens:
+        (alias.limits.contextWindow ?? alias.limits.maxInputTokens + alias.limits.maxOutputTokens) -
+        alias.limits.maxInputTokens,
       keepRecentTokens: alias.limits.keepRecentTokens,
     },
     maxOutputTokens: alias.limits.maxOutputTokens,

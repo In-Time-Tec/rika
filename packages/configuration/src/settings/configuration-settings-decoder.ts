@@ -265,6 +265,7 @@ export const decodeSettingsInput: {
         if (!object(alias.limits))
           throw ConfigurationSettingsFileError.make({ path, message: `Model alias ${name} limits must be an object` })
         exactKeys(path, `Model alias ${name} limits`, alias.limits, [
+          "contextWindow",
           "maxInputTokens",
           "maxOutputTokens",
           "keepRecentTokens",
@@ -275,6 +276,20 @@ export const decodeSettingsInput: {
             throw ConfigurationSettingsFileError.make({
               path,
               message: `Model alias ${name} limits ${key} must be a positive number`,
+            })
+        }
+        const window = alias.limits["contextWindow"]
+        if (window !== undefined) {
+          if (typeof window !== "number" || !Number.isFinite(window) || window <= 0)
+            throw ConfigurationSettingsFileError.make({
+              path,
+              message: `Model alias ${name} limits contextWindow must be a positive number`,
+            })
+          const maxInput = alias.limits["maxInputTokens"]
+          if (typeof maxInput === "number" && window < maxInput)
+            throw ConfigurationSettingsFileError.make({
+              path,
+              message: `Model alias ${name} limits contextWindow must be at least maxInputTokens`,
             })
         }
       }
