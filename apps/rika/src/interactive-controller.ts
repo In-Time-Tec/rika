@@ -15,6 +15,7 @@ type TranscriptEvent = Extract<
   | { readonly _tag: "TranscriptProjectionStopped" }
   | { readonly _tag: "TranscriptProjectionFailed" }
   | { readonly _tag: "TranscriptResyncRequired" }
+  | { readonly _tag: "TurnSettled" }
   | { readonly _tag: "ThreadUsageUpdated" }
   | { readonly _tag: "ThreadRefolding" }
 >
@@ -27,6 +28,7 @@ type QueueEvent = Extract<
 export interface State {
   readonly model: ViewState.Model
   readonly selectionEpoch: number
+  readonly activitySequence?: number
   readonly replayTurns: ReadonlyMap<string, Turn.Turn>
   readonly entries: ReadonlyArray<TranscriptRepository.Entry>
   readonly revisions: ReadonlyMap<string, number>
@@ -118,6 +120,7 @@ export interface Update {
   readonly unattached?: ReadonlyArray<string>
   readonly discarded?: boolean
   readonly resync?: boolean
+  readonly rejection?: "epoch" | "thread" | "stream" | "baseRevision" | "patchRevision" | "rootStatus"
 }
 
 export const warnUnattached = (unattached: ReadonlyArray<string>): Effect.Effect<void> =>
@@ -556,6 +559,22 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       preserveAnchor: false,
     }
   }
+  if (event._tag === "TurnSettled") {
+    if (event.selectionEpoch !== state.selectionEpoch) return { state, preserveAnchor: false, rejection: "epoch" }
+    if (state.model.currentThreadId !== event.threadId) return { state, preserveAnchor: false, rejection: "thread" }
+    if (event.activitySequence <= (state.activitySequence ?? 0)) return { state, preserveAnchor: false }
+    const activeTurnId = state.model.activeTurnId
+    if (activeTurnId !== String(event.turnId))
+      return { state: { ...state, activitySequence: event.activitySequence }, preserveAnchor: false }
+    return {
+      state: {
+        ...state,
+        activitySequence: event.activitySequence,
+        model: { ...state.model, activeTurnId: undefined, busy: false, activity: undefined },
+      },
+      preserveAnchor: false,
+    }
+  }
   if (event._tag === "SelectionLoaded") {
     if (event.selectionEpoch < state.selectionEpoch) return { state, preserveAnchor: false }
     if (
@@ -564,7 +583,10 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       event.entries.some((entry) => entry.projectionRevision < (state.revisions.get(entry.turn.id) ?? -1))
     )
       return { state, preserveAnchor: false }
-    const activeTurn = event.activeTurn
+    const sameSelection =
+      event.selectionEpoch === state.selectionEpoch && state.model.currentThreadId === event.thread.id
+    const lifecycleFresh = event.activitySequence >= (state.activitySequence ?? 0)
+    const activeTurn = lifecycleFresh ? event.activeTurn : undefined
     const keepNewerQueue =
       event.selectionEpoch === state.selectionEpoch &&
       state.model.queueThreadId === event.thread.id &&
@@ -572,8 +594,20 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
     const queue = keepNewerQueue ? state.model.queue : event.queue
     const queueRevision = keepNewerQueue ? state.model.queueRevision : event.queueRevision
     const entries = normalizeEntries(event.entries)
-    const sameSelection =
-      event.selectionEpoch === state.selectionEpoch && state.model.currentThreadId === event.thread.id
+    let lifecycle: Pick<ViewState.Model, "activeTurnId" | "busy" | "activity">
+    if (lifecycleFresh)
+      lifecycle = {
+        activeTurnId: activeTurn?.id,
+        busy: activeTurn !== undefined,
+        activity: activeTurn === undefined ? undefined : { _tag: "Waiting" },
+      }
+    else if (sameSelection)
+      lifecycle = {
+        activeTurnId: state.model.activeTurnId,
+        busy: state.model.busy,
+        activity: state.model.activity,
+      }
+    else lifecycle = { activeTurnId: undefined, busy: false, activity: undefined }
     const model = cleared({
       ...state.model,
       ...(sameSelection
@@ -585,9 +619,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
             usageTokens: { _tag: "Loading" as const },
             usageTime: { _tag: "Loading" as const },
           }),
-      activeTurnId: activeTurn?.id,
-      busy: activeTurn !== undefined,
-      activity: activeTurn === undefined ? undefined : { _tag: "Waiting" },
+      ...lifecycle,
       currentThreadId: String(event.thread.id),
       currentThreadTitle: event.thread.title,
       editingTurnId: undefined,
@@ -655,6 +687,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
     return {
       state: {
         selectionEpoch: event.selectionEpoch,
+        activitySequence: lifecycleFresh ? event.activitySequence : (state.activitySequence ?? 0),
         model: projected,
         replayTurns,
         entries: selected,
@@ -853,10 +886,11 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       [rootTurnId, stream] as const,
     ])
     let model = TranscriptPresenter.applyTurnDelta(state.model, rootTurnId, event.delta)
-    model = {
-      ...model,
-      activity: activityAfterOrigin(state.model.activity, event.origin, event.state, model),
-    }
+    if (model.activeTurnId === rootTurnId && model.busy)
+      model = {
+        ...model,
+        activity: activityAfterOrigin(state.model.activity, event.origin, event.state, model),
+      }
     if (
       event.origin._tag === "Event" &&
       event.origin.type === "steering.delivered" &&
@@ -879,18 +913,16 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
     }
   }
   if (event._tag === "TranscriptProjectionStopped") {
-    if (event.selectionEpoch !== state.selectionEpoch || state.model.currentThreadId !== event.threadId)
-      return { state, preserveAnchor: false }
+    if (event.selectionEpoch !== state.selectionEpoch) return { state, preserveAnchor: false, rejection: "epoch" }
+    if (state.model.currentThreadId !== event.threadId) return { state, preserveAnchor: false, rejection: "thread" }
     const rootTurnId = String(event.rootTurnId)
     const current = state.projectionStreams?.get(rootTurnId)
-    if (
-      current === undefined ||
-      current._tag !== "Open" ||
-      current.streamId !== event.streamId ||
-      current.patchRevision !== event.patchRevision ||
-      current.rootStatus !== event.status
-    )
-      return { state, preserveAnchor: false, resync: true }
+    if (current === undefined || current._tag !== "Open" || current.streamId !== event.streamId)
+      return { state, preserveAnchor: false, resync: true, rejection: "stream" }
+    if (current.patchRevision !== event.patchRevision)
+      return { state, preserveAnchor: false, resync: true, rejection: "patchRevision" }
+    if (current.rootStatus !== event.status)
+      return { state, preserveAnchor: false, resync: true, rejection: "rootStatus" }
     const turn = state.replayTurns.get(rootTurnId)
     let terminalTurn: Turn.AgentExecutionTurn | Turn.TerminalRecordedShellTurn | undefined
     if (turn !== undefined) {
@@ -912,17 +944,13 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       ]),
       "oldest",
     )
-    const active = state.model.activeTurnId === rootTurnId
-    const activeTurnId = active ? undefined : state.model.activeTurnId
+    const activeTurnId = state.model.activeTurnId
     const knownTurns = new Map([...state.replayTurns, [rootTurnId, terminalTurn] as const])
     const replayTurns = replayTurnsForWindow(bounded.entries, knownTurns, projectionStreams, activeTurnId)
     const liveProjections = new Map(state.liveProjections)
     liveProjections.delete(rootTurnId)
-    const baseModel = active
-      ? { ...state.model, activeTurnId: undefined, busy: false, activity: undefined }
-      : state.model
     const model = project(
-      cleared(baseModel),
+      cleared(state.model),
       displayedEntries(bounded.entries, replayTurns, liveProjections, projectionStreams, activeTurnId),
       state.threadCostUsd,
     )

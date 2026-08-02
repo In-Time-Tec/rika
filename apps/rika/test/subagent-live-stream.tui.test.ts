@@ -160,8 +160,21 @@ test(
         app.pressKey("\t")
         app.pressEnter()
         yield* app.waitFrame("PARALLEL_CHILD_A")
-        const finished = yield* app.waitFrame("PARALLEL_ROOT_FINISHED")
+        yield* app.waitFrame("PARALLEL_ROOT_FINISHED")
+        const finished = yield* app.settled
+        expect(finished).toContain("PARALLEL_ROOT_FINISHED")
         expect(finished).not.toContain("Execution failed")
+        for (const marker of [
+          "Waiting",
+          "Streaming",
+          "Thinking",
+          "Sending",
+          "Running 1 subagent",
+          "Running 1 tool",
+          "Running 2 tools",
+          "Running 2 subagents",
+        ])
+          expect(finished).not.toContain(marker)
 
         const projection = yield* app.transcript(Turn.TurnId.make("tui-turn-0"))
         expect(projection?.executionCheckpoints).toHaveLength(4)

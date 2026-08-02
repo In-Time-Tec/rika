@@ -221,6 +221,7 @@ const withSelectionEpoch = (event: InteractiveEvent, selectionEpoch: number): In
     case "QueueResyncRequired":
     case "QueueFull":
     case "TurnStarted":
+    case "TurnSettled":
     case "ContextDiagnostics":
     case "ExecutionFailed":
     case "ExecutionControlFailed":
@@ -1254,6 +1255,7 @@ export const productLayer = <
       const pendingTurnCapacity = Math.max(0, Math.floor(options.pendingTurnCapacity ?? 64))
       const reviewSettlementAdmission = yield* Semaphore.make(1)
       const turnMutationAdmission = yield* Semaphore.make(1)
+      const activityPublicationAdmission = yield* Semaphore.make(1)
       const createForSubmission = (turns: TurnRepository.Interface, input: TurnRepository.CreateInput) =>
         turnMutationAdmission.withPermits(1)(turns.createForSubmission(input))
       const turnChanges = yield* PubSub.sliding<void>(1)
@@ -1294,9 +1296,13 @@ export const productLayer = <
           return { turn, claimed: yield* rootTurnOwner.claim(turn.id, turn.status) }
         }).pipe(turnMutationAdmission.withPermits(1))
       const claimQueuedTurn = (threadId: Thread.ThreadId, now: number) => rootTurnOwner.claimQueued(threadId, now)
-      const publishInteractiveActivity = (origin: number, event: InteractiveEvent) => {
-        activitySequence += 1
-        for (const [sessionId, sink] of interactiveSinks) if (sessionId !== origin) sink(origin, event)
+      const publishInteractiveActivity = (origin: number, event: InteractiveEvent): InteractiveEvent => {
+        const published =
+          event._tag === "TurnStarted" || event._tag === "TurnSettled"
+            ? { ...event, activitySequence: (activitySequence += 1) }
+            : event
+        for (const [sessionId, sink] of interactiveSinks) if (sessionId !== origin) sink(origin, published)
+        return published
       }
       const reviewSettlements = new Map<string, Fiber.Fiber<ExecutionBackend.FanOutInspection, OperationError>>()
       const resolvedContextLayer =
@@ -1724,6 +1730,32 @@ export const productLayer = <
         yield* summaries.replaceTurn(ThreadActivity.projectionInput(threadId, result, yield* Clock.currentTimeMillis))
         yield* notifyThreadSummaries
       })
+      const publishTurnSettled = (turn: Turn.Turn) => {
+        const status = turn.status
+        if (status !== "completed" && status !== "failed" && status !== "cancelled") return Effect.void
+        return activityPublicationAdmission.withPermits(1)(
+          Effect.sync(() =>
+            publishInteractiveActivity(0, {
+              _tag: "TurnSettled",
+              selectionEpoch: 0,
+              activitySequence: 0,
+              threadId: turn.threadId,
+              turnId: turn.id,
+              status,
+            }),
+          ).pipe(
+            Effect.andThen(
+              Effect.logInfo("turn.settlement.published").pipe(
+                Effect.annotateLogs({
+                  "rika.thread.id": String(turn.threadId),
+                  "rika.turn.id": String(turn.id),
+                  "rika.turn.status": turn.status,
+                }),
+              ),
+            ),
+          ),
+        )
+      }
       const setTurnStatus = Effect.fn("Operation.setTurnStatus")(function* (
         id: Turn.TurnId,
         status: Turn.Status,
@@ -1734,6 +1766,7 @@ export const productLayer = <
         const turn = yield* turns.setStatus(id, status, lastCursor, now)
         yield* notifyThreadSummaries
         yield* notifyTurnChanged(turn)
+        yield* publishTurnSettled(turn)
         return turn
       })
       const repairThreadSummaries = Effect.fn("Operation.repairThreadSummaries")(function* () {
@@ -2187,8 +2220,8 @@ export const productLayer = <
             }),
           )
         const emit = (dispatch: (event: InteractiveEvent) => void, event: InteractiveEvent) => {
-          dispatch(event)
-          publishInteractiveActivity(sessionId, event)
+          const published = publishInteractiveActivity(sessionId, event)
+          dispatch(published)
         }
         const submissionAdmission = yield* Semaphore.make(1)
         const interactiveThread = yield* Ref.make<Thread.Thread | undefined>(undefined)
@@ -2433,6 +2466,7 @@ export const productLayer = <
                       emit(dispatch, {
                         _tag: "TurnStarted",
                         selectionEpoch: 0,
+                        activitySequence: 0,
                         threadId: thread.id,
                         turn: runningTurn,
                         ...(submissionId === undefined ? {} : { submissionId }),
@@ -2661,6 +2695,7 @@ export const productLayer = <
               emit(dispatch, {
                 _tag: "TurnStarted",
                 selectionEpoch: 0,
+                activitySequence: 0,
                 threadId: thread.id,
                 turn: runningTurn,
               })
@@ -3032,12 +3067,17 @@ export const productLayer = <
           const globalCostUsd = undefined
           if (before === undefined) {
             const queue = yield* turns.readQueue(thread.id)
-            const activeTurn = yield* turns.findActive(thread.id)
             if (!isCurrentSelectionState(state) || (yield* Ref.get(selectionRequest)) !== request) return
             for (const entry of entries) state.loadedKeys.add(entry.unit.key)
             yield* selectionAdmission.withPermits(1)(
               Effect.uninterruptible(
                 Effect.gen(function* () {
+                  const lifecycleSnapshot = yield* activityPublicationAdmission.withPermits(1)(
+                    Effect.gen(function* () {
+                      const activeTurn = yield* turns.findActive(thread.id)
+                      return { activeTurn, activitySequence }
+                    }),
+                  )
                   if ((yield* Ref.get(selectionRequest)) !== request || candidateSelectionState !== state) return
                   const loading = selectionLoad
                   if (loading === undefined || loading.epoch !== request || loading.threadId !== String(thread.id))
@@ -3049,10 +3089,17 @@ export const productLayer = <
                   yield* Ref.set(interactiveThread, thread)
                   selectedThreadId = String(thread.id)
                   loading.committed = true
+                  yield* Effect.logInfo("selection.lifecycle.loaded").pipe(
+                    Effect.annotateLogs({
+                      "rika.thread.id": String(thread.id),
+                      "rika.activity.sequence": lifecycleSnapshot.activitySequence,
+                      "rika.turn.active": lifecycleSnapshot.activeTurn === undefined ? "false" : "true",
+                    }),
+                  )
                   dispatch({
                     _tag: "SelectionLoaded",
                     selectionEpoch: request,
-                    activitySequence,
+                    activitySequence: lifecycleSnapshot.activitySequence,
                     thread,
                     entries,
                     hasOlder,
@@ -3066,7 +3113,7 @@ export const productLayer = <
                     queueRevision: queue.revision,
                     queuedCount: queue.queuedCount,
                     queue: queue.turns.map(queueItem),
-                    ...(activeTurn === undefined ? {} : { activeTurn }),
+                    ...(lifecycleSnapshot.activeTurn === undefined ? {} : { activeTurn: lifecycleSnapshot.activeTurn }),
                   })
                   yield* startSelectionProjectionFeed(state, dispatch)
                   releaseSelectionEvents(loading, request, "Selection activity exceeded its bounded live window")
@@ -3407,6 +3454,7 @@ export const productLayer = <
                       return yield* operationError(
                         `Recorded shell turn ${runningTurn.id} lost projection write authority`,
                       )
+                    yield* publishTurnSettled(terminalTurn)
                     const terminalEvents = recordedShellSettledEvents(terminalTurn, settled.projection)
                     if (interrupted) {
                       for (const event of terminalEvents) publishInteractiveActivity(sessionId, event)
@@ -4170,6 +4218,7 @@ export const productLayer = <
                   publishInteractiveActivity(0, {
                     _tag: "TurnStarted",
                     selectionEpoch: 0,
+                    activitySequence: 0,
                     threadId: thread.id,
                     turn: runningTurn,
                   })

@@ -169,3 +169,31 @@ describe("interactive feed overflow", () => {
     expect(state.transcriptThreadIds.size).toBe(InteractiveFeedOverflow.capacity)
   })
 })
+
+it("retains the newest settlement when the feed overflows", () => {
+  const state = InteractiveFeedOverflow.make()
+  for (let index = 0; index < InteractiveFeedOverflow.capacity + 1; index += 1)
+    InteractiveFeedOverflow.remember(state, {
+      _tag: "ExecutionFailed",
+      selectionEpoch: 0,
+      message: String(index),
+    })
+  InteractiveFeedOverflow.remember(state, {
+    _tag: "TurnSettled",
+    selectionEpoch: 7,
+    activitySequence: 2,
+    threadId: Thread.ThreadId.make("thread"),
+    turnId: Turn.TurnId.make("turn"),
+    status: "completed",
+  })
+  InteractiveFeedOverflow.remember(state, {
+    _tag: "TurnSettled",
+    selectionEpoch: 7,
+    activitySequence: 3,
+    threadId: Thread.ThreadId.make("thread"),
+    turnId: Turn.TurnId.make("turn"),
+    status: "completed",
+  })
+
+  expect(state.settlements.get("thread:turn")?.activitySequence).toBe(3)
+})

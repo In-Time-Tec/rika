@@ -433,9 +433,18 @@ export type InteractiveEvent =
   | {
       readonly _tag: "TurnStarted"
       readonly selectionEpoch: number
+      readonly activitySequence: number
       readonly threadId: Thread.ThreadId
       readonly turn: Turn.Turn
       readonly submissionId?: string
+    }
+  | {
+      readonly _tag: "TurnSettled"
+      readonly selectionEpoch: number
+      readonly activitySequence: number
+      readonly threadId: Thread.ThreadId
+      readonly turnId: Turn.TurnId
+      readonly status: "completed" | "failed" | "cancelled"
     }
   | {
       readonly _tag: "SubmissionAdmitted"
@@ -658,9 +667,18 @@ export const InteractiveEventSchema = Schema.Union([
   Schema.Struct({
     _tag: Schema.tag("TurnStarted"),
     selectionEpoch: Schema.Int,
+    activitySequence: Schema.Int,
     threadId: Thread.ThreadId,
     turn: Turn.Turn,
     submissionId: Schema.optionalKey(Schema.String),
+  }),
+  Schema.Struct({
+    _tag: Schema.tag("TurnSettled"),
+    selectionEpoch: Schema.Int,
+    activitySequence: Schema.Int,
+    threadId: Thread.ThreadId,
+    turnId: Turn.TurnId,
+    status: Schema.Literals(["completed", "failed", "cancelled"]),
   }),
   Schema.Struct({
     _tag: Schema.tag("SubmissionAdmitted"),

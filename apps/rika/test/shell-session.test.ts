@@ -253,6 +253,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
           event._tag === "TranscriptProjectionStopped" ||
           event._tag === "TranscriptProjectionFailed" ||
           event._tag === "TranscriptResyncRequired" ||
+          event._tag === "TurnSettled" ||
           event._tag === "ThreadUsageUpdated" ||
           event._tag === "ThreadRefolding"
         ) {

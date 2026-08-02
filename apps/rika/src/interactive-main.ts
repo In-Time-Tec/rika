@@ -718,6 +718,7 @@ export const interactiveTui =
         let transcriptNewestCursor: TranscriptRepository.PageCursor | undefined
         const appliedDeltas = new Set<string>()
         let activeSelectionEpoch = 0
+        let lifecycleSequence = 0
         let submissionSequence = 0
         const fibers = new Set<Fiber.Fiber<void, never>>()
         let selectionFiber: Fiber.Fiber<void, never> | undefined
@@ -768,16 +769,19 @@ export const interactiveTui =
             event._tag === "TranscriptProjectionStopped" ||
             event._tag === "TranscriptProjectionFailed" ||
             event._tag === "TranscriptResyncRequired" ||
+            event._tag === "TurnSettled" ||
             event._tag === "ThreadUsageUpdated" ||
             event._tag === "ThreadRefolding"
           ) {
             const selectionStartedAt = event._tag === "SelectionLoaded" ? performance.now() : undefined
             const previousThreadId = model.currentThreadId
             const previousThreadTitle = model.currentThreadTitle
+            const previousActiveTurnId = model.activeTurnId
             const controlled = InteractiveController.update(
               {
                 model,
                 selectionEpoch: activeSelectionEpoch,
+                activitySequence: lifecycleSequence,
                 replayTurns,
                 entries: loadedTranscriptEntries,
                 revisions: projectionRevisions,
@@ -793,6 +797,7 @@ export const interactiveTui =
             )
             model = controlled.state.model
             activeSelectionEpoch = controlled.state.selectionEpoch
+            lifecycleSequence = controlled.state.activitySequence ?? lifecycleSequence
             replayTurns = new Map(controlled.state.replayTurns)
             loadedTranscriptEntries = controlled.state.entries
             projectionRevisions = new Map(controlled.state.revisions)
@@ -820,6 +825,33 @@ export const interactiveTui =
             )
               refreshTerminalTitle()
             if (event._tag === "TranscriptProjectionPatched") fork(traceTuiModelEvent(appliedDeltas, event))
+            if (event._tag === "TurnSettled")
+              fork(
+                Effect.logInfo(
+                  previousActiveTurnId === event.turnId ? "tui.turn.settlement.applied" : "tui.turn.settlement.ignored",
+                ).pipe(
+                  Effect.annotateLogs({
+                    "rika.thread.id": String(event.threadId),
+                    "rika.turn.id": String(event.turnId),
+                    "rika.turn.active_id": previousActiveTurnId ?? "none",
+                    "rika.turn.status": event.status,
+                    "rika.activity.sequence": event.activitySequence,
+                  }),
+                ),
+              )
+            if (event._tag === "TranscriptProjectionStopped")
+              fork(
+                (controlled.rejection === undefined
+                  ? Effect.logInfo("tui.projection.stop.applied")
+                  : Effect.logWarning("tui.projection.stop.rejected")
+                ).pipe(
+                  Effect.annotateLogs({
+                    "rika.thread.id": String(event.threadId),
+                    "rika.turn.id": String(event.rootTurnId),
+                    "rika.projection.guard": controlled.rejection ?? "none",
+                  }),
+                ),
+              )
             if (
               (event._tag === "TranscriptResyncRequired" || controlled.resync === true) &&
               model.currentThreadId !== undefined
@@ -866,9 +898,11 @@ export const interactiveTui =
               requestQueueResync(event.threadId)
           } else if (event._tag === "TurnStarted") {
             if (
+              event.activitySequence > lifecycleSequence &&
               event.selectionEpoch === activeSelectionEpoch &&
               (model.currentThreadId === undefined || model.currentThreadId === event.threadId)
             ) {
+              lifecycleSequence = event.activitySequence
               const known = replayTurns.get(event.turn.id)
               if (
                 known?.status === "completed" ||

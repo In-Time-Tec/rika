@@ -654,6 +654,14 @@ describe("InteractiveSession controls", () => {
           turn: expect.objectContaining({ id: "created-turn", threadId: "created", prompt: "", status: "running" }),
         },
         {
+          _tag: "TurnSettled",
+          selectionEpoch: 0,
+          activitySequence: 2,
+          threadId: "created",
+          turnId: "created-turn",
+          status: "completed",
+        },
+        {
           _tag: "TranscriptProjectionPatched",
           selectionEpoch: 0,
           threadId: "created",

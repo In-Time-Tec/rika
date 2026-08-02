@@ -39,7 +39,16 @@ export const model = {
 
 const encodePrompt = Schema.encodeSync(Schema.UnknownFromJsonString)
 
-const activityMarkers = ["Waiting", "Streaming", "Running 1 tool", "Thinking"] as const
+const activityMarkers = [
+  "Waiting",
+  "Streaming",
+  "Thinking",
+  "Sending",
+  "Running 1 tool",
+  "Running 2 tools",
+  "Running 1 subagent",
+  "Running 2 subagents",
+] as const
 
 export type Script = ReadonlyArray<Parameters<typeof TestModel.make>[0][number]>
 

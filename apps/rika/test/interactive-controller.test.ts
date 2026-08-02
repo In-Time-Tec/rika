@@ -1254,7 +1254,15 @@ it("keeps the visible projection at a terminal boundary and rejects later patche
     delta: { upsert: [], remove: [] },
     rootStatus: "completed",
   })
-  const stopped = InteractiveController.update(terminal.state, {
+  const settled = InteractiveController.update(terminal.state, {
+    _tag: "TurnSettled",
+    selectionEpoch: 1,
+    activitySequence: 1,
+    threadId: thread.id,
+    turnId: active.id,
+    status: "completed",
+  })
+  const stopped = InteractiveController.update(settled.state, {
     _tag: "TranscriptProjectionStopped",
     selectionEpoch: 1,
     threadId: thread.id,
@@ -1735,7 +1743,14 @@ it("keeps one of five status labels from submit until the turn completes", () =>
   patch(10, "execution.completed")
   expectStatus("Waiting")
   expect(state.model.busy).toBe(true)
-  state = feed.stop("completed").state
+  state = InteractiveController.update(state, {
+    _tag: "TurnSettled",
+    selectionEpoch: 1,
+    activitySequence: 1,
+    threadId: thread.id,
+    turnId: turn.id,
+    status: "completed",
+  }).state
   expect(ViewState.formatActivity(state.model.activity)).toBeUndefined()
   expect(state.model.busy).toBe(false)
 })
@@ -2031,8 +2046,15 @@ it("clears working state when the semantic event stream reaches a terminal event
     activeTurn,
   })
   const feed = makeProjectionFeed(page.state, activeTurn, Transcript.empty(activeTurn.id, activeTurn.prompt))
-  feed.apply({ cursor: "completed", sequence: 1, type: "execution.completed", createdAt: 3 })
-  const completed = feed.stop("completed")
+  const terminal = feed.apply({ cursor: "completed", sequence: 1, type: "execution.completed", createdAt: 3 })
+  const completed = InteractiveController.update(terminal.state, {
+    _tag: "TurnSettled",
+    selectionEpoch: 1,
+    activitySequence: 1,
+    threadId: thread.id,
+    turnId: activeTurn.id,
+    status: "completed",
+  })
 
   expect(completed.state.model).toMatchObject({ busy: false, activity: undefined, activeTurnId: undefined })
 })
@@ -2346,4 +2368,86 @@ it("keeps the active projection outside the bounded contiguous history window", 
   expect(state.entries.some((entry) => entry.turn.id === active.id)).toBe(false)
   expect(state.model.entries.map((entry) => entry.text)).toContain(active.prompt)
   expect(state.newestCursor?.turnId).not.toBe(active.id)
+})
+
+it("settles an active turn before its projection stream closes", () => {
+  const turn = runningTurn("settled-before-stop")
+  const selected = populatedSelection(turn).state
+  const opened = startProjection(selected, turn, Transcript.empty(String(turn.id), turn.prompt)).state
+  const settled = InteractiveController.update(opened, {
+    _tag: "TurnSettled",
+    selectionEpoch: 1,
+    activitySequence: 1,
+    threadId: thread.id,
+    turnId: turn.id,
+    status: "completed",
+  })
+
+  expect(settled.state.model.busy).toBe(false)
+  expect(settled.state.model.activity).toBeUndefined()
+  expect(settled.state.model.activeTurnId).toBeUndefined()
+  expect(openProjectionStream(settled.state, String(turn.id))._tag).toBe("Open")
+})
+
+it("does not restore activity from late projection patches after settlement", () => {
+  const turn = runningTurn("settled-late-patch")
+  const selected = populatedSelection(turn).state
+  const opened = startProjection(selected, turn, Transcript.empty(String(turn.id), turn.prompt)).state
+  const settled = InteractiveController.update(opened, {
+    _tag: "TurnSettled",
+    selectionEpoch: 1,
+    activitySequence: 1,
+    threadId: thread.id,
+    turnId: turn.id,
+    status: "completed",
+  }).state
+  const stream = openProjectionStream(settled, String(turn.id))
+  const projection = Transcript.applyEvent(
+    Transcript.empty(String(turn.id), turn.prompt),
+    projectionEvent(turn, "late child output"),
+  )
+  const patched = InteractiveController.update(settled, {
+    _tag: "TranscriptProjectionPatched",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    rootTurnId: turn.id,
+    streamId: stream.streamId,
+    baseRevision: stream.patchRevision,
+    patchRevision: stream.patchRevision + 1,
+    origin: projectionOrigin(projectionEvent(turn, "late child output"), `execution:${turn.id}`),
+    state: visibleState(projection),
+    delta: unitDelta(Transcript.empty(String(turn.id), turn.prompt), projection),
+  })
+
+  expect(patched.state.model.busy).toBe(false)
+  expect(patched.state.model.activity).toBeUndefined()
+})
+
+it("rejects stale selection lifecycle snapshots after settlement while applying their transcript", () => {
+  const turn = runningTurn("stale-selection")
+  const selected = populatedSelection(turn).state
+  const settled = InteractiveController.update(selected, {
+    _tag: "TurnSettled",
+    selectionEpoch: 1,
+    activitySequence: 2,
+    threadId: thread.id,
+    turnId: turn.id,
+    status: "completed",
+  }).state
+  const reloaded = InteractiveController.update(settled, {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 2,
+    activitySequence: 1,
+    queueRevision: 0,
+    queue: [],
+    thread,
+    entries: entries("stale-selection-history", 3),
+    hasOlder: false,
+    activeTurn: turn,
+  })
+
+  expect(reloaded.state.entries.map((entry) => String(entry.turn.id))).toContain("stale-selection-history")
+  expect(reloaded.state.model.busy).toBe(false)
+  expect(reloaded.state.model.activity).toBeUndefined()
+  expect(reloaded.state.model.activeTurnId).toBeUndefined()
 })
