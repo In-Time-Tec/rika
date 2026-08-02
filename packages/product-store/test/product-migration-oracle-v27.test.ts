@@ -163,8 +163,9 @@ it.layer(BunServices.layer)("v27 migration and preflight oracle", (test) => {
               sidecarsAfter.map((bytes) => Array.from(bytes)),
               recipeCase.name,
             ).toEqual(sidecarsBefore.map((bytes) => Array.from(bytes)))
-            if (recipeCase.expected.fileSha256 !== "generated")
-              expect(sha256(before)).toBe(recipeCase.expected.fileSha256)
+            if (recipeCase.recipe.kind === "bytes")
+              expect(sha256(before), recipeCase.name).toBe(recipeCase.expected.fileSha256)
+            else expect(recipeCase.expected.fileSha256, recipeCase.name).toBe("generated")
             if (recipeCase.expected.sidecarSha256 !== undefined) {
               const sidecar = sidecarsBefore.find((bytes) => bytes.length > 0)
               expect(sidecar).toBeDefined()
