@@ -5,7 +5,6 @@ import type { Model } from "./terminal-state"
 
 export const isNarrow = (model: Model): boolean => model.width < 60
 export const threadSidebarWidth = 36
-export const defaultFileSidebarWidth = 52
 export const boundedThreadSidebarWidth = (terminalWidth: number): number =>
   Math.min(threadSidebarWidth, Math.max(8, terminalWidth - 24))
 export const threadSidebarLayoutWidth = (model: Model): number =>

@@ -175,12 +175,15 @@ export const paletteContent: {
 const modePickerContentImpl = (model: Model, innerWidth: number): StyledText => {
   const modes = modeIds
   const selected = modes[model.modePicker.selected] ?? model.mode
-  if (innerWidth < 40)
+  if (innerWidth < 40 || model.height <= 12) {
+    const compactDescription =
+      model.height <= 12 ? routeLabel(model.modeRoutes[selected]?.main) : modeDescription[selected]
     return new StyledText([
       bold(fg(colors[selected])(truncateToWidth(selected, innerWidth))),
       fg(colors.text)("\n"),
-      fg(colors.muted)(truncateToWidth(modeDescription[selected], innerWidth)),
+      fg(colors.muted)(truncateToWidth(compactDescription, innerWidth)),
     ])
+  }
   const gaugeWidth = Math.min(54, innerWidth)
   const fill = Math.min(gaugeWidth, modeGaugeFill[selected])
   const chunks: Array<TextChunk> = [fg(colors.text)("\n")]
@@ -208,7 +211,7 @@ const modePickerContentImpl = (model: Model, innerWidth: number): StyledText => 
   chunks.push(fg(colors.text)("\n\n"))
   chunks.push(dim(fg(colors.text)(divider("About"))))
   chunks.push(fg(colors.text)("\n\n"))
-  chunks.push(fg(colors.text)(modeDescription[selected]))
+  chunks.push(fg(colors.text)(truncateToWidth(modeDescription[selected], gaugeWidth)))
   return new StyledText(chunks)
 }
 

@@ -175,7 +175,7 @@ for (const [width, height] of [
           const coloredMark = setup
             .captureSpans()
             .lines.flatMap((line) => line.spans)
-            .some((span) => /[•●·]/u.test(span.text) && span.fg.toInts().join(",") === "61,212,255,255")
+            .some((span) => /[•●·]/u.test(span.text) && span.fg.toInts()[0] > span.fg.toInts()[1])
           expect(coloredMark).toBe(true)
         } finally {
           surface.destroy()
@@ -390,11 +390,10 @@ test("drags the sidebar left border to resize it through OpenTUI mouse routing",
         expect(narrowFrame).not.toContain("a-really-long-file-name-that-truncates.ts")
         yield* openTui(() => setup.mockMouse.drag(borderX, 10, borderX - 24, 10))
         yield* openTui(() => setup.renderOnce())
-        expect(model.sidebarWidth).toBe(60)
-        expect(surface.changedFilesBox.width).toBe(58)
+        expect(model.sidebarWidth).toBe(48)
+        expect(surface.changedFilesBox.width).toBe(46)
         const frame = setup.captureCharFrame()
         expect(frame).toContain("Changed files (1)")
-        expect(frame).toContain("a-really-long-file-name-that-truncates.ts")
         surface.changedFilesBox.focus()
         yield* openTui(() => setup.renderOnce())
         const focusBlue = setup

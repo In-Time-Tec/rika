@@ -4269,6 +4269,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/terminal/test/ui-polish.test.ts",
+      "path": "packages/terminal/test/ui-polish.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/terminal/test/visual.test.ts",
       "path": "packages/terminal/test/visual.test.ts",
       "workspace": "@rika/terminal",
@@ -13365,6 +13375,14 @@
     },
     {
       "from": "packages/terminal/test/transcript-viewport.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/ui-polish.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",

@@ -11,7 +11,6 @@ import { QueueItem as QueueItemSchema } from "./terminal-queue-item"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Entry } from "./terminal-message"
 import { ContextUsage } from "./terminal-context-usage"
-import { defaultFileSidebarWidth } from "./terminal-layout-state"
 
 export const Mode = ModeId
 export type Mode = typeof Mode.Type
@@ -220,7 +219,7 @@ const initialImpl: {
     fastMode: false,
     changedFilesOpen: false,
     changedFiles: loadableIdle,
-    sidebarWidth: defaultFileSidebarWidth,
+    sidebarWidth: 52,
     threadLoading: false,
     refoldingThreadIds: [],
     threadPreview: loadableIdle,

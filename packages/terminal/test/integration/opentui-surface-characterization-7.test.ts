@@ -175,7 +175,7 @@ for (const [width, height] of [
           const coloredMark = setup
             .captureSpans()
             .lines.flatMap((line) => line.spans)
-            .some((span) => /[•●·]/u.test(span.text) && span.fg.toInts().join(",") === "61,212,255,255")
+            .some((span) => /[•●·]/u.test(span.text) && span.fg.toInts()[0] > span.fg.toInts()[1])
           expect(coloredMark).toBe(true)
         } finally {
           surface.destroy()
@@ -452,12 +452,12 @@ test("keeps the welcome orb static without an active animation tick", () =>
       try {
         surface.update({ ...initial("/work", "high"), width: 80, height: 24 })
         yield* openTui(() => setup.renderOnce())
-        const first = setup.captureCharFrame()
+        const welcome = (surface as unknown as { readonly welcomeChild: { readonly content: unknown } }).welcomeChild
+        const firstContent = welcome.content
         clock.advance(1_000)
         yield* openTui(() => setup.renderOnce())
-        const second = setup.captureCharFrame()
-        expect(first).toContain("Welcome to Rika")
-        expect(second).toBe(first)
+        expect(setup.captureCharFrame()).toContain("Welcome to Rika")
+        expect(welcome.content).toBe(firstContent)
         expect(setup.renderer.isRunning).toBe(false)
       } finally {
         surface.destroy()

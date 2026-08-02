@@ -329,7 +329,7 @@ it.effect("renders mode picker, filtered palette, sidebar visibility, and notice
     surface.update(model({ modePicker: { open: true, selected: 2 } }))
     expect(paletteText()).toContain("high")
     expect(paletteText()).toContain("Deep reasoning for hard tasks")
-    expect(surface.paletteBox.bottomTitle).toBe(" ←→ turn · esc")
+    expect(surface.paletteBox.bottomTitle).toBe(" ↔ turn · esc")
     surface.update(model({ palette: { open: true, query: "quit", selected: 0 } }))
     expect(paletteText()).toContain("quit")
     surface.update(
