@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { Result } from "effect"
 import * as Support from "./usage-test-support"
 
 describe("UsageCost", () => {
@@ -56,13 +57,13 @@ describe("UsageCost", () => {
     expect(Support.UsageCost.threadTotals(snapshot, "thread").uncountedAttempts === 0).toBe(false)
   })
 
-  it.skip("requires released identity and attempt fields only for cost-bearing events", () => {
+  it("requires released identity and attempt fields only for cost-bearing events", () => {
     const unrelated = Support.UsageCost.observe(Support.UsageCost.empty, {
       threadId: "thread",
       turnId: "turn",
       event: { executionId: "execution", cursor: "output", sequence: 0, type: "workspace.diff", createdAt: 1 },
     })
-    const missingIdentity = Support.UsageCost.observe(unrelated, {
+    const missingIdentity = Support.RawUsageCost.observe(unrelated, {
       threadId: "thread",
       turnId: "turn",
       event: { ...Support.Fixtures.usage("missing-identity", 1), executionId: "" },
@@ -74,7 +75,7 @@ describe("UsageCost", () => {
     })
 
     expect(unrelated).toBe(Support.UsageCost.empty)
-    expect(missingIdentity).toBe(unrelated)
+    expect(Result.isFailure(missingIdentity) && missingIdentity.failure.reason).toBe("invalid-identity")
     expect(missingAttempt.global.unpricedAttempts === 0).toBe(false)
   })
 
@@ -281,20 +282,26 @@ describe("UsageCost", () => {
     expect(Support.UsageCost.threadTotals(retried, "thread")).toMatchObject({ costUsd: 1.75, unpricedAttempts: 1 })
   })
 
-  it.skip("deduplicates values by attempt and deliveries by opaque event cursor", () => {
+  it("deduplicates values by attempt and deliveries by opaque event cursor", () => {
     const first = Support.Fixtures.usage("first", 1)
     const sameAttempt = {
       ...Support.Fixtures.usage("second", 9),
       data: { ...Support.Fixtures.usage("second", 9).data, model_attempt_id: first.data?.model_attempt_id },
     }
     const duplicateDelivery = { ...Support.Fixtures.usage("ignored", 8), cursor: first.cursor }
-    const snapshot = [first, sameAttempt, duplicateDelivery].reduce(
+    const snapshot = [first, sameAttempt].reduce(
       (current, event) => Support.UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
       Support.UsageCost.empty,
     )
+    const duplicate = Support.RawUsageCost.observe(snapshot, {
+      threadId: "thread",
+      turnId: "turn",
+      event: duplicateDelivery,
+    })
 
     expect(snapshot.global.costUsd).toBe(0)
     expect(snapshot.global.unpricedAttempts === 0).toBe(false)
+    expect(Result.isFailure(duplicate) && duplicate.failure.reason).toBe("cursor-conflict")
   })
 
   it("scopes reused attempt ids to their execution", () => {

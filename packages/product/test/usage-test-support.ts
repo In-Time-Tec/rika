@@ -32,6 +32,14 @@ export const UsageCost = {
   deserialize: (json: string) => unwrap(StrictUsageCost.deserialize(json)),
 }
 
+const observeCompat = (
+  snapshot: StrictUsageCost.Snapshot,
+  input: StrictUsageCost.RootExecution & { readonly event: ExecutionEvent.Event },
+): StrictUsageCost.Snapshot => {
+  const result = StrictUsageCost.observe(snapshot, input)
+  return Result.isFailure(result) ? snapshot : result.success
+}
+
 const usage = (cursor: string, costUsd: number): ExecutionEvent.Event => ({
   executionId: "execution",
   cursor,
@@ -118,8 +126,7 @@ const fold = (
   events: ReadonlyArray<ExecutionEvent.Event>,
   input: { readonly threadId: string; readonly turnId: string } = { threadId: "thread", turnId: "turn" },
   snapshot: StrictUsageCost.Snapshot = UsageCost.empty,
-): StrictUsageCost.Snapshot =>
-  events.reduce((current, event) => UsageCost.observe(current, { ...input, event }), snapshot)
+): StrictUsageCost.Snapshot => events.reduce((current, event) => observeCompat(current, { ...input, event }), snapshot)
 
 export const RawUsageCost = StrictUsageCost
 

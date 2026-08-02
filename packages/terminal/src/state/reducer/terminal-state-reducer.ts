@@ -8,6 +8,7 @@ import type { Model } from "../model/terminal-state"
 import type { TranscriptBlock } from "../model/terminal-transcript-state"
 import type { ChangedFile } from "../model/terminal-changed-file"
 import type { ComposerAttachment } from "../model/terminal-composer-state"
+import type { ContextUsage } from "../model/terminal-context-usage"
 import { reduceData } from "./terminal-data-reducer"
 import { reduceExecution } from "./terminal-execution-reducer"
 import { reduceOverlay } from "./terminal-overlay-reducer"
@@ -207,11 +208,12 @@ const updateImpl = (model: Model, message: Message): Model =>
   model
 
 export const update: {
-  (model: Model, message: Message): Model
+  (model: Model, message: Message, usage?: ContextUsage): Model
   (message: Message): (model: Model) => Model
 } = Function.dual(
   2,
-  (model: Model, message: Message): Model => advanceAnimation(model, updateImpl(model, message), undefined),
+  (model: Model, message: Message, usage?: ContextUsage): Model =>
+    advanceAnimation(model, updateImpl(model, message), usage),
 )
 
 export const reduce = update

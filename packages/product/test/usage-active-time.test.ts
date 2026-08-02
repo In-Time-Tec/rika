@@ -197,12 +197,12 @@ describe("UsageCost", () => {
     })
   })
 
-  it.skip("the compatibility test fold leaves rejected lifecycle evidence out", () => {
+  it("the compatibility test fold leaves rejected lifecycle evidence out", () => {
     const snapshot = Support.Fixtures.fold([
       Support.Fixtures.lifecycle("healthy", "start", "execution.started", 1_000, 1),
       Support.Fixtures.lifecycle("healthy", "complete", "execution.completed", 4_000, 2),
       Support.Fixtures.lifecycle("conflicted", "start", "execution.started", 1_000, 1),
-      { ...lifecycle("conflicted", "start", "execution.started", 9_000, 1) },
+      Support.Fixtures.lifecycle("conflicted", "start", "execution.started", 9_000, 1),
       Support.Fixtures.lifecycle("conflicted", "complete", "execution.completed", 20_000, 2),
     ])
 
@@ -274,7 +274,7 @@ describe("UsageCost", () => {
     })
   })
 
-  it.skip("counts no time for an unstamped execution and keeps its costs", () => {
+  it("counts no time for an unstamped execution and keeps its costs", () => {
     const unstamped = Support.Fixtures.fold([
       Support.Fixtures.unstampedLifecycle("execution", "start", "execution.started", 1_000, 1),
       Support.Fixtures.unstampedLifecycle("execution", "complete", "execution.completed", 11_000, 2),
@@ -302,7 +302,7 @@ describe("UsageCost", () => {
     })
   })
 
-  it.skip("treats a regressing timestamp on a server-stamped execution as a defect", () => {
+  it("treats a regressing timestamp on a server-stamped execution as a defect", () => {
     const stamped = Support.Fixtures.fold([
       Support.Fixtures.lifecycle("execution", "start", "execution.started", 10_000, 1),
       Support.Fixtures.lifecycle("execution", "complete", "execution.completed", 1_000, 2),
@@ -328,14 +328,14 @@ describe("UsageCost", () => {
     })
   })
 
-  it.skip("reads the mapped event stamp only and ignores a stamp carried in event data", () => {
+  it("reads the mapped event stamp only and ignores a stamp carried in event data", () => {
     const dataStamped = Support.Fixtures.fold([
       {
-        ...unstampedLifecycle("execution", "start", "execution.started", 1_000, 1),
+        ...Support.Fixtures.unstampedLifecycle("execution", "start", "execution.started", 1_000, 1),
         data: { timestamp_source: "server" },
       },
       {
-        ...unstampedLifecycle("execution", "complete", "execution.completed", 11_000, 2),
+        ...Support.Fixtures.unstampedLifecycle("execution", "complete", "execution.completed", 11_000, 2),
         data: { timestamp_source: "server" },
       },
     ])
@@ -343,7 +343,7 @@ describe("UsageCost", () => {
     expect(Support.UsageCost.activeTime(dataStamped, "thread")).toEqual({ _tag: "Unavailable" })
   })
 
-  it.skip("makes active time unavailable when lifecycle identity or timestamps are invalid", () => {
+  it("makes active time unavailable when lifecycle identity or timestamps are invalid", () => {
     const missingIdentity = Support.Fixtures.fold([
       { executionId: "", cursor: "start", sequence: 1, type: "execution.started", createdAt: 1 },
     ])
@@ -355,7 +355,7 @@ describe("UsageCost", () => {
     expect(Support.UsageCost.activeTime(invalidTimestamp, "thread")).toEqual({ _tag: "Unavailable" })
   })
 
-  it.skip("uses durable sequence order and rejects regressing lifecycle timestamps", () => {
+  it("uses durable sequence order and rejects regressing lifecycle timestamps", () => {
     const snapshot = Support.Fixtures.fold([
       Support.Fixtures.lifecycle("execution", "start", "execution.started", 10_000, 1),
       Support.Fixtures.lifecycle("execution", "wait", "wait.created", 5_000, 2),

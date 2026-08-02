@@ -10058,6 +10058,14 @@
       "production": false
     },
     {
+      "from": "packages/product/test/usage-attempt.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/product/test/usage-fold.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",

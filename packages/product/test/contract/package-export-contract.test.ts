@@ -155,7 +155,6 @@ const expected: Record<string, ReadonlyArray<string>> = {
     "opentui-surface",
     "terminal-message",
     "terminal-state",
-    "terminal-animation-reducer",
     "terminal-state-reducer",
     "terminal-session",
   ],

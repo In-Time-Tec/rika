@@ -4,7 +4,6 @@ import { Function, HashMap } from "effect"
 import { applyTurnDelta } from "@rika/terminal/terminal-transcript-presentation"
 import type { ThreadItem } from "@rika/terminal/terminal-state"
 import { update as updateModel } from "@rika/terminal/terminal-state-reducer"
-import { advanceAnimation } from "@rika/terminal/terminal-animation-reducer"
 import type { State, ProjectionStream, TranscriptEvent, Update } from "./interactive-controller"
 import {
   retaining,
@@ -63,8 +62,7 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
         usageRevision: event.revision,
         ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
         ...(lastAvailableUsageCost === undefined ? {} : { lastAvailableUsageCost }),
-        model: advanceAnimation(
-          state.model,
+        model: updateModel(
           {
             ...withoutCost,
             usageCost,
@@ -73,6 +71,7 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
             contextUsage,
             ...(threadCostUsd === undefined ? {} : { costUsd: threadCostUsd }),
           },
+          { _tag: "UsageReported" },
           contextUsage,
         ),
       },

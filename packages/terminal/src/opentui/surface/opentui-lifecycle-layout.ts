@@ -107,7 +107,16 @@ export abstract class SurfaceLifecycleLayout extends SurfaceInput {
       renderedRows += labelRows
       if (index < end - 1) queueChunks.push(fg(toOpenColor(colors.text))("\n"))
     }
-    this.queueText.content = new StyledText(queueChunks)
+    const queueChanged =
+      previousModel === undefined ||
+      previousModel.queue !== model.queue ||
+      previousModel.pendingSteering !== model.pendingSteering ||
+      previousModel.queueSelection !== model.queueSelection ||
+      previousModel.editingTurnId !== model.editingTurnId ||
+      previousModel.mode !== model.mode ||
+      previousModel.width !== model.width ||
+      previousModel.sidebarWidth !== model.sidebarWidth
+    if (queueChanged) this.queueText.content = new StyledText(queueChunks)
     this.queueHint.top = hintTop
     const hintChunks: Array<TextChunk> = []
     for (const [index, segment] of hintSegments.entries()) {
@@ -116,7 +125,7 @@ export abstract class SurfaceLifecycleLayout extends SurfaceInput {
       if (segment.suffix.length > 0) hintChunks.push(dim(fg(toOpenColor(colors.text))(segment.suffix)))
     }
     if (hintSegments.length > 0) hintChunks.push(dim(fg(toOpenColor(colors.text))(" ")))
-    this.queueHint.content = new StyledText(hintChunks)
+    if (queueChanged) this.queueHint.content = new StyledText(hintChunks)
     this.queueHint.visible = hintSegments.length > 0
     this.queueLeftJoint.visible = queue.length > 0 || pendingSteering.length > 0
     this.queueRightJoint.visible = queue.length > 0 || pendingSteering.length > 0
@@ -129,20 +138,33 @@ export abstract class SurfaceLifecycleLayout extends SurfaceInput {
       : ` ${compactWorkspace(model.workspace)}${model.branch === undefined ? "" : ` (${model.branch})`} `
     const panelLoadingLabel = panelLoading(model)
     const activityLabel = formatActivity(model.activity)
-    if (activityLabel !== undefined || panelLoadingLabel !== undefined) {
-      const statusName = activityLabel ?? panelLoadingLabel!
-      this.inputBox.bottomTitle = ""
-      this.statusLabel.content = new StyledText([
-        fg(toOpenColor(colors.text))(" "),
-        fg(toOpenColor(colors.blue))(loaderFrame(statusName, this.loaderPhase)),
-        dim(fg(toOpenColor(colors.text))(` ${statusName} `)),
-      ])
-    } else {
-      this.inputBox.bottomTitle = ""
-      this.statusLabel.content = ""
+    const statusChanged =
+      previousModel === undefined ||
+      previousModel.activity !== model.activity ||
+      previousModel.busy !== model.busy ||
+      panelLoading(previousModel) !== panelLoadingLabel
+    if (statusChanged) {
+      if (activityLabel !== undefined || panelLoadingLabel !== undefined) {
+        const statusName = activityLabel ?? panelLoadingLabel!
+        this.inputBox.bottomTitle = ""
+        this.statusLabel.content = new StyledText([
+          fg(toOpenColor(colors.text))(" "),
+          fg(toOpenColor(colors.blue))(loaderFrame(statusName, this.loaderPhase)),
+          dim(fg(toOpenColor(colors.text))(` ${statusName} `)),
+        ])
+      } else {
+        this.inputBox.bottomTitle = ""
+        this.statusLabel.content = ""
+      }
     }
     this.workspaceLabel.right = sidebarWidth + 2
-    this.workspaceLabel.content = new StyledText([dim(fg(toOpenColor(colors.text))(workspaceTitle))])
+    const workspaceChanged =
+      previousModel === undefined ||
+      previousModel.workspace !== model.workspace ||
+      previousModel.branch !== model.branch ||
+      previousModel.width !== model.width
+    if (workspaceChanged)
+      this.workspaceLabel.content = new StyledText([dim(fg(toOpenColor(colors.text))(workspaceTitle))])
     this.inputBox.height = renderedInputHeight
     const queueHeight = queue.length > 0 ? this.queueBox.height - 1 : 0
     this.modeLabel.top = model.height - renderedInputHeight
@@ -151,15 +173,29 @@ export abstract class SurfaceLifecycleLayout extends SurfaceInput {
     this.transcriptViewportRows = Math.max(1, model.height - renderedInputHeight - queueHeight)
     this.transcriptScroll.content.minHeight = this.transcriptViewportRows
     this.input.visible = model.shortcutsOpen
-    this.input.content = model.shortcutsOpen ? shortcutsContent(model, Math.max(1, contentWidth - 4)) : ""
+    const shortcutsChanged =
+      previousModel === undefined ||
+      previousModel.shortcutsOpen !== model.shortcutsOpen ||
+      previousModel.shortcutsTrigger !== model.shortcutsTrigger ||
+      previousModel.input !== model.input ||
+      previousModel.width !== model.width
+    if (shortcutsChanged)
+      this.input.content = model.shortcutsOpen ? shortcutsContent(model, Math.max(1, contentWidth - 4)) : ""
     this.composerEditor.visible = !model.shortcutsOpen
     this.composerEditor.height = Math.max(1, renderedInputHeight - 2)
     this.composerEditor.sync(displayInput(model), displayCursorOffset(model))
     this.sidebar.visible = threadSidebarVisible
     this.sidebar.width = boundedThreadSidebarWidth(model.width)
-    this.sidebar.content = threadSidebarVisible
-      ? renderSidebar(model, spinnerFrames[this.loaderPhase % spinnerFrames.length]!)
-      : ""
+    const sidebarChanged =
+      previousModel === undefined ||
+      previousModel.threadSidebar !== model.threadSidebar ||
+      previousModel.threads !== model.threads ||
+      previousModel.width !== model.width ||
+      previousModel.height !== model.height
+    if (sidebarChanged)
+      this.sidebar.content = threadSidebarVisible
+        ? renderSidebar(model, spinnerFrames[this.loaderPhase % spinnerFrames.length]!)
+        : ""
     this.changedFilesBox.visible = sidebarVisible
     if (this.changedFilesBox.visible) {
       this.changedFilesBox.width = Math.max(1, sidebarWidth - 2)

@@ -5,7 +5,7 @@ import * as Runtime from "@rika/coding-tools/coding-tool-runtime"
 import { Config, Context, Effect, Layer, Logger, Schema, Semaphore, Stdio, Stream } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import * as ExecutionBackend from "@rika/product/execution-service"
-import { layer } from "../src/relay/execution/relay-execution-layer"
+import { defaultModelResilience, layer } from "../src/relay/execution/relay-execution-layer"
 import { start } from "./current-execution-route"
 
 class FixtureError extends Schema.TaggedErrorClass<FixtureError>()("RecoveryProcessFixtureError", {
@@ -91,6 +91,7 @@ const main = Effect.gen(function* () {
         phase === "initial" ? Effect.sleep("5 minutes").pipe(Effect.as("unused")) : Effect.succeed("unused"),
     }),
     recoveryChildSettlementGrace: phase === "recovered-stuck" ? "0 millis" : "5 minutes",
+    modelResilience: { ...defaultModelResilience, invalidToolCallCorrectionLimit: 0 },
   })
   const services = yield* Layer.build(backendLayer).pipe(Effect.mapError(fixtureError))
   const backend = Context.get(services, ExecutionBackend.Service)

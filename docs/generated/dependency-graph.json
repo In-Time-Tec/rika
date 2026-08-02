@@ -2300,7 +2300,6 @@
       "production": true,
       "publicExports": [
         "./opentui-surface",
-        "./terminal-animation-reducer",
         "./terminal-message",
         "./terminal-performance-evaluation",
         "./terminal-session",
@@ -9573,7 +9572,7 @@
       "package": "@rika/terminal",
       "kind": "source",
       "production": true,
-      "publicExports": ["./terminal-animation-reducer"]
+      "publicExports": []
     },
     {
       "id": "packages/terminal/src/state/reducer/terminal-data-reducer.ts",
@@ -12897,14 +12896,6 @@
       "from": "apps/rika/src/interactive/controller/terminal-interactive-feed.ts",
       "to": "packages/terminal/src/state/model/terminal-state.ts",
       "specifier": "@rika/terminal/terminal-state",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/interactive/controller/terminal-interactive-feed.ts",
-      "to": "packages/terminal/src/state/reducer/terminal-animation-reducer.ts",
-      "specifier": "@rika/terminal/terminal-animation-reducer",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -47927,6 +47918,14 @@
     },
     {
       "from": "packages/product/test/usage-attempt.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/usage-attempt.test.ts",
       "to": "packages/product/test/usage-test-support.ts",
       "specifier": "./usage-test-support",
       "kind": "import",
@@ -59785,6 +59784,14 @@
       "from": "packages/terminal/src/state/reducer/terminal-state-reducer.ts",
       "to": "packages/terminal/src/state/model/terminal-composer-state.ts",
       "specifier": "../model/terminal-composer-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/reducer/terminal-state-reducer.ts",
+      "to": "packages/terminal/src/state/model/terminal-context-usage.ts",
+      "specifier": "../model/terminal-context-usage",
       "kind": "import",
       "relationship": "runtime",
       "production": true

@@ -91,6 +91,7 @@ export class SurfaceState {
   protected welcomeStopTimer: Fiber.Fiber<void> | undefined
   protected toastTimer: Fiber.Fiber<void> | undefined
   protected usageLabelWidth = 0
+  protected modeLabelContentKey: string | undefined
   protected usageLabelHovered = false
   protected modeLabelHovered = false
   protected modeSegmentStart = 0
@@ -146,6 +147,7 @@ export class SurfaceState {
   protected transcriptRowTotal = 0
   protected transcriptWindowThread: string | undefined
   protected transcriptPositionFrame: (() => void) | undefined
+  protected transcriptScrollbarSyncPending = false
   protected transcriptAnchorScrollBy = 0
   protected transcriptAnchorNearBottom = false
   protected pendingTranscriptPosition: PendingTranscriptPosition | undefined

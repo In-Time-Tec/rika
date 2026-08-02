@@ -153,6 +153,7 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
       else if (model.usageCost?._tag === "Unavailable") usageText = "$—"
       else if (model.usageCost?._tag === "Loading" || model.busy) usageText = "$····"
     }
+    const modeContentKey = `${usageText}\u0000${model.fastMode ? "fast" : "normal"}\u0000${model.mode}\u0000${this.usageLabelHovered ? "usage-hover" : "usage"}\u0000${this.modeLabelHovered ? "mode-hover" : "mode"}`
     const modeChunks: Array<TextChunk> = []
     const previousRight = this.modeLabel.screenX + this.modeLabel.width
     this.usageLabelWidth = usageText.length === 0 ? 0 : modeLabelWidth(` ${usageText} `)
@@ -181,7 +182,10 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
       }
     }
     this.modeLabel.width = width
-    this.modeLabel.content = new StyledText(modeChunks)
+    if (this.modeLabelContentKey !== modeContentKey) {
+      this.modeLabelContentKey = modeContentKey
+      this.modeLabel.content = new StyledText(modeChunks)
+    }
     this.refreshUsageHoverAfterLayout()
   }
 

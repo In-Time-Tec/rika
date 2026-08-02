@@ -105,10 +105,13 @@ export abstract class SurfaceLifecycle extends SurfaceLifecycleTranscript {
       this.transcriptAnchorNearBottom = false
       this.scheduleTranscriptPosition(position)
     } else if (this.pendingTranscriptPosition !== undefined) this.renderer.requestRender()
-    else
+    else if (!this.transcriptScrollbarSyncPending) {
+      this.transcriptScrollbarSyncPending = true
       this.defer(() => {
+        this.transcriptScrollbarSyncPending = false
         if (this.model !== undefined) this.syncTranscriptScrollbar()
       })
+    }
     const panelLoadingLabel = panelLoading(model)
     const loaderActive =
       model.busy ||
