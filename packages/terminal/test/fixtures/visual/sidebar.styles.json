@@ -2878,7 +2878,11 @@
           "width": 36
         },
         {
+<<<<<<< HEAD:packages/terminal/test/fixtures/visual/sidebar.styles.json
           "text": "╭──────────────────────────",
+=======
+          "text": "╭────────────────────",
+>>>>>>> origin/main:packages/tui/test/fixtures/visual/sidebar.styles.json
           "fg": {
             "buffer": {
               "0": 1984,
@@ -2896,10 +2900,17 @@
             }
           },
           "attributes": 0,
+<<<<<<< HEAD:packages/terminal/test/fixtures/visual/sidebar.styles.json
           "width": 27
         },
         {
           "text": " ▓░░░ — ",
+=======
+          "width": 21
+        },
+        {
+          "text": " ctx ╌╌╌╌╌╌╌╌",
+>>>>>>> origin/main:packages/tui/test/fixtures/visual/sidebar.styles.json
           "fg": {
             "buffer": {
               "0": 1984,
@@ -2916,11 +2927,19 @@
               "3": 255
             }
           },
+<<<<<<< HEAD:packages/terminal/test/fixtures/visual/sidebar.styles.json
           "attributes": 2,
           "width": 8
         },
         {
           "text": "─ ",
+=======
+          "attributes": 0,
+          "width": 13
+        },
+        {
+          "text": " ─ ",
+>>>>>>> origin/main:packages/tui/test/fixtures/visual/sidebar.styles.json
           "fg": {
             "buffer": {
               "0": 1984,
@@ -2938,7 +2957,7 @@
             }
           },
           "attributes": 0,
-          "width": 2
+          "width": 3
         },
         {
           "text": "high",

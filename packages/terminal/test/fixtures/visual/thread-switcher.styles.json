@@ -12387,7 +12387,7 @@
           "width": 30
         },
         {
-          "text": "╰──────────────────────────────────────────────────────────────────────────────────────────────── Opt+W/Ctrl+T all workspaces · Esc close ─╯",
+          "text": "╰───────────────────────────────────────────────────────────────────────────────────────────────",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -12405,7 +12405,91 @@
             }
           },
           "attributes": 0,
-          "width": 140
+          "width": 96
+        },
+        {
+          "text": " Opt+W/Ctrl+T all workspaces ",
+          "fg": {
+            "buffer": {
+              "0": 61,
+              "1": 212,
+              "2": 255,
+              "3": 255
+            }
+          },
+          "bg": {
+            "buffer": {
+              "0": 0,
+              "1": 512,
+              "2": 0,
+              "3": 255
+            }
+          },
+          "attributes": 0,
+          "width": 29
+        },
+        {
+          "text": "──",
+          "fg": {
+            "buffer": {
+              "0": 1984,
+              "1": 448,
+              "2": 192,
+              "3": 255
+            }
+          },
+          "bg": {
+            "buffer": {
+              "0": 0,
+              "1": 512,
+              "2": 0,
+              "3": 255
+            }
+          },
+          "attributes": 0,
+          "width": 2
+        },
+        {
+          "text": " Esc close ",
+          "fg": {
+            "buffer": {
+              "0": 61,
+              "1": 212,
+              "2": 255,
+              "3": 255
+            }
+          },
+          "bg": {
+            "buffer": {
+              "0": 0,
+              "1": 512,
+              "2": 0,
+              "3": 255
+            }
+          },
+          "attributes": 0,
+          "width": 11
+        },
+        {
+          "text": "─╯",
+          "fg": {
+            "buffer": {
+              "0": 1984,
+              "1": 448,
+              "2": 192,
+              "3": 255
+            }
+          },
+          "bg": {
+            "buffer": {
+              "0": 0,
+              "1": 512,
+              "2": 0,
+              "3": 255
+            }
+          },
+          "attributes": 0,
+          "width": 2
         },
         {
           "text": "                              ",
@@ -12433,7 +12517,11 @@
     {
       "spans": [
         {
+<<<<<<< HEAD:packages/terminal/test/fixtures/visual/thread-switcher.styles.json
           "text": "╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+=======
+          "text": "╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+>>>>>>> origin/main:packages/tui/test/fixtures/visual/thread-switcher.styles.json
           "fg": {
             "buffer": {
               "0": 1984,
@@ -12451,10 +12539,17 @@
             }
           },
           "attributes": 0,
+<<<<<<< HEAD:packages/terminal/test/fixtures/visual/thread-switcher.styles.json
           "width": 183
         },
         {
           "text": " ▓░░░ — ",
+=======
+          "width": 177
+        },
+        {
+          "text": " ctx ╌╌╌╌╌╌╌╌",
+>>>>>>> origin/main:packages/tui/test/fixtures/visual/thread-switcher.styles.json
           "fg": {
             "buffer": {
               "0": 1984,
@@ -12471,11 +12566,19 @@
               "3": 255
             }
           },
+<<<<<<< HEAD:packages/terminal/test/fixtures/visual/thread-switcher.styles.json
           "attributes": 2,
           "width": 8
         },
         {
           "text": "─ ",
+=======
+          "attributes": 0,
+          "width": 13
+        },
+        {
+          "text": " ─ ",
+>>>>>>> origin/main:packages/tui/test/fixtures/visual/thread-switcher.styles.json
           "fg": {
             "buffer": {
               "0": 1984,
@@ -12493,7 +12596,7 @@
             }
           },
           "attributes": 0,
-          "width": 2
+          "width": 3
         },
         {
           "text": "high",

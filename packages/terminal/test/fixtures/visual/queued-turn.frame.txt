@@ -16,8 +16,13 @@
                     ••
 
  ╭────────────────────────────────────────────────────────────────────────────╮
+<<<<<<< HEAD:packages/terminal/test/fixtures/visual/queued-turn.frame.txt
  │ Run verification … Enter to steer · Backspace to dequeue · Ctrl+E to edit  │
 ╭┴────────────────────────────────────────────────────────────── $···· ─ high ┴╮
+=======
+ │ Run verificatio… Enter to steer ── Backspace to dequeue ── Ctrl+E to edit  │
+╭┴────────────────────────────────────────────────────────────────────── high ┴╮
+>>>>>>> origin/main:packages/tui/test/fixtures/visual/queued-turn.frame.txt
 │                                                                              │
 │                                                                              │
 │                                                                              │

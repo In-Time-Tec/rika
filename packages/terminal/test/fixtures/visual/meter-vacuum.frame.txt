@@ -17,11 +17,7 @@
           ••••••••••••••••••••••
             •···············•
                     ••
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/context-meter.frame.txt
-╭──────────────────────────────────────────────────────────── ▉░░░ 23% ─ high ─╮
-=======
-╭──────────────────────────────────────────────────── ctx ━━╌╌╌╌╌╌ 23% ─ high ─╮
->>>>>>> origin/main:packages/tui/test/fixtures/visual/context-meter.frame.txt
+╭──────────────────────────────────────────────────── ctx ━━━━━━≪╌ 23% ─ high ─╮
 │                                                                              │
 │                                                                              │
 │                                                                              │
