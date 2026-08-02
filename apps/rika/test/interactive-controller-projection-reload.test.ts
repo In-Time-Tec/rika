@@ -102,12 +102,16 @@ it("accepts a newer sole-active full selection", () => {
 it("keeps prior turns when a same-thread resync reload contains only the active prompt", () => {
   const active = runningTurn("active-prompt-reload")
   const populated = populatedSelection(active)
-  const resync = InteractiveController.update(populated.state, {
-    _tag: "TranscriptResyncRequired",
-    selectionEpoch: 1,
-    threadId: thread.id,
-    reason: "bounded feed",
-  })
+  const retainedBoundary = cursor(entries("evicted-history", 0)[0]!)
+  const resync = InteractiveController.update(
+    { ...populated.state, oldestCursor: retainedBoundary },
+    {
+      _tag: "TranscriptResyncRequired",
+      selectionEpoch: 1,
+      threadId: thread.id,
+      reason: "bounded feed",
+    },
+  )
   const activeProjection = TranscriptProjection.Projection.empty(active.id, active.prompt)
   const activeEntries = activeProjection.units.map((unit) => ({
     turn: active,
@@ -136,6 +140,7 @@ it("keeps prior turns when a same-thread resync reload contains only the active 
   expect(reloaded.state.selectionEpoch).toBe(2)
   expect(reloaded.state.activitySequence).toBe(1)
   expect(reloaded.state.projectionStreams).toEqual(new Map())
+  expect(reloaded.state.oldestCursor).toEqual(retainedBoundary)
 
   const settled = InteractiveController.update(reloaded.state, {
     _tag: "TurnSettled",

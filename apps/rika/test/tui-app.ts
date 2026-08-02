@@ -3,18 +3,19 @@ import * as TranscriptPage from "@rika/product/transcript-page"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { createTestRenderer } from "@opentui/core/testing"
 import { productLayer, Service } from "@rika/product/product-operation-service"
-import * as Database from "@rika/product-store/product-database-layer"
-import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
-import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
-import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
 import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import * as RelayExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import { Config, Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Scope } from "effect"
 import { interactiveTui } from "../src/interactive/process/interactive-process-loop"
+import {
+  makeTuiAppRepositoryLayers,
+  seedHistoricalTranscript,
+  type HistoricalTranscriptFixture,
+} from "./tui-app-repositories"
 import { makeRoutedModel, type Script, type TuiAppLane } from "./tui-app-model"
 import { tuiToolRuntimeLayer } from "./tui-app-tool-runtime"
 
@@ -34,6 +35,7 @@ export interface TuiAppOptions {
   readonly height?: number
   readonly holdExecutionFollows?: Deferred.Deferred<void>
   readonly mapInteractiveEvent?: (event: SessionEvent) => SessionEvent
+  readonly historicalTranscriptFixture?: HistoricalTranscriptFixture
 }
 
 export type CapturedSpans = ReturnType<Awaited<ReturnType<typeof createTestRenderer>>["captureSpans"]>
@@ -45,6 +47,7 @@ export interface TuiApp {
   readonly pressEscape: () => void
   readonly pressArrow: (direction: "up" | "down" | "left" | "right") => void
   readonly pressKey: (key: string, modifiers?: { ctrl?: boolean; alt?: boolean; shift?: boolean }) => void
+  readonly pressPageUp: Effect.Effect<void>
   readonly clickText: (text: string) => Effect.Effect<void>
   readonly clickComposer: Effect.Effect<void>
   readonly frame: () => string
@@ -86,14 +89,17 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
   }
   const lanes = options.lanes ?? [{ script: options.script ?? [] }]
   const { fixture, registration } = yield* makeRoutedModel(lanes)
-  const database = Database.layer(path.join(root, "rika.db"))
-  const repositoryLayer = ThreadRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
-  const turnRepositoryLayer = TurnRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
-  const transcriptRepositoryLayer = TranscriptRepository.layer.pipe(
-    Layer.provide(database),
-    Layer.provide(BunServices.layer),
-  )
-  const usageRepositoryLayer = UsageRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
+  const { repositoryLayer, turnRepositoryLayer, transcriptRepositoryLayer, usageRepositoryLayer } =
+    makeTuiAppRepositoryLayers(path.join(root, "rika.db"))
+  if (options.historicalTranscriptFixture !== undefined) {
+    const historicalRepositories = yield* Layer.buildWithScope(
+      Layer.mergeAll(repositoryLayer, turnRepositoryLayer, transcriptRepositoryLayer),
+      yield* Effect.scope,
+    )
+    yield* seedHistoricalTranscript(options.historicalTranscriptFixture, workspace).pipe(
+      Effect.provide(historicalRepositories),
+    )
+  }
   const relayBackendLayer = RelayExecutionBackend.layer({
     filename: path.join(root, "execution.db"),
     workspace,
@@ -132,6 +138,7 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
   let nextTurn = options.idStart ?? 0
   let session: InteractiveSession.InteractiveSession | undefined
   const reloadLoaded = yield* Deferred.make<void>()
+  const historicalFixtureLoaded = yield* Deferred.make<void>()
   const runSync = Effect.runSyncWith(yield* Effect.context<never>())
   const runInteractive = interactiveTui({
     makeRenderer: () => Promise.resolve(setup.renderer),
@@ -162,6 +169,8 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
             dispatch(delivered)
             if (delivered._tag === "SelectionLoaded" && delivered.selectionEpoch === 100)
               runSync(Deferred.succeed(reloadLoaded, undefined))
+            if (delivered._tag === "SelectionLoaded" && delivered.selectionEpoch === 90)
+              runSync(Deferred.succeed(historicalFixtureLoaded, undefined))
           }),
       })
     },
@@ -224,6 +233,12 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
     pressArrow: (direction) => setup.mockInput.pressArrow(direction),
     pressKey: (key, modifiers) =>
       modifiers?.alt === true ? setup.mockInput.pressKey(`\u001b${key}`) : setup.mockInput.pressKey(key, modifiers),
+    pressPageUp: Effect.gen(function* () {
+      setup.mockInput.pressKey("\u001b[5~")
+      yield* Effect.promise(() => setup.flush())
+      yield* Effect.yieldNow
+      yield* Effect.promise(() => setup.flush())
+    }).pipe(Effect.asVoid),
     clickText: (text) =>
       Effect.gen(function* () {
         yield* Effect.promise(() => setup.flush())
@@ -260,5 +275,10 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
     }),
   }
   yield* app.waitFrame(options.initialThreadId === undefined ? "Welcome to Rika" : "medium")
+  if (options.historicalTranscriptFixture !== undefined) {
+    const current = session ?? (yield* Effect.die("TUI session is unavailable"))
+    yield* current.selectThread(options.historicalTranscriptFixture.threadId, 90).pipe(Effect.orDie)
+    yield* Deferred.await(historicalFixtureLoaded)
+  }
   return app
 })

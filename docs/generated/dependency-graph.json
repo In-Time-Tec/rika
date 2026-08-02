@@ -1506,6 +1506,15 @@
       "publicExports": []
     },
     {
+      "id": "apps/rika/test/tui-app-repositories.ts",
+      "path": "apps/rika/test/tui-app-repositories.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "apps/rika/test/tui-app-tool-runtime.ts",
       "path": "apps/rika/test/tui-app-tool-runtime.ts",
       "workspace": "@rika/cli",
@@ -20303,6 +20312,118 @@
       "production": true
     },
     {
+      "from": "apps/rika/test/tui-app-repositories.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-repositories.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-repositories.ts",
+      "to": "packages/product-store/src/database/product-database-layer.ts",
+      "specifier": "@rika/product-store/product-database-layer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-repositories.ts",
+      "to": "packages/product-store/src/thread/sqlite-thread-repository.ts",
+      "specifier": "@rika/product-store/sqlite-thread-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-repositories.ts",
+      "to": "packages/product-store/src/transcript/sqlite-transcript-repository.ts",
+      "specifier": "@rika/product-store/sqlite-transcript-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-repositories.ts",
+      "to": "packages/product-store/src/turn/sqlite-turn-repository.ts",
+      "specifier": "@rika/product-store/sqlite-turn-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-repositories.ts",
+      "to": "packages/product-store/src/usage/sqlite-usage-repository.ts",
+      "specifier": "@rika/product-store/sqlite-usage-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-repositories.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-repositories.ts",
+      "to": "packages/product/src/thread/model/thread-record.ts",
+      "specifier": "@rika/product/thread-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-repositories.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-repositories.ts",
+      "to": "packages/transcript/src/ordering/child-parent-correlation.ts",
+      "specifier": "@rika/transcript/child-parent-correlation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-repositories.ts",
+      "to": "packages/transcript/src/ordering/transcript-unit-order.ts",
+      "specifier": "@rika/transcript/transcript-unit-order",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-repositories.ts",
+      "to": "packages/transcript/src/projection/transcript-projection.ts",
+      "specifier": "@rika/transcript/transcript-projection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app-repositories.ts",
+      "to": "packages/transcript/src/schema/transcript-unit.ts",
+      "specifier": "@rika/transcript/transcript-unit",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "apps/rika/test/tui-app-tool-runtime.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
@@ -20376,6 +20497,14 @@
     },
     {
       "from": "apps/rika/test/tui-app.ts",
+      "to": "apps/rika/test/tui-app-repositories.ts",
+      "specifier": "./tui-app-repositories",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/test/tui-app.ts",
       "to": "apps/rika/test/tui-app-tool-runtime.ts",
       "specifier": "./tui-app-tool-runtime",
       "kind": "import",
@@ -20408,40 +20537,8 @@
     },
     {
       "from": "apps/rika/test/tui-app.ts",
-      "to": "packages/product-store/src/database/product-database-layer.ts",
-      "specifier": "@rika/product-store/product-database-layer",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/test/tui-app.ts",
-      "to": "packages/product-store/src/thread/sqlite-thread-repository.ts",
-      "specifier": "@rika/product-store/sqlite-thread-repository",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/test/tui-app.ts",
       "to": "packages/product-store/src/transcript/sqlite-transcript-repository.ts",
       "specifier": "@rika/product-store/sqlite-transcript-repository",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/test/tui-app.ts",
-      "to": "packages/product-store/src/turn/sqlite-turn-repository.ts",
-      "specifier": "@rika/product-store/sqlite-turn-repository",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/test/tui-app.ts",
-      "to": "packages/product-store/src/usage/sqlite-usage-repository.ts",
-      "specifier": "@rika/product-store/sqlite-usage-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true

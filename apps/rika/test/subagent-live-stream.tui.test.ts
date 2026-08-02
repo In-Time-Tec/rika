@@ -4,25 +4,6 @@ import { expect, test } from "vitest"
 import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
 
-const waitForCompletedProjection = Effect.fn("TuiApp.waitForCompletedProjection")(function* (
-  app: TuiApp.TuiApp,
-  turnId: Turn.TurnId,
-) {
-  const started = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
-  for (;;) {
-    const projection = yield* app.transcript(turnId)
-    if (
-      projection !== undefined &&
-      projection.executionCheckpoints.length > 0 &&
-      projection.executionCheckpoints.every((checkpoint) => checkpoint.status === "completed")
-    )
-      return projection
-    const now = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
-    if (now - started >= 5_000) return yield* Effect.die(`turn ${turnId} was not durably completed`)
-    yield* Effect.sleep("20 millis")
-  }
-})
-
 const waitForDurableChildOutput = Effect.fn("TuiApp.waitForDurableChildOutput")(function* (
   app: TuiApp.TuiApp,
   turnId: Turn.TurnId,
@@ -123,16 +104,26 @@ test(
   () =>
     TuiApp.run(
       Effect.gen(function* () {
+        const marker = "PRIOR_TURN_HISTORY_MARKER"
+        const threadId = "tui-pageup-thread"
         const toolCalls = Array.from({ length: 65 }, (_, index) =>
           model.toolCall("read", { path: "volume.txt" }, `volume-read-${index}`),
         )
         let reloadActiveTurnId: string | undefined
         let reloadEntryTurnIds: ReadonlyArray<string> = []
+        let prependedPages = 0
+        let prependedMarker = false
         const app = yield* TuiApp.tuiApp({
           inspectTranscript: true,
           height: 600,
+          historicalTranscriptFixture: { threadId, entryCount: 412, marker },
           workspaceFiles: { "volume.txt": "realistic tool output\n".repeat(30) },
           mapInteractiveEvent: (event) => {
+            if (event._tag === "TranscriptPagePrepended") {
+              prependedPages += 1
+              prependedMarker ||= JSON.stringify(event.entries).includes(marker)
+              return event
+            }
             if (event._tag !== "SelectionLoaded" || event.selectionEpoch !== 100 || event.activeTurn === undefined)
               return event
             const entries = event.entries.filter((entry) => entry.turn.id === event.activeTurn?.id)
@@ -143,8 +134,7 @@ test(
           lanes: [
             {
               script: [
-                model.turn(toolCalls),
-                model.text("PRIOR_TURN_HISTORY_MARKER"),
+                model.turn(toolCalls, { delay: "1 second" }),
                 model.turn(
                   [
                     model.toolCall("task", { prompt: "Volume child A" }, "volume-child-a"),
@@ -167,33 +157,32 @@ test(
           ],
         })
 
-        yield* Effect.promise(() => app.type("First turn"))
-        app.pressEnter()
-        yield* app.waitFrame("PRIOR_TURN_HISTORY_MARKER")
-        yield* waitForCompletedProjection(app, Turn.TurnId.make("tui-turn-0"))
-        yield* app.settled
-
+        expect(app.frame()).not.toContain(marker)
         yield* Effect.promise(() => app.type("Run realistic volume"))
         app.pressEnter()
-        yield* app.waitFrame("Run realistic volume")
-        yield* app.waitFrame("Waiting")
+        yield* app.waitModelRequests(1)
         yield* app.reload
-        expect(reloadActiveTurnId).toBe("tui-turn-1")
-        expect(new Set(reloadEntryTurnIds)).toEqual(new Set(["tui-turn-1"]))
-        yield* Effect.sleep("200 millis")
+        expect(reloadActiveTurnId).toBe("tui-turn-0")
+        expect(new Set(reloadEntryTurnIds)).toEqual(new Set(["tui-turn-0"]))
         const reloaded = app.frame()
-        const retainedAfterReload = reloaded.includes("PRIOR_TURN_HISTORY_MARKER")
+        expect(reloaded).not.toContain(marker)
         expect(reloaded).not.toContain("Execution failed")
-        for (let page = 0; page < 3; page += 1) app.pressKey("\u001b[5~")
-        const pagedHistory = yield* Effect.exit(app.waitFrame("PRIOR_TURN_HISTORY_MARKER", 2_000))
-        for (let page = 0; page < 3; page += 1) app.pressKey("\u001b[6~")
 
+        for (let page = 0; page < 8; page += 1) {
+          if (prependedPages > 0) break
+          yield* app.pressPageUp
+        }
+        expect(prependedPages).toBeGreaterThan(0)
+        expect(prependedMarker).toBe(true)
+        yield* app.pressPageUp
+        const pagedHistory = yield* app.waitFrame(marker, 2_000)
+        expect(pagedHistory).toContain(marker)
+
+        app.pressKey("\u001b[F")
         yield* app.waitFrame("REALISTIC_VOLUME_ROOT_FINISHED", 20_000)
         const final = yield* app.settled
         expect(final).not.toContain("Execution failed")
         yield* app.quit
-        expect(retainedAfterReload).toBe(true)
-        expect(pagedHistory._tag).toBe("Success")
       }),
     ),
   240_000,

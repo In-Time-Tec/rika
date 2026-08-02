@@ -257,7 +257,10 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
           liveProjections,
           projectionStreams: new Map(),
           hasOlder: event.hasOlder || retained.evicted,
-          oldestCursor: cursorForEntry(retained.entries[0]),
+          oldestCursor:
+            retained.evicted || state.oldestCursor === undefined
+              ? cursorForEntry(retained.entries[0])
+              : state.oldestCursor,
           newestCursor: cursorForEntry(retained.entries.at(-1)),
           ...(selectedCostUsd === undefined ? {} : { threadCostUsd: selectedCostUsd }),
           ...(preservedUsageCost === undefined ? {} : { lastAvailableUsageCost: preservedUsageCost }),
