@@ -2,6 +2,27 @@
 
 Rika is a local coding-agent CLI and OpenTUI app written in Effect TypeScript. Read `PRODUCT.md` for direction and `CONTEXT.md` for vocabulary and ownership.
 
+## Navigation
+
+- Start with `rg -n "<capability-or-symbol>" apps packages tooling` to find the likely owner.
+- Open that owner and the first `rankedTests` result from `check` before expanding to neighboring files.
+- For a source path, query structural relationships with:
+
+  ```bash
+  bun --cwd tooling/repository-graph query -- impact <path>
+  bun --cwd tooling/repository-graph query -- check <path>
+  bun --cwd tooling/repository-graph query -- tests <path>
+  bun --cwd tooling/repository-graph query -- why <path>
+  ```
+
+## GREENFIELD PROJECT — BREAKING CHANGES ARE WELCOME!!!
+
+- THIS PROJECT HAS NO USERS!!! IT IS GREENFIELD!!!
+- DO NOT ASSUME THAT THE EXISTING FOUNDATION, ARCHITECTURE, OR IMPLEMENTATION IS CORRECT!!! BE SKEPTICAL, INVESTIGATE THE REAL PROBLEM, AND VERIFY THE BEST APPROACH!!!
+- CHANGE THE UNDERLYING FOUNDATION OR ARCHITECTURE WHEN EVIDENCE SHOWS THAT A DIFFERENT DESIGN IS BETTER!!! LARGE REFACTORS ARE ENCOURAGED WHEN THEY PRODUCE THE RIGHT LONG-TERM SYSTEM!!!
+- IMPLEMENT THE RIGHT FIX THAT WILL SCALE LONG TERM, NOT THE SMALLEST PATCH!!! DO NOT PAPER OVER A DESIGN PROBLEM WITH A LOCAL WORKAROUND!!!
+- BREAKING CHANGES ARE WELCOME!!! DO NOT PRESERVE LEGACY CODE OR BACKWARD COMPATIBILITY!!! REMOVE REPLACED CODE, OBSOLETE PATHS, AND TRANSITIONAL SHIMS!!!
+
 ## Boundaries
 
 - Relay owns durable execution; Baton owns the agent loop; Rika owns product semantics and projections.
@@ -9,7 +30,7 @@ Rika is a local coding-agent CLI and OpenTUI app written in Effect TypeScript. R
 - Use Effect services, schemas, streams, scopes, typed errors, platform APIs, and structured concurrency. Keep raw Promise or host APIs in a named outer adapter only when Effect has no equivalent.
 - Run Effects only at app, process, test-host, or framework boundaries. Keep pure computations pure.
 - Build CLI surfaces with `effect/unstable/cli`, use Effect SQL for Rika SQLite state, use WebSockets for Rika process transport, and keep OpenTUI imports in the TUI adapter.
-- Language-model provider SDKs are forbidden outside released Baton contracts. `@rika/tools` may use web-research provider SDKs only when they preserve Effect interruption, retry, and resource semantics; otherwise use Effect HTTP adapters.
+- Language-model provider SDKs are forbidden outside released Baton contracts. `@rika/coding-tools` may use web-research provider SDKs only when they preserve Effect interruption, retry, and resource semantics; otherwise use Effect HTTP adapters.
 - Do not add Rivet, actors, web or IDE clients, remote runners, orbs, a local semantic code index, or ast-grep outline tools. External semantic code research is allowed through web-research providers.
 - Do not create catch-all `utils`, `helpers`, `common`, or `lib` modules. Do not put comments in code.
 

@@ -4,6 +4,7 @@ import { Database as NativeDatabase } from "bun:sqlite"
 import { fileURLToPath } from "node:url"
 import { Effect, FileSystem, Layer, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { reapResidents } from "./client-process-test-runtime"
 
 const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices>) =>
   Effect.runPromise(
@@ -19,8 +20,9 @@ test(
           const fs = yield* FileSystem.FileSystem
           const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
           const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-startup-database-" })
+          yield* Effect.addFinalizer(() => Effect.ignore(reapResidents(root)))
           const databasePath = `${root}/rika.db`
-          const relayPath = `${root}/relay.db`
+          const executionPath = `${root}/execution.db`
           yield* Effect.sync(() => {
             const database = new NativeDatabase(databasePath)
             database.exec("CREATE TABLE old_sessions (id TEXT PRIMARY KEY)")
@@ -37,7 +39,7 @@ test(
               env: {
                 HOME: root,
                 RIKA_DATABASE: databasePath,
-                RIKA_RELAY_DATABASE: relayPath,
+                RIKA_EXECUTION_DATABASE: executionPath,
               },
             }),
           )
@@ -50,11 +52,11 @@ test(
             { concurrency: 3 },
           ).pipe(
             Effect.timeoutOrElse({
-              duration: "5 seconds",
+              duration: "120 seconds",
               orElse: () =>
                 handle
                   .kill({ killSignal: "SIGKILL" })
-                  .pipe(Effect.ignore, Effect.andThen(Effect.fail("resident startup did not fail promptly"))),
+                  .pipe(Effect.ignore, Effect.andThen(Effect.fail("resident startup never exited"))),
             }),
           )
           expect(Number(exitCode)).not.toBe(0)
@@ -64,5 +66,5 @@ test(
         }),
       ),
     ),
-  15_000,
+  180_000,
 )

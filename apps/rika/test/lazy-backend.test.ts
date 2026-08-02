@@ -1,14 +1,17 @@
 import { describe, expect, it } from "@effect/vitest"
-import * as ExecutionBackend from "@rika/runtime/contract"
+import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionIdentifier from "@rika/product/execution-identifier"
 import { Context, Effect, Layer } from "effect"
-import { lazyBackendLayer } from "../src/main"
+import { lazyBackendLayer } from "../src/resident/composition/lazy-execution-backend"
 
-const completedResult = (turnId: string): ExecutionBackend.Result => ({ turnId, status: "completed", events: [] })
+const completedResult = (turnId: string): ExecutionEvent.Result => ({ turnId, status: "completed", events: [] })
 
 const recordingBackend = (calls: Array<ReadonlyArray<unknown>>) => {
   const record = (...call: ReadonlyArray<unknown>) => Effect.sync(() => calls.push(call))
   return ExecutionBackend.Service.of({
     invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
+    resolveInvocationSource: () => Effect.die("unused"),
     createFanOut: () => Effect.die("unused"),
     inspectFanOut: () => Effect.die("unused"),
     cancelFanOut: () => Effect.die("unused"),
@@ -21,19 +24,15 @@ const recordingBackend = (calls: Array<ReadonlyArray<unknown>>) => {
       record("replay", turnId, afterCursor, reference).pipe(Effect.as(completedResult(turnId))),
     pageEvents: (turnId, direction, cursor, limit, reference) =>
       record("pageEvents", turnId, direction, cursor, limit, reference).pipe(Effect.as({ events: [], hasMore: false })),
-    cancel: (turnId, cancelledAt, reference) =>
-      record("cancel", turnId, cancelledAt, reference).pipe(Effect.as(completedResult(turnId))),
+    cancel: (turnId, reference) => record("cancel", turnId, reference).pipe(Effect.as(completedResult(turnId))),
     inspect: (turnId, reference) =>
       record("inspect", turnId, reference).pipe(
         Effect.as({ turnId, status: "completed" as const, waits: [], pendingTools: [], children: [] }),
       ),
-    steer: (turnId, text, createdAt, reference) =>
-      record("steer", turnId, text, createdAt, reference).pipe(
+    steer: (turnId, text, idempotencyIdentity, reference) =>
+      record("steer", turnId, text, idempotencyIdentity, reference).pipe(
         Effect.as({ steeringMessageId: `steering:${turnId}`, sequence: 0 }),
       ),
-    listApprovals: (turnId, reference) => record("listApprovals", turnId, reference).pipe(Effect.as([])),
-    resolveToolApproval: () => Effect.void,
-    resolvePermission: () => Effect.void,
   })
 }
 
@@ -46,23 +45,36 @@ describe("lazyBackendLayer", () => {
           lazyBackendLayer(Layer.succeed(ExecutionBackend.Service, recordingBackend(calls))),
         )
         const backend = Context.get(context, ExecutionBackend.Service)
-        const reference = ExecutionBackend.executionReference
+        const reference = ExecutionIdentifier.executionReference
         const childId = "child:execution%3Aturn-a:call_1"
         yield* backend.inspect(childId, reference)
         yield* backend.replay(childId, "cursor-1", reference)
-        yield* backend.cancel(childId, 7, reference)
-        yield* backend.steer(childId, "steer", 8, reference)
-        yield* backend.listApprovals(childId, reference)
+        yield* backend.cancel(childId, reference)
+        yield* backend.steer(childId, "steer", "steer-child-1", reference)
         expect(backend.pageEvents).toBeDefined()
         yield* backend.pageEvents!(childId, "forward", "cursor-2", 200, reference)
         expect(calls).toEqual([
           ["inspect", childId, reference],
           ["replay", childId, "cursor-1", reference],
-          ["cancel", childId, 7, reference],
-          ["steer", childId, "steer", 8, reference],
-          ["listApprovals", childId, reference],
+          ["cancel", childId, reference],
+          ["steer", childId, "steer", "steer-child-1", reference],
           ["pageEvents", childId, "forward", "cursor-2", 200, reference],
         ])
+      }),
+    ),
+  )
+
+  it.effect("answers listOpenRootExecutions without loading the deferred backend", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const calls: Array<ReadonlyArray<unknown>> = []
+        const context = yield* Layer.build(
+          lazyBackendLayer(Layer.succeed(ExecutionBackend.Service, recordingBackend(calls))),
+        )
+        const backend = Context.get(context, ExecutionBackend.Service)
+        expect(backend.listOpenRootExecutions).toBeDefined()
+        expect(yield* backend.listOpenRootExecutions!).toEqual([])
+        expect(calls).toEqual([])
       }),
     ),
   )

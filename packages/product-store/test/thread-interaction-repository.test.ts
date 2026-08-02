@@ -1,0 +1,377 @@
+import * as BunServices from "@effect/platform-bun/BunServices"
+import { describe, expect, it } from "@effect/vitest"
+import { Effect, FileSystem, Layer } from "effect"
+import * as Database from "../src/database/product-database-layer"
+import * as Repository from "../src/interaction/sqlite-thread-interaction-repository"
+import * as InteractionContract from "@rika/product/thread-interaction-repository"
+import * as ThreadRepository from "../src/thread/sqlite-thread-repository"
+import * as Thread from "@rika/product/thread-record"
+import * as TurnRepository from "../src/turn/sqlite-turn-repository"
+import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
+
+const sourceThreadId = Thread.ThreadId.make("source")
+const sourceTurnId = Turn.TurnId.make("source-turn")
+const route = ExecutionRouteSnapshot.testExecutionRoute()
+const sourceThread: Thread.Thread = {
+  id: sourceThreadId,
+  workspace: "/workspace",
+  title: "Source",
+  labels: [],
+  pinned: false,
+  archived: false,
+  lineage: { _tag: "Original" },
+  createdAt: 1,
+  updatedAt: 1,
+}
+const sourceTurn: Turn.AgentExecutionTurn = {
+  _tag: "AgentExecution",
+  id: sourceTurnId,
+  threadId: sourceThreadId,
+  prompt: "source",
+  status: "running",
+  stopIntent: "none",
+  executionRoute: route,
+  author: { _tag: "Human" },
+  lineage: { _tag: "Original" },
+  createdAt: 1,
+  updatedAt: 1,
+}
+const sourceQueuedTurn: Turn.AgentExecutionTurn = {
+  ...sourceTurn,
+  id: Turn.TurnId.make("source-queued"),
+  prompt: "already queued",
+  status: "queued",
+  stopIntent: "none",
+  createdAt: 2,
+  updatedAt: 2,
+}
+const otherWorkspaceThread: Thread.Thread = {
+  ...sourceThread,
+  id: Thread.ThreadId.make("other-workspace"),
+  workspace: "/other",
+  title: "Other workspace",
+}
+const limits = { maximumDepth: 3, maximumAdmissions: 8, maximumWorkspaceActive: 8, queueCapacity: 2 }
+const invocation = (digest: string, input = digest, now = 2) => ({
+  invocationDigest: digest,
+  schemaInputDigest: input,
+  sourceThreadId,
+  sourceRootTurnId: sourceTurnId,
+  now,
+})
+
+const provideBun = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Layer.build(BunServices.layer).pipe(Effect.flatMap((context) => Effect.provide(effect, context)))
+
+const exercise = (repository: InteractionContract.Interface) =>
+  Effect.gen(function* () {
+    const targetThreadId = Thread.ThreadId.make("target")
+    const targetTurnId = Turn.TurnId.make("target-turn")
+    const created = yield* repository
+      .createThread({
+        ...invocation("create"),
+        ...limits,
+        threadId: targetThreadId,
+        turnId: targetTurnId,
+        title: "Target",
+        prompt: "work",
+        executionRoute: route,
+        resultDelivery: "reply",
+        threadCreationDepth: 1,
+      })
+      .pipe(
+        Effect.mapError((cause) =>
+          InteractionContract.RepositoryError.make({ message: `create: ${cause.message ?? String(cause)}` }),
+        ),
+      )
+    const duplicate = yield* repository.createThread({
+      ...invocation("create", "create", 99),
+      ...limits,
+      threadId: Thread.ThreadId.make("ignored"),
+      turnId: Turn.TurnId.make("ignored"),
+      title: "Ignored",
+      prompt: "ignored",
+      executionRoute: route,
+      resultDelivery: "reply",
+      threadCreationDepth: 1,
+    })
+    const conflict = yield* Effect.result(
+      repository.createThread({
+        ...invocation("create", "changed"),
+        ...limits,
+        threadId: targetThreadId,
+        turnId: targetTurnId,
+        title: "Target",
+        prompt: "changed",
+        executionRoute: route,
+        resultDelivery: "reply",
+        threadCreationDepth: 1,
+      }),
+    )
+    const crossWorkspace = yield* Effect.result(
+      repository.appendMessage({
+        ...invocation("cross-workspace"),
+        ...limits,
+        targetThreadId: otherWorkspaceThread.id,
+        turnId: Turn.TurnId.make("cross-workspace"),
+        prompt: "not allowed",
+        executionRoute: route,
+        resultDelivery: "manual",
+        threadCreationDepth: 1,
+      }),
+    )
+    const queued = yield* repository
+      .appendMessage({
+        ...invocation("message", "message", 3),
+        ...limits,
+        targetThreadId,
+        turnId: Turn.TurnId.make("queued"),
+        prompt: "next",
+        executionRoute: route,
+        resultDelivery: "reply",
+        threadCreationDepth: 1,
+      })
+      .pipe(
+        Effect.mapError((cause) =>
+          InteractionContract.RepositoryError.make({ message: `message: ${cause.message ?? String(cause)}` }),
+        ),
+      )
+    const firstUndeliveredPage = yield* repository.listUndeliveredResults(1)
+    const secondUndeliveredPage = yield* repository.listUndeliveredResults(
+      1,
+      firstUndeliveredPage[0] === undefined ? undefined : { targetTurnId: firstUndeliveredPage[0].targetTurnId },
+    )
+    const stopped = yield* repository
+      .bindStop({ ...invocation("stop", "stop", 4), targetThreadId })
+      .pipe(
+        Effect.mapError((cause) =>
+          InteractionContract.RepositoryError.make({ message: `stop: ${cause.message ?? String(cause)}` }),
+        ),
+      )
+    const stoppedAgain = yield* repository.bindStop({ ...invocation("stop", "stop", 99), targetThreadId })
+    const ready = yield* repository
+      .settleResult({
+        targetTurnId,
+        result: { status: "completed", cursor: "cursor", sequence: 4, output: "done" },
+        now: 5,
+      })
+      .pipe(
+        Effect.mapError((cause) => InteractionContract.RepositoryError.make({ message: `ready: ${cause.message}` })),
+      )
+    const queueFull = yield* Effect.result(
+      repository.deliverResult({
+        targetTurnId,
+        deliveredTurnId: Turn.TurnId.make("reply"),
+        queueCapacity: 1,
+        now: 6,
+      }),
+    )
+    const readyAfterQueueFull = yield* repository.getResultRoute(targetTurnId)
+    const [delivered, concurrentDelivery] = yield* Effect.all(
+      [
+        repository.deliverResult({
+          targetTurnId,
+          deliveredTurnId: Turn.TurnId.make("reply"),
+          queueCapacity: 2,
+          now: 6,
+        }),
+        repository.deliverResult({
+          targetTurnId,
+          deliveredTurnId: Turn.TurnId.make("reply"),
+          queueCapacity: 2,
+          now: 6,
+        }),
+      ],
+      { concurrency: "unbounded" },
+    ).pipe(
+      Effect.mapError((cause) =>
+        InteractionContract.RepositoryError.make({ message: `deliver: ${cause.message ?? String(cause)}` }),
+      ),
+    )
+    const deliveredAgain = yield* repository.deliverResult({
+      targetTurnId,
+      deliveredTurnId: Turn.TurnId.make("other"),
+      queueCapacity: 2,
+      now: 7,
+    })
+    const manualCancelled = yield* repository.settleResult({
+      targetTurnId: Turn.TurnId.make("queued"),
+      result: { status: "cancelled" },
+      now: 8,
+    })
+    const cancelledDelivery = yield* Effect.result(
+      repository.deliverResult({
+        targetTurnId: Turn.TurnId.make("queued"),
+        deliveredTurnId: Turn.TurnId.make("cancelled-reply"),
+        queueCapacity: 2,
+        now: 9,
+      }),
+    )
+    return {
+      created,
+      duplicate,
+      conflict: conflict._tag,
+      crossWorkspace: crossWorkspace._tag,
+      queued,
+      undeliveredPages: [...firstUndeliveredPage, ...secondUndeliveredPage].map((item) => item.targetTurnId),
+      stopped,
+      stoppedAgain,
+      ready,
+      queueFull: queueFull._tag,
+      readyAfterQueueFull,
+      delivered,
+      concurrentDelivery,
+      deliveredAgain,
+      manualCancelled,
+      cancelledDelivery: cancelledDelivery._tag,
+      result: yield* repository.getRootResult(targetTurnId),
+      undelivered: yield* repository.listUndeliveredResults(),
+      sourceRelationships: yield* repository.listRelationships(sourceThreadId, 1),
+      targetRelationships: yield* repository.listRelationships(targetThreadId, 2),
+      messages: yield* repository.getMessages(sourceThreadId),
+    }
+  })
+
+describe("thread interaction repository", () => {
+  it.effect("keeps atomic admission, control, readiness, and delivery equal in memory and SQLite", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const memory = yield* Repository.makeMemory({
+          threads: [sourceThread, otherWorkspaceThread],
+          turns: [sourceTurn, sourceQueuedTurn],
+        })
+        const fileSystem = yield* FileSystem.FileSystem
+        const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-interaction-" })
+        const database = Database.layer(`${directory}/rika.db`)
+        const context = yield* Layer.build(
+          Layer.mergeAll(
+            database,
+            Repository.layer.pipe(Layer.provide(database)),
+            ThreadRepository.layer.pipe(Layer.provide(database)),
+            TurnRepository.layer.pipe(Layer.provide(database)),
+          ),
+        )
+        const threads = yield* ThreadRepository.Service.pipe(Effect.provide(context))
+        const turns = yield* TurnRepository.Service.pipe(Effect.provide(context))
+        yield* threads.create({
+          id: sourceThread.id,
+          workspace: sourceThread.workspace,
+          title: sourceThread.title,
+          lineage: sourceThread.lineage,
+          now: 1,
+        })
+        yield* threads.create({
+          id: otherWorkspaceThread.id,
+          workspace: otherWorkspaceThread.workspace,
+          title: otherWorkspaceThread.title,
+          lineage: otherWorkspaceThread.lineage,
+          now: 1,
+        })
+        yield* turns.copy(sourceTurn, 2)
+        yield* turns.copy(sourceQueuedTurn, 2)
+        const sqlite = yield* Repository.Service.pipe(Effect.provide(context))
+        const memoryResult = yield* exercise(memory)
+        const sqliteResult = yield* exercise(sqlite)
+        expect(sqliteResult).toEqual(memoryResult)
+        expect(sqliteResult).toMatchObject({
+          created: { status: "accepted" },
+          duplicate: { threadId: "target", turnId: "target-turn" },
+          conflict: "Failure",
+          crossWorkspace: "Failure",
+          queued: { status: "queued", queueRevision: 1 },
+          undeliveredPages: ["queued", "target-turn"],
+          stopped: { targetTurnId: "target-turn", stoppedTurnIds: ["queued"], queueRevision: 2 },
+          queueFull: "Failure",
+          readyAfterQueueFull: { targetTurnId: "target-turn", delivery: "ready" },
+          delivered: { delivery: "delivered", deliveredTurnId: "reply" },
+          concurrentDelivery: { delivery: "delivered", deliveredTurnId: "reply" },
+          deliveredAgain: { delivery: "delivered", deliveredTurnId: "reply" },
+          manualCancelled: { targetTurnId: "queued", kind: "reply", delivery: "cancelled" },
+          cancelledDelivery: "Failure",
+          result: { status: "completed", cursor: "cursor", sequence: 4, output: "done" },
+          undelivered: [],
+          sourceRelationships: [{ kind: "reply", sourceThreadId: "target", targetThreadId: "source" }],
+          targetRelationships: [
+            { kind: "reply", sourceThreadId: "target", targetThreadId: "source" },
+            { kind: "message", sourceThreadId: "source", targetThreadId: "target" },
+          ],
+        })
+        expect(sqliteResult.messages.at(-1)).toMatchObject({
+          id: "reply",
+          status: "queued",
+          author: { _tag: "Agent", sourceThreadId: "target", sourceRootTurnId: "target-turn" },
+        })
+      }).pipe(provideBun),
+    ),
+  )
+
+  it.effect("releases a queued claim when SQLite stop cancels the claimed Turn", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-interaction-stop-" })
+        const database = Database.layer(`${directory}/rika.db`)
+        const context = yield* Layer.build(
+          Layer.mergeAll(
+            database,
+            Repository.layer.pipe(Layer.provide(database)),
+            ThreadRepository.layer.pipe(Layer.provide(database)),
+            TurnRepository.layer.pipe(Layer.provide(database)),
+          ),
+        )
+        const threads = yield* ThreadRepository.Service.pipe(Effect.provide(context))
+        const turns = yield* TurnRepository.Service.pipe(Effect.provide(context))
+        const repository = yield* Repository.Service.pipe(Effect.provide(context))
+        const targetThreadId = Thread.ThreadId.make("stop-claim-target")
+        yield* threads.create({ id: sourceThreadId, workspace: "/workspace", title: "Source", now: 1 })
+        yield* threads.create({ id: targetThreadId, workspace: "/workspace", title: "Target", now: 1 })
+        yield* turns.copy(sourceTurn, 1)
+        const active = yield* turns.createForSubmission({
+          id: Turn.TurnId.make("stop-claim-active"),
+          threadId: targetThreadId,
+          prompt: "active",
+          executionRoute: route,
+          queueCapacity: 2,
+          now: 2,
+        })
+        const queued = yield* turns.createForSubmission({
+          id: Turn.TurnId.make("stop-claim-queued"),
+          threadId: targetThreadId,
+          prompt: "queued",
+          executionRoute: route,
+          queueCapacity: 2,
+          now: 3,
+        })
+        yield* turns.setStatus(active.id, "completed", undefined, 4)
+        const staleClaim = yield* turns.claimNextQueued(targetThreadId, 5)
+        if (staleClaim === undefined) return yield* Effect.die("Missing queued claim")
+
+        yield* repository.bindStop({ ...invocation("stop-claim", "stop-claim", 6), targetThreadId })
+
+        expect(yield* turns.get(queued.id)).toMatchObject({ status: "cancelled" })
+        expect(yield* turns.finishQueuedClaim(staleClaim, "running", undefined, undefined, 7)).toEqual({
+          _tag: "Unavailable",
+        })
+        const replacement = yield* turns.createForSubmission({
+          id: Turn.TurnId.make("stop-claim-replacement"),
+          threadId: targetThreadId,
+          prompt: "replacement",
+          executionRoute: route,
+          queueCapacity: 2,
+          now: 8,
+        })
+        const later = yield* turns.createForSubmission({
+          id: Turn.TurnId.make("stop-claim-later"),
+          threadId: targetThreadId,
+          prompt: "later",
+          executionRoute: route,
+          queueCapacity: 2,
+          now: 9,
+        })
+        yield* turns.setStatus(replacement.id, "completed", undefined, 10)
+        expect((yield* turns.claimNextQueued(targetThreadId, 11))?.turn.id).toBe(later.id)
+      }).pipe(provideBun),
+    ),
+  )
+})

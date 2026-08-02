@@ -1,0 +1,139 @@
+import type { ActiveEvent } from "./usage-event"
+import { Lifecycle } from "./usage-event"
+import type { Snapshot } from "./usage-snapshot"
+import { Duration, Function } from "effect"
+
+export interface Interval {
+  readonly start: number
+  readonly end?: number
+}
+
+export interface ActiveTime {
+  readonly accumulated: Duration.Duration
+  readonly activeSince?: number
+}
+
+export type ActiveTimeAvailability = ({ readonly _tag: "Available" } & ActiveTime) | { readonly _tag: "Unavailable" }
+
+const lifecycleTimestamp = (event: ActiveEvent, previous: number | undefined) =>
+  event.type === "wait.created" && previous !== undefined ? Math.max(previous, event.createdAt) : event.createdAt
+
+export const executionIntervals = (events: ReadonlyArray<ActiveEvent>): ReadonlyArray<Interval> | undefined => {
+  const ordered = events.toSorted(
+    (left, right) => left.sequence - right.sequence || left.type.localeCompare(right.type),
+  )
+  const intervals: Array<Interval> = []
+  let activeSince: number | undefined
+  let accepted = false
+  let started = false
+  let terminal = false
+  let outstandingWaits = 0
+  let previousSequence: number | undefined
+  let previousCreatedAt: number | undefined
+  for (const event of ordered) {
+    const createdAt = lifecycleTimestamp(event, previousCreatedAt)
+    if (previousSequence === event.sequence || (previousCreatedAt !== undefined && createdAt < previousCreatedAt))
+      return undefined
+    previousSequence = event.sequence
+    previousCreatedAt = createdAt
+    if (terminal) return undefined
+    if (event.type === "execution.accepted") {
+      if (accepted || started) return undefined
+      accepted = true
+      continue
+    }
+    if (event.type === "execution.started") {
+      if (started) return undefined
+      started = true
+      activeSince = createdAt
+      continue
+    }
+    if (!started) {
+      if (accepted && Lifecycle.isTerminalEventType(event.type)) {
+        terminal = true
+        continue
+      }
+      return undefined
+    }
+    if (event.type === "wait.created") {
+      if (outstandingWaits === 0 && activeSince !== undefined) {
+        intervals.push({ start: activeSince, end: createdAt })
+        activeSince = undefined
+      }
+      outstandingWaits += 1
+      continue
+    }
+    if (event.type === "wait.woken" || event.type === "wait.timed_out" || event.type === "wait.cancelled") {
+      if (outstandingWaits === 0) return undefined
+      outstandingWaits -= 1
+      if (outstandingWaits === 0) activeSince = createdAt
+      continue
+    }
+    if (activeSince !== undefined) {
+      intervals.push({ start: activeSince, end: createdAt })
+      activeSince = undefined
+    }
+    if (Lifecycle.isTerminalEventType(event.type)) terminal = true
+  }
+  if (activeSince !== undefined) intervals.push({ start: activeSince })
+  return intervals
+}
+
+const unionIntervals = (intervals: ReadonlyArray<Interval>): ActiveTime => {
+  const ordered = intervals.toSorted(
+    (left, right) => left.start - right.start || (left.end ?? Infinity) - (right.end ?? Infinity),
+  )
+  let accumulated = Duration.zero
+  let currentStart: number | undefined
+  let currentEnd: number | undefined
+  for (const interval of ordered) {
+    if (currentStart === undefined) {
+      currentStart = interval.start
+      currentEnd = interval.end
+      continue
+    }
+    if (currentEnd === undefined) continue
+    if (interval.start <= currentEnd) {
+      currentEnd = interval.end === undefined ? undefined : Math.max(currentEnd, interval.end)
+      continue
+    }
+    accumulated = Duration.sum(accumulated, Duration.millis(currentEnd - currentStart))
+    currentStart = interval.start
+    currentEnd = interval.end
+  }
+  if (currentStart === undefined) return { accumulated }
+  if (currentEnd === undefined) return { accumulated, activeSince: currentStart }
+  return { accumulated: Duration.sum(accumulated, Duration.millis(currentEnd - currentStart)) }
+}
+
+const activeIntervalsImpl = (snapshot: Snapshot, threadId: string): ReadonlyArray<Interval> | undefined => {
+  const executions = new Map<string, Array<ActiveEvent>>()
+  for (const event of snapshot.activeEvents.values()) {
+    if (event.threadId !== threadId) continue
+    const group = executions.get(event.executionId)
+    if (group === undefined) executions.set(event.executionId, [event])
+    else group.push(event)
+  }
+  const intervals: Array<Interval> = []
+  let known = false
+  for (const events of executions.values()) {
+    const execution = executionIntervals(events)
+    if (execution === undefined) continue
+    known = true
+    intervals.push(...execution)
+  }
+  return known ? intervals : undefined
+}
+
+export const activeIntervals: {
+  (arg1: string): (arg0: Snapshot) => ReturnType<typeof activeIntervalsImpl>
+  (arg0: Snapshot, arg1: string): ReturnType<typeof activeIntervalsImpl>
+} = Function.dual(2, activeIntervalsImpl)
+
+export const activeTime: {
+  (snapshot: Snapshot, threadId: string): ActiveTimeAvailability
+  (threadId: string): (snapshot: Snapshot) => ActiveTimeAvailability
+} = Function.dual(2, (snapshot: Snapshot, threadId: string): ActiveTimeAvailability => {
+  const intervals = activeIntervals(snapshot, threadId)
+  return intervals === undefined ? { _tag: "Unavailable" } : { _tag: "Available", ...unionIntervals(intervals) }
+})

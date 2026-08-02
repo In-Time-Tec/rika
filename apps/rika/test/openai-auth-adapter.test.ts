@@ -1,10 +1,10 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { OpenAiAuth } from "@rika/app"
+import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, Exit, Fiber, Layer, Redacted, Schema } from "effect"
 import { TestConsole } from "effect/testing"
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
-import { hostLayer, httpLayer } from "../src/openai-auth-adapter"
+import { hostLayer, httpLayer } from "../src/provider/openai/openai-auth-adapter"
 
 const response = (request: HttpClientRequest.HttpClientRequest, status: number, body: unknown) =>
   HttpClientResponse.fromWeb(

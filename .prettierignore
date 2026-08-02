@@ -5,4 +5,4 @@ dist
 node_modules
 repos
 artifacts
-packages/tui/test/fixtures/visual/*.styles.json
+packages/terminal/test/fixtures/visual/*.styles.json

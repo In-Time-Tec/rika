@@ -1,17 +1,30 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { assert, describe, it } from "@effect/vitest"
-import { Duration, Effect, FileSystem, Layer, Path, Ref, Schema } from "effect"
+import * as Diagnostic from "../src/diagnostic-file-logging-contract"
+import { Cause, Duration, Effect, FileSystem, Layer, Path, Ref, Schema } from "effect"
 import { TestClock } from "effect/testing"
-import * as Logging from "../src/logging"
+import * as Logging from "../src/diagnostic-file-logging"
 
 const LogRecord = Schema.fromJsonString(
   Schema.Struct({
     message: Schema.String,
+    detail: Schema.optionalKey(Schema.String),
+    cause: Schema.optionalKey(Schema.String),
     annotations: Schema.Record(Schema.String, Schema.Unknown),
   }),
 )
 
 const decodeRecord = Schema.decodeUnknownEffect(LogRecord)
+
+const writtenRecords = (root: string) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const diagnostics = yield* Logging.directory(root)
+    const [name] = yield* fs.readDirectory(diagnostics)
+    const content = (yield* fs.readFileString(path.join(diagnostics, name!))).trim()
+    return { content, records: yield* Effect.forEach(content.split("\n"), (line) => decodeRecord(line)) }
+  })
 
 describe("Logging", () => {
   it.layer(BunServices.layer)((test) => {
@@ -59,19 +72,19 @@ describe("Logging", () => {
         const path = yield* Path.Path
         const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-private-" })
         const secrets = [
-          "prompt-secret-72d8",
-          "model-body-secret-13a4",
-          "tool-output-secret-99bc",
-          "shell-secret-02ef",
-          "authorization-secret-5d31",
-          "credential-secret-f741",
-          "arbitrary-error-secret-38ab",
+          "sk-live-72d8a41f",
+          "pk-live-13a4b72e",
+          "opaque-99bcf105",
+          "private-02efab84",
+          "bearer-5d31c990",
+          "key-f7412dde",
+          "failure-38ab6c21",
         ]
         yield* Effect.scoped(
           Effect.flatMap(
             Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })),
             (logging) =>
-              Effect.logError(secrets[0], secrets[1]).pipe(
+              Effect.logError("usage repository refused an incomplete tree", 14).pipe(
                 Effect.annotateLogs({
                   prompt: secrets[0],
                   "model.body": secrets[1],
@@ -80,10 +93,10 @@ describe("Logging", () => {
                   authorization: secrets[4],
                   credential: secrets[5],
                   error: secrets[6],
-                  "rika.execution.id": "execution-42",
+                  "rika.execution.id": "execution:42",
                   "rika.failure.category": "invalid_input",
                   "rika.failure.interrupted": false,
-                  "rika.failure.kind": "InvalidInput",
+                  "rika.failure.kind": secrets[6],
                   "rika.failure.outcome": "known",
                   "rika.tool.call.id": "call-7",
                   "rika.tool.deadline.ms": 10_000,
@@ -103,11 +116,11 @@ describe("Logging", () => {
         for (const secret of secrets) assert.notInclude(content, secret)
         const record = yield* decodeRecord(content.trim())
         assert.strictEqual(record.message, "diagnostic.unstructured")
+        assert.strictEqual(record.detail, undefined)
         assert.deepStrictEqual(record.annotations, {
-          "rika.execution.id": "execution-42",
+          "rika.execution.id": "execution:42",
           "rika.failure.category": "invalid_input",
           "rika.failure.interrupted": false,
-          "rika.failure.kind": "InvalidInput",
           "rika.failure.outcome": "known",
           "rika.tool.call.id": "call-7",
           "rika.tool.deadline.ms": 10_000,
@@ -117,6 +130,192 @@ describe("Logging", () => {
           "rika.duration.ms": 9_876,
           "rika.tool.name": "read",
         })
+      }),
+    )
+
+    test.effect("preserves shared typed producer diagnostics through the logger", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-producer-contract-" })
+        const taggedFailure = (kind: Diagnostic.FailureKind) =>
+          Effect.logError("failure.tagged").pipe(Effect.annotateLogs(Diagnostic.failure(kind)))
+        yield* Effect.scoped(
+          Effect.flatMap(
+            Layer.build(Logging.layer({ dataRoot: root, role: "resident", version: "1", pid: 42 })),
+            (logging) =>
+              Effect.all(
+                [
+                  ...Diagnostic.modelBackendKinds.map((kind) =>
+                    Effect.logInfo("model.backend.configured").pipe(Effect.annotateLogs(Diagnostic.modelBackend(kind))),
+                  ),
+                  taggedFailure("ExecutionIngestFollowFailure"),
+                  Effect.logError("failure.tagged").pipe(
+                    Effect.annotateLogs(Diagnostic.failureFrom(new Error("invalid model configuration"))),
+                  ),
+                ],
+                { concurrency: 1, discard: true },
+              ).pipe(Effect.provide(logging)),
+          ),
+        )
+        const { records } = yield* writtenRecords(root)
+        assert.deepStrictEqual(
+          records.map((record) => record.annotations),
+          [
+            { "rika.model.backend.kind": "provider" },
+            { "rika.model.backend.kind": "test-script" },
+            { "rika.model.backend.kind": "test-response" },
+            { "rika.failure.kind": "ExecutionIngestFollowFailure" },
+            { "rika.failure.kind": "Error" },
+          ],
+        )
+      }),
+    )
+
+    test.effect("rejects opaque values from every approved string field while retaining known tags", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-string-schemas-" })
+        const opaque = "sk-live-7f3a9c2d"
+        const stringFields = [
+          "rika.event.cursor",
+          "rika.event.type",
+          "rika.execution.id",
+          "rika.failure.category",
+          "rika.failure.kind",
+          "rika.failure.outcome",
+          "rika.follow.cursor",
+          "rika.follow.reason",
+          "rika.follow.scope",
+          "rika.model.alias",
+          "rika.model.backend.kind",
+          "rika.model.name",
+          "rika.model.provider",
+          "rika.model.registration_key",
+          "rika.operation",
+          "rika.process.instance",
+          "rika.process.role",
+          "rika.reconciliation.cursor.initial",
+          "rika.reconciliation.cursor.replayed",
+          "rika.resident.client.kind",
+          "rika.resident.command.tag",
+          "rika.resident.connection.id",
+          "rika.resident.connection.role",
+          "rika.resident.rejection.reason",
+          "rika.resident.request.id",
+          "rika.resident.session.id",
+          "rika.resident.shutdown.reason",
+          "rika.resident.startup.role",
+          "rika.thread.id",
+          "rika.tool.call.id",
+          "rika.tool.dependency",
+          "rika.tool.name",
+          "rika.turn.id",
+          "rika.version",
+        ]
+        yield* Effect.scoped(
+          Effect.flatMap(
+            Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })),
+            (logging) =>
+              Effect.logError("failure.tagged").pipe(
+                Effect.annotateLogs({
+                  ...Object.fromEntries(stringFields.map((key) => [key, opaque])),
+                  "rika.failure.kind": "TokenExpiredError",
+                }),
+                Effect.provide(logging),
+              ),
+          ),
+        )
+        const { content, records } = yield* writtenRecords(root)
+        assert.notInclude(content, opaque)
+        assert.deepStrictEqual(records[0]?.annotations, { "rika.failure.kind": "TokenExpiredError" })
+      }),
+    )
+
+    test.effect("omits an opaque backend failure through recovered-root cancellation", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-recovery-failure-" })
+        const opaque = "sk-live-9a2f7c1e"
+        yield* TestClock.adjust("1 minute")
+        yield* Effect.scoped(
+          Effect.flatMap(
+            Layer.build(Layer.mergeAll(Logging.layer({ dataRoot: root, role: "resident", version: "1", pid: 42 }))),
+            (context) =>
+              Effect.logError("execution.recovery.orphan_cancel_failed", opaque).pipe(
+                Effect.annotateLogs(Diagnostic.failure("RecoveredRootCancelFailure")),
+                Effect.provide(context),
+              ),
+          ),
+        )
+        const { content, records } = yield* writtenRecords(root)
+        assert.notInclude(content, opaque)
+        const failed = records.find((record) => record.message === "execution.recovery.orphan_cancel_failed")
+        assert.strictEqual(failed?.annotations["rika.failure.kind"], "RecoveredRootCancelFailure")
+      }),
+    )
+
+    test.effect("omits arbitrary message values, objects, and failure causes", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-private-values-" })
+        const secret = "cause-secret-f839"
+        const cyclic: Record<string, unknown> = { value: secret }
+        cyclic.self = cyclic
+        yield* Effect.scoped(
+          Effect.flatMap(
+            Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })),
+            (logging) =>
+              Effect.all([
+                Effect.logWarning("usage repository refused an incomplete tree", cyclic),
+                Effect.logInfo("execution.follow.started", cyclic),
+                Effect.logWarning("usage-cost.read.failed", Cause.fail(secret)),
+              ]).pipe(Effect.provide(logging)),
+          ),
+        )
+        const { content, records } = yield* writtenRecords(root)
+        assert.notInclude(content, secret)
+        assert.notInclude(content, "[object Object]")
+        assert.deepStrictEqual(
+          records.map((record) => record.message),
+          ["diagnostic.unstructured", "execution.follow.started", "diagnostic.unstructured"],
+        )
+        for (const record of records) {
+          assert.strictEqual(record.detail, undefined)
+          assert.strictEqual(record.cause, undefined)
+        }
+      }),
+    )
+
+    test.effect("records follow and reconnect annotations without unknown keys", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-annotations-" })
+        yield* Effect.scoped(
+          Effect.flatMap(
+            Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })),
+            (logging) =>
+              Effect.logInfo("execution.follow.started").pipe(
+                Effect.annotateLogs({
+                  "rika.failure.cause": "UsageRepositoryError",
+                  "rika.follow.cursor": "cursor-42",
+                  "rika.follow.reason": "thread-open",
+                  "rika.follow.scope": "tree",
+                  "rika.reconnect.attempt": 3,
+                  "rika.reconnect.message": "relay stream closed",
+                  "rika.unknown.annotation": "dropped-annotation-a41c",
+                }),
+                Effect.provide(logging),
+              ),
+          ),
+        )
+        const { content, records } = yield* writtenRecords(root)
+        assert.deepStrictEqual(records[0]?.annotations, {
+          "rika.follow.cursor": "cursor-42",
+          "rika.follow.reason": "thread-open",
+          "rika.follow.scope": "tree",
+          "rika.reconnect.attempt": 3,
+        })
+        assert.notInclude(content, "dropped-annotation-a41c")
       }),
     )
 
@@ -237,22 +436,6 @@ describe("Logging", () => {
         yield* Effect.scoped(Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })))
         assert.isFalse(yield* fs.exists(expired))
         assert.isTrue(yield* fs.exists(crash))
-      }),
-    )
-
-    test.effect("resolves one canonical data root from both database paths", () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const path = yield* Path.Path
-        const parent = yield* fs.makeTempDirectoryScoped({ prefix: "rika-data-root-" })
-        const root = path.join(parent, "data")
-        const link = path.join(parent, "data-link")
-        yield* fs.makeDirectory(root)
-        yield* fs.symlink(root, link)
-        assert.strictEqual(
-          yield* Logging.resolveDataRoot(path.join(link, "rika.db"), path.join(root, "relay.db")),
-          yield* fs.realPath(root),
-        )
       }),
     )
 

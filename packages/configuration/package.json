@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/configuration",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./behavior-mode": "./src/model-routing/behavior-mode.ts",
+    "./model-catalog": "./src/model-routing/model-catalog.ts",
+    "./model-preset": "./src/model-routing/model-preset.ts",
+    "./model-route": "./src/model-routing/model-route.ts",
+    "./model-route-label": "./src/model-routing/model-route-label.ts",
+    "./model-route-resolution": "./src/model-routing/model-route-resolution.ts",
+    "./canonical-data-root": "./src/path-resolution/canonical-data-root.ts",
+    "./configuration-paths": "./src/path-resolution/configuration-paths.ts",
+    "./profile-data-paths": "./src/path-resolution/profile-data-paths.ts",
+    "./configuration-settings": "./src/settings/configuration-settings.ts",
+    "./configuration-service": "./src/settings/configuration-service.ts"
+  },
+  "dependencies": {
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@types/bun": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "rika": {
+    "kind": "capability",
+    "domain": "configuration"
+  },
+  "scripts": {
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/configuration/src packages/configuration/test",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
+  }
+}

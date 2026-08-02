@@ -1,7 +1,8 @@
-import { OpenAiAuth } from "@rika/app"
+import * as OpenAiAuth from "@rika/product/openai-auth-service"
+import * as OpenAiAuthContract from "@rika/product/openai-auth-contract"
 import { afterEach, expect, test } from "bun:test"
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
-import { layer } from "../src/openai-credential-store"
+import { layer, type Options } from "../src/provider/openai/openai-credential-store"
 
 const fs = process.getBuiltinModule("fs").promises
 const { tmpdir } = process.getBuiltinModule("os")
@@ -27,11 +28,24 @@ const setup = Effect.gen(function* () {
   roots.push(root)
   return { root, parent: join(root, "auth"), filename: join(root, "auth", "openai.json") }
 })
+interface TestStore {
+  readonly load: Effect.Effect<
+    Option.Option<typeof OpenAiAuthContract.CredentialDisk.Type>,
+    OpenAiAuthContract.StoreError
+  >
+  readonly save: (
+    credential: typeof OpenAiAuthContract.CredentialDisk.Type,
+  ) => Effect.Effect<void, OpenAiAuthContract.StoreError>
+  readonly serialized: <A, E, R>(
+    effect: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | OpenAiAuthContract.StoreError, R>
+}
+
 const withStore = <A, E>(
   filename: string,
-  effect: (store: OpenAiAuth.StoreInterface) => Effect.Effect<A, E>,
-  options = {},
-) =>
+  effect: (store: TestStore) => Effect.Effect<A, E>,
+  options: Options = {},
+): Effect.Effect<A, E | OpenAiAuthContract.StoreError> =>
   Effect.scoped(
     Layer.build(
       layer(filename, {
@@ -40,7 +54,15 @@ const withStore = <A, E>(
         lockRetry: 5,
         ...options,
       }),
-    ).pipe(Effect.flatMap((context) => effect(Context.get(context, OpenAiAuth.Store)))),
+    ).pipe(
+      Effect.flatMap((context) => effect(Context.get(context, OpenAiAuth.Store))),
+      Effect.mapError((error) =>
+        Option.match(Schema.decodeUnknownOption(OpenAiAuthContract.StoreError)(error), {
+          onNone: () => OpenAiAuthContract.StoreError.make({ kind: "io", message: String(error) }),
+          onSome: (value) => value,
+        }),
+      ),
+    ),
   )
 const errorKind = <A, E>(effect: Effect.Effect<A, E>) =>
   Effect.match(effect, {
@@ -49,7 +71,7 @@ const errorKind = <A, E>(effect: Effect.Effect<A, E>) =>
     onSuccess: () => undefined,
   })
 const encodeJson = Schema.encodeEffect(Schema.UnknownFromJsonString)
-const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect)
+const run = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect.pipe(Effect.orDie))
 
 test("saves and loads with private modes", () =>
   run(

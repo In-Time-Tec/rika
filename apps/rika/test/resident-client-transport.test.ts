@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Socket from "effect/unstable/socket/Socket"
-import { residentSocketFailure } from "../src/resident-client-transport"
+import { residentSocketFailure } from "../src/transport/client/resident-client-reconnect"
 
 const closeFailure = (code: number) => Socket.SocketError.make({ reason: Socket.SocketCloseError.make({ code }) })
 

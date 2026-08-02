@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/coding-tools",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./coding-tool-catalog": "./src/catalog/coding-tool-catalog.ts",
+    "./thread-tool-contract": "./src/catalog/thread-tool-contract.ts",
+    "./tool-invocation": "./src/catalog/tool-invocation.ts",
+    "./agent-tool-contract": "./src/delegation/agent-tool-contract.ts",
+    "./agent-tool-result": "./src/delegation/agent-tool-result.ts",
+    "./media-view-service": "./src/media/media-view-service.ts",
+    "./view-media-tool": "./src/media/view-media-tool.ts",
+    "./coding-tool-policy": "./src/policy/coding-tool-policy.ts",
+    "./local-safety-policy": "./src/policy/local-safety-policy.ts",
+    "./bash-tool": "./src/process/bash-tool.ts",
+    "./shell-command-status-tool": "./src/process/shell-command-status-tool.ts",
+    "./shell-process-registry": "./src/process/shell-process-registry.ts",
+    "./coding-tool-runtime": "./src/runtime/coding-tool-runtime.ts",
+    "./parallel-web-search": "./src/web-research/parallel-web-search.ts",
+    "./read-web-page-service": "./src/web-research/read-web-page-service.ts",
+    "./read-web-page-tool": "./src/web-research/read-web-page-tool.ts",
+    "./web-search-provider": "./src/web-research/web-search-provider.ts",
+    "./web-search-service": "./src/web-research/web-search-service.ts",
+    "./web-search-tool": "./src/web-research/web-search-tool.ts",
+    "./edit-file-tool": "./src/workspace/edit-file-tool.ts",
+    "./grep-files-tool": "./src/workspace/grep-files-tool.ts",
+    "./local-path": "./src/workspace/local-path.ts",
+    "./read-file-tool": "./src/workspace/read-file-tool.ts",
+    "./unified-diff": "./src/workspace/unified-diff.ts",
+    "./workspace-file-search": "./src/workspace/workspace-file-search.ts",
+    "./write-file-tool": "./src/workspace/write-file-tool.ts"
+  },
+  "dependencies": {
+    "@rika/configuration": "workspace:*",
+    "effect": "catalog:",
+    "parallel-web": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@types/bun": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "rika": {
+    "kind": "capability",
+    "domain": "coding-tools"
+  },
+  "scripts": {
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/coding-tools/src packages/coding-tools/test",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
+  }
+}

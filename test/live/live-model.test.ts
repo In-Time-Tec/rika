@@ -1,7 +1,7 @@
 import { Agent, ModelRegistry, Tool, Toolkit } from "@batonfx/core"
 import { withOpenAiCompatible } from "@batonfx/providers/openai-compat"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { resolve } from "../../packages/runtime/src/agent-profiles"
+import { resolve } from "@rika/relay-execution/baton-agent-definition"
 import { describe, expect, it } from "@effect/vitest"
 import { Config, Effect, FileSystem, Option, Path, Redacted, Schema } from "effect"
 

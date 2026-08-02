@@ -1,17 +1,22 @@
+import { OperationUnavailable } from "@rika/product/product-operation"
+import * as ConfigurationService from "@rika/configuration/configuration-service"
+import * as SettingsDecoder from "@rika/configuration/configuration-settings"
+import * as ConfigurationSettingsInput from "@rika/configuration/configuration-settings"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { ConfigOperations, Operation } from "@rika/app"
-import { ConfigContract, ConfigService } from "@rika/config"
-import * as Database from "@rika/persistence/database"
-import * as ThreadRepository from "@rika/persistence/repository"
-import * as Thread from "@rika/persistence/thread"
-import * as TurnRepository from "@rika/persistence/turn-repository"
-import * as Turn from "@rika/persistence/turn"
-import * as ExecutionBackend from "@rika/runtime/contract"
-import { WebSearch } from "@rika/tools"
+import * as ConfigOperations from "@rika/product/configuration-operation"
+import { productLayer, Service } from "@rika/product/product-operation-service"
+import * as Database from "@rika/product-store/product-database-layer"
+import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
+import * as Thread from "@rika/product/thread-record"
+import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
+import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
+import * as Turn from "@rika/product/turn-record"
+import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
+import * as WebSearchProvider from "@rika/coding-tools/web-search-provider"
 import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, Schema, Scope } from "effect"
 import { TestConsole } from "effect/testing"
 import { expect, it } from "@effect/vitest"
-import { run } from "../src/command"
+import { run } from "../src/command/root/rika-command"
 
 const NamedItemsJson = Schema.fromJsonString(Schema.Array(Schema.Struct({ name: Schema.String })))
 const NamedItemJson = Schema.fromJsonString(Schema.Struct({ name: Schema.String }))
@@ -28,8 +33,7 @@ const PresenceStatus = Schema.Literals(["present", "missing"])
 const CredentialStatus = Schema.Literals(["present", "missing", "not-configured"])
 const DoctorReport = Schema.fromJsonString(
   Schema.Struct({
-    databases: Schema.Struct({ product: PresenceStatus, relay: PresenceStatus }),
-    upstream: Schema.Record(Schema.String, PresenceStatus),
+    databases: Schema.Struct({ product: PresenceStatus, execution: PresenceStatus }),
     config: Schema.Struct({
       diagnostics: Schema.Array(Schema.Struct({ path: Schema.String, source: Schema.String, message: Schema.String })),
       global: PresenceStatus,
@@ -45,6 +49,7 @@ const DoctorReport = Schema.fromJsonString(
 
 const backend = ExecutionBackend.Service.of({
   invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
+  resolveInvocationSource: () => Effect.die("unused"),
   createFanOut: () => Effect.die("unused"),
   inspectFanOut: () => Effect.die("unused"),
   cancelFanOut: () => Effect.die("unused"),
@@ -57,9 +62,6 @@ const backend = ExecutionBackend.Service.of({
   cancel: (turnId) => Effect.succeed({ turnId, status: "cancelled", events: [] }),
   inspect: () => Effect.void.pipe(Effect.as(undefined)),
   steer: (turnId) => Effect.succeed({ steeringMessageId: `steering:${turnId}:steering:0`, sequence: 0 }),
-  listApprovals: () => Effect.succeed([]),
-  resolveToolApproval: () => Effect.void,
-  resolvePermission: () => Effect.void,
 })
 
 const withServices = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | Scope.Scope>) =>
@@ -69,7 +71,7 @@ interface CliSandbox {
   readonly root: string
   readonly workspace: string
   readonly databasePath: string
-  readonly relayDatabasePath: string
+  readonly executionDatabasePath: string
   readonly globalConfigPath: string
   readonly workspaceConfigPath: string
   readonly adapter: ConfigOperations.AdapterInterface
@@ -92,7 +94,7 @@ const sandbox = Effect.gen(function* () {
     root,
     workspace,
     databasePath: path.join(root, "rika.db"),
-    relayDatabasePath: path.join(root, "relay.db"),
+    executionDatabasePath: path.join(root, "execution.db"),
     globalConfigPath: path.join(root, "home", ".config", "rika", "settings.json"),
     workspaceConfigPath: path.join(workspace, ".rika", "settings.json"),
     adapter,
@@ -103,11 +105,11 @@ const sandbox = Effect.gen(function* () {
 let identifierSequence = 0
 
 const configServiceLayer = (input: {
-  readonly workspace?: ConfigContract.SettingsInput
+  readonly workspace?: ConfigurationSettingsInput.Input.SettingsInput
   readonly env?: Readonly<Record<string, string>>
 }) =>
-  ConfigService.liveEnvironmentLayer({
-    webProviders: WebSearch.providerRegistry,
+  ConfigurationService.liveConfigurationLayer({
+    webProviders: WebSearchProvider.providerRegistry,
     global: {},
     workspace: input.workspace ?? {},
   }).pipe(
@@ -119,7 +121,7 @@ const operationLayer = (
   context: CliSandbox,
   options: {
     readonly config?: {
-      readonly workspace?: ConfigContract.SettingsInput
+      readonly workspace?: ConfigurationSettingsInput.Input.SettingsInput
       readonly env?: Readonly<Record<string, string>>
     }
   } = {},
@@ -127,24 +129,29 @@ const operationLayer = (
   const database = Database.layer(context.databasePath)
   const repositoryLayer = ThreadRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
   const turnRepositoryLayer = TurnRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
-  return Operation.productLayer({
+  const transcriptRepositoryLayer = TranscriptRepository.layer.pipe(
+    Layer.provide(database),
+    Layer.provide(BunServices.layer),
+  )
+  return productLayer({
     repositoryLayer,
     turnRepositoryLayer,
+    transcriptRepositoryLayer,
     backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
     defaultWorkspace: context.workspace,
     makeThreadId: Effect.sync(() => Thread.ThreadId.make(`cli-thread-${(identifierSequence += 1)}`)),
     makeTurnId: Effect.sync(() => Turn.TurnId.make(`cli-turn-${(identifierSequence += 1)}`)),
     configOperations: {
-      layer: Layer.merge(ConfigOperations.testLayer(context.adapter), configServiceLayer(options.config ?? {})),
+      layer: Layer.merge(
+        ConfigOperations.testLayer(context.adapter),
+        configServiceLayer(options.config ?? {}),
+        BunServices.layer,
+      ),
       options: {
         globalConfigPath: context.globalConfigPath,
         workspaceConfigPath: context.workspaceConfigPath,
         productDatabasePath: context.databasePath,
-        relayDatabasePath: context.relayDatabasePath,
-        upstream: [
-          { name: "baton", present: true },
-          { name: "relay", present: true },
-        ],
+        executionDatabasePath: context.executionDatabasePath,
       },
     },
     interactive: () => Effect.void,
@@ -157,7 +164,7 @@ interface CliResult {
   readonly errors: ReadonlyArray<string>
 }
 
-const openCli = <E>(layer: Layer.Layer<Operation.Service, E>) =>
+const openCli = <E>(layer: Layer.Layer<Service, E>) =>
   Effect.gen(function* () {
     const scope = yield* Effect.scope
     const context = yield* Layer.buildWithScope(Layer.mergeAll(BunServices.layer, TestConsole.layer, layer), scope)
@@ -187,7 +194,7 @@ const expectSuccess = (result: CliResult) => {
 const expectFailureMessage = (result: CliResult) => {
   expect(result.exit._tag).toBe("Failure")
   const failure = result.exit._tag === "Failure" ? Cause.squash(result.exit.cause) : undefined
-  return Schema.is(Operation.OperationUnavailable)(failure) || Schema.is(Operation.InvalidInput)(failure)
+  return Schema.is(OperationUnavailable)(failure) || Schema.is(InvalidInput)(failure)
     ? failure.message
     : String(failure)
 }
@@ -252,10 +259,9 @@ it.effect(
         const cli = yield* openCli(operationLayer(context))
         const result = expectSuccess(yield* cli.invoke(["doctor"]))
         const report = yield* Schema.decodeUnknownEffect(DoctorReport)(jsonOutput(result))
-        expect(Object.keys(report).toSorted()).toEqual(["config", "credentials", "databases", "model", "upstream"])
-        expect(report.databases).toEqual({ product: "present", relay: "missing" })
+        expect(Object.keys(report).toSorted()).toEqual(["config", "credentials", "databases", "model"])
+        expect(report.databases).toEqual({ product: "present", execution: "missing" })
         expect(report.config).toMatchObject({ diagnostics: [], global: "missing", workspace: "missing" })
-        expect(report.upstream).toEqual({ baton: "present", relay: "present" })
       }),
     ),
   20_000,
@@ -275,7 +281,10 @@ it.effect(
         const settingsJson = yield* Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(settingsInput)
         yield* fileSystem.makeDirectory(path.dirname(context.workspaceConfigPath), { recursive: true })
         yield* fileSystem.writeFileString(context.workspaceConfigPath, settingsJson)
-        const workspaceSettings = ConfigContract.decodeSettingsInput(context.workspaceConfigPath, settingsInput)
+        const workspaceSettings = SettingsDecoder.Decoder.decodeSettingsInput(
+          context.workspaceConfigPath,
+          settingsInput,
+        )
         const cli = yield* openCli(
           operationLayer(context, {
             config: {

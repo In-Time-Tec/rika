@@ -1,14 +1,97 @@
+import * as InteractiveEvent from "@rika/product/interactive-event"
+import * as ProductOperation from "@rika/product/product-operation"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Operation } from "@rika/app"
-import * as Thread from "@rika/persistence/thread"
-import * as Turn from "@rika/persistence/turn"
+import { Service } from "@rika/product/product-operation-service"
+import * as Thread from "@rika/product/thread-record"
+import * as Turn from "@rika/product/turn-record"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
 import { Config, Console, Effect, Exit, FileSystem, Layer, Logger, Path, Ref, Schema, Scope } from "effect"
-import { serve } from "../../src/resident-host-transport"
-import * as ResidentProcessStartup from "../../src/resident-process-startup"
+import { serve } from "../../src/transport/host/resident-host-transport"
+import * as ResidentProcessStartup from "../../src/resident/process/resident-process-launch"
 
 let activeWork = 0
+
+const fixtureTurn = (threadId: Thread.ThreadId, turnId: Turn.TurnId, prompt: string): Turn.AgentExecutionTurn => ({
+  _tag: "AgentExecution",
+  id: turnId,
+  threadId,
+  prompt,
+  author: { _tag: "Human" },
+  lineage: { _tag: "Original" },
+  executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
+  status: "running",
+  stopIntent: "none",
+  createdAt: 0,
+  updatedAt: 0,
+})
+
+const visibleProjectionState = (fold: TranscriptProjection.ProjectionFold) => {
+  const state = TranscriptProjection.Fold.snapshotFoldState(fold)
+  return {
+    revision: state.revision,
+    modelPhase: state.modelPhase,
+    ...(state.usableCompletionSequence === undefined
+      ? {}
+      : { usableCompletionSequence: state.usableCompletionSequence }),
+  }
+}
+
+const makeFixtureProjection = (
+  dispatch: (event: InteractiveEvent) => void,
+  threadId: Thread.ThreadId,
+  turnId: Turn.TurnId,
+  prompt: string,
+) => {
+  const turn = fixtureTurn(threadId, turnId, prompt)
+  const fold = TranscriptProjection.Fold.restoreProjectionFold(TranscriptProjection.Projection.empty(turnId, prompt))
+  const streamId = `fixture:${turnId}`
+  let patchRevision = 0
+  dispatch({
+    _tag: "TranscriptProjectionStarted",
+    selectionEpoch: 0,
+    threadId,
+    rootTurnId: turnId,
+    turn,
+    streamId,
+    patchRevision,
+    state: visibleProjectionState(fold),
+    units: TranscriptProjection.Fold.foldUnits(fold),
+  })
+  return {
+    emit: (event: TranscriptSourceEvent.SourceEvent, executionId = `execution:${turnId}`) => {
+      const mutation = TranscriptProjection.Fold.applyFoldEvent(fold, event)
+      const baseRevision = patchRevision
+      patchRevision += 1
+      const blockId = event.data?.tool_call_id ?? event.data?.call_id ?? event.data?.id
+      dispatch({
+        _tag: "TranscriptProjectionPatched",
+        selectionEpoch: 0,
+        threadId,
+        rootTurnId: turnId,
+        streamId,
+        baseRevision,
+        patchRevision,
+        origin: {
+          _tag: "Event",
+          executionId,
+          cursor: event.cursor,
+          sequence: event.sequence,
+          type: event.type,
+          createdAt: event.createdAt,
+          transient: TranscriptProjection.Fold.isTransientEvent(event),
+          ...(event.text === undefined ? {} : { text: event.text }),
+          ...(typeof blockId === "string" ? { blockId } : {}),
+        },
+        state: visibleProjectionState(fold),
+        delta: mutation.units,
+      })
+    },
+  }
+}
 
 const program = Effect.gen(function* () {
   const dataRoot = yield* Config.string("RIKA_TEST_RESIDENT_DATA_ROOT")
@@ -21,9 +104,16 @@ const program = Effect.gen(function* () {
     yield* Config.string("RIKA_TEST_RESIDENT_OWNER_STARTUP_DELAY").pipe(Config.withDefault("0")),
   )
   const delayedWork = (yield* Config.string("RIKA_TEST_RESIDENT_DELAYED_WORK").pipe(Config.withDefault("0"))) === "1"
+  const activeWorkMilliseconds = Number(
+    yield* Config.string("RIKA_TEST_RESIDENT_ACTIVE_WORK_MILLIS").pipe(Config.withDefault("0")),
+  )
   const uninterruptibleOwner =
     (yield* Config.string("RIKA_TEST_RESIDENT_UNINTERRUPTIBLE_OWNER").pipe(Config.withDefault("0"))) === "1"
   const outboundCapacity = yield* Config.int("RIKA_TEST_RESIDENT_OUTBOUND_CAPACITY").pipe(Config.withDefault(1_024))
+  const abandonMilliseconds = Number(
+    yield* Config.string("RIKA_TEST_RESIDENT_ABANDON").pipe(Config.withDefault("5000")),
+  )
+  activeWork = Number(yield* Config.string("RIKA_TEST_RESIDENT_INITIAL_ACTIVE_WORK").pipe(Config.withDefault("0")))
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const interactiveAdmissionActive = yield* Ref.make(0)
@@ -39,6 +129,7 @@ const program = Effect.gen(function* () {
     profile: "default",
     dataRoot,
     graceMilliseconds: Number(grace),
+    abandonMilliseconds,
     startupHoldMilliseconds: Number(startupHold),
     outboundCapacity,
     onReady: ResidentProcessStartup.signalReady,
@@ -58,7 +149,12 @@ const program = Effect.gen(function* () {
             ),
           ),
         )
-        return Operation.Service.of({
+        return Service.of({
+          hasActiveExecutionWork: Effect.sync(() => activeWork > 0),
+          authorizeResidentReplacement: Effect.sync(() => (activeWork > 0 ? "defer" : "supersede")),
+          stopActiveExecutionWork: Effect.sync(() => {
+            activeWork = 0
+          }).pipe(Effect.andThen(append("stop-work.log", `${process.pid}\n`))),
           run: (input) => {
             if (input._tag !== "Interactive")
               return Effect.suspend(() => {
@@ -69,21 +165,29 @@ const program = Effect.gen(function* () {
                     Effect.flatMap(Console.log),
                     Effect.orDie,
                   )
+                const delegated = input.prompt[0] === "active-root-with-child"
                 return Effect.sync(() => {
-                  activeWork += 1
+                  activeWork += delegated ? 2 : 1
                 }).pipe(
                   Effect.andThen(append("delayed-work-starts.log", `${process.pid}\n`)),
-                  Effect.andThen(Effect.never),
+                  Effect.andThen(
+                    delegated
+                      ? append("active-executions.log", `${process.pid}:root\n${process.pid}:child\n`)
+                      : Effect.void,
+                  ),
+                  Effect.andThen(
+                    delegated && activeWorkMilliseconds > 0 ? Effect.sleep(activeWorkMilliseconds) : Effect.never,
+                  ),
                   Effect.ensuring(
                     Effect.sync(() => {
-                      activeWork -= 1
+                      activeWork -= delegated ? 2 : 1
                     }).pipe(Effect.andThen(append("delayed-work-finalizations.log", `${process.pid}\n`))),
                   ),
                 )
               })
             if (input.prompt[0] === "reject-before-start")
               return Effect.fail(
-                Operation.OperationUnavailable.make({
+                ProductOperation.OperationUnavailable.make({
                   operation: "Interactive",
                   message: "Interactive setup rejected",
                 }),
@@ -109,21 +213,20 @@ const program = Effect.gen(function* () {
                   ).pipe(Effect.andThen(Effect.never))
                 if (kind === "slow-consumer-events")
                   return Effect.gen(function* () {
+                    const projection = makeFixtureProjection(
+                      dispatch,
+                      Thread.ThreadId.make("slow-consumer-thread"),
+                      Turn.TurnId.make("slow-consumer-turn"),
+                      "slow consumer",
+                    )
                     const emitPatch = (index: number) =>
                       Effect.sync(() =>
-                        dispatch({
-                          _tag: "TranscriptPatched",
-                          selectionEpoch: 0,
-                          threadId: Thread.ThreadId.make("slow-consumer-thread"),
-                          turnId: Turn.TurnId.make("slow-consumer-turn"),
-                          event: {
-                            cursor: `slow-consumer-${index}`,
-                            sequence: index,
-                            type: "model.output.delta",
-                            createdAt: index,
-                            text: String(index),
-                          },
-                          revision: index,
+                        projection.emit({
+                          cursor: `slow-consumer-${index}`,
+                          sequence: index,
+                          type: "model.output.delta",
+                          createdAt: index,
+                          text: String(index),
                         }),
                       )
                     yield* Effect.forEach(
@@ -134,18 +237,11 @@ const program = Effect.gen(function* () {
                     yield* Effect.sleep("250 millis")
                     yield* emitPatch(outboundCapacity)
                     yield* Effect.sync(() =>
-                      dispatch({
-                        _tag: "TranscriptPatched",
-                        selectionEpoch: 0,
-                        threadId: Thread.ThreadId.make("slow-consumer-thread"),
-                        turnId: Turn.TurnId.make("slow-consumer-turn"),
-                        event: {
-                          cursor: "slow-consumer-completed",
-                          sequence: outboundCapacity + 1,
-                          type: "execution.completed",
-                          createdAt: outboundCapacity + 1,
-                        },
-                        revision: outboundCapacity + 1,
+                      projection.emit({
+                        cursor: "slow-consumer-completed",
+                        sequence: outboundCapacity + 1,
+                        type: "execution.completed",
+                        createdAt: outboundCapacity + 1,
                       }),
                     )
                     return yield* Effect.never
@@ -154,32 +250,26 @@ const program = Effect.gen(function* () {
                   return Effect.gen(function* () {
                     const threadId = Thread.ThreadId.make("timed-tool-thread")
                     const turnId = Turn.TurnId.make("timed-tool-turn")
+                    const projection = makeFixtureProjection(dispatch, threadId, turnId, "timed tools")
                     const patch = (
                       sequence: number,
                       type: "tool.call.requested" | "tool.result.received",
                       callId: string,
                     ) =>
                       Effect.sync(() =>
-                        dispatch({
-                          _tag: "TranscriptPatched",
-                          selectionEpoch: 0,
-                          threadId,
-                          turnId,
-                          event: {
-                            cursor: `timed-tool-${sequence}`,
-                            sequence,
-                            type,
-                            createdAt: sequence * 200,
-                            data:
-                              type === "tool.call.requested"
-                                ? {
-                                    tool_call_id: callId,
-                                    tool_name: "read",
-                                    input: { path: `${callId}.ts` },
-                                  }
-                                : { tool_call_id: callId, output: callId },
-                          },
-                          revision: sequence,
+                        projection.emit({
+                          cursor: `timed-tool-${sequence}`,
+                          sequence,
+                          type,
+                          createdAt: sequence * 200,
+                          data:
+                            type === "tool.call.requested"
+                              ? {
+                                  tool_call_id: callId,
+                                  tool_name: "read",
+                                  input: { path: `${callId}.ts` },
+                                }
+                              : { tool_call_id: callId, output: callId },
                         }),
                       )
                     yield* patch(0, "tool.call.requested", "first")
@@ -199,73 +289,61 @@ const program = Effect.gen(function* () {
                     const threadId = Thread.ThreadId.make("child-feed-thread")
                     const parentTurnId = Turn.TurnId.make("parent-turn")
                     const childTurnId = Turn.TurnId.make("parent-turn:child:oracle")
-                    dispatch({
-                      _tag: "TranscriptPatched",
-                      selectionEpoch: 0,
-                      threadId,
-                      turnId: parentTurnId,
-                      event: {
-                        cursor: "child-spawned",
-                        sequence: 1,
-                        type: "child_run.spawned",
-                        createdAt: 1,
-                        data: {
-                          tool_call_id: "oracle",
-                          child_execution_id: "execution:parent-turn:child:oracle",
-                        },
+                    const projection = makeFixtureProjection(dispatch, threadId, parentTurnId, "parent turn")
+                    projection.emit({
+                      cursor: "child-spawned",
+                      sequence: 1,
+                      type: "child_run.spawned",
+                      createdAt: 1,
+                      data: {
+                        tool_call_id: "oracle",
+                        child_execution_id: "execution:parent-turn:child:oracle",
                       },
-                      revision: 1,
                     })
-                    dispatch({
-                      _tag: "TranscriptPatched",
-                      selectionEpoch: 0,
-                      threadId,
-                      turnId: childTurnId,
-                      event: {
+                    projection.emit(
+                      {
                         cursor: "child-tool",
                         sequence: 0,
                         type: "tool.call.requested",
                         createdAt: 2,
                         data: { tool_call_id: "read", tool_name: "read", input: { path: "src/a.ts" } },
                       },
-                      revision: 0,
-                    })
-                    dispatch({
-                      _tag: "TranscriptPatched",
-                      selectionEpoch: 0,
-                      threadId,
-                      turnId: childTurnId,
-                      event: {
+                      `execution:${childTurnId}`,
+                    )
+                    projection.emit(
+                      {
                         cursor: "child-response",
                         sequence: 1,
                         type: "model.output.completed",
                         createdAt: 3,
                         text: "## Review complete",
                       },
-                      revision: 1,
-                    })
+                      `execution:${childTurnId}`,
+                    )
+                    return true
+                  }
+                  if (kind === "overflow-events") {
+                    const projection = makeFixtureProjection(
+                      dispatch,
+                      Thread.ThreadId.make("overflow-thread"),
+                      Turn.TurnId.make("overflow-turn"),
+                      "overflow",
+                    )
+                    for (let index = 0; index < 10; index += 1)
+                      projection.emit({
+                        cursor: `overflow-${index}`,
+                        sequence: index,
+                        type: "model.output.delta",
+                        createdAt: index,
+                        text: String(index),
+                      })
                     return true
                   }
                   let count = 1
                   if (kind === "burst-events") count = 1_000
-                  else if (kind === "overflow-events" || kind === "queue-overflow-events") count = 10
+                  else if (kind === "queue-overflow-events") count = 10
                   for (let index = 0; index < count; index += 1) {
-                    if (kind === "overflow-events")
-                      dispatch({
-                        _tag: "TranscriptPatched",
-                        selectionEpoch: 0,
-                        threadId: Thread.ThreadId.make("overflow-thread"),
-                        turnId: Turn.TurnId.make("overflow-turn"),
-                        event: {
-                          cursor: `overflow-${index}`,
-                          sequence: index,
-                          type: "model.output.delta",
-                          createdAt: index,
-                          text: String(index),
-                        },
-                        revision: index,
-                      })
-                    else if (kind === "queue-overflow-events")
+                    if (kind === "queue-overflow-events")
                       dispatch({
                         _tag: "QueueUpdated",
                         selectionEpoch: 0,
@@ -299,20 +377,19 @@ const program = Effect.gen(function* () {
                       )
                     if (input.prompt[0] !== "overflow-watch") return Effect.never
                     return Effect.sync(() => {
+                      const projection = makeFixtureProjection(
+                        dispatch,
+                        Thread.ThreadId.make("overflow-thread"),
+                        Turn.TurnId.make("overflow-turn"),
+                        "overflow watch",
+                      )
                       for (let index = 0; index < 10; index += 1)
-                        dispatch({
-                          _tag: "TranscriptPatched",
-                          selectionEpoch: 0,
-                          threadId: Thread.ThreadId.make("overflow-thread"),
-                          turnId: Turn.TurnId.make("overflow-turn"),
-                          event: {
-                            cursor: `watch-overflow-${index}`,
-                            sequence: index,
-                            type: "model.output.delta",
-                            createdAt: index,
-                            text: String(index),
-                          },
-                          revision: index,
+                        projection.emit({
+                          cursor: `watch-overflow-${index}`,
+                          sequence: index,
+                          type: "model.output.delta",
+                          createdAt: index,
+                          text: String(index),
                         })
                     }).pipe(
                       Effect.andThen(Effect.sleep("50 millis")),
@@ -378,14 +455,16 @@ const program = Effect.gen(function* () {
               steer: () => Effect.void,
               interruptAndSend: () => Effect.void,
               cancel: Effect.void,
+              quit: Effect.sync(() => {
+                activeWork = 0
+              }).pipe(Effect.andThen(append("quit-commands.log", `${process.pid}\n`))),
               newThread: Effect.void,
-              resolvePermission: () => Effect.void,
               selectThread: () => Effect.void,
               readQueue: () => Effect.void,
-              loadOlder: Effect.void,
+              loadOlder: () => Effect.void,
+              loadNewer: () => Effect.void,
               previewThread: () => Effect.void,
               reopenThread: () => Effect.void,
-              replay: () => Effect.void,
             })
           },
         })

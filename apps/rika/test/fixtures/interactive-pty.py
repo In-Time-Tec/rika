@@ -15,6 +15,8 @@ import time
 
 executable, cwd, environment_json, actions_json, *arguments = sys.argv[1:]
 entrypoint, *entrypoint_arguments = arguments if arguments else ["src/client-main.ts"]
+# A packaged binary carries its own entrypoint, so "" means "pass no script argument".
+child_argv = [value for value in [entrypoint, *entrypoint_arguments] if value != ""]
 environment = {key: value for key, value in json.loads(environment_json).items() if value is not None}
 actions = json.loads(actions_json)
 master, slave = pty.openpty()
@@ -31,7 +33,7 @@ if pid == 0:
     if slave > 2:
         os.close(slave)
     os.chdir(cwd)
-    os.execve(executable, [executable, entrypoint, *entrypoint_arguments], environment)
+    os.execve(executable, [executable, *child_argv], environment)
 
 os.close(slave)
 
@@ -84,7 +86,7 @@ running_checks = []
 replaced_descendants = []
 status = None
 timed_out = False
-deadline = time.monotonic() + 30
+deadline = time.monotonic() + max(30, sum(action.get("timeoutMs", 10_000) for action in actions) / 1000 + 8)
 action_started = time.monotonic()
 blocked_action = None
 terminal_control = re.compile(rb"\x1b(?:\][^\x07]*(?:\x07|\x1b\\)|\[[0-?]*[ -/]*[@-~]|[@-_])")
@@ -119,18 +121,22 @@ def turn_status(prompt):
     except (KeyError, sqlite3.Error):
         return None
 
+master_closed = False
 while time.monotonic() < deadline:
-    ready, _, _ = select.select([master], [], [], 0.005)
-    if ready:
-        try:
-            chunk = os.read(master, 65536)
-        except OSError:
-            _, status = os.waitpid(pid, 0)
-            break
-        if not chunk:
-            _, status = os.waitpid(pid, 0)
-            break
-        output.extend(chunk)
+    if master_closed:
+        time.sleep(0.005)
+    else:
+        ready, _, _ = select.select([master], [], [], 0.005)
+        if ready:
+            try:
+                chunk = os.read(master, 65536)
+            except OSError:
+                _, status = os.waitpid(pid, 0)
+                break
+            if not chunk:
+                _, status = os.waitpid(pid, 0)
+                break
+            output.extend(chunk)
     while action_index < len(actions):
         action = actions[action_index]
         after = action.get("after")
@@ -186,10 +192,16 @@ while time.monotonic() < deadline:
         if resize is not None:
             fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", resize["height"], resize["width"], 0, 0))
             os.kill(pid, signal.SIGWINCH)
+        signal_name = action.get("signal")
+        if signal_name is not None:
+            os.killpg(pid, getattr(signal, signal_name))
+        if action.get("closePty", False) and not master_closed:
+            master_closed = True
+            os.close(master)
         restart_arguments = action.get("restartArguments")
         if restart_arguments is None:
             write = action.get("write")
-            if write is not None:
+            if write is not None and not master_closed:
                 if resize is not None:
                     time.sleep(0.5)
                 for fragment in write.split("\0"):
@@ -241,7 +253,7 @@ for child in replaced_descendants:
     except ProcessLookupError:
         pass
 
-while True:
+while not master_closed:
     ready, _, _ = select.select([master], [], [], 0)
     if not ready:
         break
@@ -253,8 +265,11 @@ while True:
         break
     output.extend(chunk)
 
-final_height, final_width, _, _ = struct.unpack("HHHH", fcntl.ioctl(master, termios.TIOCGWINSZ, b"\0" * 8))
-os.close(master)
+if master_closed:
+    final_height, final_width = 0, 0
+else:
+    final_height, final_width, _, _ = struct.unpack("HHHH", fcntl.ioctl(master, termios.TIOCGWINSZ, b"\0" * 8))
+    os.close(master)
 print(json.dumps({
     "output": base64.b64encode(output).decode(),
     "exitCode": os.waitstatus_to_exitcode(status),

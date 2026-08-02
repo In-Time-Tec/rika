@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/repository-policy",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "rika": {
+    "kind": "tooling",
+    "domain": "repository-policy"
+  },
+  "scripts": {
+    "check": "bun ./src/repository-policy-main.ts",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit",
+    "test": "bun --cwd ../.. vitest run tooling/repository-policy/src"
+  },
+  "dependencies": {
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@types/bun": "catalog:",
+    "typescript": "5.8.3",
+    "vitest": "catalog:",
+    "@typescript-eslint/parser": "catalog:"
+  }
+}

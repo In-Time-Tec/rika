@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/repository-graph",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "rika": {
+    "kind": "tooling",
+    "domain": "repository-graph"
+  },
+  "scripts": {
+    "generate": "bun ./src/repository-graph-main.ts generate",
+    "query": "bun ./src/repository-graph-main.ts query",
+    "check": "bun ./src/repository-graph-main.ts check-generated",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit",
+    "test": "bun --cwd ../.. vitest run tooling/repository-graph/src"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "catalog:",
+    "dependency-cruiser": "catalog:",
+    "effect": "catalog:",
+    "prettier": "catalog:"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "@rika/product": "workspace:*",
+    "@rika/configuration": "workspace:*",
+    "@rika/extensions": "workspace:*",
+    "@rika/product-store": "workspace:*",
+    "@rika/relay-execution": "workspace:*",
+    "@rika/coding-tools": "workspace:*",
+    "@rika/transcript": "workspace:*",
+    "@rika/terminal": "workspace:*",
+    "@typescript-eslint/parser": "catalog:"
+  }
+}

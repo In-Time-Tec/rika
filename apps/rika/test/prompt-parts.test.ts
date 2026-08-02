@@ -1,19 +1,19 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { afterEach, expect, test } from "vitest"
 import { Config, Data, Effect, FileSystem, Layer, Path, Stream } from "effect"
-import { ViewState } from "@rika/tui"
+import * as ViewState from "@rika/terminal/terminal-state"
+import * as Reducer from "@rika/terminal/terminal-state-reducer"
+import * as Session from "@rika/terminal/terminal-session"
+import { defaultOpenArguments, parseChangedFiles, resolveLocalFile } from "../src/interactive/process/process-files"
+import { materializePromptParts } from "../src/interactive/process/process-prompt"
 import {
-  defaultOpenArguments,
-  initialSubmitAction,
-  imagePasteBlockedNotice,
-  materializePromptParts,
-  parseChangedFiles,
   pasteClipboardPng,
   pastedImagePath,
   persistPastedImage,
   refreshChangedFilesOn,
-  resolveWorkspaceFile,
-} from "../src/main"
+} from "../src/interactive/process/process-workspace"
+import { initialSubmitAction } from "../src/interactive/input/command-input"
+import { imagePasteBlockedNotice } from "../src/interactive/input/prompt-input"
 
 class TestFailure extends Data.TaggedError("TestFailure")<{ readonly operation: string; readonly cause: unknown }> {}
 
@@ -69,7 +69,7 @@ test("materializes ordered text and dropped image paths for submission", () =>
       yield* fileSystem.writeFile(path.join(root, "relative image.png"), Uint8Array.from([1, 2, 3]))
       yield* fileSystem.writeFile(path.join(root, "url image.webp"), Uint8Array.from([4, 5]))
       const prompt = `before relative\\ image.png middle file://${root}/url%20image.webp after`
-      expect(yield* materializePromptParts(ViewState.promptParts(prompt), root)).toEqual([
+      expect(yield* materializePromptParts(Session.promptParts(prompt), root)).toEqual([
         { type: "text", text: "before " },
         { type: "image", mediaType: "image/png", data: "AQID", filename: "relative image.png" },
         { type: "text", text: " middle " },
@@ -87,7 +87,7 @@ test("materializes typed image mentions in text order without retaining mention 
       const root = yield* workspace("rika-prompt-parts-")
       yield* fileSystem.writeFile(path.join(root, "diagram one.png"), Uint8Array.from([1, 2, 3]))
       const prompt = 'before @image:"diagram one.png" after'
-      expect(yield* materializePromptParts(ViewState.promptParts(prompt), root)).toEqual([
+      expect(yield* materializePromptParts(Session.promptParts(prompt), root)).toEqual([
         { type: "text", text: "before " },
         { type: "image", mediaType: "image/png", data: "AQID", filename: "diagram one.png" },
         { type: "text", text: " after" },
@@ -124,7 +124,7 @@ test("rejects an image attachment larger than the size limit with an actionable 
       expect(error._tag).toBe("PromptAttachmentError")
       expect(error.index).toBe(0)
       expect(error.path).toBe("huge.png")
-      expect(error.message).toBe("Image attachment is too large (6.0 MB; the limit is 5.0 MB): huge.png")
+      expect(error.message).toBe("Image attachment is too large (6 MB; the limit is 5 MB): huge.png")
     }),
   ))
 
@@ -158,18 +158,22 @@ test("preserves expanded text-only paste parts instead of falling back to the co
   run(
     Effect.gen(function* () {
       const token = String.fromCharCode(0xe000)
-      const model = ViewState.update(
+      const model = Reducer.update(
         { ...ViewState.initial("/work"), input: "before ", cursor: 7 },
         { _tag: "Pasted", text: "first line\nsecond line" },
       )
-      const completed = ViewState.update(model, {
+      const completed = Reducer.update(model, {
         _tag: "KeyPressed",
         key: { name: "x", sequence: " after", ctrl: false, alt: false, meta: false, shift: false, eventType: "press" },
       })
       expect(completed.input).toBe(`before ${token} after`)
       expect(
-        yield* materializePromptParts(ViewState.promptParts(completed.input, completed.pastedText), "/work"),
-      ).toEqual([{ type: "text", text: "before first line\nsecond line after" }])
+        yield* materializePromptParts(Session.promptParts(completed.input, completed.pastedText), "/work"),
+      ).toEqual([
+        { type: "text", text: "before " },
+        { type: "text", text: "first line\nsecond line", pasted: true },
+        { type: "text", text: " after" },
+      ])
     }),
   ))
 
@@ -195,12 +199,12 @@ test("parses nested changed paths, rename destinations, and diff counts", () =>
     Effect.gen(function* () {
       expect(
         parseChangedFiles(
-          "?? apps/rika/src/new file.ts\0 M packages/tui/src/adapter.ts\0R  docs/new -> name.ts\0old.ts\0?? odd\tline\nname.ts\0",
-          ["4\t1\tpackages/tui/src/adapter.ts", "2\t0\t", "old.ts", "docs/new -> name.ts", ""].join("\0"),
+          "?? apps/rika/src/new file.ts\0 M packages/terminal/src/adapter.ts\0R  docs/new -> name.ts\0old.ts\0?? odd\tline\nname.ts\0",
+          ["4\t1\tpackages/terminal/src/adapter.ts", "2\t0\t", "old.ts", "docs/new -> name.ts", ""].join("\0"),
         ),
       ).toEqual([
         { path: "apps/rika/src/new file.ts", status: "??" },
-        { path: "packages/tui/src/adapter.ts", status: "M", added: 4, removed: 1 },
+        { path: "packages/terminal/src/adapter.ts", status: "M", added: 4, removed: 1 },
         { path: "docs/new -> name.ts", status: "R", added: 2, removed: 0 },
         { path: "odd\tline\nname.ts", status: "??" },
       ])
@@ -226,7 +230,7 @@ test("opens files with the platform default application when no editor is config
     }),
   ))
 
-test("rejects workspace symlinks that resolve outside the workspace before opening", () =>
+test("follows workspace symlinks that resolve outside the workspace before opening", () =>
   run(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -236,20 +240,24 @@ test("rejects workspace symlinks that resolve outside the workspace before openi
       const outside = path.join(outsideRoot, "outside.ts")
       yield* fileSystem.writeFileString(outside, "private\ncontent\n")
       yield* fileSystem.symlink(outside, path.join(root, "link.ts"))
-      const resolved = yield* Effect.exit(resolveWorkspaceFile(root, { path: "link.ts" }))
-      expect(resolved).toMatchObject({ _tag: "Failure" })
+      const linked = yield* resolveLocalFile(root, { path: "link.ts" })
+      const traversed = yield* resolveLocalFile(root, { path: `../${path.basename(outsideRoot)}/outside.ts` })
+      const absolute = yield* resolveLocalFile(root, { path: outside })
+      expect(yield* fileSystem.readFileString(linked)).toBe("private\ncontent\n")
+      expect(yield* fileSystem.readFileString(traversed)).toBe("private\ncontent\n")
+      expect(yield* fileSystem.readFileString(absolute)).toBe("private\ncontent\n")
     }),
   ))
 
-test("rejects absolute, traversal, missing, and directory targets as typed workspace file failures", () =>
+test("rejects missing, directory, and empty targets as typed local file failures", () =>
   run(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const root = yield* workspace("rika-path-validation-")
       yield* fileSystem.makeDirectory(path.join(root, "directory"))
-      for (const target of ["/etc/passwd", "../outside.ts", "missing.ts", "directory", ""]) {
-        const error = yield* Effect.flip(resolveWorkspaceFile(root, { path: target }))
+      for (const target of ["missing.ts", "directory", ""]) {
+        const error = yield* Effect.flip(resolveLocalFile(root, { path: target }))
         expect(error._tag).toBe("WorkspaceFileError")
         expect(error.path).toBe(target)
       }

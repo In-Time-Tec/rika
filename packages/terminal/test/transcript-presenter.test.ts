@@ -1,0 +1,497 @@
+import * as TranscriptIdentity from "@rika/transcript/transcript-unit-identity"
+import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as TranscriptPresentationModel from "@rika/transcript/transcript-presentation-model"
+import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
+import { expect, it } from "vitest"
+import {
+  applyChildUnits,
+  applyRootUnits,
+  applyTurnDelta,
+  applyTurnUnits,
+} from "../src/presentation/transcript/terminal-transcript-presentation"
+import { projectUnits } from "../src/presentation/transcript/terminal-transcript-projection"
+import { relocateRowEnd, resolveRowEnd, shiftRowEnd } from "../src/presentation/transcript/terminal-transcript-window"
+import { attachChildProjections, emptyAttachments } from "../src/presentation/transcript/transcript-attachment"
+import {
+  expandableRowIds,
+  transcriptUnits as transcriptRows,
+  transcriptUnitId as unitId,
+} from "../src/presentation/transcript/transcript-row"
+import { includeRowEnd } from "../src/presentation/transcript/transcript-row-window-include"
+import { pinnedRowWindow } from "../src/presentation/transcript/transcript-row-window-state"
+import { initial, type Model } from "../src/state/model/terminal-state"
+import { type TranscriptItem } from "../src/state/model/terminal-transcript-state"
+
+import { agentOutputText } from "../src/presentation/transcript/transcript-agent-response"
+import { transcriptUnitId, transcriptUnits } from "../src/presentation/transcript/transcript-row"
+import { transcriptFixtures } from "./transcript-presenter-support"
+const {
+  event,
+  parentProjection,
+  childProjection,
+  grandchildProjection,
+  entryUnit,
+  nestedModel,
+  childTurnId,
+  childCount,
+  toolsPerChild,
+  largeParent,
+  childProjections,
+  attachedSession,
+  agentTool,
+  responseStateOf,
+  childContent,
+  optsFor,
+  settled,
+  limit,
+  noReport,
+} = transcriptFixtures
+it("projects turn units identically to the legacy projection", () => {
+  const legacy = projectUnits(initial("/work"), parentProjection.units)
+  const presenter = applyTurnUnits(initial("/work"), parentProjection.units)
+  expect(presenter).toEqual(legacy)
+})
+it("flattens nested rows identically to the legacy unit tree", () => {
+  const model = nestedModel()
+  const legacyUnits = transcriptUnits(model)
+  const rows = transcriptRows(model)
+  expect(rows).toEqual(legacyUnits)
+  expect(rows.map((unit) => unitId(model, unit))).toEqual(legacyUnits.map((unit) => transcriptUnitId(model, unit)))
+})
+it("keeps nested subagent rows at depth two with stable ids", () => {
+  const model = nestedModel()
+  const units = transcriptRows(model)
+  const parent = units.find((unit) => unit.kind === "tool" && unit.children !== undefined)
+  expect(parent?.kind).toBe("tool")
+  const children = parent?.kind === "tool" ? (parent.children ?? []) : []
+  expect(children.some((child) => (child.children?.length ?? 0) > 0)).toBe(true)
+})
+it("projects the same units twice into deep-equal models", () => {
+  const once = nestedModel()
+  const twice = applyTurnUnits(once, parentProjection.units)
+  expect(twice).toEqual(once)
+})
+it("attaches child projections to their parent rows and skips replay turns", () => {
+  const base = applyTurnUnits(initial("/work"), parentProjection.units)
+  const projections = new Map([
+    ["child:turn:oracle", childProjection],
+    ["child:child:turn:oracle:nested", grandchildProjection],
+    ["orphan-turn", grandchildProjection],
+  ])
+  const attached = attachChildProjections(base, new Set<string>(), projections)
+  const expected = applyChildUnits(
+    applyChildUnits(base, "turn:agent", childProjection.units),
+    TranscriptIdentity.scopedIdentity("child:turn:oracle", "nested"),
+    grandchildProjection.units,
+  )
+  expect(attached.model).toEqual(expected)
+  expect(attached.attachments.get("child:turn:oracle")).toBe(childProjection.revision)
+  const replaySkipped = attachChildProjections(
+    base,
+    new Set(["child:turn:oracle", "child:child:turn:oracle:nested"]),
+    projections,
+  )
+  expect(replaySkipped.model).toBe(base)
+})
+it("returns the same model object for a no-op projection", () => {
+  const once = nestedModel()
+  expect(applyTurnUnits(once, parentProjection.units)).toBe(once)
+})
+it("preserves untouched array elements when one unit changes", () => {
+  const base = applyTurnUnits(initial("/work"), parentProjection.units)
+  const next = TranscriptProjection.Projection.applyEvent(
+    parentProjection,
+    event("agent-result", 3, "tool.result.received", { data: { tool_call_id: "agent", output: "done" } }),
+  )
+  const updated = applyTurnUnits(base, next.units)
+  expect(updated).not.toBe(base)
+  expect(updated.entries).toBe(base.entries)
+  expect(updated.items).toBe(base.items)
+  expect(updated.blocks).not.toBe(base.blocks)
+  const changed = updated.blocks.filter((block, index) => block !== base.blocks[index])
+  expect(changed).toHaveLength(1)
+})
+it("inserts a new unit at its stable intrinsic order", () => {
+  const later = entryUnit("ordered:later", 2, "later")
+  const earlier = entryUnit("ordered:earlier", 1, "earlier")
+  const base = applyTurnUnits(initial("/work"), [later])
+  const inserted = applyTurnUnits(base, [earlier])
+  const orderedText = (inserted.items as ReadonlyArray<TranscriptItem>).map((item) =>
+    item._tag === "Entry" ? inserted.entries[item.index]?.text : undefined,
+  )
+  expect(orderedText).toEqual(["earlier", "later"])
+})
+it("orders one reverse delta across nested executions by the root projection order", () => {
+  const parentOrder = TranscriptOrdering.unitOrder("tool:root:agent", 1)
+  const earlier: TranscriptUnit.Unit = {
+    ...entryUnit("child-a:answer", 1, "earlier child"),
+    turnId: "child-a",
+    parentId: "root:agent",
+    order: TranscriptOrdering.childOrder(parentOrder, "child-a", TranscriptOrdering.unitOrder("child-a:answer", 1)),
+  }
+  const later: TranscriptUnit.Unit = {
+    ...entryUnit("child-z:answer", 1, "later child"),
+    turnId: "child-z",
+    parentId: "root:agent",
+    order: TranscriptOrdering.childOrder(parentOrder, "child-z", TranscriptOrdering.unitOrder("child-z:answer", 1)),
+  }
+  const inserted = applyTurnDelta(initial("/work"), "root", {
+    upsert: [later, earlier],
+    remove: [],
+  })
+  const orderedText = (inserted.items as ReadonlyArray<TranscriptItem>).map((item) =>
+    item._tag === "Entry" ? inserted.entries[item.index]?.text : undefined,
+  )
+
+  expect(orderedText).toEqual(["earlier child", "later child"])
+})
+it("applies removals without rebuilding unaffected transcript storage", () => {
+  const first = entryUnit("remove:first", 1, "first")
+  const removed = entryUnit("remove:middle", 2, "middle")
+  const last = entryUnit("remove:last", 3, "last")
+  const base = applyTurnUnits(initial("/work"), [first, removed, last])
+  const updated = applyTurnDelta(base, "ordered-turn", { upsert: [], remove: [removed.key] })
+  expect((updated.items as ReadonlyArray<TranscriptItem>).map((item) => item.id)).toEqual([first.key, last.key])
+  expect(updated.entries.map((entry) => entry.text)).toEqual(["first", "last"])
+  expect(updated.blocks).toBe(base.blocks)
+})
+it("lets an upsert win when one patch also removes the same unit key", () => {
+  const initialUnit = entryUnit("collision", 1, "before")
+  const replacement = { ...initialUnit, revision: 2, content: { ...initialUnit.content, text: "after" } }
+  const base = applyTurnUnits(initial("/work"), [initialUnit])
+  const updated = applyTurnDelta(base, "ordered-turn", {
+    upsert: [replacement],
+    remove: [initialUnit.key],
+  })
+  expect(updated.items).toHaveLength(1)
+  expect(updated.entries.map((entry) => entry.text)).toEqual(["after"])
+})
+it("removes nested child rows without disturbing their parent tool", () => {
+  const nested = TranscriptNestedProjection.withNestedProjections(parentProjection, [
+    { parentId: "turn:agent", projection: childProjection },
+  ])
+  const childKeys = nested.units.filter((unit) => unit.turnId === "child:turn:oracle").map((unit) => unit.key)
+  const base = applyTurnUnits(initial("/work"), nested.units)
+  const updated = applyTurnDelta(base, "turn", { upsert: [], remove: childKeys })
+  const itemIds = new Set(
+    (updated.items as ReadonlyArray<TranscriptItem>).flatMap((item) => (item.id === undefined ? [] : [item.id])),
+  )
+  expect(childKeys.some((key) => itemIds.has(key))).toBe(false)
+  expect(updated.blocks).toContainEqual(expect.objectContaining({ _tag: "ToolCall", id: "turn:agent" }))
+  const parent = transcriptRows(updated).find(
+    (row) =>
+      row.kind === "tool" &&
+      row.blocks.some((index) => {
+        const block = updated.blocks[index] as TranscriptPresentationModel.Block | undefined
+        return block?._tag === "ToolCall" && block.id === "turn:agent"
+      }),
+  )
+  expect(parent?.kind === "tool" ? (parent.children ?? []) : []).toEqual([])
+})
+it("removes every status derived from a hidden child outcome", () => {
+  const tool = parentProjection.units.find(
+    (unit) => unit.content._tag === "Block" && unit.content.block._tag === "ToolCall",
+  )!
+  const outcome: TranscriptUnit.Unit = {
+    key: "execution:child:outcome",
+    turnId: "child",
+    parentId: "turn:agent",
+    order: TranscriptOrdering.childOrder(
+      tool.order,
+      "child",
+      TranscriptOrdering.unitOrder("execution:child:outcome", 2),
+    ),
+    revision: 2,
+    content: { _tag: "Entry", role: "notice", text: "" },
+    executionOutcome: { status: "failed", reason: "child failed" },
+  }
+  const projected = applyRootUnits(initial("/work"), "turn", [tool, outcome])
+  const removed = applyTurnDelta(projected, "turn", {
+    upsert: [],
+    remove: [outcome.key],
+  })
+  const fresh = applyRootUnits(initial("/work"), "turn", [tool])
+
+  expect(projected.childExecutionOutcomes).toEqual({
+    "turn:agent": { status: "failed", reason: "child failed" },
+  })
+  expect(removed.childExecutionOutcomes).toEqual({})
+  expect(removed.blocks).toEqual(fresh.blocks)
+})
+it("keeps an applied child outcome when the parent's stale units reproject", () => {
+  const failedChild = TranscriptProjection.Projection.project("child:turn:oracle", "", [
+    event("read", 0, "tool.call.requested", {
+      data: { tool_call_id: "read", tool_name: "read", input: { path: "src/a.ts" } },
+    }),
+    event("fail", 1, "execution.failed", { data: { reason: "boom" } }),
+  ])
+  let model = applyTurnUnits(initial("/work"), parentProjection.units)
+  model = applyChildUnits(model, "turn:agent", failedChild.units)
+  const parentTool = (candidate: Model) =>
+    (candidate.blocks as ReadonlyArray<TranscriptPresentationModel.Block>).find(
+      (block) => block._tag === "ToolCall" && block.id === "turn:agent",
+    ) as Extract<TranscriptPresentationModel.Block, { _tag: "ToolCall" }>
+  expect(parentTool(model).status).toBe("failed")
+  const reprojected = applyTurnUnits(model, parentProjection.units)
+  expect(parentTool(reprojected).status).toBe("failed")
+  expect(applyTurnUnits(reprojected, parentProjection.units)).toBe(reprojected)
+})
+it("rewrites running rows to cancelled when a cancellation notice projects", () => {
+  const cancelled = TranscriptProjection.Projection.applyEvent(
+    parentProjection,
+    event("cancel", 3, "execution.cancelled", { data: { reason: "stop" } }),
+  )
+  const model = applyTurnUnits(nestedModel(), cancelled.units)
+  const tool = (model.blocks as ReadonlyArray<TranscriptPresentationModel.Block>).find(
+    (block) => block._tag === "ToolCall" && block.id === "turn:agent",
+  ) as Extract<TranscriptPresentationModel.Block, { _tag: "ToolCall" }>
+  expect(tool.status).toBe("cancelled")
+})
+it("skips attachments whose revision is unchanged and re-attaches on bump", () => {
+  const base = applyTurnUnits(initial("/work"), parentProjection.units)
+  const projections = new Map([["child:turn:oracle", childProjection]])
+  const first = attachChildProjections(base, new Set<string>(), projections)
+  const second = attachChildProjections(first.model, new Set<string>(), projections, first.attachments)
+  expect(second.model).toBe(first.model)
+  expect(second.attachments).toBe(first.attachments)
+  const bumped = TranscriptProjection.Projection.applyEvent(
+    childProjection,
+    event("more", 4, "model.output.delta", { text: "hi" }),
+  )
+  const third = attachChildProjections(
+    second.model,
+    new Set<string>(),
+    new Map([["child:turn:oracle", bumped]]),
+    second.attachments,
+  )
+  expect(third.model).not.toBe(second.model)
+  expect(third.attachments.get("child:turn:oracle")).toBe(bumped.revision)
+  const cleared = attachChildProjections(
+    third.model,
+    new Set<string>(),
+    new Map([["child:turn:oracle", bumped]]),
+    emptyAttachments,
+  )
+  expect(cleared.attachments.get("child:turn:oracle")).toBe(bumped.revision)
+})
+it("keeps expandable row ids stable across reprojection", () => {
+  const model = nestedModel()
+  const before = expandableRowIds(model)
+  const after = expandableRowIds(applyTurnUnits(model, parentProjection.units))
+  expect(after).toEqual(before)
+  expect(before.length).toBeGreaterThan(0)
+})
+it("re-applies every unchanged projection as a full no-op", () => {
+  const session = attachedSession()
+  expect(session.model.items.length).toBeGreaterThan(4000)
+  const reapplied = attachChildProjections(
+    applyTurnUnits(session.model, largeParent.units),
+    new Set<string>(),
+    childProjections,
+    session.attachments,
+  )
+  expect(reapplied.model).toBe(session.model)
+  expect(reapplied.attachments).toBe(session.attachments)
+})
+it("changes only the dirty child's rows when one child streams a delta", () => {
+  const session = attachedSession()
+  const bumped = TranscriptProjection.Projection.applyEvent(
+    childProjections.get(childTurnId(120))!,
+    event(`tool-120-${toolsPerChild - 1}-result`, toolsPerChild * 2 + 1, "tool.result.received", {
+      data: { tool_call_id: `tool-120-${toolsPerChild - 1}`, output: "late result" },
+    }),
+  )
+  const next = attachChildProjections(
+    session.model,
+    new Set<string>(),
+    new Map([...childProjections, [childTurnId(120), bumped]]),
+    session.attachments,
+  )
+  expect(next.model).not.toBe(session.model)
+  expect(next.model.entries).toBe(session.model.entries)
+  expect(next.model.items).toBe(session.model.items)
+  const changedBlocks = next.model.blocks.filter((block, index) => block !== session.model.blocks[index])
+  expect(changedBlocks.length).toBeGreaterThan(0)
+  expect(changedBlocks.length).toBeLessThanOrEqual(2)
+  expect(next.attachments.get(childTurnId(120))).toBe(bumped.revision)
+})
+it("reuses the memoized row flattening for an identical model", () => {
+  const session = attachedSession()
+  expect(transcriptRows(session.model)).toBe(transcriptRows(session.model))
+  const ids = expandableRowIds(session.model)
+  expect(ids.length).toBeGreaterThanOrEqual(childCount)
+  expect(expandableRowIds(session.model)).toEqual(ids)
+})
+it("exposes a growing answer while the agent remains running", () => {
+  expect(responseStateOf({ status: "running", answer: "hel" })).toEqual({ _tag: "Streaming", answer: 0 })
+  expect(responseStateOf({ status: "running", answer: "hello" })).toEqual({ _tag: "Streaming", answer: 0 })
+})
+for (const content of ["error", "neither"] as const)
+  it(`gives a running row without an answer no response state (${content})`, () => {
+    expect(responseStateOf(optsFor("running", content))).toBeUndefined()
+  })
+for (const status of settled)
+  for (const content of childContent)
+    it(`gives a settled ${status} row exactly one non-empty outcome (${content})`, () => {
+      const state = responseStateOf(optsFor(status, content))
+      expect(state?._tag).toBe("Settled")
+      if (state?._tag !== "Settled") return
+      if (state.outcome.kind === "error") expect(state.outcome.text.trim().length).toBeGreaterThan(0)
+      else expect(state.outcome.kind).toBe("answer")
+    })
+it("keeps a completed answer and ignores a stray error child when an answer exists", () => {
+  expect(responseStateOf({ status: "complete", answer: "All done.", errorDetail: "ignored" })).toEqual({
+    _tag: "Settled",
+    outcome: { kind: "answer", entry: 0 },
+  })
+  expect(responseStateOf({ status: "complete", answer: "All done." })).toEqual({
+    _tag: "Settled",
+    outcome: { kind: "answer", entry: 0 },
+  })
+})
+it("always fails a failed row even when a non-empty answer exists", () => {
+  const state = responseStateOf({ status: "failed", answer: "partial work", errorDetail: "boom" })
+  expect(state).toEqual({ _tag: "Settled", outcome: { kind: "error", tone: "failed", text: "boom" } })
+})
+it("prefers an Error child's detail over the copied tool output on a failed row", () => {
+  const state = responseStateOf({ status: "failed", errorDetail: "disk is full", output: "stale copied output" })
+  expect(state).toEqual({
+    _tag: "Settled",
+    outcome: { kind: "error", tone: "failed", text: "disk is full" },
+  })
+})
+it("falls back to the remembered execution reason when no Error child exists", () => {
+  const state = responseStateOf({ status: "failed", outcomeReason: "network exploded", output: "raw" })
+  expect(state).toEqual({
+    _tag: "Settled",
+    outcome: { kind: "error", tone: "failed", text: "network exploded" },
+  })
+})
+it("extracts text from a JSON-object output instead of showing raw JSON or blank", () => {
+  const output = JSON.stringify({ output: [{ text: "the child reported this failure" }] })
+  const state = responseStateOf({ status: "failed", output })
+  expect(state).toEqual({
+    _tag: "Settled",
+    outcome: { kind: "error", tone: "failed", text: "the child reported this failure" },
+  })
+})
+it("uses a non-blank default when the only failure data is an opaque JSON object", () => {
+  const state = responseStateOf({ status: "failed", output: JSON.stringify({ code: 42 }) })
+  expect(state?._tag).toBe("Settled")
+  if (state?._tag === "Settled" && state.outcome.kind === "error") {
+    expect(state.outcome.text.trim().length).toBeGreaterThan(0)
+    expect(state.outcome.text).not.toContain("{")
+  }
+})
+it("marks a completed row with only empty assistant text as a non-blank info terminal", () => {
+  const state = responseStateOf({ status: "complete", answer: "   " })
+  expect(state?._tag).toBe("Settled")
+  if (state?._tag === "Settled" && state.outcome.kind === "error") {
+    expect(state.outcome.tone).toBe("info")
+    expect(state.outcome.text.trim().length).toBeGreaterThan(0)
+  }
+})
+it("cancels with the cancellation reason when no answer survives", () => {
+  const withReason = responseStateOf({ status: "cancelled", outcomeReason: "user stopped the run" })
+  expect(withReason).toEqual({
+    _tag: "Settled",
+    outcome: { kind: "error", tone: "cancelled", text: "user stopped the run" },
+  })
+  const bare = responseStateOf({ status: "cancelled" })
+  expect(bare?._tag).toBe("Settled")
+  if (bare?._tag === "Settled" && bare.outcome.kind === "error") {
+    expect(bare.outcome.tone).toBe("cancelled")
+    expect(bare.outcome.text.trim().length).toBeGreaterThan(0)
+  }
+})
+it("keeps a cancelled row's answer when a non-empty one exists", () => {
+  expect(responseStateOf({ status: "cancelled", answer: "got this far" })).toEqual({
+    _tag: "Settled",
+    outcome: { kind: "answer", entry: 0 },
+  })
+})
+it("emits only ToolCall children as rows while assistant and error children feed the terminal", () => {
+  const parent = agentTool("complete")
+  const nested: Extract<TranscriptPresentationModel.Block, { _tag: "ToolCall" }> = {
+    _tag: "ToolCall",
+    id: "nested-read",
+    name: "read",
+    input: JSON.stringify({ path: "src/a.ts" }),
+    status: "complete",
+    presentation: { family: "explore", action: "read", activeLabel: "Reading", completeLabel: "Read" },
+    detail: "src/a.ts",
+    files: [],
+  }
+  const model: Model = {
+    ...initial("/work"),
+    entries: [{ role: "assistant", text: "child answer" }],
+    blocks: [parent, nested, { _tag: "Error", title: "warn", detail: "a soft error" }],
+    items: [
+      { _tag: "Block", index: 0, id: "tool:agent" },
+      { _tag: "Block", index: 1, id: "block:nested-read", parentId: "agent" },
+      { _tag: "Entry", index: 0, id: "answer:0", parentId: "agent" },
+      { _tag: "Block", index: 2, id: "block:error", parentId: "agent" },
+    ],
+  }
+  const units = transcriptUnits(model)
+  const parentUnit = units.find((unit) => unit.kind === "tool")
+  expect(parentUnit?.kind).toBe("tool")
+  if (parentUnit?.kind !== "tool") throw new Error("expected tool unit")
+  expect(parentUnit.children).toHaveLength(1)
+  expect(parentUnit.children?.[0]?.blocks).toEqual([1])
+  expect(parentUnit.agentResponse).toEqual({ _tag: "Settled", outcome: { kind: "answer", entry: 0 } })
+})
+it("resolves a pinned window to the full total and clamps explicit ends", () => {
+  expect(resolveRowEnd(pinnedRowWindow, 500, limit)).toBe(500)
+  expect(resolveRowEnd({ end: 900, pendingDelta: 0 }, 500, limit)).toBe(500)
+  expect(resolveRowEnd({ end: 100, pendingDelta: 0 }, 500, limit)).toBe(240)
+})
+it("shifts within bounds and stops at the window minimum", () => {
+  expect(shiftRowEnd(pinnedRowWindow, -100, 500, limit)).toBe(400)
+  expect(shiftRowEnd({ end: 250, pendingDelta: 0 }, -100, 500, limit)).toBe(240)
+  expect(shiftRowEnd({ end: 400, pendingDelta: 0 }, 200, 500, limit)).toBe(500)
+  expect(shiftRowEnd(pinnedRowWindow, -100, 200, limit)).toBe(200)
+})
+it("relocates around the anchor row and applies the pending shift", () => {
+  expect(relocateRowEnd({ end: 301, pendingDelta: -100, anchorKey: "k" }, 61, 301, limit)).toBe(240)
+  expect(relocateRowEnd({ end: 400, pendingDelta: 0, anchorKey: "k" }, 200, 500, limit)).toBe(440)
+  expect(relocateRowEnd({ end: 400, pendingDelta: 0 }, -1, 500, limit)).toBe(400)
+})
+it("includes an out-of-window selection and keeps an in-window one", () => {
+  expect(includeRowEnd(400, 380, 500, limit)).toBe(400)
+  expect(includeRowEnd(400, 450, 500, limit)).toBe(451)
+  expect(includeRowEnd(400, 10, 500, limit)).toBe(240)
+  expect(includeRowEnd(400, -1, 500, limit)).toBe(400)
+})
+it("renders a NoReport as its reason followed by its recovery", () => {
+  expect(agentOutputText(noReport)).toBe(
+    "The subagent finished its run without writing a final report.\n\nRe-run this delegation once with the same prompt, or do the work yourself.",
+  )
+})
+it("renders a Report as its text alone", () => {
+  const report = JSON.stringify({
+    _tag: "Report",
+    childExecutionId: "child:one",
+    status: "completed",
+    output: [{ type: "text", text: "The bug is in rows.ts." }],
+  })
+  expect(agentOutputText(report)).toBe("The bug is in rows.ts.")
+})
+it("renders a Failed as its partial output followed by its reason", () => {
+  const failed = JSON.stringify({
+    _tag: "Failed",
+    childExecutionId: "child:one",
+    status: "failed",
+    reason: "Subagent execution failed: HTTP 400",
+    output: [{ type: "text", text: "Partial finding" }],
+  })
+  expect(agentOutputText(failed)).toBe("Partial finding\n\nSubagent execution failed: HTTP 400")
+})
+it("passes plain text through and drops an unrecognised object", () => {
+  expect(agentOutputText("plain failure text")).toBe("plain failure text")
+  expect(agentOutputText(JSON.stringify({ some: "shape" }))).toBeUndefined()
+  expect(agentOutputText(undefined)).toBeUndefined()
+  expect(agentOutputText("   ")).toBeUndefined()
+})

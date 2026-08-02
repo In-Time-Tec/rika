@@ -1,7 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer, Scope } from "effect"
-import { resolve } from "../src/resident-endpoint"
+import { resolve } from "../src/resident/process/resident-endpoint"
 
 const provide = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | Scope.Scope>) =>
   Effect.scoped(Layer.build(BunServices.layer).pipe(Effect.flatMap((context) => Effect.provide(effect, context))))

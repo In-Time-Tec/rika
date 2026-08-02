@@ -2,8 +2,12 @@ import { expect, test } from "vitest"
 import { fileURLToPath } from "node:url"
 import { Effect, Fiber, FileSystem, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { interactiveRuntimeRestartLimit, interactiveRuntimeRestartPlan } from "../src/client-main"
-import { interactivePty, run } from "./client-main-harness"
+import {
+  interactiveRuntimeRestartLimit,
+  interactiveRuntimeRestartPlan,
+} from "../src/client/interactive-runtime-restart"
+import { interactivePty } from "./client-pty-scenario"
+import { run } from "./client-process-test-runtime"
 
 test("restart plan respawns on exit 75 with a restart message", () => {
   expect(
@@ -66,7 +70,7 @@ const stubbedInteractive = Effect.fn("ClientMainTest.stubbedInteractive")(functi
       env: {
         HOME: root,
         RIKA_DATABASE: `${root}/rika.db`,
-        RIKA_RELAY_DATABASE: `${root}/relay.db`,
+        RIKA_EXECUTION_DATABASE: `${root}/execution.db`,
         RIKA_TEST_RUNTIME_EXECUTABLE: stub,
         RIKA_TEST_STUB_STATE: state,
         RIKA_TEST_STUB_MODE: mode,

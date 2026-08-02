@@ -23,11 +23,13 @@ export default defineConfig({
         extends: true,
         test: {
           name: "unit",
-          setupFiles: ["test/unit/setup-relay-polling.ts"],
+          setupFiles: ["test/support/relay-polling-setup.ts"],
           include: [
+            "packages/*/src/**/*.test.ts",
             "packages/*/test/**/*.test.ts",
+            "apps/*/src/**/*.test.ts",
             "apps/*/test/**/*.test.ts",
-            "scripts/test/**/*.test.ts",
+            "tooling/*/src/**/*.test.ts",
             "test/**/*.test.ts",
           ],
           exclude: [
@@ -43,7 +45,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: "tui",
-          setupFiles: ["test/unit/setup-relay-polling.ts"],
+          setupFiles: ["test/support/relay-polling-setup.ts"],
           include: ["apps/*/test/**/*.tui.test.ts"],
           fileParallelism: false,
         },
@@ -52,11 +54,11 @@ export default defineConfig({
         extends: true,
         test: {
           name: "proc",
-          setupFiles: ["test/unit/setup-relay-polling.ts"],
+          setupFiles: ["test/support/relay-polling-setup.ts"],
           include: [
             "packages/*/test/**/*.proc.test.ts",
             "apps/*/test/**/*.proc.test.ts",
-            "test/scripts/**/*.proc.test.ts",
+            "test/process/**/*.proc.test.ts",
           ],
           fileParallelism: false,
         },

@@ -3,7 +3,8 @@ import { expect, test } from "vitest"
 import { Effect, FileSystem, Layer, Path } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
-import { parseChangedFiles, readChangedFiles } from "../src/main"
+import { parseChangedFiles } from "../src/interactive/process/process-files"
+import { readChangedFiles } from "../src/interactive/process/process-workspace"
 
 const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices>) =>
   Effect.runPromise(

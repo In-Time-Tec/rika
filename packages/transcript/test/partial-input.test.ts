@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { partialInputRecord } from "../src/partial-input"
+import { partialInputRecord } from "../src/projection/partial-tool-input"
 
 describe("partialInputRecord", () => {
   it("extracts every field from complete object input", () => {

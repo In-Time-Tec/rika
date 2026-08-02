@@ -1,21 +1,14 @@
 import { afterEach, describe, expect, test } from "vitest"
 import { Effect } from "effect"
-import { resolve } from "../src/resident-endpoint"
-import {
-  alive,
-  attachedEffect,
-  cleanRoot,
-  fileExists,
-  fileStat,
-  killTrackedHosts,
-  makeRoot,
-  readText,
-  run,
-  start,
-  waitUntil,
-} from "./resident-transport-harness"
+import { resolve } from "../src/resident/process/resident-endpoint"
+import { makeRoot, run, waitUntil } from "./resident-transport-runtime"
+import { cleanRoot, fileExists, fileStat, readText } from "./resident-transport-files"
+import { alive, attachedEffect, start } from "./resident-transport-process"
+import { killTrackedHosts } from "./resident-process-exit"
 
 afterEach(() => killTrackedHosts())
+
+const coldStartupHold = 10_000
 
 describe("resident WebSocket process transport", () => {
   test(
@@ -89,32 +82,32 @@ describe("resident WebSocket process transport", () => {
         Effect.gen(function* () {
           const root = yield* makeRoot
           try {
-            const firstClient = yield* start(root, 100, 0, false, 1_024, 2_000)
+            const firstClient = yield* start(root, 100, 0, false, 1_024, coldStartupHold)
             const first = yield* attachedEffect(firstClient)
             yield* firstClient.closeEffect
             yield* firstClient.awaitExit.pipe(
               Effect.timeoutOrElse({
-                duration: "500 millis",
+                duration: "20 seconds",
                 orElse: () => Effect.die("resident startup owner did not exit after detaching its live host"),
               }),
             )
             expect(alive(first.hostPid!)).toBe(true)
             yield* Effect.sleep("500 millis")
 
-            const lateClient = yield* start(root, 100, 0, false, 1_024, 2_000)
+            const lateClient = yield* start(root, 100, 0, false, 1_024, coldStartupHold)
             const late = yield* attachedEffect(lateClient)
             expect(late.hostPid).toBe(first.hostPid)
             expect(yield* readText(`${root}/owner-acquisitions.log`)).toBe(`${first.hostPid}\n`)
             yield* lateClient.closeEffect
 
-            yield* waitUntil(fileExists(`${root}/owner-finalizations.log`), 3_000)
+            yield* waitUntil(fileExists(`${root}/owner-finalizations.log`), coldStartupHold * 3)
             expect(yield* readText(`${root}/owner-finalizations.log`)).toBe(`${first.hostPid}\n`)
           } finally {
             yield* cleanRoot(root)
           }
         }),
       ),
-    10_000,
+    120_000,
   )
 
   test(

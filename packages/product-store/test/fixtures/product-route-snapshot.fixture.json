@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "roles": ["main", "oracle", "title", "compaction", "librarian", "painter", "review", "readThread", "surgeon", "task"],
+  "forbiddenFields": [
+    "registrationKey",
+    "providerRuntime",
+    "openAiAccountFingerprint",
+    "providerProtocol",
+    "providerBaseUrl",
+    "providerApiKeyEnv"
+  ]
+}

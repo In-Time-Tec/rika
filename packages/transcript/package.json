@@ -5,17 +5,22 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./schema": "./src/schema.ts"
-  },
-  "scripts": {
-    "build": "bun build ./src/index.ts --outdir dist --target bun --format esm --external effect --external 'effect/*'",
-    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/transcript/src packages/transcript/test",
-    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
+    "./child-parent-correlation": "./src/ordering/child-parent-correlation.ts",
+    "./transcript-unit-identity": "./src/ordering/transcript-unit-identity.ts",
+    "./transcript-unit-order": "./src/ordering/transcript-unit-order.ts",
+    "./model-usage-fallback": "./src/presentation/model-usage-fallback.ts",
+    "./recorded-shell-presentation": "./src/presentation/recorded-shell-presentation.ts",
+    "./nested-transcript-projection": "./src/projection/nested-transcript-projection.ts",
+    "./partial-tool-input": "./src/projection/partial-tool-input.ts",
+    "./transcript-projection": "./src/projection/transcript-projection.ts",
+    "./transcript-settlement": "./src/projection/transcript-settlement.ts",
+    "./transcript-presentation-model": "./src/schema/transcript-presentation-model.ts",
+    "./transcript-projection-model": "./src/schema/transcript-projection-model.ts",
+    "./transcript-source-event": "./src/schema/transcript-source-event.ts",
+    "./transcript-unit": "./src/schema/transcript-unit.ts"
   },
   "dependencies": {
-    "@opencode-ai/models": "catalog:",
-    "@rika/tools": "workspace:*",
+    "@rika/coding-tools": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {
@@ -23,5 +28,13 @@
     "@types/bun": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
+  },
+  "rika": {
+    "kind": "capability",
+    "domain": "transcript"
+  },
+  "scripts": {
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/transcript/src packages/transcript/test",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   }
 }

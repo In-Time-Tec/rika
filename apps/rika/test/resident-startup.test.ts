@@ -1,7 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, test } from "vitest"
 import { Effect, FileSystem, Layer, Schema } from "effect"
-import { claimStartup } from "../src/resident-startup"
+import { claimStartup } from "../src/resident/process/resident-startup"
 
 const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices>) =>
   Effect.runPromise(

@@ -1,6 +1,6 @@
 # Rika Product
 
-Rika is a personal coding agent for one developer working in local repositories. It combines a clear terminal interface with durable threads, parallel agent work, approvals, and restart-safe workflows. The goal is to make substantial coding work understandable while it runs and recoverable when a process stops.
+Rika is a personal coding agent for one developer working in local repositories. It combines a clear terminal interface with durable threads, parallel agent work, and restart-safe workflows. The goal is to make substantial coding work understandable while it runs and recoverable when a process stops.
 
 ## Audience
 
@@ -11,10 +11,11 @@ Rika is for a technical owner who prefers a local CLI and TUI, controls the work
 - Keep product state and authority local.
 - Make ongoing and completed agent work easy to inspect in the terminal.
 - Preserve durable work across process failure without duplicating execution authority.
-- Expose typed tools and clear permission choices rather than unrestricted model access.
+- Expose typed tools that act with the local user's authority.
 - Keep model routes configurable while modes describe stable user intent.
 - Consume framework behavior through released package contracts.
 - Prefer one current pre-1.0 contract over compatibility layers.
+- Keep each public contract at its exact owning subpath so product semantics do not leak through adapter-shaped facades.
 
 ## Boundaries
 

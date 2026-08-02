@@ -1,20 +1,11 @@
 import { afterEach, describe, expect, test } from "vitest"
 import { Clock, Effect, Fiber, FileSystem } from "effect"
-import { resolve } from "../src/resident-endpoint"
-import {
-  alive,
-  attachedEffect,
-  cleanRoot,
-  fileExists,
-  killTrackedHosts,
-  legacyClose,
-  makeRoot,
-  readText,
-  run,
-  start,
-  startOldResident,
-  waitUntil,
-} from "./resident-transport-harness"
+import { resolve } from "../src/resident/process/resident-endpoint"
+import { makeRoot, run, waitUntil } from "./resident-transport-runtime"
+import { cleanRoot, fileExists, readText } from "./resident-transport-files"
+import { legacyClose } from "./resident-legacy-client"
+import { alive, attachedEffect, start, startOldResident } from "./resident-transport-process"
+import { killTrackedHosts } from "./resident-process-exit"
 
 afterEach(() => killTrackedHosts())
 
@@ -55,6 +46,30 @@ describe("resident WebSocket process transport", () => {
             expect(yield* client.nextEffect).toMatchObject({
               type: "rejected",
               error: expect.stringContaining("unsigned resident incompatibility"),
+            })
+            expect(alive(Number(old.pid))).toBe(true)
+            expect(yield* fileExists(`${root}/owner-acquisitions.log`)).toBe(false)
+          } finally {
+            yield* old.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore)
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    15_000,
+  )
+
+  test(
+    "does not supersede a signed protocol v4 resident without the replacement guard capability",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          const old = yield* startOldResident(root, true, "signed-v4")
+          try {
+            const client = yield* start(root, 1_000)
+            expect(yield* client.nextEffect).toMatchObject({
+              type: "rejected",
+              tag: "ResidentServiceError",
             })
             expect(alive(Number(old.pid))).toBe(true)
             expect(yield* fileExists(`${root}/owner-acquisitions.log`)).toBe(false)
@@ -495,6 +510,56 @@ describe("resident WebSocket process transport", () => {
         }),
       ),
     20_000,
+  )
+
+  test(
+    "keeps a different-build resident alive while a root and delegated child execution are active",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          try {
+            const mismatched = yield* start(root, 1_000, 0, true, 1_024, 0, false, undefined, 0, {
+              script: "test/fixtures/resident-mismatched-client.ts",
+              environment: {
+                RIKA_TEST_RESIDENT_HOST_SCRIPT: "test/fixtures/resident-mismatched-host.ts",
+                RIKA_TEST_BUILD_IDENTITY: "rika-test-other-build",
+                RIKA_TEST_RESIDENT_ACTIVE_WORK_MILLIS: "1000",
+              },
+            })
+            const oldAttached = yield* attachedEffect(mismatched)
+            yield* mismatched.send("active-root-with-child")
+            yield* waitUntil(fileExists(`${root}/active-executions.log`))
+
+            const current = yield* start(root, 1_000)
+            expect(yield* current.nextEffect).toMatchObject({
+              type: "rejected",
+              tag: "ResidentServiceError",
+              error: expect.stringContaining("replacement is delayed"),
+            })
+            expect(alive(oldAttached.hostPid!)).toBe(true)
+            expect(yield* readText(`${root}/active-executions.log`)).toBe(
+              `${oldAttached.hostPid}:root\n${oldAttached.hostPid}:child\n`,
+            )
+            expect(yield* readText(`${root}/owner-acquisitions.log`)).toBe(`${oldAttached.hostPid}\n`)
+
+            yield* waitUntil(fileExists(`${root}/delayed-work-finalizations.log`), 3_000)
+            const retry = yield* start(root, 1_000)
+            expect(yield* retry.nextEffect).toEqual({ type: "resident-status", callbacks: 1 })
+            const replacement = yield* attachedEffect(retry)
+            expect(replacement.hostPid).not.toBe(oldAttached.hostPid)
+            yield* waitUntil(
+              Effect.sync(() => !alive(oldAttached.hostPid!)),
+              3_000,
+            )
+            yield* retry.closeEffect
+            yield* mismatched.kill
+          } finally {
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    15_000,
   )
 
   test(
