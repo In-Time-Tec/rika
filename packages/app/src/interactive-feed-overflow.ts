@@ -137,7 +137,9 @@ const eventsImpl = (state: State, selectionEpoch: number, reason: string): Reado
   if (state.activated !== undefined) recovered.push(state.activated)
   if (state.summaries !== undefined) recovered.push(state.summaries)
   recovered.push(...state.critical)
-  recovered.push(...state.settlements.values())
+  recovered.push(
+    ...[...state.settlements.values()].toSorted((left, right) => left.activitySequence - right.activitySequence),
+  )
   recovered.push(...state.usage.values())
   recovered.push(...state.refolds.values())
   for (const id of state.transcriptThreadIds)

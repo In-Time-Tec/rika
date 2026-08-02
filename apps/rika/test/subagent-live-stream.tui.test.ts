@@ -1,6 +1,6 @@
 import type { Projection } from "@rika/persistence/transcript-repository"
 import * as Turn from "@rika/persistence/turn"
-import { Effect } from "effect"
+import { Deferred, Effect } from "effect"
 import { expect, test } from "vitest"
 import * as TuiApp from "./tui-app"
 
@@ -189,6 +189,57 @@ test(
           )
         }
         expect(exited).toBe(true)
+      }),
+    ),
+  240_000,
+)
+
+test(
+  "settles activity before a held child projection follower drains",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const hold = yield* Deferred.make<void>()
+        const app = yield* TuiApp.tuiApp({
+          inspectTranscript: true,
+          holdExecutionFollows: hold,
+          lanes: [
+            {
+              script: [
+                TuiApp.model.toolCall("task", { prompt: "Held child prompt" }, "held-child"),
+                TuiApp.model.toolCall("await_subagents", {}, "held-child-join"),
+                TuiApp.model.text("ROOT_SETTLED_BEFORE_CHILD_PROJECTION"),
+              ],
+            },
+            {
+              when: (prompt) => !prompt.includes("Hold child projection after root completion."),
+              script: [TuiApp.model.text("CHILD_STREAMED_BEFORE_ROOT")],
+            },
+          ],
+        })
+
+        yield* Effect.promise(() => app.type("Hold child projection after root completion."))
+        app.pressEnter()
+        yield* app.waitFrame("Subagent working")
+        app.pressKey("\t")
+        app.pressEnter()
+        yield* app.waitFrame("ROOT_SETTLED_BEFORE_CHILD_PROJECTION")
+        const settled = yield* app.settled
+        for (const marker of ["Waiting", "Streaming", "Thinking", "Sending", "Running 1 subagent"])
+          expect(settled).not.toContain(marker)
+
+        const rootId = Turn.TurnId.make("tui-turn-0")
+        const open = yield* app.transcript(rootId)
+        expect(open?.executionCheckpoints.some((checkpoint) => checkpoint.executionKey !== String(rootId))).toBe(true)
+        expect(open?.executionCheckpoints.some((checkpoint) => checkpoint.status !== "completed")).toBe(true)
+
+        yield* Deferred.succeed(hold, undefined)
+        const durable = yield* waitForDurableChildOutput(app, rootId)
+        expect(durable.executionCheckpoints.every((checkpoint) => checkpoint.status === "completed")).toBe(true)
+        const final = yield* app.settled
+        for (const marker of ["Waiting", "Streaming", "Thinking", "Sending", "Running 1 subagent"])
+          expect(final).not.toContain(marker)
+        yield* app.quit
       }),
     ),
   240_000,

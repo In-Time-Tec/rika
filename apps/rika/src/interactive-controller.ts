@@ -566,12 +566,23 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
     const activeTurnId = state.model.activeTurnId
     if (activeTurnId !== String(event.turnId))
       return { state: { ...state, activitySequence: event.activitySequence }, preserveAnchor: false }
+    let model: ViewState.Model
+    if (event.status === "completed")
+      model = ViewState.update(state.model, { _tag: "ExecutionCompleted", turnId: String(event.turnId) })
+    else if (event.status === "failed")
+      model = ViewState.update(state.model, {
+        _tag: "ExecutionFailed",
+        turnId: String(event.turnId),
+        message: "Execution failed",
+      })
+    else
+      model = ViewState.update(state.model, {
+        _tag: "ExecutionCancelled",
+        turnId: String(event.turnId),
+        agentResponseArrived: false,
+      })
     return {
-      state: {
-        ...state,
-        activitySequence: event.activitySequence,
-        model: { ...state.model, activeTurnId: undefined, busy: false, activity: undefined },
-      },
+      state: { ...state, activitySequence: event.activitySequence, model },
       preserveAnchor: false,
     }
   }

@@ -197,3 +197,29 @@ it("retains the newest settlement when the feed overflows", () => {
 
   expect(state.settlements.get("thread:turn")?.activitySequence).toBe(3)
 })
+
+it("replays settlements in lifecycle sequence order", () => {
+  const state = InteractiveFeedOverflow.make()
+  for (const [turnId, activitySequence] of [
+    ["turn-a", 1],
+    ["turn-b", 2],
+    ["turn-a", 3],
+  ] as const)
+    InteractiveFeedOverflow.remember(state, {
+      _tag: "TurnSettled",
+      selectionEpoch: 7,
+      activitySequence,
+      threadId: Thread.ThreadId.make("thread"),
+      turnId: Turn.TurnId.make(turnId),
+      status: "completed",
+    })
+
+  expect(
+    InteractiveFeedOverflow.events(state, 7, "bounded").flatMap((event) =>
+      event._tag === "TurnSettled" ? [[String(event.turnId), event.activitySequence]] : [],
+    ),
+  ).toEqual([
+    ["turn-b", 2],
+    ["turn-a", 3],
+  ])
+})

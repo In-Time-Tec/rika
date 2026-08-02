@@ -3406,6 +3406,13 @@ export const productLayer = <
                       runningTurn,
                       ExecutionIngest.projectionVersion,
                     )
+                    emit(dispatch, {
+                      _tag: "TurnStarted",
+                      selectionEpoch: 0,
+                      activitySequence: 0,
+                      threadId: runningTurn.threadId,
+                      turn: runningTurn,
+                    })
                     emit(dispatch, recordedShellStartedEvent(runningTurn, runningProjection))
                     const processExit = yield* Effect.exit(
                       restore(
@@ -3692,7 +3699,10 @@ export const productLayer = <
                 if (cancelledBeforeStart) {
                   const cancelled = yield* turns.get(turn.id)
                   yield* notifyThreadSummaries
-                  if (cancelled !== undefined) yield* notifyTurnChanged(cancelled)
+                  if (cancelled !== undefined) {
+                    yield* notifyTurnChanged(cancelled)
+                    yield* publishTurnSettled(cancelled)
+                  }
                 } else {
                   const result = yield* backend.cancel(turn.id)
                   deliverResultEvents(turn.id, result.events)
@@ -3745,7 +3755,10 @@ export const productLayer = <
             if (cancelledBeforeStart) {
               const cancelled = yield* turns.get(turn.id)
               yield* notifyThreadSummaries
-              if (cancelled !== undefined) yield* notifyTurnChanged(cancelled)
+              if (cancelled !== undefined) {
+                yield* notifyTurnChanged(cancelled)
+                yield* publishTurnSettled(cancelled)
+              }
             }
             yield* setTurnStatus(
               turn.id,

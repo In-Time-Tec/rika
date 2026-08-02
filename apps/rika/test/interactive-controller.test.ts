@@ -2451,3 +2451,44 @@ it("rejects stale selection lifecycle snapshots after settlement while applying 
   expect(reloaded.state.model.activity).toBeUndefined()
   expect(reloaded.state.model.activeTurnId).toBeUndefined()
 })
+
+it("applies failed settlement terminal semantics before a legacy failure event", () => {
+  const turn = runningTurn("settled-failed")
+  const selected = populatedSelection(turn).state
+  const settled = InteractiveController.update(selected, {
+    _tag: "TurnSettled",
+    selectionEpoch: 1,
+    activitySequence: 1,
+    threadId: thread.id,
+    turnId: turn.id,
+    status: "failed",
+  }).state
+  const legacy = ViewState.update(settled.model, {
+    _tag: "ExecutionFailed",
+    turnId: String(turn.id),
+    message: "later failure",
+  })
+
+  expect(settled.model).toMatchObject({ busy: false, activeTurnId: undefined, cancelPending: false })
+  expect(settled.model.blocks).toContainEqual(expect.objectContaining({ _tag: "Error", title: "Message failed" }))
+  expect(legacy.blocks).toEqual(settled.model.blocks)
+})
+
+it("applies cancelled settlement terminal semantics and remains idempotent", () => {
+  const turn = runningTurn("settled-cancelled")
+  const selected = populatedSelection(turn).state
+  const cancelling = { ...selected, model: { ...selected.model, cancelPending: true } }
+  const event: Extract<Operation.InteractiveEvent, { readonly _tag: "TurnSettled" }> = {
+    _tag: "TurnSettled",
+    selectionEpoch: 1,
+    activitySequence: 1,
+    threadId: thread.id,
+    turnId: turn.id,
+    status: "cancelled",
+  }
+  const settled = InteractiveController.update(cancelling, event).state
+  const duplicate = InteractiveController.update(settled, event).state
+
+  expect(settled.model).toMatchObject({ busy: false, activeTurnId: undefined, cancelPending: false })
+  expect(duplicate.model).toEqual(settled.model)
+})

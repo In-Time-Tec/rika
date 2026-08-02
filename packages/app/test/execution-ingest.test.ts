@@ -1911,4 +1911,30 @@ describe("ExecutionIngest", () => {
       ).toBe(true)
     }),
   )
+
+  it.effect("keeps the projection stream open after root terminal while a child follower is held", () =>
+    Effect.gen(function* () {
+      const held = yield* Deferred.make<void>()
+      const { ingest, projectionChanges, transcripts } = yield* makeHarness({
+        script: {
+          root: { events: rootEvents, status: "completed", children: [childId] },
+          [childId]: { events: childEvents, status: "completed", hold: held },
+        },
+      })
+
+      yield* ingest.ensure({ threadId, turnId: rootId })
+      let projection: TranscriptRepository.Projection | undefined
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        projection = yield* transcripts.get(rootId)
+        if (checkpoint(projection, childId) !== undefined) break
+        yield* Effect.yieldNow
+      }
+      expect(checkpoint(projection, childId)?.status).not.toBe("completed")
+      expect(projectionChanges.filter((change) => change._tag === "ProjectionStopped")).toHaveLength(0)
+
+      yield* Deferred.succeed(held, undefined)
+      yield* settle(ingest)
+      expect(projectionChanges.filter((change) => change._tag === "ProjectionStopped")).toHaveLength(1)
+    }),
+  )
 })
