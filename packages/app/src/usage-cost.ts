@@ -516,6 +516,19 @@ export interface Interval {
   readonly end?: number
 }
 
+const lifecycleTimestamp = (event: ActiveEvent, previous: number | undefined) =>
+  event.type === "wait.created" && previous !== undefined ? Math.max(previous, event.createdAt) : event.createdAt
+
+const timestampsRegress = (events: ReadonlyArray<ActiveEvent>): boolean => {
+  let previous: number | undefined
+  for (const event of events.toSorted((left, right) => left.sequence - right.sequence)) {
+    const createdAt = lifecycleTimestamp(event, previous)
+    if (previous !== undefined && createdAt < previous) return true
+    previous = createdAt
+  }
+  return false
+}
+
 const executionIntervals = (events: ReadonlyArray<ActiveEvent>): ReadonlyArray<Interval> | undefined => {
   const ordered = events.toSorted(
     (left, right) => left.sequence - right.sequence || left.type.localeCompare(right.type),
@@ -529,10 +542,11 @@ const executionIntervals = (events: ReadonlyArray<ActiveEvent>): ReadonlyArray<I
   let previousSequence: number | undefined
   let previousCreatedAt: number | undefined
   for (const event of ordered) {
-    if (previousSequence === event.sequence || (previousCreatedAt !== undefined && event.createdAt < previousCreatedAt))
+    const createdAt = lifecycleTimestamp(event, previousCreatedAt)
+    if (previousSequence === event.sequence || (previousCreatedAt !== undefined && createdAt < previousCreatedAt))
       return undefined
     previousSequence = event.sequence
-    previousCreatedAt = event.createdAt
+    previousCreatedAt = createdAt
     if (terminal) return undefined
     if (event.type === "execution.accepted") {
       if (accepted || started) return undefined
@@ -542,7 +556,7 @@ const executionIntervals = (events: ReadonlyArray<ActiveEvent>): ReadonlyArray<I
     if (event.type === "execution.started") {
       if (started) return undefined
       started = true
-      activeSince = event.createdAt
+      activeSince = createdAt
       continue
     }
     if (!started) {
@@ -554,7 +568,7 @@ const executionIntervals = (events: ReadonlyArray<ActiveEvent>): ReadonlyArray<I
     }
     if (event.type === "wait.created") {
       if (outstandingWaits === 0 && activeSince !== undefined) {
-        intervals.push({ start: activeSince, end: event.createdAt })
+        intervals.push({ start: activeSince, end: createdAt })
         activeSince = undefined
       }
       outstandingWaits += 1
@@ -563,11 +577,11 @@ const executionIntervals = (events: ReadonlyArray<ActiveEvent>): ReadonlyArray<I
     if (event.type === "wait.woken" || event.type === "wait.timed_out" || event.type === "wait.cancelled") {
       if (outstandingWaits === 0) return undefined
       outstandingWaits -= 1
-      if (outstandingWaits === 0) activeSince = event.createdAt
+      if (outstandingWaits === 0) activeSince = createdAt
       continue
     }
     if (activeSince !== undefined) {
-      intervals.push({ start: activeSince, end: event.createdAt })
+      intervals.push({ start: activeSince, end: createdAt })
       activeSince = undefined
     }
     if (isTerminalEventType(event.type)) terminal = true
@@ -927,19 +941,6 @@ const applyActive = (
         ...context,
       }),
     )
-  const before = executionEvents[index - 1]
-  const after = executionEvents[index]
-  if (
-    (before !== undefined && before.createdAt > event.createdAt) ||
-    (after !== undefined && after.createdAt < event.createdAt)
-  )
-    return Result.fail(
-      ProjectionFailure.make({
-        reason: "timestamp-regression",
-        message: "Lifecycle timestamp regresses relative to its sequence",
-        ...context,
-      }),
-    )
   const activeEvent: ActiveEvent = {
     key,
     executionId: event.executionId,
@@ -950,6 +951,14 @@ const applyActive = (
     sequence: event.sequence,
   }
   const nextExecutionEvents = [...executionEvents.slice(0, index), activeEvent, ...executionEvents.slice(index)]
+  if (timestampsRegress(nextExecutionEvents))
+    return Result.fail(
+      ProjectionFailure.make({
+        reason: "timestamp-regression",
+        message: "Lifecycle timestamp regresses relative to its sequence",
+        ...context,
+      }),
+    )
   const invalid = lifecycleFailure(nextExecutionEvents)
   if (invalid !== undefined && executionEvents.length > 0 && index === executionEvents.length)
     return Result.fail(

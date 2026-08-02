@@ -143,10 +143,29 @@ describe("UsageCost", () => {
     expect(StrictUsageCost.empty.activeEvents.size).toBe(0)
   })
 
-  it("fails a batch atomically and accepts corrected evidence afterward", () => {
+  it("clamps a backdated replayed wait creation to the preceding lifecycle timestamp", () => {
+    const observations = [
+      lifecycle("execution", "start", "execution.started", 100, 1),
+      lifecycle("execution", "wait", "wait.created", 50, 2),
+      lifecycle("execution", "wake", "wait.woken", 200, 3),
+      lifecycle("execution", "done", "execution.completed", 300, 4),
+    ].map((event) => ({ threadId: "thread", turnId: "turn", event }))
+    const folded = StrictUsageCost.foldBatch(StrictUsageCost.empty, observations)
+
+    expect(Result.isSuccess(folded)).toBe(true)
+    if (Result.isFailure(folded)) return
+    expect(StrictUsageCost.activeTime(folded.success, "thread")).toEqual({
+      _tag: "Available",
+      accumulated: Duration.millis(100),
+    })
+    const replayed = StrictUsageCost.foldBatch(folded.success, [observations[1]!])
+    expect(Result.isSuccess(replayed) && replayed.success).toBe(folded.success)
+  })
+
+  it("fails a non-wait timestamp regression atomically and accepts corrected evidence afterward", () => {
     const observations = [
       lifecycle("execution", "start", "execution.started", 1, 1),
-      lifecycle("execution", "wait", "wait.created", 0, 2),
+      lifecycle("execution", "done", "execution.completed", 0, 2),
     ].map((event) => ({ threadId: "thread", turnId: "turn", event }))
     const failed = StrictUsageCost.foldBatch(StrictUsageCost.empty, observations)
     expect(Result.isFailure(failed)).toBe(true)
@@ -154,7 +173,7 @@ describe("UsageCost", () => {
     expect(StrictUsageCost.empty.activeEvents.size).toBe(0)
     const recovered = StrictUsageCost.foldBatch(StrictUsageCost.empty, [
       observations[0]!,
-      { ...observations[1]!, event: lifecycle("execution", "wait", "wait.created", 2, 2) },
+      { ...observations[1]!, event: lifecycle("execution", "done", "execution.completed", 2, 2) },
     ])
     expect(Result.isSuccess(recovered)).toBe(true)
   })
