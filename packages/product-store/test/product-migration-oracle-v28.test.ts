@@ -98,12 +98,14 @@ class V28Template extends Context.Service<V28Template, string>()(
   "@rika/product-store/test/product-migration-oracle-v28.test/V28Template",
 ) {}
 
+const primaryRecipe = oracle.acceptedLegacyRouteRecipes[0]!
+
 const v28TemplateLayer = Layer.effect(
   V28Template,
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem
     const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-v28-template-" })
-    const routeText = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(oracle.legacyRoute)
+    const routeText = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(primaryRecipe.legacyRoute)
     return yield* makeV27Template(directory, routeText)
   }),
 )
@@ -177,16 +179,9 @@ const malformedIdentityRoutes = (encodedRoute: string) =>
   oracle.malformedConnectionIdentityCases.map((kind) => {
     let replacement = '"connectionIdentity":{"opaque":1}'
     if (kind === "primitive") replacement = '"connectionIdentity":"opaque"'
-    else if (kind === "unknown-field") replacement = '"connectionIdentity":{"opaque":"ok","extra":true}'
-    else if (kind === "missing-connection-identity") replacement = ""
-    else if (kind === "missing-opaque") replacement = '"connectionIdentity":{}'
-    else if (kind === "empty-opaque") replacement = '"connectionIdentity":{"opaque":""}'
+    else if (kind === "array") replacement = '"connectionIdentity":[]'
     const marker = '"connectionIdentity":{"opaque":"connection-main"}'
-    const routeText =
-      kind === "missing-connection-identity"
-        ? encodedRoute.replace(`,${marker}`, "")
-        : encodedRoute.replace(marker, replacement)
-    return [`identity-${kind}`, routeText] as const
+    return [`identity-${kind}`, encodedRoute.replace(marker, replacement)] as const
   })
 
 const rejectMalformedRoutes = (prefix: string, routes: Iterable<readonly [string, string]>) =>
@@ -200,27 +195,70 @@ const rejectMalformedRoutes = (prefix: string, routes: Iterable<readonly [string
 
 const rejectIdentityCase = (prefix: string, index: number) =>
   Effect.gen(function* () {
-    const encodedRoute = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.UnknownFromJsonString))(
-      oracle.legacyRoute,
-    )
+    const route = {
+      ...primaryRecipe.legacyRoute,
+      main: {
+        ...primaryRecipe.legacyRoute.main,
+        providerRuntime: {
+          ...primaryRecipe.legacyRoute.main.providerRuntime,
+          connectionIdentity: { opaque: "connection-main" },
+        },
+      },
+    }
+    const encodedRoute = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.UnknownFromJsonString))(route)
     yield* rejectMalformedRoutes(prefix, malformedIdentityRoutes(encodedRoute).slice(index, index + 1))
   })
 
 it.layer(BunServices.layer)("v28 migration oracle", (test) => {
   test.layer(v28TemplateLayer)((templateTest) => {
-    templateTest.effect("rewrites the authoritative fixture and preserves every canonical field", () =>
+    for (const recipe of oracle.acceptedLegacyRouteRecipes)
+      templateTest.effect(`rewrites ${recipe.name} and preserves every canonical field`, () =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            expect(oracle.migrationCount).toBe(28)
+            expect(oracle.migrationName).toBe("product_route_snapshot")
+            const fileSystem = yield* FileSystem.FileSystem
+            const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-v28-oracle-" })
+            const routeText = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(recipe.legacyRoute)
+            const filename = yield* makeV27Template(`${directory}/valid`, routeText)
+            yield* makeDatabase(filename)
+            expect(yield* readRoute(filename)).toEqual(recipe.expectedSnapshot)
+          }),
+        ),
+      )
+
+    templateTest.effect("preserves a valid account runtime and arbitrary string connection identity", () =>
       Effect.scoped(
         Effect.gen(function* () {
-          expect(oracle.migrationCount).toBe(28)
-          expect(oracle.migrationName).toBe("product_route_snapshot")
-          expect(oracle.legacyRoute).toBeDefined()
-          expect(oracle.expectedSnapshot).toBeDefined()
           const fileSystem = yield* FileSystem.FileSystem
-          const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-v28-oracle-" })
-          const filename = `${directory}/valid/rika.db`
-          yield* copyTemplate(yield* V28Template, filename)
+          const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-v28-account-runtime-" })
+          const route = {
+            ...primaryRecipe.legacyRoute,
+            main: {
+              ...primaryRecipe.legacyRoute.main,
+              providerRuntime: {
+                adapter: "openai-account",
+                credentialIdentity: "account-main",
+                connectionIdentity: { profile: "", region: "test-region" },
+              },
+              openAiAccountFingerprint: "account-main",
+            },
+          }
+          const expected = {
+            ...primaryRecipe.expectedSnapshot,
+            main: {
+              ...primaryRecipe.expectedSnapshot.main,
+              providerConnection: {
+                ...primaryRecipe.expectedSnapshot.main.providerConnection,
+                authentication: "account",
+                credentialIdentity: "account-main",
+              },
+            },
+          }
+          const routeText = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(route)
+          const filename = yield* makeV27Template(directory, routeText)
           yield* makeDatabase(filename)
-          expect(yield* readRoute(filename)).toEqual(oracle.expectedSnapshot)
+          expect(yield* readRoute(filename)).toEqual(expected)
         }),
       ),
     )
@@ -247,7 +285,7 @@ it.layer(BunServices.layer)("v28 migration oracle", (test) => {
               Effect.gen(function* () {
                 const filename = `${directory}/${version}/rika.db`
                 yield* copyTemplate(template, filename)
-                const futureRoute = { ...oracle.legacyRoute, version }
+                const futureRoute = { ...primaryRecipe.legacyRoute, version }
                 const routeText = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.UnknownFromJsonString))(
                   futureRoute,
                 )

@@ -31,6 +31,12 @@ const requireFinite = (value: unknown, message: string): number => {
   return value
 }
 
+const requireStringRecord = (value: unknown, message: string): Record<string, string> => {
+  const record = requireRecord(value, message)
+  if (Object.values(record).some((entry) => typeof entry !== "string")) throw new Error(message)
+  return record as Record<string, string>
+}
+
 const roles = [
   "main",
   "oracle",
@@ -99,12 +105,8 @@ const legacyModel = (value: unknown, expectedRole: (typeof roles)[number]): Exec
         runtimeRecord.credentialIdentity,
         "Malformed legacy execution route runtime identity",
       )
-    const connectionIdentity = requireRecord(
-      runtimeRecord.connectionIdentity,
-      "Malformed legacy execution route connection identity",
-    )
-    requireKeys(connectionIdentity, ["opaque"], "Unsupported legacy execution route connection identity field")
-    requireString(connectionIdentity.opaque, "Malformed legacy execution route connection identity")
+    if (runtimeRecord.connectionIdentity !== undefined)
+      requireStringRecord(runtimeRecord.connectionIdentity, "Malformed legacy execution route connection identity")
   }
   const fingerprint =
     input.openAiAccountFingerprint === undefined
@@ -114,9 +116,10 @@ const legacyModel = (value: unknown, expectedRole: (typeof roles)[number]): Exec
     input.providerApiKeyEnv === undefined
       ? undefined
       : requireString(input.providerApiKeyEnv, "Malformed legacy execution route API key environment")
-  const credentialIdentity = fingerprint ?? runtimeCredentialIdentity
+  const account = runtimeAdapter === "openai-account" || fingerprint !== undefined
+  const credentialIdentity = account ? (fingerprint ?? runtimeCredentialIdentity) : undefined
   let authentication: "account" | "none" | "api-key"
-  if (runtimeAdapter === "openai-account" || credentialIdentity !== undefined) authentication = "account"
+  if (account) authentication = "account"
   else if (apiKeyEnvironment === undefined) authentication = "none"
   else authentication = "api-key"
   const providerOptions = input.providerOptions
