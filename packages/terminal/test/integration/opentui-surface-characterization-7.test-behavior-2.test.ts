@@ -11,7 +11,7 @@ import {
   _giantSubagentModel,
   _collapsedSubagentModel,
 } from "./opentui-surface-characterization-7-support"
-test("ticks Amp status and running-tool spinners every 200ms without rebuilding transcript bodies", () =>
+test("ticks status and running-tool spinners every 100ms without rebuilding transcript bodies", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const clock = new ManualClock()
@@ -60,7 +60,7 @@ test("ticks Amp status and running-tool spinners every 200ms without rebuilding 
         expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
         expect(styledTextValue(records().get("tool:long-running:header")!.renderable.content)).toContain("⠭")
 
-        clock.advance(199)
+        clock.advance(99)
         expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
         expect(styledTextValue(records().get("tool:long-running:header")!.renderable.content)).toContain("⠭")
         clock.advance(1)
@@ -68,13 +68,13 @@ test("ticks Amp status and running-tool spinners every 200ms without rebuilding 
         expect(styledTextValue(records().get("tool:long-running:header")!.renderable.content)).toMatch(/[⠀-⣿] sleep 5/u)
         expect(body.content).toBe(firstBodyContent)
 
-        clock.advance(200)
+        clock.advance(100)
         expect(styledTextValue(surface.statusLabel.content)).toContain("≋ Thinking 5 tok")
-        clock.advance(200)
+        clock.advance(100)
         expect(styledTextValue(surface.statusLabel.content)).toContain("≈ Thinking 5 tok")
-        clock.advance(200)
+        clock.advance(100)
         expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
-        clock.advance(200)
+        clock.advance(100)
         expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
         expect(body.content).toBe(firstBodyContent)
       } finally {

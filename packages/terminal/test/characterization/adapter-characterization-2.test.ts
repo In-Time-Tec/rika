@@ -308,8 +308,9 @@ test("renders every transcript block variant and sidebar state", () => {
   const renderedBlocks = blocks.map((block) => renderBlock(block)).join("\n")
   expect(renderedBlocks).toContain("✕ Result")
   expect(renderedBlocks).toContain("↻ Auto-compacting context…")
-  expect(renderedBlocks).toContain("✓ Auto-compacted context at 42\n  Kept recent turns")
-  expect(renderedBlocks).toContain("✓ Auto-compacted context\n  No checkpoint")
+  expect(renderedBlocks).toContain("❋ Auto-compacted\n  Kept recent turns")
+  expect(renderedBlocks).toContain("❋ Auto-compacted\n  No checkpoint")
+  expect(renderedBlocks).not.toContain(" at 42")
   expect(renderedBlocks).toContain(
     "✖ ERROR: Execution failed · Turn turn-4\n  Model unavailable\n  Next: Press Enter to retry.",
   )

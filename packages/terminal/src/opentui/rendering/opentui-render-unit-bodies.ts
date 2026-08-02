@@ -2,13 +2,14 @@ import { Function } from "effect"
 import { bold, dim, fg, type StyledText, type TextChunk } from "@opentui/core"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import type { TranscriptBlock } from "../../state/model/terminal-transcript-state"
+import type { Model } from "../../state/model/terminal-state"
 import { colors } from "../../presentation/terminal/terminal-theme"
 import { renderDiffStyled, renderPierreDiff, renderToolSummary } from "./terminal-diff-text-adapter"
 import { isToolOutputDisplayed } from "../../presentation/transcript/transcript-agent-response"
 import { agentToolSummary } from "../../presentation/transcript/transcript-tool-detail"
 import { wrapBodyText } from "./opentui-render-window"
 import { diffCounts } from "./opentui-render-tool-detail"
-import { renderBlock } from "./opentui-render-block"
+import { completedCompactionIcon, renderBlock } from "./opentui-render-block"
 import type { TerminalTextChunk } from "../../presentation/markdown/styled-text"
 
 type Append = (chunk: TextChunk | TerminalTextChunk) => void
@@ -97,7 +98,16 @@ export const renderChildAgentBody: {
   ): ReturnType<typeof renderChildAgentBodyImpl>
 } = Function.dual(6, renderChildAgentBodyImpl)
 
-const renderPlainBodyImpl = (block: TranscriptBlock, width: number, append: Append): void => {
+const compactionRainbow = ["#ff5f6d", "#ff9f43", "#ffd166", "#7bd389", "#5bc0eb", "#8c7ae6", "#d980fa"] as const
+
+const renderPlainBodyImpl = (model: Model, block: TranscriptBlock, width: number, append: Append): void => {
+  if (block._tag === "Compaction" && block.status === "complete") {
+    append(fg(colors.green)(`${completedCompactionIcon} `))
+    for (const [index, character] of Array.from("Auto-compacted").entries())
+      append(fg(compactionRainbow[(index + model.animationTick) % compactionRainbow.length]!)(character))
+    if (block.summary.length > 0) append(dim(fg(colors.text)(`\n${wrapBodyText(block.summary, width, "  ")}`)))
+    return
+  }
   let color = colors.text
   if (block._tag === "ContextUsage") color = colors.muted
   else if (block._tag === "Error") color = colors.red
@@ -108,10 +118,12 @@ export const renderPlainBody: {
   (
     arg1: Parameters<typeof renderPlainBodyImpl>[1],
     arg2: Parameters<typeof renderPlainBodyImpl>[2],
+    arg3: Parameters<typeof renderPlainBodyImpl>[3],
   ): (arg0: Parameters<typeof renderPlainBodyImpl>[0]) => ReturnType<typeof renderPlainBodyImpl>
   (
     arg0: Parameters<typeof renderPlainBodyImpl>[0],
     arg1: Parameters<typeof renderPlainBodyImpl>[1],
     arg2: Parameters<typeof renderPlainBodyImpl>[2],
+    arg3: Parameters<typeof renderPlainBodyImpl>[3],
   ): ReturnType<typeof renderPlainBodyImpl>
-} = Function.dual(3, renderPlainBodyImpl)
+} = Function.dual(4, renderPlainBodyImpl)

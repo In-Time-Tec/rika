@@ -84,11 +84,8 @@ export class SurfaceState {
   public statusLabel!: TextRenderable
   public toastBox!: BoxRenderable
   public toast!: TextRenderable
-  protected welcomePhase = 0
   protected welcomeChild: TextRenderable | undefined
   protected welcomeKey = ""
-  protected welcomeTimer: Fiber.Fiber<void> | undefined
-  protected welcomeStopTimer: Fiber.Fiber<void> | undefined
   protected toastTimer: Fiber.Fiber<void> | undefined
   protected usageLabelWidth = 0
   protected modeLabelContentKey: string | undefined

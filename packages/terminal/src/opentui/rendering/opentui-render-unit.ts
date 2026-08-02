@@ -364,7 +364,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     append(selected ? bold(fg(colors.blue)(text)) : dim(italic(fg(colors.text)(text))))
   }
   const renderPlainBlock = (index: number) => {
-    renderPlainBody(model.blocks[index] as TranscriptBlock, transcriptWrapWidth(model.width), append)
+    renderPlainBody(model, model.blocks[index] as TranscriptBlock, transcriptWrapWidth(model.width), append)
   }
   const isUnitVisible = (unit: TranscriptUnit): boolean =>
     unit.kind !== "reasoning" || rowExpanded(transcriptUnitId(model, unit))

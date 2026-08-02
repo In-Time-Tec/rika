@@ -443,7 +443,7 @@ test("expands the queue box to fit a wrapped single-line queued prompt joined to
       }
     }),
   ))
-test("renders autonomous welcome animation frames while otherwise event-driven", () =>
+test("keeps the welcome orb static without an active animation tick", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const clock = new ManualClock()
@@ -453,12 +453,11 @@ test("renders autonomous welcome animation frames while otherwise event-driven",
         surface.update({ ...initial("/work", "high"), width: 80, height: 24 })
         yield* openTui(() => setup.renderOnce())
         const first = setup.captureCharFrame()
-        clock.advance(100)
+        clock.advance(1_000)
         yield* openTui(() => setup.renderOnce())
         const second = setup.captureCharFrame()
         expect(first).toContain("Welcome to Rika")
-        expect(second).toContain("Welcome to Rika")
-        expect(second).not.toBe(first)
+        expect(second).toBe(first)
         expect(setup.renderer.isRunning).toBe(false)
       } finally {
         surface.destroy()

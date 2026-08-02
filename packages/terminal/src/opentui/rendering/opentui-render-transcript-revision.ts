@@ -51,7 +51,11 @@ const transcriptUnitRevisionImpl = (
   }
   if (unit.kind === "entry") ids.push(identityRevision(model.entries[unit.entry]))
   else if (unit.kind === "tool") walkTool(unit)
-  else ids.push(identityRevision(model.blocks[unit.block]))
+  else {
+    const block = model.blocks[unit.block] as TranscriptBlock
+    ids.push(identityRevision(block))
+    if (block._tag === "Compaction" && block.status === "complete") bits.push(`rainbow:${model.animationTick}`)
+  }
   pushExpanded(unitKey)
   const selected = model.detailSelection === unitKey ? "1" : "0"
   return `${ids.join(".")}|${bits.join("")}|${selected}|${model.width}`

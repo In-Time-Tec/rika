@@ -50,6 +50,7 @@ export interface TranscriptRenderInput {
   readonly width: number
   readonly windowEnd: number
   readonly rowWindowEnd: number
+  readonly animationTick: number
 }
 
 export interface ChangedFileRow {

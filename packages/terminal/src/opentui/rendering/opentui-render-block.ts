@@ -15,6 +15,8 @@ import { isThreadBusy } from "../../state/model/terminal-thread-predicate"
 import { toOpenColor } from "./terminal-text-adapter"
 
 const idleSpinnerFrame = "⠭"
+const compactionGlyphCapabilities = { floral: true } as const
+export const completedCompactionIcon = compactionGlyphCapabilities.floral ? "❋" : "*"
 const toOpenStyledChunk = (chunk: TextChunk): TextChunk =>
   chunk.fg === undefined ? chunk : Object.assign({}, chunk, { fg: toOpenColor(chunk.fg) })
 const wrapTextToWidth = (text: string, width: number): ReadonlyArray<string> => {
@@ -83,7 +85,7 @@ export const renderBlock: {
         if (block.status === "running") return "↻ Auto-compacting context…"
         if (block.status === "failed") return `✗ Auto-compaction failed\n${body(block.summary)}`
         if (block.status === "cancelled") return "⊘ Auto-compaction cancelled"
-        return `✓ Auto-compacted context${block.checkpoint === undefined ? "" : ` at ${block.checkpoint}`}${block.summary.length === 0 ? "" : `\n${body(block.summary)}`}`
+        return `${completedCompactionIcon} Auto-compacted${block.summary.length === 0 ? "" : `\n${body(block.summary)}`}`
       case "Notification":
         return `${head(`! ${block.title}`)}\n${body(block.detail)}`
       case "Error":
@@ -149,14 +151,6 @@ export const renderSidebar: {
   },
 )
 
-const changedFileColor = (status: string): ColorInput => {
-  if (status.includes("?")) return colors.muted
-  if (status.includes("A")) return colors.green
-  if (status.includes("D")) return colors.red
-  if (status.includes("R")) return colors.purple
-  if (status.includes("M")) return colors.amber
-  return colors.text
-}
 interface ChangedNode {
   readonly children: Map<string, ChangedNode>
   file?: ChangedFile
@@ -170,6 +164,7 @@ const fileTreeRows = (
   files: ReadonlyArray<ChangedFile>,
   innerWidth: number,
   showCounts: boolean,
+  accent: ColorInput,
 ): ReadonlyArray<ChangedFileRow> => {
   if (files.length === 0) return [{ chunks: [fg(colors.muted)("No changes")] }]
   const root: ChangedNode = { children: new Map() }
@@ -196,7 +191,7 @@ const fileTreeRows = (
         rows.push({
           chunks: [
             ...indentChunks,
-            fg(colors.muted)(truncateToWidth(`${displayName}/`, Math.max(1, innerWidth - indent.length))),
+            dim(fg(accent)(truncateToWidth(`${displayName}/`, Math.max(1, innerWidth - indent.length)))),
           ],
         })
         walk(child, depth + 1)
@@ -214,8 +209,8 @@ const fileTreeRows = (
         rows.push({
           chunks: [
             ...indentChunks,
-            fg(changedFileColor(child.file.status))(label),
-            ...(showCounts && hasCounts ? [fg(colors.green)(added), fg(colors.red)(removed)] : []),
+            fg(accent)(label),
+            ...(showCounts && hasCounts ? [dim(fg(accent)(added)), dim(fg(accent)(removed))] : []),
           ],
           file: child.file,
           nameIndex: indentChunks.length,
@@ -229,13 +224,19 @@ const fileTreeRows = (
 export const sidebarInnerWidth = (model: Model): number => Math.max(1, fileSidebarLayoutWidth(model) - 8)
 const sidebarFileRowsImpl = (model: Model, innerWidth: number): ReadonlyArray<ChangedFileRow> =>
   model.changedFilesOpen
-    ? fileTreeRows(model.changedFiles._tag === "Ready" ? model.changedFiles.value : [], innerWidth, true)
+    ? fileTreeRows(
+        model.changedFiles._tag === "Ready" ? model.changedFiles.value : [],
+        innerWidth,
+        true,
+        colors[model.mode],
+      )
     : fileTreeRows(
         model.filePicker.items._tag === "Ready"
           ? model.filePicker.items.value.map((path) => ({ path, status: "" }))
           : [],
         innerWidth,
         false,
+        colors[model.mode],
       )
 
 export const sidebarFileRows: {
@@ -270,9 +271,14 @@ export const renderChangedFiles: {
   (innerWidth: number, hoveredRow?: number): (model: Model) => StyledText
 } = Function.dual(
   (args) => args.length > 1 && typeof args[0] !== "number",
-  (model, innerWidth, hoveredRow) =>
+  (model: Model, innerWidth: number, hoveredRow?: number) =>
     renderFileRows(
-      fileTreeRows(model.changedFiles._tag === "Ready" ? model.changedFiles.value : [], innerWidth, true),
+      fileTreeRows(
+        model.changedFiles._tag === "Ready" ? model.changedFiles.value : [],
+        innerWidth,
+        true,
+        colors[model.mode],
+      ),
       hoveredRow,
     ),
 )

@@ -22,10 +22,6 @@ export abstract class SurfaceLifecycleCleanup extends SurfaceLifecycle {
     this.transcriptAnchorScrollBy = 0
     this.pendingTranscriptPosition = undefined
     this.cancelWheelReport()
-    this.cancelTimer(this.welcomeTimer)
-    this.welcomeTimer = undefined
-    this.cancelTimer(this.welcomeStopTimer)
-    this.welcomeStopTimer = undefined
     this.cancelTimer(this.toastTimer)
     this.toastTimer = undefined
     this.cancelTimer(this.junkTimer)

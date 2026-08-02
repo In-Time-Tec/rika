@@ -11,7 +11,9 @@ export const probeNativeAsset = (): string => {
 }
 
 export const statusSpinnerFrames: ReadonlyArray<string> = ["∼", "≈", "≋", "≈", "∼"]
-export const spinnerInterval = 200
+export const animationInterval = 100
+export const spinnerInterval = animationInterval
+export const welcomeAnimationInterval = animationInterval / 2
 export const idleSpinnerFrame = "⠭"
 
 export class ToolSpinner {
