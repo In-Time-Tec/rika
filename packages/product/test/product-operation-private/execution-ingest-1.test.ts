@@ -6,8 +6,84 @@ import { ExecutionFixtures } from "./execution-ingest-fixtures"
 import { Fixtures } from "./execution-ingest-support"
 import * as ExecutionIngest from "../../src/execution/ingest/execution-ingest-service"
 import { Effect } from "effect"
+import * as UsageRepository from "../../../product-store/src/usage/memory-usage-repository"
+import * as UsageSnapshot from "@rika/product/usage-snapshot"
 
 describe("ExecutionIngest", () => {
+  it.effect("backfills an incomplete current-version usage source", () =>
+    Effect.gen(function* () {
+      const usage = yield* UsageRepository.makeMemory({
+        initial: [
+          {
+            sourceId: String(ExecutionFixtures.rootId),
+            turnId: String(ExecutionFixtures.rootId),
+            threadId: String(ExecutionFixtures.threadId),
+            revision: 0,
+            projectionVersion: UsageSnapshot.projectionVersion,
+            pricedAttempts: 0,
+            unpricedAttempts: 0,
+            countedAttempts: 0,
+            uncountedAttempts: 0,
+            sourceComplete: false,
+          },
+        ],
+      })
+      const { ingest } = yield* makeHarness({
+        script: {
+          root: {
+            events: [
+              ExecutionFixtures.started("root"),
+              ExecutionFixtures.event("root", "done", 1, "execution.completed"),
+            ],
+            status: "completed",
+          },
+        },
+        usage,
+      })
+
+      yield* ingest.ensure({ threadId: ExecutionFixtures.threadId, turnId: ExecutionFixtures.rootId })
+      yield* settle(ingest)
+
+      expect(yield* usage.readSource(String(ExecutionFixtures.rootId), String(ExecutionFixtures.rootId))).toMatchObject(
+        {
+          projectionVersion: UsageSnapshot.projectionVersion,
+          sourceComplete: true,
+        },
+      )
+    }),
+  )
+
+  it.effect("degrades usage without interrupting live transcript delivery", () =>
+    Effect.gen(function* () {
+      const failures: Array<ExecutionIngest.Failure> = []
+      const { ingest, transcripts } = yield* makeHarness({
+        script: { root: { events: [], status: "running" } },
+        turnStatus: "running",
+        onFailure: (failure) => failures.push(failure),
+      })
+
+      yield* ingest.ensure({ threadId: ExecutionFixtures.threadId, turnId: ExecutionFixtures.rootId })
+      yield* ingest.consumed(ExecutionFixtures.rootId)
+      for (const delivered of [
+        ExecutionFixtures.started("root"),
+        ExecutionFixtures.event("root", "first", 1, "model.output.completed", { text: "before degraded usage" }),
+        ExecutionFixtures.event("root", "bad-wake", 2, "wait.woken"),
+        ExecutionFixtures.event("root", "second", 3, "model.output.completed", { text: "after degraded usage" }),
+        ExecutionFixtures.event("root", "done", 4, "execution.completed"),
+      ])
+        ingest.deliver(ExecutionFixtures.rootId, delivered)
+      yield* settle(ingest)
+
+      expect(failures).toEqual([])
+      expect((yield* Effect.result(ingest.consumed(ExecutionFixtures.rootId)))._tag).toBe("Success")
+      expect(
+        (yield* transcripts.get(ExecutionFixtures.rootId))?.units.some(
+          (unit) => unit.content._tag === "Entry" && unit.content.text === "after degraded usage",
+        ),
+      ).toBe(true)
+    }),
+  )
+
   it.effect("notifies committed usage after a zero-cost attempt is observed", () =>
     Effect.gen(function* () {
       const commits: Array<ExecutionIngest.Commit> = []

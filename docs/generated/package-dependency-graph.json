@@ -203,6 +203,7 @@
       "production": true,
       "publicExports": [
         "./opentui-surface",
+        "./terminal-animation-reducer",
         "./terminal-message",
         "./terminal-performance-evaluation",
         "./terminal-session",

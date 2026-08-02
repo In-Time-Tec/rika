@@ -42,6 +42,10 @@ export interface EventDependencies {
   readonly commit: (pipeline: Pipeline) => Effect.Effect<void, never>
   readonly fail: (pipeline: Pipeline, node: Node, reason: IngestFailure["reason"], message: string) => void
   readonly failProjection: (pipeline: Pipeline, failure: UsageEvent.ProjectionFailure) => void
+  readonly degradeUsage: (
+    pipeline: Pipeline,
+    failure: UsageEvent.ProjectionFailure | import("@rika/product/usage-repository").RepositoryError,
+  ) => void
   readonly publishPatch: (
     pipeline: Pipeline,
     origin: import("./execution-projection-contract").ProjectionOrigin,
@@ -261,10 +265,9 @@ export const make = (dependencies: EventDependencies) => {
         event,
       }
       const terminal = EventFamily.terminalEventStatus(event.type)
-      const usage = UsageFold.applyUsageFoldEvent(pipeline.usageFold, observation)
-      if (Result.isFailure(usage)) {
-        dependencies.failProjection(pipeline, usage.failure)
-        return
+      if (!pipeline.usageDisabled) {
+        const usage = UsageFold.applyUsageFoldEvent(pipeline.usageFold, observation)
+        if (Result.isFailure(usage)) dependencies.degradeUsage(pipeline, usage.failure)
       }
       node.resumed = false
       applyMutation(pipeline, node, TranscriptProjection.Fold.applyFoldEvent(node.fold, event), visible)
@@ -298,7 +301,8 @@ export const make = (dependencies: EventDependencies) => {
         if (node.parentKey === undefined) pipeline.rootSettled.openUnsafe()
       } else if (pipeline.pending >= dependencies.commitEvents) dependencies.wake(pipeline)
       for (const childExecutionId of spawnedChildIds(event)) discover(pipeline, node, childExecutionId, visible)
-      if (UsageFold.usageFoldChanged(pipeline.usageFold)) pipeline.usagePending.push(observation)
+      if (!pipeline.usageDisabled && UsageFold.usageFoldChanged(pipeline.usageFold))
+        pipeline.usagePending.push(observation)
       dependencies.publishPatch(pipeline, IngestProjection.eventOrigin(node.executionId, event), visible)
     } catch (cause) {
       dependencies.fail(pipeline, node, "backend", String(cause))

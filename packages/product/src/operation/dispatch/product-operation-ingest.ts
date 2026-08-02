@@ -86,6 +86,21 @@ export const makeProductOperationIngest = (input: any): Effect.Effect<ProductOpe
           globalCostUsd: global.costNanoUsd / 1_000_000_000,
         })
     })
+    const publishUnavailableThreadUsage = Effect.fn("ProductOperation.publishUnavailableThreadUsage")(function* (
+      threadId: Thread.ThreadId,
+    ) {
+      const thread = yield* usageRepository.readThread(String(threadId))
+      publishInteractiveActivity(0, {
+        _tag: "ThreadUsageUpdated",
+        selectionEpoch: 0,
+        threadId,
+        revision: thread.revision,
+        context: { _tag: "Unavailable" },
+        cost: { _tag: "Unavailable" },
+        tokens: { _tag: "Unavailable" },
+        time: { _tag: "Unavailable" },
+      })
+    })
     const commitUsageSource = Effect.fn("ProductOperation.commitUsageSource")(function* (
       sourceId: string,
       threadId: string,
@@ -174,9 +189,11 @@ export const makeProductOperationIngest = (input: any): Effect.Effect<ProductOpe
             }
           }
           if (commit.usageChanged || commit.refolded)
-            yield* usageRepository
-              .readTurn(String(commit.rootTurnId))
-              .pipe(Effect.flatMap((value) => publishThreadUsage(value)))
+            yield* commit.usageDegraded
+              ? publishUnavailableThreadUsage(commit.threadId)
+              : usageRepository
+                  .readTurn(String(commit.rootTurnId))
+                  .pipe(Effect.flatMap((value) => publishThreadUsage(value)))
         }
       }).pipe(
         Effect.catchCause((cause) =>

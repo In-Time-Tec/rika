@@ -70,7 +70,7 @@ describe("UsageCost", () => {
     const snapshot = [
       Support.Fixtures.lifecycle("execution", "start-1", "execution.started", 1_000, 1),
       Support.Fixtures.lifecycle("execution", "wait", "wait.created", 11_000, 2),
-      Support.Fixtures.lifecycle("execution", "start-2", "execution.started", 15_000, 3),
+      Support.Fixtures.lifecycle("execution", "wake", "wait.woken", 15_000, 3),
       Support.Fixtures.lifecycle("execution", "complete", "execution.completed", 20_000, 4),
     ].reduce(
       (current, event) => Support.UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
@@ -114,6 +114,36 @@ describe("UsageCost", () => {
     expect(Support.UsageCost.activeTime(withWork, "thread")).toEqual({
       _tag: "Available",
       accumulated: Duration.seconds(5),
+    })
+  })
+
+  it("accounts for parallel waits until every wait settles", () => {
+    const snapshot = Support.Fixtures.fold([
+      Support.Fixtures.lifecycle("execution", "start", "execution.started", 1_000, 1),
+      Support.Fixtures.lifecycle("execution", "wait-a", "wait.created", 10_000, 2),
+      Support.Fixtures.lifecycle("execution", "wait-b", "wait.created", 11_000, 3),
+      Support.Fixtures.lifecycle("execution", "wake-a", "wait.woken", 15_000, 4),
+      Support.Fixtures.lifecycle("execution", "cancel-b", "wait.cancelled", 20_000, 5),
+      Support.Fixtures.lifecycle("execution", "complete", "execution.completed", 22_000, 6),
+    ])
+
+    expect(Support.UsageCost.activeTime(snapshot, "thread")).toEqual({
+      _tag: "Available",
+      accumulated: Duration.seconds(11),
+    })
+  })
+
+  it("resumes active time from a durable wait cancellation", () => {
+    const snapshot = Support.Fixtures.fold([
+      Support.Fixtures.lifecycle("execution", "start", "execution.started", 1_000, 1),
+      Support.Fixtures.lifecycle("execution", "wait", "wait.created", 2_000, 2),
+      Support.Fixtures.lifecycle("execution", "cancel", "wait.cancelled", 10_000, 3),
+      Support.Fixtures.lifecycle("execution", "complete", "execution.completed", 12_000, 4),
+    ])
+
+    expect(Support.UsageCost.activeTime(snapshot, "thread")).toEqual({
+      _tag: "Available",
+      accumulated: Duration.seconds(3),
     })
   })
 

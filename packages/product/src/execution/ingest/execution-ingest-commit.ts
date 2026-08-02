@@ -23,6 +23,7 @@ export interface Commit {
   readonly revision: number
   readonly terminal: boolean
   readonly usageChanged: boolean
+  readonly usageDegraded: boolean
   readonly refolded: boolean
 }
 
@@ -36,6 +37,10 @@ export interface CommitDependencies {
   readonly options: Options
   readonly fail: (pipeline: Pipeline, node: Node, reason: IngestFailure["reason"], message: string) => void
   readonly failProjection: (pipeline: Pipeline, failure: UsageEvent.ProjectionFailure) => void
+  readonly degradeUsage: (
+    pipeline: Pipeline,
+    failure: UsageEvent.ProjectionFailure | UsageRepository.RepositoryError,
+  ) => void
   readonly resolveFlushWaiters: (pipeline: Pipeline) => void
   readonly projectionVersion: number
   readonly fullyConsumed: (nodes: ReadonlyMap<string, Node>) => boolean
@@ -202,7 +207,8 @@ export const make = (dependencies: CommitDependencies) => {
           })
           const terminal = dependencies.fullyConsumed(pipeline.nodes)
           const usageChanged =
-            pipeline.usagePending.length > 0 || (terminal && pipeline.usageSnapshot.activeEvents.size === 0)
+            !pipeline.usageDisabled &&
+            (pipeline.usagePending.length > 0 || (terminal && pipeline.usageSnapshot.activeEvents.size === 0))
           const deferred = new Map<string, { readonly owner: string; readonly unit?: TranscriptUnit.Unit }>()
           const upsert = [...dirty.units].flatMap(([key, mutation]) => {
             if (mutation.unit === undefined) return []
@@ -234,19 +240,18 @@ export const make = (dependencies: CommitDependencies) => {
             removals.length === 0 &&
             changedCheckpoints.length === 0 &&
             pipeline.usagePending.length === 0 &&
-            pipeline.usageRefoldFromVersion === undefined
+            pipeline.usageRefoldFromVersion === undefined &&
+            !pipeline.usageNotificationPending
           )
             return
           let usageCommitted = false
-          if (pipeline.usagePending.length > 0 || terminal || pipeline.usageRefoldFromVersion !== undefined) {
+          if (
+            !pipeline.usageDisabled &&
+            (pipeline.usagePending.length > 0 || terminal || pipeline.usageRefoldFromVersion !== undefined)
+          ) {
             const usageResult = yield* Effect.result(commitUsage(pipeline, terminal))
-            if (usageResult._tag === "Failure") {
-              if (usageResult.failure._tag === "UsageProjectionFailure")
-                dependencies.failProjection(pipeline, usageResult.failure)
-              else dependencies.fail(pipeline, root, "repository", String(usageResult.failure))
-              return
-            }
-            usageCommitted = usageResult.success
+            if (usageResult._tag === "Failure") dependencies.degradeUsage(pipeline, usageResult.failure)
+            else usageCommitted = usageResult.success
           }
           if (upsert.length === 0 && removals.length === 0 && changedCheckpoints.length === 0) {
             const notifyUsage = usageCommitted || usageChanged || pipeline.usageNotificationPending
@@ -257,6 +262,7 @@ export const make = (dependencies: CommitDependencies) => {
                 revision: projectionState.revision,
                 terminal,
                 usageChanged: true,
+                usageDegraded: pipeline.usageDisabled,
                 refolded: pipeline.refolding,
               })
               pipeline.usageNotificationPending = false
@@ -331,6 +337,7 @@ export const make = (dependencies: CommitDependencies) => {
             revision: projectionState.revision,
             terminal,
             usageChanged: notifyUsage,
+            usageDegraded: pipeline.usageDisabled,
             refolded: pipeline.refolding,
           })
           pipeline.usageNotificationPending = false

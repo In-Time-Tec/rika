@@ -24,6 +24,7 @@ export const executionIntervals = (events: ReadonlyArray<ActiveEvent>): Readonly
   let accepted = false
   let started = false
   let terminal = false
+  let outstandingWaits = 0
   let previousSequence: number | undefined
   let previousCreatedAt: number | undefined
   for (const event of ordered) {
@@ -38,7 +39,7 @@ export const executionIntervals = (events: ReadonlyArray<ActiveEvent>): Readonly
       continue
     }
     if (event.type === "execution.started") {
-      if (activeSince !== undefined) return undefined
+      if (started) return undefined
       started = true
       activeSince = event.createdAt
       continue
@@ -50,9 +51,18 @@ export const executionIntervals = (events: ReadonlyArray<ActiveEvent>): Readonly
       }
       return undefined
     }
-    if (event.type === "wait.woken" || event.type === "wait.timed_out") {
-      if (activeSince !== undefined) return undefined
-      activeSince = event.createdAt
+    if (event.type === "wait.created") {
+      if (outstandingWaits === 0 && activeSince !== undefined) {
+        intervals.push({ start: activeSince, end: event.createdAt })
+        activeSince = undefined
+      }
+      outstandingWaits += 1
+      continue
+    }
+    if (event.type === "wait.woken" || event.type === "wait.timed_out" || event.type === "wait.cancelled") {
+      if (outstandingWaits === 0) return undefined
+      outstandingWaits -= 1
+      if (outstandingWaits === 0) activeSince = event.createdAt
       continue
     }
     if (activeSince !== undefined) {

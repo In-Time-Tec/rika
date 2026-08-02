@@ -5,6 +5,8 @@ import * as UsageFold from "../../usage/usage-fold"
 import * as UsageSnapshot from "../../usage/usage-snapshot"
 import * as UsageCodec from "../../usage/usage-snapshot-codec"
 import * as UsageEvent from "../../usage/usage-event"
+import * as UsageRepository from "@rika/product/usage-repository"
+import type { SourceUsage } from "@rika/product/usage-snapshot"
 import * as IngestState from "./execution-ingest-state"
 import * as IngestEvent from "./execution-ingest-event"
 import * as EventFamily from "./execution-ingest-event-family"
@@ -15,6 +17,7 @@ import * as IngestLifecycle from "./execution-ingest-lifecycle"
 import * as IngestFailureRuntime from "./execution-ingest-failure"
 import { IngestFailure, type Failure } from "./execution-ingest-failure"
 import * as IngestStop from "./execution-ingest-stop"
+import * as UsageBackfill from "./execution-ingest-usage-backfill"
 
 export const projectionVersion = 4
 
@@ -24,6 +27,7 @@ export const defaultWatchCapacity = 2_048
 
 export interface Interface {
   readonly ensure: (root: IngestEvent.Root) => Effect.Effect<void, Failure>
+  readonly backfillUsage: (root: IngestEvent.Root) => Effect.Effect<void>
   readonly watchThread: (
     threadId: IngestEvent.Root["threadId"],
   ) => Effect.Effect<IngestWatch.ProjectionWatch, never, Scope.Scope>
@@ -55,6 +59,33 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
   const watch = IngestWatch.make(pipelines, watchCapacity)
   const { publish, publishPatch, publishStarted, watchThread } = watch
 
+  const degradeUsage = (
+    pipeline: Pipeline,
+    failure: UsageEvent.ProjectionFailure | UsageRepository.RepositoryError,
+  ) => {
+    if (pipeline.usageDisabled) return
+    pipeline.usageDisabled = true
+    pipeline.usagePending.length = 0
+    pipeline.usageRefoldFromVersion = undefined
+    pipeline.usageNotificationPending = true
+    const root = pipeline.nodes.get(pipeline.rootKey)!
+    pipeline.fork(
+      Effect.logWarning("execution.usage.degraded").pipe(
+        Effect.annotateLogs({
+          "rika.thread.id": String(pipeline.threadId),
+          "rika.turn.id": String(pipeline.turnId),
+          "rika.execution.id":
+            failure._tag === "UsageProjectionFailure" ? (failure.executionId ?? root.executionId) : root.executionId,
+          "rika.usage.reason": failure._tag === "UsageProjectionFailure" ? failure.reason : "repository",
+          "rika.usage.message": failure.message,
+          ...(failure._tag === "UsageProjectionFailure" && failure.sequence !== undefined
+            ? { "rika.execution.sequence": failure.sequence }
+            : {}),
+        }),
+      ),
+    )
+  }
+
   const wake = (pipeline: Pipeline) => Queue.offerUnsafe(pipeline.wake, undefined)
   const resolveFlushWaiters = (pipeline: Pipeline) => {
     const pending = pipeline.flushWaiters.filter((waiter) => {
@@ -72,6 +103,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
     options,
     fail,
     failProjection,
+    degradeUsage,
     resolveFlushWaiters,
     projectionVersion,
     fullyConsumed,
@@ -83,6 +115,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
     commit,
     fail,
     failProjection,
+    degradeUsage,
     publishPatch,
     publish,
     wake,
@@ -164,36 +197,60 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
           })
         const refolding = stored !== undefined && stored.projectionVersion < projectionVersion
         const usageSourceId = String(root.turnId)
-        const usageSource = yield* options.usage.readSource(usageSourceId, String(root.turnId)).pipe(
-          Effect.flatMap((source) =>
-            source === undefined
-              ? options.usage.admitSource(usageSourceId, String(root.turnId), String(root.threadId))
-              : Effect.succeed(source),
-          ),
-          Effect.mapError((error) =>
-            IngestFailure.make({
-              message: String(error),
-              threadId: String(root.threadId),
-              turnId: String(root.turnId),
-              executionId: String(root.turnId),
-              reason: "repository",
-            }),
-          ),
+        const usageSourceResult = yield* Effect.result(
+          options.usage
+            .readSource(usageSourceId, String(root.turnId))
+            .pipe(
+              Effect.flatMap((source) =>
+                source === undefined
+                  ? options.usage.admitSource(usageSourceId, String(root.turnId), String(root.threadId))
+                  : Effect.succeed(source),
+              ),
+            ),
         )
-        if (usageSource.projectionVersion > UsageSnapshot.projectionVersion)
-          return yield* UsageEvent.ProjectionFailure.make({
-            message: `Usage source ${usageSourceId} has unsupported projection version ${usageSource.projectionVersion}`,
-            reason: "unsupported-version",
-            threadId: String(root.threadId),
-            turnId: String(root.turnId),
-          })
+        const usageRepositoryFailure = usageSourceResult._tag === "Failure" ? usageSourceResult.failure : undefined
+        const usageSource: SourceUsage =
+          usageSourceResult._tag === "Success"
+            ? usageSourceResult.success
+            : {
+                sourceId: usageSourceId,
+                turnId: String(root.turnId),
+                threadId: String(root.threadId),
+                revision: 0,
+                projectionVersion: UsageSnapshot.projectionVersion,
+                pricedAttempts: 0,
+                unpricedAttempts: 0,
+                countedAttempts: 0,
+                uncountedAttempts: 0,
+                sourceComplete: false,
+              }
+        const unsupportedUsage =
+          usageRepositoryFailure === undefined && usageSource.projectionVersion > UsageSnapshot.projectionVersion
+            ? UsageEvent.ProjectionFailure.make({
+                message: `Usage source ${usageSourceId} has unsupported projection version ${usageSource.projectionVersion}`,
+                reason: "unsupported-version",
+                threadId: String(root.threadId),
+                turnId: String(root.turnId),
+              })
+            : undefined
         const usageRefoldFromVersion =
-          usageSource.projectionVersion < UsageSnapshot.projectionVersion ? usageSource.projectionVersion : undefined
+          usageRepositoryFailure === undefined &&
+          (usageSource.projectionVersion < UsageSnapshot.projectionVersion ||
+            (usageSource.projectionVersion === UsageSnapshot.projectionVersion && !usageSource.sourceComplete))
+            ? usageSource.projectionVersion
+            : undefined
         const usageDecoded =
-          usageRefoldFromVersion !== undefined || usageSource.foldJson === undefined
+          usageRepositoryFailure !== undefined ||
+          unsupportedUsage !== undefined ||
+          usageRefoldFromVersion !== undefined ||
+          usageSource.foldJson === undefined
             ? Result.succeed(UsageSnapshot.empty)
             : UsageCodec.deserialize(usageSource.foldJson)
-        if (Result.isFailure(usageDecoded)) return yield* usageDecoded.failure
+        const usageFailure =
+          usageRepositoryFailure ??
+          unsupportedUsage ??
+          (Result.isFailure(usageDecoded) ? usageDecoded.failure : undefined)
+        const usageSnapshot = Result.isSuccess(usageDecoded) ? usageDecoded.success : UsageSnapshot.empty
         const restored = IngestRestore.restore(turn, refolding ? undefined : stored)
         if (restored.invalid !== undefined)
           return yield* IngestFailure.make({
@@ -250,6 +307,23 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
           }
         }
         failedPipelines.delete(String(root.turnId))
+        if (
+          !refolding &&
+          isTerminalStatus(turn.status) &&
+          fullyConsumed(restored.nodes) &&
+          usageFailure === undefined &&
+          usageRefoldFromVersion !== undefined &&
+          (yield* UsageBackfill.run({
+            backend: options.backend,
+            usage: options.usage,
+            root,
+            nodes: restored.nodes,
+            sourceId: usageSourceId,
+            source: usageSource,
+            fromVersion: usageRefoldFromVersion,
+          }))
+        )
+          return
         if (!refolding && isTerminalStatus(turn.status) && fullyConsumed(restored.nodes)) return
         const unitIndex = new Map<string, import("@rika/transcript/transcript-unit").Unit>()
         const unitOwners = new Map<string, string>()
@@ -286,12 +360,13 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
           stopped: false,
           reading: 0,
           delivered: isTerminalStatus(turn.status) ? undefined : [],
-          usageSnapshot: usageDecoded.success,
+          usageSnapshot,
           usageRevision: usageSource.revision,
           usageSourceComplete: usageSource.sourceComplete,
           usageRefoldFromVersion,
           usagePending: [],
-          usageFold: UsageFold.restoreUsageFold(usageDecoded.success),
+          usageFold: UsageFold.restoreUsageFold(usageSnapshot),
+          usageDisabled: false,
           usageNotificationPending: false,
           delta: {
             units: new Map(
@@ -319,6 +394,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
           Effect.provideService(Scope.Scope, pipelineScope),
         )
         pipelines.set(String(root.turnId), pipeline)
+        if (usageFailure !== undefined) degradeUsage(pipeline, usageFailure)
         publishStarted(pipeline)
         if (refolding) options.onRefold?.({ threadId: root.threadId, rootTurnId: root.turnId, phase: "started" })
         yield* Effect.forkIn(
@@ -343,8 +419,13 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
     )
   })
 
+  const backfillUsage = Effect.fn("ExecutionIngestService.backfillUsage")(function* (root: IngestEvent.Root) {
+    yield* Effect.result(ensure(root))
+  })
+
   return {
     ensure,
+    backfillUsage,
     watchThread,
     deliver: (turnId, event) => {
       const pipeline = pipelines.get(String(turnId))

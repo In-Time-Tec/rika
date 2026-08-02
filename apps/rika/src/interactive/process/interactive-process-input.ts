@@ -8,11 +8,6 @@ import { imagePasteBlockedNotice } from "../input/prompt-input"
 import { nextSubmissionId } from "../controller/terminal-turn-submission"
 import { pasteClipboardPng, pastedImagePath, persistPastedImage } from "./process-workspace"
 
-const nextMode = (mode: Mode): Mode => {
-  const modes = Mode.literals
-  return modes[(modes.indexOf(mode) + 1) % modes.length]!
-}
-
 type InputContext = Omit<InteractiveInputContext, "options" | "resume">
 
 export const createInputHandlers = (context: InputContext): Partial<Parameters<typeof createTui>[0]> => {
@@ -135,7 +130,14 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
     },
     modeToggle: () => {
       if (loop.model.busy) return
-      loop.model = { ...loop.model, mode: nextMode(loop.model.mode) }
+      loop.model = {
+        ...loop.model,
+        paletteOpen: false,
+        palette: { open: false, query: "", selected: 0 },
+        modePicker: { open: true, selected: Mode.literals.indexOf(loop.model.mode) },
+        filePicker: { ...loop.model.filePicker, open: false },
+        shortcutsOpen: false,
+      }
       render()
     },
     key: (key) => {

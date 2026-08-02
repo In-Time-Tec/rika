@@ -81,6 +81,7 @@ export interface Pipeline {
   usageRefoldFromVersion: number | undefined
   usagePending: Array<RootExecution & { readonly event: ExecutionEvent.Event }>
   usageFold: UsageFold
+  usageDisabled: boolean
   usageNotificationPending: boolean
   delta: IngestProjectionTypes.ProjectionDelta
   failure: Failure | undefined

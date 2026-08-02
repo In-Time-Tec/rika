@@ -20,7 +20,13 @@ export interface Interface {
     sourceId: string,
     turnId: string,
   ) => Effect.Effect<
-    { readonly revision: number; readonly projectionVersion: number; readonly foldJson?: string } | undefined,
+    | {
+        readonly revision: number
+        readonly projectionVersion: number
+        readonly sourceComplete: boolean
+        readonly foldJson?: string
+      }
+    | undefined,
     RepositoryError
   >
   readonly commitSource: (

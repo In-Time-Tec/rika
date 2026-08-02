@@ -158,9 +158,11 @@ export const makeMemory = (options: MemoryOptions = {}) =>
           if (previous !== undefined && previous.threadId !== threadId)
             return [{ _tag: "Conflict", value: clone(previous) }, current]
           if (
-            previous?.projectionVersion === projectionVersion ||
-            (previous !== undefined &&
-              (previous.projectionVersion !== expectedVersion || previous.revision !== expectedRevision))
+            previous !== undefined &&
+            (previous.projectionVersion !== expectedVersion ||
+              previous.revision !== expectedRevision ||
+              (previous.projectionVersion >= projectionVersion &&
+                (previous.projectionVersion !== projectionVersion || previous.sourceComplete)))
           )
             return [{ _tag: "Conflict", value: previous === undefined ? undefined : clone(previous) }, current]
           const value: SourceUsage = clone({
@@ -210,6 +212,7 @@ export const makeMemory = (options: MemoryOptions = {}) =>
           : {
               revision: value.revision,
               projectionVersion: value.projectionVersion,
+              sourceComplete: value.sourceComplete,
               ...(value.foldJson === undefined ? {} : { foldJson: value.foldJson }),
             }
       }),

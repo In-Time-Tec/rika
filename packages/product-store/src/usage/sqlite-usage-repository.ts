@@ -214,6 +214,7 @@ export const layer = Layer.effect(
           : {
               revision: value.revision,
               projectionVersion: value.projectionVersion,
+              sourceComplete: value.sourceComplete,
               ...(value.foldJson === undefined ? {} : { foldJson: value.foldJson }),
             }
       }),
@@ -236,7 +237,10 @@ export const layer = Layer.effect(
           uncounted_attempts = ${totals.uncountedAttempts}, source_complete = ${totals.sourceComplete ? 1 : 0}, updated_at = ${now}
         WHERE rika_turn_usage.projection_version = ${expectedVersion} AND rika_turn_usage.revision = ${expectedRevision}
           AND rika_turn_usage.thread_id = ${threadId}
-          AND rika_turn_usage.projection_version < ${projectionVersion} RETURNING *`.pipe(Effect.mapError(error))
+          AND (rika_turn_usage.projection_version < ${projectionVersion} OR
+            (rika_turn_usage.projection_version = ${projectionVersion} AND rika_turn_usage.source_complete = 0)) RETURNING *`.pipe(
+            Effect.mapError(error),
+          )
           return changed.length === 0
             ? ({ _tag: "Conflict", value: yield* readSource(sourceId, turnId) } as const)
             : ({ _tag: "Applied", value: yield* decodeRow(changed[0]) } as const)

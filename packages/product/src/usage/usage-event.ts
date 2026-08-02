@@ -22,6 +22,7 @@ type ActiveEventType =
   | "wait.created"
   | "wait.woken"
   | "wait.timed_out"
+  | "wait.cancelled"
   | "execution.completed"
   | "execution.failed"
   | "execution.cancelled"
@@ -78,6 +79,7 @@ const lifecycleEventTypes = new Set<string>([
   "wait.created",
   "wait.woken",
   "wait.timed_out",
+  "wait.cancelled",
   "execution.completed",
   "execution.failed",
   "execution.cancelled",
@@ -97,24 +99,33 @@ const isActiveEventType = (type: string): type is ActiveEventType => lifecycleEv
 const isTerminalEventType = (type: ActiveEventType): boolean => ExecutionStatus.terminalEventStatus(type) !== undefined
 
 const lifecycleFailure = (events: ReadonlyArray<ActiveEvent>): ProjectionFailureReason | undefined => {
-  let state: "initial" | "accepted" | "active" | "waiting" | "terminal" = "initial"
+  let accepted = false
+  let started = false
+  let terminal = false
+  let outstandingWaits = 0
   for (const event of events) {
-    if (state === "terminal") return "post-terminal"
+    if (terminal) return "post-terminal"
     if (event.type === "execution.accepted") {
-      if (state !== "initial") return "invalid-transition"
-      state = "accepted"
-    } else if (event.type === "execution.started") {
-      if (state !== "initial" && state !== "accepted" && state !== "waiting") return "invalid-transition"
-      state = "active"
-    } else if (event.type === "wait.created") {
-      if (state !== "active") return "invalid-transition"
-      state = "waiting"
-    } else if (event.type === "wait.woken" || event.type === "wait.timed_out") {
-      if (state !== "waiting") return "invalid-transition"
-      state = "active"
-    } else {
-      state = "terminal"
+      if (accepted || started) return "invalid-transition"
+      accepted = true
+      continue
     }
+    if (event.type === "execution.started") {
+      if (started) return "invalid-transition"
+      started = true
+      continue
+    }
+    if (event.type === "wait.created") {
+      if (!started) return "invalid-transition"
+      outstandingWaits += 1
+      continue
+    }
+    if (event.type === "wait.woken" || event.type === "wait.timed_out" || event.type === "wait.cancelled") {
+      if (!started || outstandingWaits === 0) return "invalid-transition"
+      outstandingWaits -= 1
+      continue
+    }
+    terminal = true
   }
   return undefined
 }

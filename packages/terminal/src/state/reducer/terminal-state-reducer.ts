@@ -12,6 +12,7 @@ import { reduceData } from "./terminal-data-reducer"
 import { reduceExecution } from "./terminal-execution-reducer"
 import { reduceOverlay } from "./terminal-overlay-reducer"
 import { reduceKeyboard } from "./terminal-keyboard-reducer"
+import { advanceAnimation } from "./terminal-animation-reducer"
 
 const sameChangedFiles = (left: ReadonlyArray<ChangedFile>, right: ReadonlyArray<ChangedFile>): boolean =>
   left.length === right.length &&
@@ -197,18 +198,20 @@ export const context = {
   expandPastedTextAttachment,
 }
 
+const updateImpl = (model: Model, message: Message): Model =>
+  (message._tag === "ContextDetailsToggled" ? toggleContextDetails(model) : undefined) ??
+  reduceData(model, message, update) ??
+  reduceExecution(model, message, update) ??
+  reduceOverlay(model, message, update) ??
+  reduceKeyboard(model, message, update) ??
+  model
+
 export const update: {
   (model: Model, message: Message): Model
   (message: Message): (model: Model) => Model
 } = Function.dual(
   2,
-  (model: Model, message: Message): Model =>
-    (message._tag === "ContextDetailsToggled" ? toggleContextDetails(model) : undefined) ??
-    reduceData(model, message, update) ??
-    reduceExecution(model, message, update) ??
-    reduceOverlay(model, message, update) ??
-    reduceKeyboard(model, message, update) ??
-    model,
+  (model: Model, message: Message): Model => advanceAnimation(model, updateImpl(model, message), undefined),
 )
 
 export const reduce = update

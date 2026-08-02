@@ -94,16 +94,19 @@ describe("UsageCost", () => {
     expect(Result.isSuccess(replay) && replay.success).toBe(first)
   })
 
-  it("rejects repeated wait while already waiting", () => {
+  it("accepts parallel waits and their independent wake outcomes", () => {
     const result = Support.RawUsageCost.foldBatch(
       Support.RawUsageCost.empty,
       [
         Support.Fixtures.lifecycle("execution", "start", "execution.started", 1, 1),
         Support.Fixtures.lifecycle("execution", "wait-a", "wait.created", 2, 2),
         Support.Fixtures.lifecycle("execution", "wait-b", "wait.created", 3, 3),
+        Support.Fixtures.lifecycle("execution", "wake-a", "wait.woken", 4, 4),
+        Support.Fixtures.lifecycle("execution", "cancel-b", "wait.cancelled", 5, 5),
+        Support.Fixtures.lifecycle("execution", "done", "execution.completed", 6, 6),
       ].map((event) => ({ threadId: "thread", turnId: "turn", event })),
     )
-    expect(Result.isFailure(result) && result.failure.reason).toBe("invalid-transition")
+    expect(Result.isSuccess(result)).toBe(true)
   })
 
   it("rejects malformed nested snapshot state", () => {

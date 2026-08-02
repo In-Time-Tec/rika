@@ -12,6 +12,7 @@
     "./terminal-message": "./src/state/model/terminal-message.ts",
     "./terminal-state": "./src/state/model/terminal-state.ts",
     "./terminal-state-reducer": "./src/state/reducer/terminal-state-reducer.ts",
+    "./terminal-animation-reducer": "./src/state/reducer/terminal-animation-reducer.ts",
     "./terminal-session": "./src/terminal-session.ts"
   },
   "dependencies": {

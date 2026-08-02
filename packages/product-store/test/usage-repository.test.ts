@@ -38,6 +38,18 @@ const exercise = (repository: Usage.Interface) =>
       value: { foldJson: "root-fold" },
     })
     expect(yield* repository.readSource("title", "turn-a")).toMatchObject({ foldJson: "title-fold" })
+    expect(yield* repository.loadSourceFold("root", "turn-a")).toMatchObject({
+      foldJson: "root-fold",
+      sourceComplete: true,
+    })
+    expect(
+      yield* repository.commitSource("root", "turn-b", 0, "incomplete", { ...complete, sourceComplete: false }),
+    ).toMatchObject({
+      _tag: "Applied",
+    })
+    expect(
+      yield* repository.replaceSource("root", "turn-b", "thread", Usage.projectionVersion, 1, "backfilled", complete),
+    ).toMatchObject({ _tag: "Applied", value: { foldJson: "backfilled", sourceComplete: true } })
     expect(yield* repository.readTurn("turn-a")).toEqual({
       turnId: "turn-a",
       threadId: "thread",
@@ -55,10 +67,10 @@ const exercise = (repository: Usage.Interface) =>
     })
     expect(yield* repository.readThread("thread")).toMatchObject({
       turns: 2,
-      revision: 2,
+      revision: 4,
       projectionVersion: Usage.projectionVersion,
       activeMillis: 300,
-      sourceComplete: false,
+      sourceComplete: true,
     })
     expect(yield* repository.readTurn("turn-a")).not.toHaveProperty("foldJson")
     expect(yield* repository.replaceSource("missing", "turn-b", "thread", 1, 0, "new", complete)).toMatchObject({

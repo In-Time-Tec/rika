@@ -63,6 +63,7 @@ type MakeHarnessOptions = {
   readonly pageHold?: { readonly after: string; readonly open: Deferred.Deferred<void> }
   readonly onFailure?: (failure: ExecutionIngest.Failure) => void
   readonly onCommitted?: (commit: ExecutionIngest.Commit) => void
+  readonly usage?: import("@rika/product/usage-repository").Interface
 }
 
 export const makeHarness: (options: MakeHarnessOptions) => Effect.Effect<Harness, object, Scope.Scope> = Effect.fn(
@@ -70,7 +71,9 @@ export const makeHarness: (options: MakeHarnessOptions) => Effect.Effect<Harness
 )(function* (options) {
   const turn = ExecutionFixtures.makeTurn(options.turnStatus ?? "completed")
   const turns = yield* Fixtures.TurnRepository.makeMemory([turn])
-  const usage = Context.get(yield* Layer.build(Fixtures.UsageRepository.memoryLayer), Fixtures.UsageRepository.Service)
+  const usage =
+    options.usage ??
+    Context.get(yield* Layer.build(Fixtures.UsageRepository.memoryLayer), Fixtures.UsageRepository.Service)
   if (options.consumed !== undefined) {
     const observations = Object.entries(options.consumed).flatMap(([executionId, consumed]) =>
       (options.script[executionId]?.events ?? [])

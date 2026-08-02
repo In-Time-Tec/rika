@@ -1,9 +1,12 @@
 import { AiError, ModelRegistry, Response as AiResponse } from "@batonfx/core"
 import { Layer, Effect, FileSystem, Schema } from "effect"
+import { Tool } from "effect/unstable/ai"
 import { TestModel } from "@batonfx/test"
 import type { TestModel as TestModelTypes } from "@batonfx/test"
 
 export { ModelRegistry, TestModel }
+
+const toolJsonSchemaCompiler = (tool: Tool.Any) => Effect.succeed(Tool.getJsonSchema(tool))
 
 class ExternalBoundaryError extends Schema.TaggedErrorClass<ExternalBoundaryError>()("ExternalBoundaryError", {
   operation: Schema.String,
@@ -134,6 +137,7 @@ export const makeReloadingTestModel: (
     const registration: TestModelTypes.Fixture["registration"] = {
       ...initial.registration,
       layer: reloadingLayer,
+      toolJsonSchemaCompiler,
     }
     return { ...initial, registration }
   })
@@ -143,9 +147,13 @@ export const makeScriptedModel = Effect.fn("ScriptedModelRuntime.makeScriptedMod
     try: () => import("@batonfx/test"),
     catch: (cause) => ExternalBoundaryError.make({ operation: "load test model", message: String(cause) }),
   })
-  return yield* RuntimeTestModel.make(yield* buildTestModelScript(script), {
+  const fixture = yield* RuntimeTestModel.make(yield* buildTestModelScript(script), {
     metadata: { pricing: { inputPerMTok: 0, outputPerMTok: 0 } },
   })
+  return {
+    ...fixture,
+    registration: { ...fixture.registration, toolJsonSchemaCompiler },
+  }
 })
 
 export const makeConstantModel = Effect.fn("ScriptedModelRuntime.makeConstantModel")(function* (text: string) {
@@ -153,10 +161,14 @@ export const makeConstantModel = Effect.fn("ScriptedModelRuntime.makeConstantMod
     try: () => import("@batonfx/test"),
     catch: (cause) => ExternalBoundaryError.make({ operation: "load test model", message: String(cause) }),
   })
-  return yield* RuntimeTestModel.make(
+  const fixture = yield* RuntimeTestModel.make(
     Array.from({ length: 4 }, () => RuntimeTestModel.text(text)),
     {
       metadata: { pricing: { inputPerMTok: 0, outputPerMTok: 0 } },
     },
   )
+  return {
+    ...fixture,
+    registration: { ...fixture.registration, toolJsonSchemaCompiler },
+  }
 })
