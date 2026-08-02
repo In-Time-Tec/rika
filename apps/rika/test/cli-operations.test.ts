@@ -142,7 +142,11 @@ const operationLayer = (
     makeThreadId: Effect.sync(() => Thread.ThreadId.make(`cli-thread-${(identifierSequence += 1)}`)),
     makeTurnId: Effect.sync(() => Turn.TurnId.make(`cli-turn-${(identifierSequence += 1)}`)),
     configOperations: {
-      layer: Layer.merge(ConfigOperations.testLayer(context.adapter), configServiceLayer(options.config ?? {})),
+      layer: Layer.merge(
+        ConfigOperations.testLayer(context.adapter),
+        configServiceLayer(options.config ?? {}),
+        BunServices.layer,
+      ),
       options: {
         globalConfigPath: context.globalConfigPath,
         workspaceConfigPath: context.workspaceConfigPath,

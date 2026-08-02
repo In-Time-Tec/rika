@@ -5947,6 +5947,15 @@
       "publicExports": []
     },
     {
+      "id": "packages/product/src/operation/dispatch/product-operation-run-configuration.ts",
+      "path": "packages/product/src/operation/dispatch/product-operation-run-configuration.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/product/src/operation/dispatch/product-operation-run.ts",
       "path": "packages/product/src/operation/dispatch/product-operation-run.ts",
       "workspace": "@rika/product",
@@ -40055,14 +40064,6 @@
     },
     {
       "from": "packages/product/src/operation/dispatch/product-operation-run-branches.ts",
-      "to": "packages/product/src/operation/contract/configuration-operation.ts",
-      "specifier": "./../contract/configuration-operation",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/src/operation/dispatch/product-operation-run-branches.ts",
       "to": "packages/product/src/operation/contract/extension-operation.ts",
       "specifier": "./../contract/extension-operation",
       "kind": "import",
@@ -40081,6 +40082,14 @@
       "from": "packages/product/src/operation/dispatch/product-operation-run-branches.ts",
       "to": "packages/product/src/operation/dispatch/noninteractive-operation-dispatch.ts",
       "specifier": "./noninteractive-operation-dispatch",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/product-operation-run-branches.ts",
+      "to": "packages/product/src/operation/dispatch/product-operation-run-configuration.ts",
+      "specifier": "./product-operation-run-configuration",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -40151,8 +40160,56 @@
     },
     {
       "from": "packages/product/src/operation/dispatch/product-operation-run-branches.ts",
+      "to": "packages/product/src/thread/repository/transcript-repository.ts",
+      "specifier": "@rika/product/transcript-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/product-operation-run-branches.ts",
       "to": "packages/product/src/thread/repository/turn-repository.ts",
       "specifier": "@rika/product/turn-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/product-operation-run-configuration.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/product-operation-run-configuration.ts",
+      "to": "packages/configuration/src/settings/configuration-service.ts",
+      "specifier": "@rika/configuration/configuration-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/product-operation-run-configuration.ts",
+      "to": "packages/product/src/operation/contract/configuration-operation.ts",
+      "specifier": "../contract/configuration-operation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/product-operation-run-configuration.ts",
+      "to": "packages/product/src/operation/contract/product-operation.ts",
+      "specifier": "../contract/product-operation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/product-operation-run-configuration.ts",
+      "to": "packages/product/src/operation/dispatch/product-operation-integrations.ts",
+      "specifier": "./product-operation-integrations",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -41809,6 +41866,14 @@
       "from": "packages/product/src/operation/interactive/interactive-session-interface-events.ts",
       "to": "packages/product/src/operation/operation-error.ts",
       "specifier": "../operation-error",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-interface-events.ts",
+      "to": "packages/product/src/thread/repository/thread-summary-repository.ts",
+      "specifier": "@rika/product/thread-summary-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -55791,6 +55856,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/rendering/terminal-diff-text-adapter.ts",
+      "to": "packages/terminal/src/opentui/rendering/terminal-text-adapter.ts",
+      "specifier": "./terminal-text-adapter",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/rendering/terminal-diff-text-adapter.ts",
       "to": "packages/terminal/src/presentation/markdown/styled-text.ts",
       "specifier": "../../presentation/markdown/styled-text",
       "kind": "import",
@@ -57625,6 +57698,14 @@
       "from": "packages/terminal/src/presentation/terminal/terminal-context-details.ts",
       "to": "external:@opentui/core",
       "specifier": "@opentui/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/terminal/terminal-context-details.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true

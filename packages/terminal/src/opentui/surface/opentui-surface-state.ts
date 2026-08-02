@@ -160,6 +160,9 @@ export class SurfaceState {
   protected readonly recordRenderedTranscriptScroll = () => {
     this.renderedTranscriptScrollTop = this.transcriptScroll.scrollTop
   }
+  public mountedTranscriptRowCount(): number {
+    return this.transcriptChildren.length
+  }
   constructor() {
     this.transcriptViewport = initialViewport
   }

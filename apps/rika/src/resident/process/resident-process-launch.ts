@@ -199,10 +199,7 @@ export const start = () => {
                 }),
               ),
             ),
-          ).pipe(Effect.provideContext(bunServices)) as unknown as Effect.Effect<
-            Effect.Effect<Operation.Interface, ProductOperation.OperationUnavailable, never>,
-            never
-          >
+          ).pipe(Effect.provideContext(bunServices))
           return Operation.Service.of({
             hasActiveExecutionWork: Ref.get(productLoaded).pipe(
               Effect.flatMap((loaded) =>

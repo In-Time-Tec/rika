@@ -5,11 +5,23 @@ import type { Effect, Layer } from "effect"
 import type { OperationError } from "../operation-error"
 
 export interface ProductConfigOperations {
-  readonly layer: Layer.Layer<ConfigOperations.Adapter | ConfigurationService.ConfigurationService, OperationError>
+  readonly layer: Layer.Layer<
+    | ConfigOperations.Adapter
+    | ConfigurationService.ConfigurationService
+    | import("effect").FileSystem.FileSystem
+    | import("effect").Path.Path,
+    OperationError
+  >
   readonly options: ConfigOperations.Options
   readonly forWorkspace?: (workspace: string) => Effect.Effect<
     {
-      readonly layer: Layer.Layer<ConfigOperations.Adapter | ConfigurationService.ConfigurationService, OperationError>
+      readonly layer: Layer.Layer<
+        | ConfigOperations.Adapter
+        | ConfigurationService.ConfigurationService
+        | import("effect").FileSystem.FileSystem
+        | import("effect").Path.Path,
+        OperationError
+      >
       readonly options: ConfigOperations.Options
     },
     OperationError

@@ -104,7 +104,7 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
         Math.max(1, boxHeight - 2),
         this.currentTimeMillis(),
       )
-      cursorEditor = undefined
+      cursorEditor = this.composerEditor
     } else if (overlay === "files") {
       const entries = filteredFiles(model).map((file) => `@${file}`)
       const maxRows = Math.max(1, Math.min(20, composerTop - 1))

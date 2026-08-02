@@ -2,16 +2,17 @@ import { Function } from "effect"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
+import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as NoninteractiveOperation from "./noninteractive-operation-dispatch"
 import * as ReviewOperation from "./review-operation-dispatch"
 import * as ExtensionOperations from "./../contract/extension-operation"
-import * as ConfigOperations from "./../contract/configuration-operation"
 import * as WorkflowOperation from "./workflow-operation-dispatch"
+import * as ConfigurationOperation from "./product-operation-run-configuration"
 import * as ThreadOperation from "./thread-operation-dispatch"
 import { Console, Context, Effect, Layer } from "effect"
 import { Catalog as ToolCatalog } from "@rika/coding-tools/coding-tool-catalog"
-import type { Input } from "../contract/product-operation"
+import type { Input, OperationUnavailable } from "../contract/product-operation"
 import type { ModeId } from "@rika/configuration/behavior-mode"
 import type { InteractiveSession } from "../interactive/interactive-session"
 import { OperationError } from "../operation-error"
@@ -68,58 +69,59 @@ export const runInteractiveOperation: {
   (arg0: any, arg1: Extract<Input, { readonly _tag: "Interactive" }>): ReturnType<typeof runInteractiveOperationImpl>
 } = Function.dual(2, runInteractiveOperationImpl)
 
-const runNoninteractiveOperationImpl = (factory: any, input: Extract<Input, { readonly _tag: "Run" }>) =>
-  NoninteractiveOperation.run(input, {
+const runNoninteractiveOperationImpl = (factory: any, input: Extract<Input, { readonly _tag: "Run" }>) => {
+  const typedExecutionDependencies: NoninteractiveOperation.Dependencies["executionDependencies"] =
+    factory.executionDependencies
+  return NoninteractiveOperation.run(input, {
     defaultWorkspace: factory.options.defaultWorkspace,
     pendingTurnCapacity: factory.pendingTurnCapacity,
     makeThreadId: factory.options.makeThreadId,
     makeTurnId: factory.options.makeTurnId,
     resolveExecutionRoute: (mode: string, tuning: any, workspace?: string) =>
-      factory.resolveExecutionRoute(mode, tuning, workspace).pipe(Effect.provide(factory.executionDependencies)),
+      factory.resolveExecutionRoute(mode, tuning, workspace).pipe(Effect.provide(typedExecutionDependencies)),
     createObservedSubmission: (turns: any, submission: any) =>
-      factory.createObservedSubmission(turns, submission).pipe(Effect.provide(factory.executionDependencies)),
-    ensureTurnSummary: (turn: any) =>
-      factory.ensureTurnSummary(turn).pipe(Effect.provide(factory.executionDependencies)),
+      factory.createObservedSubmission(turns, submission).pipe(Effect.provide(typedExecutionDependencies)),
+    ensureTurnSummary: (turn: any) => factory.ensureTurnSummary(turn).pipe(Effect.provide(typedExecutionDependencies)),
     setTurnStatus: (id: any, status: any, cursor: any, now: number) =>
-      factory.setTurnStatus(id, status, cursor, now).pipe(Effect.provide(factory.executionDependencies)),
+      factory.setTurnStatus(id, status, cursor, now).pipe(Effect.provide(typedExecutionDependencies)),
     publishInteractiveActivity: factory.publishInteractiveActivity,
     rootTurnOwner: factory.rootTurnOwner,
     executionIngest: factory.executionIngest,
     prepareExecution: (turn: any, workspace: string, persist?: boolean) =>
-      factory.prepareExecution(turn, workspace, persist).pipe(Effect.provide(factory.executionDependencies)),
+      factory.prepareExecution(turn, workspace, persist).pipe(Effect.provide(typedExecutionDependencies)),
     claimQueuedTurn: (threadId: any, now: number) =>
-      factory.claimQueuedTurn(threadId, now).pipe(Effect.provide(factory.executionDependencies)),
+      factory.claimQueuedTurn(threadId, now).pipe(Effect.provide(typedExecutionDependencies)),
     releaseTurnObserver: factory.releaseTurnObserver,
     queueMutationEvent: factory.queueMutationEvent,
     deliverResultEvents: factory.deliverResultEvents,
     projectExecutionResult: (threadId: any, result: any) =>
-      factory.projectExecutionResult(threadId, result).pipe(Effect.provide(factory.executionDependencies)),
+      factory.projectExecutionResult(threadId, result).pipe(Effect.provide(typedExecutionDependencies)),
     ensureIngest: factory.ensureIngest,
     awaitIngestSettled: factory.awaitIngestSettled,
-    executionDependencies: factory.executionDependencies,
+    executionDependencies: typedExecutionDependencies,
     followClaimed:
       factory.owner.followClaimed === undefined
         ? undefined
         : (turnId: any) =>
-            factory.owner.followClaimed!(turnId).pipe(
-              Effect.provide(factory.executionDependencies),
-              Effect.asVoid,
-            ) as any,
+            factory.owner.followClaimed!(turnId).pipe(Effect.provide(typedExecutionDependencies), Effect.asVoid),
     staleQueuedTurnsError: factory.staleQueuedTurnsError,
     queuedTurnPromoteMaxAgeMs: factory.queuedTurnPromoteMaxAgeMs,
     awaitSessionQuiescence: (backend: any, threadId: any) =>
-      factory.awaitSessionQuiescence(backend, threadId).pipe(Effect.provide(factory.executionDependencies)),
+      factory.awaitSessionQuiescence(backend, threadId).pipe(Effect.provide(typedExecutionDependencies)),
     operationError: factory.operationError,
     unavailable: (operationInput: Input, message: string) => unavailable(factory, operationInput, message),
   })
+}
 
 export const runNoninteractiveOperation: {
   (arg1: Extract<Input, { readonly _tag: "Run" }>): (arg0: any) => ReturnType<typeof runNoninteractiveOperationImpl>
   (arg0: any, arg1: Extract<Input, { readonly _tag: "Run" }>): ReturnType<typeof runNoninteractiveOperationImpl>
 } = Function.dual(2, runNoninteractiveOperationImpl)
 
-const runReviewOperationImpl = (factory: any, input: Extract<Input, { readonly _tag: "Review" }>) =>
-  Effect.gen(function* () {
+const runReviewOperationImpl = (factory: any, input: Extract<Input, { readonly _tag: "Review" }>) => {
+  const typedExecutionDependencies: NoninteractiveOperation.Dependencies["executionDependencies"] =
+    factory.executionDependencies
+  return Effect.gen(function* () {
     if (factory.options.toolRuntimeLayer === undefined)
       return yield* unavailable(factory, input, "Review requires the local tool runtime")
     yield* ReviewOperation.run(input, {
@@ -130,25 +132,26 @@ const runReviewOperationImpl = (factory: any, input: Extract<Input, { readonly _
       resolveExecutionRoute: (mode: ModeId) =>
         factory
           .resolveExecutionRoute(mode, undefined, input.workspace ?? factory.options.defaultWorkspace)
-          .pipe(Effect.provide(factory.executionDependencies)),
+          .pipe(Effect.provide(typedExecutionDependencies)),
       toolRuntimeLayer: factory.options.toolRuntimeLayer,
       productAgentLayer: factory.options.productAgentLayer,
       backendLayer: factory.backendLayer,
       acquiredDependencies: factory.acquiredDependencies,
       createObservedSubmission: (turns: any, submission: any) =>
-        factory.createObservedSubmission(turns, submission).pipe(Effect.provide(factory.executionDependencies)),
+        factory.createObservedSubmission(turns, submission).pipe(Effect.provide(typedExecutionDependencies)),
       ensureTurnSummary: (turn: any) =>
-        factory.ensureTurnSummary(turn).pipe(Effect.provide(factory.executionDependencies)),
+        factory.ensureTurnSummary(turn).pipe(Effect.provide(typedExecutionDependencies)),
       setTurnStatus: (id: any, status: any, cursor: any, now: number) =>
-        factory.setTurnStatus(id, status, cursor, now).pipe(Effect.provide(factory.executionDependencies)),
+        factory.setTurnStatus(id, status, cursor, now).pipe(Effect.provide(typedExecutionDependencies)),
       startReviewSettlement: (turn: any, fanOutId: string, initial: any) =>
-        factory.startReviewSettlement(turn, fanOutId, initial).pipe(Effect.provide(factory.executionDependencies)),
+        factory.startReviewSettlement(turn, fanOutId, initial).pipe(Effect.provide(typedExecutionDependencies)),
       releaseTurnObserver: (turnId: any) => factory.releaseTurnObserver(turnId).pipe(Effect.asVoid),
       encodeJson: factory.encodeJson,
       operationError: factory.operationError,
       unavailable: (operationInput: Input, message: string) => unavailable(factory, operationInput, message),
     })
   })
+}
 
 export const runReviewOperation: {
   (arg1: Extract<Input, { readonly _tag: "Review" }>): (arg0: any) => ReturnType<typeof runReviewOperationImpl>
@@ -160,14 +163,16 @@ const runExtensionOperationImpl = (
   input: Extract<Input, { readonly _tag: "Skill" | "Mcp" | "Extension" }>,
 ) =>
   Effect.gen(function* () {
-    if (factory.options.extensionOperations === undefined) return
-    const extensionLayer: Layer.Layer<ExtensionOperations.Service, OperationError, never> =
-      factory.options.extensionOperations.layer
+    const typedExtensionOperations: import("./product-operation-integrations").ProductExtensionOperations | undefined =
+      factory.options.extensionOperations
+    if (typedExtensionOperations === undefined) return
+    const extensionLayer = typedExtensionOperations.layer
     const context = yield* Layer.build(extensionLayer).pipe(
       Effect.mapError((error) => unavailable(factory, input, String(error))),
     )
     yield* ExtensionOperations.run(input).pipe(
       Effect.provide(context),
+      Effect.provideService(Console.Console, globalThis.console),
       Effect.mapError((error) => unavailable(factory, input, error instanceof Error ? error.message : String(error))),
     )
   }).pipe(Effect.scoped)
@@ -182,48 +187,10 @@ export const runExtensionOperation: {
   ): ReturnType<typeof runExtensionOperationImpl>
 } = Function.dual(2, runExtensionOperationImpl)
 
-const runConfigurationOperationImpl = (
+const runSystemOperationImpl = (
   factory: any,
-  input: Extract<Input, { readonly _tag: "Config" | "Doctor" | "Mcp" }>,
-) =>
-  Effect.gen(function* () {
-    const typedConfigOperations:
-      | {
-          readonly layer: Layer.Layer<ConfigOperations.Adapter, OperationError, never>
-          readonly options: ConfigOperations.Options
-          readonly forWorkspace?: (workspace: string) => Effect.Effect<
-            {
-              readonly layer: Layer.Layer<ConfigOperations.Adapter, OperationError, never>
-              readonly options: ConfigOperations.Options
-            },
-            OperationError,
-            never
-          >
-        }
-      | undefined = factory.options.configOperations
-    if (typedConfigOperations === undefined || (input._tag === "Mcp" && input.action !== "doctor")) return
-    const config =
-      typedConfigOperations.forWorkspace === undefined
-        ? typedConfigOperations
-        : yield* typedConfigOperations
-            .forWorkspace(input.clientWorkspace ?? factory.options.defaultWorkspace)
-            .pipe(Effect.mapError((error) => unavailable(factory, input, String(error))))
-    const configLayer: Layer.Layer<ConfigOperations.Adapter, OperationError, never> = config.layer
-    const context = yield* Layer.build(configLayer)
-    yield* ConfigOperations.run(input, config.options).pipe(Effect.provide(context))
-  })
-
-export const runConfigurationOperation: {
-  (
-    arg1: Extract<Input, { readonly _tag: "Config" | "Doctor" | "Mcp" }>,
-  ): (arg0: any) => ReturnType<typeof runConfigurationOperationImpl>
-  (
-    arg0: any,
-    arg1: Extract<Input, { readonly _tag: "Config" | "Doctor" | "Mcp" }>,
-  ): ReturnType<typeof runConfigurationOperationImpl>
-} = Function.dual(2, runConfigurationOperationImpl)
-
-const runSystemOperationImpl = (factory: any, input: Input) => {
+  input: Input,
+): Effect.Effect<void, OperationError | OperationUnavailable, never> => {
   const typedRunAuth: (
     input: Extract<Input, { readonly _tag: "Auth" }>,
     options: any,
@@ -234,7 +201,7 @@ const runSystemOperationImpl = (factory: any, input: Input) => {
     const definition = ToolCatalog.get(input.name)
     return definition === undefined
       ? unavailable(factory, input, `Tool ${input.name} does not exist`)
-      : Console.log(factory.encodeJson(definition))
+      : Console.log(factory.encodeJson(definition)).pipe(Effect.provideService(Console.Console, globalThis.console))
   }
   if (input._tag === "Auth" && factory.options.authOperations !== undefined)
     return Effect.scoped(typedRunAuth(input, factory.options.authOperations, factory.options.defaultWorkspace))
@@ -247,18 +214,20 @@ const runSystemOperationImpl = (factory: any, input: Input) => {
     (input._tag === "Config" || input._tag === "Doctor" || (input._tag === "Mcp" && input.action === "doctor")) &&
     factory.options.configOperations !== undefined
   )
-    return runConfigurationOperation(factory, input)
+    return ConfigurationOperation.runConfigurationOperation(factory, input)
   if (input._tag === "Workflow")
     return WorkflowOperation.run(input, {
       backend: factory.backend,
       encodeJson: factory.encodeJson,
       unavailable: (operationInput: Input, message: string) => unavailable(factory, operationInput, message),
-    })
+    }).pipe(Effect.provideService(Console.Console, globalThis.console))
   if (input._tag === "Thread") {
     const typedSystemExecutionDependencies: Context.Context<
-      ThreadRepository.Service | TurnRepository.Service | ThreadSummaryRepository.Service
-    > = factory.executionDependencies
-    return ThreadOperation.run(input, {
+      ThreadRepository.Service | TurnRepository.Service | ThreadSummaryRepository.Service | TranscriptRepository.Service
+    > = factory.dependencyContext
+    const typedNotifyThreadSummaries: Effect.Effect<void, OperationError, ThreadSummaryRepository.Service> =
+      factory.notifyThreadSummaries
+    const threadDependencies: ThreadOperation.Dependencies = {
       defaultWorkspace: factory.options.defaultWorkspace,
       pendingTurnCapacity: factory.pendingTurnCapacity,
       makeThreadId: factory.options.makeThreadId,
@@ -266,13 +235,17 @@ const runSystemOperationImpl = (factory: any, input: Input) => {
       turnMutationAdmission: factory.turnMutationAdmission,
       backend: factory.backend,
       usageRepository: factory.usageRepository,
-      notifyThreadSummaries: factory.notifyThreadSummaries,
+      notifyThreadSummaries: typedNotifyThreadSummaries,
       writeThread: factory.writeThread,
       requireThread: factory.requireThread,
       markdownExport: factory.markdownExport,
       encodeJson: factory.encodeJson,
       unavailable: (operationInput: Input, message: string) => unavailable(factory, operationInput, message),
-    }).pipe(Effect.provide(typedSystemExecutionDependencies))
+    }
+    return ThreadOperation.run(input, threadDependencies).pipe(
+      Effect.provide(typedSystemExecutionDependencies),
+      Effect.provideService(Console.Console, globalThis.console),
+    )
   }
   return unavailable(factory, input)
 }

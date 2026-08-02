@@ -37,7 +37,8 @@ export const makeThreadResultReconciliation =
       const typedAwaitIngestSettled: (turnId: Turn.Turn["id"]) => Effect.Effect<void, OperationError, never> =
         awaitIngestSettled
       const typedRootTurnOwner: RootTurnOwner.Interface = rootTurnOwner
-      const typedIsTerminalStatus: (status: Turn.Turn["status"]) => boolean = isTerminalStatus
+      const typedIsTerminalStatus: (status: Turn.Turn["status"]) => status is "completed" | "failed" | "cancelled" =
+        isTerminalStatus
       const reconcileThreadResults = Effect.fn("ProductOperation.reconcileThreadResults")(function* () {
         if (typedInteractions === undefined) return false
         const turns = Context.get(typedContext, TurnRepository.Service)
@@ -73,7 +74,7 @@ export const makeThreadResultReconciliation =
                 const checkpoint = projection?.executionCheckpoints.find(
                   (entry: any) => entry.executionKey === TranscriptCorrelation.executionKey(String(turn.id)),
                 )
-                const expectedOutcome = projectedOutcomeStatus(turn.status as any)
+                const expectedOutcome = projectedOutcomeStatus(turn.status)
                 const outcome = projection?.units.find(
                   (unit: any) =>
                     unit.parentId === undefined && unit.turnId === turn.id && unit.executionOutcome !== undefined,

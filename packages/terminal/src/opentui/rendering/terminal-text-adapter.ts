@@ -8,6 +8,18 @@ import { highlightShellCommand as highlightCommand } from "../../presentation/ma
 import { wrapStyledLine as wrapLine } from "../../presentation/markdown/styled-text-wrapping"
 import type { TerminalColor, TerminalStyledText, TerminalTextChunk } from "../../presentation/markdown/styled-text"
 
+type TerminalColorWithInts = {
+  readonly intent?: string
+  readonly slot?: number
+  readonly toInts: () => [number, number, number, number]
+}
+
+const isTerminalColorWithInts = (value: object): value is TerminalColorWithInts =>
+  "toInts" in value && typeof value.toInts === "function"
+
+const isIndexedTerminalColor = (value: object): value is { readonly _tag: "Indexed"; readonly index: number } =>
+  "_tag" in value && value._tag === "Indexed" && "index" in value && typeof value.index === "number"
+
 const toOpenColorImpl = (value: TerminalColor | RGBA | undefined): RGBA | undefined => {
   if (value === undefined || value instanceof RGBA) return value
   if (typeof value === "string") {
@@ -24,20 +36,13 @@ const toOpenColorImpl = (value: TerminalColor | RGBA | undefined): RGBA | undefi
     }
     return value.startsWith("#") ? RGBA.fromHex(value) : RGBA.fromIndex(indexes[value] ?? 7)
   }
-  if ("toInts" in value && typeof value.toInts === "function") {
-    const terminalColor = value as unknown as {
-      readonly intent?: string
-      readonly slot?: number
-      readonly toInts: () => [number, number, number, number]
-    }
-    if (terminalColor.intent === "indexed" && terminalColor.slot !== undefined)
-      return RGBA.fromIndex(terminalColor.slot)
-    if (terminalColor.intent === "default") return RGBA.defaultBackground()
-    const ints = terminalColor.toInts()
+  if (isTerminalColorWithInts(value)) {
+    if (value.intent === "indexed" && value.slot !== undefined) return RGBA.fromIndex(value.slot)
+    if (value.intent === "default") return RGBA.defaultBackground()
+    const ints = value.toInts()
     return RGBA.fromInts(ints[0], ints[1], ints[2], ints[3])
   }
-  if ("_tag" in value && value._tag === "Indexed" && typeof (value as { readonly index?: unknown }).index === "number")
-    return RGBA.fromIndex((value as unknown as { readonly index: number }).index)
+  if (isIndexedTerminalColor(value)) return RGBA.fromIndex(value.index)
   return RGBA.defaultBackground()
 }
 export const toOpenColor: {
@@ -48,8 +53,8 @@ export const toOpenColor: {
   (value: TerminalColor | RGBA | undefined): RGBA | undefined
 }
 export const toOpenChunk = (chunk: TerminalTextChunk | TextChunk): TextChunk => {
-  const fg = chunk.fg as TextChunk["fg"],
-    bg = chunk.bg as TextChunk["bg"]
+  const fg = toOpenColor(chunk.fg),
+    bg = toOpenColor(chunk.bg)
   return {
     __isChunk: true,
     text: chunk.text,

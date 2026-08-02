@@ -43,6 +43,7 @@ export interface TuiApp {
   readonly pressArrow: (direction: "up" | "down" | "left" | "right") => void
   readonly pressKey: (key: string, modifiers?: { ctrl?: boolean; alt?: boolean; shift?: boolean }) => void
   readonly clickText: (text: string) => Effect.Effect<void>
+  readonly clickComposer: Effect.Effect<void>
   readonly frame: () => string
   readonly spans: () => CapturedSpans
   readonly transcript: (
@@ -228,6 +229,10 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
         if (x < 0 || y < 0) return yield* Effect.die(`tui-app could not click missing text: ${text}`)
         yield* Effect.promise(() => setup.mockMouse.click(x, y))
       }),
+    clickComposer: Effect.gen(function* () {
+      yield* Effect.promise(() => setup.flush())
+      yield* Effect.promise(() => setup.mockMouse.click(2, (options.height ?? 30) - 2))
+    }).pipe(Effect.asVoid),
     frame,
     spans: () => setup.captureSpans(),
     transcript: (turnId) => transcripts?.get(turnId) ?? Effect.die("TUI transcript inspection was not requested"),

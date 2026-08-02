@@ -1,5 +1,6 @@
 import { Function } from "effect"
 import { StyledText, type TextChunk } from "@opentui/core"
+import { toOpenColor } from "./terminal-text-adapter"
 import type { TerminalStyledText, TerminalTextChunk } from "../../presentation/markdown/styled-text"
 import {
   renderDiffStyled as diffStyled,
@@ -7,15 +8,14 @@ import {
 } from "../../presentation/tool/diff-renderer"
 import { renderPierreDiff as pierreDiff, type DiffRenderOptions } from "../../presentation/tool/pierre-diff-adapter"
 import { renderToolSummary as toolSummary } from "../../presentation/tool/tool-summary"
-const toOpenChunk = (chunk: TerminalTextChunk): TextChunk =>
-  ({
-    __isChunk: true,
-    text: chunk.text,
-    ...(chunk.fg === undefined ? {} : { fg: chunk.fg }),
-    ...(chunk.bg === undefined ? {} : { bg: chunk.bg }),
-    ...(chunk.attributes === undefined ? {} : { attributes: chunk.attributes }),
-    ...(chunk.link === undefined ? {} : { link: chunk.link }),
-  }) as unknown as TextChunk
+const toOpenChunk = (chunk: TerminalTextChunk): TextChunk => ({
+  __isChunk: true,
+  text: chunk.text,
+  ...(chunk.fg === undefined ? {} : { fg: toOpenColor(chunk.fg) }),
+  ...(chunk.bg === undefined ? {} : { bg: toOpenColor(chunk.bg) }),
+  ...(chunk.attributes === undefined ? {} : { attributes: chunk.attributes }),
+  ...(chunk.link === undefined ? {} : { link: chunk.link }),
+})
 const toOpenText = (text: TerminalStyledText): StyledText => new StyledText(text.chunks.map(toOpenChunk))
 
 const renderDiffStyledImpl = (patch: string, options: Parameters<typeof diffStyled>[1]): StyledText =>

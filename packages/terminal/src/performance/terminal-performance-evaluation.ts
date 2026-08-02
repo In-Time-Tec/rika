@@ -206,7 +206,7 @@ const evaluate = Effect.fn("TuiPerformance.evaluate")(function* (options: {
       streamUpdates.push(performance.now() - startedAt)
     }
     options.observe?.("completed")
-    const state = surface as unknown as { readonly transcriptChildren: ReadonlyArray<unknown> }
+    const mountedTranscriptRows = surface.mountedTranscriptRowCount()
     const metrics: Array<PerformanceMetric> = [
       measured("tui.initial-render", "milliseconds", initialMilliseconds, { operator: "lte", value: 150 }),
       measured("tui.picker-open.p95", "milliseconds", percentile(pickerOpen, 0.95), { operator: "lte", value: 25 }),
@@ -232,7 +232,7 @@ const evaluate = Effect.fn("TuiPerformance.evaluate")(function* (options: {
         operator: "lte",
         value: 16.7,
       }),
-      measured("tui.mounted-rows", "count", state.transcriptChildren.length, {
+      measured("tui.mounted-rows", "count", mountedTranscriptRows, {
         operator: "lte",
         value: maxMountedTranscriptRows * 2,
       }),

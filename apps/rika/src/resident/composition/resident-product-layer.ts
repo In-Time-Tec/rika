@@ -187,6 +187,7 @@ const createOperationLayerImpl = (
         configOperations: {
           layer: Layer.merge(configAdapter, applicationConfigLayer).pipe(
             Layer.provide(BunServices.layer),
+            Layer.merge(BunServices.layer),
             Layer.catchCause((cause) =>
               Layer.effectContext(
                 Effect.fail(ResidentAuth.OperationProductError.make({ message: Cause.pretty(cause) })),
@@ -212,6 +213,7 @@ const createOperationLayerImpl = (
                   }),
                 ).pipe(
                   Layer.provide(BunServices.layer),
+                  Layer.merge(BunServices.layer),
                   Layer.catchCause((cause) =>
                     Layer.effectContext(
                       Effect.fail(ResidentAuth.OperationProductError.make({ message: Cause.pretty(cause) })),

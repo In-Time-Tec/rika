@@ -5,7 +5,7 @@ export type ModelBackendKind = (typeof modelBackendKinds)[number]
 export const modelBackend = (kind: ModelBackendKind) => ({ "rika.model.backend.kind": kind })
 
 export const failureKinds = [
-  "@rika/app/ExtensionOperationError",
+  "@rika/product/ExtensionOperationError",
   "@rika/extensions/McpConfigError",
   "@rika/extensions/McpDiagnostic",
   "@rika/extensions/McpOAuthError",

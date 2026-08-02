@@ -218,13 +218,12 @@ const makeMessageFrameDecoder = <Message>(config: {
   return (frame: string): Message | undefined => {
     if (encoder.encode(frame).byteLength > maxFrameBytes) throw new Error("Resident frame exceeds maximum size")
     const wire = config.decodeWire(parse(frame))
-    const isChunk =
-      typeof wire === "object" &&
-      wire !== null &&
-      "_tag" in wire &&
-      (wire as { readonly _tag: unknown })._tag === config.chunkTag
-    if (!isChunk) return wire as Message
-    const decoded = wire as unknown as MessageChunk
+    const isChunk = (
+      value: Message | (MessageChunk & { readonly _tag: ChunkTag }),
+    ): value is MessageChunk & { readonly _tag: ChunkTag } =>
+      typeof value === "object" && value !== null && "_tag" in value && value._tag === config.chunkTag
+    if (!isChunk(wire)) return wire
+    const decoded = wire
     if (decoded.count > config.maxChunks) throw new Error(config.tooManyChunksMessage)
     const currentTime = now()
     expire(currentTime)

@@ -34,6 +34,8 @@ export const makeInteractiveSessionSelection = (
     epoch: number,
     dispatch: (event: import("./interactive-event").InteractiveEvent) => void,
   ) => Effect.Effect<void, OperationUnavailable, never> = input.runThreadLoad
+  const typedEnsureIngest: (threadId: string, turnId: string) => Effect.Effect<void, OperationError, never> =
+    input.ensureIngest
   const typedLoadTranscriptPage: (
     state: import("./interactive-thread-selection").SelectionEpochState,
     dispatch: (event: import("./interactive-event").InteractiveEvent) => void,
@@ -155,7 +157,7 @@ export const makeInteractiveSessionSelection = (
               projection === undefined ||
               projection.checkpointCursor !== execution.lastCursor)
           )
-            yield* input.ensureIngest(turn.threadId, turn.id)
+            yield* typedEnsureIngest(turn.threadId, turn.id)
           return {
             prompt: turn.prompt,
             units: projection?.units ?? TranscriptProjection.Projection.empty(turn.id, turn.prompt).units,
@@ -170,9 +172,8 @@ export const makeInteractiveSessionSelection = (
       input.sessionDispatch({ _tag: "ThreadPreviewLoaded", threadId: id, turns: previewTurns })
     }).pipe(
       Effect.provide(typedExecutionDependencies),
-      Effect.scoped,
       Effect.orElseSucceed(() => undefined),
-    ) as any
+    )
   const reopenThread = (epoch: number) =>
     safe(
       input.sessionDispatch,

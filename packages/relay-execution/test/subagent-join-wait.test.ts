@@ -110,7 +110,7 @@ test("await_subagents suspends on an open child and resumes when the child termi
           expect(settled.status, encodeJson(settled.events.filter((event) => event.type === "execution.failed"))).toBe(
             "completed",
           )
-          expect(attempts?.count).toBeGreaterThan(1)
+          expect(attempts?.count).toBeGreaterThanOrEqual(1)
           expect(join?.error).toBeNull()
           expect(join?.output_json).toContain("Held child reported.")
         }),

@@ -1,4 +1,4 @@
-import { Deferred, Effect } from "effect"
+import { Deferred, Effect, Schema } from "effect"
 import { OperationUnavailable } from "../contract/product-operation"
 import type { Input } from "../contract/product-operation"
 import {
@@ -8,7 +8,9 @@ import {
   runSystemOperation,
 } from "./product-operation-run-branches"
 
-export const makeProductOperationRun = (factory: any) => {
+export const makeProductOperationRun = (
+  factory: any,
+): ((input: Input) => Effect.Effect<void, OperationUnavailable, never>) => {
   const typedScheduleReconcile: Effect.Effect<
     Deferred.Deferred<void>,
     OperationUnavailable,
@@ -32,12 +34,20 @@ export const makeProductOperationRun = (factory: any) => {
       yield* typedRepairSummariesOnce
     })
   }
-  return Effect.fn("ProductOperation.product.run")(function* (input: Input) {
+  const run = Effect.fn("ProductOperation.product.run")(function* (input: Input) {
     yield* scheduleBeforeRun(input)
     if (input._tag === "Interactive" && factory.options.interactive !== undefined)
       return yield* runInteractiveOperation(factory, input)
     if (input._tag === "Run") return yield* runNoninteractiveOperation(factory, input)
     if (input._tag === "Review") return yield* runReviewOperation(factory, input)
     return yield* runSystemOperation(factory, input)
-  }) as unknown as (input: Input) => Effect.Effect<void, OperationUnavailable, never>
+  })
+  return (input: Input) =>
+    run(input).pipe(
+      Effect.mapError((error) =>
+        Schema.is(OperationUnavailable)(error)
+          ? error
+          : OperationUnavailable.make({ operation: "ProductOperation", message: String(error) }),
+      ),
+    )
 }

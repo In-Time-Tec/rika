@@ -152,9 +152,15 @@ const resolveImpl = (name: Name, model: ModelRegistry.ModelSelection) => {
   }
 }
 
-export const profilePermissions = Object.fromEntries(
-  names.map((name) => [name, definitions[name].permissions]),
-) as unknown as Record<Name, ReadonlyArray<string>>
+export const profilePermissions: Record<Name, ReadonlyArray<string>> = {
+  Oracle: definitions.Oracle.permissions,
+  Librarian: definitions.Librarian.permissions,
+  Painter: definitions.Painter.permissions,
+  Review: definitions.Review.permissions,
+  ReadThread: definitions.ReadThread.permissions,
+  Surgeon: definitions.Surgeon.permissions,
+  Task: definitions.Task.permissions,
+}
 
 type ResolvedProfile = ReturnType<typeof resolveImpl>
 

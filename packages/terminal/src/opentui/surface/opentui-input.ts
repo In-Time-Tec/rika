@@ -30,6 +30,31 @@ import { panelLoading, formatCost, modeLabelWidth } from "./opentui-surface-cont
 
 const mouseSequencePattern = new RegExp(`^(?:${String.fromCharCode(27)}?\\[)?<?\\d+(?:;\\d+)*[Mm]?$`)
 
+const readRendererProperty = (renderer: object, property: string): unknown => Reflect.get(renderer, property)
+
+const isWriteFunction = (value: unknown): value is NodeJS.WriteStream["write"] => typeof value === "function"
+
+const isWriteStream = (value: unknown): value is NodeJS.WriteStream => {
+  if (typeof value !== "object" || value === null) return false
+  return (
+    typeof Reflect.get(value, "columns") === "number" &&
+    typeof Reflect.get(value, "rows") === "number" &&
+    isWriteFunction(Reflect.get(value, "write"))
+  )
+}
+
+type RendererOutput = {
+  readonly stdout: NodeJS.WriteStream
+  readonly realStdoutWrite: NodeJS.WriteStream["write"]
+}
+
+const readRendererOutput = (renderer: object): RendererOutput | undefined => {
+  const stdout = readRendererProperty(renderer, "stdout")
+  const realStdoutWrite = readRendererProperty(renderer, "realStdoutWrite")
+  if (!isWriteStream(stdout) || !isWriteFunction(realStdoutWrite)) return undefined
+  return { stdout, realStdoutWrite }
+}
+
 export abstract class SurfaceInput extends SurfaceOverlayRegion {
   protected readonly onKey = (key: KeyEvent) => {
     const mapped = fromOpenTui(key)
@@ -264,11 +289,11 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
     this.handlers.paste?.(text)
   }
   protected readonly physicalTerminalSize = (width: number, height: number) => {
-    if ((this.renderer as unknown as { readonly _usesProcessStdout?: boolean })._usesProcessStdout !== true)
-      return { width, height }
-    const stream = (this.renderer as unknown as { readonly stdout?: NodeJS.WriteStream }).stdout
-    const physicalWidth = stream?.columns
-    const physicalHeight = stream?.rows
+    if (readRendererProperty(this.renderer, "_usesProcessStdout") !== true) return { width, height }
+    const stream = readRendererProperty(this.renderer, "stdout")
+    const output = isWriteStream(stream) ? stream : undefined
+    const physicalWidth = output?.columns
+    const physicalHeight = output?.rows
     const currentWidth =
       Number.isInteger(physicalWidth) && physicalWidth !== undefined && physicalWidth > 0 ? physicalWidth : width
     const currentHeight =
@@ -287,11 +312,8 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
   protected readonly setPointerShape = (shape: "ns-resize" | "ew-resize" | "default") => {
     if (this.pointerShape === shape) return
     this.pointerShape = shape
-    const renderer = this.renderer as unknown as {
-      stdout?: NodeJS.WriteStream
-      realStdoutWrite?: NodeJS.WriteStream["write"]
-    }
-    if (renderer.stdout !== undefined && renderer.realStdoutWrite !== undefined) {
+    const renderer = readRendererOutput(this.renderer)
+    if (renderer !== undefined) {
       renderer.realStdoutWrite.call(renderer.stdout, `\u001b]22;${shape}\u001b\\`)
       return
     }
@@ -347,6 +369,10 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
   protected readonly onComposerMouseDown = (event: MouseEvent) => {
     const model = this.model
     if (event.button !== 0 || model === undefined || model.shortcutsOpen) return
+    if (model.contextDetailsOpen) {
+      this.handlers.contextToggle?.()
+      event.stopPropagation()
+    }
     if (event.y !== this.inputBox.y) {
       const row = event.y - this.composerEditor.y
       const column = event.x - this.composerEditor.x

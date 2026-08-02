@@ -13,8 +13,8 @@ import type { InteractiveEvent } from "../interactive/interactive-event"
 export const makeExecutionLifecycle = (input: any): Effect.Effect<Readonly<Record<string, unknown>>, Error, never> =>
   Effect.gen(function* () {
     const {
-      executionDependencies,
       dependencyContext,
+      executionDependencies,
       ensureIngest,
       flushIngest,
       awaitIngestSettled,
@@ -95,8 +95,14 @@ export const makeExecutionLifecycle = (input: any): Effect.Effect<Readonly<Recor
           commitUsage: (id, threadId, turnId, events, terminal) =>
             commitUsageSource(id, threadId, turnId, events, terminal).pipe(Effect.provide(executionDependencies)),
           announce,
-          notify: notifyThreadSummaries.pipe(Effect.provide(executionDependencies)) as any,
-          publishUsage: (usage) => publishThreadUsage(usage).pipe(Effect.provide(executionDependencies)) as any,
+          notify: notifyThreadSummaries.pipe(
+            Effect.provideService(
+              ThreadSummaryRepository.Service,
+              Context.get(dependencyContext, ThreadSummaryRepository.Service),
+            ),
+            Effect.mapError((error) => operationError(String(error), error)),
+          ),
+          publishUsage: (usage) => publishThreadUsage(usage),
           attempts: titleAttempts,
           settled: settledTitleExecutions,
         }),

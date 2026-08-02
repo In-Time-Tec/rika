@@ -170,6 +170,6 @@ export const makeProductOperationSchedule = (input: any): any =>
     requestResultRetry = Effect.forkIn(
       Effect.sleep("1 second").pipe(Effect.andThen(scheduleReconcile), Effect.asVoid),
       typedOwnerScope,
-    ).pipe(Effect.asVoid) as unknown as Effect.Effect<void, never, never>
+    ).pipe(Effect.asVoid)
     return { owner, repairSummariesOnce, repairThreadTitles, reconcileSchedule, scheduleReconcile }
   })

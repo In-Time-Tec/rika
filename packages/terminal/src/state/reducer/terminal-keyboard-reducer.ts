@@ -27,7 +27,8 @@ const reduceKeyboardImpl = (
       const key = message.key
       if (key.ctrl && key.name === "y") return update(model, { _tag: "ContextDetailsToggled" })
       if (model.contextDetailsOpen) {
-        return key.name === "escape" ? update(model, { _tag: "ContextDetailsToggled" }) : model
+        if (key.name === "escape") return update(model, { _tag: "ContextDetailsToggled" })
+        return update(update(model, { _tag: "ContextDetailsToggled" }), message)
       }
       const prelude = reduceKeyboardPrelude(model, key, update)
       if (prelude !== undefined) return prelude

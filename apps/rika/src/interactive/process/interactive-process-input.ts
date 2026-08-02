@@ -149,7 +149,8 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
       }
       const wasChangedFilesOpen = loop.model.changedFilesOpen
       const beforePreviewId = loop.model.threadSwitcher.open ? selectedThreadMetadata(loop.model)?.id : undefined
-      const submitting = key.name === "return" && !key.shift && !key.ctrl && canSubmit(loop.model)
+      const submitting =
+        key.name === "return" && !key.shift && !key.ctrl && (canSubmit(loop.model) || loop.model.contextDetailsOpen)
       const submission = submitting ? nextSubmissionId(loop.submissionSequence) : undefined
       if (submission !== undefined) loop.submissionSequence = submission.sequence
       const submissionId = submission?.id

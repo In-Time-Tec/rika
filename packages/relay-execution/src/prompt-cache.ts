@@ -6,14 +6,13 @@ const providerRecord = (value: unknown): Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? { ...(value as Record<string, unknown>) } : {}
 
 const withBreakpoint = <Options extends Prompt.ProviderOptions>(options: Options): Options =>
-  ({
-    ...options,
+  Object.assign({}, options, {
     anthropic: { ...providerRecord(options["anthropic"]), cacheControl: { type: "ephemeral" } },
     amazonBedrock: { ...providerRecord(options["amazonBedrock"]), cachePoint: true },
-  }) as unknown as Options
+  })
 
 const partBreakpoint = <Part extends Prompt.Part>(part: Part): Part =>
-  ({ ...part, options: withBreakpoint(part.options) }) as unknown as Part
+  Object.assign({}, part, { options: withBreakpoint(part.options) })
 
 const systemBreakpoint = (message: Prompt.SystemMessage): Prompt.SystemMessage => ({
   ...message,
@@ -27,11 +26,14 @@ const lastAnnotatablePart = (parts: ReadonlyArray<Prompt.Part>): number => {
 }
 
 const contentBreakpoint = (message: Prompt.UserMessage | Prompt.ToolMessage): Prompt.Message => {
-  const parts: ReadonlyArray<Prompt.Part> = message.content
-  const target = lastAnnotatablePart(parts)
+  const target = lastAnnotatablePart(message.content)
   if (target < 0) return message
-  const annotated = parts.map((part, index) => (index === target ? partBreakpoint(part) : part))
-  return { ...message, content: annotated } as unknown as Prompt.Message
+  if (message.role === "user") {
+    const annotated = message.content.map((part, index) => (index === target ? partBreakpoint(part) : part))
+    return { ...message, content: annotated }
+  }
+  const annotated = message.content.map((part, index) => (index === target ? partBreakpoint(part) : part))
+  return { ...message, content: annotated }
 }
 
 export interface CacheBreakpoints {

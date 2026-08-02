@@ -111,6 +111,6 @@ export const makeInteractiveShell = (input: any): any => {
       Effect.catch((error) => Effect.sync(() => dispatchFailure(dispatch, error, ownerThreadId))),
       Effect.forkIn(sessionScope),
       Effect.asVoid,
-    ) as any
+    )
   }
 }

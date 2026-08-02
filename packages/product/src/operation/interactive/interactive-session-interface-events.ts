@@ -1,4 +1,5 @@
-import { Effect, Schema, Semaphore } from "effect"
+import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
+import { Context, Effect, Schema, Semaphore } from "effect"
 import { OperationUnavailable } from "../contract/product-operation"
 import type { InteractiveSession } from "./interactive-session"
 import { makeInteractiveShell } from "./interactive-shell-session"
@@ -10,6 +11,7 @@ export const makeInteractiveSessionEvents = (
   input: any,
 ): Pick<InteractiveSession, "events" | "submit" | "newThread" | "shell" | "editQueued" | "dequeue" | "steerQueued"> => {
   const operationFeed: InteractiveOperationFeed = input.operationFeed
+  const typedExecutionDependencies: Context.Context<ThreadSummaryRepository.Service> = input.executionDependencies
   const dispatchThreadSummaries: (
     dispatch: (event: InteractiveEvent) => void,
   ) => Effect.Effect<void, OperationError, never> = input.dispatchThreadSummaries
@@ -24,13 +26,13 @@ export const makeInteractiveSessionEvents = (
       yield* dispatchThreadSummaries(input.sessionDispatch)
       yield* operationFeed.events(dispatch, input.getCurrentSelectionEpoch, input.getSelectedThreadId)
     }).pipe(
-      Effect.provide(input.executionDependencies),
+      Effect.provide(typedExecutionDependencies),
       Effect.mapError((error) =>
         Schema.is(OperationUnavailable)(error)
           ? error
           : OperationUnavailable.make({ operation: "InteractiveSession.events", message: String(error) }),
       ),
-    ) as any
+    )
   const submit = (prompt: string, mode: any, parts: any, tuning: any, submissionId?: string) =>
     input.submit(prompt, input.sessionDispatch, mode, parts, tuning, submissionId) as Effect.Effect<
       void,
