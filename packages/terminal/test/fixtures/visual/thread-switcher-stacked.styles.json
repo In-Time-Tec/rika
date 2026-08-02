@@ -3906,7 +3906,7 @@
           "width": 2
         },
         {
-          "text": "╰──────────────────────────────────────────────────────────────────────",
+          "text": "╰─────────────────────────────────────────────────────────────────────── Opt+W/Ctrl+T all workspaces · Esc close ─╯",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -3924,91 +3924,7 @@
             }
           },
           "attributes": 0,
-          "width": 71
-        },
-        {
-          "text": " Opt+W/Ctrl+T all workspaces ",
-          "fg": {
-            "buffer": {
-              "0": 61,
-              "1": 212,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 29
-        },
-        {
-          "text": "──",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 2
-        },
-        {
-          "text": " Esc close ",
-          "fg": {
-            "buffer": {
-              "0": 61,
-              "1": 212,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 11
-        },
-        {
-          "text": "─╯",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 2
+          "width": 115
         },
         {
           "text": "  ",
@@ -4036,11 +3952,7 @@
     {
       "spans": [
         {
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/thread-switcher-stacked.styles.json
           "text": "╭─────────────────────────────────────────────────────────────────────────────────────────────────────",
-=======
-          "text": "╭───────────────────────────────────────────────────────────────────────────────────────────────",
->>>>>>> origin/main:packages/tui/test/fixtures/visual/thread-switcher-stacked.styles.json
           "fg": {
             "buffer": {
               "0": 1984,
@@ -4058,17 +3970,10 @@
             }
           },
           "attributes": 0,
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/thread-switcher-stacked.styles.json
           "width": 102
         },
         {
           "text": " ▓░░░ — ",
-=======
-          "width": 96
-        },
-        {
-          "text": " ctx ╌╌╌╌╌╌╌╌",
->>>>>>> origin/main:packages/tui/test/fixtures/visual/thread-switcher-stacked.styles.json
           "fg": {
             "buffer": {
               "0": 1984,
@@ -4085,19 +3990,11 @@
               "3": 255
             }
           },
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/thread-switcher-stacked.styles.json
           "attributes": 2,
           "width": 8
         },
         {
           "text": "─ ",
-=======
-          "attributes": 0,
-          "width": 13
-        },
-        {
-          "text": " ─ ",
->>>>>>> origin/main:packages/tui/test/fixtures/visual/thread-switcher-stacked.styles.json
           "fg": {
             "buffer": {
               "0": 1984,
@@ -4115,7 +4012,7 @@
             }
           },
           "attributes": 0,
-          "width": 3
+          "width": 2
         },
         {
           "text": "high",

@@ -2122,11 +2122,7 @@
           "width": 61
         },
         {
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/context-meter.styles.json
           "text": " ▉░░░ 23% ",
-=======
-          "text": " ctx ━━╌╌╌╌╌╌",
->>>>>>> origin/main:packages/tui/test/fixtures/visual/context-meter.styles.json
           "fg": {
             "buffer": {
               "0": 1984,
@@ -2143,34 +2139,8 @@
               "3": 255
             }
           },
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/context-meter.styles.json
           "attributes": 2,
           "width": 10
-=======
-          "attributes": 0,
-          "width": 13
-        },
-        {
-          "text": " 23% ",
-          "fg": {
-            "buffer": {
-              "0": 61,
-              "1": 212,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 1,
-          "width": 5
->>>>>>> origin/main:packages/tui/test/fixtures/visual/context-meter.styles.json
         },
         {
           "text": "─ ",

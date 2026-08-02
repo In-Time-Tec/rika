@@ -80,18 +80,9 @@ test(
         yield* Effect.promise(() => app.type("Price this turn."))
         app.pressEnter()
         yield* app.waitFrame("PRICED_TURN_COMPLETE")
-<<<<<<< HEAD
         const priced = yield* app.waitCost
         expect(priced.match(/\$[0-9][^ ]*/u)?.[0]).toBe("$0.00")
         expect(priced).not.toContain("$\u2014")
-=======
-        yield* app.settled
-        app.pressKey("y", { ctrl: true })
-        const priced = yield* app.waitFrame("$0.00")
-        expect(priced).toContain("Cost       $0.00")
-        app.pressEscape()
-        yield* app.waitGone("Context & Usage")
->>>>>>> origin/main
 
         yield* Effect.promise(() => app.type("Fail this turn."))
         app.pressEnter()
@@ -132,63 +123,6 @@ test(
 )
 
 test(
-<<<<<<< HEAD
-=======
-  "shows exact context pressure and retains it while the next turn starts",
-  () =>
-    TuiApp.run(
-      Effect.gen(function* () {
-        const app = yield* TuiApp.tuiApp({
-          script: [
-            TuiApp.model.text("CONTEXT_METER_COMPLETE"),
-            TuiApp.model.text("CONTEXT_METER_SECOND_COMPLETE", 1_500),
-          ],
-          mapExecutionEvent: (event) =>
-            event.type === "model.usage.reported"
-              ? {
-                  ...event,
-                  data: {
-                    ...event.data,
-                    input_tokens: event.executionId.includes("tui-turn-1") ? 100_000 : 56_120,
-                    input_tokens_uncached: event.executionId.includes("tui-turn-1") ? 100_000 : 56_120,
-                    input_tokens_cache_read: 0,
-                    input_tokens_cache_write: 0,
-                    output_tokens: 100,
-                  },
-                }
-              : event,
-        })
-
-        yield* Effect.promise(() => app.type("Measure context pressure."))
-        app.pressEnter()
-        yield* app.waitFrame("CONTEXT_METER_COMPLETE")
-        yield* app.settled
-        expect(yield* app.waitFrame("ctx ━━╌╌╌╌╌╌ 23%")).toContain("medium")
-
-        app.pressKey("y", { ctrl: true })
-        const details = yield* app.waitFrame("Context & Usage")
-        expect(details).toContain("Used        56.1K")
-        expect(details).toContain("Usable     244K")
-        expect(details).toContain("Full       372K")
-        expect(details).not.toContain("Reserved")
-        app.pressKey("y", { ctrl: true })
-        yield* app.waitGone("Context & Usage")
-
-        yield* Effect.promise(() => app.type("Measure context again."))
-        app.pressEnter()
-        const pending = yield* app.waitFrame("Measure context again.")
-        expect(pending).toMatch(/ctx ━[ᗧᗤ]······ 23%/u)
-        yield* app.waitFrame("CONTEXT_METER_SECOND_COMPLETE")
-        yield* app.settled
-        expect(yield* app.waitFrame("ctx ━━━╌╌╌╌╌ 41%")).toContain("medium")
-        yield* app.quit
-      }),
-    ),
-  240_000,
-)
-
-test(
->>>>>>> origin/main
   "restores elapsed active time after reopening the persisted thread",
   () =>
     TuiApp.run(
@@ -518,32 +452,20 @@ test(
         yield* app.waitGone("Files (")
 
         app.pressKey("s", { ctrl: true })
-        yield* app.waitFrame("Balanced default for everyday work")
+        yield* app.waitFrame("Balanced intelligence, speed, and cost for most tasks")
         app.pressArrow("right")
         yield* app.waitFrame("Deep reasoning for hard tasks")
         app.pressEscape()
         const escaped = yield* app.waitGone("Deep reasoning")
         expect(escaped).toContain("medium")
         app.pressKey("s", { ctrl: true })
-        yield* app.waitFrame("Balanced default for everyday work")
+        yield* app.waitFrame("Balanced intelligence, speed, and cost for most tasks")
         app.pressArrow("right")
         yield* app.waitFrame("Deep reasoning for hard tasks")
         app.pressEnter()
-        yield* app.waitGone("Deep reasoning")
-        expect(yield* app.waitFrame(" high ")).toContain("high")
+        const applied = yield* app.waitGone("Deep reasoning")
+        expect(applied).toContain("high")
 
-<<<<<<< HEAD
-=======
-        app.pressKey("y", { ctrl: true })
-        const context = yield* app.waitFrame("Context & Usage")
-        expect(context).toContain("Cost")
-        expect(context).toContain("Active")
-        expect(context).not.toContain("Processed")
-        expect(context).toContain("Ctrl+Y toggle")
-        app.pressEscape()
-        yield* app.waitGone("Context & Usage")
-
->>>>>>> origin/main
         app.pressKey("o", { ctrl: true })
         const palette = yield* app.waitFrame("Command Palette")
         expect(palette).toContain("switch")

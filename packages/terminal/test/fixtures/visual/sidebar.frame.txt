@@ -17,11 +17,7 @@
                                               ••••••••••••••••••••••           █
                                                 •···············•              █
                                                         ••                     █
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/sidebar.frame.txt
                                     ╭────────────────────────── ▓░░░ — ─ high ─╮
-=======
-                                    ╭──────────────────── ctx ╌╌╌╌╌╌╌╌ ─ high ─╮
->>>>>>> origin/main:packages/tui/test/fixtures/visual/sidebar.frame.txt
                                     │                                          │
                                     │                                          │
                                     │                                          │

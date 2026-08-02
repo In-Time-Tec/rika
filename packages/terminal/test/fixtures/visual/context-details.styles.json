@@ -512,7 +512,7 @@
           "width": 5
         },
         {
-          "text": "•●●•••",
+          "text": "•●●••••••••••••••••••••••••••",
           "fg": {
             "buffer": {
               "0": 61,
@@ -530,7 +530,6 @@
             }
           },
           "attributes": 0,
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/context-details.styles.json
           "width": 29
         },
         {
@@ -1182,9 +1181,6 @@
           },
           "attributes": 0,
           "width": 18
-=======
-          "width": 6
->>>>>>> origin/main:packages/tui/test/fixtures/visual/context-details.styles.json
         },
         {
           "text": "╭─",
@@ -1275,136 +1271,6 @@
           "width": 1
         },
         {
-          "text": "    ",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 4
-        },
-        {
-          "text": "•••••••",
-          "fg": {
-            "buffer": {
-              "0": 61,
-              "1": 212,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 7
-        },
-        {
-          "text": "│",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 1
-        },
-        {
-          "text": "                                                                  ",
-          "fg": {
-            "buffer": {
-              "0": 255,
-              "1": 255,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 66
-        },
-        {
-          "text": "│",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 1
-        }
-      ]
-    },
-    {
-      "spans": [
-        {
-          "text": " ",
-          "fg": {
-            "buffer": {
-              "0": 255,
-              "1": 255,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 1
-        },
-        {
           "text": "   ",
           "fg": {
             "buffer": {
@@ -1489,11 +1355,7 @@
           "width": 1
         },
         {
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/context-details.styles.json
           "text": "█████▍░░░░░░░░░░░░░░░░░░",
-=======
-          "text": "━━━━━╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
->>>>>>> origin/main:packages/tui/test/fixtures/visual/context-details.styles.json
           "fg": {
             "buffer": {
               "0": 1536,
@@ -1511,11 +1373,7 @@
             }
           },
           "attributes": 0,
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/context-details.styles.json
           "width": 24
-=======
-          "width": 20
->>>>>>> origin/main:packages/tui/test/fixtures/visual/context-details.styles.json
         },
         {
           "text": " 23%",
@@ -1539,11 +1397,7 @@
           "width": 4
         },
         {
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/context-details.styles.json
           "text": "                           ",
-=======
-          "text": "                                         ",
->>>>>>> origin/main:packages/tui/test/fixtures/visual/context-details.styles.json
           "fg": {
             "buffer": {
               "0": 255,
@@ -1561,11 +1415,7 @@
             }
           },
           "attributes": 0,
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/context-details.styles.json
           "width": 27
-=======
-          "width": 41
->>>>>>> origin/main:packages/tui/test/fixtures/visual/context-details.styles.json
         },
         {
           "text": "│",
@@ -1698,11 +1548,7 @@
           "width": 1
         },
         {
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/context-details.styles.json
           "text": "208.3K used · 713.7K available",
-=======
-          "text": "Used        208.3K",
->>>>>>> origin/main:packages/tui/test/fixtures/visual/context-details.styles.json
           "fg": {
             "buffer": {
               "0": 1984,
@@ -1720,14 +1566,10 @@
             }
           },
           "attributes": 0,
-          "width": 18
+          "width": 30
         },
         {
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/context-details.styles.json
           "text": "                         ",
-=======
-          "text": "                                               ",
->>>>>>> origin/main:packages/tui/test/fixtures/visual/context-details.styles.json
           "fg": {
             "buffer": {
               "0": 255,
@@ -1745,485 +1587,7 @@
             }
           },
           "attributes": 0,
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/context-details.styles.json
           "width": 25
-=======
-          "width": 47
-        },
-        {
-          "text": "│",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 1
-        }
-      ]
-    },
-    {
-      "spans": [
-        {
-          "text": " ",
-          "fg": {
-            "buffer": {
-              "0": 255,
-              "1": 255,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 1
-        },
-        {
-          "text": "   ",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 3
-        },
-        {
-          "text": "••••••••",
-          "fg": {
-            "buffer": {
-              "0": 61,
-              "1": 212,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 8
-        },
-        {
-          "text": "│",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 1
-        },
-        {
-          "text": " ",
-          "fg": {
-            "buffer": {
-              "0": 255,
-              "1": 255,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 1
-        },
-        {
-          "text": "Available   713.7K",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 18
-        },
-        {
-          "text": "                                               ",
-          "fg": {
-            "buffer": {
-              "0": 255,
-              "1": 255,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 47
-        },
-        {
-          "text": "│",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 1
-        }
-      ]
-    },
-    {
-      "spans": [
-        {
-          "text": " ",
-          "fg": {
-            "buffer": {
-              "0": 255,
-              "1": 255,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 1
-        },
-        {
-          "text": "   ",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 3
-        },
-        {
-          "text": "••••••••",
-          "fg": {
-            "buffer": {
-              "0": 61,
-              "1": 212,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 8
-        },
-        {
-          "text": "├─ ",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 3
-        },
-        {
-          "text": "Window",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 2,
-          "width": 6
-        },
-        {
-          "text": " ─────────────────────────────────────────────────────────┤",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 59
-        }
-      ]
-    },
-    {
-      "spans": [
-        {
-          "text": " ",
-          "fg": {
-            "buffer": {
-              "0": 255,
-              "1": 255,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 1
-        },
-        {
-          "text": "   ",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 3
-        },
-        {
-          "text": "••••••••",
-          "fg": {
-            "buffer": {
-              "0": 61,
-              "1": 212,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 8
-        },
-        {
-          "text": "│",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 1
-        },
-        {
-          "text": " ",
-          "fg": {
-            "buffer": {
-              "0": 255,
-              "1": 255,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 1
-        },
-        {
-          "text": "Usable     922K",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 15
-        },
-        {
-          "text": "                                                  ",
-          "fg": {
-            "buffer": {
-              "0": 255,
-              "1": 255,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 50
->>>>>>> origin/main:packages/tui/test/fixtures/visual/context-details.styles.json
         },
         {
           "text": "│",
@@ -2356,11 +1720,7 @@
           "width": 1
         },
         {
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/context-details.styles.json
           "text": "922K usable · 1.05M window · 128K reserved",
-=======
-          "text": "Full       1.05M",
->>>>>>> origin/main:packages/tui/test/fixtures/visual/context-details.styles.json
           "fg": {
             "buffer": {
               "0": 2176,
@@ -2490,7 +1850,7 @@
           "width": 16
         },
         {
-          "text": "├─ ",
+          "text": "│",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -2508,15 +1868,15 @@
             }
           },
           "attributes": 0,
-          "width": 3
+          "width": 1
         },
         {
-          "text": "Session",
+          "text": " ",
           "fg": {
             "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
+              "0": 255,
+              "1": 255,
+              "2": 255,
               "3": 255
             }
           },
@@ -2528,15 +1888,11 @@
               "3": 255
             }
           },
-          "attributes": 2,
-          "width": 7
+          "attributes": 0,
+          "width": 1
         },
         {
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/context-details.styles.json
           "text": "Cost $1.25 · Active ◷ 1m 43s",
-=======
-          "text": " ────────────────────────────────────────────────────────┤",
->>>>>>> origin/main:packages/tui/test/fixtures/visual/context-details.styles.json
           "fg": {
             "buffer": {
               "0": 2176,
@@ -2554,7 +1910,6 @@
             }
           },
           "attributes": 0,
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/context-details.styles.json
           "width": 28
         },
         {
@@ -2598,9 +1953,6 @@
           },
           "attributes": 0,
           "width": 1
-=======
-          "width": 58
->>>>>>> origin/main:packages/tui/test/fixtures/visual/context-details.styles.json
         }
       ]
     },
@@ -2712,16 +2064,12 @@
           "width": 1
         },
         {
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/context-details.styles.json
           "text": "Tokens 6.8M tok",
-=======
-          "text": "Cost       $1.25",
->>>>>>> origin/main:packages/tui/test/fixtures/visual/context-details.styles.json
           "fg": {
             "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
+              "0": 2176,
+              "1": 384,
+              "2": 128,
               "3": 255
             }
           },
@@ -2734,14 +2082,10 @@
             }
           },
           "attributes": 0,
-          "width": 16
+          "width": 15
         },
         {
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/context-details.styles.json
           "text": "                                        ",
-=======
-          "text": "                                                 ",
->>>>>>> origin/main:packages/tui/test/fixtures/visual/context-details.styles.json
           "fg": {
             "buffer": {
               "0": 255,
@@ -2759,11 +2103,7 @@
             }
           },
           "attributes": 0,
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/context-details.styles.json
           "width": 40
-=======
-          "width": 49
->>>>>>> origin/main:packages/tui/test/fixtures/visual/context-details.styles.json
         },
         {
           "text": "│",
@@ -3135,20 +2475,12 @@
           "width": 35
         },
         {
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/context-details.styles.json
           "text": " Ctrl+Y toggle · esc ",
           "fg": {
             "buffer": {
               "0": 1536,
               "1": 384,
               "2": 128,
-=======
-          "text": " ",
-          "fg": {
-            "buffer": {
-              "0": 255,
-              "1": 255,
-              "2": 255,
               "3": 255
             }
           },
@@ -3161,268 +2493,7 @@
             }
           },
           "attributes": 0,
-          "width": 1
-        },
-        {
-          "text": "Active     ◷ 1m 43s",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 19
-        },
-        {
-          "text": "                                              ",
-          "fg": {
-            "buffer": {
-              "0": 255,
-              "1": 255,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 46
-        },
-        {
-          "text": "│",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 1
-        }
-      ]
-    },
-    {
-      "spans": [
-        {
-          "text": " ",
-          "fg": {
-            "buffer": {
-              "0": 255,
-              "1": 255,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 1
-        },
-        {
-          "text": "           │",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 12
-        },
-        {
-          "text": "                                                                  ",
-          "fg": {
-            "buffer": {
-              "0": 255,
-              "1": 255,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 66
-        },
-        {
-          "text": "│",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 1
-        }
-      ]
-    },
-    {
-      "spans": [
-        {
-          "text": " ",
-          "fg": {
-            "buffer": {
-              "0": 255,
-              "1": 255,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 1
-        },
-        {
-          "text": "           ╰───────────────────────────────────────────",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 55
-        },
-        {
-          "text": " Ctrl+Y toggle ",
-          "fg": {
-            "buffer": {
-              "0": 61,
-              "1": 212,
-              "2": 255,
->>>>>>> origin/main:packages/tui/test/fixtures/visual/context-details.styles.json
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 15
-        },
-        {
-          "text": "──",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 2
-        },
-        {
-          "text": " esc ",
-          "fg": {
-            "buffer": {
-              "0": 61,
-              "1": 212,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 5
+          "width": 21
         },
         {
           "text": "─╯",
@@ -3471,11 +2542,7 @@
           "width": 61
         },
         {
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/context-details.styles.json
           "text": " ▉░░░ 23% ",
-=======
-          "text": " ctx ━━╌╌╌╌╌╌",
->>>>>>> origin/main:packages/tui/test/fixtures/visual/context-details.styles.json
           "fg": {
             "buffer": {
               "0": 1984,
@@ -3492,34 +2559,8 @@
               "3": 255
             }
           },
-<<<<<<< HEAD:packages/terminal/test/fixtures/visual/context-details.styles.json
           "attributes": 2,
           "width": 10
-=======
-          "attributes": 0,
-          "width": 13
-        },
-        {
-          "text": " 23% ",
-          "fg": {
-            "buffer": {
-              "0": 61,
-              "1": 212,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 1,
-          "width": 5
->>>>>>> origin/main:packages/tui/test/fixtures/visual/context-details.styles.json
         },
         {
           "text": "─ ",
