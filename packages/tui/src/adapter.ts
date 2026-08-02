@@ -3484,6 +3484,8 @@ export class Surface {
       (model.usageTime?._tag === "Available" && model.usageTime.activeSince !== undefined) ||
       (model.modePicker.open && model.modePicker.turnTick !== undefined) ||
       model.modeCommit !== undefined ||
+      model.contextAnimation.flashTicks > 0 ||
+      model.contextAnimation.compactTick !== undefined ||
       (model.threadSidebar.open &&
         (model.threads as ReadonlyArray<ThreadItem>).some((thread) => isThreadBusy(thread.status)))
     if (

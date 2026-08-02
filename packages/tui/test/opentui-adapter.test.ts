@@ -3934,3 +3934,51 @@ test("renders selector slide retargeting and the complete footer commit sequence
       }
     }),
   ))
+
+test("drains a threshold flash after completion before stopping the animation interval", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const clock = new ManualClock()
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24, clock }))
+      let model: Model = {
+        ...initial("/work", "high"),
+        width: 80,
+        height: 24,
+        currentThreadId: "thread",
+        busy: true,
+        contextUsage: { _tag: "Available", inputTokens: 600_000, contextWindow: 1_050_000, reserveTokens: 128_000 },
+      }
+      const surface = new Surface(
+        setup.renderer,
+        {
+          key: () => undefined,
+          resize: () => undefined,
+          animationTick: () => {
+            model = update(model, { _tag: "AnimationTicked" })
+            surface.update(model)
+          },
+        },
+        { clock },
+      )
+      try {
+        model = update(model, {
+          _tag: "ContextUsageReplaced",
+          contextUsage: { _tag: "Available", inputTokens: 700_000, contextWindow: 1_050_000, reserveTokens: 128_000 },
+        })
+        model = update(model, { _tag: "ExecutionCompleted" })
+        surface.update(model)
+        yield* openTui(() => setup.renderOnce())
+        expect(styledTextValue(surface.modeLabel.content)).toContain("✦")
+        expect((surface as unknown as { readonly loaderTimer: unknown }).loaderTimer).toBeDefined()
+        clock.advance(200)
+        expect(styledTextValue(surface.modeLabel.content)).toContain("✦")
+        clock.advance(200)
+        expect(styledTextValue(surface.modeLabel.content)).not.toContain("✦")
+        expect(styledTextValue(surface.modeLabel.content)).toContain("━━━━━━╌╌ 76%")
+        expect((surface as unknown as { readonly loaderTimer: unknown }).loaderTimer).toBeUndefined()
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
