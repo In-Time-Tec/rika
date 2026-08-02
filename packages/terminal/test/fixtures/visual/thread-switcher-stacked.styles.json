@@ -277,7 +277,7 @@
     {
       "spans": [
         {
-          "text": " ",
+          "text": "  ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -295,10 +295,10 @@
             }
           },
           "attributes": 0,
-          "width": 1
+          "width": 2
         },
         {
-          "text": " │",
+          "text": "│",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -316,7 +316,7 @@
             }
           },
           "attributes": 0,
-          "width": 2
+          "width": 1
         },
         {
           "text": " ",
@@ -428,7 +428,7 @@
     {
       "spans": [
         {
-          "text": " ",
+          "text": "  ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -446,10 +446,10 @@
             }
           },
           "attributes": 0,
-          "width": 1
+          "width": 2
         },
         {
-          "text": " │",
+          "text": "│",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -467,7 +467,7 @@
             }
           },
           "attributes": 0,
-          "width": 2
+          "width": 1
         },
         {
           "text": " ",
@@ -579,7 +579,7 @@
     {
       "spans": [
         {
-          "text": " ",
+          "text": "  ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -597,10 +597,10 @@
             }
           },
           "attributes": 0,
-          "width": 1
+          "width": 2
         },
         {
-          "text": " │",
+          "text": "│",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -618,7 +618,7 @@
             }
           },
           "attributes": 0,
-          "width": 2
+          "width": 1
         },
         {
           "text": " ",
@@ -751,7 +751,7 @@
     {
       "spans": [
         {
-          "text": " ",
+          "text": "  ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -769,10 +769,10 @@
             }
           },
           "attributes": 0,
-          "width": 1
+          "width": 2
         },
         {
-          "text": " │",
+          "text": "│",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -790,7 +790,7 @@
             }
           },
           "attributes": 0,
-          "width": 2
+          "width": 1
         },
         {
           "text": " ",
@@ -2874,7 +2874,7 @@
     {
       "spans": [
         {
-          "text": " ",
+          "text": "  ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -2892,10 +2892,10 @@
             }
           },
           "attributes": 0,
-          "width": 1
+          "width": 2
         },
         {
-          "text": " │",
+          "text": "│",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -2913,7 +2913,7 @@
             }
           },
           "attributes": 0,
-          "width": 2
+          "width": 1
         },
         {
           "text": " ",
@@ -3130,7 +3130,7 @@
     {
       "spans": [
         {
-          "text": " ",
+          "text": "  ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -3148,10 +3148,10 @@
             }
           },
           "attributes": 0,
-          "width": 1
+          "width": 2
         },
         {
-          "text": " │",
+          "text": "│",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -3169,7 +3169,7 @@
             }
           },
           "attributes": 0,
-          "width": 2
+          "width": 1
         },
         {
           "text": " ",
@@ -3323,7 +3323,7 @@
     {
       "spans": [
         {
-          "text": " ",
+          "text": "  ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -3341,10 +3341,10 @@
             }
           },
           "attributes": 0,
-          "width": 1
+          "width": 2
         },
         {
-          "text": " │",
+          "text": "│",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -3362,7 +3362,7 @@
             }
           },
           "attributes": 0,
-          "width": 2
+          "width": 1
         },
         {
           "text": " ",
@@ -3516,7 +3516,7 @@
     {
       "spans": [
         {
-          "text": " ",
+          "text": "  ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -3534,10 +3534,10 @@
             }
           },
           "attributes": 0,
-          "width": 1
+          "width": 2
         },
         {
-          "text": " │",
+          "text": "│",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -3555,7 +3555,7 @@
             }
           },
           "attributes": 0,
-          "width": 2
+          "width": 1
         },
         {
           "text": " ",

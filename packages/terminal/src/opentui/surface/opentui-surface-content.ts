@@ -6,6 +6,7 @@ import { isLoading } from "../../state/model/terminal-loadable-state"
 import { activeTimeIcon } from "../../state/model/terminal-activity-time"
 import { colors, spacing } from "../../presentation/terminal/terminal-theme"
 import { homeRelativePath } from "../../presentation/terminal/terminal-format"
+import { ampOrbFrames } from "./opentui-amp-orb-frames"
 export const panelLoading = (model: Model): string | undefined => {
   if (model.currentThreadId !== undefined && model.refoldingThreadIds.includes(model.currentThreadId))
     return "Rebuilding thread projection"
@@ -41,7 +42,7 @@ const welcomeMarkFrame = (rows: ReadonlyArray<string>): ReadonlyArray<string> =>
 
 const shiftWelcomeMarkRow = (row: string): string => ` ${row}`.slice(0, 40)
 
-export const welcomeMarkFrames = [
+const _legacyWelcomeMarkFrames = [
   welcomeMarkFrame([
     "            •••••••••••••               ",
     "         ••••••••••●●••••••••           ",
@@ -244,22 +245,14 @@ export const welcomeMarkFrames = [
   ]),
 ] as const
 
-const hex2 = (value: number): string => Math.round(value).toString(16).padStart(2, "0")
+export const welcomeMarkFrames = ampOrbFrames.small
 
-const welcomeMarkColor = (row: number, _mode: Mode): readonly [number, number, number] => {
-  const clamped = Math.max(0, Math.min(1, row))
-  const top = [239, 133, 49] as const
-  const bottom = [143, 69, 21] as const
-  return mix(top, bottom, clamped)
-}
-
-const mix = (
-  a: readonly [number, number, number],
-  b: readonly [number, number, number],
-  tValue: number,
-): readonly [number, number, number] => {
-  const clamped = Math.max(0, Math.min(1, tValue))
-  return [a[0] + (b[0] - a[0]) * clamped, a[1] + (b[1] - a[1]) * clamped, a[2] + (b[2] - a[2]) * clamped]
+const welcomeMarkColor = (glyph: string, _mode: Mode): string => {
+  if (glyph === "●") return "#e8823c"
+  if (glyph === "•") return "#cf6828"
+  if (glyph === ":") return "#ad4f1c"
+  if (glyph === "·") return "#8e3d17"
+  return "#743016"
 }
 
 const welcomeContentImpl = (width: number, height: number, phase: number, mode: Mode): StyledText => {
@@ -270,28 +263,36 @@ const welcomeContentImpl = (width: number, height: number, phase: number, mode: 
       fg(colors.text)("\n\n"),
       fg(colors.text)(`${" ".repeat(Math.max(0, Math.floor((width - 24) / 2)))}ctrl+o commands   ? help`),
     ])
-  const frame = welcomeMarkFrames[(phase + 5) % welcomeMarkFrames.length] ?? welcomeMarkFrames[0]
-  const pattern = frame.slice(3)
+  const frames = width >= 140 && height >= 35 ? ampOrbFrames.large : ampOrbFrames.small
+  const frame = frames[phase % frames.length] ?? frames[0]
+  const pattern = frame ?? []
+  const patternWidth = Math.max(...pattern.map(stringWidth), 1)
   const area = Math.max(1, height - spacing.inputHeight)
   const top = Math.max(0, Math.floor((area - pattern.length) / 2))
-  const center = Math.floor(width / 2)
-  const logoLeft = Math.max(0, center - 43)
-  const textGap = Math.max(1, center - 1 - logoLeft - 40)
+  const logoLeft = Math.max(0, Math.floor((width - patternWidth - 24) / 2))
+  const textGap = Math.max(2, width - logoLeft - patternWidth - 24)
   const visiblePattern = pattern.slice(0, Math.max(1, area - top))
   const chunks: TextChunk[] = [fg(colors.text)("\n".repeat(top))]
-  const copy = new Map<number, ReadonlyArray<TextChunk>>([
-    [4, [bold(fg(colors[mode])("Welcome to Rika"))]],
-    [7, [bold(fg(colors.text)("ctrl+o")), fg(colors.muted)(" for commands")]],
-    [8, [bold(fg(colors.text)("?")), fg(colors.muted)(" for shortcuts")]],
-  ])
+  const copyRows: ReadonlyArray<readonly [number, ReadonlyArray<TextChunk>]> =
+    pattern === ampOrbFrames.small[phase % ampOrbFrames.small.length]
+      ? [
+          [0, [bold(fg("#e8823c")("Welcome to Rika"))]],
+          [3, [bold(fg(colors.text)("ctrl+o")), fg(colors.muted)(" for commands")]],
+          [4, [bold(fg(colors.text)("?")), fg(colors.muted)(" for shortcuts")]],
+        ]
+      : [
+          [4, [bold(fg("#e8823c")("Welcome to Rika"))]],
+          [7, [bold(fg(colors.text)("ctrl+o")), fg(colors.muted)(" for commands")]],
+          [8, [bold(fg(colors.text)("?")), fg(colors.muted)(" for shortcuts")]],
+        ]
+  const copy = new Map(copyRows)
   for (let row = 0; row < visiblePattern.length; row += 1) {
     if (row > 0) chunks.push(fg(colors.text)("\n"))
     chunks.push(fg(colors.text)(" ".repeat(logoLeft)))
     for (const glyph of visiblePattern[row] ?? "") {
       if (glyph === " ") chunks.push(fg(colors.text)(glyph))
       else {
-        const [red, green, blue] = welcomeMarkColor(row / 17, mode)
-        chunks.push(fg(`#${hex2(red)}${hex2(green)}${hex2(blue)}`)(glyph))
+        chunks.push(fg(welcomeMarkColor(glyph, mode))(glyph))
       }
     }
     const suffix = copy.get(row)

@@ -8864,6 +8864,15 @@
       "publicExports": []
     },
     {
+      "id": "packages/terminal/src/opentui/surface/opentui-amp-orb-frames.ts",
+      "path": "packages/terminal/src/opentui/surface/opentui-amp-orb-frames.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/terminal/src/opentui/surface/opentui-composer-region.ts",
       "path": "packages/terminal/src/opentui/surface/opentui-composer-region.ts",
       "workspace": "@rika/terminal",
@@ -57445,6 +57454,14 @@
       "from": "packages/terminal/src/opentui/surface/opentui-surface-content.ts",
       "to": "external:string-width",
       "specifier": "string-width",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-surface-content.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-amp-orb-frames.ts",
+      "specifier": "./opentui-amp-orb-frames",
       "kind": "import",
       "relationship": "runtime",
       "production": true

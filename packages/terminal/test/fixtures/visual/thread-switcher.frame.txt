@@ -23,11 +23,11 @@
                               │                                                                     │                                                                 │  │
                               │                                                                     │                                                                 │  │
                               │                                                                     │                                                                 │  │
+                              │                                                                     │                                                                 │  │ Welcome to Rika
                               │                                                                     │                                                                 │  │
                               │                                                                     │                                                                 │  │
-                              │                                                                     │                                                                 │  │
-                              │                                                                     │                                                                 │  │
-                              │                                                                     │                                                                 │  │
+                              │                                                                     │                                                                 │  │    ctrl+o for commands
+                              │                                                                     │                                                                 │  │    ? for shortcuts
                               │                                                                     │                                                                 │  │
                               │                                                                     │                                                                 │  │
                               │                                                                     │                                                                 │  │
