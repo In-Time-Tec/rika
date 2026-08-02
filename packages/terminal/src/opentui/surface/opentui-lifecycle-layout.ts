@@ -195,6 +195,7 @@ export abstract class SurfaceLifecycleLayout extends SurfaceInput {
       previousModel === undefined ||
       previousModel.threadSidebar !== model.threadSidebar ||
       previousModel.threads !== model.threads ||
+      previousModel.mode !== model.mode ||
       previousModel.width !== model.width ||
       previousModel.height !== model.height
     if (sidebarChanged)
@@ -208,6 +209,8 @@ export abstract class SurfaceLifecycleLayout extends SurfaceInput {
         ? ` Changed files (${readyOr(model.changedFiles, []).length}) `
         : ` Files (${readyOr(model.filePicker.items, []).length}) `
       this.changedFilesBox.titleAlignment = "left"
+      this.changedFilesBox.titleColor = toOpenColor(colors[model.mode])
+      this.changedFilesText.fg = toOpenColor(colors[model.mode])
       this.refreshSidebarRows(model)
       if (
         previousModel === undefined ||
@@ -217,7 +220,8 @@ export abstract class SurfaceLifecycleLayout extends SurfaceInput {
         previousModel.changedFilesOpen !== model.changedFilesOpen ||
         previousModel.changedFiles !== model.changedFiles ||
         previousModel.workspaceFilesOpen !== model.workspaceFilesOpen ||
-        previousModel.filePicker.items !== model.filePicker.items
+        previousModel.filePicker.items !== model.filePicker.items ||
+        previousModel.mode !== model.mode
       )
         this.refreshSidebarAfterLayout()
     } else {

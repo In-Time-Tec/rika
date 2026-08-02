@@ -183,7 +183,7 @@ const modePickerContentImpl = (model: Model, innerWidth: number): StyledText => 
     ])
   const gaugeWidth = Math.min(54, innerWidth)
   const fill = Math.min(gaugeWidth, modeGaugeFill[selected])
-  const chunks: Array<TextChunk> = []
+  const chunks: Array<TextChunk> = [fg(colors.text)("\n")]
   chunks.push(fg(colors[selected])("•".repeat(fill)))
   chunks.push(fg(colors.muted)("·".repeat(Math.max(0, gaugeWidth - fill))))
   chunks.push(fg(colors.text)("\n"))
@@ -195,6 +195,9 @@ const modePickerContentImpl = (model: Model, innerWidth: number): StyledText => 
     chunks.push(mode === selected ? bold(fg(colors[mode])(mode)) : fg(colors.muted)(mode))
     column = Math.max(column, start) + mode.length
   })
+  const divider = (label: string) => `├─ ${label} ${"─".repeat(Math.max(0, gaugeWidth - label.length - 5))}┤`
+  chunks.push(fg(colors.text)("\n\n"))
+  chunks.push(dim(fg(colors.text)(divider("Route"))))
   chunks.push(fg(colors.text)("\n\n"))
   const routes = model.modeRoutes[selected]
   chunks.push(bold(fg(colors.text)("Agent:")))
@@ -202,6 +205,8 @@ const modePickerContentImpl = (model: Model, innerWidth: number): StyledText => 
   chunks.push(fg(colors.text)("\n"))
   chunks.push(bold(fg(colors.text)("Oracle:")))
   chunks.push(fg(colors.muted)(` ${routeLabel(routes?.oracle)}`))
+  chunks.push(fg(colors.text)("\n\n"))
+  chunks.push(dim(fg(colors.text)(divider("About"))))
   chunks.push(fg(colors.text)("\n\n"))
   chunks.push(fg(colors.text)(modeDescription[selected]))
   return new StyledText(chunks)

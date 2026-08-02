@@ -5,6 +5,7 @@ import type { Model } from "./terminal-state"
 
 export const isNarrow = (model: Model): boolean => model.width < 60
 export const threadSidebarWidth = 36
+export const defaultFileSidebarWidth = 52
 export const boundedThreadSidebarWidth = (terminalWidth: number): number =>
   Math.min(threadSidebarWidth, Math.max(8, terminalWidth - 24))
 export const threadSidebarLayoutWidth = (model: Model): number =>
@@ -14,7 +15,12 @@ export const fileSidebarLayoutWidth = (model: Model): number => {
     !isNarrow(model) &&
     ((model.changedFilesOpen && isReady(model.changedFiles)) ||
       (model.workspaceFilesOpen && isReady(model.filePicker.items)))
-  return visible ? Math.max(0, Math.min(model.sidebarWidth, model.width - threadSidebarLayoutWidth(model) - 4)) : 0
+  return visible
+    ? Math.max(
+        0,
+        Math.min(model.sidebarWidth, Math.floor(model.width * 0.4), model.width - threadSidebarLayoutWidth(model) - 4),
+      )
+    : 0
 }
 export const contentColumnWidth = (model: Model): number =>
   Math.max(1, model.width - fileSidebarLayoutWidth(model) - threadSidebarLayoutWidth(model))
@@ -22,7 +28,7 @@ export const contentColumnWidth = (model: Model): number =>
 export const composerHeightLimit = (terminalHeight: number): number =>
   Math.max(1, Math.min(5, terminalHeight), terminalHeight - 4)
 const clampSidebarWidthImpl = (width: number, terminalWidth: number): number =>
-  Math.max(24, Math.min(width, Math.max(24, terminalWidth - 40)))
+  Math.max(24, Math.min(width, Math.max(24, Math.floor(terminalWidth * 0.4))))
 
 export const clampSidebarWidth: {
   (

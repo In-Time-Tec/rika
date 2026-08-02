@@ -81,25 +81,27 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
       cursorEditor = this.overlayEditor
     } else if (overlay === "modes") {
       const boxWidth = Math.min(58, contentWidth)
-      const boxHeight = Math.min(9, Math.max(1, composerTop))
+      const boxHeight = Math.min(boxWidth - 4 < 40 ? 9 : 15, Math.max(1, composerTop))
       this.paletteBox.width = boxWidth
       this.paletteBox.height = boxHeight
       this.paletteBox.left = contentLeft + Math.max(0, contentWidth - boxWidth)
       this.paletteBox.top = Math.max(0, composerTop - boxHeight)
-      this.paletteBox.title = ""
-      this.paletteBox.bottomTitle = " ←→ turn · esc"
+      this.paletteBox.title = " Mode "
+      this.paletteBox.titleColor = toOpenColor(colors[model.mode])
+      this.paletteBox.titleAlignment = "left"
+      this.paletteBox.bottomTitle = " ↔ turn · esc"
       this.paletteBox.bottomTitleAlignment = "right"
       this.palette.content = modePickerContent(model, Math.max(1, boxWidth - 4))
       cursorEditor = undefined
     } else if (overlay === "context") {
       const boxWidth = Math.min(58, contentWidth)
-      const boxHeight = model.width <= 24 ? Math.min(12, model.height) : Math.min(9, Math.max(1, composerTop))
+      const boxHeight = model.width <= 24 ? Math.min(12, model.height) : Math.min(15, Math.max(1, composerTop))
       this.paletteBox.width = boxWidth
       this.paletteBox.height = boxHeight
       this.paletteBox.left = contentLeft + Math.max(0, contentWidth - boxWidth)
       this.paletteBox.top = Math.max(0, composerTop - boxHeight)
       this.paletteBox.title = " Context & Usage "
-      this.paletteBox.titleColor = toOpenColor(colors.teal)
+      this.paletteBox.titleColor = toOpenColor(colors[model.mode])
       this.paletteBox.titleAlignment = "left"
       this.paletteBox.bottomTitle = " Ctrl+Y toggle · esc "
       this.paletteBox.bottomTitleAlignment = "right"

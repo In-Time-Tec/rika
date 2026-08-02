@@ -59,7 +59,19 @@ const contextDetailsImpl = (model: Model, width: number, height: number, now: nu
     line(
       `${formatContextTokens(context.inputTokens)} used · ${formatContextTokens(Math.max(0, ContextMeter.usableTokens(context) - context.inputTokens))} available`,
     )
-    if (height >= 4)
+    if (height >= 11) {
+      const divider = (label: string) => `├─ ${label} ${"─".repeat(Math.max(0, width - label.length - 5))}┤`
+      line("")
+      line(divider("Window"), colors.muted)
+      line("")
+      line(
+        `${formatContextTokens(ContextMeter.usableTokens(context))} usable · ${formatContextTokens(context.contextWindow)} window · ${formatContextTokens(context.reserveTokens)} reserved`,
+        colors.muted,
+      )
+      line("")
+      line(divider("Session"), colors.muted)
+      line("")
+    } else if (height >= 4)
       line(
         `${formatContextTokens(ContextMeter.usableTokens(context))} usable · ${formatContextTokens(context.contextWindow)} window · ${formatContextTokens(context.reserveTokens)} reserved`,
         colors.muted,

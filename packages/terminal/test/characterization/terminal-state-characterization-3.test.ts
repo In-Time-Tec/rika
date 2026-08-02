@@ -250,10 +250,10 @@ it("transitions workspace files and keeps a stale thread preview while the next 
 
 it("clamps the sidebar width on change and terminal resize", () => {
   const base = { ...initial("/work"), width: 120, height: 40 }
-  expect(update(base, { _tag: "SidebarWidthChanged", width: 200 }).sidebarWidth).toBe(80)
+  expect(update(base, { _tag: "SidebarWidthChanged", width: 200 }).sidebarWidth).toBe(48)
   expect(update(base, { _tag: "SidebarWidthChanged", width: 10 }).sidebarWidth).toBe(24)
   const widened = update(base, { _tag: "SidebarWidthChanged", width: 60 })
-  expect(widened.sidebarWidth).toBe(60)
+  expect(widened.sidebarWidth).toBe(48)
   const shrunk = update(widened, { _tag: "Resized", width: 70, height: 40 })
-  expect(shrunk.sidebarWidth).toBe(30)
+  expect(shrunk.sidebarWidth).toBe(28)
 })
