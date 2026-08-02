@@ -6,7 +6,7 @@ import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as UsageRepository from "@rika/persistence/usage-repository"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import * as Transcript from "@rika/transcript"
-import { Context, Deferred, Effect, Exit, Layer, Ref, Scope, Stream } from "effect"
+import { Context, Deferred, Effect, Exit, Layer, Logger, Ref, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import * as ExecutionIngest from "../src/execution-ingest"
 import * as UsageCost from "../src/usage-cost"
@@ -111,10 +111,13 @@ const makeHarness = Effect.fn("ExecutionIngestTest.makeHarness")(function* (opti
   readonly commitGate?: (write: number) => Effect.Effect<void>
   readonly pageHold?: { readonly after: string; readonly open: Deferred.Deferred<void> }
   readonly onFailure?: (failure: ExecutionIngest.Failure) => void
+  readonly mapUsage?: (usage: UsageRepository.Interface) => UsageRepository.Interface
 }) {
   const turn = makeTurn(options.turnStatus ?? "completed")
   const turns = yield* TurnRepository.makeMemory([turn])
-  const usage = Context.get(yield* Layer.build(UsageRepository.memoryLayer), UsageRepository.Service)
+  const usage =
+    options.mapUsage?.(Context.get(yield* Layer.build(UsageRepository.memoryLayer), UsageRepository.Service)) ??
+    Context.get(yield* Layer.build(UsageRepository.memoryLayer), UsageRepository.Service)
   if (options.consumed !== undefined) {
     const observations = Object.entries(options.consumed).flatMap(([executionId, consumed]) =>
       (options.script[executionId]?.events ?? [])
@@ -1495,6 +1498,115 @@ describe("ExecutionIngest", () => {
       expect((yield* transcripts.get(rootId))?.units).toHaveLength(stored.units.length)
     }),
   )
+
+  it.effect("backfills an incomplete parallel-wait usage source", () =>
+    Effect.gen(function* () {
+      const staleUsage = yield* UsageRepository.makeMemory({
+        initial: [
+          {
+            sourceId: String(rootId),
+            turnId: String(rootId),
+            threadId: String(threadId),
+            revision: 0,
+            projectionVersion: UsageRepository.projectionVersion,
+            pricedAttempts: 0,
+            unpricedAttempts: 0,
+            countedAttempts: 0,
+            uncountedAttempts: 0,
+            sourceComplete: false,
+          },
+        ],
+      })
+      const parallelWaits = [
+        event("root", "accepted", 0, "execution.accepted"),
+        event("root", "started", 1, "execution.started"),
+        event("root", "wait-a", 2, "wait.created"),
+        event("root", "wait-b", 3, "wait.created"),
+        event("root", "wait-c", 4, "wait.created"),
+        event("root", "cancel-a", 5, "wait.cancelled"),
+        event("root", "wake-b", 6, "wait.woken"),
+        event("root", "timeout-c", 7, "wait.timed_out"),
+        event("root", "done", 8, "execution.cancelled"),
+      ]
+      const stored = Transcript.project("root", "delegate", parallelWaits)
+      const { ingest, transcripts } = yield* makeHarness({
+        script: { root: { events: parallelWaits, status: "cancelled" } },
+        turnStatus: "cancelled",
+        stored,
+        storedProjectionVersion: ExecutionIngest.projectionVersion,
+        executionCheckpoints: [
+          {
+            executionKey: "root",
+            executionId: "root",
+            cursor: "done",
+            sequence: 8,
+            status: "cancelled",
+            state: Transcript.projectionState(stored),
+          },
+        ],
+        mapUsage: () => staleUsage,
+      })
+
+      expect((yield* transcripts.get(rootId))?.projectionVersion).toBe(ExecutionIngest.projectionVersion)
+      expect((yield* staleUsage.readSource(String(rootId), String(rootId)))?.sourceComplete).toBe(false)
+      yield* ingest.backfillUsage({ threadId, turnId: rootId })
+
+      const recovered = yield* staleUsage.readSource(String(rootId), String(rootId))
+      expect(recovered).toMatchObject({
+        projectionVersion: UsageRepository.projectionVersion,
+        sourceComplete: true,
+      })
+      expect(recovered?.foldJson).toBeDefined()
+      const decoded = recovered?.foldJson === undefined ? undefined : UsageCost.deserialize(recovered.foldJson)
+      expect(decoded?._tag).toBe("Success")
+      if (decoded?._tag === "Success")
+        expect(UsageCost.activeTime(decoded.success, String(threadId))).toMatchObject({ _tag: "Available" })
+    }),
+  )
+
+  it.effect("degrades usage without interrupting live transcript delivery", () => {
+    const lines: Array<string> = []
+    const logger = Logger.make((options) => lines.push(Logger.formatJson.log(options)))
+    return Effect.gen(function* () {
+      const failures: Array<ExecutionIngest.Failure> = []
+      const { ingest, projectionChanges, transcripts, usage } = yield* makeHarness({
+        script: { root: { events: [], status: "running" } },
+        turnStatus: "running",
+        onFailure: (failure) => failures.push(failure),
+      })
+
+      yield* ingest.ensure({ threadId, turnId: rootId })
+      yield* ingest.consumed(rootId)
+      for (const delivered of [
+        started("root"),
+        event("root", "first", 1, "model.output.completed", { text: "before degraded usage" }),
+        event("root", "bad-wake", 2, "wait.woken"),
+        event("root", "second", 3, "model.output.completed", { text: "after degraded usage" }),
+        event("root", "done", 4, "execution.completed"),
+      ])
+        ingest.deliver(rootId, delivered)
+      yield* settle(ingest)
+
+      expect(failures).toEqual([])
+      expect((yield* Effect.result(ingest.consumed(rootId)))._tag).toBe("Success")
+      expect(
+        (yield* transcripts.get(rootId))?.units.some(
+          (unit) => unit.content._tag === "Entry" && unit.content.text === "after degraded usage",
+        ),
+      ).toBe(true)
+      expect(
+        projectionChanges.some(
+          (change) =>
+            change._tag === "ProjectionPatched" &&
+            change.patch.delta.upsert.some(
+              (unit) => unit.content._tag === "Entry" && unit.content.text === "after degraded usage",
+            ),
+        ),
+      ).toBe(true)
+      expect((yield* usage.readSource(String(rootId), String(rootId)))?.sourceComplete).toBe(false)
+      expect(lines.filter((line) => line.includes("execution.usage.degraded"))).toHaveLength(1)
+    }).pipe(Effect.provideService(Logger.CurrentLoggers, new Set([logger])))
+  })
 
   for (const outcome of ["failure", "stale"] as const)
     it.effect(`reports a typed ${outcome} checkpoint write to every waiter`, () =>

@@ -76,6 +76,7 @@ const lifecycle = (
     | "wait.created"
     | "wait.woken"
     | "wait.timed_out"
+    | "wait.cancelled"
     | "execution.completed"
     | "execution.failed"
     | "execution.cancelled",
@@ -212,16 +213,62 @@ describe("UsageCost", () => {
     expect(Result.isSuccess(replay) && replay.success).toBe(first)
   })
 
-  it("rejects repeated wait while already waiting", () => {
+  it("folds concurrent waits until each outstanding wait closes", () => {
+    const result = StrictUsageCost.foldBatch(
+      StrictUsageCost.empty,
+      [
+        lifecycle("execution", "start", "execution.started", 0, 1),
+        lifecycle("execution", "wait-a", "wait.created", 10_000, 2),
+        lifecycle("execution", "wait-b", "wait.created", 20_000, 3),
+        lifecycle("execution", "wait-c", "wait.created", 30_000, 4),
+        lifecycle("execution", "wake-a", "wait.woken", 40_000, 5),
+        lifecycle("execution", "cancel-b", "wait.cancelled", 50_000, 6),
+        lifecycle("execution", "timeout-c", "wait.timed_out", 60_000, 7),
+        lifecycle("execution", "done", "execution.completed", 70_000, 8),
+      ].map((event) => ({ threadId: "thread", turnId: "turn", event })),
+      new Set(["execution"]),
+    )
+    expect(Result.isSuccess(result)).toBe(true)
+    if (Result.isFailure(result)) return
+    expect(StrictUsageCost.activeTime(result.success, "thread")).toEqual({
+      _tag: "Available",
+      accumulated: Duration.seconds(20),
+    })
+  })
+
+  it("rejects a wait closure with no outstanding wait", () => {
     const result = StrictUsageCost.foldBatch(
       StrictUsageCost.empty,
       [
         lifecycle("execution", "start", "execution.started", 1, 1),
-        lifecycle("execution", "wait-a", "wait.created", 2, 2),
-        lifecycle("execution", "wait-b", "wait.created", 3, 3),
+        lifecycle("execution", "wake", "wait.woken", 2, 2),
       ].map((event) => ({ threadId: "thread", turnId: "turn", event })),
     )
     expect(Result.isFailure(result) && result.failure.reason).toBe("invalid-transition")
+  })
+
+  it("folds the parallel child wait history shape emitted by Relay", () => {
+    const result = StrictUsageCost.foldBatch(
+      StrictUsageCost.empty,
+      [
+        lifecycle("execution", "accepted", "execution.accepted", 0, 0),
+        lifecycle("execution", "started", "execution.started", 1, 1),
+        work("execution", "spawn-a", "child_run.spawned", 12, 12),
+        lifecycle("execution", "wait-a", "wait.created", 14, 14),
+        work("execution", "spawn-b", "child_run.spawned", 15, 15),
+        lifecycle("execution", "wait-b", "wait.created", 16, 16),
+        work("execution", "spawn-c", "child_run.spawned", 17, 17),
+        lifecycle("execution", "wait-c", "wait.created", 18, 18),
+        work("execution", "model", "model.output.completed", 48, 48),
+        work("execution", "waiting", "execution.waiting", 49, 49),
+        lifecycle("execution", "cancel-a", "wait.cancelled", 50, 50),
+        lifecycle("execution", "wake-b", "wait.woken", 52, 52),
+        lifecycle("execution", "wake-c", "wait.woken", 54, 54),
+        lifecycle("execution", "cancelled", "execution.cancelled", 56, 56),
+      ].map((event) => ({ threadId: "thread", turnId: "turn", event })),
+      new Set(["execution"]),
+    )
+    expect(Result.isSuccess(result)).toBe(true)
   })
 
   it("rejects malformed nested snapshot state", () => {
@@ -361,7 +408,7 @@ describe("UsageCost", () => {
     const snapshot = [
       lifecycle("execution", "start-1", "execution.started", 1_000, 1),
       lifecycle("execution", "wait", "wait.created", 11_000, 2),
-      lifecycle("execution", "start-2", "execution.started", 15_000, 3),
+      lifecycle("execution", "wake", "wait.woken", 15_000, 3),
       lifecycle("execution", "complete", "execution.completed", 20_000, 4),
     ].reduce(
       (current, event) => UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),

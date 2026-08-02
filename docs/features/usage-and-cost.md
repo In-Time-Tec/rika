@@ -2,7 +2,7 @@
 
 Rika maintains a durable, revisioned usage projection for every admitted non-queued Turn. Normal startup, Thread selection, and `rika threads usage <thread-id>` read this projection without inspecting or replaying Relay execution history. Archived Threads remain part of the global total. An empty projection is unavailable rather than a complete zero.
 
-Execution ingest owns the root source for a Turn, including the root execution and every attached child and grandchild. The title execution is separate and uses its title execution identifier as its source. Each execution-scoped Relay delivery cursor is folded once, so exact replay changes nothing. A conflicting replay or malformed projection fails the operation with its typed cause instead of preserving a successful state.
+Execution ingest owns the root source for a Turn, including the root execution and every attached child and grandchild. The title execution is separate and uses its title execution identifier as its source. Each execution-scoped Relay delivery cursor is folded once, so exact replay changes nothing. A conflicting replay or malformed projection fails the operation with its typed cause instead of preserving a successful state. Usage degradation never interrupts transcript delivery.
 
 Usage is write-ahead: ingest commits source usage before it commits the corresponding transcript revision. A concurrent reader can therefore observe usage ahead of transcript content, but never transcript content whose admitted usage was rejected. After the transcript commit, one event-driven worker re-reads Turn, Thread, and global aggregates and publishes them. It has no polling window or background ticker.
 

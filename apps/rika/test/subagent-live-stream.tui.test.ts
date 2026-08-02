@@ -100,3 +100,83 @@ test(
     ),
   240_000,
 )
+
+test(
+  "keeps the transcript live through three parallel subagent waits",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const app = yield* TuiApp.tuiApp({
+          inspectTranscript: true,
+          lanes: [
+            {
+              script: [
+                TuiApp.model.toolCall("task", { prompt: "Parallel child A" }, "parallel-a"),
+                TuiApp.model.toolCall("task", { prompt: "Parallel child B" }, "parallel-b"),
+                TuiApp.model.toolCall("task", { prompt: "Parallel child C" }, "parallel-c"),
+                TuiApp.model.toolCall("await_subagents", {}, "parallel-join"),
+                TuiApp.model.text("PARALLEL_ROOT_FINISHED"),
+              ],
+            },
+            {
+              when: (prompt) =>
+                !prompt.includes("Run three parallel subagents.") && prompt.includes("Parallel child A"),
+              script: [
+                TuiApp.model.turn([
+                  TuiApp.model.part("PARALLEL_CHILD_A"),
+                  TuiApp.model.toolCall("bash", { command: "sleep 1" }, "parallel-a-hold"),
+                ]),
+                TuiApp.model.text("PARALLEL_CHILD_A_DONE"),
+              ],
+            },
+            {
+              when: (prompt) =>
+                !prompt.includes("Run three parallel subagents.") && prompt.includes("Parallel child B"),
+              script: [
+                TuiApp.model.turn([
+                  TuiApp.model.part("PARALLEL_CHILD_B"),
+                  TuiApp.model.toolCall("bash", { command: "sleep 1" }, "parallel-b-hold"),
+                ]),
+                TuiApp.model.text("PARALLEL_CHILD_B_DONE"),
+              ],
+            },
+            {
+              when: (prompt) =>
+                !prompt.includes("Run three parallel subagents.") && prompt.includes("Parallel child C"),
+              script: [
+                TuiApp.model.turn([
+                  TuiApp.model.part("PARALLEL_CHILD_C"),
+                  TuiApp.model.toolCall("bash", { command: "sleep 1" }, "parallel-c-hold"),
+                ]),
+                TuiApp.model.text("PARALLEL_CHILD_C_DONE"),
+              ],
+            },
+          ],
+        })
+
+        yield* Effect.promise(() => app.type("Run three parallel subagents."))
+        app.pressEnter()
+        yield* app.waitFrame("Subagent working")
+        app.pressKey("\t")
+        app.pressEnter()
+        yield* app.waitFrame("PARALLEL_CHILD_A")
+        const finished = yield* app.waitFrame("PARALLEL_ROOT_FINISHED")
+        expect(finished).not.toContain("Execution failed")
+
+        const projection = yield* app.transcript(Turn.TurnId.make("tui-turn-0"))
+        expect(projection?.executionCheckpoints).toHaveLength(4)
+        expect(projection?.executionCheckpoints.every((checkpoint) => checkpoint.status === "completed")).toBe(true)
+
+        let exited = false
+        for (let attempt = 0; attempt < 3 && !exited; attempt += 1) {
+          app.close()
+          exited = yield* app.done.pipe(
+            Effect.as(true),
+            Effect.timeoutOrElse({ duration: "1 second", orElse: () => Effect.succeed(false) }),
+          )
+        }
+        expect(exited).toBe(true)
+      }),
+    ),
+  240_000,
+)

@@ -87,6 +87,7 @@ export interface Commit {
   readonly revision: number
   readonly terminal: boolean
   readonly usageChanged: boolean
+  readonly usageDegraded: boolean
   readonly refolded: boolean
 }
 
@@ -175,6 +176,7 @@ interface Pipeline {
   usageRefoldFromVersion: number | undefined
   usagePending: Array<UsageCost.RootExecution & { readonly event: ExecutionBackend.Event }>
   usageFold: UsageCost.UsageFold
+  usageDisabled: boolean
   usageNotificationPending: boolean
   delta: IngestProjection.ProjectionDelta
   failure: Failure | undefined
@@ -580,18 +582,27 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
     wake(pipeline)
   }
 
-  const failProjection = (pipeline: Pipeline, failure: UsageCost.ProjectionFailure) => {
-    if (pipeline.failure !== undefined) return
-    pipeline.stopped = true
-    pipeline.failure = failure
-    retainFailure(pipeline.turnId, failure)
-    options.onFailure?.(failure)
-    for (const waiter of pipeline.flushWaiters) Deferred.doneUnsafe(waiter.deferred, Effect.fail(failure))
-    pipeline.flushWaiters.length = 0
-    Deferred.doneUnsafe(pipeline.rootCommitted, Effect.fail(failure))
-    pipeline.rootSettled.openUnsafe()
-    pipeline.abandoned.openUnsafe()
-    wake(pipeline)
+  const degradeUsage = (pipeline: Pipeline, failure: UsageCost.ProjectionFailure | UsageRepository.RepositoryError) => {
+    if (pipeline.usageDisabled) return
+    pipeline.usageDisabled = true
+    pipeline.usagePending.length = 0
+    pipeline.usageRefoldFromVersion = undefined
+    pipeline.usageNotificationPending = true
+    const root = pipeline.nodes.get(pipeline.rootKey)!
+    const projection = failure._tag === "UsageProjectionFailure" ? failure : undefined
+    pipeline.fork(
+      Effect.logWarning("execution.usage.degraded").pipe(
+        Effect.annotateLogs({
+          "rika.thread.id": String(pipeline.threadId),
+          "rika.turn.id": String(pipeline.turnId),
+          "rika.execution.id": projection?.executionId ?? root.executionId,
+          "rika.usage.reason": projection?.reason ?? "repository",
+          "rika.usage.message": failure.message,
+          ...(projection?.sequence === undefined ? {} : { "rika.execution.sequence": projection.sequence }),
+          ...Diagnostic.failure("UsageProjectionFailure"),
+        }),
+      ),
+    )
   }
 
   const markCheckpoint = (pipeline: Pipeline, node: Node) => {
@@ -844,7 +855,8 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
           })
           const terminal = fullyConsumed(pipeline.nodes)
           const usageChanged =
-            pipeline.usagePending.length > 0 || (terminal && pipeline.usageSnapshot.activeEvents.size === 0)
+            !pipeline.usageDisabled &&
+            (pipeline.usagePending.length > 0 || (terminal && pipeline.usageSnapshot.activeEvents.size === 0))
           const deferred = new Map<string, { readonly owner: string; readonly unit?: Transcript.Unit }>()
           const upsert = [...dirty.units].flatMap(([key, mutation]) => {
             if (mutation.unit === undefined) return []
@@ -876,21 +888,33 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
             removals.length === 0 &&
             changedCheckpoints.length === 0 &&
             pipeline.usagePending.length === 0 &&
-            pipeline.usageRefoldFromVersion === undefined
+            pipeline.usageRefoldFromVersion === undefined &&
+            !pipeline.usageNotificationPending
           )
             return
           let usageCommitted = false
-          if (pipeline.usagePending.length > 0 || terminal || pipeline.usageRefoldFromVersion !== undefined) {
+          if (
+            !pipeline.usageDisabled &&
+            (pipeline.usagePending.length > 0 || terminal || pipeline.usageRefoldFromVersion !== undefined)
+          ) {
             const usageResult = yield* Effect.result(commitUsage(pipeline, terminal))
-            if (usageResult._tag === "Failure") {
-              if (usageResult.failure._tag === "UsageProjectionFailure") failProjection(pipeline, usageResult.failure)
-              else fail(pipeline, root, "repository", String(usageResult.failure))
-              return
-            }
-            usageCommitted = usageResult.success
+            if (usageResult._tag === "Failure") degradeUsage(pipeline, usageResult.failure)
+            else usageCommitted = usageResult.success
           }
           if (upsert.length === 0 && removals.length === 0 && changedCheckpoints.length === 0) {
             if (usageCommitted || usageChanged) pipeline.usageNotificationPending = true
+            if (pipeline.usageNotificationPending) {
+              options.onCommitted?.({
+                threadId: pipeline.threadId,
+                rootTurnId: pipeline.turnId,
+                revision: projectionState.revision,
+                terminal,
+                usageChanged: true,
+                usageDegraded: pipeline.usageDisabled,
+                refolded: pipeline.refolding,
+              })
+              pipeline.usageNotificationPending = false
+            }
             return
           }
           const write: Effect.Effect<TranscriptRepository.RefoldWriteResult, TranscriptRepository.RepositoryError> =
@@ -960,6 +984,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
             revision: projectionState.revision,
             terminal,
             usageChanged: notifyUsage,
+            usageDegraded: pipeline.usageDisabled,
             refolded: pipeline.refolding,
           })
           pipeline.usageNotificationPending = false
@@ -1100,10 +1125,9 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
         event,
       }
       const terminal = ExecutionStatus.terminalEventStatus(event.type)
-      const usage = UsageCost.applyUsageFoldEvent(pipeline.usageFold, observation)
-      if (Result.isFailure(usage)) {
-        failProjection(pipeline, usage.failure)
-        return
+      if (!pipeline.usageDisabled) {
+        const usage = UsageCost.applyUsageFoldEvent(pipeline.usageFold, observation)
+        if (Result.isFailure(usage)) degradeUsage(pipeline, usage.failure)
       }
       node.resumed = false
       applyMutation(pipeline, node, Transcript.applyFoldEvent(node.fold, event), visible)
@@ -1137,7 +1161,8 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
         if (node.parentKey === undefined) pipeline.rootSettled.openUnsafe()
       } else if (pipeline.pending >= commitEvents) wake(pipeline)
       for (const childExecutionId of spawnedChildIds(event)) discover(pipeline, node, childExecutionId, visible)
-      if (UsageCost.usageFoldChanged(pipeline.usageFold)) pipeline.usagePending.push(observation)
+      if (!pipeline.usageDisabled && UsageCost.usageFoldChanged(pipeline.usageFold))
+        pipeline.usagePending.push(observation)
       publishPatch(pipeline, IngestProjection.eventOrigin(node.executionId, event), visible)
     } catch (cause) {
       fail(pipeline, node, "backend", String(cause))
@@ -1191,6 +1216,25 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
       }
     })
 
+  const logBackfillUsageDegraded = (
+    root: Root,
+    reason: string,
+    message: string,
+    executionId = String(root.turnId),
+    sequence?: number,
+  ) =>
+    Effect.logWarning("execution.usage.degraded").pipe(
+      Effect.annotateLogs({
+        "rika.thread.id": String(root.threadId),
+        "rika.turn.id": String(root.turnId),
+        "rika.execution.id": executionId,
+        "rika.usage.reason": reason,
+        "rika.usage.message": message,
+        ...(sequence === undefined ? {} : { "rika.execution.sequence": sequence }),
+        ...Diagnostic.failure("UsageProjectionFailure"),
+      }),
+    )
+
   const backfillStoredUsage = Effect.fn("ExecutionIngest.backfillStoredUsage")(function* (
     root: Root,
     stored: TranscriptRepository.Projection,
@@ -1207,7 +1251,10 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
         ),
       ),
     )
-    if (replayed._tag === "Failure") return
+    if (replayed._tag === "Failure") {
+      yield* logBackfillUsageDegraded(root, "backend", String(replayed.failure))
+      return
+    }
     const events = replayed.success.flat()
     const terminalExecutions = new Set(
       checkpoints.flatMap((checkpoint) => (checkpoint.status === undefined ? [] : [checkpoint.executionId])),
@@ -1217,7 +1264,16 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
       events.map((event) => ({ threadId: String(root.threadId), turnId: String(root.turnId), event })),
       terminalExecutions,
     )
-    if (Result.isFailure(folded)) return
+    if (Result.isFailure(folded)) {
+      yield* logBackfillUsageDegraded(
+        root,
+        folded.failure.reason,
+        folded.failure.message,
+        folded.failure.executionId,
+        folded.failure.sequence,
+      )
+      return
+    }
     const totals = {
       ...UsageCost.materialize(folded.success, String(root.turnId), String(root.threadId)),
       sourceComplete: true,
@@ -1234,13 +1290,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
       ),
     )
     if (replacement._tag === "Failure") {
-      yield* Effect.logWarning("execution.usage_backfill.commit_failed").pipe(
-        Effect.annotateLogs({
-          "rika.thread.id": String(root.threadId),
-          "rika.turn.id": String(root.turnId),
-          ...Diagnostic.failure("UsageProjectionFailure"),
-        }),
-      )
+      yield* logBackfillUsageDegraded(root, "repository", replacement.failure.message)
       return
     }
     if (replacement.success._tag === "Applied")
@@ -1250,6 +1300,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
         revision: stored.revision,
         terminal: true,
         usageChanged: true,
+        usageDegraded: false,
         refolded: false,
       })
   })
@@ -1437,6 +1488,8 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
                     "rika.turn.id": failure.turnId,
                     "rika.execution.id": failure.executionId,
                     "rika.ingest.reason": failure.reason,
+                    "rika.ingest.message": failure.message,
+                    "rika.failure.tag": failure._tag,
                     ...Diagnostic.failure(failure._tag),
                   }),
                 )
@@ -1496,36 +1549,58 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
           })
         const refolding = stored !== undefined && stored.projectionVersion < projectionVersion
         const usageSourceId = String(root.turnId)
-        const usageSource = yield* options.usage.readSource(usageSourceId, String(root.turnId)).pipe(
-          Effect.flatMap((source) =>
-            source === undefined
-              ? options.usage.admitSource(usageSourceId, String(root.turnId), String(root.threadId))
-              : Effect.succeed(source),
-          ),
-          Effect.mapError((error) =>
-            IngestFailure.make({
-              message: String(error),
-              threadId: String(root.threadId),
-              turnId: String(root.turnId),
-              executionId: String(root.turnId),
-              reason: "repository",
-            }),
-          ),
+        const usageSourceResult = yield* Effect.result(
+          options.usage
+            .readSource(usageSourceId, String(root.turnId))
+            .pipe(
+              Effect.flatMap((source) =>
+                source === undefined
+                  ? options.usage.admitSource(usageSourceId, String(root.turnId), String(root.threadId))
+                  : Effect.succeed(source),
+              ),
+            ),
         )
-        if (usageSource.projectionVersion > UsageRepository.projectionVersion)
-          return yield* UsageCost.ProjectionFailure.make({
-            message: `Usage source ${usageSourceId} has unsupported projection version ${usageSource.projectionVersion}`,
-            reason: "unsupported-version",
-            threadId: String(root.threadId),
-            turnId: String(root.turnId),
-          })
+        const usageRepositoryFailure = usageSourceResult._tag === "Failure" ? usageSourceResult.failure : undefined
+        const usageSource: UsageRepository.SourceUsage =
+          usageSourceResult._tag === "Success"
+            ? usageSourceResult.success
+            : {
+                sourceId: usageSourceId,
+                turnId: String(root.turnId),
+                threadId: String(root.threadId),
+                revision: 0,
+                projectionVersion: UsageRepository.projectionVersion,
+                pricedAttempts: 0,
+                unpricedAttempts: 0,
+                countedAttempts: 0,
+                uncountedAttempts: 0,
+                sourceComplete: false,
+              }
+        const unsupportedUsage =
+          usageRepositoryFailure === undefined && usageSource.projectionVersion > UsageRepository.projectionVersion
+            ? UsageCost.ProjectionFailure.make({
+                message: `Usage source ${usageSourceId} has unsupported projection version ${usageSource.projectionVersion}`,
+                reason: "unsupported-version",
+                threadId: String(root.threadId),
+                turnId: String(root.turnId),
+              })
+            : undefined
         const usageRefoldFromVersion =
-          usageSource.projectionVersion < UsageRepository.projectionVersion ? usageSource.projectionVersion : undefined
+          usageRepositoryFailure === undefined && usageSource.projectionVersion < UsageRepository.projectionVersion
+            ? usageSource.projectionVersion
+            : undefined
         const usageDecoded =
-          usageRefoldFromVersion !== undefined || usageSource.foldJson === undefined
+          usageRepositoryFailure !== undefined ||
+          unsupportedUsage !== undefined ||
+          usageRefoldFromVersion !== undefined ||
+          usageSource.foldJson === undefined
             ? Result.succeed(UsageCost.empty)
             : UsageCost.deserialize(usageSource.foldJson)
-        if (Result.isFailure(usageDecoded)) return yield* usageDecoded.failure
+        const usageFailure =
+          usageRepositoryFailure ??
+          unsupportedUsage ??
+          (Result.isFailure(usageDecoded) ? usageDecoded.failure : undefined)
+        const usageSnapshot = Result.isSuccess(usageDecoded) ? usageDecoded.success : UsageCost.empty
         const restored = restore(turn, refolding ? undefined : stored)
         if (restored.invalid !== undefined)
           return yield* IngestFailure.make({
@@ -1613,12 +1688,13 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
           stopped: false,
           reading: 0,
           delivered: isTerminalStatus(turn.status) ? undefined : [],
-          usageSnapshot: usageDecoded.success,
+          usageSnapshot,
           usageRevision: usageSource.revision,
           usageSourceComplete: usageSource.sourceComplete,
           usageRefoldFromVersion,
           usagePending: [],
-          usageFold: UsageCost.restoreUsageFold(usageDecoded.success),
+          usageFold: UsageCost.restoreUsageFold(usageSnapshot),
+          usageDisabled: false,
           usageNotificationPending: false,
           delta: {
             units: new Map(
@@ -1646,6 +1722,7 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
           Effect.provideService(Scope.Scope, pipelineScope),
         )
         pipelines.set(String(root.turnId), pipeline)
+        if (usageFailure !== undefined) degradeUsage(pipeline, usageFailure)
         publishStarted(pipeline)
         if (refolding) options.onRefold?.({ threadId: root.threadId, rootTurnId: root.turnId, phase: "started" })
         yield* Effect.forkIn(
@@ -1689,7 +1766,11 @@ export const make = Effect.fn("ExecutionIngest.make")(function* (options: Option
         const stored = yield* options.transcripts.get(root.turnId)
         if (stored === undefined || stored.projectionVersion !== projectionVersion) return
         const source = yield* options.usage.readSource(String(root.turnId), String(root.turnId))
-        if (source === undefined || source.projectionVersion >= UsageRepository.projectionVersion) return
+        if (
+          source === undefined ||
+          (source.projectionVersion >= UsageRepository.projectionVersion && source.sourceComplete)
+        )
+          return
         yield* backfillStoredUsage(root, stored, source)
       }),
     ).pipe(

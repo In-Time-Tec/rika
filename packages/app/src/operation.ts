@@ -1379,6 +1379,21 @@ export const productLayer = <
             globalCostUsd: global.costNanoUsd / 1_000_000_000,
           })
       })
+      const publishUnavailableThreadUsage = Effect.fn("Operation.publishUnavailableThreadUsage")(function* (
+        threadId: Thread.ThreadId,
+      ) {
+        const thread = yield* usageRepository.readThread(String(threadId))
+        publishInteractiveActivity(0, {
+          _tag: "ThreadUsageUpdated",
+          selectionEpoch: 0,
+          threadId,
+          revision: thread.revision,
+          context: { _tag: "Unavailable" },
+          cost: { _tag: "Unavailable" },
+          tokens: { _tag: "Unavailable" },
+          time: { _tag: "Unavailable" },
+        })
+      })
       const replacementAdmission = yield* Semaphore.make(1)
       const replacementState = yield* Ref.make({ closed: false, active: 0 })
       const activeWorkflows = new Map<
@@ -1545,7 +1560,9 @@ export const productLayer = <
               }
             }
             if (commit.usageChanged || commit.refolded)
-              yield* usageRepository.readTurn(String(commit.rootTurnId)).pipe(Effect.flatMap(publishThreadUsage))
+              yield* commit.usageDegraded
+                ? publishUnavailableThreadUsage(commit.threadId)
+                : usageRepository.readTurn(String(commit.rootTurnId)).pipe(Effect.flatMap(publishThreadUsage))
           }
         }).pipe(
           Effect.catchCause((cause) =>

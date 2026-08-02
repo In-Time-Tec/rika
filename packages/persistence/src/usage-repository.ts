@@ -241,9 +241,10 @@ export const makeMemory = (options: MemoryOptions = {}) =>
           if (previous !== undefined && previous.threadId !== threadId)
             return [{ _tag: "Conflict", value: clone(previous) }, current]
           if (
-            previous?.projectionVersion === projectionVersion ||
-            (previous !== undefined &&
-              (previous.projectionVersion !== expectedVersion || previous.revision !== expectedRevision))
+            previous !== undefined &&
+            (previous.projectionVersion !== expectedVersion ||
+              previous.revision !== expectedRevision ||
+              (previous.projectionVersion === projectionVersion && previous.sourceComplete))
           )
             return [{ _tag: "Conflict", value: previous === undefined ? undefined : clone(previous) }, current]
           const value: SourceUsage = clone({
@@ -461,7 +462,9 @@ export const layer = Layer.effect(
           uncounted_attempts = ${totals.uncountedAttempts}, source_complete = ${totals.sourceComplete ? 1 : 0}, updated_at = ${now}
         WHERE rika_turn_usage.projection_version = ${expectedVersion} AND rika_turn_usage.revision = ${expectedRevision}
           AND rika_turn_usage.thread_id = ${threadId}
-          AND rika_turn_usage.projection_version < ${projectionVersion} RETURNING *`.pipe(Effect.mapError(error))
+          AND (rika_turn_usage.projection_version < ${projectionVersion} OR rika_turn_usage.source_complete = 0) RETURNING *`.pipe(
+            Effect.mapError(error),
+          )
           return changed.length === 0
             ? ({ _tag: "Conflict", value: yield* readSource(sourceId, turnId) } as const)
             : ({ _tag: "Applied", value: yield* decodeRow(changed[0]) } as const)
