@@ -244,24 +244,13 @@ export const welcomeMarkFrames = [
   ]),
 ] as const
 
-const modeRgb = (mode: Mode): readonly [number, number, number] => {
-  const value = colors[mode]
-  return [
-    Number.parseInt(value.slice(1, 3), 16),
-    Number.parseInt(value.slice(3, 5), 16),
-    Number.parseInt(value.slice(5, 7), 16),
-  ]
-}
-
 const hex2 = (value: number): string => Math.round(value).toString(16).padStart(2, "0")
 
-const welcomeMarkColor = (row: number, mode: Mode): readonly [number, number, number] => {
-  if (mode !== "ultra") return modeRgb(mode)
+const welcomeMarkColor = (row: number, _mode: Mode): readonly [number, number, number] => {
   const clamped = Math.max(0, Math.min(1, row))
-  const top = [92, 225, 152] as const
-  const middle = [64, 140, 124] as const
-  const bottom = [36, 64, 168] as const
-  return clamped < 0.48 ? mix(top, middle, clamped / 0.48) : mix(middle, bottom, (clamped - 0.48) / 0.52)
+  const top = [239, 133, 49] as const
+  const bottom = [143, 69, 21] as const
+  return mix(top, bottom, clamped)
 }
 
 const mix = (
