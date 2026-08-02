@@ -1,4 +1,7 @@
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
+import { ModelRegistry } from "@batonfx/core"
+import { Effect } from "effect"
+import { Tool } from "effect/unstable/ai"
 import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 
 const encodeJson = (value: unknown) => JSON.stringify(value)
@@ -23,4 +26,9 @@ const executionModelRoute = (
   compaction: { contextWindow: 372_000, reserveTokens: 128_000, keepRecentTokens: 32_000 },
 })
 
-export const fixture = { encodeJson, executionModelRoute }
+const testModelRegistration = (registration: ModelRegistry.Registration): ModelRegistry.Registration => ({
+  ...registration,
+  toolJsonSchemaCompiler: (tool: Tool.Any) => Effect.succeed(Tool.getJsonSchema(tool)),
+})
+
+export const fixture = { encodeJson, executionModelRoute, testModelRegistration }

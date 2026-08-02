@@ -284,6 +284,25 @@ export class SurfaceConstruction extends SurfaceLifecycleCleanup {
       overflow: "hidden",
     })
     this.palette = new TextRenderable(renderer, { content: "", fg: toOpenColor(colors.text), wrapMode: "word" })
+    this.contextDividerOne = new TextRenderable(renderer, {
+      content: "",
+      fg: toOpenColor(colors.muted),
+      visible: false,
+      position: "absolute",
+    })
+    this.contextDividerTwo = new TextRenderable(renderer, {
+      content: "",
+      fg: toOpenColor(colors.muted),
+      visible: false,
+      position: "absolute",
+    })
+    this.contextFooter = new TextRenderable(renderer, {
+      content: "",
+      fg: toOpenColor(colors.muted),
+      visible: false,
+      position: "absolute",
+      wrapMode: "none",
+    })
     this.overlayEditor = new ProjectedEditorRenderable(renderer, {
       visible: false,
       position: "absolute",
@@ -383,6 +402,9 @@ export class SurfaceConstruction extends SurfaceLifecycleCleanup {
     this.inputBox.add(this.input)
     this.inputBox.add(this.composerEditor)
     this.paletteBox.add(this.palette)
+    this.paletteBox.add(this.contextDividerOne)
+    this.paletteBox.add(this.contextDividerTwo)
+    this.paletteBox.add(this.contextFooter)
     this.paletteBox.add(this.overlayEditor)
     this.transcriptRow.add(this.transcriptScroll)
     this.transcriptRow.add(this.transcriptScrollbar)

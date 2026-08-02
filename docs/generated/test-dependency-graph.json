@@ -11395,6 +11395,14 @@
     },
     {
       "from": "packages/relay-execution/test/standard-tool-transcripts.test.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/standard-tool-transcripts.test.ts",
       "to": "external:@batonfx/test",
       "specifier": "@batonfx/test",
       "kind": "import",

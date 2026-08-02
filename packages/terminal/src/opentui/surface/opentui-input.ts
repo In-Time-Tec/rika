@@ -34,13 +34,9 @@ const readRendererProperty = (renderer: object, property: string): unknown => Re
 
 const isWriteFunction = (value: unknown): value is NodeJS.WriteStream["write"] => typeof value === "function"
 
-const isWriteStream = (value: unknown): value is NodeJS.WriteStream => {
+const isDimensionStream = (value: unknown): value is Pick<NodeJS.WriteStream, "columns" | "rows"> => {
   if (typeof value !== "object" || value === null) return false
-  return (
-    typeof Reflect.get(value, "columns") === "number" &&
-    typeof Reflect.get(value, "rows") === "number" &&
-    isWriteFunction(Reflect.get(value, "write"))
-  )
+  return typeof Reflect.get(value, "columns") === "number" && typeof Reflect.get(value, "rows") === "number"
 }
 
 type RendererOutput = {
@@ -48,10 +44,13 @@ type RendererOutput = {
   readonly realStdoutWrite: NodeJS.WriteStream["write"]
 }
 
+const isWritableStream = (value: unknown): value is NodeJS.WriteStream =>
+  typeof value === "object" && value !== null && isWriteFunction(Reflect.get(value, "write"))
+
 const readRendererOutput = (renderer: object): RendererOutput | undefined => {
   const stdout = readRendererProperty(renderer, "stdout")
   const realStdoutWrite = readRendererProperty(renderer, "realStdoutWrite")
-  if (!isWriteStream(stdout) || !isWriteFunction(realStdoutWrite)) return undefined
+  if (!isWritableStream(stdout) || !isWriteFunction(realStdoutWrite)) return undefined
   return { stdout, realStdoutWrite }
 }
 
@@ -113,14 +112,28 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
   protected renderModeLabel(model: Model): void {
     let usageText = ""
     if (model.currentThreadId !== undefined && model.contextUsage?._tag === "Available") {
-      const value = ContextMeter.meter(model.contextUsage, {
-        cells: this.modeLabel.width < 40 ? 4 : 8,
-        phase: this.loaderPhase,
-        animated: model.busy || model.activity !== undefined,
-      })
-      usageText = `${value.glyphs.join("")} ${value.percent}%`
+      const streaming = model.busy || model.activity?._tag === "Streaming"
+      const animatedContext =
+        streaming || model.contextAnimation.compactFromPercent !== undefined || model.contextAnimation.flashTicks > 0
+      const cells = animatedContext ? 8 : 4
+      const value = ContextMeter.meter(model.contextUsage, { cells })
+      const glyphs =
+        streaming || model.contextAnimation.compactFromPercent !== undefined || model.contextAnimation.flashTicks > 0
+          ? ContextMeter.animatedGlyphs(model.contextUsage, {
+              cells,
+              tick: model.contextAnimation.compactTick ?? model.animationTick + this.loaderPhase,
+              streaming,
+              ...(model.contextAnimation.compactFromPercent === undefined
+                ? {}
+                : { compactFromPercent: model.contextAnimation.compactFromPercent }),
+              ...(model.contextAnimation.flashTicks > 0 ? { flashTicks: model.contextAnimation.flashTicks } : {}),
+            })
+          : value.glyphs
+      usageText = `${animatedContext ? "ctx " : ""}${glyphs.join("")} ${value.percent}%`
     } else if (model.currentThreadId !== undefined && model.contextUsage?._tag === "Loading") {
-      usageText = `${ContextMeter.loadingMeter(this.loaderPhase, { cells: 4 }).join("")} —`
+      usageText = model.busy
+        ? `ctx ${ContextMeter.loadingMeter(model.animationTick + this.loaderPhase, { cells: 8 }).join("")}`
+        : "▓░░░ —"
     } else if (model.usageDisplay === "time") {
       if (model.usageTime?._tag === "Available")
         usageText = formatActiveTime(activeTimeAt(model.usageTime, this.currentTimeMillis()))
@@ -201,7 +214,7 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
       if (label !== undefined)
         this.statusLabel.content = new StyledText([
           fg(toOpenColor(colors.text))(" "),
-          fg(toOpenColor(colors.blue))(loaderFrame(label, this.loaderPhase)),
+          fg(toOpenColor(colors.blue))(loaderFrame(label, current.animationTick + this.loaderPhase)),
           dim(fg(toOpenColor(colors.text))(` ${label} `)),
         ])
       const glyph = this.toolSpinner.toBraille()
@@ -291,7 +304,7 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
   protected readonly physicalTerminalSize = (width: number, height: number) => {
     if (readRendererProperty(this.renderer, "_usesProcessStdout") !== true) return { width, height }
     const stream = readRendererProperty(this.renderer, "stdout")
-    const output = isWriteStream(stream) ? stream : undefined
+    const output = isDimensionStream(stream) ? stream : undefined
     const physicalWidth = output?.columns
     const physicalHeight = output?.rows
     const currentWidth =

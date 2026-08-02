@@ -44,10 +44,12 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
     if (event.selectionEpoch !== state.selectionEpoch || event.threadId !== state.model.currentThreadId)
       return unchanged(state)
     if (state.usageRevision !== undefined && event.revision < state.usageRevision) return unchanged(state)
-    const contextUsage =
-      event.context._tag === "Unavailable" && state.model.contextUsage?._tag === "Available"
-        ? state.model.contextUsage
-        : event.context
+    let contextUsage = state.model.contextUsage
+    if (event.context !== undefined) {
+      contextUsage = event.context
+      if (event.context._tag === "Unavailable" && state.model.contextUsage?._tag === "Available")
+        contextUsage = state.model.contextUsage
+    }
     const availableUsageCost = event.cost._tag === "Available" ? event.cost : state.lastAvailableUsageCost
     const threadCostUsd =
       availableUsageCost?._tag === "Available" ? availableUsageCost.usd : (state.threadCostUsd ?? state.model.costUsd)

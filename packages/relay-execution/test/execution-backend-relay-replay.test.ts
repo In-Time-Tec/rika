@@ -14,7 +14,7 @@ import { start } from "./current-execution-route"
 import { layer as relayLayer } from "../src/relay/execution/relay-execution-layer"
 import { fixture as testSupport } from "./execution-backend-relay-fixture"
 import type { LayerOptions } from "../src/relay/execution/relay-execution-layer"
-const { runNative } = testSupport
+const { runNative, testModelRegistration } = testSupport
 const provide = <A, E, R, ROut, E2, RIn>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<ROut, E2, RIn>) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -46,7 +46,7 @@ const withBackend = <A, E extends object, AdditionalTools extends Record<string,
         relayLayer({
           filename: `${directory}/execution.db`,
           workspace: directory,
-          registration: registration?.(fixture) ?? fixture.registration,
+          registration: testModelRegistration(registration?.(fixture) ?? fixture.registration),
           selection: fixture.selection,
           modelVariantPolicy: "fixed-selection",
           ...layerOptions,

@@ -59,6 +59,7 @@ export const defaultModelResilience: ModelResilience.Interface = {
   classify: ModelResilience.defaultClassify,
   resolve: ModelResilience.defaultResolveFailure,
   retrySchedule: Schedule.exponential("500 millis", 2).pipe(Schedule.jittered, Schedule.upTo({ times: 3 })),
+  invalidToolCallCorrectionLimit: 2,
 }
 export const route: {
   readonly modelRoutesForExecution: typeof Route.modelRoutesForExecution
@@ -96,6 +97,10 @@ export const layer = <
   ServiceContract,
   BackendError | PlatformError.PlatformError | Runtime.AcquisitionError,
   Crypto.Crypto | ExternalToolRuntimeRequirements<RuntimeRequirements>
-> => makeRelayLayer(options)
+> =>
+  makeRelayLayer({
+    ...options,
+    modelResilience: options.modelResilience ?? defaultModelResilience,
+  })
 
 void ExecutionService

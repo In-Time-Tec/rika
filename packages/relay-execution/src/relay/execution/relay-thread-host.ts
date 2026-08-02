@@ -102,6 +102,7 @@ export const hostRegistration: Effect.Effect<ModelRegistry.Registration, Platfor
       provider: hostSelection.provider,
       model: hostSelection.model,
       layer: Layer.succeed(LanguageModel.LanguageModel, service),
+      toolJsonSchemaCompiler: (tool: Tool.Any) => Effect.succeed(Tool.getJsonSchema(tool)),
     })
   })
 

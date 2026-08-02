@@ -18,9 +18,33 @@ export interface Meter {
 
 const partialGlyphs = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"] as const
 
+const meterGlyphs = {
+  fill: "━",
+  track: "╌",
+  muncherOpen: "ᗧ",
+  muncherClosed: "ᗤ",
+  vacuum: "≪",
+  flash: "✦",
+  scanner: "▓",
+  pellet: "·",
+} as const
+
+const glyphFallbacks = {
+  muncherOpen: "C",
+  muncherClosed: "c",
+} as const
+
+const glyphCapabilities = {
+  muncher: true,
+} as const
+
+const muncherGlyphs: { readonly open: string; readonly closed: string } = glyphCapabilities.muncher
+  ? { open: meterGlyphs.muncherOpen, closed: meterGlyphs.muncherClosed }
+  : { open: glyphFallbacks.muncherOpen, closed: glyphFallbacks.muncherClosed }
+
 export const usableTokens = (reading: Reading): number => Math.max(0, reading.contextWindow - reading.reserveTokens)
 
-export const pressure = (reading: Reading): number => {
+const pressure = (reading: Reading): number => {
   const usable = usableTokens(reading)
   if (usable === 0) return reading.inputTokens > 0 ? 1 : 0
   return Math.max(0, reading.inputTokens / usable)
@@ -64,18 +88,44 @@ export const meter: {
   },
 )
 
-interface LoadingMeterOptions {
-  readonly cells?: number
-}
-
 export const loadingMeter: {
-  (phase: number, options?: LoadingMeterOptions): ReadonlyArray<string>
-  (options?: LoadingMeterOptions): (phase: number) => ReadonlyArray<string>
+  (phase: number, options?: { readonly cells?: number }): ReadonlyArray<string>
+  (options?: { readonly cells?: number }): (phase: number) => ReadonlyArray<string>
 } = Function.dual(
   (args) => typeof args[0] === "number",
-  (phase: number, options: LoadingMeterOptions = {}): ReadonlyArray<string> => {
+  (phase: number, options: { readonly cells?: number } = {}): ReadonlyArray<string> => {
     const width = Math.max(1, Math.floor(options.cells ?? 8))
-    const highlight = Math.abs(Math.floor(phase)) % width
-    return Array.from({ length: width }, (_, index) => (index === highlight ? "▓" : "░"))
+    const position = Math.abs(Math.floor(phase)) % width
+    return Array.from({ length: width }, (_, index) => (index === position ? meterGlyphs.scanner : "░"))
   },
 )
+
+export interface AnimatedMeterOptions {
+  readonly cells: number
+  readonly tick: number
+  readonly streaming?: boolean
+  readonly compactFromPercent?: number
+  readonly flashTicks?: number
+}
+
+export const animatedGlyphs: {
+  (reading: Reading, options: AnimatedMeterOptions): ReadonlyArray<string>
+  (options: AnimatedMeterOptions): (reading: Reading) => ReadonlyArray<string>
+} = Function.dual(2, (reading: Reading, options: AnimatedMeterOptions): ReadonlyArray<string> => {
+  const value = meter(reading, { cells: options.cells })
+  const filled = Math.max(0, Math.min(options.cells, Math.round(value.pressure * options.cells)))
+  const compactFrom =
+    options.compactFromPercent === undefined ? filled : Math.round((options.compactFromPercent / 100) * options.cells)
+  const visibleFill =
+    compactFrom > filled
+      ? Math.max(filled, compactFrom - Math.max(1, Math.floor((Math.abs(options.tick) + 1) / 2)))
+      : filled
+  return Array.from({ length: options.cells }, (_, index) => {
+    if (compactFrom > filled && index === visibleFill) return meterGlyphs.vacuum
+    if (index === filled - 1 && options.flashTicks !== undefined && options.flashTicks > 0) return meterGlyphs.flash
+    if (index === filled - 1 && options.streaming === true)
+      return options.tick % 2 === 0 ? muncherGlyphs.open : muncherGlyphs.closed
+    if (index < visibleFill) return meterGlyphs.fill
+    return options.streaming === true ? meterGlyphs.pellet : meterGlyphs.track
+  })
+})

@@ -70,6 +70,9 @@ export class SurfaceState {
   public workspaceLabel!: TextRenderable
   public paletteBox!: BoxRenderable
   public palette!: TextRenderable
+  public contextDividerOne!: TextRenderable
+  public contextDividerTwo!: TextRenderable
+  public contextFooter!: TextRenderable
   public overlayEditor!: EditBufferRenderable & { sync(text: string, cursor: number): void }
   public sidebar!: TextRenderable
   public changedFilesBox!: ScrollBoxRenderable & {

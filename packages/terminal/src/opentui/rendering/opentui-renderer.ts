@@ -1,13 +1,43 @@
-import { fg, StyledText, type TextChunk } from "@opentui/core"
+import { fg, RGBA, StyledText, type TextChunk } from "@opentui/core"
 import { Function } from "effect"
 import type { Model } from "../../state/model/terminal-state"
-import { colors } from "../../presentation/terminal/terminal-theme"
+import { colors, TerminalColor } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "./terminal-text-adapter"
 import { orderedTranscriptItems, transcriptUnits } from "../../presentation/transcript/transcript-row"
 import { offsetUnitRange } from "./opentui-render-transcript-window"
 import { transcriptUnitBuilder } from "./opentui-render-unit"
 import { idleSpinnerFrame } from "./opentui-spinner"
 import type { UnitLineRange } from "./opentui-render-transcript-window"
+const terminalColors = Object.values(colors).filter((value): value is TerminalColor => value instanceof TerminalColor)
+const restoreTerminalColor = (value: RGBA): TerminalColor | undefined => {
+  if (value.intent === "indexed")
+    return terminalColors.find((color) => color.intent === "indexed" && color.slot === value.slot)
+  if ("token" in value && typeof value.token === "string") {
+    const slot = /^ansi-(\d+)$/.exec(value.token)?.[1]
+    if (slot !== undefined)
+      return terminalColors.find((color) => color.intent === "indexed" && color.slot === Number(slot))
+  }
+  const ints = [
+    Math.round(value.r * 255),
+    Math.round(value.g * 255),
+    Math.round(value.b * 255),
+    Math.round(value.a * 255),
+  ]
+  return terminalColors.find((color) => color.toInts().every((channel, index) => channel === ints[index]))
+}
+const preserveColorIdentity = (chunks: ReadonlyArray<TextChunk>): void => {
+  for (const chunk of chunks) {
+    if (chunk.fg instanceof RGBA) {
+      const color = restoreTerminalColor(chunk.fg)
+      if (color !== undefined) Reflect.set(chunk, "fg", color)
+    }
+    if (chunk.bg instanceof RGBA) {
+      const color = restoreTerminalColor(chunk.bg)
+      if (color !== undefined) Reflect.set(chunk, "bg", color)
+    }
+  }
+}
+
 export const buildTranscript: {
   (model: Model, spinnerFrame?: string): { styled: StyledText; ranges: ReadonlyArray<UnitLineRange> }
   (spinnerFrame?: string): (model: Model) => { styled: StyledText; ranges: ReadonlyArray<UnitLineRange> }
@@ -35,6 +65,7 @@ export const buildTranscript: {
       ranges.push({ ...offsetUnitRange(built.root, offset), gapBefore: renderedUnits > 1 })
       for (const nested of built.nested) ranges.push(offsetUnitRange(nested, offset))
     }
+    preserveColorIdentity(chunks)
     return { styled: new StyledText(chunks), ranges }
   },
 )

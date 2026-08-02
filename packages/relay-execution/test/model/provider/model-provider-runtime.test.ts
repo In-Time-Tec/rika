@@ -14,7 +14,7 @@ import { layer as relayLayer } from "../../../src/relay/execution/relay-executio
 import * as RikaToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import { Database } from "bun:sqlite"
 import { Cause, ConfigProvider, Context, Effect, FileSystem, Layer, Redacted, Schema, Scope, Stream } from "effect"
-import { LanguageModel, Response as AiResponse } from "effect/unstable/ai"
+import { LanguageModel, Response as AiResponse, Tool } from "effect/unstable/ai"
 import { executionModelRoutes, executionRoutePin, modelRoutesForExecution } from "./model-provider-fixture"
 import { bedrockAuthRefreshTestLayer } from "../../../src/model/provider/model-provider-runtime"
 import * as ModelProviderRuntime from "../../../src/model/provider/model-provider-runtime"
@@ -411,6 +411,7 @@ test("compacts a restored durable session and replays a nested OpenAI Responses 
             ...(preparedRegistration.classifyFailure === undefined
               ? {}
               : { classifyFailure: preparedRegistration.classifyFailure }),
+            toolJsonSchemaCompiler: (tool: Tool.Any) => Effect.succeed(Tool.getJsonSchema(tool)),
           })
           const summarySelection = {
             provider: "test",
@@ -427,6 +428,7 @@ test("compacts a restored durable session and replays a nested OpenAI Responses 
           const summaryRegistration = yield* ModelRegistry.registration({
             ...summarySelection,
             layer: Layer.succeed(LanguageModel.LanguageModel, summaryModel),
+            toolJsonSchemaCompiler: (tool: Tool.Any) => Effect.succeed(Tool.getJsonSchema(tool)),
           })
           const backendContext = yield* Layer.build(
             relayLayer({

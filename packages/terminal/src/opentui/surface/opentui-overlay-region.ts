@@ -58,6 +58,11 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
     this.paletteBox.visible = overlay !== undefined
     this.palette.visible = this.paletteBox.visible
     this.paletteBox.bottomTitle = ""
+    this.contextDividerOne.visible = false
+    this.contextDividerTwo.visible = false
+    this.contextFooter.visible = false
+    this.modeLabel.visible = true
+    this.paletteBox.overflow = "hidden"
     let cursorEditor: ProjectedEditorRenderable | undefined =
       model.shortcutsOpen || (threadSidebarVisible && model.threadSidebar.focused) ? undefined : this.composerEditor
     if (overlay === "palette") {
@@ -88,7 +93,7 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
       cursorEditor = undefined
     } else if (overlay === "context") {
       const boxWidth = Math.min(58, contentWidth)
-      const boxHeight = Math.min(9, Math.max(1, composerTop))
+      const boxHeight = model.width <= 24 ? Math.min(12, model.height) : Math.min(9, Math.max(1, composerTop))
       this.paletteBox.width = boxWidth
       this.paletteBox.height = boxHeight
       this.paletteBox.left = contentLeft + Math.max(0, contentWidth - boxWidth)
@@ -98,13 +103,33 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
       this.paletteBox.titleAlignment = "left"
       this.paletteBox.bottomTitle = " Ctrl+Y toggle · esc "
       this.paletteBox.bottomTitleAlignment = "right"
+      if (model.width <= 24) {
+        this.modeLabel.visible = false
+        this.paletteBox.overflow = "visible"
+        this.contextFooter.content = "╰── Ctrl+Y toggle ── e…╯"
+        this.contextFooter.width = boxWidth
+        this.contextFooter.left = -1
+        this.contextFooter.top = 10
+        this.contextFooter.visible = true
+        const divider = (label: string) => `├─ ${label} ${"─".repeat(Math.max(0, boxWidth - label.length - 5))}┤`
+        this.contextDividerOne.content = divider("Window")
+        this.contextDividerTwo.content = divider("Session")
+        this.contextDividerOne.width = boxWidth
+        this.contextDividerTwo.width = boxWidth
+        this.contextDividerOne.left = -1
+        this.contextDividerTwo.left = -1
+        this.contextDividerOne.top = 3
+        this.contextDividerTwo.top = 6
+        this.contextDividerOne.visible = true
+        this.contextDividerTwo.visible = true
+      }
       this.palette.content = contextDetails(
         model,
         Math.max(1, boxWidth - 4),
         Math.max(1, boxHeight - 2),
         this.currentTimeMillis(),
       )
-      cursorEditor = this.composerEditor
+      cursorEditor = undefined
     } else if (overlay === "files") {
       const entries = filteredFiles(model).map((file) => `@${file}`)
       const maxRows = Math.max(1, Math.min(20, composerTop - 1))

@@ -21,6 +21,7 @@ const defaultModelResilience: ModelResilience.Interface = {
   classify: ModelResilience.defaultClassify,
   resolve: ModelResilience.defaultResolveFailure,
   retrySchedule: Schedule.exponential("500 millis", 2).pipe(Schedule.jittered, Schedule.upTo({ times: 3 })),
+  invalidToolCallCorrectionLimit: 2,
 }
 
 export interface RouteFailure {
@@ -200,7 +201,7 @@ const configuredLayer: (
           compaction,
           oracleCompaction,
           modelVariantPolicy,
-          ...(testModel === undefined ? { modelResilience: defaultModelResilience } : {}),
+          modelResilience: defaultModelResilience,
           toolRuntimeLayerForWorkspace: (workspace) => options.toolRuntimeLayerForWorkspace(workspace),
           resolveWorkspace: () => Effect.succeed(options.workspace),
           ...(options.webSearchCredentials === undefined ? {} : { webSearchCredentials: options.webSearchCredentials }),

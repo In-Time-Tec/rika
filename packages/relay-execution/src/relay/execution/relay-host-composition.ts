@@ -49,13 +49,15 @@ export const makeHostRuntime = <
     toolExecutionPolicy,
   })
   const workflowHandlers = makeWorkflowHost({ options, relayClient, addressId, toolExecutionPolicy, childResult })
-  return Runtime.layerEmbedded({
+  const runtimeLayer = Runtime.layerEmbedded({
     database,
     languageModelLayer,
+    ...(options.modelResilience === undefined ? {} : { modelCallPolicy: options.modelResilience }),
     toolRuntimeLayer,
     blobStoreLayer: DataBlobStore.layer,
     promptAssemblerLayer,
     childFanOutHostLayer: fanOutHandlers,
     workflowDefinitionHostLayer: workflowHandlers,
   })
+  return runtimeLayer
 }

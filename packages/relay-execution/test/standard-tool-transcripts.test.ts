@@ -1,5 +1,6 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { TestModel } from "@batonfx/test"
+import { ModelResilience } from "@batonfx/core"
 import { Catalog } from "@rika/coding-tools/coding-tool-catalog"
 import * as Runtime from "@rika/coding-tools/coding-tool-runtime"
 import { expect, test } from "vitest"
@@ -7,6 +8,9 @@ import { Effect, FileSystem, Layer, Redacted, Schema } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { layer } from "../src/relay/execution/relay-execution-layer"
 import { start } from "./current-execution-route"
+import { fixture as testSupport } from "./execution-backend-relay-fixture"
+
+const { testModelRegistration } = testSupport
 
 const cases = [
   ["grep", { pattern: "needle", regex: false }, "pattern"],
@@ -52,11 +56,12 @@ for (const [name, parameters, malformedField] of cases) {
         const backendLayer = layer({
           filename: `${directory}/execution.db`,
           workspace: directory,
-          registration: fixture.registration,
+          registration: testModelRegistration(fixture.registration),
           selection: fixture.selection,
           modelVariantPolicy: "fixed-selection",
           webSearchCredentials: { parallel: Redacted.make("web-test-key") },
           toolRuntimeLayer: runtimeLayer,
+          modelResilience: { ...ModelResilience.none, invalidToolCallCorrectionLimit: 0 },
         })
         const backendContext = yield* Layer.build(backendLayer)
         return yield* Effect.gen(function* () {
@@ -119,11 +124,12 @@ for (const [name, parameters, malformedField] of cases) {
                   layer({
                     filename: `${directory}/execution.db`,
                     workspace: directory,
-                    registration: fixture.registration,
+                    registration: testModelRegistration(fixture.registration),
                     selection: fixture.selection,
                     modelVariantPolicy: "fixed-selection",
                     webSearchCredentials: { parallel: Redacted.make("web-test-key") },
                     toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "unexpected", truncated: false })),
+                    modelResilience: { ...ModelResilience.none, invalidToolCallCorrectionLimit: 0 },
                   }),
                 )
                 return yield* Effect.gen(function* () {

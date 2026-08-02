@@ -3,7 +3,7 @@ import * as AuthenticationOperation from "./authentication-operation-dispatch"
 import * as ExecutionRecovery from "./execution-recovery-dispatch"
 import * as ExtensionOperations from "./../contract/extension-operation"
 import * as ConfigOperations from "./../contract/configuration-operation"
-import { Console, Deferred, Effect, Layer, Schema, Scope } from "effect"
+import { Console, Deferred, Effect, FileSystem, Layer, Option, Path, Schema, Scope } from "effect"
 import { awaitSessionQuiescence, hasActiveExecutionWork } from "../../execution/lifecycle/product-execution-quiescence"
 import { queuedTurnPromoteMaxAgeMs, staleQueuedTurnsError } from "../../thread/queue/pending-turn-policy"
 import { OperationUnavailable } from "../contract/product-operation"
@@ -109,6 +109,9 @@ export const productLayer = <
       Scope.Scope
     > {
       const ownerScope = yield* Effect.scope
+      const console = yield* Console.Console
+      const fileSystem = yield* Effect.serviceOption(FileSystem.FileSystem)
+      const path = yield* Effect.serviceOption(Path.Path)
       let activitySequence = 0
       const interactiveSinks = new Map<number, (origin: number, event: any) => void>()
       const sessionThreadViews = new Map<number, () => string | undefined>()
@@ -157,6 +160,9 @@ export const productLayer = <
         options,
         state,
         schedule,
+        console,
+        fileSystem: Option.getOrUndefined(fileSystem),
+        path: Option.getOrUndefined(path),
         executionDependencies: state.executionDependencies,
         hasActiveExecutionWork,
         stopActiveExecutionWorkWithProjection: state.stopActiveExecutionWorkWithProjection,

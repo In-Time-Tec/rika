@@ -1,4 +1,5 @@
 import { AiError, LanguageModel } from "effect/unstable/ai"
+import { Tool } from "effect/unstable/ai"
 import { Context, Effect, Layer, Schema, Stream } from "effect"
 import { ModelRegistry, TestModel } from "@rika/relay-execution/scripted-model-runtime"
 
@@ -68,6 +69,7 @@ export const makeRoutedModel = Effect.fn("TuiApp.makeRoutedModel")(function* (la
     ...fixture.selection,
     layer: Layer.succeed(LanguageModel.LanguageModel, routedModel),
     ...(fixture.registration.metadata === undefined ? {} : { metadata: fixture.registration.metadata }),
+    toolJsonSchemaCompiler: (tool: Tool.Any) => Effect.succeed(Tool.getJsonSchema(tool)),
   })
   return { fixture, registration }
 })

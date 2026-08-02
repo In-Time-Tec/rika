@@ -1,8 +1,31 @@
 import { ModelRegistry, ModelResilience } from "@batonfx/core"
 import { EventHistory } from "@relayfx/sdk"
 import { executionEventHistoryFor } from "@rika/configuration/profile-data-paths"
-import { Effect, Layer, Ref, Semaphore, Stream } from "effect"
+import { Context, Effect, Layer, Ref, Semaphore, Stream } from "effect"
 import { LanguageModel } from "effect/unstable/ai"
+
+const failureClassifierKey = Symbol.for("@batonfx/core/model-registry/FailureClassifier")
+const toolJsonSchemaCompilerKey = Symbol.for("@batonfx/core/model-registry/ToolJsonSchemaCompiler")
+
+const attachRegistrationMetadata = (
+  registration: ModelRegistry.Registration,
+  context: Context.Context<ModelRegistry.ModelEnvironment>,
+): Context.Context<ModelRegistry.ModelEnvironment> => {
+  if (registration.classifyFailure === undefined && registration.toolJsonSchemaCompiler === undefined) return context
+  const model = Context.get(context, LanguageModel.LanguageModel)
+  const withCompiler =
+    registration.toolJsonSchemaCompiler === undefined
+      ? model
+      : ModelRegistry.withToolJsonSchemaCompiler(model, registration.toolJsonSchemaCompiler)
+  const registered = {
+    ...withCompiler,
+    ...(registration.classifyFailure === undefined ? {} : { [failureClassifierKey]: registration.classifyFailure }),
+    ...(registration.toolJsonSchemaCompiler === undefined
+      ? {}
+      : { [toolJsonSchemaCompilerKey]: registration.toolJsonSchemaCompiler }),
+  }
+  return Context.add(context, LanguageModel.LanguageModel, registered)
+}
 
 const modelSelectionKey = (selection: ModelRegistry.ModelSelection) =>
   JSON.stringify([selection.provider, selection.model, selection.registrationKey ?? null])
@@ -23,7 +46,12 @@ export const lazyModelRegistryLayer = (
       const makeEntry = (registration: ModelRegistry.Registration) =>
         Effect.cached(
           Layer.buildWithMemoMap(registration.layer, memoMap, scope).pipe(
-            Effect.map((context) => context as import("effect").Context.Context<ModelRegistry.ModelEnvironment>),
+            Effect.map((context) =>
+              attachRegistrationMetadata(
+                registration,
+                context as import("effect").Context.Context<ModelRegistry.ModelEnvironment>,
+              ),
+            ),
           ),
         ).pipe(Effect.map((context) => ({ registration, context }) satisfies Entry))
       const initialEntries = yield* Effect.forEach(registrations, makeEntry)
@@ -89,5 +117,8 @@ export const withResilience = (input: {
     LanguageModel.LanguageModel,
     LanguageModel.LanguageModel.pipe(Effect.map((model) => ModelResilience.apply(model, input.resilience!))),
   ).pipe(Layer.provideMerge(input.registration.layer))
-  return { ...input.registration, layer: modelLayer }
+  return {
+    ...input.registration,
+    layer: modelLayer,
+  }
 }

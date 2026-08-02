@@ -16,7 +16,7 @@ import { routedModel } from "./routed-model"
 import { start } from "./current-execution-route"
 
 import { fixture as testSupport } from "./subagent-spawn-fixture"
-const { encodeJson, decodeToolExecution, parallelRootPrompt, executionModelRoute } = testSupport
+const { encodeJson, decodeToolExecution, parallelRootPrompt, executionModelRoute, testModelRegistration } = testSupport
 test("three Task calls in one model turn run as overlapping durable children", () => {
   const program = Effect.scoped(
     Effect.gen(function* () {
@@ -88,7 +88,7 @@ test("three Task calls in one model turn run as overlapping durable children", (
       const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
-        registration,
+        registration: testModelRegistration(registration),
         selection: fixture.selection,
         modelVariantPolicy: "fixed-selection",
         toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
@@ -216,8 +216,8 @@ test("ReadThread uses the Oracle route and receives the current Thread identity"
       const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
-        registration: main.registration,
-        additionalRegistrations: [oracle.registration],
+        registration: testModelRegistration(main.registration),
+        additionalRegistrations: [testModelRegistration(oracle.registration)],
         selection: main.selection,
         additionalToolkit: ThreadToolkits.ThreadContract.toolkit,
         additionalHandlerLayer: ThreadToolkits.ThreadContract.toolkit.toLayer({

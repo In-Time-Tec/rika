@@ -15,7 +15,7 @@ import { routedModel } from "./routed-model"
 import { start } from "./current-execution-route"
 
 import { fixture as testSupport } from "./subagent-spawn-fixture"
-const { decodeToolExecution, nestedRootPrompt, executionModelRoute } = testSupport
+const { decodeToolExecution, nestedRootPrompt, executionModelRoute, testModelRegistration } = testSupport
 test("depth-one Task agents can use specialists but cannot delegate more Tasks", () => {
   const program = Effect.scoped(
     Effect.gen(function* () {
@@ -75,8 +75,8 @@ test("depth-one Task agents can use specialists but cannot delegate more Tasks",
       const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
-        registration: terraRegistration,
-        additionalRegistrations: [solRegistration],
+        registration: testModelRegistration(terraRegistration),
+        additionalRegistrations: [testModelRegistration(solRegistration)],
         selection: terra.selection,
         toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
       })

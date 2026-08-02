@@ -31140,6 +31140,22 @@
     },
     {
       "from": "packages/relay-execution/test/execution-backend-relay-fixture.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/test/execution-backend-relay-fixture.ts",
+      "to": "external:@batonfx/test",
+      "specifier": "@batonfx/test",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/test/execution-backend-relay-fixture.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -31150,6 +31166,14 @@
       "from": "packages/relay-execution/test/execution-backend-relay-fixture.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/test/execution-backend-relay-fixture.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -31371,9 +31395,57 @@
       "production": true
     },
     {
+      "from": "packages/relay-execution/test/routed-model.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/test/subagent-join-fixture.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/test/subagent-join-fixture.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/test/subagent-join-fixture.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/test/subagent-spawn-fixture.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/relay-execution/test/subagent-spawn-fixture.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/relay-execution/test/subagent-spawn-fixture.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
       "kind": "import",
       "relationship": "runtime",
       "production": true

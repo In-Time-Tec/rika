@@ -1,4 +1,6 @@
-import { Schema } from "effect"
+import { Schema, Effect } from "effect"
+import { ModelRegistry } from "@batonfx/core"
+import { Tool } from "effect/unstable/ai"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 
@@ -38,6 +40,11 @@ const executionModelRoute = (
   compaction: { contextWindow: 372_000, reserveTokens: 128_000, keepRecentTokens: 32_000 },
 })
 
+const testModelRegistration = (registration: ModelRegistry.Registration): ModelRegistry.Registration => ({
+  ...registration,
+  toolJsonSchemaCompiler: (tool: Tool.Any) => Effect.succeed(Tool.getJsonSchema(tool)),
+})
+
 export const fixture = {
   terminal,
   encodeJson,
@@ -45,4 +52,5 @@ export const fixture = {
   parallelRootPrompt,
   nestedRootPrompt,
   executionModelRoute,
+  testModelRegistration,
 }

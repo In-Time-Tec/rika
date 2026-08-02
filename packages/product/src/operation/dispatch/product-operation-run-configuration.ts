@@ -1,4 +1,4 @@
-import { Console, Context, Effect, FileSystem, Function, Layer, Path } from "effect"
+import { Console, Context, Effect, FileSystem, Function, Layer, Option, Path } from "effect"
 import * as ConfigOperations from "../contract/configuration-operation"
 import * as ConfigurationService from "@rika/configuration/configuration-service"
 import type { Input, OperationUnavailable } from "../contract/product-operation"
@@ -17,15 +17,19 @@ const runConfigurationOperationImpl = (
             .forWorkspace(input.clientWorkspace ?? factory.options.defaultWorkspace)
             .pipe(Effect.mapError((error) => unavailable(factory, input, String(error))))
     const context = yield* Layer.build(config.layer)
+    const fileSystem = Option.getOrUndefined(Context.getOption(context, FileSystem.FileSystem)) ?? factory.fileSystem
+    const path = Option.getOrUndefined(Context.getOption(context, Path.Path)) ?? factory.path
+    if (fileSystem === undefined || path === undefined)
+      return yield* unavailable(factory, input, "Configuration filesystem is unavailable")
     yield* ConfigOperations.run(input, config.options).pipe(
       Effect.provideService(ConfigOperations.Adapter, Context.get(context, ConfigOperations.Adapter)),
       Effect.provideService(
         ConfigurationService.ConfigurationService,
         Context.get(context, ConfigurationService.ConfigurationService),
       ),
-      Effect.provideService(FileSystem.FileSystem, Context.get(context, FileSystem.FileSystem)),
-      Effect.provideService(Path.Path, Context.get(context, Path.Path)),
-      Effect.provideService(Console.Console, globalThis.console),
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+      Effect.provideService(Console.Console, factory.console),
       Effect.mapError((error) => unavailable(factory, input, String(error))),
     )
   }).pipe(Effect.scoped)

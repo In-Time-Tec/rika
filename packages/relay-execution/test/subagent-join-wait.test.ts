@@ -12,7 +12,7 @@ import { layer } from "../src/relay/execution/relay-execution-layer"
 import { start } from "./current-execution-route"
 
 import { fixture as testSupport } from "./subagent-join-fixture"
-const { encodeJson, executionModelRoute } = testSupport
+const { encodeJson, executionModelRoute, testModelRegistration } = testSupport
 test("await_subagents suspends on an open child and resumes when the child terminates", () => {
   const program = Effect.scoped(
     Effect.gen(function* () {
@@ -47,8 +47,8 @@ test("await_subagents suspends on an open child and resumes when the child termi
       const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
-        registration: main.registration,
-        additionalRegistrations: [childRegistration],
+        registration: testModelRegistration(main.registration),
+        additionalRegistrations: [testModelRegistration(childRegistration)],
         selection: main.selection,
         toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
       })
@@ -151,8 +151,8 @@ test("a parent that answers without collecting its subagents cancels them", () =
       const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
-        registration: main.registration,
-        additionalRegistrations: [childRegistration],
+        registration: testModelRegistration(main.registration),
+        additionalRegistrations: [testModelRegistration(childRegistration)],
         selection: main.selection,
         toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
       })

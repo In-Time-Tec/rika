@@ -172,7 +172,7 @@ const runExtensionOperationImpl = (
     )
     yield* ExtensionOperations.run(input).pipe(
       Effect.provide(context),
-      Effect.provideService(Console.Console, globalThis.console),
+      Effect.provideService(Console.Console, factory.console),
       Effect.mapError((error) => unavailable(factory, input, error instanceof Error ? error.message : String(error))),
     )
   }).pipe(Effect.scoped)
@@ -201,7 +201,7 @@ const runSystemOperationImpl = (
     const definition = ToolCatalog.get(input.name)
     return definition === undefined
       ? unavailable(factory, input, `Tool ${input.name} does not exist`)
-      : Console.log(factory.encodeJson(definition)).pipe(Effect.provideService(Console.Console, globalThis.console))
+      : Console.log(factory.encodeJson(definition)).pipe(Effect.provideService(Console.Console, factory.console))
   }
   if (input._tag === "Auth" && factory.options.authOperations !== undefined)
     return Effect.scoped(typedRunAuth(input, factory.options.authOperations, factory.options.defaultWorkspace))
@@ -220,7 +220,7 @@ const runSystemOperationImpl = (
       backend: factory.backend,
       encodeJson: factory.encodeJson,
       unavailable: (operationInput: Input, message: string) => unavailable(factory, operationInput, message),
-    }).pipe(Effect.provideService(Console.Console, globalThis.console))
+    }).pipe(Effect.provideService(Console.Console, factory.console))
   if (input._tag === "Thread") {
     const typedSystemExecutionDependencies: Context.Context<
       ThreadRepository.Service | TurnRepository.Service | ThreadSummaryRepository.Service | TranscriptRepository.Service
@@ -244,7 +244,7 @@ const runSystemOperationImpl = (
     }
     return ThreadOperation.run(input, threadDependencies).pipe(
       Effect.provide(typedSystemExecutionDependencies),
-      Effect.provideService(Console.Console, globalThis.console),
+      Effect.provideService(Console.Console, factory.console),
     )
   }
   return unavailable(factory, input)

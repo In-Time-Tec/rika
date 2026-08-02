@@ -16,7 +16,7 @@ import { routedModel } from "./routed-model"
 import { start } from "./current-execution-route"
 
 import { fixture as testSupport } from "./subagent-spawn-fixture"
-const { executionModelRoute } = testSupport
+const { executionModelRoute, testModelRegistration } = testSupport
 test("a nested subagent delegates ReadThread without broadening its Relay scope", () => {
   const program = Effect.scoped(
     Effect.gen(function* () {
@@ -57,8 +57,8 @@ test("a nested subagent delegates ReadThread without broadening its Relay scope"
       const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
-        registration: main.registration,
-        additionalRegistrations: [oracle.registration],
+        registration: testModelRegistration(main.registration),
+        additionalRegistrations: [testModelRegistration(oracle.registration)],
         selection: main.selection,
         additionalToolkit: ThreadToolkits.ThreadContract.toolkit,
         additionalHandlerLayer: ThreadToolkits.ThreadContract.toolkit.toLayer({
@@ -149,6 +149,7 @@ test("parallel Task calls fall back to the pinned main Sol route when no agent r
             TestModel.toolCall("task", { prompt: "Explore beta." }, { id: "call-beta" }),
             TestModel.toolCall("task", { prompt: "Explore gamma." }, { id: "call-gamma" }),
           ]),
+          TestModel.turn([TestModel.toolCall("await_subagents", {}, { id: "join-pinned-tasks" })]),
           TestModel.text("Sol completed alpha."),
           TestModel.text("Sol completed beta."),
           TestModel.text("Sol completed gamma."),
@@ -171,7 +172,7 @@ test("parallel Task calls fall back to the pinned main Sol route when no agent r
       const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
-        registration: sol.registration,
+        registration: testModelRegistration(sol.registration),
         selection: sol.selection,
         toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
       })

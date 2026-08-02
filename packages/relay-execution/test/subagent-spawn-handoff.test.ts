@@ -15,7 +15,7 @@ import { routedModel } from "./routed-model"
 import { start } from "./current-execution-route"
 
 import { fixture as testSupport } from "./subagent-spawn-fixture"
-const { terminal } = testSupport
+const { terminal, testModelRegistration } = testSupport
 test("model spawns a durable Oracle child through the handoff tool and resumes with its result", () => {
   const program = Effect.scoped(
     Effect.gen(function* () {
@@ -45,7 +45,7 @@ test("model spawns a durable Oracle child through the handoff tool and resumes w
       const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
-        registration: fixture.registration,
+        registration: testModelRegistration(fixture.registration),
         selection: fixture.selection,
         modelVariantPolicy: "fixed-selection",
         toolRuntimeLayer: runtimeLayer,
@@ -166,7 +166,7 @@ test("handoff children resolve real workspace tools through their parent Rika tu
       const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
-        registration: fixture.registration,
+        registration: testModelRegistration(fixture.registration),
         selection: fixture.selection,
         modelVariantPolicy: "fixed-selection",
         toolRuntimeLayerForWorkspace: (runtimeWorkspace) =>
@@ -260,7 +260,7 @@ test("parent and handoff child may reuse a model tool-call identifier", () => {
       const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
-        registration: fixture.registration,
+        registration: testModelRegistration(fixture.registration),
         selection: fixture.selection,
         modelVariantPolicy: "fixed-selection",
         toolRuntimeLayer: Runtime.layer(directory).pipe(

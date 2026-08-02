@@ -12,7 +12,7 @@ import { layer } from "../src/relay/execution/relay-execution-layer"
 import { start } from "./current-execution-route"
 
 import { fixture as testSupport } from "./subagent-join-fixture"
-const { encodeJson, executionModelRoute } = testSupport
+const { encodeJson, executionModelRoute, testModelRegistration } = testSupport
 test("a delegation returns a running handle and await_subagents collects the report", () => {
   const program = Effect.scoped(
     Effect.gen(function* () {
@@ -34,8 +34,8 @@ test("a delegation returns a running handle and await_subagents collects the rep
       const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
-        registration: main.registration,
-        additionalRegistrations: [oracle.registration],
+        registration: testModelRegistration(main.registration),
+        additionalRegistrations: [testModelRegistration(oracle.registration)],
         selection: main.selection,
         toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
       })
@@ -113,8 +113,8 @@ test("a silent subagent is collected as a no-report verdict", () => {
       const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
-        registration: main.registration,
-        additionalRegistrations: [oracle.registration],
+        registration: testModelRegistration(main.registration),
+        additionalRegistrations: [testModelRegistration(oracle.registration)],
         selection: main.selection,
         toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
       })
@@ -188,8 +188,8 @@ test("one root batch can start more than four delegations", () => {
       const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
-        registration: main.registration,
-        additionalRegistrations: [child.registration],
+        registration: testModelRegistration(main.registration),
+        additionalRegistrations: [testModelRegistration(child.registration)],
         selection: main.selection,
         toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
       })
@@ -270,8 +270,8 @@ test("collecting one batch allows a later delegation", () => {
       const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
-        registration: main.registration,
-        additionalRegistrations: [child.registration],
+        registration: testModelRegistration(main.registration),
+        additionalRegistrations: [testModelRegistration(child.registration)],
         selection: main.selection,
         toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
       })

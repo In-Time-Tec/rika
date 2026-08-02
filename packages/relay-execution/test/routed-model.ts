@@ -1,6 +1,7 @@
 import { LanguageModel, ModelRegistry } from "@batonfx/core"
 import { TestModel } from "@batonfx/test"
 import { Context, Effect, Layer, Schema, Stream } from "effect"
+import { Tool } from "effect/unstable/ai"
 
 const encodePrompt = Schema.encodeSync(Schema.UnknownFromJsonString)
 
@@ -44,7 +45,11 @@ export const routedModel = ({ lanes, ...options }: RoutedModelInput) =>
     }
     const selection = fixtures[0]!.selection
     const layer = Layer.succeed(LanguageModel.LanguageModel, model)
-    const registration = yield* ModelRegistry.registration({ ...selection, layer })
+    const registration = yield* ModelRegistry.registration({
+      ...selection,
+      layer,
+      toolJsonSchemaCompiler: (tool: Tool.Any) => Effect.succeed(Tool.getJsonSchema(tool)),
+    })
     const requests = Effect.forEach(fixtures, (fixture) => fixture.requests).pipe(
       Effect.map((collected) => collected.flat()),
     )

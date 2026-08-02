@@ -15,7 +15,8 @@ import { createFanOut, start } from "./current-execution-route"
 import { layer as relayLayer } from "../src/relay/execution/relay-execution-layer"
 import { fixture as testSupport } from "./execution-backend-relay-fixture"
 import type { LayerOptions } from "../src/relay/execution/relay-execution-layer"
-const { executionModelRoute, runNative, encodeJson, decodeToolExecution } = testSupport
+const { executionModelRoute, runNative, encodeJson, decodeToolExecution, rawScriptedModel, testModelRegistration } =
+  testSupport
 const provide = <A, E, R, ROut, E2, RIn>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<ROut, E2, RIn>) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -34,20 +35,24 @@ const withBackend = <A, E extends object, AdditionalTools extends Record<string,
     "modelResilience" | "compaction" | "modelVariantPolicy" | "additionalToolkit" | "additionalHandlerLayer"
   > & {
     readonly registration?: (fixture: TestModel.Fixture) => ModelRegistry.Registration
+    readonly rawModel?: boolean
   },
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
       const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-runtime-" })
-      const fixture = yield* TestModel.make(script)
-      const { registration, ...layerOptions } = options ?? {}
+      const { registration, rawModel, ...layerOptions } = options ?? {}
+      const fixture =
+        rawModel === true
+          ? yield* rawScriptedModel(script, { provider: "test", model: "scripted" })
+          : yield* TestModel.make(script)
       return yield* provide(
         run(fixture, directory),
         relayLayer({
           filename: `${directory}/execution.db`,
           workspace: directory,
-          registration: registration?.(fixture) ?? fixture.registration,
+          registration: testModelRegistration(registration?.(fixture) ?? fixture.registration),
           selection: fixture.selection,
           modelVariantPolicy: "fixed-selection",
           ...layerOptions,
@@ -74,6 +79,7 @@ test(
                   const result = yield* start(backend, { threadId: turnId, turnId, prompt: "call tool" })
                   return { result, requests: yield* fixture.requests }
                 }),
+              { rawModel: true },
             )
             expect(outcome.result.status).toBe("completed")
             expect(
@@ -107,6 +113,7 @@ test(
                 prompt: "fail",
               })
             }),
+          { rawModel: true },
         )
         const failures = result.events.filter((event) => event.type === "execution.failed")
         expect(result.status).toBe("failed")
@@ -241,8 +248,8 @@ test(
               relayLayer({
                 filename: `${directory}/execution.db`,
                 workspace: directory,
-                registration: main.registration,
-                additionalRegistrations: [oracle.registration],
+                registration: testModelRegistration(main.registration),
+                additionalRegistrations: [testModelRegistration(oracle.registration)],
                 selection: main.selection,
                 oracleSelection: oracle.selection,
               }),

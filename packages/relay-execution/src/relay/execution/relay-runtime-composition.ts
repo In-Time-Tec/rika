@@ -2,7 +2,7 @@ import { ModelHub } from "@relayfx/sdk"
 import { lazyModelRegistryLayer } from "../../model/routing/relay-model-registry"
 import { error } from "./relay-event-payload"
 import { Cause, Context, Effect, Layer, Scope } from "effect"
-import { ModelRegistry } from "@batonfx/core"
+import { ModelRegistry, ModelResilience } from "@batonfx/core"
 import { BackendError } from "@rika/product/execution-service"
 import type { ToolRuntimeRequirements, LayerOptions } from "./relay-execution-layer"
 import * as RikaToolRuntime from "@rika/coding-tools/coding-tool-runtime"
@@ -42,7 +42,13 @@ export const makeModelRuntimeComposition = <
 } => {
   const { options, relayModelContext } = input
   const modelRegistry = Context.get(relayModelContext, ModelHub.Service).modelRegistry
-  const languageModelLayer = Layer.mergeAll(Layer.succeedContext(relayModelContext), ContextTokenizer.layer)
+  const languageModelLayer = Layer.mergeAll(
+    Layer.succeedContext(relayModelContext),
+    ContextTokenizer.layer,
+    ...(options.modelResilience === undefined
+      ? []
+      : [Layer.succeed(ModelResilience.ModelResilience, options.modelResilience)]),
+  )
   const sharedModelRegistryLayer = Layer.succeed(ModelRegistry.ModelRegistry, modelRegistry)
   const rikaToolRuntimeLayer =
     options.toolRuntimeLayerForWorkspace !== undefined && options.resolveWorkspace !== undefined

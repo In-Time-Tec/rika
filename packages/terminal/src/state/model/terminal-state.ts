@@ -22,6 +22,13 @@ const WorkspaceFilesSchema = Schema.Union([
 ])
 const PaletteStateSchema = Schema.Struct({ open: Schema.Boolean, query: Schema.String, selected: Schema.Finite })
 const ModePickerStateSchema = Schema.Struct({ open: Schema.Boolean, selected: Schema.Finite })
+const ContextAnimationSchema = Schema.Struct({
+  compactFromPercent: Schema.optional(Schema.Finite),
+  compactTick: Schema.optional(Schema.Finite),
+  flashTicks: Schema.Finite,
+  flashed75: Schema.Boolean,
+  flashed90: Schema.Boolean,
+})
 const FilePickerStateSchema = Schema.Struct({
   open: Schema.Boolean,
   query: Schema.String,
@@ -101,6 +108,8 @@ export const Model = Schema.Struct({
   activity: Schema.optional(Activity),
   costUsd: Schema.optional(Schema.Finite),
   contextUsage: Schema.optional(ContextUsage),
+  contextAnimation: ContextAnimationSchema,
+  animationTick: Schema.Finite,
   contextDetailsOpen: Schema.Boolean,
   usageDisplay: Schema.optional(UsageDisplay),
   usageTime: Schema.optional(UsageTime),
@@ -181,6 +190,8 @@ const initialImpl: {
     cancelPending: false,
     busy: false,
     contextUsage: { _tag: "Loading" },
+    contextAnimation: { flashTicks: 0, flashed75: false, flashed90: false },
+    animationTick: 0,
     contextDetailsOpen: false,
     usageDisplay: "cost",
     paletteOpen: false,
