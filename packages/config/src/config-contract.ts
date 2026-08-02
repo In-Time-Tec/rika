@@ -67,6 +67,7 @@ export interface ModelAliasInput {
   readonly displayName?: string
   readonly supportsMedia?: boolean
   readonly limits?: {
+    readonly contextWindow?: number
     readonly maxInputTokens: number
     readonly maxOutputTokens: number
     readonly keepRecentTokens: number
@@ -105,6 +106,7 @@ export interface ModelAlias {
   readonly provider: ProviderId
   readonly candidates: ReadonlyArray<string>
   readonly limits: {
+    readonly contextWindow?: number
     readonly maxInputTokens: number
     readonly maxOutputTokens: number
     readonly keepRecentTokens: number
@@ -278,8 +280,10 @@ const resolveRoute = (settings: Settings, route: RoleRoute, owner: string): Reso
     candidates: alias.candidates,
     model,
     compaction: {
-      contextWindow: alias.limits.maxInputTokens + alias.limits.maxOutputTokens,
-      reserveTokens: alias.limits.maxOutputTokens,
+      contextWindow: alias.limits.contextWindow ?? alias.limits.maxInputTokens + alias.limits.maxOutputTokens,
+      reserveTokens:
+        (alias.limits.contextWindow ?? alias.limits.maxInputTokens + alias.limits.maxOutputTokens) -
+        alias.limits.maxInputTokens,
       keepRecentTokens: alias.limits.keepRecentTokens,
     },
     maxOutputTokens: alias.limits.maxOutputTokens,
@@ -526,6 +530,7 @@ export const decodeSettingsInput: {
         if (!object(alias.limits))
           throw ConfigFileError.make({ path, message: `Model alias ${name} limits must be an object` })
         exactKeys(path, `Model alias ${name} limits`, alias.limits, [
+          "contextWindow",
           "maxInputTokens",
           "maxOutputTokens",
           "keepRecentTokens",
@@ -534,6 +539,20 @@ export const decodeSettingsInput: {
           const limit = alias.limits[key]
           if (typeof limit !== "number" || !Number.isFinite(limit) || limit <= 0)
             throw ConfigFileError.make({ path, message: `Model alias ${name} limits ${key} must be a positive number` })
+        }
+        const window = alias.limits["contextWindow"]
+        if (window !== undefined) {
+          if (typeof window !== "number" || !Number.isFinite(window) || window <= 0)
+            throw ConfigFileError.make({
+              path,
+              message: `Model alias ${name} limits contextWindow must be a positive number`,
+            })
+          const maxInput = alias.limits["maxInputTokens"]
+          if (typeof maxInput === "number" && window < maxInput)
+            throw ConfigFileError.make({
+              path,
+              message: `Model alias ${name} limits contextWindow must be at least maxInputTokens`,
+            })
         }
       }
       if (alias.efforts !== undefined) {

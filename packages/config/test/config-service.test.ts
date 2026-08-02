@@ -57,8 +57,8 @@ describe("ConfigService", () => {
       expect(
         routes.every(
           (route) =>
-            route.compaction.contextWindow === 1_050_000 &&
-            route.compaction.reserveTokens === 128_000 &&
+            route.compaction.contextWindow === 272_000 &&
+            route.compaction.reserveTokens === 13_600 &&
             route.compaction.keepRecentTokens === 32_000,
         ),
       ).toBe(true)

@@ -9,28 +9,28 @@ export const catalog = {
     source,
     id: "gpt-5.6-luna",
     displayName: "GPT-5.6 Luna",
-    limits: { contextWindow: 1_050_000, maxInputTokens: 922_000, maxOutputTokens: 128_000 },
+    limits: { contextWindow: 272_000, maxInputTokens: 258_400, maxOutputTokens: 128_000 },
     efforts: supportedEfforts,
   },
   gpt56Terra: {
     source,
     id: "gpt-5.6-terra",
     displayName: "GPT-5.6 Terra",
-    limits: { contextWindow: 1_050_000, maxInputTokens: 922_000, maxOutputTokens: 128_000 },
+    limits: { contextWindow: 272_000, maxInputTokens: 258_400, maxOutputTokens: 128_000 },
     efforts: supportedEfforts,
   },
   gpt56Sol: {
     source,
     id: "gpt-5.6-sol",
     displayName: "GPT-5.6 Sol",
-    limits: { contextWindow: 1_050_000, maxInputTokens: 922_000, maxOutputTokens: 128_000 },
+    limits: { contextWindow: 272_000, maxInputTokens: 258_400, maxOutputTokens: 128_000 },
     efforts: supportedEfforts,
   },
   gpt55: {
     source,
     id: "gpt-5.5",
     displayName: "GPT-5.5",
-    limits: { contextWindow: 1_050_000, maxInputTokens: 922_000, maxOutputTokens: 128_000 },
+    limits: { contextWindow: 272_000, maxInputTokens: 258_400, maxOutputTokens: 128_000 },
     efforts: ["low", "medium", "high", "xhigh"],
   },
   claudeFable5: {
@@ -82,7 +82,7 @@ export const presets = {
     protocols: ["openai"] as ReadonlyArray<string>,
     optionKeys: ["reasoning", "service_tier"] as ReadonlyArray<string>,
     efforts: supportedEfforts as ReadonlyArray<Effort>,
-    limits: { maxInputTokens: 922_000, maxOutputTokens: 128_000, keepRecentTokens: 32_000 },
+    limits: { contextWindow: 272_000, maxInputTokens: 258_400, maxOutputTokens: 128_000, keepRecentTokens: 32_000 },
     variants: gptVariants,
   },
   claude: {
@@ -95,6 +95,7 @@ export const presets = {
 } as const satisfies Readonly<Record<PresetId, unknown>>
 
 const limits = (model: CatalogModel, keepRecentTokens: number) => ({
+  contextWindow: model.limits.contextWindow,
   maxInputTokens: model.limits.maxInputTokens,
   maxOutputTokens: model.limits.maxOutputTokens,
   keepRecentTokens,
@@ -132,6 +133,6 @@ export const presetForBase = (base: string): PresetId => (base === "fable" || ba
 
 export const defaultCompaction = {
   contextWindow: catalog.gpt56Luna.limits.contextWindow,
-  reserveTokens: catalog.gpt56Luna.limits.maxOutputTokens,
+  reserveTokens: catalog.gpt56Luna.limits.contextWindow - catalog.gpt56Luna.limits.maxInputTokens,
   keepRecentTokens: 32_000,
 }
