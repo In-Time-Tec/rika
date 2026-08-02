@@ -2454,12 +2454,19 @@ export const layer = <
             childRuns: (execution) =>
               Deferred.await(relayClient).pipe(
                 Effect.flatMap((client) => client.executions.inspect(Ids.ExecutionId.make(execution))),
-                Effect.map((inspection) =>
-                  inspection.child_runs.map((child) => ({
-                    childExecutionId: String(child.child_execution_id),
-                    status: child.status,
-                  })),
-                ),
+                Effect.map((inspection) => {
+                  const children = new Map<string, SubagentJoin.ChildRun>()
+                  for (const call of inspection.pending_tool_calls) {
+                    if (!AgentTools.isDelegationToolName(call.tool_name)) continue
+                    const childExecutionId = String(makeChildExecutionId(execution, String(call.tool_call_id)))
+                    children.set(childExecutionId, { childExecutionId, status: "running" })
+                  }
+                  for (const child of inspection.child_runs) {
+                    const childExecutionId = String(child.child_execution_id)
+                    children.set(childExecutionId, { childExecutionId, status: child.status })
+                  }
+                  return [...children.values()]
+                }),
                 Effect.mapError(String),
               ),
             resolveChild: (childExecutionId) =>
