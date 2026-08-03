@@ -16,7 +16,7 @@ import { makePromptAssemblerLayer } from "./relay-execution-prompt-layer"
 import { registerModel, registrationsFor, zeroPriceFromMetadata } from "./relay-execution-routing"
 import * as ClientLayer from "./relay-execution-client-layer"
 import { makeToolComposition } from "./relay-tool-composition"
-import { buildModelContext, makeModelRuntimeComposition } from "./relay-runtime-composition"
+import { buildModelContext, makeModelRuntimeComposition, providerToolRegistration } from "./relay-runtime-composition"
 import { makeHostRuntime } from "./relay-host-composition"
 const addressId = Ids.AddressId.make("address:rika")
 type Service = ExecutionServiceType
@@ -70,7 +70,9 @@ export const makeRelayLayer = <
             addressId,
           })
           const { toolkit, runnerToolkit, handlerLayer } = delegationLayers
-          const initialRegistrations = [...registrationsFor(options), yield* hostRegistration]
+          const providerRegistration = (registration: import("@batonfx/core").ModelRegistry.Registration) =>
+            providerToolRegistration(registration, toolkit)
+          const initialRegistrations = [...registrationsFor(options), yield* hostRegistration].map(providerRegistration)
           const relayModelContext = yield* buildModelContext(initialRegistrations)
           const { languageModelLayer, sharedModelRegistryLayer, rikaToolRuntimeLayer, modelRegistry } =
             makeModelRuntimeComposition({
@@ -102,7 +104,8 @@ export const makeRelayLayer = <
             registerModels: (registrations) =>
               Effect.forEach(
                 registrations,
-                (registration) => registerModel(modelRegistry, registration, options.modelResilience),
+                (registration) =>
+                  registerModel(modelRegistry, providerRegistration(registration), options.modelResilience),
                 { discard: true },
               ),
           }).pipe(Layer.provide(runtimeLayer), Layer.provide(promoterRegistryLayer))

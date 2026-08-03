@@ -1,4 +1,4 @@
-import { CliRenderEvents } from "@opentui/core"
+import { CliRenderEvents, StyledText, dim, fg } from "@opentui/core"
 import stringWidth from "string-width"
 import { filter } from "../../presentation/terminal/command-palette"
 import { colors } from "../../presentation/terminal/terminal-theme"
@@ -18,8 +18,12 @@ import type { ProjectedEditorRenderable } from "./opentui-surface-construction"
 import { SurfaceSidebarRegion } from "./opentui-sidebar-region"
 
 export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
-  private overlayDivider(label: string, width: number): string {
-    return `├─ ${label} ${"─".repeat(Math.max(0, width - label.length - 5))}┤`
+  private overlayDivider(label: string, width: number): StyledText {
+    return new StyledText([
+      fg(colors.text)("├─ "),
+      dim(fg(colors.muted)(label)),
+      fg(colors.text)(` ${"─".repeat(Math.max(0, width - label.length - 5))}┤`),
+    ])
   }
 
   private renderOverlayHints(
@@ -189,7 +193,7 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
       cursorEditor = undefined
     } else if (overlay === "context") {
       const boxWidth = Math.min(68, contentWidth)
-      const boxHeight = model.width <= 24 ? Math.min(12, model.height) : Math.min(18, Math.max(1, composerTop))
+      const boxHeight = model.width <= 24 ? Math.min(12, model.height) : Math.min(14, Math.max(1, composerTop))
       this.paletteBox.width = boxWidth
       this.paletteBox.height = boxHeight
       this.paletteBox.left = contentLeft + Math.max(0, contentWidth - boxWidth)
@@ -216,7 +220,7 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
         this.contextDividerTwo.top = 6
         this.contextDividerOne.visible = true
         this.contextDividerTwo.visible = true
-      } else if (boxHeight >= 18) {
+      } else if (boxHeight >= 14) {
         this.paletteBox.overflow = "visible"
         this.contextDividerOne.content = this.overlayDivider("Window", boxWidth)
         this.contextDividerTwo.content = this.overlayDivider("Session", boxWidth)
@@ -224,8 +228,8 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
         this.contextDividerTwo.width = boxWidth
         this.contextDividerOne.left = -1
         this.contextDividerTwo.left = -1
-        this.contextDividerOne.top = 6
-        this.contextDividerTwo.top = 11
+        this.contextDividerOne.top = 5
+        this.contextDividerTwo.top = 8
         this.contextDividerOne.visible = true
         this.contextDividerTwo.visible = true
       }

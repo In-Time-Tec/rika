@@ -264,6 +264,8 @@ const reduceOverlayImpl = (
           turns: message.turns.map((turn) => ({ prompt: turn.prompt, units: [...turn.units] })),
         }),
       }
+    case "ThreadPreviewFailed":
+      return { ...model, threadPreview: { _tag: "Failed", message: message.message } }
     case "ComposerReplaced":
       return {
         ...model,

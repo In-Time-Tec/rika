@@ -1,10 +1,11 @@
 import { Schema } from "effect"
+import { Content } from "./agent-tool-content"
 
 export const Report = Schema.Struct({
   _tag: Schema.tag("Report"),
   childExecutionId: Schema.String,
   status: Schema.Literal("completed"),
-  output: Schema.NonEmptyArray(Schema.Unknown),
+  output: Schema.NonEmptyArray(Content),
 })
 export type Report = typeof Report.Type
 
@@ -22,7 +23,7 @@ export const Failed = Schema.Struct({
   childExecutionId: Schema.String,
   status: Schema.Literal("failed"),
   reason: Schema.String,
-  output: Schema.NonEmptyArray(Schema.Unknown),
+  output: Schema.NonEmptyArray(Content),
 })
 export type Failed = typeof Failed.Type
 
@@ -31,6 +32,6 @@ export const Cancelled = Schema.Struct({
   childExecutionId: Schema.String,
   status: Schema.Literal("cancelled"),
   reason: Schema.String,
-  output: Schema.Array(Schema.Unknown),
+  output: Schema.Array(Content),
 })
 export type Cancelled = typeof Cancelled.Type

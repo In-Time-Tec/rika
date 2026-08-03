@@ -199,11 +199,13 @@ test("keeps a typed draft intact and blocks submission while a thread is loading
   expect(canSubmit(update(afterEnter, { _tag: "ThreadOpenCompleted" }))).toBe(true)
 })
 
-test("wires the welcome orb to active ticks and returns idle rendering to its first frame", () => {
-  const idle = { ...initial("/work", "high"), animationTick: 7 }
-  expect(animationActive(idle)).toBe(false)
+test("wires the welcome orb to a finite startup animation and active execution ticks", () => {
+  let welcome = { ...initial("/work", "high"), animationTick: 7 }
+  expect(animationActive(welcome)).toBe(true)
   expect(text(welcomeContent(120, 30, 0, "high").chunks)).not.toBe(text(welcomeContent(120, 30, 1, "high").chunks))
-  expect(animationActive({ ...idle, busy: true, activity: { _tag: "Waiting" } })).toBe(true)
+  for (let index = 0; index < 24; index += 1) welcome = update(welcome, { _tag: "AnimationTicked" })
+  expect(animationActive(welcome)).toBe(false)
+  expect(animationActive({ ...welcome, busy: true, activity: { _tag: "Waiting" } })).toBe(true)
 })
 
 test("places the welcome orb and copy at the v0.1.7 anchors with mode-colored intensity tiers", () => {

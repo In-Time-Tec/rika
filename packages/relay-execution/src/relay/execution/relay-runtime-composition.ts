@@ -8,6 +8,13 @@ import type { ToolRuntimeRequirements, LayerOptions } from "./relay-execution-la
 import * as RikaToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as ContextTokenizer from "../../context-tokenizer"
 import { routedToolRuntimeLayer } from "./relay-tool-runtime"
+import { withProviderToolWireSchemas } from "../../model/routing/relay-provider-tool-wire"
+import type { Toolkit } from "effect/unstable/ai"
+
+export const providerToolRegistration: {
+  (registration: ModelRegistry.Registration, toolkit: Toolkit.Any): ModelRegistry.Registration
+  (toolkit: Toolkit.Any): (registration: ModelRegistry.Registration) => ModelRegistry.Registration
+} = withProviderToolWireSchemas
 
 export type RelayModelContext = Context.Context<
   ModelHub.Service | ModelRegistry.ModelRegistry | import("@relayfx/sdk").LanguageModelService.Service

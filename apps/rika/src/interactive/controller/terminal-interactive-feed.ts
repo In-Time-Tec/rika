@@ -136,6 +136,12 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
       ? (state.lastAvailableUsageCost ??
         (state.model.usageCost?._tag === "Available" ? state.model.usageCost : undefined))
       : undefined
+    const preservedContextUsage =
+      sameThread && state.model.contextUsage?._tag === "Available" ? state.model.contextUsage : undefined
+    const preservedUsageTokens =
+      sameThread && state.model.usageTokens?._tag === "Available" ? state.model.usageTokens : undefined
+    const preservedUsageTime =
+      sameThread && state.model.usageTime?._tag === "Available" ? state.model.usageTime : undefined
     let lifecycle: Pick<Model, "activeTurnId" | "busy" | "activity">
     if (lifecycleFresh)
       lifecycle = {
@@ -148,14 +154,13 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
     else lifecycle = { activeTurnId: undefined, busy: false, activity: undefined }
     const model = cleared({
       ...state.model,
-      ...(preservedUsageCost === undefined
-        ? {
-            usageCost: { _tag: "Loading" as const },
-            usageTokens: { _tag: "Loading" as const },
-            usageTime: { _tag: "Loading" as const },
-            contextUsage: { _tag: "Loading" as const },
-          }
-        : { usageCost: preservedUsageCost }),
+      usageCost: preservedUsageCost ?? { _tag: "Loading" as const },
+      usageTokens: preservedUsageTokens ?? { _tag: "Loading" as const },
+      usageTime: preservedUsageTime ?? { _tag: "Loading" as const },
+      contextUsage: preservedContextUsage ?? { _tag: "Loading" as const },
+      contextAnimation: sameThread
+        ? state.model.contextAnimation
+        : { flashTicks: 0, flashed75: false, flashed90: false },
       ...lifecycle,
       currentThreadId: String(event.thread.id),
       currentThreadTitle: event.thread.title,
@@ -178,6 +183,11 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
     })
     const selectedCostUsd =
       event.threadCostUsd ?? (sameThread ? (state.threadCostUsd ?? preservedUsageCost?.usd) : undefined)
+    const {
+      threadCostUsd: _threadCostUsd,
+      lastAvailableUsageCost: _lastAvailableUsageCost,
+      ...stateWithoutRetainedUsage
+    } = state
     const activeProjection =
       projectionTurn === undefined
         ? undefined
@@ -252,7 +262,7 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
       )
       return {
         state: {
-          ...state,
+          ...stateWithoutRetainedUsage,
           selectionEpoch: event.selectionEpoch,
           activitySequence: lifecycleFresh ? event.activitySequence : (state.activitySequence ?? 0),
           model: retainedModel,
@@ -483,6 +493,25 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
         ...model,
         activity: activityAfterOrigin(state.model.activity, event.origin, event.state, model),
       }
+    if (event.origin._tag === "Event") {
+      let compactionStatus: "running" | "complete" | "failed" | "cancelled" | undefined
+      switch (event.origin.type) {
+        case "agent.compaction.started":
+          compactionStatus = "running"
+          break
+        case "agent.compaction.completed":
+          compactionStatus = "complete"
+          break
+        case "agent.compaction.failed":
+          compactionStatus = "failed"
+          break
+        case "agent.compaction.cancelled":
+          compactionStatus = "cancelled"
+          break
+      }
+      if (compactionStatus !== undefined)
+        model = updateModel(model, { _tag: "CompactionChanged", status: compactionStatus })
+    }
     if (
       event.origin._tag === "Event" &&
       event.origin.type === "steering.delivered" &&

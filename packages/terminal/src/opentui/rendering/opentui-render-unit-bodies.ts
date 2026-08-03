@@ -102,9 +102,9 @@ const compactionRainbow = ["#ff5f6d", "#ff9f43", "#ffd166", "#7bd389", "#5bc0eb"
 
 const renderPlainBodyImpl = (model: Model, block: TranscriptBlock, width: number, append: Append): void => {
   if (block._tag === "Compaction" && block.status === "complete") {
-    append(fg(colors.green)(`${completedCompactionIcon} `))
-    for (const [index, character] of Array.from("Auto-compacted").entries())
-      append(fg(compactionRainbow[(index + model.animationTick) % compactionRainbow.length]!)(character))
+    const phase = model.compactionShimmer?.tick ?? 0
+    for (const [index, character] of Array.from(`${completedCompactionIcon} Auto-compacted`).entries())
+      append(fg(compactionRainbow[(index + phase) % compactionRainbow.length]!)(character))
     return
   }
   let color = colors.text

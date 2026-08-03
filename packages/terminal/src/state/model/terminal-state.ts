@@ -32,10 +32,12 @@ const ModeCommitAnimationSchema = Schema.Struct({ from: Mode, to: Mode, tick: Sc
 const ContextAnimationSchema = Schema.Struct({
   compactFromPercent: Schema.optional(Schema.Finite),
   compactTick: Schema.optional(Schema.Finite),
+  compactionPending: Schema.optional(Schema.Boolean),
   flashTicks: Schema.Finite,
   flashed75: Schema.Boolean,
   flashed90: Schema.Boolean,
 })
+const CompactionShimmerSchema = Schema.Struct({ tick: Schema.Finite, remaining: Schema.Finite })
 const FilePickerStateSchema = Schema.Struct({
   open: Schema.Boolean,
   query: Schema.String,
@@ -77,6 +79,7 @@ const ThreadPreviewSchema = Schema.Union([
   loadableSchemas.idle,
   Schema.TaggedStruct("Loading", { previous: Schema.optionalKey(ThreadPreviewValueSchema) }),
   Schema.TaggedStruct("Ready", { value: ThreadPreviewValueSchema }),
+  Schema.TaggedStruct("Failed", { message: Schema.String }),
 ])
 export const Model = Schema.Struct({
   workspace: Schema.String,
@@ -117,6 +120,8 @@ export const Model = Schema.Struct({
   contextUsage: Schema.optional(ContextUsage),
   contextAnimation: ContextAnimationSchema,
   animationTick: Schema.Finite,
+  welcomeAnimationTicks: Schema.Finite,
+  compactionShimmer: Schema.optional(CompactionShimmerSchema),
   contextDetailsOpen: Schema.Boolean,
   usageDisplay: Schema.optional(UsageDisplay),
   usageTime: Schema.optional(UsageTime),
@@ -200,6 +205,8 @@ const initialImpl: {
     contextUsage: { _tag: "Loading" },
     contextAnimation: { flashTicks: 0, flashed75: false, flashed90: false },
     animationTick: 0,
+    welcomeAnimationTicks: 16,
+    compactionShimmer: undefined,
     contextDetailsOpen: false,
     usageDisplay: "cost",
     paletteOpen: false,

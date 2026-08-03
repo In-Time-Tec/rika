@@ -1,4 +1,4 @@
-export const projectionVersion = 3
+export const projectionVersion = 4
 
 export interface ActiveInterval {
   readonly start: number

@@ -18,6 +18,8 @@ export const panelLoading = (model: Model): string | undefined => {
 }
 
 export const animationActive = (model: Model): boolean =>
+  model.welcomeAnimationTicks > 0 ||
+  model.compactionShimmer !== undefined ||
   model.busy ||
   model.activity !== undefined ||
   panelLoading(model) !== undefined ||

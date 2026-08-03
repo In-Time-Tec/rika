@@ -142,6 +142,24 @@ const reduceExecutionImpl = (
         ],
         items: [...model.items, { _tag: "Block", index: model.blocks.length }],
       }
+    case "CompactionChanged": {
+      const { compactionPending: _, ...contextAnimation } = model.contextAnimation
+      const { compactionShimmer: _compactionShimmer, ...modelWithoutShimmer } = model
+      const running = message.status === "running"
+      const complete = message.status === "complete"
+      let compactionShimmer = model.compactionShimmer
+      if (running) compactionShimmer = undefined
+      else if (complete) compactionShimmer = model.compactionShimmer ?? { tick: 0, remaining: 14 }
+      return {
+        ...modelWithoutShimmer,
+        contextAnimation:
+          running || complete ? { ...model.contextAnimation, compactionPending: true } : contextAnimation,
+        ...(compactionShimmer === undefined ? {} : { compactionShimmer }),
+        ...(model.busy
+          ? { activity: running ? ({ _tag: "Compacting" } as const) : ({ _tag: "Waiting" } as const) }
+          : {}),
+      }
+    }
     case "TurnStarted": {
       const boundDrafts = bindSubmittedDraft(model.submittedDrafts, message.turnId, message.submissionId)
       if (model.entries.some((entry) => entry.role === "user" && entry.turnId === message.turnId))

@@ -37,7 +37,14 @@ const contextDetailsImpl = (model: Model, width: number, height: number, now: nu
   const meter = availableContext === undefined ? undefined : ContextMeter.meter(availableContext, { cells })
 
   if (!compact) line("")
-  if (meter === undefined) line(meterGlyphs.track.repeat(cells), (value) => fg(colors[model.mode])(value))
+  if (meter === undefined)
+    line(
+      (model.busy
+        ? ContextMeter.loadingMeter(model.animationTick, { cells })
+        : Array(cells).fill(meterGlyphs.track)
+      ).join(""),
+      (value) => fg(colors[model.mode])(value),
+    )
   else if (availableContext !== undefined) {
     const streaming = model.busy && model.activity?._tag !== "Compacting"
     const glyphs =
@@ -58,14 +65,10 @@ const contextDetailsImpl = (model: Model, width: number, height: number, now: nu
   if (!compact) line("")
   line(compact ? `Used       ${used}` : `Used        ${used}`)
   line(compact ? `Available  ${available}` : `Available   ${available}`)
-  if (!compact) line("")
   line(" ".repeat(width), (value) => dim(fg(colors.text)(value)))
-  if (!compact) line("")
   line(`Usable     ${usableText}`)
   line(`Full       ${full}`)
-  if (!compact) line("")
   line(" ".repeat(width), (value) => dim(fg(colors.text)(value)))
-  if (!compact) line("")
   line(`Cost       ${cost(model)}`)
   line(`Active     ${time(model, now)}`)
   if (!compact) line("")

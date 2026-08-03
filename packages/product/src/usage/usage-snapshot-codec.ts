@@ -2,10 +2,11 @@ import { Result } from "effect"
 import type { AttemptCost, AttemptPricing, AttemptTokens } from "./usage-attempt"
 import type { ActiveEvent, DeliveryIdentity } from "./usage-event"
 import { ProjectionFailure } from "./usage-event"
+import type { ContextReading } from "./usage-context-reading"
 import type { Snapshot } from "./usage-snapshot"
 import type { Totals } from "./usage-total"
 
-export const foldVersion = 6
+export const foldVersion = 7
 
 type SerializedSnapshot = {
   readonly version: number
@@ -15,6 +16,7 @@ type SerializedSnapshot = {
   readonly deliveries: ReadonlyArray<readonly [string, DeliveryIdentity]>
   readonly attempts: ReadonlyArray<readonly [string, AttemptCost]>
   readonly executionAttempts: ReadonlyArray<readonly [string, ReadonlyArray<string>]>
+  readonly executionContexts: ReadonlyArray<readonly [string, ContextReading]>
   readonly activeEvents: ReadonlyArray<readonly [string, ActiveEvent]>
   readonly executionEvents: ReadonlyArray<readonly [string, ReadonlyArray<ActiveEvent>]>
 }
@@ -28,6 +30,7 @@ export const serialize = (snapshot: Snapshot): string =>
     deliveries: [...snapshot.deliveries],
     attempts: [...snapshot.attempts],
     executionAttempts: [...snapshot.executionAttempts].map(([key, values]) => [key, [...values]]),
+    executionContexts: [...snapshot.executionContexts],
     activeEvents: [...snapshot.activeEvents],
     executionEvents: [...snapshot.executionEvents],
   } satisfies SerializedSnapshot)
@@ -55,6 +58,7 @@ export const deserialize = (json: string): Result.Result<Snapshot, ProjectionFai
       deliveries: new Map(value.deliveries),
       attempts: new Map(value.attempts),
       executionAttempts: new Map(value.executionAttempts.map(([key, values]) => [key, new Set(values)])),
+      executionContexts: new Map(value.executionContexts),
       activeEvents: new Map(value.activeEvents),
       executionEvents: new Map(value.executionEvents),
     })
@@ -101,6 +105,13 @@ const isAttempt = (value: unknown): value is AttemptCost =>
   isString(value.turnId) &&
   isPricing(value.cost) &&
   isTokens(value.tokens)
+const isContextReading = (value: unknown): value is ContextReading =>
+  isRecord(value) &&
+  isFiniteNumber(value.inputTokens) &&
+  isFiniteNumber(value.sequence) &&
+  isString(value.modelCallId) &&
+  isString(value.modelAttemptId) &&
+  isFiniteNumber(value.attempt)
 const activeEventTypes = new Set([
   "execution.accepted",
   "execution.started",
@@ -128,5 +139,6 @@ const isSerializedSnapshot = (value: Readonly<Record<string, unknown>>): value i
   isEntries(value.deliveries, isDelivery) &&
   isEntries(value.attempts, isAttempt) &&
   isEntries(value.executionAttempts, (item) => Array.isArray(item) && item.every(isString)) &&
+  isEntries(value.executionContexts, isContextReading) &&
   isEntries(value.activeEvents, isActiveEvent) &&
   isEntries(value.executionEvents, (item) => Array.isArray(item) && item.every(isActiveEvent))

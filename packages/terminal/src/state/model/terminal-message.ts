@@ -29,6 +29,7 @@ type Message =
   | { readonly _tag: "ModeCommitted"; readonly selected?: number }
   | { readonly _tag: "ModeHovered"; readonly selected: number }
   | { readonly _tag: "ContextUsageReplaced"; readonly contextUsage: ContextUsage }
+  | { readonly _tag: "CompactionChanged"; readonly status: "running" | "complete" | "failed" | "cancelled" }
   | { readonly _tag: "AnimationTicked" }
   | { readonly _tag: "Pasted"; readonly text: string }
   | { readonly _tag: "ImageInserted"; readonly path: string }
@@ -95,6 +96,7 @@ type Message =
       readonly threadId: string
       readonly turns: ReadonlyArray<{ readonly prompt: string; readonly units: ReadonlyArray<Unit> }>
     }
+  | { readonly _tag: "ThreadPreviewFailed"; readonly threadId: string; readonly message: string }
 
 export type { Message }
 export const runningToolsActivity = ActivityState.runningToolsActivity

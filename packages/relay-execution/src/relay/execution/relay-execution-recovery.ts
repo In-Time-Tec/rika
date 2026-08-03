@@ -1,5 +1,5 @@
 import { Client, Ids, type Execution } from "@relayfx/sdk"
-import { Clock, Duration, Effect, Option, Schedule } from "effect"
+import { Clock, Duration, Effect, Option, Schedule, Schema } from "effect"
 import * as AgentAwait from "@rika/coding-tools/agent-tool-contract"
 import * as AgentOutcomes from "@rika/coding-tools/agent-tool-contract"
 import { terminalExecutionStatus, recoveryRetrySchedule, unsafeRecoveryFailure } from "./relay-recovery-policy"
@@ -50,9 +50,15 @@ const terminalStatuses: Readonly<Record<string, "completed" | "failed" | "cancel
   "execution.cancelled": "cancelled",
 }
 
-const durableOutput = (event: Execution.ExecutionEvent | undefined): ReadonlyArray<unknown> | undefined => {
+const decodeContent = (value: unknown): ReadonlyArray<AgentOutcomes.Content> | undefined =>
+  Option.getOrUndefined(Schema.decodeUnknownOption(Schema.Array(AgentOutcomes.AgentContract.Content))(value))
+
+const durableOutput = (
+  event: Execution.ExecutionEvent | undefined,
+): ReadonlyArray<AgentOutcomes.Content> | undefined => {
   if (event === undefined) return undefined
-  if (event.content?.some((part) => part.type === "text" && part.text.trim().length > 0) === true) return event.content
+  const content = decodeContent(event.content)
+  if (content?.some((part) => part.type === "text" && part.text.trim().length > 0) === true) return content
   const text = event.data?.text
   return typeof text === "string" && text.trim().length > 0 ? [{ type: "text", text }] : undefined
 }
@@ -110,7 +116,10 @@ export const resolveChildResult = ({ childExecutionId, events, reconciled }: Chi
     return AgentOutcomes.AgentContract.cancelled({
       childExecutionId,
       reason: failure ?? unreconciledReason(status),
-      output: output === undefined || output.length === 0 ? [] : (output as readonly [unknown, ...unknown[]]),
+      output:
+        output === undefined || output.length === 0
+          ? []
+          : (output as readonly [AgentOutcomes.Content, ...AgentOutcomes.Content[]]),
     })
   if (output === undefined || output.length === 0) {
     if (status === "completed")
@@ -118,10 +127,13 @@ export const resolveChildResult = ({ childExecutionId, events, reconciled }: Chi
     return AgentOutcomes.AgentContract.noReport({ childExecutionId, reason: failure ?? unreconciledReason(status) })
   }
   if (status === "completed")
-    return AgentOutcomes.AgentContract.report({ childExecutionId, output: output as readonly [unknown, ...unknown[]] })
+    return AgentOutcomes.AgentContract.report({
+      childExecutionId,
+      output: output as readonly [AgentOutcomes.Content, ...AgentOutcomes.Content[]],
+    })
   return AgentOutcomes.AgentContract.failed({
     childExecutionId,
     reason: failure ?? unreconciledReason(status),
-    output: output as readonly [unknown, ...unknown[]],
+    output: output as readonly [AgentOutcomes.Content, ...AgentOutcomes.Content[]],
   })
 }

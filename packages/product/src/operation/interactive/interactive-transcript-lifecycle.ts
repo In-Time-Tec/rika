@@ -5,6 +5,7 @@ import * as UsageRepository from "@rika/product/usage-repository"
 import { OperationError } from "../operation-error"
 import { Context, Clock, Effect, Fiber, Ref, Scope, Semaphore } from "effect"
 import { makeSelectionState, type SelectionEpochState } from "./interactive-thread-selection"
+import type { ThreadContext } from "./interactive-thread-context"
 
 export const makeInteractiveTranscriptLifecycle = (input: any) => {
   const {
@@ -38,6 +39,7 @@ export const makeInteractiveTranscriptLifecycle = (input: any) => {
   const typedSelectionRequest: Ref.Ref<number> = selectionRequest
   const typedTranscriptPageAdmission: Semaphore.Semaphore = transcriptPageAdmission
   const typedNotifyThreadSummaries: Effect.Effect<void, OperationError, never> = notifyThreadSummaries
+  const typedReadThreadContext: (threadId: string) => Effect.Effect<ThreadContext, Error> = input.readThreadContext
   const typedLoadTranscriptPage = (
     state: SelectionEpochState,
     dispatch: (event: any) => void,
@@ -60,7 +62,18 @@ export const makeInteractiveTranscriptLifecycle = (input: any) => {
               selectionEpoch: state.epoch,
               threadId: state.thread.id,
               revision: totals.revision,
-              ...input.persistedThreadUsage(totals),
+              ...input.persistedThreadUsage(totals, { _tag: "Unavailable" }),
+            })
+            const context = yield* typedReadThreadContext(String(state.thread.id)).pipe(
+              Effect.orElseSucceed(() => ({ _tag: "Unavailable" }) as const),
+            )
+            if (typedGetActiveSelectionState() !== state || context._tag === "Unavailable") return
+            dispatch({
+              _tag: "ThreadUsageUpdated",
+              selectionEpoch: state.epoch,
+              threadId: state.thread.id,
+              revision: totals.revision,
+              ...input.persistedThreadUsage(totals, context),
             })
           }).pipe(Effect.provide(typedExecutionDependencies)),
           typedSessionScope,

@@ -12,6 +12,7 @@ import * as UsageProjection from "../../usage/usage-projection"
 import * as UsageSnapshot from "../../usage/usage-snapshot"
 import * as UsageCodec from "../../usage/usage-snapshot-codec"
 import { persistedThreadUsage } from "../interactive/interactive-session-transcript-runtime"
+import { readThreadContext as readAuthoritativeThreadContext } from "../interactive/interactive-thread-context"
 import type { Commit, Refold } from "../../execution/ingest/execution-ingest-commit"
 import { Cause, Effect, Queue, Result, Scope } from "effect"
 import { failureKind, operationError, OperationError } from "../operation-error"
@@ -46,6 +47,9 @@ interface ProductOperationIngest {
     terminal: boolean,
   ) => Effect.Effect<unknown, Error>
   readonly publishThreadUsage: (value: UsageSnapshot.TurnUsage | undefined) => Effect.Effect<void, Error>
+  readonly readThreadContext: (
+    threadId: string,
+  ) => Effect.Effect<import("../interactive/interactive-thread-context").ThreadContext, Error>
 }
 
 export const makeProductOperationIngest = (input: any): Effect.Effect<ProductOperationIngest, Error, never> =>
@@ -60,21 +64,31 @@ export const makeProductOperationIngest = (input: any): Effect.Effect<ProductOpe
     const ownerScope: Scope.Scope = rawOwnerScope
     const acquiredBackend: import("@rika/product/execution-service").Interface = rawBackend
     const usageRepository: UsageRepository.Interface = rawUsageRepository
+    const turns: TurnRepository.Interface = input.turns
     const titleExecutionId = (turnId: Turn.TurnId) =>
       ExecutionIdentifier.AgentDepth.childExecutionId(String(turnId), "title")
+    const readThreadContext = (threadId: string) =>
+      readAuthoritativeThreadContext({ threadId, turns, usage: usageRepository })
     const publishThreadUsage = Effect.fn("ProductOperation.publishThreadUsage")(function* (
       value: UsageSnapshot.TurnUsage | undefined,
     ) {
       if (value === undefined) return
       const thread = yield* usageRepository.readThread(value.threadId)
+      const context = { _tag: "Unavailable" } as const
       const global = yield* usageRepository.readGlobal
-      if (thread.costNanoUsd === undefined && thread.tokens === undefined && thread.activeMillis === undefined) return
+      if (
+        context._tag === "Unavailable" &&
+        thread.costNanoUsd === undefined &&
+        thread.tokens === undefined &&
+        thread.activeMillis === undefined
+      )
+        return
       publishInteractiveActivity(0, {
         _tag: "ThreadUsageUpdated",
         selectionEpoch: 0,
         threadId: Thread.ThreadId.make(value.threadId),
         revision: thread.revision,
-        ...persistedThreadUsage(thread),
+        ...persistedThreadUsage(thread, context),
       })
       if (value.costNanoUsd !== undefined && thread.costNanoUsd !== undefined && global.costNanoUsd !== undefined)
         publishInteractiveActivity(0, {
@@ -136,7 +150,6 @@ export const makeProductOperationIngest = (input: any): Effect.Effect<ProductOpe
     const usageCommits = yield* Queue.unbounded<Commit>()
     const refoldingRoots = new Map<string, number>()
     const transcripts: TranscriptRepository.Interface = input.transcripts
-    const turns: TurnRepository.Interface = input.turns
     const executionIngest = yield* ExecutionIngest.make({
       backend: acquiredBackend,
       transcripts,
@@ -237,5 +250,6 @@ export const makeProductOperationIngest = (input: any): Effect.Effect<ProductOpe
       titleExecutionId,
       commitUsageSource,
       publishThreadUsage,
+      readThreadContext,
     }
   })

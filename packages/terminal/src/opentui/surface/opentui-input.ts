@@ -176,10 +176,9 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
         chunks.push(bold(fg(colors[model.mode])(` ${value.percent}% `)))
         return chunks
       }
-      const glyphs =
-        model.busy && context?._tag === "Loading"
-          ? ContextMeter.loadingMeter(model.animationTick, { cells: contextCells })
-          : Array.from({ length: contextCells }, () => meterGlyphs.track)
+      const glyphs = model.busy
+        ? ContextMeter.loadingMeter(model.animationTick, { cells: contextCells })
+        : Array.from({ length: contextCells }, () => meterGlyphs.track)
       for (const glyph of glyphs) chunks.push(fg(colors[model.mode])(glyph))
       chunks.push(fg(border)(" "))
       return chunks

@@ -1,15 +1,18 @@
 import * as UsageSnapshot from "@rika/product/usage-snapshot"
+import { Function } from "effect"
 import type { InteractiveEvent } from "./interactive-event"
 import { makeInitialTranscriptWindow, makeInteractiveTranscriptPage } from "./interactive-transcript-page"
 import { makeInteractiveTranscriptLifecycle } from "./interactive-transcript-lifecycle"
+import type { ThreadContext } from "./interactive-thread-context"
 
-export const persistedThreadUsage = (
+const persistedThreadUsageImpl = (
   value: UsageSnapshot.Aggregate,
+  context: ThreadContext,
 ): Pick<
   Extract<InteractiveEvent, { readonly _tag: "ThreadUsageUpdated" }>,
   "context" | "cost" | "tokens" | "time"
 > => ({
-  context: { _tag: "Unavailable" },
+  context,
   cost:
     value.costNanoUsd === undefined
       ? { _tag: "Unavailable" }
@@ -27,6 +30,11 @@ export const persistedThreadUsage = (
           ...(value.activeSince === undefined ? {} : { activeSince: value.activeSince }),
         },
 })
+
+export const persistedThreadUsage: {
+  (value: UsageSnapshot.Aggregate, context: ThreadContext): ReturnType<typeof persistedThreadUsageImpl>
+  (context: ThreadContext): (value: UsageSnapshot.Aggregate) => ReturnType<typeof persistedThreadUsageImpl>
+} = Function.dual(2, persistedThreadUsageImpl)
 
 export const makeInteractiveTranscript = (input: any) => {
   const lifecycleInput = { ...input, persistedThreadUsage }

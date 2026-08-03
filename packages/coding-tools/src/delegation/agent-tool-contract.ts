@@ -6,6 +6,7 @@ import * as Registrations from "./agent-tool-registrations"
 import * as Await from "./agent-tool-await-result"
 import * as Outcomes from "./agent-tool-outcomes"
 import * as Errors from "./agent-tool-errors"
+import * as ResultContent from "./agent-tool-content"
 export const TaskInput = Schema.Struct({
   prompt: Schema.String,
 })
@@ -54,6 +55,8 @@ const joinToolkit = Toolkits.joinToolkit
 const registrations = Registrations.registrations
 const Result = Await.Result
 export type Result = typeof Result.Type
+const Content = ResultContent.Content
+export type Content = typeof Content.Type
 const AwaitSubagentsResult = Await.AwaitSubagentsResult
 const noReportRecovery = Outcomes.noReportRecovery
 const report = Outcomes.report
@@ -85,6 +88,7 @@ export const AgentContract = {
   joinToolkit,
   registrations,
   Result,
+  Content,
   AwaitSubagentsResult,
   noReportRecovery,
   report,

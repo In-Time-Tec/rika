@@ -39,6 +39,12 @@ const genericBlock = ({
       summary: event.text ?? string(value.summary ?? value.message),
       status: "failed",
     }
+  if (event.type === "agent.compaction.cancelled")
+    return {
+      _tag: "Compaction",
+      summary: event.text ?? string(value.summary ?? value.message),
+      status: "cancelled",
+    }
   if (event.type.includes("notification"))
     return {
       _tag: "Notification",

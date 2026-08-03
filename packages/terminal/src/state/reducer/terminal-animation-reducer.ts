@@ -14,7 +14,7 @@ const advanceAnimationImpl = (before: Model, after: Model, usage?: ContextUsage)
   if (!ticked && usage === undefined) return after
   const previousUsage = contextPercent(before.contextUsage)
   const currentUsage = contextPercent(usage ?? after.contextUsage)
-  const previousAnimation = before.contextAnimation
+  const previousAnimation = after.contextAnimation
   let flashTicks = ticked ? Math.max(0, previousAnimation.flashTicks - 1) : previousAnimation.flashTicks
   let flashed75 = previousAnimation.flashed75
   let flashed90 = previousAnimation.flashed90
@@ -32,15 +32,17 @@ const advanceAnimationImpl = (before: Model, after: Model, usage?: ContextUsage)
   }
   let compactFromPercent = previousAnimation.compactFromPercent
   let compactTick = previousAnimation.compactTick
+  let compactionPending = previousAnimation.compactionPending === true
   if (
     usage !== undefined &&
-    before.activity?._tag === "Compacting" &&
+    (compactionPending || before.activity?._tag === "Compacting" || after.activity?._tag === "Compacting") &&
     previousUsage !== undefined &&
     currentUsage !== undefined &&
     currentUsage < previousUsage
   ) {
     compactFromPercent = previousUsage
     compactTick = 0
+    compactionPending = false
   } else if (ticked && compactTick !== undefined) {
     if (compactTick >= 15) {
       compactFromPercent = undefined
@@ -52,6 +54,7 @@ const advanceAnimationImpl = (before: Model, after: Model, usage?: ContextUsage)
     contextAnimation: {
       ...(compactFromPercent === undefined ? {} : { compactFromPercent }),
       ...(compactTick === undefined ? {} : { compactTick }),
+      ...(compactionPending ? { compactionPending: true } : {}),
       flashTicks,
       flashed75,
       flashed90,

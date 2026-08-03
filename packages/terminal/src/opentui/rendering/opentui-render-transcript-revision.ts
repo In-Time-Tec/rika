@@ -54,7 +54,8 @@ const transcriptUnitRevisionImpl = (
   else {
     const block = model.blocks[unit.block] as TranscriptBlock
     ids.push(identityRevision(block))
-    if (block._tag === "Compaction" && block.status === "complete") bits.push(`rainbow:${model.animationTick}`)
+    if (block._tag === "Compaction" && block.status === "complete")
+      bits.push(`rainbow:${model.compactionShimmer?.tick ?? 0}`)
   }
   pushExpanded(unitKey)
   const selected = model.detailSelection === unitKey ? "1" : "0"

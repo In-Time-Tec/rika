@@ -302,6 +302,9 @@ export const makeEventRouter = (runtime: Runtime) => {
             units: turn.units.map((unit) => Schema.decodeUnknownSync(TranscriptUnit.Unit)(unit)),
           })),
         })
+    } else if (event._tag === "ThreadPreviewFailed") {
+      if (loop.model.threadSwitcher.open && selectedThreadMetadata(loop.model)?.id === event.threadId)
+        loop.model = update(loop.model, event)
     } else {
       loop.model = update(loop.model, event)
     }

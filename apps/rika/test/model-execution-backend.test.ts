@@ -223,6 +223,30 @@ test("executes a real provider route with every production tool through the prod
               },
               { status: 400 },
             )
+          if (requests.length === 1)
+            return sseResponse([
+              {
+                type: "response.output_item.added",
+                output_index: 0,
+                sequence_number: 0,
+                item: {
+                  type: "function_call",
+                  id: "fake-read-item",
+                  call_id: "fake-read-call",
+                  name: "read",
+                  arguments: "",
+                  status: "in_progress",
+                },
+              },
+              {
+                type: "response.function_call_arguments.done",
+                item_id: "fake-read-item",
+                output_index: 0,
+                sequence_number: 1,
+                arguments: JSON.stringify({ path: "README.md" }),
+              },
+              { type: "response.completed", response: fakeOpenAiResponse, sequence_number: 2 },
+            ])
           return sseResponse([
             {
               type: "response.output_text.delta",
@@ -282,7 +306,8 @@ test("executes a real provider route with every production tool through the prod
               settings,
               threadToolGateway: yield* ThreadToolService.makeGateway,
               providerAuthLayer: Layer.succeed(OpenAiAuth.Service, auth),
-              toolRuntimeLayerForWorkspace: () => ToolRuntime.testLayer(() => Effect.die("unused")),
+              toolRuntimeLayerForWorkspace: () =>
+                ToolRuntime.testLayer(() => Effect.succeed({ text: "fixture contents", truncated: false })),
             }),
             yield* Effect.scope,
           )
@@ -294,7 +319,7 @@ test("executes a real provider route with every production tool through the prod
             executionRoute: executionRoutePin(settings, "medium"),
           })
 
-          expect(requests).toHaveLength(1)
+          expect(requests).toHaveLength(2)
           expect(requests[0]!.url.pathname.endsWith("/responses")).toBe(true)
           expect((requests[0]!.body.tools as ReadonlyArray<Record<string, unknown>>).map((tool) => tool.name)).toEqual(
             productionRootToolNames,

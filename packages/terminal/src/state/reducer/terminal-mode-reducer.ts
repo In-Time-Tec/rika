@@ -62,7 +62,18 @@ const tickAnimations = (model: Model): Model => {
   let modeCommit = model.modeCommit
   if (modeCommit !== undefined)
     modeCommit = modeCommit.tick >= commitLength ? undefined : { ...modeCommit, tick: modeCommit.tick + 1 }
-  return { ...model, animationTick: model.animationTick + 1, modePicker, modeCommit }
+  const compactionShimmer =
+    model.compactionShimmer === undefined || model.compactionShimmer.remaining <= 1
+      ? undefined
+      : { tick: model.compactionShimmer.tick + 1, remaining: model.compactionShimmer.remaining - 1 }
+  return {
+    ...model,
+    animationTick: model.animationTick + 1,
+    welcomeAnimationTicks: Math.max(0, model.welcomeAnimationTicks - 1),
+    compactionShimmer,
+    modePicker,
+    modeCommit,
+  }
 }
 
 const reduceModeInteractionImpl = (model: Model, message: Message): Model | undefined => {

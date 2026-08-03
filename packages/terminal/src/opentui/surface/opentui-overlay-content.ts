@@ -202,8 +202,8 @@ export const previewBoxRows: {
         fg(colors.muted)("│"),
       ])
     })
-  } else if (!isLoading(model.threadPreview)) {
-    const status = "No preview"
+  } else if (model.threadPreview._tag !== "Loading") {
+    const status = model.threadPreview._tag === "Failed" ? "Preview unavailable" : "No preview"
     const statusLeft = Math.max(0, Math.floor((inner - status.length) / 2))
     rows.set(2 + details.length, [
       fg(colors.muted)("│"),

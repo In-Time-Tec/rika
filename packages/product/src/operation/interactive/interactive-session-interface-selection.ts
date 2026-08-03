@@ -8,7 +8,7 @@ import * as ThreadSummaryRepository from "@rika/product/thread-summary-repositor
 import { OperationError, operationError } from "../operation-error"
 import { OperationUnavailable } from "../contract/product-operation"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import { Context, Effect, Ref, Semaphore } from "effect"
+import { Cause, Context, Effect, Ref, Semaphore } from "effect"
 import { isNewerSelectionEpoch, selectionMatches } from "./interactive-thread-selection"
 import type { InteractiveSession } from "./interactive-session"
 
@@ -145,7 +145,10 @@ export const makeInteractiveSessionSelection = (
       const transcripts = yield* TranscriptRepository.Service
       const backend = yield* ExecutionBackend.Service
       const thread = yield* threads.get(Thread.ThreadId.make(id))
-      if (thread === undefined) return
+      if (thread === undefined) {
+        input.sessionDispatch({ _tag: "ThreadPreviewFailed", threadId: id, message: "Thread not found" })
+        return
+      }
       const recent = yield* turns.listRecentNonqueued(thread.id, 4)
       const previewTurns = yield* Effect.forEach(recent, (turn) =>
         Effect.gen(function* () {
@@ -172,7 +175,11 @@ export const makeInteractiveSessionSelection = (
       input.sessionDispatch({ _tag: "ThreadPreviewLoaded", threadId: id, turns: previewTurns })
     }).pipe(
       Effect.provide(typedExecutionDependencies),
-      Effect.orElseSucceed(() => undefined),
+      Effect.catchCause((cause) =>
+        Effect.sync(() =>
+          input.sessionDispatch({ _tag: "ThreadPreviewFailed", threadId: id, message: Cause.pretty(cause) }),
+        ),
+      ),
     )
   const reopenThread = (epoch: number) =>
     safe(
