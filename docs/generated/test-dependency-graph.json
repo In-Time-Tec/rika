@@ -4199,6 +4199,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/terminal/test/restoration.test.ts",
+      "path": "packages/terminal/test/restoration.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/terminal/test/session.test.ts",
       "path": "packages/terminal/test/session.test.ts",
       "workspace": "@rika/terminal",
@@ -13345,6 +13355,14 @@
     },
     {
       "from": "packages/terminal/test/pierre-diff.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/restoration.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",

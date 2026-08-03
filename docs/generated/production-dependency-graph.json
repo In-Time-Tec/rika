@@ -8907,14 +8907,6 @@
     },
     {
       "from": "apps/rika/src/interactive/process/interactive-process-input.ts",
-      "to": "packages/terminal/src/state/model/terminal-state.ts",
-      "specifier": "@rika/terminal/terminal-state",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/interactive/process/interactive-process-input.ts",
       "to": "packages/terminal/src/state/reducer/terminal-state-reducer.ts",
       "specifier": "@rika/terminal/terminal-state-reducer",
       "kind": "import",
@@ -33376,6 +33368,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-overlay-region.ts",
+      "to": "packages/configuration/src/model-routing/behavior-mode.ts",
+      "specifier": "@rika/configuration/behavior-mode",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-overlay-region.ts",
       "to": "packages/terminal/src/opentui/rendering/terminal-text-adapter.ts",
       "specifier": "../rendering/terminal-text-adapter",
       "kind": "import",
@@ -36120,6 +36120,14 @@
     },
     {
       "from": "packages/terminal/src/state/reducer/terminal-state-reducer.ts",
+      "to": "packages/configuration/src/model-routing/behavior-mode.ts",
+      "specifier": "@rika/configuration/behavior-mode",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/reducer/terminal-state-reducer.ts",
       "to": "packages/terminal/src/presentation/terminal/command-palette.ts",
       "specifier": "../../presentation/terminal/command-palette",
       "kind": "import",
@@ -36154,6 +36162,22 @@
       "from": "packages/terminal/src/state/reducer/terminal-state-reducer.ts",
       "to": "packages/terminal/src/state/model/terminal-context-usage.ts",
       "specifier": "../model/terminal-context-usage",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/reducer/terminal-state-reducer.ts",
+      "to": "packages/terminal/src/state/model/terminal-layout-state.ts",
+      "specifier": "../model/terminal-layout-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/reducer/terminal-state-reducer.ts",
+      "to": "packages/terminal/src/state/model/terminal-loadable-state.ts",
+      "specifier": "../model/terminal-loadable-state",
       "kind": "import",
       "relationship": "runtime",
       "production": true

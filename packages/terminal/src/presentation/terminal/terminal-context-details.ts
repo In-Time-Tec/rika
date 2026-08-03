@@ -23,23 +23,26 @@ const contextDetailsImpl = (model: Model, width: number, height: number, now: nu
   }
   const compact = width < 40 || height < 11
   const context = model.contextUsage
-  const usable = context?._tag === "Available" ? ContextMeter.usableTokens(context) : undefined
-  const used = context?._tag === "Available" ? formatContextTokens(context.inputTokens) : "Unknown"
+  const availableContext = context?._tag === "Available" ? context : undefined
+  const usable = availableContext === undefined ? undefined : ContextMeter.usableTokens(availableContext)
+  const used = availableContext === undefined ? "Unknown" : formatContextTokens(availableContext.inputTokens)
   const available =
-    context?._tag === "Available" ? formatContextTokens(Math.max(0, usable! - context.inputTokens)) : "Unknown"
-  const full = context?._tag === "Available" ? formatContextTokens(context.contextWindow) : "Unknown"
+    availableContext === undefined
+      ? "Unknown"
+      : formatContextTokens(Math.max(0, usable! - availableContext.inputTokens))
+  const full = availableContext === undefined ? "Unknown" : formatContextTokens(availableContext.contextWindow)
   const usableText = usable === undefined ? "Unknown" : formatContextTokens(usable)
   const cells = Math.max(4, Math.min(width < 40 ? 12 : 20, width - 5))
-  const meter = context?._tag === "Available" ? ContextMeter.meter(context, { cells }) : undefined
+  const meter = availableContext === undefined ? undefined : ContextMeter.meter(availableContext, { cells })
   const divider = (label: string) => `├─ ${label} ${"─".repeat(Math.max(0, width - label.length - 5))}┤`
 
   if (!compact) line("")
   if (meter === undefined) line(ContextMeter.meterGlyphs.track.repeat(cells), (value) => fg(colors[model.mode])(value))
-  else {
+  else if (availableContext !== undefined) {
     const streaming = model.busy && model.activity?._tag !== "Compacting"
     const glyphs =
       streaming || model.contextAnimation.compactFromPercent !== undefined || model.contextAnimation.flashTicks > 0
-        ? ContextMeter.animatedGlyphs(context, {
+        ? ContextMeter.animatedGlyphs(availableContext, {
             cells,
             tick: model.contextAnimation.compactTick ?? model.animationTick,
             streaming,

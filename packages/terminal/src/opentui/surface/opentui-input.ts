@@ -168,7 +168,7 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
     modeChunks.push(fg(toOpenColor(colors.text))(" "))
     if (model.fastMode) modeChunks.push(fg(toOpenColor(colors.amber))("↯"))
     const commit = model.modeCommit
-    let modeLabel = model.mode
+    let modeLabel: string = model.mode
     let cursor = ""
     if (commit !== undefined) {
       if (commit.tick < commit.from.length) modeLabel = commit.from.slice(0, commit.from.length - commit.tick - 1)

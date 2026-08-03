@@ -11,6 +11,7 @@ const key = (name: string) => ({
   alt: false,
   meta: false,
   shift: false,
+  eventType: "press" as const,
 })
 
 const text = (chunks: ReadonlyArray<{ readonly text: string }>) => chunks.map((chunk) => chunk.text).join("")

@@ -210,12 +210,9 @@ const tickAnimations = (model: Model): Model => {
       ? { ...model.modePicker, from: undefined, fromPosition: undefined, turnTick: undefined }
       : { ...model.modePicker, turnTick: model.modePicker.turnTick + 1 }
   const commitLength = model.modeCommit === undefined ? 0 : model.modeCommit.from.length + model.modeCommit.to.length
-  const modeCommit =
-    model.modeCommit === undefined
-      ? undefined
-      : model.modeCommit.tick >= commitLength
-        ? undefined
-        : { ...model.modeCommit, tick: model.modeCommit.tick + 1 }
+  let modeCommit = model.modeCommit
+  if (modeCommit !== undefined)
+    modeCommit = modeCommit.tick >= commitLength ? undefined : { ...modeCommit, tick: modeCommit.tick + 1 }
   return { ...model, animationTick: model.animationTick + 1, modePicker, modeCommit }
 }
 
@@ -270,24 +267,29 @@ export const context = {
   expandPastedTextAttachment,
 }
 
+const reduceInteraction = (model: Model, message: Message): Model | undefined => {
+  switch (message._tag) {
+    case "ContextDetailsToggled":
+      return toggleContextDetails(model)
+    case "ModeSelectorOpened":
+      return model.busy ? model : openModeSelector(model)
+    case "ModeTurned":
+      return turnModeSelector(model, message.offset)
+    case "ModeCommitted":
+      return commitModeSelector(model, message.selected)
+    case "ModeHovered":
+      return model.modePicker.open && modeIds[message.selected] !== undefined
+        ? { ...model, modePicker: { ...model.modePicker, selected: message.selected } }
+        : model
+    case "AnimationTicked":
+      return tickAnimations(model)
+    default:
+      return undefined
+  }
+}
+
 const updateImpl = (model: Model, message: Message): Model =>
-  (message._tag === "ContextDetailsToggled"
-    ? toggleContextDetails(model)
-    : message._tag === "ModeSelectorOpened"
-      ? model.busy
-        ? model
-        : openModeSelector(model)
-      : message._tag === "ModeTurned"
-        ? turnModeSelector(model, message.offset)
-        : message._tag === "ModeCommitted"
-          ? commitModeSelector(model, message.selected)
-          : message._tag === "ModeHovered"
-            ? model.modePicker.open && modeIds[message.selected] !== undefined
-              ? { ...model, modePicker: { ...model.modePicker, selected: message.selected } }
-              : model
-            : message._tag === "AnimationTicked"
-              ? tickAnimations(model)
-              : undefined) ??
+  reduceInteraction(model, message) ??
   reduceData(model, message, update) ??
   reduceExecution(model, message, update) ??
   reduceOverlay(model, message, update) ??
