@@ -19,7 +19,7 @@ import { boundedTranscriptModel } from "../rendering/opentui-render-transcript-w
 import { transcriptUnitRevision } from "../rendering/opentui-render-transcript-revision"
 import { transcriptUnitBuilder } from "../rendering/opentui-render-unit"
 import type { TranscriptRangeBundle, TranscriptUnitCacheEntry } from "../rendering/opentui-render-transcript-revision"
-import { welcomeContent } from "./opentui-surface-content"
+import { animationActive, welcomeContent } from "./opentui-surface-content"
 import { cutoutBackground } from "./opentui-surface-construction"
 import type { TranscriptRenderableDescriptor } from "./opentui-surface-transcript-types"
 import { SurfaceLifecycleToast } from "./opentui-lifecycle-toast"
@@ -55,11 +55,12 @@ export abstract class SurfaceLifecycleTranscript extends SurfaceLifecycleToast {
     if (isWelcome) {
       this.transcriptRenderInput = undefined
       const welcomeWidth = this.welcomeWidthFor(model)
-      const welcomeKey = `${welcomeWidth}:${model.height}:${model.animationTick}:${model.mode}`
+      const welcomePhase = animationActive(model) ? model.animationTick : 0
+      const welcomeKey = `${welcomeWidth}:${model.height}:${welcomePhase}:${model.mode}`
       const existingWelcome = this.transcriptChildren.length === 1 ? this.welcomeChild : undefined
       if (existingWelcome === undefined) {
         const child = new TextRenderable(this.renderer, {
-          content: welcomeContent(welcomeWidth, model.height, model.animationTick, model.mode),
+          content: welcomeContent(welcomeWidth, model.height, welcomePhase, model.mode),
           fg: modeColor,
           wrapMode: "word",
           selectable: true,
@@ -70,7 +71,7 @@ export abstract class SurfaceLifecycleTranscript extends SurfaceLifecycleToast {
       } else if (this.welcomeKey !== welcomeKey) {
         this.welcomeKey = welcomeKey
         existingWelcome.fg = modeColor
-        existingWelcome.content = welcomeContent(welcomeWidth, model.height, model.animationTick, model.mode)
+        existingWelcome.content = welcomeContent(welcomeWidth, model.height, welcomePhase, model.mode)
       }
     } else {
       const renderModel = sidebarWidth === 0 && !threadSidebarVisible ? model : { ...model, width: contentWidth }

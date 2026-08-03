@@ -152,7 +152,7 @@ const routeLabel = (route: ModeRouteLabel | undefined): string =>
   route === undefined ? "" : `${route.name} ${route.effort}${route.fast ? " fast" : ""}`
 const modeDescription = {
   low: "Fast, low-cost mode for small, well-defined tasks",
-  medium: "Balanced intelligence, speed, and cost for most tasks",
+  medium: "Balanced default for everyday work",
   high: "Deep reasoning for hard tasks",
   ultra: "The most capable mode for hard, open-ended tasks",
 } as const

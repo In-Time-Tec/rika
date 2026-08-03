@@ -743,7 +743,7 @@
           "width": 1
         },
         {
-          "text": "    ",
+          "text": "        ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -761,7 +761,7 @@
             }
           },
           "attributes": 0,
-          "width": 4
+          "width": 8
         },
         {
           "text": "Welcome to Rika",
@@ -785,7 +785,7 @@
           "width": 15
         },
         {
-          "text": "             ",
+          "text": "         ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -803,7 +803,7 @@
             }
           },
           "attributes": 0,
-          "width": 13
+          "width": 9
         },
         {
           "text": "│",
@@ -1700,7 +1700,7 @@
           "width": 1
         },
         {
-          "text": "    ",
+          "text": "   ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -1718,7 +1718,7 @@
             }
           },
           "attributes": 0,
-          "width": 4
+          "width": 3
         },
         {
           "text": "ctrl+o",
@@ -1763,7 +1763,7 @@
           "width": 13
         },
         {
-          "text": "    ",
+          "text": "     ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -1781,7 +1781,7 @@
             }
           },
           "attributes": 0,
-          "width": 4
+          "width": 5
         },
         {
           "text": "│",
@@ -2040,7 +2040,7 @@
           "width": 1
         },
         {
-          "text": "    ",
+          "text": "   ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -2058,7 +2058,7 @@
             }
           },
           "attributes": 0,
-          "width": 4
+          "width": 3
         },
         {
           "text": "?",
@@ -2103,7 +2103,7 @@
           "width": 14
         },
         {
-          "text": "        ",
+          "text": "         ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -2121,7 +2121,7 @@
             }
           },
           "attributes": 0,
-          "width": 8
+          "width": 9
         },
         {
           "text": "│",

@@ -2,6 +2,7 @@ import { Function } from "effect"
 import { fg, bold, StyledText, type TextChunk } from "@opentui/core"
 import stringWidth from "string-width"
 import type { Model, Mode } from "../../state/model/terminal-state"
+import type { ThreadItem } from "../../state/model/terminal-thread-state"
 import { isLoading } from "../../state/model/terminal-loadable-state"
 import { activeTimeIcon } from "../../state/model/terminal-activity-time"
 import { colors, spacing } from "../../presentation/terminal/terminal-theme"
@@ -15,6 +16,22 @@ export const panelLoading = (model: Model): string | undefined => {
   if ((model.workspaceFilesOpen || model.filePicker.open) && isLoading(model.filePicker.items)) return "Loading files"
   return undefined
 }
+
+export const animationActive = (model: Model): boolean =>
+  model.busy ||
+  model.activity !== undefined ||
+  panelLoading(model) !== undefined ||
+  (model.usageDisplay === "time" &&
+    model.usageTime?._tag === "Available" &&
+    model.usageTime.activeSince !== undefined) ||
+  (model.modePicker.open && model.modePicker.turnTick !== undefined) ||
+  model.modeCommit !== undefined ||
+  model.contextAnimation.flashTicks > 0 ||
+  model.contextAnimation.compactTick !== undefined ||
+  (model.threadSidebar.open &&
+    (model.threads as ReadonlyArray<ThreadItem>).some(
+      (thread) => thread.status !== "idle" && thread.status !== "error",
+    ))
 
 export const compactWorkspace = (workspace: string): string => {
   const home = homeRelativePath(workspace)
@@ -278,12 +295,11 @@ const welcomeContentImpl = (width: number, height: number, phase: number, mode: 
   const frames = width >= 140 && height >= 35 ? ampOrbFrames.large : ampOrbFrames.small
   const frame = frames[phase % frames.length] ?? frames[0]
   const pattern = frame ?? []
-  const patternWidth = Math.max(...pattern.map(stringWidth), 1)
   const area = Math.max(1, height - spacing.inputHeight)
   const top = Math.max(0, Math.floor((area - pattern.length) / 2))
-  const copyWidth = 24
-  const textGap = 4
-  const logoLeft = Math.max(0, Math.floor((width - patternWidth - textGap - copyWidth) / 2))
+  const center = Math.floor(width / 2)
+  const logoLeft = Math.max(0, center - (frames === ampOrbFrames.large ? 43 : 31))
+  const copyLeft = Math.max(0, Math.min(width - 1, center + 2))
   const visiblePattern = pattern.slice(0, Math.max(1, area - top))
   const chunks: TextChunk[] = [fg(colors.text)("\n".repeat(top))]
   const copyRows: ReadonlyArray<readonly [number, ReadonlyArray<TextChunk>]> =
@@ -310,7 +326,7 @@ const welcomeContentImpl = (width: number, height: number, phase: number, mode: 
     }
     const suffix = copy.get(row)
     if (suffix !== undefined) {
-      chunks.push(fg(colors.text)(" ".repeat(textGap)))
+      chunks.push(fg(colors.text)(" ".repeat(Math.max(1, copyLeft - logoLeft - stringWidth(pattern[row] ?? "")))))
       chunks.push(...suffix)
     }
   }

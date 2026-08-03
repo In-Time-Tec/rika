@@ -76,6 +76,8 @@ export class SurfaceState {
   public contextDividerOne!: TextRenderable
   public contextDividerTwo!: TextRenderable
   public contextFooter!: TextRenderable
+  public overlayHintOne!: TextRenderable
+  public overlayHintTwo!: TextRenderable
   public overlayEditor!: EditBufferRenderable & { sync(text: string, cursor: number): void }
   public sidebar!: TextRenderable
   public changedFilesBox!: ScrollBoxRenderable & {

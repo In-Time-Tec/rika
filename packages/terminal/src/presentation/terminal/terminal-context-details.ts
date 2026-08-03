@@ -35,7 +35,6 @@ const contextDetailsImpl = (model: Model, width: number, height: number, now: nu
   const usableText = usable === undefined ? "Unknown" : formatContextTokens(usable)
   const cells = Math.max(4, Math.min(width < 40 ? 12 : 20, width - 5))
   const meter = availableContext === undefined ? undefined : ContextMeter.meter(availableContext, { cells })
-  const divider = (label: string) => `├─ ${label} ${"─".repeat(Math.max(0, width - label.length - 5))}┤`
 
   if (!compact) line("")
   if (meter === undefined) line(meterGlyphs.track.repeat(cells), (value) => fg(colors[model.mode])(value))
@@ -60,12 +59,12 @@ const contextDetailsImpl = (model: Model, width: number, height: number, now: nu
   line(compact ? `Used       ${used}` : `Used        ${used}`)
   line(compact ? `Available  ${available}` : `Available   ${available}`)
   if (!compact) line("")
-  line(compact ? divider("Window") : " ".repeat(width), (value) => dim(fg(colors.text)(value)))
+  line(" ".repeat(width), (value) => dim(fg(colors.text)(value)))
   if (!compact) line("")
   line(`Usable     ${usableText}`)
   line(`Full       ${full}`)
   if (!compact) line("")
-  line(compact ? divider("Session") : " ".repeat(width), (value) => dim(fg(colors.text)(value)))
+  line(" ".repeat(width), (value) => dim(fg(colors.text)(value)))
   if (!compact) line("")
   line(`Cost       ${cost(model)}`)
   line(`Active     ${time(model, now)}`)

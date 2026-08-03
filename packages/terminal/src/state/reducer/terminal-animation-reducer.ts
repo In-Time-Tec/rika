@@ -1,7 +1,6 @@
 import { Function } from "effect"
 import type { ContextUsage } from "../model/terminal-context-usage"
 import type { Model } from "../model/terminal-state"
-import type { TranscriptBlock } from "../model/terminal-transcript-state"
 
 const contextPercent = (usage: ContextUsage | undefined): number | undefined => {
   if (usage?._tag !== "Available") return undefined
@@ -9,23 +8,17 @@ const contextPercent = (usage: ContextUsage | undefined): number | undefined => 
   if (usable === 0) return usage.inputTokens > 0 ? 100 : 0
   return (usage.inputTokens / usable) * 100
 }
-const hasRunningCompaction = (model: Model): boolean =>
-  model.blocks.some((block) => {
-    const candidate = block as TranscriptBlock
-    return candidate._tag === "Compaction" && candidate.status === "running"
-  })
 
 const advanceAnimationImpl = (before: Model, after: Model, usage?: ContextUsage): Model => {
+  const ticked = after.animationTick !== before.animationTick
+  if (!ticked && usage === undefined) return after
   const previousUsage = contextPercent(before.contextUsage)
   const currentUsage = contextPercent(usage ?? after.contextUsage)
   const previousAnimation = before.contextAnimation
-  let flashTicks = Math.max(0, previousAnimation.flashTicks - 1)
+  let flashTicks = ticked ? Math.max(0, previousAnimation.flashTicks - 1) : previousAnimation.flashTicks
   let flashed75 = previousAnimation.flashed75
   let flashed90 = previousAnimation.flashed90
-  if (currentUsage === undefined) {
-    flashed75 = false
-    flashed90 = false
-  } else {
+  if (usage !== undefined && currentUsage !== undefined) {
     if (currentUsage < 75) flashed75 = false
     else if (!flashed75 && (previousUsage === undefined || previousUsage < 75)) {
       flashed75 = true
@@ -37,23 +30,28 @@ const advanceAnimationImpl = (before: Model, after: Model, usage?: ContextUsage)
       flashTicks = Math.max(flashTicks, 2)
     }
   }
-  const nextTick = before.animationTick + 1
-  const runningCompaction = hasRunningCompaction(after)
-  const settlingCompaction =
-    !runningCompaction &&
-    previousAnimation.compactFromPercent !== undefined &&
-    previousAnimation.compactTick === before.animationTick
-  if (usage === undefined && !runningCompaction && !settlingCompaction && previousAnimation.flashTicks === 0)
-    return after
-  let compactFromPercent: number | undefined
-  if (runningCompaction) compactFromPercent = previousAnimation.compactFromPercent ?? previousUsage ?? currentUsage
-  else if (settlingCompaction) compactFromPercent = previousAnimation.compactFromPercent
+  let compactFromPercent = previousAnimation.compactFromPercent
+  let compactTick = previousAnimation.compactTick
+  if (
+    usage !== undefined &&
+    before.activity?._tag === "Compacting" &&
+    previousUsage !== undefined &&
+    currentUsage !== undefined &&
+    currentUsage < previousUsage
+  ) {
+    compactFromPercent = previousUsage
+    compactTick = 0
+  } else if (ticked && compactTick !== undefined) {
+    if (compactTick >= 15) {
+      compactFromPercent = undefined
+      compactTick = undefined
+    } else compactTick += 1
+  }
   return {
     ...after,
-    animationTick: nextTick,
     contextAnimation: {
       ...(compactFromPercent === undefined ? {} : { compactFromPercent }),
-      ...(runningCompaction || settlingCompaction ? { compactTick: nextTick } : {}),
+      ...(compactTick === undefined ? {} : { compactTick }),
       flashTicks,
       flashed75,
       flashed90,

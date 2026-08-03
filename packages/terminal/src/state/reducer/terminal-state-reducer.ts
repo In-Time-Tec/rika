@@ -224,6 +224,7 @@ export const update: {
 )
 
 export const reduce = update
+export const withUsageAnimation = advanceAnimation
 export const applyQueueDelta = QueueState.applyQueueDelta
 export const resetQueue = QueueState.resetQueue
 export const commands = Palette.commands

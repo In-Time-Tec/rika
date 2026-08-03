@@ -155,7 +155,7 @@
           "width": 1
         },
         {
-          "text": "                     ",
+          "text": "                ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -173,7 +173,7 @@
             }
           },
           "attributes": 0,
-          "width": 21
+          "width": 16
         },
         {
           "text": ".",
@@ -260,7 +260,7 @@
           "width": 1
         },
         {
-          "text": "    ",
+          "text": "                ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -278,7 +278,7 @@
             }
           },
           "attributes": 0,
-          "width": 4
+          "width": 16
         },
         {
           "text": "Welcome to Rika",
@@ -302,7 +302,7 @@
           "width": 15
         },
         {
-          "text": "                              ",
+          "text": "                       ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -320,7 +320,7 @@
             }
           },
           "attributes": 0,
-          "width": 30
+          "width": 23
         }
       ]
     },
@@ -348,7 +348,7 @@
           "width": 1
         },
         {
-          "text": "                   ",
+          "text": "              ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -366,7 +366,7 @@
             }
           },
           "attributes": 0,
-          "width": 19
+          "width": 14
         },
         {
           "text": "•",
@@ -537,7 +537,7 @@
           "width": 1
         },
         {
-          "text": "                                              ",
+          "text": "                                                   ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -555,7 +555,7 @@
             }
           },
           "attributes": 0,
-          "width": 46
+          "width": 51
         }
       ]
     },
@@ -583,7 +583,7 @@
           "width": 1
         },
         {
-          "text": "                 ",
+          "text": "            ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -601,7 +601,7 @@
             }
           },
           "attributes": 0,
-          "width": 17
+          "width": 12
         },
         {
           "text": "••",
@@ -835,7 +835,7 @@
           "width": 1
         },
         {
-          "text": "                                             ",
+          "text": "                                                  ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -853,7 +853,7 @@
             }
           },
           "attributes": 0,
-          "width": 45
+          "width": 50
         }
       ]
     },
@@ -881,7 +881,7 @@
           "width": 1
         },
         {
-          "text": "                ",
+          "text": "           ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -899,7 +899,7 @@
             }
           },
           "attributes": 0,
-          "width": 16
+          "width": 11
         },
         {
           "text": "••••••",
@@ -1049,7 +1049,7 @@
           "width": 1
         },
         {
-          "text": "    ",
+          "text": "           ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -1067,7 +1067,7 @@
             }
           },
           "attributes": 0,
-          "width": 4
+          "width": 11
         },
         {
           "text": "ctrl+o",
@@ -1112,7 +1112,7 @@
           "width": 13
         },
         {
-          "text": "                     ",
+          "text": "                   ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -1130,7 +1130,7 @@
             }
           },
           "attributes": 0,
-          "width": 21
+          "width": 19
         }
       ]
     },
@@ -1158,7 +1158,7 @@
           "width": 1
         },
         {
-          "text": "                ",
+          "text": "           ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -1176,7 +1176,7 @@
             }
           },
           "attributes": 0,
-          "width": 16
+          "width": 11
         },
         {
           "text": "••",
@@ -1389,7 +1389,7 @@
           "width": 1
         },
         {
-          "text": "    ",
+          "text": "          ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -1407,7 +1407,7 @@
             }
           },
           "attributes": 0,
-          "width": 4
+          "width": 10
         },
         {
           "text": "?",
@@ -1452,7 +1452,7 @@
           "width": 14
         },
         {
-          "text": "                        ",
+          "text": "                       ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -1470,7 +1470,7 @@
             }
           },
           "attributes": 0,
-          "width": 24
+          "width": 23
         }
       ]
     },
@@ -1498,7 +1498,7 @@
           "width": 1
         },
         {
-          "text": "                ",
+          "text": "           ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -1516,7 +1516,7 @@
             }
           },
           "attributes": 0,
-          "width": 16
+          "width": 11
         },
         {
           "text": ":",
@@ -1666,7 +1666,7 @@
           "width": 7
         },
         {
-          "text": "                                           ",
+          "text": "                                                ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -1684,7 +1684,7 @@
             }
           },
           "attributes": 0,
-          "width": 43
+          "width": 48
         }
       ]
     },
@@ -1712,7 +1712,7 @@
           "width": 1
         },
         {
-          "text": "                ",
+          "text": "           ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -1730,7 +1730,7 @@
             }
           },
           "attributes": 0,
-          "width": 16
+          "width": 11
         },
         {
           "text": "::",
@@ -1859,7 +1859,7 @@
           "width": 1
         },
         {
-          "text": "                                            ",
+          "text": "                                                 ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -1877,7 +1877,7 @@
             }
           },
           "attributes": 0,
-          "width": 44
+          "width": 49
         }
       ]
     },
@@ -1905,7 +1905,7 @@
           "width": 1
         },
         {
-          "text": "                 ",
+          "text": "            ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -1923,7 +1923,7 @@
             }
           },
           "attributes": 0,
-          "width": 17
+          "width": 12
         },
         {
           "text": ":",
@@ -2010,7 +2010,7 @@
           "width": 1
         },
         {
-          "text": "                                             ",
+          "text": "                                                  ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -2028,7 +2028,7 @@
             }
           },
           "attributes": 0,
-          "width": 45
+          "width": 50
         }
       ]
     },
@@ -2056,7 +2056,7 @@
           "width": 1
         },
         {
-          "text": "                   ",
+          "text": "              ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -2074,7 +2074,7 @@
             }
           },
           "attributes": 0,
-          "width": 19
+          "width": 14
         },
         {
           "text": "..............",
@@ -2098,7 +2098,7 @@
           "width": 14
         },
         {
-          "text": "                                              ",
+          "text": "                                                   ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -2116,7 +2116,7 @@
             }
           },
           "attributes": 0,
-          "width": 46
+          "width": 51
         }
       ]
     },
@@ -2144,7 +2144,7 @@
           "width": 1
         },
         {
-          "text": "                      ",
+          "text": "                 ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -2162,7 +2162,7 @@
             }
           },
           "attributes": 0,
-          "width": 22
+          "width": 17
         },
         {
           "text": "........",
@@ -2186,7 +2186,7 @@
           "width": 8
         },
         {
-          "text": "                                                 ",
+          "text": "                                                      ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -2204,7 +2204,7 @@
             }
           },
           "attributes": 0,
-          "width": 49
+          "width": 54
         }
       ]
     },

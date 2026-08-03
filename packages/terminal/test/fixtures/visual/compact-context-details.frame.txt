@@ -2,11 +2,11 @@
 │ ━━━╌╌╌╌╌╌╌╌╌ 23%     │
 │ Used       56.1K     │
 │ Available  187.9K    │
-├─├Windowo─────────────┤
+├─ Window ─────────────┤
 │ Usable     244K      │
 │ Full       372K      │
-├─├Sessiono────────────┤
+├─ Session ────────────┤
 │ Cost       $1.25     │
 │ Active     ◷ 1m 43s  │
 │                      │
-╰───Ctrl+Y─toggle────e…╯
+╰── Ctrl+Y toggle ── e…╯

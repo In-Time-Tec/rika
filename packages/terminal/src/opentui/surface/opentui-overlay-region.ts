@@ -4,6 +4,7 @@ import { filter } from "../../presentation/terminal/command-palette"
 import { colors } from "../../presentation/terminal/terminal-theme"
 import { contextDetails } from "../../presentation/terminal/terminal-context-details"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
+import { truncateToWidth } from "../../presentation/terminal/terminal-format"
 import { filteredFiles } from "../../state/model/terminal-thread-navigation"
 import { type Model } from "../../state/model/terminal-state"
 import { paletteContent, modeLabelStarts, modePickerContent } from "./opentui-composer-region"
@@ -13,6 +14,54 @@ import type { ProjectedEditorRenderable } from "./opentui-surface-construction"
 import { SurfaceSidebarRegion } from "./opentui-sidebar-region"
 
 export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
+  private overlayDivider(label: string, width: number): string {
+    return `├─ ${label} ${"─".repeat(Math.max(0, width - label.length - 5))}┤`
+  }
+
+  private renderOverlayHints(
+    labels: ReadonlyArray<string>,
+    color: string,
+    bounds: { readonly left: number; readonly top: number; readonly width: number; readonly height: number },
+  ): void {
+    const hints = [this.overlayHintOne, this.overlayHintTwo]
+    for (const hint of hints) hint.visible = false
+    const widthOf = (label: string): number => stringWidth(label.replaceAll("↔", "x"))
+    const available = Math.max(0, bounds.width - 4)
+    const fitted: Array<string> = []
+    let used = 0
+    let truncated = false
+    for (const label of labels) {
+      const separator = fitted.length === 0 ? 0 : 2
+      const remaining = available - used - separator
+      if (remaining <= 0) break
+      const width = widthOf(label)
+      const value = width <= remaining ? label : remaining === 1 ? "…" : `${truncateToWidth(label, remaining - 1)}…`
+      fitted.push(value)
+      used += separator + widthOf(value)
+      if (width > remaining) {
+        truncated = true
+        break
+      }
+    }
+    const boxRight = Math.min(this.renderer.terminalWidth - 1, bounds.left + bounds.width - 1)
+    let cursor = truncated || fitted.length < labels.length ? boxRight : boxRight - 1
+    for (let index = fitted.length - 1; index >= 0; index -= 1) {
+      const label = fitted[index]!
+      const hint = hints[fitted.length - 1 - index]
+      if (hint === undefined) continue
+      const width = widthOf(label)
+      cursor -= width
+      hint.content = label
+      hint.width = width
+      hint.left = cursor
+      hint.top = bounds.top + bounds.height - 1
+      hint.fg = toOpenColor(color)
+      hint.bg = toOpenColor(colors.surface)
+      hint.visible = true
+      cursor -= 2
+    }
+  }
+
   protected syncOverlayEditor(text: string, cursor: number, top: number, height: number, width: number): void {
     this.overlayEditor.visible = true
     this.overlayEditor.top = top
@@ -62,6 +111,8 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
     this.contextDividerOne.visible = false
     this.contextDividerTwo.visible = false
     this.contextFooter.visible = false
+    this.overlayHintOne.visible = false
+    this.overlayHintTwo.visible = false
     this.modeLabel.visible = true
     this.paletteBox.overflow = "hidden"
     this.palette.onMouseMove = undefined
@@ -93,14 +144,17 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
       const selectedMode = modeIds[model.modePicker.selected] ?? model.mode
       this.paletteBox.titleColor = toOpenColor(colors[selectedMode])
       this.paletteBox.titleAlignment = "left"
-      this.paletteBox.bottomTitle = " ↔ turn ── esc "
-      this.paletteBox.bottomTitleAlignment = "right"
+      this.renderOverlayHints([" ↔ turn ", " esc "], colors[selectedMode], {
+        left: this.paletteBox.left,
+        top: this.paletteBox.top,
+        width: boxWidth,
+        height: boxHeight,
+      })
       const modeContentWidth = Math.max(1, boxWidth - 4)
       if (modeContentWidth >= 40 && model.height > 12) {
         this.paletteBox.overflow = "visible"
-        const divider = (label: string) => `├─ ${label} ${"─".repeat(Math.max(0, boxWidth - label.length - 5))}┤`
-        this.contextDividerOne.content = divider("Route")
-        this.contextDividerTwo.content = divider("About")
+        this.contextDividerOne.content = this.overlayDivider("Route", boxWidth)
+        this.contextDividerTwo.content = this.overlayDivider("About", boxWidth)
         this.contextDividerOne.width = boxWidth
         this.contextDividerTwo.width = boxWidth
         this.contextDividerOne.left = -1
@@ -143,19 +197,17 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
       this.paletteBox.title = " Context & Usage "
       this.paletteBox.titleColor = toOpenColor(colors[model.mode])
       this.paletteBox.titleAlignment = "left"
-      this.paletteBox.bottomTitle = " Ctrl+Y toggle ── esc "
-      this.paletteBox.bottomTitleAlignment = "right"
+      this.renderOverlayHints([" Ctrl+Y toggle ", " esc "], colors[model.mode], {
+        left: this.paletteBox.left,
+        top: this.paletteBox.top,
+        width: boxWidth,
+        height: boxHeight,
+      })
       if (model.width <= 24) {
         this.modeLabel.visible = false
         this.paletteBox.overflow = "visible"
-        this.contextFooter.content = "╰── Ctrl+Y toggle ── e…╯"
-        this.contextFooter.width = boxWidth
-        this.contextFooter.left = -1
-        this.contextFooter.top = 10
-        this.contextFooter.visible = true
-        const divider = (label: string) => `├─ ${label} ${"─".repeat(Math.max(0, boxWidth - label.length - 5))}┤`
-        this.contextDividerOne.content = divider("Window")
-        this.contextDividerTwo.content = divider("Session")
+        this.contextDividerOne.content = this.overlayDivider("Window", boxWidth)
+        this.contextDividerTwo.content = this.overlayDivider("Session", boxWidth)
         this.contextDividerOne.width = boxWidth
         this.contextDividerTwo.width = boxWidth
         this.contextDividerOne.left = -1
@@ -166,9 +218,8 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
         this.contextDividerTwo.visible = true
       } else if (boxHeight >= 18) {
         this.paletteBox.overflow = "visible"
-        const divider = (label: string) => `├─ ${label} ${"─".repeat(Math.max(0, boxWidth - label.length - 5))}┤`
-        this.contextDividerOne.content = divider("Window")
-        this.contextDividerTwo.content = divider("Session")
+        this.contextDividerOne.content = this.overlayDivider("Window", boxWidth)
+        this.contextDividerTwo.content = this.overlayDivider("Session", boxWidth)
         this.contextDividerOne.width = boxWidth
         this.contextDividerTwo.width = boxWidth
         this.contextDividerOne.left = -1
@@ -208,8 +259,12 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
       this.paletteBox.top = Math.max(0, composerTop - overlayHeight)
       this.paletteBox.title = model.threadSwitcher.kind === "mention" ? " Mention Thread " : " Switch Thread "
       this.paletteBox.titleAlignment = "left"
-      this.paletteBox.bottomTitle = " Opt+W/Ctrl+T all workspaces ── Esc close "
-      this.paletteBox.bottomTitleAlignment = "right"
+      this.renderOverlayHints([" Opt+W/Ctrl+T all workspaces ", " Esc close "], colors[model.mode], {
+        left: this.paletteBox.left,
+        top: this.paletteBox.top,
+        width: overlayWidth,
+        height: overlayHeight,
+      })
       const switcherContentWidth = Math.max(1, overlayWidth - 4)
       const contentHeight = Math.max(1, overlayHeight - 2)
       const minute = Math.floor(this.currentTimeMillis() / 60_000)

@@ -1,8 +1,8 @@
 import { expect, test } from "vitest"
 import { initial } from "../src/state/model/terminal-state"
-import { canSubmit, update } from "../src/state/reducer/terminal-state-reducer"
+import { canSubmit, update, withUsageAnimation } from "../src/state/reducer/terminal-state-reducer"
 import { modePickerContent } from "../src/opentui/surface/opentui-composer-region"
-import { welcomeContent } from "../src/opentui/surface/opentui-surface-content"
+import { animationActive, welcomeContent } from "../src/opentui/surface/opentui-surface-content"
 
 const key = (name: string) => ({
   name,
@@ -45,6 +45,30 @@ test("retains the authoritative root context reading while a following turn wait
   expect(waiting.activity).toEqual({ _tag: "Waiting" })
 })
 
+test("drains threshold flashes and compaction vacuum ticks only on animation ticks", () => {
+  const before = {
+    ...initial("/work", "high"),
+    activity: { _tag: "Compacting" as const },
+    contextUsage: { _tag: "Available" as const, inputTokens: 80, contextWindow: 110, reserveTokens: 10 },
+  }
+  const compacted = { _tag: "Available" as const, inputTokens: 20, contextWindow: 110, reserveTokens: 10 }
+  let model = withUsageAnimation(before, { ...before, contextUsage: compacted }, compacted)
+  expect(model.contextAnimation).toMatchObject({ compactFromPercent: 80, compactTick: 0 })
+  for (let index = 0; index < 17; index += 1) model = update(model, { _tag: "AnimationTicked" })
+  expect(model.contextAnimation.compactTick).toBeUndefined()
+  const threshold = { _tag: "Available" as const, inputTokens: 76, contextWindow: 110, reserveTokens: 10 }
+  model = withUsageAnimation(
+    { ...before, activity: undefined, contextUsage: { ...before.contextUsage, inputTokens: 70 } },
+    { ...before, activity: undefined, contextUsage: threshold },
+    threshold,
+  )
+  expect(model.contextAnimation.flashTicks).toBe(2)
+  model = update(model, { _tag: "ComposerReplaced", text: "does not drain" })
+  expect(model.contextAnimation.flashTicks).toBe(2)
+  model = update(update(model, { _tag: "AnimationTicked" }), { _tag: "AnimationTicked" })
+  expect(model.contextAnimation.flashTicks).toBe(0)
+})
+
 test("keeps a typed draft intact and blocks submission while a thread is loading", () => {
   let model = update(initial("/work"), { _tag: "ComposerReplaced", text: "keep this draft" })
   model = update(model, { _tag: "ThreadOpenRequested" })
@@ -55,7 +79,14 @@ test("keeps a typed draft intact and blocks submission while a thread is loading
   expect(canSubmit(update(afterEnter, { _tag: "ThreadOpenCompleted" }))).toBe(true)
 })
 
-test("centers the welcome orb and copy as one group with mode-colored intensity tiers", () => {
+test("wires the welcome orb to active ticks and returns idle rendering to its first frame", () => {
+  const idle = { ...initial("/work", "high"), animationTick: 7 }
+  expect(animationActive(idle)).toBe(false)
+  expect(text(welcomeContent(120, 30, 0, "high").chunks)).not.toBe(text(welcomeContent(120, 30, 1, "high").chunks))
+  expect(animationActive({ ...idle, busy: true, activity: { _tag: "Waiting" } })).toBe(true)
+})
+
+test("places the welcome orb and copy at the v0.1.7 anchors with mode-colored intensity tiers", () => {
   const medium = welcomeContent(120, 30, 0, "medium")
   const high = welcomeContent(120, 30, 0, "high")
   const mediumText = text(medium.chunks)

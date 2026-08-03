@@ -3,7 +3,7 @@ import * as ThreadResult from "@rika/product/thread-result"
 import { Function, HashMap } from "effect"
 import { applyTurnDelta } from "@rika/terminal/terminal-transcript-presentation"
 import type { Model, ThreadItem } from "@rika/terminal/terminal-state"
-import { update as updateModel } from "@rika/terminal/terminal-state-reducer"
+import { update as updateModel, withUsageAnimation } from "@rika/terminal/terminal-state-reducer"
 import type { State, ProjectionStream, TranscriptEvent, Update } from "./interactive-controller"
 import {
   activeSeedEntries,
@@ -61,16 +61,19 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
         usageRevision: event.revision,
         ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
         ...(lastAvailableUsageCost === undefined ? {} : { lastAvailableUsageCost }),
-        model: updateModel(
-          {
-            ...withoutCost,
-            usageCost,
-            usageTokens: event.tokens,
-            usageTime: event.time,
-            contextUsage,
-            ...(threadCostUsd === undefined ? {} : { costUsd: threadCostUsd }),
-          },
-          { _tag: "UsageReported" },
+        model: withUsageAnimation(
+          state.model,
+          updateModel(
+            {
+              ...withoutCost,
+              usageCost,
+              usageTokens: event.tokens,
+              usageTime: event.time,
+              contextUsage,
+              ...(threadCostUsd === undefined ? {} : { costUsd: threadCostUsd }),
+            },
+            { _tag: "UsageReported" },
+          ),
           contextUsage,
         ),
       },

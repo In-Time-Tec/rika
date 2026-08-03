@@ -407,7 +407,7 @@
           "width": 1
         },
         {
-          "text": "    ",
+          "text": "      ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -425,7 +425,7 @@
             }
           },
           "attributes": 0,
-          "width": 4
+          "width": 6
         },
         {
           "text": "Welcome to Rika",
@@ -449,7 +449,7 @@
           "width": 15
         },
         {
-          "text": "       ",
+          "text": "     ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -467,7 +467,7 @@
             }
           },
           "attributes": 0,
-          "width": 7
+          "width": 5
         }
       ]
     },
@@ -1238,7 +1238,7 @@
           "width": 1
         },
         {
-          "text": "    ",
+          "text": " ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -1256,7 +1256,7 @@
             }
           },
           "attributes": 0,
-          "width": 4
+          "width": 1
         },
         {
           "text": "ctrl+o",
@@ -1301,7 +1301,7 @@
           "width": 5
         },
         {
-          "text": "      ",
+          "text": "         ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -1319,7 +1319,7 @@
             }
           },
           "attributes": 0,
-          "width": 6
+          "width": 9
         }
       ]
     },
@@ -1624,7 +1624,7 @@
           "width": 1
         },
         {
-          "text": "    ",
+          "text": " ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -1642,7 +1642,7 @@
             }
           },
           "attributes": 0,
-          "width": 4
+          "width": 1
         },
         {
           "text": "?",
@@ -1687,7 +1687,7 @@
           "width": 14
         },
         {
-          "text": "  ",
+          "text": "     ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -1705,7 +1705,7 @@
             }
           },
           "attributes": 0,
-          "width": 2
+          "width": 5
         }
       ]
     },
