@@ -136,10 +136,10 @@ test("renders every default mode route in the mode picker", () =>
           yield* Effect.tryPromise(() => setup.renderOnce())
           const frame = setup.captureCharFrame()
           expect(frame).toContain(
-            `Oracle: ${modelRouteDisplayLabel(ModelRouteResolution.resolveModelRoute(SettingsDefaults.Defaults.defaults, mode, "oracle"))}`,
+            `Oracle    ${modelRouteDisplayLabel(ModelRouteResolution.resolveModelRoute(SettingsDefaults.Defaults.defaults, mode, "oracle"))}`,
           )
           expect(frame).toContain(
-            `Agent:  ${modelRouteDisplayLabel(ModelRouteResolution.resolveModelRoute(SettingsDefaults.Defaults.defaults, mode, "main"))}`,
+            `Agent     ${modelRouteDisplayLabel(ModelRouteResolution.resolveModelRoute(SettingsDefaults.Defaults.defaults, mode, "main"))}`,
           )
         }
       }),

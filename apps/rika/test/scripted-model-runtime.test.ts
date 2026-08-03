@@ -143,8 +143,8 @@ test("renders configured model display names in the mode picker", () =>
         yield* Effect.tryPromise(() => setup.flush())
         yield* Effect.tryPromise(() => setup.renderOnce())
         const frame = setup.captureCharFrame()
-        expect(frame).toContain("Agent:  Sonnet 5 high")
-        expect(frame).toContain("Oracle: Opus 5 high")
+        expect(frame).toContain("Agent     Sonnet 5 high")
+        expect(frame).toContain("Oracle    Opus 5 high")
         expect(frame).not.toContain("GPT-5.6")
       }),
     ),
