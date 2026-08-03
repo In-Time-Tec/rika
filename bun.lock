@@ -46,7 +46,7 @@
     },
     "apps/rika": {
       "name": "@rika/cli",
-      "version": "0.1.7",
+      "version": "0.1.8",
       "bin": {
         "rika": "./dist/client-main.js",
       },
@@ -268,11 +268,11 @@
   },
   "catalog": {
     "@ast-grep/cli": "0.44.0",
-    "@batonfx/core": "0.12.0",
-    "@batonfx/mcp": "0.12.0",
-    "@batonfx/providers": "0.12.0",
-    "@batonfx/skills": "0.12.0",
-    "@batonfx/test": "0.12.0",
+    "@batonfx/core": "0.12.1",
+    "@batonfx/mcp": "0.12.1",
+    "@batonfx/providers": "0.12.1",
+    "@batonfx/skills": "0.12.1",
+    "@batonfx/test": "0.12.1",
     "@effect/platform-bun": "4.0.0-beta.98",
     "@effect/sql-mysql2": "4.0.0-beta.98",
     "@effect/sql-sqlite-bun": "4.0.0-beta.98",
@@ -289,7 +289,7 @@
     "@opentui/core-win32-arm64": "0.4.3",
     "@opentui/core-win32-x64": "0.4.3",
     "@pierre/diffs": "1.2.11",
-    "@relayfx/sdk": "0.8.3",
+    "@relayfx/sdk": "0.8.4",
     "@tsconfig/bun": "1.0.9",
     "@types/bun": "1.3.13",
     "@types/node": "24.12.2",
@@ -409,15 +409,15 @@
 
     "@babel/types": ["@babel/types@7.29.7", "", { "dependencies": { "@babel/helper-string-parser": "^7.29.7", "@babel/helper-validator-identifier": "^7.29.7" } }, "sha512-4zBIxpPzowiZpusoFkyGVwakdRJUyuH5PxQ/PrqghfdFWWasvnCdPfQXHrenDai+gyLARulZjZowCOj6fjT4pA=="],
 
-    "@batonfx/core": ["@batonfx/core@0.12.0", "", { "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-ErOc1ZJGjC0kDYWQ4co8mQ7xZnHPO7TZX1kxnrvkjK/ALgcmcBXF5MeRESKbEdZav1ARBqRx3TNmxbN43L0TdA=="],
+    "@batonfx/core": ["@batonfx/core@0.12.1", "", { "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-H9E8/jS1atFTwConjDxJQpCwXwAdSjk7aoLvlXfVROAeAApXrCs65kEETki8H3BPhgl6oE3RfrRCaRRz5jrCjQ=="],
 
-    "@batonfx/mcp": ["@batonfx/mcp@0.12.0", "", { "dependencies": { "@batonfx/core": "0.12.0", "@modelcontextprotocol/sdk": "1.29.0" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-bSjf391PMYicBTdoHO35P4MIvYJ4BBIhmuv+NH1JP4drHRAYpKnxj5TEWc8U8jt4cG+s1qYUW0o8HjWxbYrQ7Q=="],
+    "@batonfx/mcp": ["@batonfx/mcp@0.12.1", "", { "dependencies": { "@batonfx/core": "0.12.1", "@modelcontextprotocol/sdk": "1.29.0" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-qOBpCn+aCD3574sDve2IxqUju/RfMyTf6NtWCz+Dpyb/6zETZehd21X7jzcFPlX5yZaJrTcpLqQlaokQ3ujeyw=="],
 
-    "@batonfx/providers": ["@batonfx/providers@0.12.0", "", { "dependencies": { "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/credential-provider-node": "3.859.0", "@batonfx/core": "0.12.0", "@effect/ai-anthropic": "4.0.0-beta.98", "@effect/ai-openai": "4.0.0-beta.98", "@effect/ai-openai-compat": "4.0.0-beta.98", "@effect/ai-openrouter": "4.0.0-beta.98", "@smithy/types": "4.3.1" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-tiuzI3v9T35/0J8WU3JlH1vAXCgMaMzWmaFr++tJeK1ilNR2ykaT+t9HukBYyIBH/zev8T0x1Oz8N5PcttugBA=="],
+    "@batonfx/providers": ["@batonfx/providers@0.12.1", "", { "dependencies": { "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/credential-provider-node": "3.859.0", "@batonfx/core": "0.12.1", "@effect/ai-anthropic": "4.0.0-beta.98", "@effect/ai-openai": "4.0.0-beta.98", "@effect/ai-openai-compat": "4.0.0-beta.98", "@effect/ai-openrouter": "4.0.0-beta.98", "@smithy/types": "4.3.1" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-muATvvKTSnpJQYbNTJbzUrPbQFmXDeMSZ/YvmMEVC38SCYaDeF3+BvxlbCF00PFswvyWX8NVioasMArlPWx4gA=="],
 
-    "@batonfx/skills": ["@batonfx/skills@0.12.0", "", { "dependencies": { "@batonfx/core": "0.12.0" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-AuhC+QmPUlEVfYQhYrQGHgDkzaB1GXmnhEnvefIDv9RMHzFpVQ5emS7CO/4T0vKpSzKM8HiQB1ecRftlzIVRXg=="],
+    "@batonfx/skills": ["@batonfx/skills@0.12.1", "", { "dependencies": { "@batonfx/core": "0.12.1" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-H6dqtArDxw3082NE36E/Bc+KWo2JPuCPYpokJetfa2mXh9JrnVYW6Q13ShDOxDvZRGi0IFC2ImnZtwtoTzmhKA=="],
 
-    "@batonfx/test": ["@batonfx/test@0.12.0", "", { "dependencies": { "@batonfx/core": "0.12.0" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-KLhhwZaJQthhccNGLNuEC8oGO2ydFqaZg8F71XwGO9RP9yaMOaIrBKjeCrSjPlmnHrHr4y3xUdQZEFq9a5r+gg=="],
+    "@batonfx/test": ["@batonfx/test@0.12.1", "", { "dependencies": { "@batonfx/core": "0.12.1" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-1b7vFDiBL03KXSFCrI2RZnJPyHvczCP4jdN1PNNXFSSrZBpRwARR1sTsay/Rmf7SIEiC9GZSAD37cr8l7+Sh8Q=="],
 
     "@bcoe/v8-coverage": ["@bcoe/v8-coverage@1.0.2", "", {}, "sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA=="],
 
@@ -629,7 +629,7 @@
 
     "@pierre/theming": ["@pierre/theming@0.0.1", "", { "peerDependencies": { "@pierre/theme": "^1.0.0", "@shikijs/themes": "^3.0.0 || ^4.0.0", "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0", "shiki": "^3.0.0 || ^4.0.0" }, "optionalPeers": ["@pierre/theme", "@shikijs/themes", "react", "react-dom", "shiki"] }, "sha512-1thlEtJbqdyLzc1ZS2KQa1q7FzDGHT4dTEdKHoyQjOMeWWOmbVG5/ndEfOKfAb5Fzkz8cNJrOjFLiZoDH/A03A=="],
 
-    "@relayfx/sdk": ["@relayfx/sdk@0.8.3", "", { "dependencies": { "@aws-sdk/client-s3": "3.1094.0", "@batonfx/core": "0.12.0", "@batonfx/providers": "0.12.0", "@effect/ai-anthropic": "4.0.0-beta.98", "@effect/ai-openai": "4.0.0-beta.98", "@effect/ai-openai-compat": "4.0.0-beta.98", "@effect/ai-openrouter": "4.0.0-beta.98", "@effect/platform-bun": "4.0.0-beta.98", "@effect/sql-mysql2": "4.0.0-beta.98", "@effect/sql-pg": "4.0.0-beta.98", "@effect/sql-sqlite-bun": "4.0.0-beta.98", "drizzle-orm": "1.0.0-rc.3", "effect": "4.0.0-beta.98", "pg": "8.21.0" } }, "sha512-dwKOt58eSh9hW7ygCuj/NVeWGFvbWtejTey3vyOxrIYHmElJ+s/iWTOz2kVbCm+J/aV5CSqg+QmTmToeRwexQQ=="],
+    "@relayfx/sdk": ["@relayfx/sdk@0.8.4", "", { "dependencies": { "@aws-sdk/client-s3": "3.1094.0", "@batonfx/core": "0.12.1", "@batonfx/providers": "0.12.1", "@effect/ai-anthropic": "4.0.0-beta.98", "@effect/ai-openai": "4.0.0-beta.98", "@effect/ai-openai-compat": "4.0.0-beta.98", "@effect/ai-openrouter": "4.0.0-beta.98", "@effect/platform-bun": "4.0.0-beta.98", "@effect/sql-mysql2": "4.0.0-beta.98", "@effect/sql-pg": "4.0.0-beta.98", "@effect/sql-sqlite-bun": "4.0.0-beta.98", "drizzle-orm": "1.0.0-rc.3", "effect": "4.0.0-beta.98", "pg": "8.21.0" } }, "sha512-fRlxdemXgRCOQL4yqQKPGBbvaSmgjnBC8ATYx0TmXihyIwkJGClZoz+SSS9ejaSKyUw/XPxBInFf9YxMKh/b9Q=="],
 
     "@rika/cli": ["@rika/cli@workspace:apps/rika"],
 
