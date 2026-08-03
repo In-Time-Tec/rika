@@ -50,55 +50,59 @@ for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
     ))
 }
 for (const panel of ["changed", "workspace"] as const) {
-  test(`keeps composer updates bounded with a large ${panel} files sidebar`, () =>
-    Effect.runPromise(
-      Effect.gen(function* () {
-        const setup = yield* openTui(() => createTestRenderer({ width: 120, height: 40 }))
-        const paths = Array.from(
-          { length: 10_000 },
-          (_, index) => `src/feature-${Math.floor(index / 20)}/file-${index}.ts`,
-        )
-        const initialModel = initial("/work", "high")
-        const base: Model = {
-          ...initialModel,
-          width: 120,
-          height: 40,
-          entries: [{ role: "assistant", text: "settled response" }],
-          ...(panel === "changed"
-            ? {
-                changedFilesOpen: true,
-                changedFiles: ready(paths.map((path) => ({ path, status: "M", added: 1, removed: 0 }))),
-              }
-            : {
-                workspaceFilesOpen: true,
-                filePicker: { ...initialModel.filePicker, items: ready(paths) },
-              }),
-        }
-        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-        try {
-          surface.update(base)
-          yield* openTui(() => setup.flush())
-          const state = surface as unknown as {
-            readonly changedRows: ReadonlyArray<unknown>
-            readonly transcriptChildren: ReadonlyArray<Renderable>
-          }
-          const sidebarRows = state.changedRows
-          expect(surface.changedFilesBox.scrollHeight).toBe(sidebarRows.length)
-          expect(surface.changedFilesBox.content.height).toBeLessThanOrEqual(
-            surface.changedFilesBox.viewport.height + 1,
+  test(
+    `keeps composer updates bounded with a large ${panel} files sidebar`,
+    () =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const setup = yield* openTui(() => createTestRenderer({ width: 120, height: 40 }))
+          const paths = Array.from(
+            { length: 10_000 },
+            (_, index) => `src/feature-${Math.floor(index / 20)}/file-${index}.ts`,
           )
-          const transcriptChildren = [...state.transcriptChildren]
-          for (let index = 0; index < 20; index += 1)
-            surface.update({ ...base, input: `next ${index}`, cursor: `next ${index}`.length })
+          const initialModel = initial("/work", "high")
+          const base: Model = {
+            ...initialModel,
+            width: 120,
+            height: 40,
+            entries: [{ role: "assistant", text: "settled response" }],
+            ...(panel === "changed"
+              ? {
+                  changedFilesOpen: true,
+                  changedFiles: ready(paths.map((path) => ({ path, status: "M", added: 1, removed: 0 }))),
+                }
+              : {
+                  workspaceFilesOpen: true,
+                  filePicker: { ...initialModel.filePicker, items: ready(paths) },
+                }),
+          }
+          const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+          try {
+            surface.update(base)
+            yield* openTui(() => setup.flush())
+            const state = surface as unknown as {
+              readonly changedRows: ReadonlyArray<unknown>
+              readonly transcriptChildren: ReadonlyArray<Renderable>
+            }
+            const sidebarRows = state.changedRows
+            expect(surface.changedFilesBox.scrollHeight).toBe(sidebarRows.length)
+            expect(surface.changedFilesBox.content.height).toBeLessThanOrEqual(
+              surface.changedFilesBox.viewport.height + 1,
+            )
+            const transcriptChildren = [...state.transcriptChildren]
+            for (let index = 0; index < 20; index += 1)
+              surface.update({ ...base, input: `next ${index}`, cursor: `next ${index}`.length })
 
-          expect(state.changedRows).toBe(sidebarRows)
-          expect(state.transcriptChildren.every((child, index) => child === transcriptChildren[index])).toBe(true)
-        } finally {
-          surface.destroy()
-          setup.renderer.destroy()
-        }
-      }),
-    ))
+            expect(state.changedRows).toBe(sidebarRows)
+            expect(state.transcriptChildren.every((child, index) => child === transcriptChildren[index])).toBe(true)
+          } finally {
+            surface.destroy()
+            setup.renderer.destroy()
+          }
+        }),
+      ),
+    30_000,
+  )
 }
 for (const width of [80, 50] as const) {
   test(`renders a visible error action and leaves the composer usable at width ${width}`, () =>

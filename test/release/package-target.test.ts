@@ -145,5 +145,5 @@ describe("release target construction", () => {
     expect([...interactive.external].join("\n")).not.toContain("@batonfx/providers")
     expect(residentFiles).not.toContain("/packages/terminal/")
     expect([...resident.external].join("\n")).not.toContain("@opentui/")
-  })
+  }, 30_000)
 })

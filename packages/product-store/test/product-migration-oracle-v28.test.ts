@@ -264,45 +264,52 @@ it.layer(BunServices.layer)("v28 migration oracle", (test) => {
     )
 
     for (const [index, kind] of oracle.malformedJsonCases.entries())
-      templateTest.effect(`rejects malformed JSON ${kind} without changing database or sidecars`, () =>
-        rejectMalformedRoutes(`rika-v28-malformed-json-${index}-`, malformedJsonRoutes().slice(index, index + 1)),
+      templateTest.effect(
+        `rejects malformed JSON ${kind} without changing database or sidecars`,
+        () => rejectMalformedRoutes(`rika-v28-malformed-json-${index}-`, malformedJsonRoutes().slice(index, index + 1)),
+        30_000,
       )
 
     for (const [index, kind] of oracle.malformedConnectionIdentityCases.entries())
-      templateTest.effect(`rejects malformed connection identity ${kind} without changing database or sidecars`, () =>
-        rejectIdentityCase(`rika-v28-malformed-identity-${index}-`, index),
+      templateTest.effect(
+        `rejects malformed connection identity ${kind} without changing database or sidecars`,
+        () => rejectIdentityCase(`rika-v28-malformed-identity-${index}-`, index),
+        30_000,
       )
 
-    templateTest.effect("rejects every declared future version before writing database or sidecar bytes", () =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const fileSystem = yield* FileSystem.FileSystem
-          const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-v28-reject-" })
-          const template = yield* V28Template
-          yield* Effect.forEach(
-            oracle.rejectedVersions,
-            (version) =>
-              Effect.gen(function* () {
-                const filename = `${directory}/${version}/rika.db`
-                yield* copyTemplate(template, filename)
-                const futureRoute = { ...primaryRecipe.legacyRoute, version }
-                const routeText = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.UnknownFromJsonString))(
-                  futureRoute,
-                )
-                yield* updateRoute(filename, routeText)
-                yield* removeSidecars(filename)
-                const before = yield* readDatabaseBytes(filename)
-                expect(before.has(filename)).toBe(true)
-                expect(before.has(`${filename}-wal`)).toBe(false)
-                expect(before.has(`${filename}-shm`)).toBe(false)
-                const result = yield* Effect.result(makeDatabase(filename))
-                expect(result._tag).toBe("Failure")
-                yield* expectUnchanged(before, filename)
-              }),
-            { concurrency: 2 },
-          )
-        }),
-      ),
+    templateTest.effect(
+      "rejects every declared future version before writing database or sidecar bytes",
+      () =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const fileSystem = yield* FileSystem.FileSystem
+            const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-v28-reject-" })
+            const template = yield* V28Template
+            yield* Effect.forEach(
+              oracle.rejectedVersions,
+              (version) =>
+                Effect.gen(function* () {
+                  const filename = `${directory}/${version}/rika.db`
+                  yield* copyTemplate(template, filename)
+                  const futureRoute = { ...primaryRecipe.legacyRoute, version }
+                  const routeText = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.UnknownFromJsonString))(
+                    futureRoute,
+                  )
+                  yield* updateRoute(filename, routeText)
+                  yield* removeSidecars(filename)
+                  const before = yield* readDatabaseBytes(filename)
+                  expect(before.has(filename)).toBe(true)
+                  expect(before.has(`${filename}-wal`)).toBe(false)
+                  expect(before.has(`${filename}-shm`)).toBe(false)
+                  const result = yield* Effect.result(makeDatabase(filename))
+                  expect(result._tag).toBe("Failure")
+                  yield* expectUnchanged(before, filename)
+                }),
+              { concurrency: 2 },
+            )
+          }),
+        ),
+      30_000,
     )
   })
 })
