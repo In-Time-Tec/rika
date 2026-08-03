@@ -60,6 +60,33 @@ test("coalesces rapid wheel offsets into one report per frame", () =>
       }
     }),
   ))
+test("requests older history when PageUp starts at the top of a short transcript", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      const model: Model = {
+        ...initial("/work", "high"),
+        entries: [{ role: "assistant", text: "short history", turnId: "turn-0" }],
+        items: [{ _tag: "Entry", index: 0, id: "answer-0", turnId: "turn-0" }],
+      }
+      const offsets = new Array<number>()
+      const surface = new Surface(setup.renderer, {
+        key: () => undefined,
+        resize: () => undefined,
+        scroll: (offset) => offsets.push(offset),
+      })
+      try {
+        surface.update(model)
+        yield* openTui(() => setup.flush())
+        setup.mockInput.pressKey("\x1b[5~")
+        yield* openTui(() => setup.flush())
+        expect(offsets).toEqual([0])
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
 test("moves the bounded transcript window forward by one measured page", () =>
   Effect.runPromise(
     Effect.gen(function* () {

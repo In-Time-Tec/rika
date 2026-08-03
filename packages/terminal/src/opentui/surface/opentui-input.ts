@@ -66,7 +66,10 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
       if (this.queuePendingTranscriptScroll(-amount)) return
       if (this.transcriptScroll.scrollTop <= 1 && this.shiftTranscriptWindow(-100, true, -amount)) return
       this.applyTranscriptPosition(this.transcriptScroll.scrollTop - amount)
-      this.reportTranscriptScroll()
+      if (this.transcriptScroll.scrollTop <= 1) {
+        this.syncTranscriptScrollbar()
+        this.handlers.scroll?.(0)
+      } else this.reportTranscriptScroll()
     } else if (!mapped.ctrl && !mapped.alt && !mapped.meta && mapped.name === "pagedown") {
       this.cancelWheelReport()
       const amount = Math.max(1, this.transcriptScroll.viewport.height - 1)
