@@ -14,10 +14,12 @@ export interface ProfileDataPaths {
   readonly executionDatabase: string
 }
 
+export const executionDatabaseName = "execution-v2.db"
+
 export const dataPaths = (home: string): ProfileDataPaths => ({
   dataRoot: under(home, ".rika"),
   database: under(home, ".rika", "rika.db"),
-  executionDatabase: under(home, ".rika", "execution.db"),
+  executionDatabase: under(home, ".rika", executionDatabaseName),
 })
 
 export const resolveProfileDataPaths = (options: ProfileDataPathOptions): ProfileDataPaths => {
@@ -25,7 +27,7 @@ export const resolveProfileDataPaths = (options: ProfileDataPathOptions): Profil
     return {
       dataRoot: options.hostDataRoot,
       database: under(options.hostDataRoot, "rika.db"),
-      executionDatabase: under(options.hostDataRoot, "execution.db"),
+      executionDatabase: under(options.hostDataRoot, executionDatabaseName),
     }
   const defaults = dataPaths(options.home)
   return {
@@ -42,5 +44,11 @@ const parentDirectory = (filename: string): string => {
   return filename.slice(0, separator)
 }
 
+const filenameStem = (filename: string): string => {
+  const separator = filename.lastIndexOf("/")
+  const basename = separator < 0 ? filename : filename.slice(separator + 1)
+  return basename.endsWith(".db") ? basename.slice(0, -3) : basename
+}
+
 export const executionEventHistoryFor = (executionDatabase: string): string =>
-  under(parentDirectory(executionDatabase), "execution-event-history")
+  under(parentDirectory(executionDatabase), `${filenameStem(executionDatabase)}-event-history`)

@@ -56,6 +56,7 @@ const annotationSchemas: Readonly<Record<string, AnnotationSchema>> = {
   ),
   "rika.failure.interrupted": boolean,
   "rika.failure.kind": knownFailureKinds,
+  "rika.failure.message": matching(/^[\s\S]{1,4096}$/, 4096),
   "rika.failure.outcome": oneOf("known", "unknown"),
   "rika.follow.cursor": eventCursor,
   "rika.follow.reason": oneOf("thread-open", "reattach", "resume", "recovery"),

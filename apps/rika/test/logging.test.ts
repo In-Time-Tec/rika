@@ -297,6 +297,8 @@ describe("Logging", () => {
               Effect.logInfo("execution.follow.started").pipe(
                 Effect.annotateLogs({
                   "rika.failure.cause": "UsageRepositoryError",
+                  "rika.failure.kind": "ExecutionBackendError",
+                  "rika.failure.message": "ExecutionNotFound",
                   "rika.follow.cursor": "cursor-42",
                   "rika.follow.reason": "thread-open",
                   "rika.follow.scope": "tree",
@@ -310,6 +312,8 @@ describe("Logging", () => {
         )
         const { content, records } = yield* writtenRecords(root)
         assert.deepStrictEqual(records[0]?.annotations, {
+          "rika.failure.kind": "ExecutionBackendError",
+          "rika.failure.message": "ExecutionNotFound",
           "rika.follow.cursor": "cursor-42",
           "rika.follow.reason": "thread-open",
           "rika.follow.scope": "tree",

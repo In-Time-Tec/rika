@@ -21,10 +21,10 @@ describe("on-disk layout", () => {
     expect(dataPaths("/home/ada/").database).toBe(dataPaths("/home/ada").database)
   })
 
-  it("derives one stable event history directory in the data root that holds execution.db", () => {
+  it("keeps the isolated execution schema generation and its event history together", () => {
     const paths = dataPaths("/home/ada")
-    expect(paths.executionDatabase).toBe("/home/ada/.rika/execution.db")
-    expect(executionEventHistoryFor(paths.executionDatabase)).toBe("/home/ada/.rika/execution-event-history")
+    expect(paths.executionDatabase).toBe("/home/ada/.rika/execution-v2.db")
+    expect(executionEventHistoryFor(paths.executionDatabase)).toBe("/home/ada/.rika/execution-v2-event-history")
     expect(executionEventHistoryFor(paths.executionDatabase)).toBe(executionEventHistoryFor(paths.executionDatabase))
     expect(executionEventHistoryFor(dataPaths("/home/ada/").executionDatabase)).toBe(
       executionEventHistoryFor(paths.executionDatabase),
@@ -41,7 +41,11 @@ describe("on-disk layout", () => {
         productDatabase: "/explicit/product.db",
         executionDatabase: "/explicit/execution.db",
       }),
-    ).toEqual({ dataRoot: "/host/data", database: "/host/data/rika.db", executionDatabase: "/host/data/execution.db" })
+    ).toEqual({
+      dataRoot: "/host/data",
+      database: "/host/data/rika.db",
+      executionDatabase: "/host/data/execution-v2.db",
+    })
     expect(
       resolveProfileDataPaths({
         home: "/home/ada",

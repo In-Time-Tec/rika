@@ -48,7 +48,9 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
     readonly timeoutMs?: number
   }>,
   modelScript?: string,
-  residentEnvironment?: Readonly<Record<string, string>>,
+  residentEnvironment?: Readonly<Record<string, string | undefined>>,
+  entrypointArguments: ReadonlyArray<string> = [],
+  residentDataRoot?: string,
 ) {
   const fs = yield* FileSystem.FileSystem
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -57,7 +59,8 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
   const workspace = `${root}/workspace`
   const state = `${root}/state`
   yield* Effect.forEach([home, workspace, state], (directory) => fs.makeDirectory(directory))
-  yield* Effect.addFinalizer(() => reapResidents(state))
+  const activeDataRoot = residentDataRoot ?? state
+  yield* Effect.addFinalizer(() => reapResidents(activeDataRoot))
   const directory = fileURLToPath(new URL(".", import.meta.url))
   const helper = `${directory}/fixtures/interactive-pty.py`
   const path = yield* Config.string("PATH").pipe(
@@ -82,7 +85,14 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
   const handle = yield* spawner.spawn(
     ChildProcess.make(
       "python3",
-      [helper, process.execPath, directory.replace(/\/test\/$/, ""), environment, encodedActions],
+      [
+        helper,
+        process.execPath,
+        directory.replace(/\/test\/$/, ""),
+        environment,
+        encodedActions,
+        ...(entrypointArguments.length === 0 ? [] : ["src/client-main.ts", ...entrypointArguments]),
+      ],
       { stdin: "ignore", stdout: "pipe", stderr: "pipe" },
     ),
   )
@@ -110,13 +120,13 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
   if (settlesDiagnostics)
     yield* waitUntil(
       fs
-        .readDirectory(`${state}/diagnostics`)
+        .readDirectory(`${activeDataRoot}/diagnostics`)
         .pipe(Effect.map((names) => names.every((name) => !name.endsWith(".open.jsonl")))),
     )
-  const names = yield* fs.readDirectory(`${state}/diagnostics`)
+  const names = yield* fs.readDirectory(`${activeDataRoot}/diagnostics`)
   const clientLogs = yield* Effect.forEach(
-    names.filter((name) => name.startsWith("client-") && name.endsWith(".jsonl")),
-    (name) => fs.readFileString(`${state}/diagnostics/${name}`),
+    names.filter((name) => name.startsWith("client-") && name.endsWith(".jsonl") && !name.endsWith(".open.jsonl")),
+    (name) => fs.readFileString(`${activeDataRoot}/diagnostics/${name}`),
   )
   const workspaceFiles = yield* fs.readDirectory(workspace)
   return {
@@ -125,6 +135,6 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
     clientLogs: clientLogs.join("\n"),
     names,
     workspaceFiles,
-    database: `${state}/rika.db`,
+    database: `${activeDataRoot}/rika.db`,
   }
 })

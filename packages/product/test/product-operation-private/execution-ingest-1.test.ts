@@ -5,11 +5,43 @@ import { ExecutionFixtures } from "./execution-ingest-fixtures"
 
 import { Fixtures } from "./execution-ingest-support"
 import * as ExecutionIngest from "../../src/execution/ingest/execution-ingest-service"
-import { Effect } from "effect"
+import { Effect, Layer, Logger, Schema } from "effect"
 import * as UsageRepository from "../../../product-store/src/usage/memory-usage-repository"
 import * as UsageSnapshot from "@rika/product/usage-snapshot"
 
 describe("ExecutionIngest", () => {
+  it.effect("logs the underlying backend tag and message when follow fails", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const lines: Array<string> = []
+        const logger = Logger.make((options) => lines.push(Logger.formatJson.log(options)))
+        const logging = yield* Layer.build(Logger.layer([logger]))
+        yield* Effect.gen(function* () {
+          const { ingest } = yield* makeHarness({
+            script: { root: { events: [], status: "running" } },
+            followFailure: "underlying follow failure",
+          })
+
+          yield* ingest.ensure({ threadId: ExecutionFixtures.threadId, turnId: ExecutionFixtures.rootId })
+          yield* Effect.result(ingest.settled(ExecutionFixtures.rootId))
+        }).pipe(Effect.provide(logging))
+        const records = yield* Effect.forEach(lines, (line) =>
+          Schema.decodeUnknownEffect(
+            Schema.fromJsonString(
+              Schema.Struct({ message: Schema.String, annotations: Schema.Record(Schema.String, Schema.Unknown) }),
+            ),
+          )(line),
+        )
+        expect(
+          records.find((candidate) => candidate.message === "execution.ingest.follow.failed")?.annotations,
+        ).toMatchObject({
+          "rika.failure.kind": "ExecutionBackendError",
+          "rika.failure.message": "underlying follow failure",
+        })
+      }),
+    ),
+  )
+
   it.effect("backfills an incomplete current-version usage source", () =>
     Effect.gen(function* () {
       const usage = yield* UsageRepository.makeMemory({

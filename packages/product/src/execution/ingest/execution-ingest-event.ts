@@ -18,6 +18,19 @@ import type { IngestFailure, Failure } from "./execution-ingest-failure"
 import type * as IngestProjectionContract from "./execution-projection-contract"
 import type * as UsageEvent from "../../usage/usage-event"
 import * as UsageFold from "../../usage/usage-fold"
+const failureDetails = (cause: Cause.Cause<unknown>) => {
+  const failure = Cause.squash(cause)
+  let kind: string
+  if (failure instanceof Error) kind = failure.name
+  else if (failure !== null && typeof failure === "object" && "_tag" in failure && typeof failure._tag === "string")
+    kind = failure._tag
+  else kind = typeof failure
+  return {
+    "rika.failure.kind": kind,
+    "rika.failure.message": failure instanceof Error ? failure.message : String(failure),
+  }
+}
+
 export interface Root {
   readonly threadId: import("@rika/product/thread-record").ThreadId
   readonly turnId: import("@rika/product/turn-record").TurnId
@@ -426,14 +439,14 @@ export const make = (dependencies: EventDependencies) => {
           Cause.hasInterruptsOnly(cause)
             ? Effect.void
             : Effect.suspend(() => {
-                const message = String(Cause.squash(cause))
-                dependencies.fail(pipeline, node, "backend", message)
+                const details = failureDetails(cause)
+                dependencies.fail(pipeline, node, "backend", details["rika.failure.message"])
                 return Effect.logWarning("execution.ingest.follow.failed").pipe(
                   Effect.annotateLogs({
                     "rika.thread.id": String(pipeline.threadId),
                     "rika.turn.id": String(pipeline.turnId),
                     "rika.execution.id": node.executionId,
-                    "rika.failure.cause": message,
+                    ...details,
                   }),
                 )
               }),

@@ -98,7 +98,8 @@ export const makeInteractiveSupervision = (input: any): any => {
                       Effect.annotateLogs({
                         "rika.thread.id": String(turn.threadId),
                         "rika.turn.id": String(turn.id),
-                        "rika.failure.kind": String(error),
+                        "rika.failure.kind": error.name,
+                        "rika.failure.message": error.message,
                       }),
                       Effect.andThen(Effect.sleep("50 millis")),
                       Effect.andThen(typedNotifyTurnChanged(turn)),

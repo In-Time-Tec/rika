@@ -63,6 +63,7 @@ type MakeHarnessOptions = {
   readonly pageHold?: { readonly after: string; readonly open: Deferred.Deferred<void> }
   readonly onFailure?: (failure: ExecutionIngest.Failure) => void
   readonly onCommitted?: (commit: ExecutionIngest.Commit) => void
+  readonly followFailure?: string
   readonly usage?: import("@rika/product/usage-repository").Interface
 }
 
@@ -212,6 +213,8 @@ export const makeHarness: (options: MakeHarnessOptions) => Effect.Effect<Harness
       Effect.gen(function* () {
         const after = typeof afterCursor === "string" ? afterCursor : afterCursor?.cursor
         follows.push({ executionId, after })
+        if (options.followFailure !== undefined)
+          return yield* Fixtures.ExecutionBackend.BackendError.make({ message: options.followFailure })
         const entry = options.script[executionId]
         if (entry === undefined)
           return yield* Fixtures.ExecutionBackend.BackendError.make({ message: `ExecutionNotFound ${executionId}` })
