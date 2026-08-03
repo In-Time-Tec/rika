@@ -21,7 +21,14 @@ const WorkspaceFilesSchema = Schema.Union([
   Schema.TaggedStruct("Ready", { value: Schema.Array(Schema.String) }),
 ])
 const PaletteStateSchema = Schema.Struct({ open: Schema.Boolean, query: Schema.String, selected: Schema.Finite })
-const ModePickerStateSchema = Schema.Struct({ open: Schema.Boolean, selected: Schema.Finite })
+const ModePickerStateSchema = Schema.Struct({
+  open: Schema.Boolean,
+  selected: Schema.Finite,
+  from: Schema.optional(Schema.Finite),
+  fromPosition: Schema.optional(Schema.Finite),
+  turnTick: Schema.optional(Schema.Finite),
+})
+const ModeCommitAnimationSchema = Schema.Struct({ from: Mode, to: Mode, tick: Schema.Finite })
 const ContextAnimationSchema = Schema.Struct({
   compactFromPercent: Schema.optional(Schema.Finite),
   compactTick: Schema.optional(Schema.Finite),
@@ -130,6 +137,7 @@ export const Model = Schema.Struct({
   paletteOpen: Schema.Boolean,
   palette: PaletteStateSchema,
   modePicker: ModePickerStateSchema,
+  modeCommit: Schema.optional(ModeCommitAnimationSchema),
   filePicker: FilePickerStateSchema,
   threadSwitcher: ThreadSwitcherStateSchema,
   shortcutsOpen: Schema.Boolean,
@@ -197,6 +205,7 @@ const initialImpl: {
     paletteOpen: false,
     palette: { open: false, query: "", selected: 0 },
     modePicker: { open: false, selected: 0 },
+    modeCommit: undefined,
     filePicker: { open: false, query: "", selected: 0, items: loadableIdle },
     threadSwitcher: { open: false, query: "", selected: 0, kind: "switch", previewScroll: 0 },
     shortcutsOpen: false,

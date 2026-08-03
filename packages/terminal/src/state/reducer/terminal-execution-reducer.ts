@@ -152,6 +152,7 @@ const reduceExecutionImpl = (
           activeTurnId: message.turnId,
           busy: true,
           activity: { _tag: "Waiting" },
+          contextAnimation: { flashTicks: 0, flashed75: false, flashed90: false },
         }
       return {
         ...model,
@@ -165,6 +166,7 @@ const reduceExecutionImpl = (
         activeTurnId: message.turnId,
         busy: true,
         activity: { _tag: "Waiting" },
+        contextAnimation: { flashTicks: 0, flashed75: false, flashed90: false },
       }
     }
     case "BlockAdded": {

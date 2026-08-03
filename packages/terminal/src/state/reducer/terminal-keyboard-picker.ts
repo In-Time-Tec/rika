@@ -155,18 +155,10 @@ const reduceKeyboardPickerImpl = (
       },
       "@",
     )
-  if (key.ctrl && (key.name === "s" || key.name === "m") && !model.busy) {
-    if (model.modePicker.open)
-      return { ...model, modePicker: { open: true, selected: (model.modePicker.selected + 1) % 4 } }
-    return {
-      ...model,
-      paletteOpen: false,
-      palette: { open: false, query: "", selected: 0 },
-      modePicker: { open: true, selected: modeIds.indexOf(model.mode) },
-      filePicker: { ...model.filePicker, open: false },
-      shortcutsOpen: false,
-    }
-  }
+  if (key.ctrl && (key.name === "s" || key.name === "m") && !model.busy)
+    return model.modePicker.open
+      ? update(model, { _tag: "ModeTurned", offset: 1 })
+      : update(model, { _tag: "ModeSelectorOpened" })
   if (key.ctrl && key.name === "c" && !model.cancelPending && model.busy)
     return { ...model, activity: { _tag: "Waiting" }, cancelPending: model.busy, pendingAction: { _tag: "Cancel" } }
   if (key.ctrl && key.name === "s" && model.busy && !model.cancelPending && model.input.length > 0) {
@@ -212,16 +204,10 @@ const reduceKeyboardPickerImpl = (
   }
   if (model.modePicker.open) {
     if (key.name === "escape") return { ...model, modePicker: { ...model.modePicker, open: false } }
-    let selected = model.modePicker.selected
-    if (key.name === "left" || key.name === "up") selected = (model.modePicker.selected + 3) % 4
-    else if (key.name === "right" || key.name === "down") selected = (model.modePicker.selected + 1) % 4
-    if (key.name === "return")
-      return {
-        ...model,
-        mode: modeIds[selected]!,
-        modePicker: { open: false, selected },
-      }
-    return { ...model, modePicker: { open: true, selected } }
+    if (key.name === "left" || key.name === "up") return update(model, { _tag: "ModeTurned", offset: -1 })
+    if (key.name === "right" || key.name === "down") return update(model, { _tag: "ModeTurned", offset: 1 })
+    if (key.name === "return") return update(model, { _tag: "ModeCommitted" })
+    return model
   }
   if (model.palette.open) {
     const results = filter(model.palette.query)

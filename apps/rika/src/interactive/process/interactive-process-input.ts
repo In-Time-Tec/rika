@@ -1,5 +1,4 @@
 import { create as createTui } from "@rika/terminal/opentui-surface"
-import { Mode } from "@rika/terminal/terminal-state"
 import { expandPastedText, execute, promptParts, type Action } from "@rika/terminal/terminal-session"
 import { canSubmit, selectedThreadMetadata, update } from "@rika/terminal/terminal-state-reducer"
 import { Effect, Fiber } from "effect"
@@ -129,15 +128,19 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
       render()
     },
     modeToggle: () => {
-      if (loop.model.busy) return
-      loop.model = {
-        ...loop.model,
-        paletteOpen: false,
-        palette: { open: false, query: "", selected: 0 },
-        modePicker: { open: true, selected: Mode.literals.indexOf(loop.model.mode) },
-        filePicker: { ...loop.model.filePicker, open: false },
-        shortcutsOpen: false,
-      }
+      loop.model = update(loop.model, { _tag: "ModeSelectorOpened" })
+      render()
+    },
+    modeCommit: (selected) => {
+      loop.model = update(loop.model, { _tag: "ModeCommitted", selected })
+      render()
+    },
+    modeHover: (selected) => {
+      loop.model = update(loop.model, { _tag: "ModeHovered", selected })
+      render()
+    },
+    animationTick: () => {
+      loop.model = update(loop.model, { _tag: "AnimationTicked" })
       render()
     },
     key: (key) => {
@@ -152,7 +155,13 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
       const wasChangedFilesOpen = loop.model.changedFilesOpen
       const beforePreviewId = loop.model.threadSwitcher.open ? selectedThreadMetadata(loop.model)?.id : undefined
       const submitting =
-        key.name === "return" && !key.shift && !key.ctrl && (canSubmit(loop.model) || loop.model.contextDetailsOpen)
+        key.name === "return" &&
+        !key.shift &&
+        !key.ctrl &&
+        !loop.model.threadLoading &&
+        (canSubmit(loop.model) || loop.model.contextDetailsOpen)
+      if (key.name === "return" && !key.shift && !key.ctrl && loop.model.threadLoading)
+        loop.renderer?.surface.showToast("Thread is still loading; your draft is preserved")
       const submission = submitting ? nextSubmissionId(loop.submissionSequence) : undefined
       if (submission !== undefined) loop.submissionSequence = submission.sequence
       const submissionId = submission?.id

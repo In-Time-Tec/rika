@@ -417,8 +417,8 @@ test("renders changed files as an indented path tree", () => {
     { text: "\n", fg: opentui.RGBA.fromIndex(7) },
     { text: "  ", fg: opentui.RGBA.fromIndex(7) },
     { text: "main.ts", fg: opentui.RGBA.fromIndex(7) },
-    { text: " +3", fg: opentui.RGBA.fromIndex(7), attributes: 2 },
-    { text: " -1", fg: opentui.RGBA.fromIndex(7), attributes: 2 },
+    { text: " +3", fg: opentui.RGBA.fromIndex(2), attributes: 2 },
+    { text: " -1", fg: opentui.RGBA.fromIndex(1), attributes: 2 },
   ])
 })
 test("renders base transcript text with an explicit terminal palette color", () => {

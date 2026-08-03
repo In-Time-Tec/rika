@@ -105,7 +105,6 @@ const renderPlainBodyImpl = (model: Model, block: TranscriptBlock, width: number
     append(fg(colors.green)(`${completedCompactionIcon} `))
     for (const [index, character] of Array.from("Auto-compacted").entries())
       append(fg(compactionRainbow[(index + model.animationTick) % compactionRainbow.length]!)(character))
-    if (block.summary.length > 0) append(dim(fg(colors.text)(`\n${wrapBodyText(block.summary, width, "  ")}`)))
     return
   }
   let color = colors.text

@@ -317,7 +317,7 @@ for (const [width, height] of [
           const coloredMark = setup
             .captureSpans()
             .lines.flatMap((line) => line.spans)
-            .some((span) => /[•●·]/u.test(span.text) && span.fg.toInts()[0] > span.fg.toInts()[1])
+            .some((span) => /[•●·]/u.test(span.text) && span.fg.toInts()[2] > span.fg.toInts()[0])
           expect(coloredMark).toBe(true)
         } finally {
           surface.destroy()

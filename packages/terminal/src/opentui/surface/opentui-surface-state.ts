@@ -36,6 +36,9 @@ export interface Handlers {
   readonly contextToggle?: () => void
   readonly usageToggle?: () => void
   readonly modeToggle?: () => void
+  readonly modeCommit?: (selected: number) => void
+  readonly modeHover?: (selected: number) => void
+  readonly animationTick?: () => void
   readonly composerResize?: (height: number) => void
   readonly sidebarResize?: (width: number) => void
   readonly threadSidebarSelect?: (index: number) => void

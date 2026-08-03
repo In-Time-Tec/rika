@@ -26,8 +26,8 @@ test("renders completed compaction rows without internal checkpoint identifiers"
 test("uses padded full-size mode and context sections while compact content stays tight", () => {
   const model = initial("/work", "high")
   const mode = text(modePickerContent(model, 54).chunks)
-  expect(mode).toContain("\n\n├─ Route ")
-  expect(mode).toContain("\n\n├─ About ")
+  expect(mode).toContain("\n\n" + " ".repeat(54) + "\n\nAgent")
+  expect(mode).toContain("\n\n" + " ".repeat(54) + "\n\nFast, low-cost")
 
   const context = text(
     contextDetails(
@@ -40,12 +40,12 @@ test("uses padded full-size mode and context sections while compact content stay
       0,
     ).chunks,
   )
-  expect(context).toContain("\n\n├─ Window ")
-  expect(context).toContain("\n\n├─ Session ")
+  expect(context).toContain("\n\n" + " ".repeat(54) + "\n\nUsable")
+  expect(context).toContain("\n\n" + " ".repeat(54) + "\n\nCost")
   expect(text(modePickerContent(model, 32).chunks)).not.toContain("├─ Route ")
 })
 
-test("uses a wider mode-accented file sidebar within the forty-percent geometry cap", () => {
+test("uses a wider file sidebar with mode-accented title geometry and neutral content", () => {
   const model = {
     ...initial("/work", "ultra"),
     changedFilesOpen: true,
@@ -56,5 +56,5 @@ test("uses a wider mode-accented file sidebar within the forty-percent geometry 
   expect(clampSidebarWidth(200, 70)).toBe(28)
   const rows = sidebarFileRows(model, 40)
   const fileLabel = rows[1]?.chunks.find((chunk) => chunk.text === "main.ts")
-  expect(String(fileLabel?.fg)).toContain("0.85")
+  expect(String(fileLabel?.fg)).toContain("0.75")
 })

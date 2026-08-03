@@ -175,7 +175,7 @@ for (const [width, height] of [
           const coloredMark = setup
             .captureSpans()
             .lines.flatMap((line) => line.spans)
-            .some((span) => /[•●·]/u.test(span.text) && span.fg.toInts()[0] > span.fg.toInts()[1])
+            .some((span) => /[•●·]/u.test(span.text) && span.fg.toInts()[2] > span.fg.toInts()[0])
           expect(coloredMark).toBe(true)
         } finally {
           surface.destroy()
@@ -440,14 +440,14 @@ test("joins the durable queue to the composer like Amp", () =>
         const frame = setup.captureCharFrame()
         const rows = frame.split("\n")
         expect(frame).toContain("First queued prompt")
-        expect(frame).toContain("Selected queued p…")
+        expect(frame).toContain("Selected queued…")
         expect(frame).not.toContain("queued 1/2")
         expect(frame).not.toContain("queued 2/2")
         expect(frame).toContain("Enter to steer")
         expect(frame).toContain("Backspace to dequeue")
         expect(frame).toContain("Ctrl+E to edit")
         expect(rows.findIndex((row) => row.includes("Enter to steer"))).toBe(
-          rows.findIndex((row) => row.includes("Selected queued p…")),
+          rows.findIndex((row) => row.includes("Selected queued…")),
         )
         expect(rows.find((row) => row.includes("Enter to steer"))).toMatch(/Ctrl\+E to edit  │ $/)
         expect(surface.queueBox.height).toBe(4)

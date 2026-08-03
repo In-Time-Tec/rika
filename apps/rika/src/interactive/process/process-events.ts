@@ -84,6 +84,8 @@ export const makeEventRouter = (runtime: Runtime) => {
       if (event._tag === "SelectionLoaded") {
         loop.loadingOlder = false
         loop.pendingNewer = undefined
+        if (loop.model.currentThreadId === event.thread.id)
+          loop.model = update(loop.model, { _tag: "ThreadOpenCompleted" })
       } else if (
         event._tag === "TranscriptPageAppended" &&
         loop.pendingNewer?.threadId === event.threadId &&

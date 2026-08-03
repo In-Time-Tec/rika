@@ -247,12 +247,24 @@ const _legacyWelcomeMarkFrames = [
 
 export const welcomeMarkFrames = ampOrbFrames.small
 
-const welcomeMarkColor = (glyph: string, _mode: Mode): string => {
-  if (glyph === "●") return "#e8823c"
-  if (glyph === "•") return "#cf6828"
-  if (glyph === ":") return "#ad4f1c"
-  if (glyph === "·") return "#8e3d17"
-  return "#743016"
+const modeShade = (mode: Mode, intensity: number): string => {
+  const hex = colors[mode].slice(1)
+  const red = Number.parseInt(hex.slice(0, 2), 16)
+  const green = Number.parseInt(hex.slice(2, 4), 16)
+  const blue = Number.parseInt(hex.slice(4, 6), 16)
+  const channel = (value: number) =>
+    Math.round(value * intensity)
+      .toString(16)
+      .padStart(2, "0")
+  return `#${channel(red)}${channel(green)}${channel(blue)}`
+}
+
+const welcomeMarkColor = (glyph: string, mode: Mode): string => {
+  if (glyph === "●") return modeShade(mode, 1)
+  if (glyph === "•") return modeShade(mode, 0.84)
+  if (glyph === ":") return modeShade(mode, 0.68)
+  if (glyph === "·") return modeShade(mode, 0.52)
+  return modeShade(mode, 0.4)
 }
 
 const welcomeContentImpl = (width: number, height: number, phase: number, mode: Mode): StyledText => {
@@ -269,19 +281,20 @@ const welcomeContentImpl = (width: number, height: number, phase: number, mode: 
   const patternWidth = Math.max(...pattern.map(stringWidth), 1)
   const area = Math.max(1, height - spacing.inputHeight)
   const top = Math.max(0, Math.floor((area - pattern.length) / 2))
-  const logoLeft = Math.max(0, Math.floor((width - patternWidth - 24) / 2))
-  const textGap = Math.max(2, width - logoLeft - patternWidth - 24)
+  const copyWidth = 24
+  const textGap = 4
+  const logoLeft = Math.max(0, Math.floor((width - patternWidth - textGap - copyWidth) / 2))
   const visiblePattern = pattern.slice(0, Math.max(1, area - top))
   const chunks: TextChunk[] = [fg(colors.text)("\n".repeat(top))]
   const copyRows: ReadonlyArray<readonly [number, ReadonlyArray<TextChunk>]> =
     pattern === ampOrbFrames.small[phase % ampOrbFrames.small.length]
       ? [
-          [0, [bold(fg("#e8823c")("Welcome to Rika"))]],
+          [0, [bold(fg(colors[mode])("Welcome to Rika"))]],
           [3, [bold(fg(colors.text)("ctrl+o")), fg(colors.muted)(" for commands")]],
           [4, [bold(fg(colors.text)("?")), fg(colors.muted)(" for shortcuts")]],
         ]
       : [
-          [4, [bold(fg("#e8823c")("Welcome to Rika"))]],
+          [4, [bold(fg(colors[mode])("Welcome to Rika"))]],
           [7, [bold(fg(colors.text)("ctrl+o")), fg(colors.muted)(" for commands")]],
           [8, [bold(fg(colors.text)("?")), fg(colors.muted)(" for shortcuts")]],
         ]

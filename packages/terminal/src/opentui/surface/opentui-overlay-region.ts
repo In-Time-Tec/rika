@@ -6,7 +6,8 @@ import { contextDetails } from "../../presentation/terminal/terminal-context-det
 import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { filteredFiles } from "../../state/model/terminal-thread-navigation"
 import { type Model } from "../../state/model/terminal-state"
-import { paletteContent, modePickerContent } from "./opentui-composer-region"
+import { paletteContent, modeLabelStarts, modePickerContent } from "./opentui-composer-region"
+import { modeIds } from "@rika/configuration/behavior-mode"
 import { filePickerContent, threadSwitcherContent, threadSwitcherListWidth } from "./opentui-overlay-content"
 import type { ProjectedEditorRenderable } from "./opentui-surface-construction"
 import { SurfaceSidebarRegion } from "./opentui-sidebar-region"
@@ -63,6 +64,8 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
     this.contextFooter.visible = false
     this.modeLabel.visible = true
     this.paletteBox.overflow = "hidden"
+    this.palette.onMouseMove = undefined
+    this.palette.onMouseDown = undefined
     let cursorEditor: ProjectedEditorRenderable | undefined =
       model.shortcutsOpen || (threadSidebarVisible && model.threadSidebar.focused) ? undefined : this.composerEditor
     if (overlay === "palette") {
@@ -87,15 +90,52 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
       this.paletteBox.left = contentLeft + Math.max(0, contentWidth - boxWidth)
       this.paletteBox.top = Math.max(0, composerTop - boxHeight)
       this.paletteBox.title = " Mode "
-      this.paletteBox.titleColor = toOpenColor(colors[model.mode])
+      const selectedMode = modeIds[model.modePicker.selected] ?? model.mode
+      this.paletteBox.titleColor = toOpenColor(colors[selectedMode])
       this.paletteBox.titleAlignment = "left"
-      this.paletteBox.bottomTitle = " ↔ turn · esc"
+      this.paletteBox.bottomTitle = " ↔ turn ── esc "
       this.paletteBox.bottomTitleAlignment = "right"
-      this.palette.content = modePickerContent(model, Math.max(1, boxWidth - 4))
+      const modeContentWidth = Math.max(1, boxWidth - 4)
+      if (modeContentWidth >= 40 && model.height > 12) {
+        this.paletteBox.overflow = "visible"
+        const divider = (label: string) => `├─ ${label} ${"─".repeat(Math.max(0, boxWidth - label.length - 5))}┤`
+        this.contextDividerOne.content = divider("Route")
+        this.contextDividerTwo.content = divider("About")
+        this.contextDividerOne.width = boxWidth
+        this.contextDividerTwo.width = boxWidth
+        this.contextDividerOne.left = -1
+        this.contextDividerTwo.left = -1
+        this.contextDividerOne.top = 4
+        this.contextDividerTwo.top = 9
+        this.contextDividerOne.visible = true
+        this.contextDividerTwo.visible = true
+      }
+      this.palette.content = modePickerContent(model, modeContentWidth)
+      const hitMode = (event: { readonly x: number; readonly y: number }): number | undefined => {
+        const compact = modeContentWidth < 40 || model.height <= 12
+        const labelRow = this.palette.screenY + (compact ? 0 : 2)
+        if (event.y !== labelRow) return undefined
+        const starts = modeLabelStarts(modeContentWidth)
+        const column = event.x - this.palette.screenX
+        const selected = modeIds.findIndex(
+          (mode, index) => column >= starts[index]! && column < starts[index]! + mode.length,
+        )
+        return selected < 0 ? undefined : selected
+      }
+      this.palette.onMouseMove = (event) => {
+        const selected = hitMode(event)
+        this.renderer.setMousePointer(selected === undefined ? "default" : "pointer")
+        if (selected !== undefined) this.handlers.modeHover?.(selected)
+      }
+      this.palette.onMouseDown = (event) => {
+        if (event.button !== 0) return
+        const selected = hitMode(event)
+        if (selected !== undefined) this.handlers.modeCommit?.(selected)
+      }
       cursorEditor = undefined
     } else if (overlay === "context") {
       const boxWidth = Math.min(58, contentWidth)
-      const boxHeight = model.width <= 24 ? Math.min(12, model.height) : Math.min(15, Math.max(1, composerTop))
+      const boxHeight = model.width <= 24 ? Math.min(12, model.height) : Math.min(18, Math.max(1, composerTop))
       this.paletteBox.width = boxWidth
       this.paletteBox.height = boxHeight
       this.paletteBox.left = contentLeft + Math.max(0, contentWidth - boxWidth)
@@ -103,7 +143,7 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
       this.paletteBox.title = " Context & Usage "
       this.paletteBox.titleColor = toOpenColor(colors[model.mode])
       this.paletteBox.titleAlignment = "left"
-      this.paletteBox.bottomTitle = " Ctrl+Y toggle · esc "
+      this.paletteBox.bottomTitle = " Ctrl+Y toggle ── esc "
       this.paletteBox.bottomTitleAlignment = "right"
       if (model.width <= 24) {
         this.modeLabel.visible = false
@@ -122,6 +162,19 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
         this.contextDividerTwo.left = -1
         this.contextDividerOne.top = 3
         this.contextDividerTwo.top = 6
+        this.contextDividerOne.visible = true
+        this.contextDividerTwo.visible = true
+      } else if (boxHeight >= 18) {
+        this.paletteBox.overflow = "visible"
+        const divider = (label: string) => `├─ ${label} ${"─".repeat(Math.max(0, boxWidth - label.length - 5))}┤`
+        this.contextDividerOne.content = divider("Window")
+        this.contextDividerTwo.content = divider("Session")
+        this.contextDividerOne.width = boxWidth
+        this.contextDividerTwo.width = boxWidth
+        this.contextDividerOne.left = -1
+        this.contextDividerTwo.left = -1
+        this.contextDividerOne.top = 6
+        this.contextDividerTwo.top = 11
         this.contextDividerOne.visible = true
         this.contextDividerTwo.visible = true
       }
@@ -155,7 +208,7 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
       this.paletteBox.top = Math.max(0, composerTop - overlayHeight)
       this.paletteBox.title = model.threadSwitcher.kind === "mention" ? " Mention Thread " : " Switch Thread "
       this.paletteBox.titleAlignment = "left"
-      this.paletteBox.bottomTitle = " Opt+W/Ctrl+T all workspaces · Esc close "
+      this.paletteBox.bottomTitle = " Opt+W/Ctrl+T all workspaces ── Esc close "
       this.paletteBox.bottomTitleAlignment = "right"
       const switcherContentWidth = Math.max(1, overlayWidth - 4)
       const contentHeight = Math.max(1, overlayHeight - 2)

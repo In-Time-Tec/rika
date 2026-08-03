@@ -70,7 +70,7 @@ test("keeps every overlay above the composer at 50x12", () =>
           "Command Palette",
           "toggle fast mode",
         )
-        yield* capture({ ...base, modePicker: { ...base.modePicker, open: true } }, "↔ turn · esc", "GPT-5.6")
+        yield* capture({ ...base, modePicker: { ...base.modePicker, open: true } }, "↔ turn ── esc", "GPT-5.6")
         yield* capture({ ...base, shortcutsOpen: true }, "command palette", "Ctrl+O", 4)
         yield* capture({ ...base, filePicker: { ...base.filePicker, open: true } }, "@src", "@src")
         yield* capture(

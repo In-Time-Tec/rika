@@ -270,7 +270,7 @@ it.effect("clears usage hover when a narrower selector moves away from the point
     expect(opentui.renderer.setMousePointer).toHaveBeenLastCalledWith("default")
     expect(
       (surface.modeLabel.content as { chunks: ReadonlyArray<{ attributes?: number }> }).chunks[0]?.attributes,
-    ).toBe(2)
+    ).toBeUndefined()
   }),
 )
 it.effect("clears usage hover after layout moves a right-anchored label under a stationary pointer", () =>
@@ -289,7 +289,7 @@ it.effect("clears usage hover after layout moves a right-anchored label under a 
     expect(opentui.renderer.setMousePointer).toHaveBeenLastCalledWith("default")
     expect(
       (surface.modeLabel.content as { chunks: ReadonlyArray<{ attributes?: number }> }).chunks[0]?.attributes,
-    ).toBe(2)
+    ).toBeUndefined()
   }),
 )
 it.effect("removes its listeners on destroy", () =>
@@ -329,7 +329,7 @@ it.effect("renders mode picker, filtered palette, sidebar visibility, and notice
     surface.update(model({ modePicker: { open: true, selected: 2 } }))
     expect(paletteText()).toContain("high")
     expect(paletteText()).toContain("Deep reasoning for hard tasks")
-    expect(surface.paletteBox.bottomTitle).toBe(" ↔ turn · esc")
+    expect(surface.paletteBox.bottomTitle).toBe(" ↔ turn ── esc ")
     surface.update(model({ palette: { open: true, query: "quit", selected: 0 } }))
     expect(paletteText()).toContain("quit")
     surface.update(

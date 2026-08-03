@@ -13,38 +13,35 @@ export interface Meter {
   readonly pressure: number
   readonly percent: number
   readonly tone: Tone
-  readonly highlight?: number
 }
 
-const partialGlyphs = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"] as const
-
-const meterGlyphs = {
+export const meterGlyphs = {
   fill: "━",
   track: "╌",
   muncherOpen: "ᗧ",
   muncherClosed: "ᗤ",
   vacuum: "≪",
   flash: "✦",
-  scanner: "▓",
+  scanner: "━",
   pellet: "·",
 } as const
 
-const glyphFallbacks = {
+export const glyphFallbacks = {
   muncherOpen: "C",
   muncherClosed: "c",
 } as const
 
-const glyphCapabilities = {
+export const glyphCapabilities = {
   muncher: true,
 } as const
 
-const muncherGlyphs: { readonly open: string; readonly closed: string } = glyphCapabilities.muncher
+export const muncherGlyphs: { readonly open: string; readonly closed: string } = glyphCapabilities.muncher
   ? { open: meterGlyphs.muncherOpen, closed: meterGlyphs.muncherClosed }
   : { open: glyphFallbacks.muncherOpen, closed: glyphFallbacks.muncherClosed }
 
 export const usableTokens = (reading: Reading): number => Math.max(0, reading.contextWindow - reading.reserveTokens)
 
-const pressure = (reading: Reading): number => {
+export const pressure = (reading: Reading): number => {
   const usable = usableTokens(reading)
   if (usable === 0) return reading.inputTokens > 0 ? 1 : 0
   return Math.max(0, reading.inputTokens / usable)
@@ -52,8 +49,6 @@ const pressure = (reading: Reading): number => {
 
 interface MeterOptions {
   readonly cells?: number
-  readonly phase?: number
-  readonly animated?: boolean
 }
 
 export const meter: {
@@ -65,26 +60,12 @@ export const meter: {
     const cells = Math.max(1, Math.floor(options.cells ?? 8))
     const value = pressure(reading)
     const bounded = Math.min(1, value)
-    const scaled = bounded * cells
-    const full = Math.floor(scaled)
-    const fraction = scaled - full
-    const partial = full < cells ? partialGlyphs[Math.floor(fraction * partialGlyphs.length)]! : ""
-    const glyphs = Array.from({ length: cells }, (_, index) => {
-      if (index < full) return "█"
-      if (index === full && partial.length > 0) return partial
-      return "░"
-    })
-    const filled = Math.min(cells, Math.max(1, full + (partial.length > 0 ? 1 : 0)))
+    const filled = Math.max(value > 0 ? 1 : 0, Math.min(cells, Math.round(bounded * cells)))
+    const glyphs = Array.from({ length: cells }, (_, index) => (index < filled ? meterGlyphs.fill : meterGlyphs.track))
     let tone: Tone = "calm"
     if (value >= 0.9) tone = "critical"
     else if (value >= 0.7) tone = "warning"
-    return {
-      glyphs,
-      pressure: value,
-      percent: Math.min(100, Math.round(value * 100)),
-      tone,
-      ...(options.animated === true ? { highlight: Math.abs(Math.floor(options.phase ?? 0)) % filled } : {}),
-    }
+    return { glyphs, pressure: value, percent: Math.min(100, Math.round(value * 100)), tone }
   },
 )
 
@@ -95,8 +76,9 @@ export const loadingMeter: {
   (args) => typeof args[0] === "number",
   (phase: number, options: { readonly cells?: number } = {}): ReadonlyArray<string> => {
     const width = Math.max(1, Math.floor(options.cells ?? 8))
-    const position = Math.abs(Math.floor(phase)) % width
-    return Array.from({ length: width }, (_, index) => (index === position ? meterGlyphs.scanner : "░"))
+    const period = Math.max(1, width * 2 - 2)
+    const position = width === 1 ? 0 : Math.abs((Math.abs(Math.floor(phase)) % period) - (width - 1))
+    return Array.from({ length: width }, (_, index) => (index === position ? meterGlyphs.scanner : meterGlyphs.track))
   },
 )
 
@@ -113,7 +95,7 @@ export const animatedGlyphs: {
   (options: AnimatedMeterOptions): (reading: Reading) => ReadonlyArray<string>
 } = Function.dual(2, (reading: Reading, options: AnimatedMeterOptions): ReadonlyArray<string> => {
   const value = meter(reading, { cells: options.cells })
-  const filled = Math.max(0, Math.min(options.cells, Math.round(value.pressure * options.cells)))
+  const filled = value.glyphs.filter((glyph) => glyph === meterGlyphs.fill).length
   const compactFrom =
     options.compactFromPercent === undefined ? filled : Math.round((options.compactFromPercent / 100) * options.cells)
   const visibleFill =

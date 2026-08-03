@@ -164,7 +164,7 @@ const fileTreeRows = (
   files: ReadonlyArray<ChangedFile>,
   innerWidth: number,
   showCounts: boolean,
-  accent: ColorInput,
+  _accent: ColorInput,
 ): ReadonlyArray<ChangedFileRow> => {
   if (files.length === 0) return [{ chunks: [fg(colors.muted)("No changes")] }]
   const root: ChangedNode = { children: new Map() }
@@ -191,7 +191,7 @@ const fileTreeRows = (
         rows.push({
           chunks: [
             ...indentChunks,
-            dim(fg(accent)(truncateToWidth(`${displayName}/`, Math.max(1, innerWidth - indent.length)))),
+            dim(fg(colors.text)(truncateToWidth(`${displayName}/`, Math.max(1, innerWidth - indent.length)))),
           ],
         })
         walk(child, depth + 1)
@@ -209,8 +209,8 @@ const fileTreeRows = (
         rows.push({
           chunks: [
             ...indentChunks,
-            fg(accent)(label),
-            ...(showCounts && hasCounts ? [dim(fg(accent)(added)), dim(fg(accent)(removed))] : []),
+            fg(colors.text)(label),
+            ...(showCounts && hasCounts ? [dim(fg(colors.green)(added)), dim(fg(colors.red)(removed))] : []),
           ],
           file: child.file,
           nameIndex: indentChunks.length,

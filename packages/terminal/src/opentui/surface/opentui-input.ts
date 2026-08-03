@@ -112,16 +112,13 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
   protected renderModeLabel(model: Model): void {
     let usageText = ""
     if (model.currentThreadId !== undefined && model.contextUsage?._tag === "Available") {
-      const streaming = model.busy || model.activity?._tag === "Streaming"
-      const animatedContext =
-        streaming || model.contextAnimation.compactFromPercent !== undefined || model.contextAnimation.flashTicks > 0
-      const cells = animatedContext ? 8 : 4
-      const value = ContextMeter.meter(model.contextUsage, { cells })
+      const streaming = model.busy && model.activity?._tag !== "Compacting"
+      const value = ContextMeter.meter(model.contextUsage, { cells: 8 })
       const glyphs =
         streaming || model.contextAnimation.compactFromPercent !== undefined || model.contextAnimation.flashTicks > 0
           ? ContextMeter.animatedGlyphs(model.contextUsage, {
-              cells,
-              tick: model.contextAnimation.compactTick ?? model.animationTick + this.loaderPhase,
+              cells: 8,
+              tick: model.contextAnimation.compactTick ?? model.animationTick,
               streaming,
               ...(model.contextAnimation.compactFromPercent === undefined
                 ? {}
@@ -129,11 +126,15 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
               ...(model.contextAnimation.flashTicks > 0 ? { flashTicks: model.contextAnimation.flashTicks } : {}),
             })
           : value.glyphs
-      usageText = `${animatedContext ? "ctx " : ""}${glyphs.join("")} ${value.percent}%`
+      usageText = `ctx ${glyphs.join("")} ${value.percent}%`
     } else if (model.currentThreadId !== undefined && model.contextUsage?._tag === "Loading") {
-      usageText = model.busy
-        ? `ctx ${ContextMeter.loadingMeter(model.animationTick + this.loaderPhase, { cells: 8 }).join("")}`
-        : "▓░░░ —"
+      usageText = `ctx ${
+        model.busy
+          ? ContextMeter.loadingMeter(model.animationTick, { cells: 8 }).join("")
+          : ContextMeter.meterGlyphs.track.repeat(8)
+      }`
+    } else if (model.currentThreadId !== undefined && model.contextUsage?._tag === "Unavailable") {
+      usageText = `ctx ${ContextMeter.meterGlyphs.track.repeat(8)}`
     } else if (model.usageDisplay === "time") {
       if (model.usageTime?._tag === "Available")
         usageText = formatActiveTime(activeTimeAt(model.usageTime, this.currentTimeMillis()))
@@ -153,19 +154,31 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
       else if (model.usageCost?._tag === "Unavailable") usageText = "$—"
       else if (model.usageCost?._tag === "Loading" || model.busy) usageText = "$····"
     }
-    const modeContentKey = `${usageText}\u0000${model.fastMode ? "fast" : "normal"}\u0000${model.mode}\u0000${this.usageLabelHovered ? "usage-hover" : "usage"}\u0000${this.modeLabelHovered ? "mode-hover" : "mode"}`
+    const modeContentKey = `${usageText}\u0000${model.fastMode ? "fast" : "normal"}\u0000${model.mode}\u0000${model.modeCommit?.from ?? ""}\u0000${model.modeCommit?.to ?? ""}\u0000${model.modeCommit?.tick ?? ""}\u0000${this.usageLabelHovered ? "usage-hover" : "usage"}\u0000${this.modeLabelHovered ? "mode-hover" : "mode"}`
     const modeChunks: Array<TextChunk> = []
     const previousRight = this.modeLabel.screenX + this.modeLabel.width
     this.usageLabelWidth = usageText.length === 0 ? 0 : modeLabelWidth(` ${usageText} `)
     if (usageText.length > 0) {
-      const usage = fg(toOpenColor(colors.text))(` ${usageText} `)
-      modeChunks.push(this.usageLabelHovered ? usage : dim(usage))
+      const usageColor = model.currentThreadId === undefined ? toOpenColor(colors.text) : colors[model.mode]
+      const usage = fg(usageColor)(` ${usageText} `)
+      modeChunks.push(this.usageLabelHovered ? bold(usage) : usage)
       modeChunks.push(fg(toOpenColor(colors.text))("─"))
     }
     this.modeSegmentStart = usageText.length === 0 ? 0 : this.usageLabelWidth + 1
     modeChunks.push(fg(toOpenColor(colors.text))(" "))
     if (model.fastMode) modeChunks.push(fg(toOpenColor(colors.amber))("↯"))
-    const modeText = fg(colors[model.mode])(model.mode)
+    const commit = model.modeCommit
+    let modeLabel = model.mode
+    let cursor = ""
+    if (commit !== undefined) {
+      if (commit.tick < commit.from.length) modeLabel = commit.from.slice(0, commit.from.length - commit.tick - 1)
+      else {
+        const typed = Math.min(commit.to.length, commit.tick - commit.from.length + 1)
+        modeLabel = commit.to.slice(0, typed)
+        if (typed < commit.to.length) cursor = "▮"
+      }
+    }
+    const modeText = fg(colors[model.mode])(`${modeLabel}${cursor}`)
     modeChunks.push(this.modeLabelHovered ? bold(modeText) : modeText)
     modeChunks.push(fg(toOpenColor(colors.text))(" "))
     const width = modeChunks.reduce((total, chunk) => total + modeLabelWidth(chunk.text), 0)
@@ -176,8 +189,9 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
         this.usageLabelHovered = hovered
         this.renderer.setMousePointer(hovered ? "pointer" : "default")
         if (usageText.length > 0) {
-          const usage = fg(toOpenColor(colors.text))(` ${usageText} `)
-          modeChunks[0] = hovered ? usage : dim(usage)
+          const usageColor = model.currentThreadId === undefined ? toOpenColor(colors.text) : colors[model.mode]
+          const usage = fg(usageColor)(` ${usageText} `)
+          modeChunks[0] = hovered ? bold(usage) : usage
         }
       }
     }
@@ -211,6 +225,7 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
   protected tickLoader(): void {
     if (this.destroyed) return
     this.loaderPhase += 1
+    this.handlers.animationTick?.()
     this.toolSpinner.step()
     const current = this.model
     if (current !== undefined) {

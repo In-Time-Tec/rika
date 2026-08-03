@@ -148,7 +148,6 @@ const paletteContentImpl = (
   return new StyledText(chunks)
 }
 
-const modeGaugeFill = { low: 2, medium: 19, high: 36, ultra: 54 } as const
 const routeLabel = (route: ModeRouteLabel | undefined): string =>
   route === undefined ? "" : `${route.name} ${route.effort}${route.fast ? " fast" : ""}`
 const modeDescription = {
@@ -172,46 +171,61 @@ export const paletteContent: {
   ): ReturnType<typeof paletteContentImpl>
 } = Function.dual(4, paletteContentImpl)
 
+export const modeLabelStarts = (innerWidth: number): ReadonlyArray<number> =>
+  modeIds.map((_, index) => Math.floor((index * Math.max(0, innerWidth - 5)) / (modeIds.length - 1)))
+
 const modePickerContentImpl = (model: Model, innerWidth: number): StyledText => {
-  const modes = modeIds
-  const selected = modes[model.modePicker.selected] ?? model.mode
-  if (innerWidth < 40 || model.height <= 12) {
-    const compactDescription =
-      model.height <= 12 ? routeLabel(model.modeRoutes[selected]?.main) : modeDescription[selected]
-    return new StyledText([
-      bold(fg(colors[selected])(truncateToWidth(selected, innerWidth))),
-      fg(colors.text)("\n"),
-      fg(colors.muted)(truncateToWidth(compactDescription, innerWidth)),
-    ])
+  const selected = modeIds[model.modePicker.selected] ?? model.mode
+  const compact = innerWidth < 40 || model.height <= 12
+  const chunks: Array<TextChunk> = []
+  const line = (value = "", style: (text: string) => TextChunk = fg(colors.text)) => {
+    if (chunks.length > 0) chunks.push(fg(colors.text)("\n"))
+    chunks.push(style(truncateToWidth(value, innerWidth)))
   }
-  const gaugeWidth = Math.min(54, innerWidth)
-  const fill = Math.min(gaugeWidth, modeGaugeFill[selected])
-  const chunks: Array<TextChunk> = [fg(colors.text)("\n")]
-  chunks.push(fg(colors[selected])("•".repeat(fill)))
-  chunks.push(fg(colors.muted)("·".repeat(Math.max(0, gaugeWidth - fill))))
-  chunks.push(fg(colors.text)("\n"))
-  const labelStarts = [0, 16, 33, 49].map((start) => Math.floor((start * gaugeWidth) / 54))
+  if (compact) {
+    line(selected, (value) => bold(fg(colors[selected])(value)))
+    line(model.height <= 12 ? routeLabel(model.modeRoutes[selected]?.main) : modeDescription[selected], (value) =>
+      fg(colors.muted)(value),
+    )
+    return new StyledText(chunks)
+  }
+  const starts = modeLabelStarts(innerWidth)
+  const targetPosition = model.modePicker.selected
+  const fromPosition = model.modePicker.fromPosition ?? model.modePicker.from ?? targetPosition
+  const progress = Math.min(1, ((model.modePicker.turnTick ?? 4) + 1) / 4)
+  const position = fromPosition + (targetPosition - fromPosition) * (1 - (1 - progress) * (1 - progress))
+  const center = Math.round((position * Math.max(0, innerWidth - 5)) / Math.max(1, modeIds.length - 1))
+  const target = starts[model.modePicker.selected] ?? 0
+  const from = Math.round((fromPosition * Math.max(0, innerWidth - 5)) / Math.max(1, modeIds.length - 1))
+  const thumbWidth = selected.length
+  const dial = Array.from({ length: innerWidth }, () => "╌")
+  for (let index = 0; index < thumbWidth; index += 1) if (center + index < dial.length) dial[center + index] = "━"
+  if (model.modePicker.turnTick !== undefined) {
+    const edge = target >= from ? center + thumbWidth : center - 1
+    if (edge >= 0 && edge < dial.length) dial[edge] = "╾"
+  }
+  line("")
+  line(dial.join(""), (value) => fg(colors[selected])(value))
+  const labels: Array<TextChunk> = []
   let column = 0
-  modes.forEach((mode, index) => {
-    const start = labelStarts[index]!
-    chunks.push(fg(colors.text)(" ".repeat(Math.max(0, start - column))))
-    chunks.push(mode === selected ? bold(fg(colors[mode])(mode)) : fg(colors.muted)(mode))
-    column = Math.max(column, start) + mode.length
-  })
-  const divider = (label: string) => `├─ ${label} ${"─".repeat(Math.max(0, gaugeWidth - label.length - 5))}┤`
-  chunks.push(fg(colors.text)("\n\n"))
-  chunks.push(dim(fg(colors.text)(divider("Route"))))
-  chunks.push(fg(colors.text)("\n\n"))
+  for (const [index, mode] of modeIds.entries()) {
+    const start = starts[index]!
+    labels.push(fg(colors.text)(" ".repeat(Math.max(0, start - column))))
+    labels.push(mode === selected ? bold(fg(colors[selected])(mode)) : dim(fg(colors.text)(mode)))
+    column = start + mode.length
+  }
+  chunks.push(fg(colors.text)("\n"), ...labels)
+  line("")
+  line(" ".repeat(innerWidth))
+  line("")
   const routes = model.modeRoutes[selected]
-  chunks.push(bold(fg(colors.text)("Agent:")))
-  chunks.push(fg(colors.muted)(`  ${routeLabel(routes?.main)}`))
-  chunks.push(fg(colors.text)("\n"))
-  chunks.push(bold(fg(colors.text)("Oracle:")))
-  chunks.push(fg(colors.muted)(` ${routeLabel(routes?.oracle)}`))
-  chunks.push(fg(colors.text)("\n\n"))
-  chunks.push(dim(fg(colors.text)(divider("About"))))
-  chunks.push(fg(colors.text)("\n\n"))
-  chunks.push(fg(colors.text)(truncateToWidth(modeDescription[selected], gaugeWidth)))
+  line(`Agent     ${routeLabel(routes?.main)}`)
+  line(`Oracle    ${routeLabel(routes?.oracle)}`)
+  line("")
+  line(" ".repeat(innerWidth))
+  line("")
+  line(modeDescription[selected])
+  line("")
   return new StyledText(chunks)
 }
 

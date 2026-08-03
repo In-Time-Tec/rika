@@ -446,7 +446,7 @@ it.effect("uses native clock width and pointer hover for the usage label", () =>
     Object.assign(surface.modeLabel, { screenX: 20 })
     expect(
       (surface.modeLabel.content as { chunks: ReadonlyArray<{ attributes?: number }> }).chunks[0]?.attributes,
-    ).toBe(2)
+    ).toBeUndefined()
 
     surface.modeLabel.onMouseOver?.({ x: 20 } as never)
     expect(opentui.renderer.setMousePointer).toHaveBeenLastCalledWith("pointer")

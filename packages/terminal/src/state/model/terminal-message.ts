@@ -23,6 +23,11 @@ type UiEvent = {
 type Message =
   | { readonly _tag: "KeyPressed"; readonly key: Key }
   | { readonly _tag: "ContextDetailsToggled" }
+  | { readonly _tag: "ModeSelectorOpened" }
+  | { readonly _tag: "ModeTurned"; readonly offset: number }
+  | { readonly _tag: "ModeCommitted"; readonly selected?: number }
+  | { readonly _tag: "ModeHovered"; readonly selected: number }
+  | { readonly _tag: "AnimationTicked" }
   | { readonly _tag: "Pasted"; readonly text: string }
   | { readonly _tag: "ImageInserted"; readonly path: string }
   | { readonly _tag: "ImageRemoved"; readonly path: string }
