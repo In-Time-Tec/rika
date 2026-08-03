@@ -6990,6 +6990,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/product/test/interactive-session-supervision.test.ts",
+      "path": "packages/product/test/interactive-session-supervision.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/product/test/openai-auth-browser.test.ts",
       "path": "packages/product/test/openai-auth-browser.test.ts",
       "workspace": "@rika/product",
@@ -14612,6 +14622,14 @@
     },
     {
       "from": "apps/rika/src/resident/composition/resident-execution-layer.ts",
+      "to": "packages/product/src/authentication/openai-auth-service.ts",
+      "specifier": "@rika/product/openai-auth-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-layer.ts",
       "to": "packages/product/src/execution/contract/execution-request.ts",
       "specifier": "@rika/product/execution-request",
       "kind": "import",
@@ -18444,6 +18462,14 @@
     },
     {
       "from": "apps/rika/test/model-execution-backend.test.ts",
+      "to": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
+      "specifier": "@rika/coding-tools/coding-tool-runtime",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/model-execution-backend.test.ts",
       "to": "packages/configuration/src/settings/configuration-settings.ts",
       "specifier": "@rika/configuration/configuration-settings",
       "kind": "import",
@@ -18518,14 +18544,6 @@
       "from": "apps/rika/test/model-execution-backend.test.ts",
       "to": "packages/product/src/thread/tool/thread-tool-service.ts",
       "specifier": "@rika/product/thread-tool-service",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/model-execution-backend.test.ts",
-      "to": "packages/relay-execution/src/model/provider/model-provider-runtime.ts",
-      "specifier": "@rika/relay-execution/model-provider-runtime",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -45758,6 +45776,62 @@
       "from": "packages/product/test/interactive-feed-overflow.test.ts",
       "to": "packages/product/src/thread/model/turn-record.ts",
       "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/interactive-session-supervision.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/interactive-session-supervision.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/interactive-session-supervision.test.ts",
+      "to": "packages/product/src/execution/contract/execution-service.ts",
+      "specifier": "@rika/product/execution-service",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/interactive-session-supervision.test.ts",
+      "to": "packages/product/src/operation/interactive/interactive-event.ts",
+      "specifier": "../src/operation/interactive/interactive-event",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/interactive-session-supervision.test.ts",
+      "to": "packages/product/src/operation/interactive/interactive-session-supervision.ts",
+      "specifier": "../src/operation/interactive/interactive-session-supervision",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/interactive-session-supervision.test.ts",
+      "to": "packages/product/src/thread/repository/transcript-repository.ts",
+      "specifier": "@rika/product/transcript-repository",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/interactive-session-supervision.test.ts",
+      "to": "packages/product/src/thread/repository/turn-repository.ts",
+      "specifier": "@rika/product/turn-repository",
       "kind": "import",
       "relationship": "test",
       "production": false

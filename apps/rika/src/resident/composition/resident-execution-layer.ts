@@ -3,6 +3,7 @@ import * as SettingsDefaults from "@rika/configuration/configuration-settings"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ExecutionRequest from "@rika/product/execution-request"
+import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
@@ -15,7 +16,7 @@ import { Cause, Effect, Exit, Layer, pipe } from "effect"
 import { resolveExecutionWorkspace } from "./resident-execution-recovery"
 import { validateWebSearchProviders } from "./resident-configuration-adapter"
 
-interface ConfiguredBackendOptions {
+interface ConfiguredBackendOptions<ProviderAuthError> {
   readonly filename: string
   readonly workspace: string
   readonly repositoryLayer: Layer.Layer<ThreadRepository.Service, ThreadRepository.RepositoryError, never>
@@ -42,12 +43,13 @@ interface ConfiguredBackendOptions {
     input: ExecutionRequest.StartInput,
   ) => Effect.Effect<ExecutionRouteSnapshot.ExecutionRoutePin, ExecutionBackend.BackendError>
   readonly threadToolGateway: ThreadToolService.Gateway
+  readonly providerAuthLayer: Layer.Layer<OpenAiAuth.Service, ProviderAuthError>
   readonly toolRuntimeLayerForWorkspace: (
     workspace: string,
   ) => Layer.Layer<ToolRuntime.Service, ExecutionBackend.BackendError, never>
 }
 
-export const configuredBackendLayer = (options: ConfiguredBackendOptions) => {
+export const configuredBackendLayer = <ProviderAuthError>(options: ConfiguredBackendOptions<ProviderAuthError>) => {
   const relayOptions = {
     filename: options.filename,
     workspace: options.workspace,
@@ -62,6 +64,7 @@ export const configuredBackendLayer = (options: ConfiguredBackendOptions) => {
       interaction: options.threadInteractionRepositoryLayer,
     },
     threadToolGateway: options.threadToolGateway,
+    providerAuthLayer: options.providerAuthLayer,
     ...(options.resolveLegacyRoute === undefined ? {} : { resolveLegacyRoute: options.resolveLegacyRoute }),
     toolRuntimeLayerForWorkspace: options.toolRuntimeLayerForWorkspace,
   }

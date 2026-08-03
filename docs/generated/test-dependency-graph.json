@@ -2429,6 +2429,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/product/test/interactive-session-supervision.test.ts",
+      "path": "packages/product/test/interactive-session-supervision.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/product/test/openai-auth-browser.test.ts",
       "path": "packages/product/test/openai-auth-browser.test.ts",
       "workspace": "@rika/product",
@@ -9377,6 +9387,30 @@
       "from": "packages/product/test/interactive-feed-overflow.test.ts",
       "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
       "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/interactive-session-supervision.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/interactive-session-supervision.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/interactive-session-supervision.test.ts",
+      "to": "packages/product/src/execution/contract/execution-service.ts",
+      "specifier": "@rika/product/execution-service",
       "kind": "import",
       "relationship": "test",
       "production": false

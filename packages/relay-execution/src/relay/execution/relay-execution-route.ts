@@ -222,24 +222,21 @@ interface PreparedExecutionRoutes {
   }>
 }
 
-const prepareExecutionRoutes = (options: {
+const prepareExecutionRoutes = <ProviderAuthError>(options: {
   readonly routes: ReadonlyArray<ModelRouteResolution.ResolvedModelRoute>
   readonly persisted: ReadonlyArray<ExecutionRouteSnapshot.ExecutionRouteModelSnapshot>
-  readonly providerAuthLayer?: Layer.Layer<OpenAiAuth.Service>
+  readonly providerAuthLayer: Layer.Layer<OpenAiAuth.Service, ProviderAuthError>
 }): Effect.Effect<PreparedExecutionRoutes, BackendError, never> =>
   Effect.gen(function* () {
-    const service =
-      options.providerAuthLayer === undefined
-        ? yield* ModelProviderRuntime.Service
-        : Context.get(
-            yield* Layer.build(
-              ModelProviderRuntime.Service.layer.pipe(
-                Layer.provide(options.providerAuthLayer),
-                Layer.provide(ModelProviderRuntime.bedrockAuthRefreshLiveLayer),
-              ),
-            ),
-            ModelProviderRuntime.Service,
-          )
+    const service = Context.get(
+      yield* Layer.build(
+        ModelProviderRuntime.Service.layer.pipe(
+          Layer.provide(options.providerAuthLayer),
+          Layer.provide(ModelProviderRuntime.bedrockAuthRefreshLiveLayer),
+        ),
+      ).pipe(Effect.mapError((cause) => BackendError.make({ message: String(cause) }))),
+      ModelProviderRuntime.Service,
+    )
     const prepared = yield* service
       .prepare(options.routes)
       .pipe(Effect.mapError((cause) => BackendError.make({ message: String(cause) })))

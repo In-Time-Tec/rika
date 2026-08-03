@@ -6,9 +6,15 @@ import * as ThreadResult from "@rika/product/thread-result"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
-import { Context, Effect, PubSub } from "effect"
+import { Clock, Context, Effect, PubSub } from "effect"
 import type { InteractiveEvent } from "./interactive-event"
 import { settleStopRequestedTurns } from "../../execution/lifecycle/product-execution-stop"
+
+export const isMissingExecutionRuntimeService = (error: { readonly message: string }) =>
+  error.message.includes("Service not found:")
+
+export const missingExecutionRuntimeServiceMessage =
+  "Execution backend is missing a required runtime service. Update or reinstall Rika, then retry."
 
 const interactiveEventThreadId = (event: InteractiveEvent): string | undefined => {
   if (event._tag === "SelectionLoaded") return String(event.thread.id)
@@ -93,18 +99,43 @@ export const makeInteractiveSupervision = (input: any): any => {
                         ),
                       )
                   }),
-                  Effect.catch((error) =>
-                    Effect.logError("turn.observer.failed").pipe(
+                  Effect.catch((error) => {
+                    const logged = Effect.logError("turn.observer.failed").pipe(
                       Effect.annotateLogs({
                         "rika.thread.id": String(turn.threadId),
                         "rika.turn.id": String(turn.id),
                         "rika.failure.kind": error.name,
                         "rika.failure.message": error.message,
                       }),
-                      Effect.andThen(Effect.sleep("50 millis")),
-                      Effect.andThen(typedNotifyTurnChanged(turn)),
-                    ),
-                  ),
+                    )
+                    if (!isMissingExecutionRuntimeService(error))
+                      return logged.pipe(
+                        Effect.andThen(Effect.sleep("50 millis")),
+                        Effect.andThen(typedNotifyTurnChanged(turn)),
+                      )
+                    return Effect.gen(function* () {
+                      yield* logged
+                      const current = yield* turns.get(turn.id)
+                      if (
+                        current !== undefined &&
+                        ThreadResult.TurnResult.isAgentExecution(current) &&
+                        typedIsTerminalStatus(current.status) !== true
+                      )
+                        yield* typedSetTurnStatus(
+                          current.id,
+                          "failed",
+                          current.lastCursor,
+                          yield* Clock.currentTimeMillis,
+                        )
+                      typedOperationFeed.emit(typedOperationFeed.sessionDispatch, {
+                        _tag: "ExecutionFailed",
+                        selectionEpoch: 0,
+                        threadId: turn.threadId,
+                        turnId: turn.id,
+                        message: missingExecutionRuntimeServiceMessage,
+                      })
+                    })
+                  }),
                 ),
               )
             const settleStopRequested = settleStopRequestedTurns(backend, (turnId, status, cursor, settledAt) =>

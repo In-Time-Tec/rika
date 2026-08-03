@@ -48,7 +48,7 @@ type LegacyRouteResolution =
       readonly registrations?: ReadonlyArray<unknown>
     }
 
-export interface ConfiguredOptions {
+export interface ConfiguredOptions<ProviderAuthError> {
   readonly filename: string
   readonly workspace: string
   readonly settings?: ConfigurationSettings.ConfigurationSettings
@@ -56,7 +56,7 @@ export interface ConfiguredOptions {
   readonly webSearchCredentials?: Readonly<Record<string, import("effect").Redacted.Redacted<string>>>
   readonly repositories: RepositoryLayers
   readonly threadToolGateway: ThreadToolService.Gateway
-  readonly providerAuthLayer?: Layer.Layer<OpenAiAuth.Service>
+  readonly providerAuthLayer: Layer.Layer<OpenAiAuth.Service, ProviderAuthError>
   readonly resolveLegacyRoute?: (
     input: ExecutionRequest.StartInput,
   ) => Effect.Effect<LegacyRouteResolution, ExecutionBackend.BackendError>
@@ -83,7 +83,7 @@ const unavailableRouteError = (failure: RouteFailure) =>
 const withPinnedRouteRegistration = Effect.fn("Relay.withPinnedRouteRegistration")(function* (
   backend: ExecutionBackend.Interface,
   options: {
-    readonly resolveLegacyRoute?: ConfiguredOptions["resolveLegacyRoute"]
+    readonly resolveLegacyRoute?: ConfiguredOptions<never>["resolveLegacyRoute"]
     readonly unavailable?: ReadonlyArray<RouteFailure>
     readonly registeredRoutes?: ReadonlyArray<ExecutionRouteSnapshot.ExecutionRouteModelSnapshot>
     readonly registerPinnedRoutes?: (
@@ -139,16 +139,16 @@ const readEnvironment = Effect.gen(function* () {
   return undefined
 })
 
-const configuredLayer: (
-  options: ConfiguredOptions,
-) => Layer.Layer<
+const configuredLayer = <ProviderAuthError>(
+  options: ConfiguredOptions<ProviderAuthError>,
+): Layer.Layer<
   ExecutionBackend.Service,
   | ExecutionBackend.BackendError
   | Config.ConfigError
   | PlatformError.PlatformError
   | import("@relayfx/sdk").Runtime.AcquisitionError,
   import("./relay-execution-layer").ExternalToolRuntimeRequirements<never>
-> = (options) =>
+> =>
   Layer.unwrap(
     Effect.gen(function* () {
       const settings = options.settings ?? ConfigurationSettings.Defaults.defaults
@@ -172,7 +172,7 @@ const configuredLayer: (
         const prepared = yield* Route.prepareExecutionRoutes({
           routes: configuredRoutes,
           persisted: options.persistedModelRoutes ?? [],
-          ...(options.providerAuthLayer === undefined ? {} : { providerAuthLayer: options.providerAuthLayer }),
+          providerAuthLayer: options.providerAuthLayer,
         }).pipe(Effect.mapError((error) => ExecutionBackend.BackendError.make({ message: String(error) })))
         unavailable = prepared.unavailable
         if (prepared.registrations.length === 0)

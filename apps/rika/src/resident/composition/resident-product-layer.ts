@@ -151,9 +151,10 @@ const createOperationLayerImpl = (
         webSearchCredentials,
         resolveLegacyRoute,
         threadToolGateway,
+        providerAuthLayer: openAiAuthLayer,
         toolRuntimeLayerForWorkspace: (workspace) =>
           defaultWorkspaceToolRuntimeLayer(workspace, effectiveConfigForWorkspace),
-      }).pipe(Layer.provide(openAiAuthLayer), Layer.provide(BunServices.layer))
+      }).pipe(Layer.provide(BunServices.layer))
       const configAdapter = ResidentConfiguration.productConfigAdapter(editor)
       const operationLayer = Operation.productLayer({
         repositoryLayer: repositories,

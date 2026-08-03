@@ -10347,6 +10347,14 @@
     },
     {
       "from": "apps/rika/src/resident/composition/resident-execution-layer.ts",
+      "to": "packages/product/src/authentication/openai-auth-service.ts",
+      "specifier": "@rika/product/openai-auth-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/resident/composition/resident-execution-layer.ts",
       "to": "packages/product/src/thread/tool/thread-tool-service.ts",
       "specifier": "@rika/product/thread-tool-service",
       "kind": "import",
