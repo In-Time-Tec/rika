@@ -7,8 +7,12 @@ import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { truncateToWidth } from "../../presentation/terminal/terminal-format"
 import { filteredFiles } from "../../state/model/terminal-thread-navigation"
 import { type Model } from "../../state/model/terminal-state"
-import { paletteContent, modeLabelStarts, modePickerContent } from "./opentui-composer-region"
+import { paletteContent, modePickerContent } from "./opentui-composer-region"
 import { modeIds } from "@rika/configuration/behavior-mode"
+import {
+  modeSelectorIndexAtColumn,
+  modeSelectorLabels,
+} from "../../presentation/terminal/terminal-mode-selector-layout"
 import { filePickerContent, threadSwitcherContent, threadSwitcherListWidth } from "./opentui-overlay-content"
 import type { ProjectedEditorRenderable } from "./opentui-surface-construction"
 import { SurfaceSidebarRegion } from "./opentui-sidebar-region"
@@ -170,17 +174,7 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
         const compact = modeContentWidth < 40 || model.height <= 12
         const labelRow = this.palette.screenY + (compact ? 1 : 2)
         if (event.y !== labelRow) return undefined
-        const starts = modeLabelStarts(modeContentWidth)
-        const pointer = event.x - this.palette.screenX
-        let column = 0
-        for (const [index, mode] of modeIds.entries()) {
-          column = Math.max(column, Math.min(modeContentWidth, starts[index]!))
-          const visible = truncateToWidth(mode, Math.max(0, modeContentWidth - column))
-          const width = stringWidth(visible)
-          if (pointer >= column && pointer < column + width) return index
-          column += width
-        }
-        return undefined
+        return modeSelectorIndexAtColumn(modeSelectorLabels(modeContentWidth), event.x - this.palette.screenX)
       }
       this.palette.onMouseMove = (event) => {
         const selected = hitMode(event)

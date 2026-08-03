@@ -5,7 +5,8 @@ import { Effect } from "effect"
 import { expect, test } from "vitest"
 import { initial } from "../src/state/model/terminal-state"
 import { canSubmit, update } from "../src/state/reducer/terminal-state-reducer"
-import { modeLabelStarts, modePickerContent } from "../src/opentui/surface/opentui-composer-region"
+import { modePickerContent } from "../src/opentui/surface/opentui-composer-region"
+import { modeSelectorLabels } from "../src/presentation/terminal/terminal-mode-selector-layout"
 import { animationActive, welcomeContent } from "../src/opentui/surface/opentui-surface-content"
 import { Surface } from "../src/opentui/surface/opentui-surface"
 import { colors } from "../src/presentation/terminal/terminal-theme"
@@ -23,10 +24,10 @@ const key = (name: string) => ({
 
 const text = (chunks: ReadonlyArray<{ readonly text: string }>) => chunks.map((chunk) => chunk.text).join("")
 
-test("mode selection is ViewState-owned with eased turns and a draining commit animation", () => {
+test("mode selection is ViewState-owned with eased keyboard turns and a draining commit animation", () => {
   let model = update(initial("/work", "medium"), { _tag: "ModeSelectorOpened" })
   expect(model.modePicker).toMatchObject({ open: true, selected: 1 })
-  model = update(model, { _tag: "ModeTurned", offset: 1 })
+  model = update(model, { _tag: "KeyPressed", key: key("right") })
   expect(model.modePicker).toMatchObject({ selected: 2, turnTick: 0 })
   expect(text(modePickerContent(model, 54).chunks)).toContain("╾")
   model = update(model, { _tag: "AnimationTicked" })
@@ -39,13 +40,56 @@ test("mode selection is ViewState-owned with eased turns and a draining commit a
   expect(model.modeCommit).toBeUndefined()
 })
 
-test("renders the compact mode dial with all four clickable notch labels", () => {
+test("renders the compact mode dial with all four visually distinct notch labels", () => {
   const content = text(
-    modePickerContent({ ...initial("/work", "medium"), height: 12, modePicker: { open: true, selected: 1 } }, 28)
+    modePickerContent({ ...initial("/work", "medium"), height: 12, modePicker: { open: true, selected: 1 } }, 20)
       .chunks,
   )
-  expect(content.split("\n").slice(0, 2)).toEqual(["╌╌╌╌╌╌╌╌━━━━━━╌╌╌╌╌╌╌╌╌╌╌╌╌╌", "low    medium  high    ultra"])
+  expect(content.split("\n").slice(0, 2)).toEqual(["╌╌╌╌╌━━━╌╌╌╌╌╌╌╌╌╌╌╌", "low  med  high ultra"])
 })
+
+it.effect("renders and targets every compact mode notch on a real 24x12 surface", () =>
+  Effect.gen(function* () {
+    const setup = yield* Effect.acquireRelease(
+      Effect.tryPromise(() => createTestRenderer({ width: 24, height: 12 })),
+      (value) => Effect.sync(() => value.renderer.destroy()),
+    )
+    const committed: Array<number> = []
+    const surface = yield* Effect.acquireRelease(
+      Effect.sync(
+        () =>
+          new Surface(
+            setup.renderer,
+            { key: () => undefined, resize: () => undefined, modeCommit: (selected) => committed.push(selected) },
+            { animate: false },
+          ),
+      ),
+      (value) => Effect.sync(() => value.destroy()),
+    )
+    surface.update({ ...initial("/work", "medium"), width: 24, height: 12, modePicker: { open: true, selected: 1 } })
+    yield* Effect.tryPromise(() => setup.renderOnce())
+    expect(setup.captureCharFrame().split("\n").slice(0, 4)).toEqual([
+      "╭─ Mode ───────────────╮",
+      "│ ╌╌╌╌╌━━━╌╌╌╌╌╌╌╌╌╌╌╌ │",
+      "│ low  med  high ultra │",
+      "│ Balanced default for │",
+    ])
+    const palette = (
+      surface as unknown as {
+        readonly palette: {
+          readonly screenX: number
+          readonly screenY: number
+        }
+      }
+    ).palette
+    for (const label of modeSelectorLabels(20)) {
+      setup.mockMouse.click(palette.screenX + label.start, palette.screenY + 1)
+      setup.mockMouse.click(palette.screenX + label.end - 1, palette.screenY + 1)
+    }
+    yield* Effect.tryPromise(() => setup.renderOnce())
+    expect(committed).toEqual([0, 0, 1, 1, 2, 2, 3, 3])
+  }).pipe(Effect.scoped),
+)
 
 it.effect("renders responsive context tracks and per-cell mode commit wipe colors", () =>
   Effect.gen(function* () {
@@ -85,7 +129,7 @@ it.effect("renders responsive context tracks and per-cell mode commit wipe color
         }
       }
     ).palette
-    setup.mockMouse.click(palette.screenX + modeLabelStarts(28)[2]!, palette.screenY + 1)
+    setup.mockMouse.click(palette.screenX + modeSelectorLabels(28)[2]!.start, palette.screenY + 1)
     yield* Effect.tryPromise(() => setup.renderOnce())
     expect(committed).toEqual([2])
     setup.resize(80, 24)

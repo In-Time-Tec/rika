@@ -3557,6 +3557,16 @@
       "testKind": "fixture"
     },
     {
+      "id": "packages/terminal/test/fixtures/visual/compact-mode-selector.styles.json",
+      "path": "packages/terminal/test/fixtures/visual/compact-mode-selector.styles.json",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "asset",
+      "production": false,
+      "publicExports": [],
+      "testKind": "fixture"
+    },
+    {
       "id": "packages/terminal/test/fixtures/visual/context-details.styles.json",
       "path": "packages/terminal/test/fixtures/visual/context-details.styles.json",
       "workspace": "@rika/terminal",
@@ -4249,6 +4259,16 @@
     {
       "id": "packages/terminal/test/syntax-highlight.test.ts",
       "path": "packages/terminal/test/syntax-highlight.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/terminal/test/terminal-mode-selector-layout.test.ts",
+      "path": "packages/terminal/test/terminal-mode-selector-layout.test.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -13487,6 +13507,14 @@
     },
     {
       "from": "packages/terminal/test/syntax-highlight.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/terminal-mode-selector-layout.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",

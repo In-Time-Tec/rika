@@ -8,6 +8,10 @@ import { displayInput } from "../../state/model/terminal-composer-state"
 import { truncateToWidth } from "../../presentation/terminal/terminal-format"
 import type { Command } from "../../presentation/terminal/command-palette"
 import type { ModeRouteLabel } from "../../state/model/terminal-mode-route"
+import {
+  modeSelectorLabels,
+  modeSelectorNotchAtPosition,
+} from "../../presentation/terminal/terminal-mode-selector-layout"
 const displayCursorOffset = (model: Model): number => {
   let offset = model.cursor
   for (const attachment of model.pastedText) {
@@ -174,9 +178,6 @@ export const paletteContent: {
   ): ReturnType<typeof paletteContentImpl>
 } = Function.dual(4, paletteContentImpl)
 
-export const modeLabelStarts = (innerWidth: number): ReadonlyArray<number> =>
-  modeIds.map((_, index) => Math.floor((index * Math.max(0, innerWidth - 5)) / (modeIds.length - 1)))
-
 const modePickerContentImpl = (model: Model, innerWidth: number): StyledText => {
   const selected = modeIds[model.modePicker.selected] ?? model.mode
   const compact = innerWidth < 40 || model.height <= 12
@@ -185,15 +186,16 @@ const modePickerContentImpl = (model: Model, innerWidth: number): StyledText => 
     if (chunks.length > 0) chunks.push(fg(colors.text)("\n"))
     chunks.push(style(truncateToWidth(value, innerWidth)))
   }
-  const starts = modeLabelStarts(innerWidth)
+  const labels = modeSelectorLabels(innerWidth)
   const targetPosition = model.modePicker.selected
   const fromPosition = model.modePicker.fromPosition ?? model.modePicker.from ?? targetPosition
   const progress = Math.min(1, ((model.modePicker.turnTick ?? 4) + 1) / 4)
   const position = fromPosition + (targetPosition - fromPosition) * (1 - (1 - progress) * (1 - progress))
-  const center = Math.round((position * Math.max(0, innerWidth - 5)) / Math.max(1, modeIds.length - 1))
-  const target = starts[model.modePicker.selected] ?? 0
-  const from = Math.round((fromPosition * Math.max(0, innerWidth - 5)) / Math.max(1, modeIds.length - 1))
-  const thumbWidth = selected.length
+  const center = modeSelectorNotchAtPosition(labels, position)
+  const target = modeSelectorNotchAtPosition(labels, targetPosition)
+  const from = modeSelectorNotchAtPosition(labels, fromPosition)
+  const targetLabel = labels[model.modePicker.selected]
+  const thumbWidth = targetLabel === undefined ? selected.length : targetLabel.end - targetLabel.start
   const dial = Array.from({ length: innerWidth }, () => "╌")
   for (let index = 0; index < thumbWidth; index += 1) if (center + index < dial.length) dial[center + index] = "━"
   if (model.modePicker.turnTick !== undefined) {
@@ -202,18 +204,16 @@ const modePickerContentImpl = (model: Model, innerWidth: number): StyledText => 
   }
   if (!compact) line("")
   line(dial.join(""), (value) => fg(colors[selected])(value))
-  const labels: Array<TextChunk> = []
+  const labelChunks: Array<TextChunk> = []
   let column = 0
-  for (const [index, mode] of modeIds.entries()) {
-    const start = Math.min(innerWidth, starts[index]!)
-    labels.push(fg(colors.text)(" ".repeat(Math.max(0, start - column))))
-    column = Math.max(column, start)
-    const visible = truncateToWidth(mode, Math.max(0, innerWidth - column))
-    if (visible.length === 0) break
-    labels.push(mode === selected ? bold(fg(colors[selected])(visible)) : dim(fg(colors.text)(visible)))
-    column += stringWidth(visible)
+  for (const label of labels) {
+    labelChunks.push(fg(colors.text)(" ".repeat(Math.max(0, label.start - column))))
+    labelChunks.push(
+      label.mode === selected ? bold(fg(colors[selected])(label.text)) : dim(fg(colors.text)(label.text)),
+    )
+    column = label.end
   }
-  chunks.push(fg(colors.text)("\n"), ...labels)
+  chunks.push(fg(colors.text)("\n"), ...labelChunks)
   if (compact) {
     line(modeDescription[selected], (value) => fg(colors.muted)(value))
     return new StyledText(chunks)

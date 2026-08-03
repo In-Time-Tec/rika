@@ -447,6 +447,7 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
       24,
     ],
     ["narrow-layout", { ...base(), width: 50, height: 12, input: "narrow", cursor: 6 }, 50, 12],
+    ["compact-mode-selector", { ...base(), modePicker: { open: true, selected: 1 } }, 24, 12],
     ["narrow-mode-overlay", { ...base(), modePicker: { open: true, selected: 1 } }, 32, 12],
     [
       "narrow-palette-overlay",

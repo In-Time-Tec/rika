@@ -47,6 +47,7 @@ test(
             "sidebar",
             "thread-switcher",
             "thread-switcher-stacked",
+            "compact-mode-selector",
             "narrow-mode-overlay",
             "narrow-palette-overlay",
             "context-meter",

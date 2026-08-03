@@ -1,5 +1,5 @@
 ╭─ Mode ───────────────────────╮
-│ ╌╌╌╌╌╌╌╌━━━━━━╌╌╌╌╌╌╌╌╌╌╌╌╌╌ │
+│ ╌╌╌╌╌╌╌━━━━━━╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ │
 │ low    medium  high    ultra │
 │ Balanced default for everyda │
 │                              │
