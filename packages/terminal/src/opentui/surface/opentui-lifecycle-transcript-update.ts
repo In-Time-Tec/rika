@@ -19,7 +19,7 @@ import { boundedTranscriptModel } from "../rendering/opentui-render-transcript-w
 import { transcriptUnitRevision } from "../rendering/opentui-render-transcript-revision"
 import { transcriptUnitBuilder } from "../rendering/opentui-render-unit"
 import type { TranscriptRangeBundle, TranscriptUnitCacheEntry } from "../rendering/opentui-render-transcript-revision"
-import { animationActive, welcomeContent } from "./opentui-surface-content"
+import { welcomeContent, welcomeVisible } from "./opentui-surface-content"
 import { cutoutBackground } from "./opentui-surface-construction"
 import type { TranscriptRenderableDescriptor } from "./opentui-surface-transcript-types"
 import { SurfaceLifecycleToast } from "./opentui-lifecycle-toast"
@@ -50,12 +50,12 @@ export abstract class SurfaceLifecycleTranscript extends SurfaceLifecycleToast {
     const threadSidebarVisible = contentLeft > 0
     const contentWidth = contentColumnWidth(model)
     const modeColor = colors[model.mode]
-    const isWelcome = model.entries.length === 0 && model.blocks.length === 0
+    const isWelcome = welcomeVisible(model)
     this.transcriptScroll.content.justifyContent = isWelcome ? "flex-start" : "flex-end"
     if (isWelcome) {
       this.transcriptRenderInput = undefined
       const welcomeWidth = this.welcomeWidthFor(model)
-      const welcomePhase = animationActive(model) ? model.animationTick : 0
+      const welcomePhase = model.animationTick
       const welcomeKey = `${welcomeWidth}:${model.height}:${welcomePhase}:${model.mode}`
       const existingWelcome = this.transcriptChildren.length === 1 ? this.welcomeChild : undefined
       if (existingWelcome === undefined) {

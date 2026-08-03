@@ -31,6 +31,15 @@ describe("InteractiveSession persisted usage", () => {
       expect(shown).toEqual([...shown].toSorted((left, right) => left - right))
       const availability = updates.map((event) => event.time._tag)
       expect(availability.slice(availability.indexOf("Available")).includes("Unavailable")).toBe(false)
+      const contexts = updates.map((event) => event.context._tag)
+      expect(contexts).toContain("Available")
+      expect(contexts.slice(contexts.indexOf("Available")).includes("Unavailable")).toBe(false)
+      expect(updates.at(-1)?.context).toEqual({
+        _tag: "Available",
+        inputTokens: 50,
+        contextWindow: 372_000,
+        reserveTokens: 128_000,
+      })
       expect(updates.at(-1)?.time).toEqual({ _tag: "Available", accumulatedMillis: 30_000 })
       expect(persisted.activeMillis).toBe(30_000)
     }),

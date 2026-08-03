@@ -74,7 +74,9 @@ export const makeProductOperationIngest = (input: any): Effect.Effect<ProductOpe
     ) {
       if (value === undefined) return
       const thread = yield* usageRepository.readThread(value.threadId)
-      const context = { _tag: "Unavailable" } as const
+      const context = yield* readThreadContext(value.threadId).pipe(
+        Effect.orElseSucceed(() => ({ _tag: "Unavailable" }) as const),
+      )
       const global = yield* usageRepository.readGlobal
       if (
         context._tag === "Unavailable" &&

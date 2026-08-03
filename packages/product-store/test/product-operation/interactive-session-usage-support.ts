@@ -35,13 +35,32 @@ const stamped = (
 
 const spendEvents: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [
   stamped("spend-started", "execution.started", 10_000, 1),
-  stamped("spend-usage", "model.attempt.completed", 20_000, 2, {
-    data: { model_attempt_id: "spend-attempt", attempt: 1, cost: { amount: 0.75, currency: "USD" } },
+  stamped("spend-context", "model.usage.reported", 15_000, 2, {
+    data: {
+      model_call_id: "spend-call",
+      model_attempt_id: "spend-attempt",
+      attempt: 1,
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      input_tokens: 50,
+      input_tokens_uncached: 50,
+      input_tokens_cache_read: 0,
+      input_tokens_cache_write: 0,
+      output_tokens: 10,
+    },
   }),
-  stamped("spend-answer", "model.output.completed", 30_000, 3, { text: "spent" }),
+  stamped("spend-usage", "model.attempt.completed", 20_000, 3, {
+    data: {
+      model_call_id: "spend-call",
+      model_attempt_id: "spend-attempt",
+      attempt: 1,
+      cost: { amount: 0.75, currency: "USD" },
+    },
+  }),
+  stamped("spend-answer", "model.output.completed", 30_000, 4, { text: "spent" }),
 ]
 
-const spendCompleted = stamped("spend-completed", "execution.completed", 40_000, 4)
+const spendCompleted = stamped("spend-completed", "execution.completed", 40_000, 5)
 
 const spendTimeline: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> = [...spendEvents, spendCompleted]
 

@@ -245,7 +245,7 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
   }
 
   protected tickLoader(): void {
-    if (this.destroyed) return
+    if (this.destroyed || this.loaderTimer === undefined) return
     this.loaderPhase += 1
     this.handlers.animationTick?.()
     this.toolSpinner.step()

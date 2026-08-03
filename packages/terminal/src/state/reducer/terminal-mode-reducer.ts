@@ -69,7 +69,6 @@ const tickAnimations = (model: Model): Model => {
   return {
     ...model,
     animationTick: model.animationTick + 1,
-    welcomeAnimationTicks: Math.max(0, model.welcomeAnimationTicks - 1),
     compactionShimmer,
     modePicker,
     modeCommit,

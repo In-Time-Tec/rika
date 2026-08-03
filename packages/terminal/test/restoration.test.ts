@@ -1,5 +1,5 @@
 import { fg } from "@opentui/core"
-import { createTestRenderer } from "@opentui/core/testing"
+import { createTestRenderer, ManualClock } from "@opentui/core/testing"
 import { it } from "@effect/vitest"
 import { Effect } from "effect"
 import { expect, test } from "vitest"
@@ -199,14 +199,129 @@ test("keeps a typed draft intact and blocks submission while a thread is loading
   expect(canSubmit(update(afterEnter, { _tag: "ThreadOpenCompleted" }))).toBe(true)
 })
 
-test("wires the welcome orb to a finite startup animation and active execution ticks", () => {
+test("keeps the welcome orb animated for as long as the welcome screen is visible", () => {
   let welcome = { ...initial("/work", "high"), animationTick: 7 }
   expect(animationActive(welcome)).toBe(true)
   expect(text(welcomeContent(120, 30, 0, "high").chunks)).not.toBe(text(welcomeContent(120, 30, 1, "high").chunks))
-  for (let index = 0; index < 24; index += 1) welcome = update(welcome, { _tag: "AnimationTicked" })
-  expect(animationActive(welcome)).toBe(false)
-  expect(animationActive({ ...welcome, busy: true, activity: { _tag: "Waiting" } })).toBe(true)
+  for (let index = 0; index < 64; index += 1) welcome = update(welcome, { _tag: "AnimationTicked" })
+  expect(animationActive(welcome)).toBe(true)
+  expect(animationActive({ ...welcome, entries: [{ role: "user", text: "hello" }] })).toBe(false)
+  expect(animationActive({ ...welcome, blocks: [{ _tag: "Notification", title: "hello" }] })).toBe(false)
+  expect(animationActive({ ...welcome, height: 12 })).toBe(false)
 })
+
+it.effect("owns and drains the completed-compaction rainbow cadence after settlement", () =>
+  Effect.gen(function* () {
+    const clock = new ManualClock()
+    const setup = yield* Effect.acquireRelease(
+      Effect.tryPromise(() => createTestRenderer({ width: 80, height: 24, clock })),
+      (value) => Effect.sync(() => value.renderer.destroy()),
+    )
+    const block = { _tag: "Compaction" as const, summary: "", status: "complete" as const }
+    let model = update(
+      {
+        ...initial("/work", "high"),
+        entries: [{ role: "user" as const, text: "compact" }],
+        blocks: [block],
+        items: [{ _tag: "Block" as const, index: 0, id: "compaction", turnId: "turn" }],
+      },
+      { _tag: "CompactionChanged", status: "complete" },
+    )
+    let ticks = 0
+    let surface!: Surface
+    surface = new Surface(
+      setup.renderer,
+      {
+        key: () => undefined,
+        resize: () => undefined,
+        animationTick: () => {
+          ticks += 1
+          model = update(model, { _tag: "AnimationTicked" })
+          surface.update(model)
+        },
+      },
+      { clock },
+    )
+    yield* Effect.addFinalizer(() => Effect.sync(() => surface.destroy()))
+    surface.update(model)
+    yield* Effect.tryPromise(() => setup.renderOnce())
+    const rainbowColors = () => {
+      const records = (
+        surface as unknown as {
+          readonly transcriptRecords: ReadonlyMap<
+            string,
+            {
+              readonly renderable: {
+                readonly content: { readonly chunks: ReadonlyArray<{ text: string; fg: unknown }> }
+              }
+            }
+          >
+        }
+      ).transcriptRecords
+      const row = [...records.values()].find(({ renderable }) =>
+        text(renderable.content.chunks).includes("Auto-compacted"),
+      )
+      return row?.renderable.content.chunks.map((chunk) => String(chunk.fg)) ?? []
+    }
+    const first = rainbowColors()
+    clock.advance(100)
+    expect(rainbowColors()).not.toEqual(first)
+    clock.advance(1_300)
+    expect(ticks).toBe(14)
+    expect(model.compactionShimmer).toBeUndefined()
+    clock.advance(1_000)
+    expect(ticks).toBe(14)
+  }).pipe(Effect.scoped),
+)
+
+it.effect("owns a continuous welcome cadence and stops it when transcript content mounts", () =>
+  Effect.gen(function* () {
+    const clock = new ManualClock()
+    const setup = yield* Effect.acquireRelease(
+      Effect.tryPromise(() => createTestRenderer({ width: 120, height: 30, clock })),
+      (value) => Effect.sync(() => value.renderer.destroy()),
+    )
+    let model = { ...initial("/work", "high"), width: 120, height: 30 }
+    let ticks = 0
+    let surface!: Surface
+    surface = new Surface(
+      setup.renderer,
+      {
+        key: () => undefined,
+        resize: () => undefined,
+        animationTick: () => {
+          ticks += 1
+          model = update(model, { _tag: "AnimationTicked" })
+          surface.update(model)
+        },
+      },
+      { clock },
+    )
+    yield* Effect.addFinalizer(() => Effect.sync(() => surface.destroy()))
+    surface.update(model)
+    yield* Effect.tryPromise(() => setup.renderOnce())
+    const renderedWelcome = () =>
+      text(
+        (
+          surface as unknown as {
+            readonly welcomeChild: { readonly content: { readonly chunks: ReadonlyArray<{ readonly text: string }> } }
+          }
+        ).welcomeChild.content.chunks,
+      )
+    const first = renderedWelcome()
+    clock.advance(100)
+    const second = renderedWelcome()
+    clock.advance(3_200)
+    expect(ticks).toBe(33)
+    expect(second).not.toBe(first)
+    expect(renderedWelcome()).not.toBe(first)
+    model = { ...model, entries: [{ role: "user", text: "hello" }] }
+    surface.update(model)
+    const stoppedAt = ticks
+    clock.advance(1_000)
+    expect(ticks).toBe(stoppedAt)
+  }).pipe(Effect.scoped),
+)
 
 test("places the welcome orb and copy at the v0.1.7 anchors with mode-colored intensity tiers", () => {
   const medium = welcomeContent(120, 30, 0, "medium")

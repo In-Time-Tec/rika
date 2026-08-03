@@ -337,6 +337,7 @@ describe("InteractiveSession subagent reload", () => {
         _tag: "ThreadUsageUpdated",
         selectionEpoch: 1,
         threadId: "subagent-thread",
+        context: { _tag: "Available", inputTokens: 20, contextWindow: 372_000, reserveTokens: 128_000 },
         cost: { _tag: "Available", usd: 1.25, unpricedAttempts: 0 },
         tokens: { _tag: "Available", total: 30, uncountedAttempts: 0 },
         time: { _tag: "Available" },

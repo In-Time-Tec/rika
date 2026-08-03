@@ -87,6 +87,31 @@ it("keeps one of five status labels from submit until the turn completes", () =>
   expect(state.model.busy).toBe(false)
 })
 
+it("drives compaction activity and shimmer from the live projection origin", () => {
+  const turn = { ...entries("compact", 2)[0]!.turn, status: "running" as const }
+  const selected: InteractiveController.State = {
+    ...initialState(),
+    selectionEpoch: 1,
+    model: {
+      ...initialState().model,
+      currentThreadId: thread.id,
+      activeTurnId: turn.id,
+      busy: true,
+      activity: { _tag: "Waiting" },
+    },
+    replayTurns: new Map([[turn.id, turn]]),
+    entries: entries(turn.id, turn.createdAt),
+  }
+  const feed = makeProjectionFeed(selected, turn, TranscriptProjection.Projection.empty(turn.id, turn.prompt))
+  feed.apply({ cursor: "compact-start", sequence: 0, type: "agent.compaction.started", createdAt: 1 })
+  expect(feed.state.model.activity).toEqual({ _tag: "Compacting" })
+  expect(feed.state.model.contextAnimation.compactionPending).toBe(true)
+  feed.apply({ cursor: "compact-commit", sequence: 1, type: "agent.compaction.committed", createdAt: 2 })
+  expect(feed.state.model.activity).toEqual({ _tag: "Waiting" })
+  expect(feed.state.model.compactionShimmer).toEqual({ tick: 0, remaining: 14 })
+  expect(feed.state.model.contextAnimation.compactionPending).toBe(true)
+})
+
 it("keeps 200ms tool lifecycle events in distinct TUI frames", () => {
   type ProjectionPatchedEvent = Extract<InteractiveEvent, { readonly _tag: "TranscriptProjectionPatched" }>
   type ProjectionPatched = ProjectionPatchedEvent & {

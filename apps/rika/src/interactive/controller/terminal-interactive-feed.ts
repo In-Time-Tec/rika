@@ -500,6 +500,7 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
           compactionStatus = "running"
           break
         case "agent.compaction.completed":
+        case "agent.compaction.committed":
           compactionStatus = "complete"
           break
         case "agent.compaction.failed":

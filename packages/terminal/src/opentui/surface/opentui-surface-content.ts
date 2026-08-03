@@ -17,8 +17,12 @@ export const panelLoading = (model: Model): string | undefined => {
   return undefined
 }
 
+export const welcomeVisible = (model: Model): boolean => model.entries.length === 0 && model.blocks.length === 0
+
+const animatedWelcomeVisible = (model: Model): boolean => welcomeVisible(model) && model.height >= 20
+
 export const animationActive = (model: Model): boolean =>
-  model.welcomeAnimationTicks > 0 ||
+  animatedWelcomeVisible(model) ||
   model.compactionShimmer !== undefined ||
   model.busy ||
   model.activity !== undefined ||

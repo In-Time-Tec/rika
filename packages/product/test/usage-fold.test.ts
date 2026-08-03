@@ -142,6 +142,50 @@ describe("UsageCost", () => {
     expect(Result.isFailure(invalid) && invalid.failure.reason).toBe("invalid-transition")
   })
 
+  it("persists only the latest exact conversational root context reading", () => {
+    const input = { threadId: "thread", turnId: "turn" }
+    const events = [
+      {
+        ...Support.Fixtures.reportedTokens("conversation-1", "gpt-5.6-sol", 120, 10),
+        sequence: 4,
+      },
+      {
+        ...Support.Fixtures.reportedTokens("compaction", "gpt-5.6-sol", 40, 5, {
+          model_call_id: "call:compaction-summary",
+          model_attempt_id: "attempt-compaction",
+        }),
+        sequence: 5,
+      },
+      {
+        ...Support.Fixtures.reportedTokens("structured", "gpt-5.6-sol", 60, 5, {
+          model_call_id: "call:structured-output",
+          model_attempt_id: "attempt-structured",
+        }),
+        sequence: 6,
+      },
+      {
+        ...Support.Fixtures.reportedTokens("conversation-2", "gpt-5.6-sol", 180, 12),
+        sequence: 7,
+      },
+    ]
+    const folded = events.reduce(
+      (snapshot, event) => Support.UsageCost.observe(snapshot, { ...input, event }),
+      Support.UsageCost.empty,
+    )
+    expect([...folded.executionContexts.values()]).toEqual([
+      {
+        inputTokens: 180,
+        sequence: 7,
+        modelCallId: "call-conversation-2",
+        modelAttemptId: "attempt-conversation-2",
+        attempt: 1,
+      },
+    ])
+    expect([...Support.UsageCost.deserialize(Support.UsageCost.serialize(folded)).executionContexts.values()]).toEqual([
+      ...folded.executionContexts.values(),
+    ])
+  })
+
   it("round trips every fold state and continues identically", () => {
     const input = { threadId: "thread", turnId: "turn" }
     const before = [
