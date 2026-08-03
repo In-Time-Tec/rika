@@ -27,7 +27,8 @@ import { meterGlyphs } from "../../state/model/terminal-context-meter-glyph"
 import { loaderFrame } from "../rendering/opentui-spinner"
 import { spinnerFrames } from "../rendering/opentui-spinner"
 import { renderSidebar } from "../rendering/opentui-render-block"
-import { panelLoading, formatCost, modeLabelWidth } from "./opentui-surface-content"
+import { panelLoading, formatCost, modeLabelWidth, welcomeContent } from "./opentui-surface-content"
+import { welcomeAnimationActive } from "./opentui-welcome-state"
 import { contentColumnWidth } from "../../state/model/terminal-layout-state"
 
 const mouseSequencePattern = new RegExp(`^(?:${String.fromCharCode(27)}?\\[)?<?\\d+(?:;\\d+)*[Mm]?$`)
@@ -242,6 +243,17 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
     }
     this.usageLayoutFrame = refresh
     this.renderer.on(CliRenderEvents.FRAME, refresh)
+  }
+
+  protected tickWelcome(): void {
+    if (this.destroyed || this.welcomeTimer === undefined) return
+    const current = this.model
+    if (current === undefined || !welcomeAnimationActive(current) || this.welcomeChild === undefined) return
+    this.welcomePhase += 1
+    const welcomeWidth = this.welcomeWidthFor(current)
+    this.welcomeKey = `${welcomeWidth}:${current.height}:${this.welcomePhase}:${current.mode}`
+    this.welcomeChild.content = welcomeContent(welcomeWidth, current.height, this.welcomePhase, current.mode)
+    this.renderer.requestRender()
   }
 
   protected tickLoader(): void {

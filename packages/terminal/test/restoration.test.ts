@@ -8,6 +8,7 @@ import { canSubmit, update } from "../src/state/reducer/terminal-state-reducer"
 import { modePickerContent } from "../src/opentui/surface/opentui-composer-region"
 import { modeSelectorLabels } from "../src/presentation/terminal/terminal-mode-selector-layout"
 import { animationActive, welcomeContent } from "../src/opentui/surface/opentui-surface-content"
+import { welcomeAnimationActive } from "../src/opentui/surface/opentui-welcome-state"
 import { Surface } from "../src/opentui/surface/opentui-surface"
 import { colors } from "../src/presentation/terminal/terminal-theme"
 import { meterGlyphs } from "../src/state/model/terminal-context-meter-glyph"
@@ -199,15 +200,14 @@ test("keeps a typed draft intact and blocks submission while a thread is loading
   expect(canSubmit(update(afterEnter, { _tag: "ThreadOpenCompleted" }))).toBe(true)
 })
 
-test("keeps the welcome orb animated for as long as the welcome screen is visible", () => {
-  let welcome = { ...initial("/work", "high"), animationTick: 7 }
-  expect(animationActive(welcome)).toBe(true)
+test("keeps the welcome orb cadence independent from global ViewState animation", () => {
+  const welcome = { ...initial("/work", "high"), animationTick: 7 }
+  expect(welcomeAnimationActive(welcome)).toBe(true)
+  expect(animationActive(welcome)).toBe(false)
   expect(text(welcomeContent(120, 30, 0, "high").chunks)).not.toBe(text(welcomeContent(120, 30, 1, "high").chunks))
-  for (let index = 0; index < 64; index += 1) welcome = update(welcome, { _tag: "AnimationTicked" })
-  expect(animationActive(welcome)).toBe(true)
-  expect(animationActive({ ...welcome, entries: [{ role: "user", text: "hello" }] })).toBe(false)
-  expect(animationActive({ ...welcome, blocks: [{ _tag: "Notification", title: "hello" }] })).toBe(false)
-  expect(animationActive({ ...welcome, height: 12 })).toBe(false)
+  expect(welcomeAnimationActive({ ...welcome, entries: [{ role: "user", text: "hello" }] })).toBe(false)
+  expect(welcomeAnimationActive({ ...welcome, blocks: [{ _tag: "Notification", title: "hello" }] })).toBe(false)
+  expect(welcomeAnimationActive({ ...welcome, height: 12 })).toBe(false)
 })
 
 it.effect("owns and drains the completed-compaction rainbow cadence after settlement", () =>
@@ -282,7 +282,7 @@ it.effect("owns a continuous welcome cadence and stops it when transcript conten
       (value) => Effect.sync(() => value.renderer.destroy()),
     )
     let model = { ...initial("/work", "high"), width: 120, height: 30 }
-    let ticks = 0
+    let globalTicks = 0
     let surface!: Surface
     surface = new Surface(
       setup.renderer,
@@ -290,9 +290,7 @@ it.effect("owns a continuous welcome cadence and stops it when transcript conten
         key: () => undefined,
         resize: () => undefined,
         animationTick: () => {
-          ticks += 1
-          model = update(model, { _tag: "AnimationTicked" })
-          surface.update(model)
+          globalTicks += 1
         },
       },
       { clock },
@@ -312,14 +310,18 @@ it.effect("owns a continuous welcome cadence and stops it when transcript conten
     clock.advance(100)
     const second = renderedWelcome()
     clock.advance(3_200)
-    expect(ticks).toBe(33)
+    const local = surface as unknown as { readonly welcomePhase: number; readonly welcomeTimer: unknown }
+    expect(local.welcomePhase).toBe(33)
+    expect(globalTicks).toBe(0)
     expect(second).not.toBe(first)
     expect(renderedWelcome()).not.toBe(first)
     model = { ...model, entries: [{ role: "user", text: "hello" }] }
     surface.update(model)
-    const stoppedAt = ticks
+    const stoppedAt = local.welcomePhase
+    expect(local.welcomeTimer).toBeUndefined()
     clock.advance(1_000)
-    expect(ticks).toBe(stoppedAt)
+    expect(local.welcomePhase).toBe(stoppedAt)
+    expect(globalTicks).toBe(0)
   }).pipe(Effect.scoped),
 )
 

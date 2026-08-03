@@ -7,6 +7,8 @@ export abstract class SurfaceLifecycleCleanup extends SurfaceLifecycle {
     this.destroyed = true
     if (this.loaderTimer !== undefined) this.clock.clearInterval(this.loaderTimer)
     this.loaderTimer = undefined
+    if (this.welcomeTimer !== undefined) this.clock.clearInterval(this.welcomeTimer)
+    this.welcomeTimer = undefined
     if (this.publishedWorkingFrame !== undefined) this.publishWorkingFrame(undefined)
     this.scrollGeneration += 1
     if (this.cursorRestoreFrame !== undefined) this.renderer.off(CliRenderEvents.FRAME, this.cursorRestoreFrame)

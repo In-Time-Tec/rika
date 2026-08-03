@@ -19,7 +19,8 @@ import { boundedTranscriptModel } from "../rendering/opentui-render-transcript-w
 import { transcriptUnitRevision } from "../rendering/opentui-render-transcript-revision"
 import { transcriptUnitBuilder } from "../rendering/opentui-render-unit"
 import type { TranscriptRangeBundle, TranscriptUnitCacheEntry } from "../rendering/opentui-render-transcript-revision"
-import { welcomeContent, welcomeVisible } from "./opentui-surface-content"
+import { welcomeContent } from "./opentui-surface-content"
+import { welcomeVisible } from "./opentui-welcome-state"
 import { cutoutBackground } from "./opentui-surface-construction"
 import type { TranscriptRenderableDescriptor } from "./opentui-surface-transcript-types"
 import { SurfaceLifecycleToast } from "./opentui-lifecycle-toast"
@@ -55,7 +56,7 @@ export abstract class SurfaceLifecycleTranscript extends SurfaceLifecycleToast {
     if (isWelcome) {
       this.transcriptRenderInput = undefined
       const welcomeWidth = this.welcomeWidthFor(model)
-      const welcomePhase = model.animationTick
+      const welcomePhase = this.options.animate === false ? model.animationTick : this.welcomePhase
       const welcomeKey = `${welcomeWidth}:${model.height}:${welcomePhase}:${model.mode}`
       const existingWelcome = this.transcriptChildren.length === 1 ? this.welcomeChild : undefined
       if (existingWelcome === undefined) {

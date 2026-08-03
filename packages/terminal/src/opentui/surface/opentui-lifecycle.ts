@@ -8,6 +8,7 @@ import { maxMountedTranscriptEntries } from "../rendering/opentui-render-transcr
 import { idleSpinnerFrame, spinnerInterval } from "../rendering/opentui-spinner"
 import { SurfaceLifecycleTranscript } from "./opentui-lifecycle-transcript-update"
 import { animationActive } from "./opentui-surface-content"
+import { welcomeAnimationActive } from "./opentui-welcome-state"
 
 export abstract class SurfaceLifecycle extends SurfaceLifecycleTranscript {
   protected readonly onSelection = (selection: { getSelectedText: () => string }) => {
@@ -116,6 +117,13 @@ export abstract class SurfaceLifecycle extends SurfaceLifecycleTranscript {
     } else if ((this.options.animate === false || !loaderActive) && this.loaderTimer !== undefined) {
       this.clock.clearInterval(this.loaderTimer)
       this.loaderTimer = undefined
+    }
+    const welcomeActive = welcomeAnimationActive(model)
+    if (this.options.animate !== false && welcomeActive && this.welcomeTimer === undefined) {
+      this.welcomeTimer = this.clock.setInterval(() => this.tickWelcome(), spinnerInterval)
+    } else if ((this.options.animate === false || !welcomeActive) && this.welcomeTimer !== undefined) {
+      this.clock.clearInterval(this.welcomeTimer)
+      this.welcomeTimer = undefined
     }
     this.updateOverlay(
       model,

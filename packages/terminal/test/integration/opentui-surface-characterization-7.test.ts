@@ -447,12 +447,17 @@ test("expands the queue box to fit a wrapped single-line queued prompt joined to
       }
     }),
   ))
-test("keeps the welcome orb static without an active animation tick", () =>
+test("keeps the welcome orb moving without dispatching global ViewState ticks", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const clock = new ManualClock()
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24, clock }))
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { clock })
+      let globalTicks = 0
+      const surface = new Surface(
+        setup.renderer,
+        { key: () => undefined, resize: () => undefined, animationTick: () => (globalTicks += 1) },
+        { clock },
+      )
       try {
         surface.update({ ...initial("/work", "high"), width: 80, height: 24 })
         yield* openTui(() => setup.renderOnce())
@@ -461,7 +466,8 @@ test("keeps the welcome orb static without an active animation tick", () =>
         clock.advance(1_000)
         yield* openTui(() => setup.renderOnce())
         expect(setup.captureCharFrame()).toContain("Welcome to Rika")
-        expect(welcome.content).toBe(firstContent)
+        expect(welcome.content).not.toBe(firstContent)
+        expect(globalTicks).toBe(0)
         expect(setup.renderer.isRunning).toBe(false)
       } finally {
         surface.destroy()

@@ -91,6 +91,8 @@ export class SurfaceState {
   public toast!: TextRenderable
   protected welcomeChild: TextRenderable | undefined
   protected welcomeKey = ""
+  protected welcomePhase = 0
+  protected welcomeTimer: TimerHandle | undefined
   protected toastTimer: Fiber.Fiber<void> | undefined
   protected usageLabelWidth = 0
   protected usageLabelHovered = false
