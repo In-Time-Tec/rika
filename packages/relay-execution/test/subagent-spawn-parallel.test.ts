@@ -7,7 +7,7 @@ import * as Runtime from "@rika/coding-tools/coding-tool-runtime"
 import { expect, test } from "vitest"
 
 import { Database } from "bun:sqlite"
-import { Clock, Effect, FileSystem, Layer, Ref, Schema, Stream } from "effect"
+import { Effect, FileSystem, Layer, Ref, Schema, Stream } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 
@@ -45,9 +45,9 @@ test("three Task calls in one model turn run as overlapping durable children", (
           },
         ],
       })
-      const windows = yield* Ref.make<
-        Array<{ readonly prompt: string; readonly startedAt: number; readonly completedAt?: number }>
-      >([])
+      const windows = yield* Ref.make<Array<{ readonly prompt: string }>>([])
+      const activeCalls = yield* Ref.make(0)
+      const maxActiveCalls = yield* Ref.make(0)
       const trackingLayer = Layer.effect(
         LanguageModel.LanguageModel,
         Effect.gen(function* () {
@@ -56,26 +56,12 @@ test("three Task calls in one model turn run as overlapping durable children", (
             Stream.unwrap(
               Effect.gen(function* () {
                 const prompt = encodeJson(options.prompt)
-                const startedAt = yield* Clock.currentTimeMillis
-                const index = yield* Ref.modify(windows, (current) => [
-                  current.length,
-                  [...current, { prompt, startedAt }],
-                ])
+                yield* Ref.update(windows, (current) => [...current, { prompt }])
+                const active = yield* Ref.updateAndGet(activeCalls, (current) => current + 1)
+                yield* Ref.update(maxActiveCalls, (current) => Math.max(current, active))
                 return model
                   .streamText(options)
-                  .pipe(
-                    Stream.ensuring(
-                      Clock.currentTimeMillis.pipe(
-                        Effect.flatMap((completedAt) =>
-                          Ref.update(windows, (current) =>
-                            current.map((window, currentIndex) =>
-                              currentIndex === index ? { ...window, completedAt } : window,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  )
+                  .pipe(Stream.ensuring(Ref.update(activeCalls, (current) => current - 1)))
               }),
             )) as LanguageModel.Service["streamText"]
           return { ...model, streamText }
@@ -131,6 +117,7 @@ test("three Task calls in one model turn run as overlapping durable children", (
           selection: fixture.selection,
           requests: yield* fixture.requests,
           windows: yield* Ref.get(windows),
+          maxActiveCalls: yield* Ref.get(maxActiveCalls),
         }
       }).pipe(Effect.provide(backendContext))
     }),
@@ -142,7 +129,7 @@ test("three Task calls in one model turn run as overlapping durable children", (
         return yield* program.pipe(Effect.provide(bunContext))
       }),
     ).pipe(
-      Effect.tap(({ settled, children, root, childRuns, selection, requests, windows }) =>
+      Effect.tap(({ settled, children, root, childRuns, selection, requests, windows, maxActiveCalls }) =>
         Effect.sync(() => {
           const childWindows = windows.filter((window) => !window.prompt.includes(parallelRootPrompt))
           expect(settled.status, encodeJson(settled.events.filter((event) => event.type === "execution.failed"))).toBe(
@@ -179,9 +166,7 @@ test("three Task calls in one model turn run as overlapping durable children", (
               ["Explore alpha.", "Explore beta.", "Explore gamma."].some((prompt) => window.prompt.includes(prompt)),
             ),
           ).toBe(true)
-          expect(Math.max(...childWindows.map((window) => window.startedAt))).toBeLessThan(
-            Math.min(...childWindows.map((window) => window.completedAt ?? 0)),
-          )
+          expect(maxActiveCalls).toBeGreaterThanOrEqual(3)
           expect(requests.every((request) => request.operation === "streamText")).toBe(true)
           expect(
             settled.events

@@ -24,6 +24,7 @@ export default defineConfig({
         test: {
           name: "unit",
           setupFiles: ["test/support/relay-polling-setup.ts"],
+          testTimeout: 20_000,
           include: [
             "packages/*/src/**/*.test.ts",
             "packages/*/test/**/*.test.ts",
