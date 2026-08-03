@@ -33,6 +33,78 @@ const fakeOpenAiResponse = {
   output: [],
 }
 
+const productionRootToolNames = [
+  "grep",
+  "read",
+  "write",
+  "edit",
+  "bash",
+  "shell_command_status",
+  "web_search",
+  "read_web_page",
+  "view_media",
+  "task",
+  "oracle",
+  "librarian",
+  "review",
+  "surgeon",
+  "read_thread",
+  "find_thread",
+  "create_thread",
+  "thread_interact",
+  "wait_for_threads",
+  "await_subagents",
+]
+
+const strictToolSchemaProblems = (tools: unknown): ReadonlyArray<string> => {
+  if (!Array.isArray(tools)) return ["tools must be an array"]
+  const problems = new Array<string>()
+  const visit = (value: unknown, path: string) => {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return
+    const node = value as Record<string, unknown>
+    if (node.type === "object") {
+      if (node.additionalProperties !== false) problems.push(`${path} must set additionalProperties to false`)
+      if (node.properties === null || typeof node.properties !== "object" || Array.isArray(node.properties)) {
+        problems.push(`${path} must define object properties`)
+      } else {
+        const propertyNames = Object.keys(node.properties)
+        const required = Array.isArray(node.required) ? node.required : []
+        if (required.length !== propertyNames.length || propertyNames.some((name) => !required.includes(name)))
+          problems.push(`${path} must require every property`)
+        for (const [name, property] of Object.entries(node.properties)) visit(property, `${path}.properties.${name}`)
+      }
+    }
+    if (node.type === "array") visit(node.items, `${path}.items`)
+    if (Array.isArray(node.anyOf))
+      for (const [index, member] of node.anyOf.entries()) visit(member, `${path}.anyOf.${index}`)
+  }
+  const names = tools.map((tool) =>
+    tool !== null && typeof tool === "object" && !Array.isArray(tool)
+      ? (tool as Record<string, unknown>).name
+      : undefined,
+  )
+  if (JSON.stringify(names) !== JSON.stringify(productionRootToolNames))
+    problems.push("tool names do not match production")
+  for (const [index, value] of tools.entries()) {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      problems.push(`tools.${index} must be an object`)
+      continue
+    }
+    const tool = value as Record<string, unknown>
+    if (tool.type !== "function" || tool.strict !== true) problems.push(`tools.${index} must be a strict function`)
+    const parameters = tool.parameters
+    if (
+      parameters === null ||
+      typeof parameters !== "object" ||
+      Array.isArray(parameters) ||
+      (parameters as Record<string, unknown>).type !== "object"
+    )
+      problems.push(`tools.${index}.parameters must have type object`)
+    visit(parameters, `tools.${index}.parameters`)
+  }
+  return problems
+}
+
 test("builds the production resident execution layer without injected runtime services", () =>
   Effect.runPromise(
     withBunServices(
@@ -130,24 +202,41 @@ test("builds the production resident execution layer without injected runtime se
     ),
   ))
 
-test("executes a real provider route through the production resident composition", () => {
-  const requests = new Array<URL>()
+test("executes a real provider route with every production tool through the production resident composition", () => {
+  const requests = new Array<{ readonly url: URL; readonly body: Record<string, unknown> }>()
   const server = Bun.serve({
     port: 0,
-    fetch: (request) => {
-      requests.push(new URL(request.url))
-      return sseResponse([
-        {
-          type: "response.output_text.delta",
-          item_id: "fake-message",
-          output_index: 0,
-          content_index: 0,
-          delta: "OK",
-          sequence_number: 0,
-        },
-        { type: "response.completed", response: fakeOpenAiResponse, sequence_number: 1 },
-      ])
-    },
+    fetch: (request) =>
+      Effect.promise(() => request.json()).pipe(
+        Effect.map((value) => {
+          const body = value as Record<string, unknown>
+          requests.push({ url: new URL(request.url), body })
+          const problems = strictToolSchemaProblems(body.tools)
+          if (problems.length > 0)
+            return Response.json(
+              {
+                error: {
+                  message: problems.join("; "),
+                  type: "invalid_request_error",
+                  code: "invalid_function_parameters",
+                },
+              },
+              { status: 400 },
+            )
+          return sseResponse([
+            {
+              type: "response.output_text.delta",
+              item_id: "fake-message",
+              output_index: 0,
+              content_index: 0,
+              delta: "OK",
+              sequence_number: 0,
+            },
+            { type: "response.completed", response: fakeOpenAiResponse, sequence_number: 1 },
+          ])
+        }),
+        Effect.runPromise,
+      ),
   })
   return Effect.runPromise(
     withBunServices(
@@ -205,8 +294,12 @@ test("executes a real provider route through the production resident composition
             executionRoute: executionRoutePin(settings, "medium"),
           })
 
-          expect(requests.length).toBeGreaterThan(0)
-          expect(requests.every((request) => request.pathname.endsWith("/responses"))).toBe(true)
+          expect(requests).toHaveLength(1)
+          expect(requests[0]!.url.pathname.endsWith("/responses")).toBe(true)
+          expect((requests[0]!.body.tools as ReadonlyArray<Record<string, unknown>>).map((tool) => tool.name)).toEqual(
+            productionRootToolNames,
+          )
+          expect(strictToolSchemaProblems(requests[0]!.body.tools)).toEqual([])
           expect(result.status).toBe("completed")
           expect(result.events.some((event) => event.type === "model.output.completed" && event.text === "OK")).toBe(
             true,

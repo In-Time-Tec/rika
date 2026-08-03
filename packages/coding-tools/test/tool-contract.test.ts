@@ -130,6 +130,13 @@ describe("tool contracts", () => {
         "wait_for_threads",
       ])
       expect(
+        Tool.getJsonSchema(contractFixtures.ThreadToolkits.coordinationToolkit.tools.thread_interact),
+      ).toMatchObject({
+        type: "object",
+        required: ["action", "threadId"],
+        additionalProperties: false,
+      })
+      expect(
         yield* Schema.decodeUnknownEffect(contractFixtures.ThreadCoordination.CreateThreadInput)({
           prompt: "Investigate",
           mode: "ultra",
@@ -144,9 +151,25 @@ describe("tool contracts", () => {
           prompt: "😀".repeat(100_001),
         }),
       )
+      expect(
+        yield* Schema.decodeUnknownEffect(contractFixtures.ThreadCoordination.ThreadInteractInput)({
+          action: "message",
+          threadId: "thread-1",
+          message: "Continue",
+          mode: "high",
+          resultDelivery: "reply",
+        }),
+      ).toEqual({
+        action: "message",
+        threadId: "thread-1",
+        message: "Continue",
+        mode: "high",
+        resultDelivery: "reply",
+      })
       yield* Effect.flip(
         Schema.decodeUnknownEffect(contractFixtures.ThreadCoordination.ThreadInteractInput)({
           action: "status",
+          threadId: "thread-1",
           message: "not valid for status",
         }),
       )

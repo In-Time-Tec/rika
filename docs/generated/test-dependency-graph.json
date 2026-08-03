@@ -839,6 +839,14 @@
       "package": "effect"
     },
     {
+      "id": "external:effect/unstable/ai/OpenAiStructuredOutput",
+      "workspace": "root",
+      "kind": "external",
+      "production": true,
+      "publicExports": [],
+      "package": "effect"
+    },
+    {
       "id": "external:effect/unstable/cli",
       "workspace": "root",
       "kind": "external",
@@ -3071,6 +3079,16 @@
     {
       "id": "packages/relay-execution/test/model/provider/openai-prompt-cache.test.ts",
       "path": "packages/relay-execution/test/model/provider/openai-prompt-cache.test.ts",
+      "workspace": "@rika/relay-execution",
+      "package": "@rika/relay-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/relay-execution/test/model/provider/openai-tool-schema.test.ts",
+      "path": "packages/relay-execution/test/model/provider/openai-tool-schema.test.ts",
       "workspace": "@rika/relay-execution",
       "package": "@rika/relay-execution",
       "kind": "source",
@@ -11367,6 +11385,30 @@
       "from": "packages/relay-execution/test/model/provider/openai-prompt-cache.test.ts",
       "to": "external:effect/unstable/http",
       "specifier": "effect/unstable/http",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/openai-tool-schema.test.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/openai-tool-schema.test.ts",
+      "to": "external:effect/unstable/ai/OpenAiStructuredOutput",
+      "specifier": "effect/unstable/ai/OpenAiStructuredOutput",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/relay-execution/test/model/provider/openai-tool-schema.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
       "kind": "import",
       "relationship": "test",
       "production": false

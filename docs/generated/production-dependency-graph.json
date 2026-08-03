@@ -1289,6 +1289,14 @@
       "package": "effect"
     },
     {
+      "id": "external:effect/unstable/ai/OpenAiStructuredOutput",
+      "workspace": "root",
+      "kind": "external",
+      "production": true,
+      "publicExports": [],
+      "package": "effect"
+    },
+    {
       "id": "external:effect/unstable/cli",
       "workspace": "root",
       "kind": "external",

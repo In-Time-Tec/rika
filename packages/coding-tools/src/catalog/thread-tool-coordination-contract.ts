@@ -50,7 +50,30 @@ export const ThreadInteractAction = Schema.Union([
   CancelAction,
   StopAction,
 ])
-export const ThreadInteractInput = ThreadInteractAction
+const ThreadInteractProviderInput = Schema.Struct({
+  action: Schema.Literals(["status", "preview_messages", "message", "steer", "cancel", "stop"]),
+  threadId: NonEmptyString,
+  cursor: Schema.optionalKey(NonEmptyString),
+  limit: Schema.optionalKey(PreviewLimit),
+  message: Schema.optionalKey(PublicInputText),
+  mode: Schema.optionalKey(Mode),
+  resultDelivery: Schema.optionalKey(ResultDelivery),
+}).check(
+  Schema.makeFilter((input) => {
+    const actionFields = {
+      status: [],
+      preview_messages: ["cursor", "limit"],
+      message: ["message", "mode", "resultDelivery"],
+      steer: ["message"],
+      cancel: [],
+      stop: [],
+    }[input.action]
+    const allowed = new Set(["action", "threadId", ...actionFields])
+    const field = Object.keys(input).find((key) => !allowed.has(key))
+    return field === undefined ? undefined : { path: [field], issue: `field is not valid for ${input.action}` }
+  }),
+)
+export const ThreadInteractInput = ThreadInteractProviderInput.pipe(Schema.decodeTo(ThreadInteractAction))
 const StatusSuccess = Schema.Struct({
   schemaVersion: Schema.Literal(2),
   action: Schema.tag("status"),
