@@ -7,7 +7,7 @@ import * as Runtime from "@rika/coding-tools/coding-tool-runtime"
 import { expect, test } from "vitest"
 
 import { Database } from "bun:sqlite"
-import { Effect, FileSystem, Layer, Ref, Schema, Stream } from "effect"
+import { Deferred, Effect, FileSystem, Layer, Ref, Schema, Stream } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 
@@ -48,6 +48,8 @@ test("three Task calls in one model turn run as overlapping durable children", (
       const windows = yield* Ref.make<Array<{ readonly prompt: string }>>([])
       const activeCalls = yield* Ref.make(0)
       const maxActiveCalls = yield* Ref.make(0)
+      const childStarts = yield* Ref.make(0)
+      const allChildrenStarted = yield* Deferred.make<void>()
       const trackingLayer = Layer.effect(
         LanguageModel.LanguageModel,
         Effect.gen(function* () {
@@ -59,6 +61,11 @@ test("three Task calls in one model turn run as overlapping durable children", (
                 yield* Ref.update(windows, (current) => [...current, { prompt }])
                 const active = yield* Ref.updateAndGet(activeCalls, (current) => current + 1)
                 yield* Ref.update(maxActiveCalls, (current) => Math.max(current, active))
+                if (!prompt.includes(parallelRootPrompt)) {
+                  const started = yield* Ref.updateAndGet(childStarts, (current) => current + 1)
+                  if (started === 3) yield* Deferred.succeed(allChildrenStarted, undefined)
+                  yield* Deferred.await(allChildrenStarted).pipe(Effect.timeout("30 seconds"))
+                }
                 return model
                   .streamText(options)
                   .pipe(Stream.ensuring(Ref.update(activeCalls, (current) => current - 1)))
