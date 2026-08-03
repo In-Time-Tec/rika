@@ -1,5 +1,4 @@
 import { Function } from "effect"
-import { modeIds } from "@rika/configuration/behavior-mode"
 import * as QueueState from "../model/terminal-queue-state"
 import * as Palette from "../../presentation/terminal/command-palette"
 import * as ThreadNavigation from "../model/terminal-thread-navigation"
@@ -16,7 +15,7 @@ import { reduceOverlay } from "./terminal-overlay-reducer"
 import { reduceKeyboard } from "./terminal-keyboard-reducer"
 import { advanceAnimation } from "./terminal-animation-reducer"
 import { contentColumnWidth } from "../model/terminal-layout-state"
-import { idle } from "../model/terminal-loadable-state"
+import { reduceModeInteraction } from "./terminal-mode-reducer"
 
 const sameChangedFiles = (left: ReadonlyArray<ChangedFile>, right: ReadonlyArray<ChangedFile>): boolean =>
   left.length === right.length &&
@@ -156,66 +155,6 @@ const expandPastedTextAttachment = (model: Model, token: string): Model => {
     pastedText: model.pastedText.filter((candidate) => candidate.token !== token),
   }
 }
-const openModeSelector = (model: Model): Model => ({
-  ...model,
-  contextDetailsOpen: false,
-  threadSidebar:
-    contentColumnWidth(model) < 24 ? { ...model.threadSidebar, open: false, focused: false } : model.threadSidebar,
-  paletteOpen: false,
-  palette: { open: false, query: "", selected: 0 },
-  modePicker: { open: true, selected: modeIds.indexOf(model.mode) },
-  filePicker: { ...model.filePicker, open: false },
-  threadSwitcher: { open: false, query: "", selected: 0, kind: "switch", previewScroll: 0 },
-  threadPreview: idle,
-  shortcutsOpen: false,
-  shortcutsTrigger: undefined,
-})
-
-const slidePosition = (picker: Model["modePicker"]): number => {
-  const target = picker.selected
-  const from = picker.fromPosition ?? picker.from ?? target
-  const progress = Math.min(1, ((picker.turnTick ?? 4) + 1) / 4)
-  return from + (target - from) * (1 - (1 - progress) * (1 - progress))
-}
-
-const turnModeSelector = (model: Model, offset: number): Model => {
-  if (!model.modePicker.open) return model
-  const selected = (model.modePicker.selected + offset + modeIds.length) % modeIds.length
-  return {
-    ...model,
-    modePicker: {
-      open: true,
-      selected,
-      from: model.modePicker.selected,
-      fromPosition: slidePosition(model.modePicker),
-      turnTick: 0,
-    },
-  }
-}
-
-const commitModeSelector = (model: Model, selected = model.modePicker.selected): Model => {
-  const next = modeIds[selected]
-  if (next === undefined) return model
-  return {
-    ...model,
-    mode: next,
-    modePicker: { open: false, selected },
-    modeCommit: next === model.mode ? undefined : { from: model.mode, to: next, tick: 0 },
-  }
-}
-
-const tickAnimations = (model: Model): Model => {
-  const modePicker =
-    model.modePicker.turnTick === undefined || model.modePicker.turnTick >= 3
-      ? { ...model.modePicker, from: undefined, fromPosition: undefined, turnTick: undefined }
-      : { ...model.modePicker, turnTick: model.modePicker.turnTick + 1 }
-  const commitLength = model.modeCommit === undefined ? 0 : model.modeCommit.from.length + model.modeCommit.to.length
-  let modeCommit = model.modeCommit
-  if (modeCommit !== undefined)
-    modeCommit = modeCommit.tick >= commitLength ? undefined : { ...modeCommit, tick: modeCommit.tick + 1 }
-  return { ...model, animationTick: model.animationTick + 1, modePicker, modeCommit }
-}
-
 const toggleContextDetails = (model: Model): Model => {
   const open = !model.contextDetailsOpen
   return {
@@ -267,29 +206,8 @@ export const context = {
   expandPastedTextAttachment,
 }
 
-const reduceInteraction = (model: Model, message: Message): Model | undefined => {
-  switch (message._tag) {
-    case "ContextDetailsToggled":
-      return toggleContextDetails(model)
-    case "ModeSelectorOpened":
-      return model.busy ? model : openModeSelector(model)
-    case "ModeTurned":
-      return turnModeSelector(model, message.offset)
-    case "ModeCommitted":
-      return commitModeSelector(model, message.selected)
-    case "ModeHovered":
-      return model.modePicker.open && modeIds[message.selected] !== undefined
-        ? { ...model, modePicker: { ...model.modePicker, selected: message.selected } }
-        : model
-    case "AnimationTicked":
-      return tickAnimations(model)
-    default:
-      return undefined
-  }
-}
-
 const updateImpl = (model: Model, message: Message): Model =>
-  reduceInteraction(model, message) ??
+  (message._tag === "ContextDetailsToggled" ? toggleContextDetails(model) : reduceModeInteraction(model, message)) ??
   reduceData(model, message, update) ??
   reduceExecution(model, message, update) ??
   reduceOverlay(model, message, update) ??

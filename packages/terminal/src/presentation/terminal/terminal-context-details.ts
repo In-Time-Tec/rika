@@ -4,6 +4,7 @@ import { formatContextTokens } from "../../state/model/terminal-usage-state"
 import { activeTimeAt, activeTimeIcon, formatActiveTime } from "../../state/model/terminal-activity-time"
 import type { Model } from "../../state/model/terminal-state"
 import * as ContextMeter from "../../state/model/terminal-context-meter"
+import { meterGlyphs } from "../../state/model/terminal-context-meter-glyph"
 import { colors } from "./terminal-theme"
 import { truncateToWidth } from "./terminal-format"
 
@@ -37,7 +38,7 @@ const contextDetailsImpl = (model: Model, width: number, height: number, now: nu
   const divider = (label: string) => `├─ ${label} ${"─".repeat(Math.max(0, width - label.length - 5))}┤`
 
   if (!compact) line("")
-  if (meter === undefined) line(ContextMeter.meterGlyphs.track.repeat(cells), (value) => fg(colors[model.mode])(value))
+  if (meter === undefined) line(meterGlyphs.track.repeat(cells), (value) => fg(colors[model.mode])(value))
   else if (availableContext !== undefined) {
     const streaming = model.busy && model.activity?._tag !== "Compacting"
     const glyphs =

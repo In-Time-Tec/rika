@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest"
 import * as ContextMeter from "../src/state/model/terminal-context-meter"
+import { glyphFallbacks } from "../src/state/model/terminal-context-meter-glyph"
 
 const reading = (inputTokens: number): ContextMeter.Reading => ({
   inputTokens,
@@ -35,7 +36,7 @@ describe("ContextMeter", () => {
       "━✦╌╌╌╌╌╌",
     )
     expect(ContextMeter.animatedGlyphs(reading(208_294), { cells: 8, tick: 0, compactFromPercent: 75 })).toContain("≪")
-    expect(ContextMeter.glyphFallbacks).toEqual({ muncherOpen: "C", muncherClosed: "c" })
+    expect(glyphFallbacks).toEqual({ muncherOpen: "C", muncherClosed: "c" })
   })
 
   test("caps the visual indicator while preserving over-budget pressure", () => {

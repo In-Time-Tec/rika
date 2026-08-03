@@ -1,4 +1,5 @@
 import { Function } from "effect"
+import { meterGlyphs, muncherGlyphs } from "./terminal-context-meter-glyph"
 
 export interface Reading {
   readonly inputTokens: number
@@ -15,33 +16,9 @@ export interface Meter {
   readonly tone: Tone
 }
 
-export const meterGlyphs = {
-  fill: "━",
-  track: "╌",
-  muncherOpen: "ᗧ",
-  muncherClosed: "ᗤ",
-  vacuum: "≪",
-  flash: "✦",
-  scanner: "━",
-  pellet: "·",
-} as const
-
-export const glyphFallbacks = {
-  muncherOpen: "C",
-  muncherClosed: "c",
-} as const
-
-export const glyphCapabilities = {
-  muncher: true,
-} as const
-
-export const muncherGlyphs: { readonly open: string; readonly closed: string } = glyphCapabilities.muncher
-  ? { open: meterGlyphs.muncherOpen, closed: meterGlyphs.muncherClosed }
-  : { open: glyphFallbacks.muncherOpen, closed: glyphFallbacks.muncherClosed }
-
 export const usableTokens = (reading: Reading): number => Math.max(0, reading.contextWindow - reading.reserveTokens)
 
-export const pressure = (reading: Reading): number => {
+const pressure = (reading: Reading): number => {
   const usable = usableTokens(reading)
   if (usable === 0) return reading.inputTokens > 0 ? 1 : 0
   return Math.max(0, reading.inputTokens / usable)

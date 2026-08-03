@@ -23,6 +23,7 @@ import { colors } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { formatTokens } from "../../presentation/terminal/terminal-format"
 import * as ContextMeter from "../../state/model/terminal-context-meter"
+import { meterGlyphs } from "../../state/model/terminal-context-meter-glyph"
 import { loaderFrame } from "../rendering/opentui-spinner"
 import { spinnerFrames } from "../rendering/opentui-spinner"
 import { renderSidebar } from "../rendering/opentui-render-block"
@@ -129,12 +130,10 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
       usageText = `ctx ${glyphs.join("")} ${value.percent}%`
     } else if (model.currentThreadId !== undefined && model.contextUsage?._tag === "Loading") {
       usageText = `ctx ${
-        model.busy
-          ? ContextMeter.loadingMeter(model.animationTick, { cells: 8 }).join("")
-          : ContextMeter.meterGlyphs.track.repeat(8)
+        model.busy ? ContextMeter.loadingMeter(model.animationTick, { cells: 8 }).join("") : meterGlyphs.track.repeat(8)
       }`
     } else if (model.currentThreadId !== undefined && model.contextUsage?._tag === "Unavailable") {
-      usageText = `ctx ${ContextMeter.meterGlyphs.track.repeat(8)}`
+      usageText = `ctx ${meterGlyphs.track.repeat(8)}`
     } else if (model.usageDisplay === "time") {
       if (model.usageTime?._tag === "Available")
         usageText = formatActiveTime(activeTimeAt(model.usageTime, this.currentTimeMillis()))

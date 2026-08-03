@@ -6742,6 +6742,15 @@
       "publicExports": []
     },
     {
+      "id": "packages/terminal/src/state/model/terminal-context-meter-glyph.ts",
+      "path": "packages/terminal/src/state/model/terminal-context-meter-glyph.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/terminal/src/state/model/terminal-context-meter.ts",
       "path": "packages/terminal/src/state/model/terminal-context-meter.ts",
       "workspace": "@rika/terminal",
@@ -6951,6 +6960,15 @@
     {
       "id": "packages/terminal/src/state/reducer/terminal-keyboard-reducer.ts",
       "path": "packages/terminal/src/state/reducer/terminal-keyboard-reducer.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/terminal/src/state/reducer/terminal-mode-reducer.ts",
+      "path": "packages/terminal/src/state/reducer/terminal-mode-reducer.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -32784,6 +32802,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-input.ts",
+      "to": "packages/terminal/src/state/model/terminal-context-meter-glyph.ts",
+      "specifier": "../../state/model/terminal-context-meter-glyph",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-input.ts",
       "to": "packages/terminal/src/state/model/terminal-context-meter.ts",
       "specifier": "../../state/model/terminal-context-meter",
       "kind": "import",
@@ -34408,6 +34434,14 @@
     },
     {
       "from": "packages/terminal/src/presentation/terminal/terminal-context-details.ts",
+      "to": "packages/terminal/src/state/model/terminal-context-meter-glyph.ts",
+      "specifier": "../../state/model/terminal-context-meter-glyph",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/terminal/terminal-context-details.ts",
       "to": "packages/terminal/src/state/model/terminal-context-meter.ts",
       "specifier": "../../state/model/terminal-context-meter",
       "kind": "import",
@@ -35239,6 +35273,14 @@
       "production": true
     },
     {
+      "from": "packages/terminal/src/state/model/terminal-context-meter.ts",
+      "to": "packages/terminal/src/state/model/terminal-context-meter-glyph.ts",
+      "specifier": "./terminal-context-meter-glyph",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/src/state/model/terminal-context-usage.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -36039,6 +36081,54 @@
       "production": true
     },
     {
+      "from": "packages/terminal/src/state/reducer/terminal-mode-reducer.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/reducer/terminal-mode-reducer.ts",
+      "to": "packages/configuration/src/model-routing/behavior-mode.ts",
+      "specifier": "@rika/configuration/behavior-mode",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/reducer/terminal-mode-reducer.ts",
+      "to": "packages/terminal/src/state/model/terminal-layout-state.ts",
+      "specifier": "../model/terminal-layout-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/reducer/terminal-mode-reducer.ts",
+      "to": "packages/terminal/src/state/model/terminal-loadable-state.ts",
+      "specifier": "../model/terminal-loadable-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/reducer/terminal-mode-reducer.ts",
+      "to": "packages/terminal/src/state/model/terminal-message.ts",
+      "specifier": "../model/terminal-message",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/reducer/terminal-mode-reducer.ts",
+      "to": "packages/terminal/src/state/model/terminal-state.ts",
+      "specifier": "../model/terminal-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/src/state/reducer/terminal-overlay-reducer.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -36120,14 +36210,6 @@
     },
     {
       "from": "packages/terminal/src/state/reducer/terminal-state-reducer.ts",
-      "to": "packages/configuration/src/model-routing/behavior-mode.ts",
-      "specifier": "@rika/configuration/behavior-mode",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/state/reducer/terminal-state-reducer.ts",
       "to": "packages/terminal/src/presentation/terminal/command-palette.ts",
       "specifier": "../../presentation/terminal/command-palette",
       "kind": "import",
@@ -36170,14 +36252,6 @@
       "from": "packages/terminal/src/state/reducer/terminal-state-reducer.ts",
       "to": "packages/terminal/src/state/model/terminal-layout-state.ts",
       "specifier": "../model/terminal-layout-state",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/state/reducer/terminal-state-reducer.ts",
-      "to": "packages/terminal/src/state/model/terminal-loadable-state.ts",
-      "specifier": "../model/terminal-loadable-state",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -36250,6 +36324,14 @@
       "from": "packages/terminal/src/state/reducer/terminal-state-reducer.ts",
       "to": "packages/terminal/src/state/reducer/terminal-keyboard-reducer.ts",
       "specifier": "./terminal-keyboard-reducer",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/reducer/terminal-state-reducer.ts",
+      "to": "packages/terminal/src/state/reducer/terminal-mode-reducer.ts",
+      "specifier": "./terminal-mode-reducer",
       "kind": "import",
       "relationship": "runtime",
       "production": true
