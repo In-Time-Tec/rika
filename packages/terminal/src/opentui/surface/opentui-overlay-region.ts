@@ -35,7 +35,8 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
       const remaining = available - used - separator
       if (remaining <= 0) break
       const width = widthOf(label)
-      const value = width <= remaining ? label : remaining === 1 ? "…" : `${truncateToWidth(label, remaining - 1)}…`
+      let value = label
+      if (width > remaining) value = remaining === 1 ? "…" : `${truncateToWidth(label, remaining - 1)}…`
       fitted.push(value)
       used += separator + widthOf(value)
       if (width > remaining) {

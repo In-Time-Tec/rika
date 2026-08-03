@@ -2729,6 +2729,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/product/test/transcript-window.test.ts",
+      "path": "packages/product/test/transcript-window.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/product/test/usage-active-time.test.ts",
       "path": "packages/product/test/usage-active-time.test.ts",
       "workspace": "@rika/product",
@@ -10101,6 +10111,30 @@
       "from": "packages/product/test/thread-title.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/transcript-window.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/transcript-window.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/transcript-window.test.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "../src/execution/contract/execution-route-snapshot",
       "kind": "import",
       "relationship": "test",
       "production": false

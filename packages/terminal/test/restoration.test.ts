@@ -1,6 +1,6 @@
 import { expect, test } from "vitest"
 import { initial } from "../src/state/model/terminal-state"
-import { canSubmit, update, withUsageAnimation } from "../src/state/reducer/terminal-state-reducer"
+import { canSubmit, update } from "../src/state/reducer/terminal-state-reducer"
 import { modePickerContent } from "../src/opentui/surface/opentui-composer-region"
 import { animationActive, welcomeContent } from "../src/opentui/surface/opentui-surface-content"
 
@@ -52,15 +52,14 @@ test("drains threshold flashes and compaction vacuum ticks only on animation tic
     contextUsage: { _tag: "Available" as const, inputTokens: 80, contextWindow: 110, reserveTokens: 10 },
   }
   const compacted = { _tag: "Available" as const, inputTokens: 20, contextWindow: 110, reserveTokens: 10 }
-  let model = withUsageAnimation(before, { ...before, contextUsage: compacted }, compacted)
+  let model = update(before, { _tag: "ContextUsageReplaced", contextUsage: compacted })
   expect(model.contextAnimation).toMatchObject({ compactFromPercent: 80, compactTick: 0 })
   for (let index = 0; index < 17; index += 1) model = update(model, { _tag: "AnimationTicked" })
   expect(model.contextAnimation.compactTick).toBeUndefined()
   const threshold = { _tag: "Available" as const, inputTokens: 76, contextWindow: 110, reserveTokens: 10 }
-  model = withUsageAnimation(
+  model = update(
     { ...before, activity: undefined, contextUsage: { ...before.contextUsage, inputTokens: 70 } },
-    { ...before, activity: undefined, contextUsage: threshold },
-    threshold,
+    { _tag: "ContextUsageReplaced", contextUsage: threshold },
   )
   expect(model.contextAnimation.flashTicks).toBe(2)
   model = update(model, { _tag: "ComposerReplaced", text: "does not drain" })

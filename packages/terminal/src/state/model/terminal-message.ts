@@ -4,6 +4,7 @@ import type { Unit } from "@rika/transcript/transcript-unit"
 import type { Key } from "../../presentation/terminal/terminal-keymap"
 import type { TranscriptBlock, TranscriptItem } from "./terminal-transcript-state"
 import type { ChangedFile } from "./terminal-changed-file"
+import type { ContextUsage } from "./terminal-context-usage"
 import type { ThreadItem } from "./terminal-thread-state"
 
 export const Entry = Schema.Struct({
@@ -27,6 +28,7 @@ type Message =
   | { readonly _tag: "ModeTurned"; readonly offset: number }
   | { readonly _tag: "ModeCommitted"; readonly selected?: number }
   | { readonly _tag: "ModeHovered"; readonly selected: number }
+  | { readonly _tag: "ContextUsageReplaced"; readonly contextUsage: ContextUsage }
   | { readonly _tag: "AnimationTicked" }
   | { readonly _tag: "Pasted"; readonly text: string }
   | { readonly _tag: "ImageInserted"; readonly path: string }

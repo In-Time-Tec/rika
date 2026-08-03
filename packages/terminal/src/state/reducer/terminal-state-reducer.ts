@@ -8,7 +8,6 @@ import type { Model } from "../model/terminal-state"
 import type { TranscriptBlock } from "../model/terminal-transcript-state"
 import type { ChangedFile } from "../model/terminal-changed-file"
 import type { ComposerAttachment } from "../model/terminal-composer-state"
-import type { ContextUsage } from "../model/terminal-context-usage"
 import { reduceData } from "./terminal-data-reducer"
 import { reduceExecution } from "./terminal-execution-reducer"
 import { reduceOverlay } from "./terminal-overlay-reducer"
@@ -215,16 +214,17 @@ const updateImpl = (model: Model, message: Message): Model =>
   model
 
 export const update: {
-  (model: Model, message: Message, usage?: ContextUsage): Model
+  (model: Model, message: Message): Model
   (message: Message): (model: Model) => Model
 } = Function.dual(
   2,
-  (model: Model, message: Message, usage?: ContextUsage): Model =>
-    advanceAnimation(model, updateImpl(model, message), usage),
+  (model: Model, message: Message): Model =>
+    message._tag === "ContextUsageReplaced"
+      ? advanceAnimation(model, { ...model, contextUsage: message.contextUsage }, message.contextUsage)
+      : advanceAnimation(model, updateImpl(model, message), undefined),
 )
 
 export const reduce = update
-export const withUsageAnimation = advanceAnimation
 export const applyQueueDelta = QueueState.applyQueueDelta
 export const resetQueue = QueueState.resetQueue
 export const commands = Palette.commands
