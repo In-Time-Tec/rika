@@ -1,11 +1,11 @@
 ╭─ Mode ───────────────────────╮
-│ medium                       │
-│ GPT-5.6 Terra xhigh          │
-│                              │
+│ ╌╌╌╌╌╌╌╌━━━━━━╌╌╌╌╌╌╌╌╌╌╌╌╌╌ │
+│ low    medium  high    ultra │
+│ Balanced default for everyda │
 │                              │
 │                              │
 ╰────────────── ↔ turn ── esc ─╯
-╭─────────────────────── high ─╮
+╭──────────────── ╌╌╌╌ ─ high ─╮
 │                              │
 │                              │
 │                              │

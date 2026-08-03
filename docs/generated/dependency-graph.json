@@ -56844,6 +56844,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-input.ts",
+      "to": "packages/terminal/src/state/model/terminal-layout-state.ts",
+      "specifier": "../../state/model/terminal-layout-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-input.ts",
       "to": "packages/terminal/src/state/model/terminal-state.ts",
       "specifier": "../../state/model/terminal-state",
       "kind": "import",
@@ -65052,6 +65060,38 @@
     },
     {
       "from": "packages/terminal/test/restoration.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/restoration.test.ts",
+      "to": "external:@opentui/core",
+      "specifier": "@opentui/core",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/restoration.test.ts",
+      "to": "external:@opentui/core/testing",
+      "specifier": "@opentui/core/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/restoration.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/restoration.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -65070,6 +65110,30 @@
       "from": "packages/terminal/test/restoration.test.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-surface-content.ts",
       "specifier": "../src/opentui/surface/opentui-surface-content",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/restoration.test.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-surface.ts",
+      "specifier": "../src/opentui/surface/opentui-surface",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/restoration.test.ts",
+      "to": "packages/terminal/src/presentation/terminal/terminal-theme.ts",
+      "specifier": "../src/presentation/terminal/terminal-theme",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/restoration.test.ts",
+      "to": "packages/terminal/src/state/model/terminal-context-meter-glyph.ts",
+      "specifier": "../src/state/model/terminal-context-meter-glyph",
       "kind": "import",
       "relationship": "test",
       "production": false

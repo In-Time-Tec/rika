@@ -1,8 +1,15 @@
+import { fg } from "@opentui/core"
+import { createTestRenderer } from "@opentui/core/testing"
+import { it } from "@effect/vitest"
+import { Effect } from "effect"
 import { expect, test } from "vitest"
 import { initial } from "../src/state/model/terminal-state"
 import { canSubmit, update } from "../src/state/reducer/terminal-state-reducer"
-import { modePickerContent } from "../src/opentui/surface/opentui-composer-region"
+import { modeLabelStarts, modePickerContent } from "../src/opentui/surface/opentui-composer-region"
 import { animationActive, welcomeContent } from "../src/opentui/surface/opentui-surface-content"
+import { Surface } from "../src/opentui/surface/opentui-surface"
+import { colors } from "../src/presentation/terminal/terminal-theme"
+import { meterGlyphs } from "../src/state/model/terminal-context-meter-glyph"
 
 const key = (name: string) => ({
   name,
@@ -31,6 +38,76 @@ test("mode selection is ViewState-owned with eased turns and a draining commit a
   for (let index = 0; index < 12; index += 1) model = update(model, { _tag: "AnimationTicked" })
   expect(model.modeCommit).toBeUndefined()
 })
+
+test("renders the compact mode dial with all four clickable notch labels", () => {
+  const content = text(
+    modePickerContent({ ...initial("/work", "medium"), height: 12, modePicker: { open: true, selected: 1 } }, 28)
+      .chunks,
+  )
+  expect(content.split("\n").slice(0, 2)).toEqual(["╌╌╌╌╌╌╌╌━━━━━━╌╌╌╌╌╌╌╌╌╌╌╌╌╌", "low    medium  high    ultra"])
+})
+
+it.effect("renders responsive context tracks and per-cell mode commit wipe colors", () =>
+  Effect.gen(function* () {
+    const setup = yield* Effect.acquireRelease(
+      Effect.tryPromise(() => createTestRenderer({ width: 80, height: 24 })),
+      (value) => Effect.sync(() => value.renderer.destroy()),
+    )
+    const committed: Array<number> = []
+    const surface = yield* Effect.acquireRelease(
+      Effect.sync(
+        () =>
+          new Surface(
+            setup.renderer,
+            { key: () => undefined, resize: () => undefined, modeCommit: (selected) => committed.push(selected) },
+            { animate: false },
+          ),
+      ),
+      (value) => Effect.sync(() => value.destroy()),
+    )
+    const modeLabel = () =>
+      (
+        surface as unknown as {
+          readonly modeLabel: {
+            readonly content: { readonly chunks: ReadonlyArray<ReturnType<ReturnType<typeof fg>>> }
+          }
+        }
+      ).modeLabel.content.chunks
+    setup.resize(32, 12)
+    surface.update({ ...initial("/work", "high"), width: 32, height: 12, modePicker: { open: true, selected: 1 } })
+    yield* Effect.tryPromise(() => setup.renderOnce())
+    expect(text(modeLabel())).toContain(`${meterGlyphs.track.repeat(4)} ─ high`)
+    const palette = (
+      surface as unknown as {
+        readonly palette: {
+          readonly screenX: number
+          readonly screenY: number
+        }
+      }
+    ).palette
+    setup.mockMouse.click(palette.screenX + modeLabelStarts(28)[2]!, palette.screenY + 1)
+    yield* Effect.tryPromise(() => setup.renderOnce())
+    expect(committed).toEqual([2])
+    setup.resize(80, 24)
+    surface.update({ ...initial("/work", "high"), width: 80, modePicker: { open: true, selected: 1 } })
+    expect(text(modeLabel())).toContain(`ctx ${meterGlyphs.track.repeat(8)} ─ high`)
+
+    surface.update({
+      ...initial("/work", "high"),
+      currentThreadId: "thread",
+      contextUsage: { _tag: "Available", inputTokens: 50, contextWindow: 100, reserveTokens: 0 },
+      modeCommit: { from: "medium", to: "high", tick: 2 },
+    })
+    const filled = modeLabel().filter((chunk) => chunk.text === meterGlyphs.fill)
+    expect(filled).toHaveLength(4)
+    expect(filled.map((chunk) => chunk.fg)).toEqual([
+      fg(colors.high)(meterGlyphs.fill).fg,
+      fg(colors.high)(meterGlyphs.fill).fg,
+      fg(colors.medium)(meterGlyphs.fill).fg,
+      fg(colors.medium)(meterGlyphs.fill).fg,
+    ])
+  }).pipe(Effect.scoped),
+)
 
 test("retains the authoritative root context reading while a following turn waits", () => {
   const contextUsage = {

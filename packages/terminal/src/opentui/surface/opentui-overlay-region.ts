@@ -168,14 +168,19 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
       this.palette.content = modePickerContent(model, modeContentWidth)
       const hitMode = (event: { readonly x: number; readonly y: number }): number | undefined => {
         const compact = modeContentWidth < 40 || model.height <= 12
-        const labelRow = this.palette.screenY + (compact ? 0 : 2)
+        const labelRow = this.palette.screenY + (compact ? 1 : 2)
         if (event.y !== labelRow) return undefined
         const starts = modeLabelStarts(modeContentWidth)
-        const column = event.x - this.palette.screenX
-        const selected = modeIds.findIndex(
-          (mode, index) => column >= starts[index]! && column < starts[index]! + mode.length,
-        )
-        return selected < 0 ? undefined : selected
+        const pointer = event.x - this.palette.screenX
+        let column = 0
+        for (const [index, mode] of modeIds.entries()) {
+          column = Math.max(column, Math.min(modeContentWidth, starts[index]!))
+          const visible = truncateToWidth(mode, Math.max(0, modeContentWidth - column))
+          const width = stringWidth(visible)
+          if (pointer >= column && pointer < column + width) return index
+          column += width
+        }
+        return undefined
       }
       this.palette.onMouseMove = (event) => {
         const selected = hitMode(event)
@@ -189,7 +194,7 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
       }
       cursorEditor = undefined
     } else if (overlay === "context") {
-      const boxWidth = Math.min(58, contentWidth)
+      const boxWidth = Math.min(68, contentWidth)
       const boxHeight = model.width <= 24 ? Math.min(12, model.height) : Math.min(18, Math.max(1, composerTop))
       this.paletteBox.width = boxWidth
       this.paletteBox.height = boxHeight

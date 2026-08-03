@@ -13397,6 +13397,38 @@
     },
     {
       "from": "packages/terminal/test/restoration.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/restoration.test.ts",
+      "to": "external:@opentui/core",
+      "specifier": "@opentui/core",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/restoration.test.ts",
+      "to": "external:@opentui/core/testing",
+      "specifier": "@opentui/core/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/restoration.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/restoration.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",

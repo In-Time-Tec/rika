@@ -12538,7 +12538,7 @@
           "width": 177
         },
         {
-          "text": " ctx ╌╌╌╌╌╌╌╌ ",
+          "text": " ctx ╌╌╌╌╌╌╌╌",
           "fg": {
             "buffer": {
               "0": 61,
@@ -12556,10 +12556,10 @@
             }
           },
           "attributes": 0,
-          "width": 14
+          "width": 13
         },
         {
-          "text": "─ ",
+          "text": " ─ ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -12577,7 +12577,7 @@
             }
           },
           "attributes": 0,
-          "width": 2
+          "width": 3
         },
         {
           "text": "high",

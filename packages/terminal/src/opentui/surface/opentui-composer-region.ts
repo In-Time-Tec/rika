@@ -41,7 +41,10 @@ const shortcutRows: ReadonlyArray<ReadonlyArray<readonly [string, string]>> = [
     ["Ctrl+V", "paste images"],
     ["Shift+Enter", "newline"],
   ],
-  [["Ctrl+S", "switch modes"]],
+  [
+    ["Ctrl+S", "switch modes"],
+    ["Ctrl+Y", "context & usage"],
+  ],
   [
     ["Ctrl+G", "edit in $EDITOR"],
     ["Opt+T", "toggle file tree"],
@@ -182,13 +185,6 @@ const modePickerContentImpl = (model: Model, innerWidth: number): StyledText => 
     if (chunks.length > 0) chunks.push(fg(colors.text)("\n"))
     chunks.push(style(truncateToWidth(value, innerWidth)))
   }
-  if (compact) {
-    line(selected, (value) => bold(fg(colors[selected])(value)))
-    line(model.height <= 12 ? routeLabel(model.modeRoutes[selected]?.main) : modeDescription[selected], (value) =>
-      fg(colors.muted)(value),
-    )
-    return new StyledText(chunks)
-  }
   const starts = modeLabelStarts(innerWidth)
   const targetPosition = model.modePicker.selected
   const fromPosition = model.modePicker.fromPosition ?? model.modePicker.from ?? targetPosition
@@ -204,17 +200,24 @@ const modePickerContentImpl = (model: Model, innerWidth: number): StyledText => 
     const edge = target >= from ? center + thumbWidth : center - 1
     if (edge >= 0 && edge < dial.length) dial[edge] = "╾"
   }
-  line("")
+  if (!compact) line("")
   line(dial.join(""), (value) => fg(colors[selected])(value))
   const labels: Array<TextChunk> = []
   let column = 0
   for (const [index, mode] of modeIds.entries()) {
-    const start = starts[index]!
+    const start = Math.min(innerWidth, starts[index]!)
     labels.push(fg(colors.text)(" ".repeat(Math.max(0, start - column))))
-    labels.push(mode === selected ? bold(fg(colors[selected])(mode)) : dim(fg(colors.text)(mode)))
-    column = start + mode.length
+    column = Math.max(column, start)
+    const visible = truncateToWidth(mode, Math.max(0, innerWidth - column))
+    if (visible.length === 0) break
+    labels.push(mode === selected ? bold(fg(colors[selected])(visible)) : dim(fg(colors.text)(visible)))
+    column += stringWidth(visible)
   }
   chunks.push(fg(colors.text)("\n"), ...labels)
+  if (compact) {
+    line(modeDescription[selected], (value) => fg(colors.muted)(value))
+    return new StyledText(chunks)
+  }
   line("")
   line(" ".repeat(innerWidth))
   line("")

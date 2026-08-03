@@ -2107,7 +2107,7 @@
           "width": 6
         },
         {
-          "text": " switch modes",
+          "text": " switch modes             ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -2125,10 +2125,52 @@
             }
           },
           "attributes": 0,
-          "width": 13
+          "width": 26
         },
         {
-          "text": "                                                          ",
+          "text": "Ctrl+Y",
+          "fg": {
+            "buffer": {
+              "0": 1024,
+              "1": 256,
+              "2": 128,
+              "3": 255
+            }
+          },
+          "bg": {
+            "buffer": {
+              "0": 0,
+              "1": 0,
+              "2": 0,
+              "3": 0
+            }
+          },
+          "attributes": 0,
+          "width": 6
+        },
+        {
+          "text": " context & usage",
+          "fg": {
+            "buffer": {
+              "0": 1984,
+              "1": 448,
+              "2": 192,
+              "3": 255
+            }
+          },
+          "bg": {
+            "buffer": {
+              "0": 0,
+              "1": 0,
+              "2": 0,
+              "3": 0
+            }
+          },
+          "attributes": 0,
+          "width": 16
+        },
+        {
+          "text": "                       ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -2146,7 +2188,7 @@
             }
           },
           "attributes": 0,
-          "width": 58
+          "width": 23
         },
         {
           "text": "│",

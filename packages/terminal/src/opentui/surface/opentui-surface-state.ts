@@ -93,7 +93,6 @@ export class SurfaceState {
   protected welcomeKey = ""
   protected toastTimer: Fiber.Fiber<void> | undefined
   protected usageLabelWidth = 0
-  protected modeLabelContentKey: string | undefined
   protected usageLabelHovered = false
   protected modeLabelHovered = false
   protected modeSegmentStart = 0

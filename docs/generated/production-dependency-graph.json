@@ -32818,6 +32818,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-input.ts",
+      "to": "packages/terminal/src/state/model/terminal-layout-state.ts",
+      "specifier": "../../state/model/terminal-layout-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-input.ts",
       "to": "packages/terminal/src/state/model/terminal-state.ts",
       "specifier": "../../state/model/terminal-state",
       "kind": "import",

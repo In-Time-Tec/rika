@@ -28,6 +28,7 @@ import { loaderFrame } from "../rendering/opentui-spinner"
 import { spinnerFrames } from "../rendering/opentui-spinner"
 import { renderSidebar } from "../rendering/opentui-render-block"
 import { panelLoading, formatCost, modeLabelWidth } from "./opentui-surface-content"
+import { contentColumnWidth } from "../../state/model/terminal-layout-state"
 
 const mouseSequencePattern = new RegExp(`^(?:${String.fromCharCode(27)}?\\[)?<?\\d+(?:;\\d+)*[Mm]?$`)
 
@@ -114,94 +115,114 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
   }
 
   protected renderModeLabel(model: Model): void {
-    let usageText = ""
-    if (model.currentThreadId !== undefined && model.contextUsage?._tag === "Available") {
-      const streaming = model.busy && model.activity?._tag !== "Compacting"
-      const value = ContextMeter.meter(model.contextUsage, { cells: 8 })
-      const glyphs =
-        streaming || model.contextAnimation.compactFromPercent !== undefined || model.contextAnimation.flashTicks > 0
-          ? ContextMeter.animatedGlyphs(model.contextUsage, {
-              cells: 8,
-              tick: model.contextAnimation.compactTick ?? model.animationTick,
-              streaming,
-              ...(model.contextAnimation.compactFromPercent === undefined
-                ? {}
-                : { compactFromPercent: model.contextAnimation.compactFromPercent }),
-              ...(model.contextAnimation.flashTicks > 0 ? { flashTicks: model.contextAnimation.flashTicks } : {}),
-            })
-          : value.glyphs
-      usageText = `ctx ${glyphs.join("")} ${value.percent}%`
-    } else if (model.currentThreadId !== undefined && model.contextUsage?._tag === "Loading") {
-      usageText = `ctx ${
-        model.busy ? ContextMeter.loadingMeter(model.animationTick, { cells: 8 }).join("") : meterGlyphs.track.repeat(8)
-      }`
-    } else if (model.currentThreadId !== undefined && model.contextUsage?._tag === "Unavailable") {
-      usageText = `ctx ${meterGlyphs.track.repeat(8)}`
-    } else if (model.usageDisplay === "time") {
-      if (model.usageTime?._tag === "Available")
-        usageText = formatActiveTime(activeTimeAt(model.usageTime, this.currentTimeMillis()))
-      else if (model.usageTime?._tag === "Unavailable") usageText = `${activeTimeIcon} —`
-      else usageText = `${activeTimeIcon} ····`
-    } else if (model.usageDisplay === "tokens") {
-      if (model.usageTokens?._tag === "Available")
-        usageText =
-          model.usageTokens.uncountedAttempts > 0
+    const previousRight = this.modeLabel.screenX + this.modeLabel.width
+    const availableWidth = contentColumnWidth(model)
+    const contextVisible = availableWidth >= 24 && (model.currentThreadId !== undefined || model.modePicker.open)
+    const contextCells = availableWidth < 40 ? 4 : 8
+    const contextPrefix = availableWidth < 40 ? " " : " ctx "
+    const border = toOpenColor(colors.text)
+    const legacyUsageText = (): string => {
+      if (model.usageDisplay === "time") {
+        if (model.usageTime?._tag === "Available")
+          return formatActiveTime(activeTimeAt(model.usageTime, this.currentTimeMillis()))
+        return model.usageTime?._tag === "Unavailable" ? `${activeTimeIcon} —` : `${activeTimeIcon} ····`
+      }
+      if (model.usageDisplay === "tokens") {
+        if (model.usageTokens?._tag === "Available")
+          return model.usageTokens.uncountedAttempts > 0
             ? formatTokens(model.usageTokens.total).replace(/ tok$/, "+ tok")
             : formatTokens(model.usageTokens.total)
-      else if (model.usageTokens?._tag === "Unavailable") usageText = "— tok"
-      else usageText = "···· tok"
-    } else {
-      if (model.usageCost?._tag === "Available") usageText = formatCost(model.usageCost.usd)
-      else if (model.costUsd !== undefined) usageText = formatCost(model.costUsd)
-      else if (model.usageCost?._tag === "Unavailable") usageText = "$—"
-      else if (model.usageCost?._tag === "Loading" || model.busy) usageText = "$····"
-    }
-    const modeContentKey = `${usageText}\u0000${model.fastMode ? "fast" : "normal"}\u0000${model.mode}\u0000${model.modeCommit?.from ?? ""}\u0000${model.modeCommit?.to ?? ""}\u0000${model.modeCommit?.tick ?? ""}\u0000${this.usageLabelHovered ? "usage-hover" : "usage"}\u0000${this.modeLabelHovered ? "mode-hover" : "mode"}`
-    const modeChunks: Array<TextChunk> = []
-    const previousRight = this.modeLabel.screenX + this.modeLabel.width
-    this.usageLabelWidth = usageText.length === 0 ? 0 : modeLabelWidth(` ${usageText} `)
-    if (usageText.length > 0) {
-      const usageColor = model.currentThreadId === undefined ? toOpenColor(colors.text) : colors[model.mode]
-      const usage = fg(usageColor)(` ${usageText} `)
-      modeChunks.push(this.usageLabelHovered ? bold(usage) : usage)
-      modeChunks.push(fg(toOpenColor(colors.text))("─"))
-    }
-    this.modeSegmentStart = usageText.length === 0 ? 0 : this.usageLabelWidth + 1
-    modeChunks.push(fg(toOpenColor(colors.text))(" "))
-    if (model.fastMode) modeChunks.push(fg(toOpenColor(colors.amber))("↯"))
-    const commit = model.modeCommit
-    let modeLabel: string = model.mode
-    let cursor = ""
-    if (commit !== undefined) {
-      if (commit.tick < commit.from.length) modeLabel = commit.from.slice(0, commit.from.length - commit.tick - 1)
-      else {
-        const typed = Math.min(commit.to.length, commit.tick - commit.from.length + 1)
-        modeLabel = commit.to.slice(0, typed)
-        if (typed < commit.to.length) cursor = "▮"
+        return model.usageTokens?._tag === "Unavailable" ? "— tok" : "···· tok"
       }
+      if (model.usageCost?._tag === "Available") return formatCost(model.usageCost.usd)
+      if (model.costUsd !== undefined) return formatCost(model.costUsd)
+      if (model.usageCost?._tag === "Unavailable") return "$—"
+      return model.usageCost?._tag === "Loading" || model.busy ? "$····" : ""
     }
-    const modeText = fg(colors[model.mode])(`${modeLabel}${cursor}`)
-    modeChunks.push(this.modeLabelHovered ? bold(modeText) : modeText)
-    modeChunks.push(fg(toOpenColor(colors.text))(" "))
-    const width = modeChunks.reduce((total, chunk) => total + modeLabelWidth(chunk.text), 0)
+    const buildUsageChunks = (): Array<TextChunk> => {
+      if (!contextVisible) {
+        const usageText = legacyUsageText()
+        if (usageText.length === 0) return []
+        const usage = fg(model.currentThreadId === undefined ? border : colors[model.mode])(` ${usageText} `)
+        return [this.usageLabelHovered ? bold(usage) : usage]
+      }
+      const chunks: Array<TextChunk> = [fg(colors[model.mode])(contextPrefix)]
+      const context = model.contextUsage
+      if (context?._tag === "Available") {
+        const value = ContextMeter.meter(context, { cells: contextCells })
+        const streaming = model.busy && model.activity?._tag !== "Compacting"
+        const glyphs =
+          streaming || model.contextAnimation.compactFromPercent !== undefined || model.contextAnimation.flashTicks > 0
+            ? ContextMeter.animatedGlyphs(context, {
+                cells: contextCells,
+                tick: model.contextAnimation.compactTick ?? model.animationTick,
+                streaming,
+                ...(model.contextAnimation.compactFromPercent === undefined
+                  ? {}
+                  : { compactFromPercent: model.contextAnimation.compactFromPercent }),
+                ...(model.contextAnimation.flashTicks > 0 ? { flashTicks: model.contextAnimation.flashTicks } : {}),
+              })
+            : value.glyphs
+        const filled = value.glyphs.filter((glyph) => glyph === meterGlyphs.fill).length
+        for (const [index, glyph] of glyphs.entries()) {
+          let glyphColor = colors[model.mode]
+          if (model.modeCommit !== undefined && index < filled)
+            glyphColor =
+              index < Math.min(filled, model.modeCommit.tick)
+                ? colors[model.modeCommit.to]
+                : colors[model.modeCommit.from]
+          chunks.push(fg(glyphColor)(glyph))
+        }
+        chunks.push(bold(fg(colors[model.mode])(` ${value.percent}% `)))
+        return chunks
+      }
+      const glyphs =
+        model.busy && context?._tag === "Loading"
+          ? ContextMeter.loadingMeter(model.animationTick, { cells: contextCells })
+          : Array.from({ length: contextCells }, () => meterGlyphs.track)
+      for (const glyph of glyphs) chunks.push(fg(colors[model.mode])(glyph))
+      chunks.push(fg(border)(" "))
+      return chunks
+    }
+    const buildModeChunks = (): Array<TextChunk> => {
+      const usageChunks = buildUsageChunks()
+      const chunks = [...usageChunks]
+      if (usageChunks.length > 0) chunks.push(fg(border)("─"))
+      chunks.push(fg(border)(" "))
+      if (model.fastMode) chunks.push(fg(toOpenColor(colors.amber))("↯"))
+      const commit = model.modeCommit
+      let modeLabel: string = model.mode
+      let cursor = ""
+      if (commit !== undefined) {
+        if (commit.tick < commit.from.length) modeLabel = commit.from.slice(0, commit.from.length - commit.tick - 1)
+        else {
+          const typed = Math.min(commit.to.length, commit.tick - commit.from.length + 1)
+          modeLabel = commit.to.slice(0, typed)
+          if (typed < commit.to.length) cursor = "▮"
+        }
+      }
+      const modeText = fg(colors[model.mode])(`${modeLabel}${cursor}`)
+      chunks.push(this.modeLabelHovered ? bold(modeText) : modeText)
+      chunks.push(fg(border)(" "))
+      return chunks
+    }
+    const initialUsage = buildUsageChunks()
+    this.usageLabelWidth = initialUsage.reduce((total, chunk) => total + modeLabelWidth(chunk.text), 0)
+    this.modeSegmentStart = this.usageLabelWidth === 0 ? 0 : this.usageLabelWidth + 1
+    let modeChunks = buildModeChunks()
+    let width = modeChunks.reduce((total, chunk) => total + modeLabelWidth(chunk.text), 0)
     if (this.usagePointerX !== undefined && this.modeLabel.width > 0) {
       const screenX = previousRight - width
       const hovered = this.usagePointerX >= screenX && this.usagePointerX < screenX + this.usageLabelWidth
       if (hovered !== this.usageLabelHovered) {
         this.usageLabelHovered = hovered
         this.renderer.setMousePointer(hovered ? "pointer" : "default")
-        if (usageText.length > 0) {
-          const usageColor = model.currentThreadId === undefined ? toOpenColor(colors.text) : colors[model.mode]
-          const usage = fg(usageColor)(` ${usageText} `)
-          modeChunks[0] = hovered ? bold(usage) : usage
-        }
+        modeChunks = buildModeChunks()
+        width = modeChunks.reduce((total, chunk) => total + modeLabelWidth(chunk.text), 0)
       }
     }
     this.modeLabel.width = width
-    if (this.modeLabelContentKey !== modeContentKey) {
-      this.modeLabelContentKey = modeContentKey
-      this.modeLabel.content = new StyledText(modeChunks)
-    }
+    this.modeLabel.content = new StyledText(modeChunks)
     this.refreshUsageHoverAfterLayout()
   }
 
