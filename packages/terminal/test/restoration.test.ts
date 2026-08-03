@@ -31,6 +31,19 @@ test("mode selection is ViewState-owned with eased turns and a draining commit a
   expect(model.modeCommit).toBeUndefined()
 })
 
+test("retains the authoritative root context reading while a following turn waits", () => {
+  const contextUsage = {
+    _tag: "Available" as const,
+    inputTokens: 20_000,
+    contextWindow: 272_000,
+    reserveTokens: 13_600,
+  }
+  const selected = { ...initial("/work"), currentThreadId: "thread", contextUsage }
+  const waiting = update(selected, { _tag: "TurnStarted", turnId: "turn-2", prompt: "continue" })
+  expect(waiting.contextUsage).toEqual(contextUsage)
+  expect(waiting.activity).toEqual({ _tag: "Waiting" })
+})
+
 test("keeps a typed draft intact and blocks submission while a thread is loading", () => {
   let model = update(initial("/work"), { _tag: "ComposerReplaced", text: "keep this draft" })
   model = update(model, { _tag: "ThreadOpenRequested" })
