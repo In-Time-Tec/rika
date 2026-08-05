@@ -1,0 +1,26 @@
+diff --git a/dist/unstable/ai/Response.js b/dist/unstable/ai/Response.js
+index 1bc8112113b61a849a21ae233add6320812d4c43..0391872991248a073d559d4a098a77254948e8f4 100644
+--- a/dist/unstable/ai/Response.js
++++ b/dist/unstable/ai/Response.js
+@@ -482,7 +482,7 @@ export const HttpRequestDetails = /*#__PURE__*/Schema.Struct({
+   method: Schema.Literals(["GET", "POST", "PATCH", "PUT", "DELETE", "HEAD", "OPTIONS", "TRACE"]),
+   url: Schema.String,
+   urlParams: Schema.Array(Schema.Tuple([Schema.String, Schema.String])),
+-  hash: Schema.UndefinedOr(Schema.String),
++  hash: Schema.optionalKey(Schema.UndefinedOr(Schema.String)),
+   headers: Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Redacted(Schema.String)]))
+ }).annotate({
+   identifier: "HttpRequestDetails"
+diff --git a/src/unstable/ai/Response.ts b/src/unstable/ai/Response.ts
+index c14811ffa87164c9ef4d384d0ea5eb8334b3d997..b0e2a61f9d368d337612083b6da52cc740d889dd 100644
+--- a/src/unstable/ai/Response.ts
++++ b/src/unstable/ai/Response.ts
+@@ -2135,7 +2135,7 @@ export const HttpRequestDetails = Schema.Struct({
+   method: Schema.Literals(["GET", "POST", "PATCH", "PUT", "DELETE", "HEAD", "OPTIONS", "TRACE"]),
+   url: Schema.String,
+   urlParams: Schema.Array(Schema.Tuple([Schema.String, Schema.String])),
+-  hash: Schema.UndefinedOr(Schema.String),
++  hash: Schema.optionalKey(Schema.UndefinedOr(Schema.String)),
+   headers: Schema.Record(
+     Schema.String,
+     Schema.Union([

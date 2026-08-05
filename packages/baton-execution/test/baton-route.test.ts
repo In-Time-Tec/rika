@@ -1,5 +1,6 @@
 import { expect, it } from "@effect/vitest"
 import { ExecutableManifest } from "@batonfx/core"
+import { ExecutableRegistration } from "@batonfx/runtime"
 import * as Settings from "@rika/configuration/configuration-settings"
 import * as ExecutionRouteResolution from "@rika/product/execution-route-resolution"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
@@ -63,11 +64,17 @@ it.effect("resolves complete ordered model candidates deterministically", () =>
 
 it.effect("builds one exact closed executable with role-specific tool and service pins", () =>
   Effect.gen(function* () {
-    const executionRoute = testExecutionRoute()
+    const route = testExecutionRoute()
+    const executionRoute = {
+      ...route,
+      compactionSummary: {
+        ...route.compactionSummary,
+        registrationIdentity: "test-compaction-route" as (typeof route.compactionSummary)["registrationIdentity"],
+      },
+    }
     const configured = yield* configure({ executionRoute, workspace: "/workspace", sandbox })
     expect(Object.keys(configured.profiles)).toEqual([
       "Title",
-      "Compaction",
       "Oracle",
       "Librarian",
       "Painter",
@@ -76,7 +83,7 @@ it.effect("builds one exact closed executable with role-specific tool and servic
       "Surgeon",
       "Task",
     ])
-    expect(configured.resolverEntries).toHaveLength(10)
+    expect(configured.resolverEntries).toHaveLength(9)
     const rootResolution = configured.resolverEntries[0]!
     expect("agent" in rootResolution ? rootResolution.agent.model : undefined).toMatchObject({
       provider: "@batonfx/providers",
@@ -107,7 +114,6 @@ it.effect("builds one exact closed executable with role-specific tool and servic
     ])
     expect(rootToolNames).toContain("read")
     expect(configured.profiles.Title!.manifest.tools).toEqual([])
-    expect(configured.profiles.Compaction!.manifest.tools).toEqual([])
     expect(configured.profiles.Librarian!.manifest.tools.map(({ name }) => name)).toEqual([
       "read_web_page",
       "web_search",
@@ -137,7 +143,10 @@ it.effect("builds one exact closed executable with role-specific tool and servic
       keepRecentTokens: executionRoute.main.compaction.keepRecentTokens,
       reserveTokens: executionRoute.main.compaction.reserveTokens,
       strategyIdentity: executionRoute.compaction.strategy,
-      summaryModel: configured.profiles.Compaction!.manifest.model,
+      summaryModel: configured.registrations.find(
+        ({ codec, payload }) =>
+          codec === "rika-model-route" && (payload as { readonly role?: string }).role === "compaction",
+      )?.pin,
       summaryPromptIdentity: expect.stringMatching(/^[a-f0-9]{64}$/),
     })
     expect("runOptions" in rootResolution ? rootResolution.runOptions?.compaction : undefined).toEqual({
@@ -161,6 +170,8 @@ it.effect("builds one exact closed executable with role-specific tool and servic
       ),
     ).toBe(true)
     const registrationPins = new Set(configured.registrations.map(({ pin }) => pin))
+    expect(registrationPins).toEqual(ExecutableRegistration.requiredPins(configured.executable))
+    yield* ExecutableRegistration.validate(configured.executable, configured.registrations)
     for (const name of Object.keys(ChildTools.selections)) {
       expect(
         configured.registrations.some(

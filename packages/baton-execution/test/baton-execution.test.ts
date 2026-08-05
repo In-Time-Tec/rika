@@ -6,7 +6,7 @@ import { Database } from "bun:sqlite"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { Context, Effect, Layer, Random, Schedule, Schema, Stream } from "effect"
-import type { Tool, Toolkit } from "effect/unstable/ai"
+import { Response, type Tool, type Toolkit } from "effect/unstable/ai"
 import * as RoleToolkits from "@rika/coding-tools/agent-role-toolkits"
 import { layer, projectEvent } from "../src/baton-execution"
 import { configure } from "../src/baton-route"
@@ -22,6 +22,24 @@ const stubHandlers = <Tools extends Record<string, Tool.Any>>(toolkit: Toolkit.T
 const agentServices = Layer.mergeAll(stubHandlers(RoleToolkits.root), stubHandlers(RoleToolkits.readThread))
 
 const promptJson = Schema.encodeSync(Schema.UnknownFromJsonString)
+
+it("accepts provider response metadata when an optional request hash is omitted", () => {
+  expect(() =>
+    Schema.decodeUnknownSync(Response.ResponseMetadataPart)({
+      metadata: {},
+      type: "response-metadata",
+      id: "response-id",
+      modelId: "model-id",
+      timestamp: "2026-08-05T20:14:04.000Z",
+      request: {
+        method: "POST",
+        url: "https://provider.example/v1/responses",
+        urlParams: [],
+        headers: { authorization: "<redacted>" },
+      },
+    }),
+  ).not.toThrow()
+})
 
 const sandbox = SandboxExecutor.makeTest(() => Effect.die(new Error("unexpected Program execution")), {
   language: "javascript",
