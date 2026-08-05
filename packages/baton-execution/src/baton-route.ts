@@ -66,7 +66,6 @@ export interface ResolverOptions {
 const instructions = {
   root: "Work directly on the user's request. Inspect relevant evidence, make necessary changes, and verify the result.",
   title: "Return a concise title for the supplied request and nothing else.",
-  compaction: "Summarize the durable facts, decisions, progress, and unresolved work needed to continue accurately.",
   Oracle: "Analyze the supplied problem deeply. Return a precise recommendation with risks and supporting reasoning.",
   Librarian: "Research the supplied question and return a concise evidence-backed report.",
   Painter: "Inspect the supplied visual material and return concrete implementation guidance.",
@@ -262,7 +261,6 @@ const taskToolkit = ChildTools.toolkit(RoleToolkits.task, ChildTools.taskSelecti
 const roleTools: Readonly<Record<RoleName, ReadonlyArray<Tool.Any>>> = {
   Root: Object.values(rootToolkit.tools),
   Title: [],
-  Compaction: [],
   Oracle: Object.values(RoleToolkits.oracle.tools),
   Librarian: Object.values(RoleToolkits.librarian.tools),
   Painter: Object.values(RoleToolkits.painter.tools),
@@ -272,19 +270,9 @@ const roleTools: Readonly<Record<RoleName, ReadonlyArray<Tool.Any>>> = {
   Task: Object.values(taskToolkit.tools),
 }
 
-type RoleName =
-  | "Root"
-  | "Title"
-  | "Compaction"
-  | "Oracle"
-  | "Librarian"
-  | "Painter"
-  | "ReadThread"
-  | "Review"
-  | "Surgeon"
-  | "Task"
+type RoleName = "Root" | "Title" | "Oracle" | "Librarian" | "Painter" | "ReadThread" | "Review" | "Surgeon" | "Task"
 
-type ExecutorRole = Exclude<RoleName, "Title" | "Compaction">
+type ExecutorRole = Exclude<RoleName, "Title">
 
 type RoleExecutor = (handlers: Layer.Layer<AgentToolHandlers>) => Layer.Layer<ToolExecutor.ToolExecutor>
 
@@ -360,7 +348,6 @@ export const configure = (
     }
     const profileInstructions = {
       Title: instructions.title,
-      Compaction: instructions.compaction,
       Oracle: instructions.Oracle,
       Librarian: instructions.Librarian,
       Painter: instructions.Painter,
@@ -379,12 +366,11 @@ export const configure = (
         environment(name),
         [],
         contextPin,
-        name === "Title" || name === "Compaction" ? undefined : compactionIdentity,
+        name === "Title" ? undefined : compactionIdentity,
         route.tokenBudget,
       )
     const leafProfiles = {
       Title: leaf("Title"),
-      Compaction: leaf("Compaction"),
       Oracle: leaf("Oracle"),
       Librarian: leaf("Librarian"),
       Painter: leaf("Painter"),
@@ -410,17 +396,7 @@ export const configure = (
       Task: task,
     }
     const childNames = ["Title", "Oracle", "Librarian", "Painter", "ReadThread", "Review", "Surgeon", "Task"] as const
-    const profileNames = [
-      "Title",
-      "Compaction",
-      "Oracle",
-      "Librarian",
-      "Painter",
-      "ReadThread",
-      "Review",
-      "Surgeon",
-      "Task",
-    ] as const
+    const profileNames = ["Title", "Oracle", "Librarian", "Painter", "ReadThread", "Review", "Surgeon", "Task"] as const
     const nestedNames = new Set<string>(childNames)
     const programAuthority = Program.authority({
       workspace: options.workspace,
@@ -451,7 +427,6 @@ export const configure = (
     for (const model of [
       routes.Root,
       routes.Title,
-      routes.Compaction,
       routes.Oracle,
       routes.Librarian,
       routes.Painter,
@@ -466,6 +441,10 @@ export const configure = (
         Registration.make(Registration.codecs.modelRegistryRoute, modelRegistryPin(model), model),
       )
     }
+    registrationMap.set(
+      modelPin(routes.Compaction),
+      Registration.make(Registration.codecs.modelRoute, modelPin(routes.Compaction), routes.Compaction),
+    )
     registrationMap.set(
       compactionPin(route),
       Registration.make(Registration.codecs.compaction, compactionPin(route), {
@@ -525,10 +504,16 @@ export const configure = (
         )
       }
     }
+    const registrations = yield* Effect.forEach(ExecutableRegistration.requiredPins(executable), (pin) => {
+      const registration = registrationMap.get(pin)
+      return registration === undefined
+        ? Errors.ExecutableRegistrationInvalid.make({ message: `unregistered executable pin: ${pin}` })
+        : Effect.succeed(registration)
+    })
     return {
       programAuthority,
       executable,
-      registrations: [...registrationMap.values()],
+      registrations,
       resolverEntries: [
         {
           executable,
@@ -548,7 +533,7 @@ export const configure = (
               : ExecutableManifest.make({ root: definition.pinned.pin, entries: [agentEntry(definition.pinned)] }),
             agent: definition.agent,
           }
-          return name === "Title" || name === "Compaction"
+          return name === "Title"
             ? resolved
             : Object.assign(resolved, {
                 runOptions: {
