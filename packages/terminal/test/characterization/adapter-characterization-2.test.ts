@@ -2,6 +2,7 @@ import { expect, test, vi } from "vitest"
 import { Effect } from "effect"
 import { buildTranscript, renderTranscriptStyled } from "../../src/opentui/rendering/opentui-renderer"
 import { renderBlock, renderSidebar } from "../../src/opentui/rendering/opentui-render-block"
+import { colors } from "../../src/presentation/terminal/terminal-theme"
 
 const opentuiValue = vi.hoisted(() => {
   const boxChildren: Array<object> = []
@@ -351,6 +352,30 @@ test("renders hidden tool output as inline presentation status in plain transcri
   expect(renderBlock(block)).toBe("✓ Web Search Find current documentation")
   expect(transcript).toContain("Web Search")
   expect(transcript).not.toContain("HIDDEN SEARCH RESULT")
+})
+test("progressively discloses error detail while keeping recovery visible", () => {
+  const block = {
+    _tag: "Error" as const,
+    title: "Execution failed",
+    detail: "Model unavailable",
+    turnId: "turn-4",
+    recovery: "Press Enter to retry.",
+  }
+  const collapsed = buildTranscript(model({ blocks: [block] }))
+  const collapsedText = collapsed.styled.chunks.map((chunk) => chunk.text).join("")
+
+  expect(collapsed.ranges).toMatchObject([{ unit: "block:Error:0", expandable: true }])
+  expect(collapsedText).toContain("✖ ERROR: Execution failed · Turn turn-4 ▸")
+  expect(collapsedText).toContain("Next: Press Enter to retry.")
+  expect(collapsedText).not.toContain("Model unavailable")
+  expect(collapsed.styled.chunks.find((chunk) => chunk.text.includes("ERROR: Execution failed"))?.fg).toBe(colors.red)
+
+  const expandedText = buildTranscript(model({ blocks: [block], expandedRowKeys: ["block:Error:0"] }))
+    .styled.chunks.map((chunk) => chunk.text)
+    .join("")
+  expect(expandedText).toContain("✖ ERROR: Execution failed · Turn turn-4 ▾")
+  expect(expandedText).toContain("Model unavailable")
+  expect(expandedText).toContain("Next: Press Enter to retry.")
 })
 test("keeps tool cards generic without removed activity assumptions", () => {
   const rendered = renderBlock({

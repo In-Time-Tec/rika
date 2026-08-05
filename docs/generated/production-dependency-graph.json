@@ -30747,6 +30747,14 @@
     },
     {
       "from": "packages/transcript/src/projection/transcript-event-fold.ts",
+      "to": "packages/transcript/src/schema/transcript-projection-model.ts",
+      "specifier": "../schema/transcript-projection-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/projection/transcript-event-fold.ts",
       "to": "packages/transcript/src/schema/transcript-source-event.ts",
       "specifier": "../schema/transcript-source-event",
       "kind": "import",
@@ -30789,6 +30797,14 @@
       "from": "packages/transcript/src/projection/transcript-fold-mutation.ts",
       "to": "packages/transcript/src/schema/transcript-presentation-model.ts",
       "specifier": "../schema/transcript-presentation-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/projection/transcript-fold-mutation.ts",
+      "to": "packages/transcript/src/schema/transcript-projection-model.ts",
+      "specifier": "../schema/transcript-projection-model",
       "kind": "import",
       "relationship": "runtime",
       "production": true

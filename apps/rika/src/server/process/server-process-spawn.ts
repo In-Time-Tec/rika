@@ -1,6 +1,6 @@
 import * as ServerService from "@rika/product/server-service"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { Effect, Option, Schema, Stream } from "effect"
+import { Effect, Function, Option, Schema, Stream } from "effect"
 
 const StartupMessage = Schema.Union([
   Schema.Struct({ _tag: Schema.tag("ready") }),
@@ -10,6 +10,20 @@ const StartupMessage = Schema.Union([
 const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(StartupMessage))
 const startupFdEnvironment = "RIKA_INTERNAL_SERVER_STARTUP_FD"
 const startupFd = 3
+
+export const serverProcessEnvironment: {
+  (
+    inherited: Readonly<Record<string, string | undefined>>,
+    configured: Readonly<Record<string, string | undefined>>,
+  ): Readonly<Record<string, string | undefined>>
+  (
+    configured: Readonly<Record<string, string | undefined>>,
+  ): (inherited: Readonly<Record<string, string | undefined>>) => Readonly<Record<string, string | undefined>>
+} = Function.dual(2, (inherited, configured) => ({
+  ...inherited,
+  ...configured,
+  [startupFdEnvironment]: String(startupFd),
+}))
 
 const startupError = (reason: "startup-failed" | "transport-failed", cause: unknown) =>
   ServerService.ServerServiceError.make({ reason, message: String(cause) })
@@ -54,8 +68,8 @@ export const spawn = Effect.fn("ServerProcessStartup.spawn")(function* (options:
         stdout: "ignore",
         stderr: "ignore",
         additionalFds: { fd3: { type: "output" } },
-        extendEnv: true,
-        env: { ...options.environment, [startupFdEnvironment]: String(startupFd) },
+        extendEnv: false,
+        env: serverProcessEnvironment(process.env, options.environment),
       }),
     )
     .pipe(Effect.mapError((cause) => startupError("transport-failed", cause)))

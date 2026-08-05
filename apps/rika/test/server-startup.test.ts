@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url"
 import { Effect, FileSystem, Layer, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { claimStartup } from "../src/server/process/server-startup"
+import { serverProcessEnvironment } from "../src/server/process/server-process-spawn"
 import { reapServers } from "./client-process-test-runtime"
 
 const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices>) =>
@@ -27,6 +28,20 @@ const snapshotDatabase = (databasePath: string) => {
     database.close()
   }
 }
+
+test("preserves inherited credentials and gives server settings authority", () => {
+  expect(
+    serverProcessEnvironment(
+      { HOME: "/home", SWITCHBOARD_KEY: "secret", RIKA_INTERNAL_SERVER_PROFILE: "inherited" },
+      { RIKA_INTERNAL_SERVER_PROFILE: "default" },
+    ),
+  ).toEqual({
+    HOME: "/home",
+    SWITCHBOARD_KEY: "secret",
+    RIKA_INTERNAL_SERVER_PROFILE: "default",
+    RIKA_INTERNAL_SERVER_STARTUP_FD: "3",
+  })
+})
 
 test("elects exactly one startup owner from two hundred simultaneous claims", () =>
   run(

@@ -2,6 +2,7 @@ import type { Block } from "../schema/transcript-presentation-model"
 import { ToolFile as ToolFileSchema } from "../schema/transcript-presentation-model"
 type ToolFile = typeof ToolFileSchema.Type
 import type { Unit } from "../schema/transcript-unit"
+import type { ModelFailure } from "../schema/transcript-projection-model"
 import type { MutableMutation, OwnedFold, FoldMutation } from "./transcript-fold-state"
 import { foldState } from "./transcript-fold-state"
 import { executionKey } from "../ordering/child-parent-correlation"
@@ -17,6 +18,7 @@ interface MutableProjectionState {
   checkpointCursor: string | undefined
   costUsd: number | undefined
   pricingVersion: string | undefined
+  modelFailure: ModelFailure | undefined
 }
 
 interface ChildOutcome {
