@@ -33,12 +33,9 @@ const detailColumn = 17
 
 export const renderGoodbye = (input: GoodbyeInput): string => {
   const home = homedir()
-  const workspaceLine =
-    input.workspace === home
-      ? "~"
-      : input.workspace.startsWith(`${home}/`)
-        ? `~${input.workspace.slice(home.length)}`
-        : input.workspace.replace(/^\/Users\/[^/]+(?=\/|$)/, "~")
+  let workspaceLine = input.workspace.replace(/^\/Users\/[^/]+(?=\/|$)/, "~")
+  if (input.workspace === home) workspaceLine = "~"
+  else if (input.workspace.startsWith(`${home}/`)) workspaceLine = `~${input.workspace.slice(home.length)}`
   const [markR, markG, markB] = modeRgb[input.mode]
   const details = new Map<number, string>([
     [1, input.threadTitle === undefined || input.threadTitle.length === 0 ? "" : input.threadTitle],
