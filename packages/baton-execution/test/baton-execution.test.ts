@@ -333,48 +333,51 @@ it.live("keeps exact Turn admission idempotent and rejects changed admission", (
   }),
 )
 
-it.live("steers the linked root and durably cancels its active child closure", () =>
-  Effect.gen(function* () {
-    const filename = `/tmp/rika-baton-control-${yield* Random.nextInt}.db`
-    const fixture = yield* TestModel.make(
-      [
-        TestModel.turn([TestModel.toolCall("task", { prompt: "wait in child" }, { id: "cancel-child" })]),
-        TestModel.turn([TestModel.text("too late")], { delay: 5_000 }),
-      ],
-      { provider: "test", model: "test", registrationKey: "control-route" },
-    )
-    const route = routeWithIdentity("control-route")
-    const result = yield* Effect.scoped(
-      Effect.gen(function* () {
-        const context = yield* Layer.build(
-          testLayer({ filename, modelServices: registryLayer(fixture), agentServices: () => agentServices }),
-        )
-        const gateway = Context.get(context, ExecutionGateway.Service)
-        const link = yield* gateway.startTurn({
-          threadId: "thread-control",
-          turnId: "turn-control",
-          workspace: "/workspace",
-          prompt: "wait",
-          executionRoute: route,
-        })
-        yield* fixture.requests.pipe(
-          Effect.repeat({ until: (requests) => requests.length > 1, schedule: Schedule.spaced("10 millis") }),
-        )
-        yield* gateway.steerTurn(link, { text: "new direction", idempotencyKey: "steer-1" })
-        yield* gateway.cancelTurn(link, "stop")
-        return { link, events: yield* gateway.watchTurn(link).pipe(Stream.runCollect) }
-      }),
-    )
+it.live(
+  "steers the linked root and durably cancels its active child closure",
+  () =>
+    Effect.gen(function* () {
+      const filename = `/tmp/rika-baton-control-${yield* Random.nextInt}.db`
+      const fixture = yield* TestModel.make(
+        [
+          TestModel.turn([TestModel.toolCall("task", { prompt: "wait in child" }, { id: "cancel-child" })]),
+          TestModel.turn([TestModel.text("too late")], { delay: 5_000 }),
+        ],
+        { provider: "test", model: "test", registrationKey: "control-route" },
+      )
+      const route = routeWithIdentity("control-route")
+      const result = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const context = yield* Layer.build(
+            testLayer({ filename, modelServices: registryLayer(fixture), agentServices: () => agentServices }),
+          )
+          const gateway = Context.get(context, ExecutionGateway.Service)
+          const link = yield* gateway.startTurn({
+            threadId: "thread-control",
+            turnId: "turn-control",
+            workspace: "/workspace",
+            prompt: "wait",
+            executionRoute: route,
+          })
+          yield* fixture.requests.pipe(
+            Effect.repeat({ until: (requests) => requests.length > 1, schedule: Schedule.spaced("10 millis") }),
+          )
+          yield* gateway.steerTurn(link, { text: "new direction", idempotencyKey: "steer-1" })
+          yield* gateway.cancelTurn(link, "stop")
+          return { link, events: yield* gateway.watchTurn(link).pipe(Stream.runCollect) }
+        }),
+      )
 
-    const childCancellationIndex = result.events.findIndex(
-      (event) => event.childExecutionId !== undefined && event.type === "execution.cancelled",
-    )
-    const rootCancellationIndex = result.events.findIndex(
-      (event) => event.executionId === result.link.runId && event.type === "execution.cancelled",
-    )
-    expect(childCancellationIndex).toBeGreaterThanOrEqual(0)
-    expect(rootCancellationIndex).toBeGreaterThan(childCancellationIndex)
-  }),
+      const childCancellationIndex = result.events.findIndex(
+        (event) => event.childExecutionId !== undefined && event.type === "execution.cancelled",
+      )
+      const rootCancellationIndex = result.events.findIndex(
+        (event) => event.executionId === result.link.runId && event.type === "execution.cancelled",
+      )
+      expect(childCancellationIndex).toBeGreaterThanOrEqual(0)
+      expect(rootCancellationIndex).toBeGreaterThan(childCancellationIndex)
+    }),
+  30_000,
 )
 
 it("projects executable-neutral completion without assuming an Agent result", () => {

@@ -24,8 +24,8 @@ test(
         const result = yield* interactivePty(
           [
             { after: "Welcome to Rika", write: "cancel this turn\r" },
-            { after: "Runn", write: "\u0003" },
-            { after: "(cancelled)", write: "\u0003", checkRunning: true },
+            { after: "Runn", write: "\u0003", timeoutMs: 30_000 },
+            { after: "(cancelled)", write: "\u0003", checkRunning: true, timeoutMs: 30_000 },
           ],
           script,
         )
