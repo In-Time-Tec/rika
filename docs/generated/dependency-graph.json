@@ -13943,6 +13943,14 @@
       "production": false
     },
     {
+      "from": "apps/rika/test/app.tui.test.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "apps/rika/test/cli-operations.test.ts",
       "to": "apps/rika/src/command/root/rika-command.ts",
       "specifier": "../src/command/root/rika-command",
@@ -16317,6 +16325,14 @@
       "kind": "import",
       "relationship": "runtime",
       "production": true
+    },
+    {
+      "from": "apps/rika/test/server-startup.test.ts",
+      "to": "apps/rika/src/server/process/server-process-spawn.ts",
+      "specifier": "../src/server/process/server-process-spawn",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
     },
     {
       "from": "apps/rika/test/server-startup.test.ts",
@@ -45009,6 +45025,14 @@
     },
     {
       "from": "packages/terminal/test/characterization/adapter-characterization-2.test.ts",
+      "to": "packages/terminal/src/presentation/terminal/terminal-theme.ts",
+      "specifier": "../../src/presentation/terminal/terminal-theme",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/characterization/adapter-characterization-2.test.ts",
       "to": "packages/terminal/test/characterization/adapter-characterization-2-support.ts",
       "specifier": "./adapter-characterization-2-support",
       "kind": "import",
@@ -50417,6 +50441,14 @@
     },
     {
       "from": "packages/transcript/src/projection/transcript-event-fold.ts",
+      "to": "packages/transcript/src/schema/transcript-projection-model.ts",
+      "specifier": "../schema/transcript-projection-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/projection/transcript-event-fold.ts",
       "to": "packages/transcript/src/schema/transcript-source-event.ts",
       "specifier": "../schema/transcript-source-event",
       "kind": "import",
@@ -50459,6 +50491,14 @@
       "from": "packages/transcript/src/projection/transcript-fold-mutation.ts",
       "to": "packages/transcript/src/schema/transcript-presentation-model.ts",
       "specifier": "../schema/transcript-presentation-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/transcript/src/projection/transcript-fold-mutation.ts",
+      "to": "packages/transcript/src/schema/transcript-projection-model.ts",
+      "specifier": "../schema/transcript-projection-model",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -51315,6 +51355,14 @@
       "from": "packages/transcript/test/projection-10-failure.test.ts",
       "to": "packages/transcript/src/projection/transcript-projection.ts",
       "specifier": "../src/projection/transcript-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/projection-10-failure.test.ts",
+      "to": "packages/transcript/src/schema/transcript-source-event.ts",
+      "specifier": "../src/schema/transcript-source-event",
       "kind": "import",
       "relationship": "test",
       "production": false

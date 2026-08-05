@@ -4,6 +4,7 @@ import { identityKey } from "../ordering/transcript-unit-identity"
 import type { Block } from "../schema/transcript-presentation-model"
 import type { SourceEvent } from "../schema/transcript-source-event"
 import type { Unit } from "../schema/transcript-unit"
+import type { ModelFailure } from "../schema/transcript-projection-model"
 import { applyAssistant, applyReasoning, applyUsage, assistantKey, reasoningKey } from "./transcript-model-event-fold"
 import { applyChild } from "./transcript-child-event-fold"
 import { genericBlock, genericKey } from "./transcript-generic-event-fold"
@@ -41,6 +42,62 @@ const {
 } = foldState
 import type { FoldMutation, MutableMutation, OwnedFold, ProjectionFold } from "./transcript-fold-state"
 
+const modelFailure = (event: SourceEvent, previous?: ModelFailure): ModelFailure | undefined => {
+  const payload = sourcePayload(event)
+  const modelCallId = string(payload.model_call_id)
+  const category = string(payload.category)
+  const classification = string(payload.classification)
+  if (modelCallId.length === 0 || category.length === 0 || classification.length === 0) return undefined
+  const matchesPrevious = previous?.modelCallId === modelCallId
+  const purpose = string(payload.purpose)
+  const provider = string(payload.provider)
+  const model = string(payload.model)
+  let resolvedProvider = provider.length > 0 ? provider : undefined
+  let resolvedModel = model.length > 0 ? model : undefined
+  if (resolvedProvider === undefined && matchesPrevious) resolvedProvider = previous?.provider
+  if (resolvedModel === undefined && matchesPrevious) resolvedModel = previous?.model
+  return {
+    modelCallId,
+    category,
+    classification,
+    ...(purpose.length === 0 ? {} : { purpose }),
+    ...(typeof payload.attempts === "number" ? { attempts: payload.attempts } : {}),
+    ...(resolvedProvider === undefined ? {} : { provider: resolvedProvider }),
+    ...(resolvedModel === undefined ? {} : { model: resolvedModel }),
+  }
+}
+
+const failurePresentation = (failure: ModelFailure | undefined, reason: string) => {
+  const category = failure?.category
+  let title = "Execution failed"
+  let recovery = "Edit your prompt and press Enter to try again."
+  if (category === "authentication") {
+    title = "Model authentication failed"
+    recovery = "Check the provider credential, restart Rika, then press Enter to retry."
+  } else if (category === "rate-limit") {
+    title = "Model rate limit reached"
+    recovery = "Wait for the provider limit to reset, then press Enter to retry."
+  } else if (category === "transport" || category === "timeout") {
+    title = "Model provider unavailable"
+    recovery = "Check your network and provider status, then press Enter to retry."
+  } else if (category === "context-overflow" || category === "token-budget") {
+    title = "Thread context is too large"
+    recovery = "Try again. If the thread is still too large, start a new thread."
+  } else if (category === "invalid-tool-call" || category === "stream-decode" || category === "truncated-stream") {
+    title = "Model response was invalid"
+    recovery = "Press Enter to retry. If it happens again, choose another model."
+  } else if (category === "provider-response") {
+    title = "Model request failed"
+    recovery = "Press Enter to retry. If it happens again, check the provider status."
+  }
+  const attribution = [
+    failure?.provider === undefined ? undefined : `Provider: ${failure.provider}`,
+    failure?.model === undefined ? undefined : `Model: ${failure.model}`,
+    failure?.attempts === undefined ? undefined : `Attempts: ${failure.attempts}`,
+  ].filter((line): line is string => line !== undefined)
+  return { title, detail: [reason, ...attribution].join("\n"), recovery }
+}
+
 const applyKnownEvent = (value: OwnedFold, change: MutableMutation, event: SourceEvent): void => {
   const turnId = value.turnId
   if (event.type === "model.input.prepared") {
@@ -65,6 +122,8 @@ const applyKnownEvent = (value: OwnedFold, change: MutableMutation, event: Sourc
   if (event.type === "steering.delivered") return applySteeringDelivered(value, change, turnId, event)
   if (event.type === "model.attempt.completed") return applyUsage({ value, change, event })
   if (event.type === "model.attempt.failed" || event.type === "model.call.failed") {
+    const failure = modelFailure(event, value.state.modelFailure)
+    if (failure !== undefined) setState(value, change, "modelFailure", failure)
     if (!isTruncatedStream(event)) return
     const block: Block = {
       _tag: "Notification",
@@ -81,7 +140,12 @@ const applyKnownEvent = (value: OwnedFold, change: MutableMutation, event: Sourc
     )
     return
   }
+  if (event.type === "model.call.completed") {
+    setState(value, change, "modelFailure", undefined)
+    return
+  }
   if (event.type === "execution.completed") {
+    setState(value, change, "modelFailure", undefined)
     settleRunningInto(value, change, "cancelled", event.sequence)
     applyExecutionOutcome(value, change, turnId, event.sequence, { status: "complete" })
     return
@@ -94,17 +158,26 @@ const applyKnownEvent = (value: OwnedFold, change: MutableMutation, event: Sourc
     }
     const payload = sourcePayload(event)
     const details = record(payload.details)
-    const compactionFailed = details.failure_classification === "context-overflow"
+    const legacyCategory = string(details.failure_classification)
+    const legacyCompactionFailed = value.state.modelFailure === undefined && legacyCategory === "context-overflow"
+    const failure =
+      value.state.modelFailure ??
+      (legacyCategory.length === 0
+        ? undefined
+        : { modelCallId: event.cursor, category: legacyCategory, classification: "terminal" })
     const reason = event.text ?? string(payload.message, "The execution failed unexpectedly.")
+    const presentation = failurePresentation(failure, reason)
     const block: Block = {
       _tag: "Error",
-      title: compactionFailed ? "Auto-compaction failed" : "Execution failed",
-      detail: reason,
+      title:
+        failure?.purpose === "compaction-summary" || legacyCompactionFailed
+          ? "Auto-compaction failed"
+          : presentation.title,
+      detail: presentation.detail,
       turnId,
-      recovery: compactionFailed
-        ? "Try again. If the thread is still too large, start a new thread."
-        : "Edit your prompt and press Enter to try again.",
+      recovery: presentation.recovery,
     }
+    setState(value, change, "modelFailure", undefined)
     settleRunningInto(value, change, "failed", event.sequence)
     clearExecutionOutcomes(value, change)
     upsertUnit(value, change, {

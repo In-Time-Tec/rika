@@ -478,6 +478,56 @@ it("projects one authoritative flattened usage event per model attempt", () => {
   ])
 })
 
+it("preserves provider identity and disposition for failed model attempts", () => {
+  const executable = Effect.runSync(
+    configure({ executionRoute: testExecutionRoute(), workspace: "/workspace", sandbox }),
+  ).executable
+  const runId = Run.RunId.make("failed-attempt-run")
+  const event = RunEvent.RunEvent.make({
+    _tag: "ModelAttemptFailed",
+    specVersion: "1",
+    eventId: "failed-attempt-event",
+    runId,
+    sequence: 8,
+    executableRef: executable.ref,
+    rootRunId: runId,
+    occurredAt: "2026-08-04T00:00:01.000Z",
+    deliveryId: "delivery",
+    turn: 0,
+    modelCallId: "call",
+    modelAttemptId: "attempt",
+    attempt: 2,
+    failedAt: 1_000,
+    category: "authentication",
+    classification: "terminal",
+    disposition: "terminal",
+    provider: "openai",
+    model: "gpt-test",
+    registrationKey: "registration",
+    candidate: 1,
+  })
+
+  expect(projectEvent({ source: event, cursor: "baton-tree:failed-attempt" })).toEqual([
+    expect.objectContaining({
+      cursor: "baton-tree:failed-attempt",
+      createdAt: 1_000,
+      type: "model.attempt.failed",
+      data: {
+        model_call_id: "call",
+        model_attempt_id: "attempt",
+        attempt: 2,
+        category: "authentication",
+        classification: "terminal",
+        disposition: "terminal",
+        provider: "openai",
+        model: "gpt-test",
+        registration_key: "registration",
+        candidate: 1,
+      },
+    }),
+  ])
+})
+
 it("projects child admission and settlement with explicit run and invocation identity", () => {
   const executable = Effect.runSync(
     configure({ executionRoute: testExecutionRoute(), workspace: "/workspace", sandbox }),

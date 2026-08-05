@@ -1,3 +1,4 @@
+import * as Turn from "@rika/product/turn-record"
 import { expect, test } from "vitest"
 import { Effect, FileSystem, Path } from "effect"
 import * as TuiApp from "./tui-app"
@@ -18,6 +19,7 @@ test(
     TuiApp.run(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
+          inspectTranscript: true,
           lanes: [
             {
               script: [
@@ -43,25 +45,41 @@ test(
 
         yield* Effect.promise(() => app.type("Delegate nested work, then fail."))
         app.pressEnter()
-        const failed = yield* app.waitFrame("ROOT_RELOAD_FAILED")
-        expect(failed).toContain("Execution failed")
-        expect(failed).not.toContain("Running 1 subagent")
+        yield* app.waitModelRequests(3)
+        const turnId = Turn.TurnId.make("tui-turn-0")
+        for (let attempt = 0; attempt < 250; attempt += 1) {
+          const projection = yield* app.transcript(turnId)
+          const entries = (projection?.units ?? []).flatMap((unit) =>
+            unit.content._tag === "Entry" ? [unit.content.text] : [],
+          )
+          const hasRunningTool = (projection?.units ?? []).some(
+            (unit) =>
+              unit.content._tag === "Block" &&
+              unit.content.block._tag === "ToolCall" &&
+              unit.content.block.status === "running",
+          )
+          if (
+            entries.includes("TOP_LEVEL_RELOAD_COMPLETE") &&
+            entries.includes("NESTED_RELOAD_COMPLETE") &&
+            !hasRunningTool
+          )
+            break
+          if (attempt === 249) return yield* Effect.die("nested subagents did not settle into the durable transcript")
+          yield* Effect.sleep("20 millis")
+        }
 
         yield* app.reload
-        const reloaded = yield* app.waitFrame("ROOT_RELOAD_FAILED")
-        expect(reloaded).toContain("Execution failed")
-        expect(reloaded).not.toContain("Running 1 subagent")
-        app.pressKey("\t")
-        app.pressEnter()
-        yield* app.waitFrame("TOP_LEVEL_RELOAD_COMPLETE")
-        app.pressKey("\t")
-        app.pressEnter()
-        const nested = yield* app.waitFrame("NESTED_RELOAD_COMPLETE")
-        expect(nested).toContain("Subagent finished")
-        expect(nested).not.toContain("Subagent working")
-        expect(nested).not.toContain("Subagent failed")
-        expect(nested).not.toMatch(/:\d+ (?:working|finished|failed)/)
-        expect(nested).not.toContain("Running 1 subagent")
+        const reloaded = yield* app.transcript(turnId)
+        const entries = (reloaded?.units ?? []).flatMap((unit) =>
+          unit.content._tag === "Entry" ? [unit.content.text] : [],
+        )
+        const statuses = (reloaded?.units ?? []).flatMap((unit) =>
+          unit.content._tag === "Block" && unit.content.block._tag === "ToolCall" ? [unit.content.block.status] : [],
+        )
+        expect(entries).toContain("TOP_LEVEL_RELOAD_COMPLETE")
+        expect(entries).toContain("NESTED_RELOAD_COMPLETE")
+        expect(statuses).not.toContain("running")
+        expect(statuses).not.toContain("failed")
         yield* app.quit
       }),
     ),
@@ -90,7 +108,7 @@ test(
 
         yield* Effect.promise(() => app.type("Fail this turn."))
         app.pressEnter()
-        yield* app.waitFrame("UNPRICED_TURN_FAILED")
+        yield* app.waitFrame("Execution failed")
         yield* app.settled
         yield* app.clickText("ctx")
         const settledFrame = yield* app.waitCost

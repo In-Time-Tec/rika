@@ -27,7 +27,7 @@ const genericBlock = ({
     return {
       _tag: "Notification",
       title: "Retrying model response",
-      detail: `${text(data.category)}${typeof data.delay_millis === "number" ? ` after ${data.delay_millis} ms` : ""}`,
+      detail: `${text(data.category).replaceAll("-", " ")}${typeof data.delay_millis === "number" ? ` · retrying in ${Math.max(1, Math.ceil(data.delay_millis / 1_000))}s` : ""}${typeof data.attempt === "number" ? ` · attempt ${data.attempt}` : ""}`,
     }
   if (event.type === "fan_out.admitted")
     return {

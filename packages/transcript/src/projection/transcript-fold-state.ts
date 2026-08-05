@@ -1,7 +1,7 @@
 import { Function } from "effect"
 import { executionKey } from "../ordering/child-parent-correlation"
 import type { Block, Content } from "../schema/transcript-presentation-model"
-import type { Projection, ProjectionState } from "../schema/transcript-projection-model"
+import type { ModelFailure, Projection, ProjectionState } from "../schema/transcript-projection-model"
 import type { SourceEvent } from "../schema/transcript-source-event"
 import type { Unit } from "../schema/transcript-unit"
 import { identityKey } from "../ordering/transcript-unit-identity"
@@ -43,6 +43,7 @@ interface MutableProjectionState {
   checkpointCursor: string | undefined
   costUsd: number | undefined
   pricingVersion: string | undefined
+  modelFailure: ModelFailure | undefined
 }
 
 interface ChildOutcome {
@@ -259,6 +260,7 @@ const mutableState = (projection: Projection): MutableProjectionState => ({
   checkpointCursor: projection.checkpointCursor,
   costUsd: projection.costUsd,
   pricingVersion: projection.pricingVersion,
+  modelFailure: projection.modelFailure,
 })
 
 const validateRestoredUnits = (units: ReadonlyArray<Unit>): void => {
@@ -388,6 +390,7 @@ const snapshotFoldState = (fold: ProjectionFold): ProjectionState => {
     ...(state.costUsd === undefined ? {} : { costUsd: state.costUsd }),
     ...(value.usageCursorList.length === 0 ? {} : { usageCursors: [...value.usageCursorList] }),
     ...(state.pricingVersion === undefined ? {} : { pricingVersion: state.pricingVersion }),
+    ...(state.modelFailure === undefined ? {} : { modelFailure: state.modelFailure }),
   }
 }
 

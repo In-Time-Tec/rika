@@ -168,7 +168,13 @@ export const isExpandableUnit: {
   (model: Model, unit: TranscriptUnit): boolean
   (unit: TranscriptUnit): (model: Model) => boolean
 } = Function.dual(2, (model: Model, unit: TranscriptUnit): boolean => {
-  if (unit.kind !== "tool") return unit.kind === "reasoning" || unit.kind === "diff" || unit.kind === "childAgent"
+  if (unit.kind !== "tool") {
+    if (unit.kind === "block") {
+      const block = model.blocks[unit.block] as TranscriptBlock
+      return block._tag === "Error" && block.detail.length > 0
+    }
+    return unit.kind === "reasoning" || unit.kind === "diff" || unit.kind === "childAgent"
+  }
   if ((unit.children?.length ?? 0) > 0 || unit.agentResponse !== undefined) return true
   if (unit.group === "explore" || unit.group === "edit" || (unit.group === "shell" && unit.blocks.length > 1))
     return true

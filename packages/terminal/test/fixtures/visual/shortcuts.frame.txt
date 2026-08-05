@@ -11,7 +11,7 @@
 │ Ctrl+S switch modes             Ctrl+Y context & usage                       │
 │ Ctrl+G edit in $EDITOR          Opt+T toggle file tree                       │
 │ @ / @@ mention files/threads    Tab/Shift+Tab navigate messages              │
-│ ? toggle this help                                                           │
+│ D toggle details                ? toggle this help                           │
 │                                                                              │
 │ Sidebar                                                                      │
 │ Opt+S toggle changed files                                                   │

@@ -57,7 +57,10 @@ const shortcutRows: ReadonlyArray<ReadonlyArray<readonly [string, string]>> = [
     ["@ / @@", "mention files/threads"],
     ["Tab/Shift+Tab", "navigate messages"],
   ],
-  [["?", "toggle this help"]],
+  [
+    ["D", "toggle details"],
+    ["?", "toggle this help"],
+  ],
 ]
 
 const sidebarShortcutRows: ReadonlyArray<readonly [string, string]> = [

@@ -363,8 +363,18 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     const text = wrapTextToWidth(block.text, transcriptWrapWidth(model.width)).join("\n")
     append(selected ? bold(fg(colors.blue)(text)) : dim(italic(fg(colors.text)(text))))
   }
-  const renderPlainBlock = (index: number) => {
-    renderPlainBody(model, model.blocks[index] as TranscriptBlock, transcriptWrapWidth(model.width), append)
+  const renderPlainBlock = (index: number, expanded: boolean) => {
+    const block = model.blocks[index] as TranscriptBlock
+    const width = transcriptWrapWidth(model.width)
+    if (block._tag === "Error" && block.detail.length > 0) {
+      const turn = block.turnId === undefined ? "" : ` · Turn ${block.turnId}`
+      append(fg(colors.red)(`✖ ERROR: ${block.title}${turn}${expanded ? " ▾" : " ▸"}`))
+      if (expanded) append(fg(colors.red)(`\n${wrapBodyText(block.detail, width, "  ")}`))
+      if (block.recovery !== undefined)
+        append(fg(colors.red)(`\n${wrapBodyText(`Next: ${block.recovery}`, width, "  ")}`))
+      return
+    }
+    renderPlainBody(model, block, width, append)
   }
   const isUnitVisible = (unit: TranscriptUnit): boolean =>
     unit.kind !== "reasoning" || rowExpanded(transcriptUnitId(model, unit))
@@ -389,7 +399,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     else if (unit.kind === "childAgent")
       renderChildAgentUnitBody(model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "ChildAgent" }>, expanded)
     else if (unit.kind === "diff") renderDiffUnitBody(unit.block, selected, expanded)
-    else if (unit.kind === "block") renderPlainBlock(unit.block)
+    else if (unit.kind === "block") renderPlainBlock(unit.block, expanded)
     else if (unit.children !== undefined || unit.agentResponse !== undefined) {
       renderOtherToolBody(
         toolUnitsFor(model, unit.blocks)[0]!,

@@ -89,6 +89,11 @@ const failedUsage = (event: Extract<RunEvent.RunEvent, { readonly _tag: "ModelAt
   ...(event.providerUsage?.totalTokens === undefined ? {} : { total_tokens: event.providerUsage.totalTokens }),
   category: event.category,
   classification: event.classification,
+  disposition: event.disposition,
+  ...(event.provider === undefined ? {} : { provider: event.provider }),
+  ...(event.model === undefined ? {} : { model: event.model }),
+  ...(event.registrationKey === undefined ? {} : { registration_key: event.registrationKey }),
+  ...(event.candidate === undefined ? {} : { candidate: event.candidate }),
 })
 
 const projectModelPart = (
