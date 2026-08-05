@@ -3,7 +3,6 @@ import type { ModelRoute } from "../model-routing/model-route"
 import type { ConfigurationSettings } from "./configuration-settings"
 
 export interface ModelAliasInput {
-  readonly base?: string
   readonly preset?: string
   readonly provider: ModelRoute.ProviderId
   readonly candidates: ReadonlyArray<string>
@@ -66,5 +65,3 @@ export interface ConfigurationSettingsInput {
     readonly providers: Readonly<Record<string, { readonly apiKey: string }>>
   }
 }
-
-export type SettingsInput = ConfigurationSettingsInput

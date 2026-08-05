@@ -3,7 +3,7 @@ import * as ProductOperation from "@rika/product/product-operation"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as ResidentService from "@rika/product/resident-service"
+import * as ServerService from "@rika/product/server-service"
 import { resolveProfileDataPaths } from "@rika/configuration/profile-data-paths"
 import { create as createTui, probeNativeAsset } from "@rika/terminal/opentui-surface"
 import type { Model } from "@rika/terminal/terminal-state"
@@ -14,7 +14,7 @@ import { Command } from "effect/unstable/cli"
 import { command, version } from "../../command/root/rika-command"
 import { interactiveTui } from "./interactive-process-loop"
 import { relaunchArguments } from "../../release/relaunch-argument"
-import { layer as residentLayer } from "../../transport/client/resident-client-transport"
+import { layer as serverLayer } from "../../transport/client/server-client-transport"
 import { globalPaths, workspacePaths } from "@rika/configuration/configuration-paths"
 import { provideLayerScoped } from "./process-layer"
 import { makeDispatcherLayer } from "./process-startup-dispatcher"
@@ -49,21 +49,20 @@ export const start = () => {
   }
   const environment = Effect.runSync(
     Config.all({
-      hostDataRoot: Config.option(Config.string("RIKA_INTERNAL_RESIDENT_DATA_ROOT")),
+      hostDataRoot: Config.option(Config.string("RIKA_INTERNAL_SERVER_DATA_ROOT")),
       home: Config.option(Config.string("HOME")),
       database: Config.option(Config.string("RIKA_DATABASE")),
-      executionDatabase: Config.option(Config.string("RIKA_EXECUTION_DATABASE")),
       visual: Config.option(Config.string("VISUAL")),
       editor: Config.option(Config.string("EDITOR")),
       testModelResponse: Config.option(Config.string("RIKA_TEST_MODEL_RESPONSE")),
       testModelScript: Config.option(Config.string("RIKA_TEST_MODEL_SCRIPT")),
       testMediaAnalyzerResponse: Config.option(Config.string("RIKA_TEST_MEDIA_ANALYZER_RESPONSE")),
       testMediaAnalyzerError: Config.option(Config.string("RIKA_TEST_MEDIA_ANALYZER_ERROR")),
-      residentProfile: Config.option(Config.string("RIKA_INTERNAL_RESIDENT_PROFILE")),
-      residentGrace: Config.option(Config.string("RIKA_INTERNAL_RESIDENT_GRACE")),
+      serverProfile: Config.option(Config.string("RIKA_INTERNAL_SERVER_PROFILE")),
+      serverGrace: Config.option(Config.string("RIKA_INTERNAL_SERVER_GRACE")),
       recoveryAbandon: Config.option(Config.string("RIKA_INTERNAL_RECOVERY_ABANDON")),
-      residentStartupHold: Config.option(Config.string("RIKA_INTERNAL_RESIDENT_STARTUP_HOLD")),
-      residentHost: Config.option(Config.string("RIKA_INTERNAL_RESIDENT_HOST")),
+      serverStartupHold: Config.option(Config.string("RIKA_INTERNAL_SERVER_STARTUP_HOLD")),
+      serverHost: Config.option(Config.string("RIKA_INTERNAL_SERVER_HOST")),
       runtimeRestarted: Config.option(Config.string("RIKA_INTERNAL_RUNTIME_RESTARTED")),
       restartThread: Config.option(Config.string("RIKA_INTERNAL_RESTART_THREAD")),
       launcherExecutable: Config.option(Config.string("RIKA_INTERNAL_LAUNCHER_EXECUTABLE")),
@@ -80,10 +79,8 @@ export const start = () => {
     home,
     hostDataRoot,
     productDatabase: environment.database._tag === "Some" ? environment.database.value : undefined,
-    executionDatabase: environment.executionDatabase._tag === "Some" ? environment.executionDatabase.value : undefined,
   })
   const database = paths.database
-  const executionDatabase = paths.executionDatabase
   const globalLayout = globalPaths(home)
   const workspaceLayout = workspacePaths(process.cwd())
   const globalConfig = globalLayout.settings
@@ -91,18 +88,17 @@ export const start = () => {
   let editor: string | undefined
   if (environment.visual._tag === "Some") editor = environment.visual.value
   else if (environment.editor._tag === "Some") editor = environment.editor.value
-  const residentRuntime = import.meta.path.startsWith("/$bunfs/")
-    ? { executable: join(dirname(process.execPath), ".rika-resident"), arguments: [] }
-    : { executable: process.execPath, arguments: [join(import.meta.dir, "..", "..", "resident-main.ts")] }
+  const serverRuntime = import.meta.path.startsWith("/$bunfs/")
+    ? { executable: join(dirname(process.execPath), ".rika-server"), arguments: [] }
+    : { executable: process.execPath, arguments: [join(import.meta.dir, "..", "..", "server-main.ts")] }
   let clientModeRoutes: ModeRoutes | undefined
   const clientOwnedInteractiveFunction = interactiveTui({ editor, modeRoutes: () => clientModeRoutes })
 
   const dispatcherLayer = makeDispatcherLayer({
     database,
-    executionDatabase,
     globalConfig,
     workspaceConfig,
-    residentRuntime,
+    serverRuntime,
     environment,
     restartThreadId,
     runtimeRestarted,
@@ -126,7 +122,7 @@ export const start = () => {
         BunServices.layer,
         BunCrypto.layer,
         FetchHttpClient.layer,
-        dispatcherLayer.pipe(Layer.provide(residentLayer)),
+        dispatcherLayer.pipe(Layer.provide(serverLayer)),
       ),
     ),
   )
@@ -163,7 +159,7 @@ export const start = () => {
           return onExit(2)
         }
       }
-      if (runtimeRestartRequest !== undefined) return onExit(ResidentService.ServiceRuntime.runtimeRestartExitCode)
+      if (runtimeRestartRequest !== undefined) return onExit(ServerService.ServiceRuntime.runtimeRestartExitCode)
       Runtime.defaultTeardown(exit, onExit)
     },
   })

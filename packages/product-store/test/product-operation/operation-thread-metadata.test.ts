@@ -4,7 +4,7 @@ import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
-import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { Catalog as ToolCatalog } from "@rika/coding-tools/coding-tool-catalog"
 import { Effect, Layer, Ref, Schema } from "effect"
 import { TestConsole } from "effect/testing"
@@ -30,7 +30,7 @@ describe("Operation", () => {
         productLayer({
           repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
           turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-          backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+          backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
           defaultWorkspace: "/work",
           makeThreadId: nextId.pipe(Effect.map(Thread.ThreadId.make)),
           makeTurnId: Effect.succeed(Turn.TurnId.make("turn-a")),

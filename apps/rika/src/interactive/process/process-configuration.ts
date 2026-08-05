@@ -32,7 +32,7 @@ export const failureKind = (cause: Cause.Cause<unknown>) => {
 }
 
 const withClientWorkspaceImpl = (input: ProductOperation.Input, workspace: string): ProductOperation.Input => {
-  if (input._tag === "Interactive" || input._tag === "Run" || input._tag === "Review")
+  if (input._tag === "Interactive" || input._tag === "Run")
     return { ...input, clientWorkspace: workspace, workspace: input.workspace ?? workspace }
   if (
     input._tag === "Skill" ||
@@ -41,8 +41,7 @@ const withClientWorkspaceImpl = (input: ProductOperation.Input, workspace: strin
     input._tag === "Config" ||
     input._tag === "Auth" ||
     input._tag === "Doctor" ||
-    input._tag === "Thread" ||
-    input._tag === "Workflow"
+    input._tag === "Thread"
   )
     return { ...input, clientWorkspace: workspace }
   return input

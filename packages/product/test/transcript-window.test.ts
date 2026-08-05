@@ -30,7 +30,6 @@ const turn = (index: number): Turn.AgentExecutionTurn => ({
   lineage: { _tag: "Original" },
   executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
   status: "completed",
-  stopIntent: "none",
   createdAt: index,
   updatedAt: index,
 })

@@ -78,8 +78,7 @@ const program = Effect.scoped(
     const environment = {
       HOME: home,
       RIKA_DATABASE: path.join(state, "rika.db"),
-      RIKA_EXECUTION_DATABASE: path.join(state, "execution.db"),
-      RIKA_INTERNAL_RESIDENT_GRACE: "0",
+      RIKA_INTERNAL_SERVER_GRACE: "0",
       RIKA_TEST_MODEL_SCRIPT: grepScript,
     }
     const output = (

@@ -1,13 +1,65 @@
 import * as Turn from "@rika/product/turn-record"
+import * as Thread from "@rika/product/thread-record"
+import * as ThreadRepository from "@rika/product/thread-repository"
+import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
-import * as ExecutionBackend from "@rika/product/execution-service"
-import { followChildRun, observeChildRun } from "./child-run-follower"
+import * as ResolvedContext from "../../context/context-resolution-service"
+import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"
+import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionStatus from "@rika/product/execution-status"
+import { observeRootTurn, watchRootTurn } from "./root-turn-watcher"
 import { Effect, Clock } from "effect"
+import { OperationError } from "../operation-error"
+import type * as RootTurnOwner from "../../thread/queue/root-turn-owner"
 import type { InteractiveEvent } from "./interactive-event"
 
 export const ignoreInteractiveEvent = (_event: InteractiveEvent) => {}
 
-export const makeInteractiveFollowing = (input: any): any => {
+export interface InteractiveFollowingInput {
+  readonly rootTurnOwner: RootTurnOwner.Interface
+  readonly ensureIngest: (threadId: Thread.ThreadId, turnId: Turn.TurnId) => Effect.Effect<void, OperationError, never>
+  readonly deliverResultEvents: (
+    turnId: Turn.TurnId,
+    events: ReadonlyArray<ExecutionEvent.Event>,
+    delivered?: ReadonlySet<string>,
+  ) => void
+  readonly setTurnStatus: (
+    id: Turn.TurnId,
+    status: ExecutionStatus.Status,
+    now: number,
+    responseArrived?: boolean,
+  ) => Effect.Effect<
+    Turn.Turn,
+    OperationError | ThreadSummaryRepository.RepositoryError | TurnRepository.RepositoryError,
+    ThreadSummaryRepository.Service | TurnRepository.Service
+  >
+  readonly projectExecutionResult: (
+    threadId: Thread.ThreadId,
+    result: ExecutionEvent.Result,
+  ) => Effect.Effect<void, OperationError | ThreadSummaryRepository.RepositoryError, ThreadSummaryRepository.Service>
+  readonly settleThread: (
+    thread: Thread.Thread,
+    dispatch: (event: InteractiveEvent) => void,
+  ) => Effect.Effect<
+    void,
+    never,
+    | ResolvedContext.Service
+    | ThreadRepository.Service
+    | TurnRepository.Service
+    | ThreadSummaryRepository.Service
+    | ExecutionExtensions.ExecutionExtensionService
+  >
+  readonly threadForTurn: (
+    turn: Turn.Turn,
+  ) => Effect.Effect<Thread.Thread, OperationError | ThreadRepository.RepositoryError, never>
+  readonly claimTurnObserver: (
+    turnId: Turn.TurnId,
+    expectedStatus?: ExecutionStatus.Status,
+  ) => Effect.Effect<boolean, TurnRepository.RepositoryError, never>
+  readonly releaseTurnObserver: (turnId: Turn.TurnId, notify?: boolean) => Effect.Effect<void, never, never>
+}
+
+export const makeInteractiveFollowing = (input: InteractiveFollowingInput) => {
   const {
     rootTurnOwner,
     ensureIngest,
@@ -16,21 +68,17 @@ export const makeInteractiveFollowing = (input: any): any => {
     projectExecutionResult,
     settleThread,
     threadForTurn,
-    titleThread,
     claimTurnObserver,
     releaseTurnObserver,
-    emit,
   } = input
-  const followClaimedTurn = Effect.fn("ProductOperation.interactive.followClaimedTurn")(function* (
+  const watchClaimedTurn = Effect.fn("ProductOperation.interactive.watchClaimedTurn")(function* (
     turnId: Turn.TurnId,
     dispatch: (event: InteractiveEvent) => void,
   ) {
     const turns = (yield* TurnRepository.Service) as TurnRepository.Interface
-    const backend = yield* ExecutionBackend.Service
-    return yield* followChildRun({
+    return yield* watchRootTurn({
       turnId,
       turns,
-      backend,
       owner: rootTurnOwner,
       ensureIngest,
       deliverResultEvents,
@@ -38,9 +86,7 @@ export const makeInteractiveFollowing = (input: any): any => {
       projectExecutionResult,
       settleThread,
       threadForTurn,
-      titleThread,
       dispatch,
-      emit,
       now: Clock.currentTimeMillis,
     })
   })
@@ -48,14 +94,12 @@ export const makeInteractiveFollowing = (input: any): any => {
     turn: Turn.AgentExecutionTurn,
     dispatch: (event: InteractiveEvent) => void,
   ) {
-    const backend = yield* ExecutionBackend.Service
-    return yield* observeChildRun({
+    return yield* observeRootTurn({
       turn,
-      backend,
       claim: claimTurnObserver,
       release: releaseTurnObserver,
-      follow: followClaimedTurn(turn.id, dispatch),
+      watch: watchClaimedTurn(turn.id, dispatch),
     })
   })
-  return { followClaimedTurn, observeTurn }
+  return { watchClaimedTurn, observeTurn }
 }

@@ -1,4 +1,5 @@
 import { expect, it } from "vitest"
+import { homedir } from "node:os"
 import { renderGoodbye } from "../src/interactive/input/goodbye-message"
 
 const esc = String.fromCharCode(27)
@@ -13,7 +14,7 @@ const cellColor = (text: string, glyph: string): readonly [number, number, numbe
 it("renders the Amp-parity shaded mark with title, workspace, and continue command", () => {
   const output = renderGoodbye({
     mode: "medium",
-    workspace: "/Users/dallen.pyrah/projects/Rika",
+    workspace: `${homedir()}/projects/Rika`,
     threadId: "T-abc123",
     threadTitle: "New coding session",
   })

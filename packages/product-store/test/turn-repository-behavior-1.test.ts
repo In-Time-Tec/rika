@@ -4,22 +4,6 @@ import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionStatus from "@rika/product/execution-status"
 import { expect, it, Thread, TurnRepository, Turn, Effect } from "./turn-repository-behavior-support"
 import { create, provideLayer } from "./turn-repository-behavior-setup"
-import { stopIntentContract } from "./turn-repository-behavior-contract"
-
-it.effect("a terminal turn cannot acquire a stop intent", () =>
-  Effect.gen(function* () {
-    const repository = yield* TurnRepository.Service
-    const turn = yield* create(repository, {
-      id: Turn.TurnId.make("done-turn"),
-      threadId: Thread.ThreadId.make("done-thread"),
-      prompt: "already done",
-      now: 1,
-    })
-    yield* repository.setStatus(turn.id, "completed", undefined, 2)
-    expect(yield* repository.requestStop(turn.id, 3)).toBeUndefined()
-    expect((yield* repository.get(turn.id))?.stopIntent).toBe("none")
-  }).pipe(provideLayer(TurnRepository.memoryLayer())),
-)
 
 it.effect("memory turns preserve structured image prompt parts", () =>
   Effect.gen(function* () {
@@ -57,7 +41,7 @@ it.effect("memory turns snapshot attachments and execution pins at the repositor
       executionRoute,
       now: 1,
     })
-    const mutableRoute = executionRoute.main as { model: string }
+    const mutableRoute = executionRoute.main.candidates[0] as { model: string }
     const mutableCreatedParts = created.promptParts as Array<ExecutionRequest.PromptPart> | undefined
     promptParts[0] = { type: "text", text: "mutated" }
     mutableRoute.model = "mutated"
@@ -68,32 +52,8 @@ it.effect("memory turns snapshot attachments and execution pins at the repositor
         { type: "text", text: "inspect " },
         { type: "image", data: "b3JpZ2luYWw=", filename: "original.png" },
       ],
-      executionRoute: { mode: "high", main: { model: "test" } },
+      executionRoute: { mode: "high", main: { candidates: [{ model: "test" }] } },
     })
-  }).pipe(provideLayer(TurnRepository.memoryLayer())),
-)
-
-it.effect("memory turns preserve immutable execution extension pins", () =>
-  Effect.gen(function* () {
-    const repository = yield* TurnRepository.Service
-    const created = yield* create(repository, {
-      id: Turn.TurnId.make("turn-pin"),
-      threadId: Thread.ThreadId.make("thread-pin"),
-      prompt: "pin",
-      now: 1,
-    })
-    const pin = {
-      generation: "generation-a",
-      sourceDigest: "source-a",
-      configFingerprint: "config-a",
-      toolSchemaDigest: "tools-a",
-      mcpFingerprint: "mcp-a",
-      resolvedContextDigest: "context-a",
-    }
-    expect((yield* repository.setExtensionPin(created.id, pin)).extensionPin).toEqual(pin)
-    expect(
-      (yield* Effect.result(repository.setExtensionPin(created.id, { ...pin, generation: "generation-b" })))._tag,
-    ).toBe("Failure")
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
@@ -111,23 +71,32 @@ it.effect("memory turns pin the execution route at creation", () =>
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
-it.effect("memory turns preserve review fan-out route ownership while nonterminal", () =>
+it.effect("memory turns attach one canonical execution link without allowing replacement", () =>
   Effect.gen(function* () {
     const repository = yield* TurnRepository.Service
     const created = yield* create(repository, {
-      id: Turn.TurnId.make("review-owner"),
-      threadId: Thread.ThreadId.make("review-thread"),
-      prompt: "Review workspace changes",
+      id: Turn.TurnId.make("linked-turn"),
+      threadId: Thread.ThreadId.make("linked-thread"),
+      prompt: "Run linked work",
       executionRoute: ExecutionRouteSnapshot.testExecutionRoute("medium"),
-      reviewFanOutId: "review:review-owner",
       now: 1,
     })
-    yield* repository.setStatus(created.id, "running", undefined, 2)
+    const link = { runId: "run-1", turnId: "baton-turn-1", threadId: "baton-thread-1" }
+    yield* repository.attachExecutionLink(created.id, link, 2)
+    yield* repository.attachExecutionLink(created.id, link, 3)
     expect(yield* repository.get(created.id)).toMatchObject({
-      status: "running",
-      reviewFanOutId: "review:review-owner",
+      executionLink: link,
+      updatedAt: 2,
     })
-    expect((yield* repository.listNonterminal).map((turn) => turn.id)).toContain(created.id)
+    expect(
+      yield* Effect.result(
+        repository.attachExecutionLink(
+          created.id,
+          { runId: "run-2", turnId: "baton-turn-2", threadId: "baton-thread-2" },
+          4,
+        ),
+      ),
+    ).toMatchObject({ _tag: "Failure", failure: { _tag: "TurnRepositoryError" } })
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
@@ -146,12 +115,12 @@ it.effect("memory turns preserve deterministic identity and status", () =>
       prompt: "next",
       now: 1,
     })
-    const completed = yield* repository.setStatus(created.id, "completed", "cursor-a", 2)
-    const failed = yield* repository.setStatus(created.id, "failed", undefined, 3)
+    const completed = yield* repository.setStatus(created.id, "completed", 2)
+    const failed = yield* repository.setStatus(created.id, "failed", 3)
     const listed = yield* repository.list(created.threadId)
     expect(created.status).toBe("accepted")
-    expect(completed.lastCursor).toBe("cursor-a")
-    expect(failed).toMatchObject({ status: "completed", lastCursor: "cursor-a", updatedAt: 2 })
+    expect(completed).toMatchObject({ status: "completed", updatedAt: 2 })
+    expect(failed).toMatchObject({ status: "completed", updatedAt: 2 })
     expect(listed.map((turn) => turn.id)).toEqual([Turn.TurnId.make("turn-a"), Turn.TurnId.make("turn-b")])
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
@@ -190,7 +159,7 @@ it.effect("memory lists recent nonqueued turns independently of queue depth", ()
         prompt: `prompt ${index}`,
         now: index + 1,
       })
-      if (index < 5) yield* repository.setStatus(turn.id, "completed", undefined, index + 1)
+      if (index < 5) yield* repository.setStatus(turn.id, "completed", index + 1)
     }
     for (let index = 0; index < 140; index += 1)
       yield* create(repository, {
@@ -218,12 +187,12 @@ it.effect("memory terminal status is immutable against every stale lifecycle upd
       prompt: "done",
       now: 1,
     })
-    yield* repository.setStatus(created.id, "completed", "terminal-cursor", 2)
+    yield* repository.setStatus(created.id, "completed", 2)
     for (const [index, staleStatus] of ExecutionStatus.Status.literals
       .filter((candidate) => candidate !== "queued")
       .entries()) {
-      const unchanged = yield* repository.setStatus(created.id, staleStatus, `stale-${staleStatus}`, index + 3)
-      expect(unchanged).toMatchObject({ status: "completed", lastCursor: "terminal-cursor", updatedAt: 2 })
+      const unchanged = yield* repository.setStatus(created.id, staleStatus, index + 3)
+      expect(unchanged).toMatchObject({ status: "completed", updatedAt: 2 })
     }
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
@@ -255,26 +224,6 @@ it.effect("memory accepted start and cancellation claims are mutually exclusive"
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
-it.effect("memory cursor repair compares status and cursor without changing activity time", () =>
-  Effect.gen(function* () {
-    const repository = yield* TurnRepository.Service
-    const created = yield* create(repository, {
-      id: Turn.TurnId.make("terminal-repair"),
-      threadId: Thread.ThreadId.make("terminal-repair-thread"),
-      prompt: "repair",
-      now: 1,
-    })
-    yield* repository.setStatus(created.id, "completed", "cursor-a", 2)
-    expect(yield* repository.repairCursor(created.id, "completed", "stale", "cursor-b")).toBe(false)
-    expect(yield* repository.repairCursor(created.id, "completed", "cursor-a", "cursor-b")).toBe(true)
-    expect(yield* repository.get(created.id)).toMatchObject({
-      status: "completed",
-      lastCursor: "cursor-b",
-      updatedAt: 2,
-    })
-  }).pipe(provideLayer(TurnRepository.memoryLayer())),
-)
-
 it.effect("memory turns reject duplicates and missing updates", () =>
   Effect.gen(function* () {
     const repository = yield* TurnRepository.Service
@@ -286,7 +235,7 @@ it.effect("memory turns reject duplicates and missing updates", () =>
     }
     yield* create(repository, input)
     const duplicate = yield* Effect.result(create(repository, input))
-    const missing = yield* Effect.result(repository.setStatus(Turn.TurnId.make("missing"), "failed", undefined, 2))
+    const missing = yield* Effect.result(repository.setStatus(Turn.TurnId.make("missing"), "failed", 2))
     expect(duplicate._tag).toBe("Failure")
     expect(missing._tag).toBe("Failure")
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
@@ -318,7 +267,7 @@ it.effect("memory submissions queue while active and promote one in FIFO order",
     expect((yield* repository.findActive(threadId))?.id).toBe(first.id)
     expect((yield* repository.readQueue(threadId)).turns.map((turn) => turn.id)).toEqual([third.id, second.id])
     expect(yield* repository.claimNextQueued(threadId, 3)).toBeUndefined()
-    yield* repository.setStatus(first.id, "completed", undefined, 3)
+    yield* repository.setStatus(first.id, "completed", 3)
     expect((yield* repository.claimNextQueued(threadId, 4))?.turn.id).toBe(third.id)
     expect(yield* repository.claimNextQueued(threadId, 4)).toBeUndefined()
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
@@ -348,7 +297,6 @@ it.effect("memory claims stay queued and edit or dequeue invalidate preparation"
         author: { _tag: "Human" },
         lineage: { _tag: "Original" },
         status: "queued",
-        stopIntent: "none",
         createdAt: 1,
         updatedAt: 1,
       },
@@ -362,7 +310,7 @@ it.effect("memory claims stay queued and edit or dequeue invalidate preparation"
     expect(yield* repository.claimNextQueued(threadId, 3)).toBeUndefined()
 
     yield* repository.editQueued(queued.id, "after", 4)
-    expect(yield* repository.finishQueuedClaim(first, "running", undefined, undefined, 5)).toEqual({
+    expect(yield* repository.finishQueuedClaim(first, "running", 5)).toEqual({
       _tag: "Unavailable",
     })
     const second = yield* repository.claimNextQueued(threadId, 6)
@@ -372,13 +320,13 @@ it.effect("memory claims stay queued and edit or dequeue invalidate preparation"
     const released = yield* repository.claimNextQueued(threadId, 6)
     if (released === undefined) return yield* Effect.die("Missing released claim")
     expect(released.token).not.toBe(second.token)
-    const finished = yield* repository.finishQueuedClaim(released, "running", "cursor", undefined, 7)
+    const finished = yield* repository.finishQueuedClaim(released, "running", 7)
     expect(finished).toMatchObject({
       _tag: "Transitioned",
-      turn: { status: "running", prompt: "after", lastCursor: "cursor" },
+      turn: { status: "running", prompt: "after" },
       queue: { queuedCount: 0, change: { _tag: "Removed", turnId: queued.id } },
     })
-    yield* repository.setStatus(queued.id, "completed", "cursor", 8)
+    yield* repository.setStatus(queued.id, "completed", 8)
 
     const removed = yield* repository.copy(
       { ...queued, id: Turn.TurnId.make("removed"), prompt: "removed", createdAt: 9, updatedAt: 9 },
@@ -387,13 +335,13 @@ it.effect("memory claims stay queued and edit or dequeue invalidate preparation"
     const third = yield* repository.claimNextQueued(threadId, 10)
     if (third === undefined) return yield* Effect.die("Missing dequeue claim")
     yield* repository.dequeue(removed.id)
-    expect(yield* repository.finishQueuedClaim(third, "failed", undefined, undefined, 11)).toEqual({
+    expect(yield* repository.finishQueuedClaim(third, "failed", 11)).toEqual({
       _tag: "Unavailable",
     })
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
-it.effect("memory queue revisions and wake generations stay atomic", () =>
+it.effect("memory queue revisions stay atomic", () =>
   Effect.gen(function* () {
     const repository = yield* TurnRepository.Service
     const threadId = Thread.ThreadId.make("thread-revisions")
@@ -419,14 +367,6 @@ it.effect("memory queue revisions and wake generations stay atomic", () =>
     expect(first.queue).toMatchObject({ revision: 1, queuedCount: 1, becameNonempty: true })
     expect(second.queue).toMatchObject({ revision: 2, queuedCount: 2, becameNonempty: false })
     expect(yield* repository.readQueue(threadId)).toMatchObject({ revision: 2, queuedCount: 2 })
-
-    const wake = yield* repository.requestQueueWake(threadId)
-    expect(wake).toEqual({ threadId, generation: 1, queueRevision: 2 })
-    expect(yield* repository.requestQueueWake(threadId)).toEqual(wake)
-    expect(yield* repository.consumeQueueWake(threadId, 2)).toBe(false)
-    expect(yield* repository.consumeQueueWake(threadId, 1)).toBe(true)
-    expect(yield* repository.consumeQueueWake(threadId, 1)).toBe(false)
-    expect(yield* repository.requestQueueWake(threadId)).toEqual({ threadId, generation: 2, queueRevision: 2 })
 
     const edited = yield* repository.editQueued(first.id, "edited", 4)
     expect(edited.queue).toMatchObject({ revision: 3, queuedCount: 2, change: { _tag: "Updated" } })
@@ -469,5 +409,3 @@ it.effect("memory atomically takes a queued turn and reports a typed promotion c
     })
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
-
-stopIntentContract("memory", TurnRepository.memoryLayer())

@@ -5,8 +5,6 @@ import * as UsageRepository from "@rika/product/usage-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as ExecutionEvent from "@rika/product/execution-event"
-import * as ExecutionIdentifier from "@rika/product/execution-identifier"
-import * as ExecutionStatus from "@rika/product/execution-status"
 import * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
 import * as UsageProjection from "../../usage/usage-projection"
 import * as UsageSnapshot from "../../usage/usage-snapshot"
@@ -14,8 +12,11 @@ import * as UsageCodec from "../../usage/usage-snapshot-codec"
 import { persistedThreadUsage } from "../interactive/interactive-session-transcript-runtime"
 import { readThreadContext as readAuthoritativeThreadContext } from "../interactive/interactive-thread-context"
 import type { Commit, Refold } from "../../execution/ingest/execution-ingest-commit"
-import { Cause, Effect, Queue, Result, Scope } from "effect"
+import { Cause, Effect, FiberSet, Queue, Result, Scope } from "effect"
 import { failureKind, operationError, OperationError } from "../operation-error"
+import type { InteractiveEvent } from "../interactive/interactive-event"
+import type { InteractiveDependencyContext } from "../interactive/interactive-session-runtime"
+import { applyGeneratedTitle } from "./product-operation-ingest-title"
 
 const undeliveredEventsImpl = (
   events: ReadonlyArray<ExecutionEvent.Event>,
@@ -28,17 +29,16 @@ export const undeliveredEvents: {
   (arg0: ReadonlyArray<ExecutionEvent.Event>, arg1: ReadonlySet<string>): ReturnType<typeof undeliveredEventsImpl>
 } = Function.dual(2, undeliveredEventsImpl)
 
-interface ProductOperationIngest {
+export interface ProductOperationIngest {
   readonly executionIngest: ExecutionIngest.Interface
-  readonly ensureIngest: (threadId: string, turnId: string) => Effect.Effect<void, OperationError>
-  readonly awaitIngestSettled: (turnId: string) => Effect.Effect<void, OperationError>
-  readonly flushIngest: (turnId: string) => Effect.Effect<void, OperationError>
+  readonly ensureIngest: (threadId: Thread.ThreadId, turnId: Turn.TurnId) => Effect.Effect<void, OperationError, never>
+  readonly awaitIngestSettled: (turnId: Turn.TurnId) => Effect.Effect<void, OperationError, never>
+  readonly flushIngest: (turnId: Turn.TurnId) => Effect.Effect<void, OperationError, never>
   readonly deliverResultEvents: (
-    turnId: string,
+    turnId: Turn.TurnId,
     events: ReadonlyArray<ExecutionEvent.Event>,
     delivered?: ReadonlySet<string>,
   ) => void
-  readonly titleExecutionId: (turnId: Turn.TurnId) => string
   readonly commitUsageSource: (
     sourceId: string,
     threadId: string,
@@ -52,7 +52,20 @@ interface ProductOperationIngest {
   ) => Effect.Effect<import("../interactive/interactive-thread-context").ThreadContext, Error>
 }
 
-export const makeProductOperationIngest = (input: any): Effect.Effect<ProductOperationIngest, Error, never> =>
+export interface ProductOperationIngestInput {
+  readonly acquiredBackend: import("@rika/product/execution-gateway").Interface
+  readonly usageRepository: UsageRepository.Interface
+  readonly ownerScope: Scope.Scope
+  readonly publishInteractiveActivity: (origin: number, event: InteractiveEvent) => InteractiveEvent
+  readonly ingestFailureMessage: string
+  readonly transcripts: TranscriptRepository.Interface
+  readonly turns: TurnRepository.Interface
+  readonly dependencyContext: InteractiveDependencyContext
+}
+
+export const makeProductOperationIngest = (
+  input: ProductOperationIngestInput,
+): Effect.Effect<ProductOperationIngest, Error, never> =>
   Effect.gen(function* () {
     const {
       acquiredBackend: rawBackend,
@@ -62,11 +75,9 @@ export const makeProductOperationIngest = (input: any): Effect.Effect<ProductOpe
       ingestFailureMessage,
     } = input
     const ownerScope: Scope.Scope = rawOwnerScope
-    const acquiredBackend: import("@rika/product/execution-service").Interface = rawBackend
+    const acquiredBackend: import("@rika/product/execution-gateway").Interface = rawBackend
     const usageRepository: UsageRepository.Interface = rawUsageRepository
     const turns: TurnRepository.Interface = input.turns
-    const titleExecutionId = (turnId: Turn.TurnId) =>
-      ExecutionIdentifier.AgentDepth.childExecutionId(String(turnId), "title")
     const readThreadContext = (threadId: string) =>
       readAuthoritativeThreadContext({ threadId, turns, usage: usageRepository })
     const publishThreadUsage = Effect.fn("ProductOperation.publishThreadUsage")(function* (
@@ -172,37 +183,31 @@ export const makeProductOperationIngest = (input: any): Effect.Effect<ProductOpe
           refolding: next > 0,
         })
       },
-      onFailure: (failure: any) =>
+      onFailure: (failure) =>
         publishInteractiveActivity(0, {
           _tag: "ExecutionFailed",
           selectionEpoch: 0,
-          threadId: failure.threadId,
-          turnId: failure.turnId,
+          ...(failure.threadId === undefined ? {} : { threadId: Thread.ThreadId.make(failure.threadId) }),
+          ...(failure.turnId === undefined ? {} : { turnId: Turn.TurnId.make(failure.turnId) }),
           message: ingestFailureMessage,
         }),
     }).pipe(Effect.provideService(Scope.Scope, ownerScope))
+    const fork = yield* FiberSet.makeRuntime<never, void, never>().pipe(Effect.provideService(Scope.Scope, ownerScope))
+    const productIngest: ExecutionIngest.Interface = {
+      ...executionIngest,
+      deliver: (turnId, event) => {
+        applyGeneratedTitle(
+          { turns, dependencyContext: input.dependencyContext, publishInteractiveActivity, fork },
+          turnId,
+          event,
+        )
+        executionIngest.deliver(turnId, event)
+      },
+    }
     yield* Effect.forkIn(
       Effect.gen(function* () {
         while (true) {
           const commit = yield* Queue.take(usageCommits)
-          if (commit.refolded) {
-            const sourceId = titleExecutionId(commit.rootTurnId)
-            const inspection = yield* acquiredBackend.inspect(sourceId, ExecutionIdentifier.executionReference)
-            if (inspection !== undefined) {
-              if (!ExecutionStatus.isTerminalStatus(inspection.status))
-                return yield* operationError(`Title usage source ${sourceId} is nonterminal after root refold`)
-              const replay = yield* acquiredBackend.replay(sourceId, undefined, ExecutionIdentifier.executionReference)
-              if (replay.status !== inspection.status)
-                return yield* operationError(`Title usage source ${sourceId} has contradictory terminal status`)
-              yield* commitUsageSource(
-                sourceId,
-                String(commit.threadId),
-                String(commit.rootTurnId),
-                replay.events,
-                true,
-              )
-            }
-          }
           if (commit.usageChanged || commit.refolded)
             yield* commit.usageDegraded
               ? publishUnavailableThreadUsage(commit.threadId)
@@ -224,32 +229,27 @@ export const makeProductOperationIngest = (input: any): Effect.Effect<ProductOpe
       ),
       ownerScope,
     )
-    const ensureIngest = (threadId: any, turnId: any) =>
+    const ensureIngest = (threadId: Thread.ThreadId, turnId: Turn.TurnId) =>
       executionIngest
         .ensure({ threadId, turnId })
-        .pipe(Effect.mapError((failure: any) => operationError(String(failure.message), failure)))
-    const awaitIngestSettled = (turnId: any) =>
-      executionIngest
-        .settled(turnId)
-        .pipe(Effect.mapError((failure: any) => operationError(String(failure.message), failure)))
-    const flushIngest = (turnId: any) =>
-      executionIngest
-        .flush(turnId)
-        .pipe(Effect.mapError((failure: any) => operationError(String(failure.message), failure)))
+        .pipe(Effect.mapError((failure) => operationError(failure.message, failure)))
+    const awaitIngestSettled = (turnId: Turn.TurnId) =>
+      executionIngest.settled(turnId).pipe(Effect.mapError((failure) => operationError(failure.message, failure)))
+    const flushIngest = (turnId: Turn.TurnId) =>
+      executionIngest.flush(turnId).pipe(Effect.mapError((failure) => operationError(failure.message, failure)))
     const deliverResultEvents = (
-      turnId: any,
+      turnId: Turn.TurnId,
       events: ReadonlyArray<ExecutionEvent.Event>,
       delivered: ReadonlySet<string> = new Set(),
     ) => {
-      for (const event of undeliveredEvents(events, delivered)) executionIngest.deliver(turnId, event)
+      for (const event of undeliveredEvents(events, delivered)) productIngest.deliver(turnId, event)
     }
     return {
-      executionIngest,
+      executionIngest: productIngest,
       ensureIngest,
       awaitIngestSettled,
       flushIngest,
       deliverResultEvents,
-      titleExecutionId,
       commitUsageSource,
       publishThreadUsage,
       readThreadContext,

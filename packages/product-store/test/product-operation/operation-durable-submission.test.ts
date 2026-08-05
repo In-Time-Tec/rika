@@ -6,15 +6,12 @@ import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
-import * as ExecutionBackend from "@rika/product/execution-service"
-import * as ExecutionRequest from "@rika/product/execution-request"
-import * as ExecutionIdentifier from "@rika/product/execution-identifier"
-import * as ExecutionChildRun from "@rika/product/execution-child-run"
-import { Deferred, Effect, Layer, Ref } from "effect"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
+import { Deferred, Effect, Layer, Ref, Stream } from "effect"
 import * as ResolvedContext from "@rika/product/context-resolution-service"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { holdSession, openInteractiveSession, settleEvents } from "../support/operation-session-harness"
-import { executionStarted, backend } from "../support/operation-execution-fixtures"
+import { backend } from "../support/operation-execution-fixtures"
 
 describe("Operation", () => {
   it.effect("durably submits interactive prompts and projects completion", () =>
@@ -25,59 +22,27 @@ describe("Operation", () => {
       const events = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])
       const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
-      const startInputs = yield* Ref.make<ReadonlyArray<ExecutionRequest.StartInput>>([])
-      const childInputs = yield* Ref.make<ReadonlyArray<ExecutionChildRun.InvokeChildInput>>([])
-      const liveBackend = ExecutionBackend.Service.of({
+      const startInputs = yield* Ref.make<ReadonlyArray<ExecutionGateway.StartTurn>>([])
+      const liveBackend = ExecutionGateway.Service.of({
         ...backend,
-        invokeChild: (input) =>
-          Ref.update(childInputs, (all) => [...all, input]).pipe(Effect.as({ ...input, type: "accepted" as const })),
-        follow: (executionId, afterCursor, onEvent, reference) => {
-          if (executionId !== "child:turn-interactive:title")
-            return backend.follow!(executionId, afterCursor, onEvent, reference)
-          if (reference !== ExecutionIdentifier.executionReference)
-            return Effect.die(new Error("title execution addressed without the execution reference"))
-          return Effect.succeed({
-            turnId: executionId,
-            status: "completed" as const,
-            events: [
-              executionStarted(executionId),
-              {
-                executionId,
-                cursor: "title-a",
-                sequence: 1,
-                type: "model.output.completed" as const,
-                createdAt: 3,
-                text: "answer",
-              },
-              {
-                executionId,
-                cursor: "title-b",
-                sequence: 2,
-                type: "execution.completed" as const,
-                timestampSource: "server" as const,
-                createdAt: 4,
-              },
-            ],
-          })
-        },
-        start: (input) =>
-          Ref.update(startInputs, (all) => [...all, input]).pipe(
-            Effect.andThen(
-              backend.start(input).pipe(
-                Effect.tap((result) =>
-                  Effect.sync(() => {
-                    for (const event of result.events) input.onEvent?.(event)
-                  }),
-                ),
-              ),
-            ),
-          ),
+        startTurn: (input) =>
+          Ref.update(startInputs, (all) => [...all, input]).pipe(Effect.andThen(backend.startTurn(input))),
+        watchTurn: (link, cursor) =>
+          Stream.make({
+            executionId: "opaque-title-child",
+            childExecutionId: "opaque-title-child",
+            cursor: "cursor-title",
+            sequence: 0,
+            type: "thread.title.generated",
+            createdAt: 0,
+            data: { title: "\u001b Generated \n title ", invocation_id: "rika.thread-title" },
+          }).pipe(Stream.concat(backend.watchTurn(link, cursor))),
       })
       const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
-        backendLayer: Layer.succeed(ExecutionBackend.Service, liveBackend),
+        backendLayer: Layer.succeed(ExecutionGateway.Service, liveBackend),
         defaultWorkspace: "/work",
         makeThreadId: Effect.succeed(Thread.ThreadId.make("thread-interactive")),
         makeTurnId: Effect.succeed(Turn.TurnId.make("turn-interactive")),
@@ -99,7 +64,8 @@ describe("Operation", () => {
           )
         )
           yield* Effect.yieldNow
-        while (!(yield* Ref.get(events)).some((event) => event._tag === "ThreadTitled")) yield* Effect.yieldNow
+        while ((yield* repository.get(Thread.ThreadId.make("thread-interactive")))?.title !== "Generated title")
+          yield* Effect.yieldNow
       }).pipe(provideLayer(layer))
       const dispatched = yield* Ref.get(events)
       const transcript = dispatched.filter(
@@ -127,7 +93,6 @@ describe("Operation", () => {
             threadId: "thread-interactive",
             prompt: "exact prompt",
             status: "running",
-            stopIntent: "none",
           }),
         }),
       )
@@ -149,9 +114,9 @@ describe("Operation", () => {
             : [],
         ),
       ).toEqual([
-        [1, "turn-interactive", "cursor-started"],
-        [2, "turn-interactive", "cursor-a"],
-        [3, "turn-interactive", "cursor-b"],
+        [1, "turn-interactive-run", "cursor-started"],
+        [2, "turn-interactive-run", "cursor-a"],
+        [3, "turn-interactive-run", "cursor-b"],
       ])
       expect(transcript).toContainEqual(
         expect.objectContaining({
@@ -162,20 +127,19 @@ describe("Operation", () => {
           status: "completed",
         }),
       )
-      expect(transcript).toContainEqual(
-        expect.objectContaining({ _tag: "ThreadTitled", threadId: "thread-interactive", title: "answer" }),
-      )
-      expect(yield* Ref.get(childInputs)).toContainEqual({
-        parentTurnId: "turn-interactive",
-        childId: "title",
-        profile: "Title",
-        prompt: "exact prompt",
-      })
       expect(yield* turns.get(Turn.TurnId.make("turn-interactive"))).toMatchObject({
         prompt: "exact prompt",
         status: "completed",
-        stopIntent: "none",
-        lastCursor: "cursor-b",
+      })
+      expect(yield* Ref.get(startInputs)).toEqual([
+        expect.objectContaining({
+          titleIntent: { _tag: "GenerateThreadTitle", expectedTitle: "exact prompt" },
+        }),
+      ])
+      expect(dispatched).toContainEqual({
+        _tag: "ThreadTitled",
+        threadId: "thread-interactive",
+        title: "Generated title",
       })
     }),
   )
@@ -192,10 +156,11 @@ describe("Operation", () => {
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(
-          ExecutionBackend.Service,
-          ExecutionBackend.Service.of({
+          ExecutionGateway.Service,
+          ExecutionGateway.Service.of({
             ...backend,
-            start: (input) => Ref.update(starts, (count) => count + 1).pipe(Effect.andThen(backend.start(input))),
+            startTurn: (input) =>
+              Ref.update(starts, (count) => count + 1).pipe(Effect.andThen(backend.startTurn(input))),
           }),
         ),
         resolvedContextLayer: ResolvedContext.testLayer({ resolve: () => Effect.die("preparation failed") }),
@@ -232,33 +197,16 @@ describe("Operation", () => {
       const preparationEntered = yield* Deferred.make<void>()
       const releasePreparation = yield* Deferred.make<void>()
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
-      const cancellingBackend = ExecutionBackend.Service.of({
+      const cancellingBackend = ExecutionGateway.Service.of({
         ...backend,
-        start: (input) => Ref.update(starts, (count) => count + 1).pipe(Effect.andThen(backend.start(input))),
-        inspect: (turnId) => Effect.succeed({ turnId, status: "running", waits: [], pendingTools: [], children: [] }),
-        cancel: (turnId) =>
-          Ref.update(cancellations, (count) => count + 1).pipe(
-            Effect.as({
-              turnId,
-              status: "cancelled" as const,
-              events: [
-                executionStarted(String(turnId)),
-                {
-                  executionId: String(turnId),
-                  cursor: "cancelled",
-                  sequence: 1,
-                  type: "execution.cancelled",
-                  timestampSource: "server",
-                  createdAt: 1,
-                },
-              ],
-            }),
-          ),
+        startTurn: (input) => Ref.update(starts, (count) => count + 1).pipe(Effect.andThen(backend.startTurn(input))),
+        inspectTurn: () => Effect.succeed({ status: "running" }),
+        cancelTurn: () => Ref.update(cancellations, (count) => count + 1),
       })
       const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-        backendLayer: Layer.succeed(ExecutionBackend.Service, cancellingBackend),
+        backendLayer: Layer.succeed(ExecutionGateway.Service, cancellingBackend),
         resolvedContextLayer: ResolvedContext.testLayer({
           resolve: () =>
             Deferred.succeed(preparationEntered, undefined).pipe(

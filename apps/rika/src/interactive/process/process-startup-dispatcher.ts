@@ -4,22 +4,21 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Operation from "@rika/product/product-operation-service"
 import * as ProductOperation from "@rika/product/product-operation"
-import * as ResidentHandshake from "@rika/product/resident-service-handshake"
-import * as ResidentService from "@rika/product/resident-service"
+import * as ServerHandshake from "@rika/product/server-service-handshake"
+import * as ServerService from "@rika/product/server-service"
 import * as DataRoot from "@rika/configuration/canonical-data-root"
 import { Effect, Layer, Cause, Clock, References, Schema } from "effect"
 import * as Logging from "../../diagnostic-file-logging"
-import * as ResidentProcessStartup from "../../resident/process/resident-process"
-import { spawn as spawnResident } from "../../resident/process/resident-process-spawn"
+import * as ServerProcessStartup from "../../server/process/server-process"
+import { spawn as spawnServer } from "../../server/process/server-process-spawn"
 import { provideLayerScoped } from "./process-layer"
 import { loadSettingsFile, failureKind, withClientWorkspace } from "./process-configuration"
 
 type DispatcherContext = {
   readonly database: string
-  readonly executionDatabase: string
   readonly globalConfig: string
   readonly workspaceConfig: string
-  readonly residentRuntime: { readonly executable: string; readonly arguments: ReadonlyArray<string> }
+  readonly serverRuntime: { readonly executable: string; readonly arguments: ReadonlyArray<string> }
   readonly environment: any
   readonly restartThreadId: string | undefined
   readonly runtimeRestarted: boolean
@@ -32,10 +31,9 @@ type DispatcherContext = {
 export const makeDispatcherLayer = (context: DispatcherContext) => {
   const {
     database,
-    executionDatabase,
     globalConfig,
     workspaceConfig,
-    residentRuntime,
+    serverRuntime,
     environment,
     restartThreadId,
     runtimeRestarted,
@@ -93,10 +91,10 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
   return Layer.effect(
     Operation.Service,
     Effect.gen(function* () {
-      const resident = yield* ResidentService.Service
+      const server = yield* ServerService.Service
       return Operation.Service.of({
         run: Effect.fn("Operation.dispatch")((input) =>
-          DataRoot.canonicalDataRoot(database, executionDatabase).pipe(
+          DataRoot.canonicalDataRoot(database).pipe(
             Effect.flatMap((dataRoot) =>
               observedProgram(
                 "client",
@@ -108,14 +106,12 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
                       workspaceInput._tag === "Interactive" && restartThreadId !== undefined
                         ? { ...workspaceInput, threadId: restartThreadId, last: false }
                         : workspaceInput
-                    const requestRuntimeRestart = (error: ResidentService.ResidentRestartRequired) =>
+                    const requestRuntimeRestart = (error: ServerService.ServerRestartRequired) =>
                       Effect.sync(() => {
                         runtimeRestartRequest.value = error.threadId === undefined ? {} : { threadId: error.threadId }
                       }).pipe(
                         Effect.andThen(
-                          ResidentProcessStartup.runtimeRestart
-                            .signalRuntimeRestart(error.threadId)
-                            .pipe(Effect.ignore),
+                          ServerProcessStartup.runtimeRestart.signalRuntimeRestart(error.threadId).pipe(Effect.ignore),
                         ),
                         Effect.andThen(
                           ProductOperation.OperationUnavailable.make({
@@ -124,33 +120,31 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
                           }),
                         ),
                       )
-                    let clientKind: ResidentHandshake.Handshake["clientKind"]
+                    let clientKind: ServerHandshake.Handshake["clientKind"]
                     if (clientInput._tag === "Interactive") clientKind = "interactive"
                     else if (clientInput._tag === "Run") clientKind = "run"
-                    else if (clientInput._tag === "Review") clientKind = "review"
-                    else if (clientInput._tag === "Workflow") clientKind = "workflow"
                     else clientKind = "product"
                     const connected = yield* Effect.result(
-                      resident
+                      server
                         .getOrCreate({
                           profile: "default",
                           dataRoot,
                           ...(runtimeRestarted ? { allowSupersede: false } : {}),
                           clientKind,
                           startHost: () =>
-                            spawnResident({
-                              executable: residentRuntime.executable,
-                              arguments: residentRuntime.arguments,
+                            spawnServer({
+                              executable: serverRuntime.executable,
+                              arguments: serverRuntime.arguments,
                               environment: {
-                                RIKA_INTERNAL_RESIDENT_HOST: "1",
-                                RIKA_INTERNAL_RESIDENT_PROFILE: "default",
-                                RIKA_INTERNAL_RESIDENT_DATA_ROOT: dataRoot,
-                                ...(environment.residentGrace._tag === "None"
+                                RIKA_INTERNAL_SERVER_HOST: "1",
+                                RIKA_INTERNAL_SERVER_PROFILE: "default",
+                                RIKA_INTERNAL_SERVER_DATA_ROOT: dataRoot,
+                                ...(environment.serverGrace._tag === "None"
                                   ? {}
-                                  : { RIKA_INTERNAL_RESIDENT_GRACE: environment.residentGrace.value }),
-                                ...(environment.residentStartupHold._tag === "None"
+                                  : { RIKA_INTERNAL_SERVER_GRACE: environment.serverGrace.value }),
+                                ...(environment.serverStartupHold._tag === "None"
                                   ? {}
-                                  : { RIKA_INTERNAL_RESIDENT_STARTUP_HOLD: environment.residentStartupHold.value }),
+                                  : { RIKA_INTERNAL_SERVER_STARTUP_HOLD: environment.serverStartupHold.value }),
                                 ...(environment.testModelResponse._tag === "None"
                                   ? {}
                                   : { RIKA_TEST_MODEL_RESPONSE: environment.testModelResponse.value }),
@@ -164,13 +158,13 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
                                   ? {}
                                   : { RIKA_TEST_MEDIA_ANALYZER_ERROR: environment.testMediaAnalyzerError.value }),
                               },
-                            }).pipe(Effect.tap(() => Effect.logInfo("resident.spawned"))),
+                            }).pipe(Effect.tap(() => Effect.logInfo("server.spawned"))),
                         })
                         .pipe(provideLayerScoped(Layer.merge(BunServices.layer, BunCrypto.layer))),
                     )
                     if (connected._tag === "Success") {
                       const connection = connected.success
-                      yield* Effect.logInfo("resident.connected")
+                      yield* Effect.logInfo("server.connected")
                       yield* connection
                         .run(clientInput, {
                           stdout: (text) => Effect.sync(() => process.stdout.write(text)),
@@ -181,13 +175,13 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
                         })
                         .pipe(
                           Effect.tapError((error) =>
-                            Schema.is(ResidentService.ResidentRestartRequired)(error)
+                            Schema.is(ServerService.ServerRestartRequired)(error)
                               ? Effect.sync(() => {
                                   runtimeRestartRequest.value =
                                     error.threadId === undefined ? {} : { threadId: error.threadId }
                                 }).pipe(
                                   Effect.andThen(
-                                    ResidentProcessStartup.runtimeRestart
+                                    ServerProcessStartup.runtimeRestart
                                       .signalRuntimeRestart(error.threadId)
                                       .pipe(Effect.ignore),
                                   ),
@@ -199,7 +193,7 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
                               ? error
                               : ProductOperation.OperationUnavailable.make({
                                   operation: clientInput._tag,
-                                  message: Schema.is(ResidentService.ResidentRestartRequired)(error)
+                                  message: Schema.is(ServerService.ServerRestartRequired)(error)
                                     ? "Rika was upgraded; restarting this session"
                                     : error.message,
                                 }),
@@ -208,7 +202,7 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
                         )
                       return
                     }
-                    if (Schema.is(ResidentService.ResidentRestartRequired)(connected.failure))
+                    if (Schema.is(ServerService.ServerRestartRequired)(connected.failure))
                       return yield* requestRuntimeRestart(connected.failure)
                     return yield* ProductOperation.OperationUnavailable.make({
                       operation: clientInput._tag,

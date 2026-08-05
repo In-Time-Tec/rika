@@ -1,20 +1,21 @@
 import { Clock, Effect } from "effect"
-import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TurnQueuePromotion from "../../thread/repository/turn-repository-queue"
 import type { InteractiveEvent } from "./interactive-event"
 import { OperationError, operationFailureDetail } from "../operation-error"
+import type { operationError } from "../operation-error"
 
 export const makeInteractiveControl = (input: {
   readonly turns: TurnRepository.Interface
-  readonly backend: ExecutionBackend.Interface
+  readonly backend: ExecutionGateway.Interface
   readonly pendingCapacity: number
-  readonly active: () => Effect.Effect<Turn.Turn, OperationError, never>
+  readonly active: Effect.Effect<Turn.Turn, OperationError | TurnRepository.RepositoryError, never>
   readonly dispatch: (event: InteractiveEvent) => void
   readonly queueMutation: (change: TurnQueuePromotion.QueueItemChange) => InteractiveEvent
   readonly nextSteeringIdentity: (turnId: string) => string
-  readonly fail: (message: string) => Effect.Effect<never, OperationError, never>
+  readonly fail: typeof operationError
 }) => {
   const editQueued = (id: string, prompt: string) =>
     Effect.gen(function* () {
@@ -30,11 +31,16 @@ export const makeInteractiveControl = (input: {
     })
   const steer = (text: string, targetTurnId?: string) =>
     Effect.gen(function* () {
-      const turn = yield* input.active()
+      const turn = yield* input.active
       if (targetTurnId !== undefined && String(turn.id) !== targetTurnId)
         return yield* input.fail(`Steering target ${targetTurnId} is no longer the active turn`)
+      if (turn._tag !== "AgentExecution" || turn.executionLink === undefined)
+        return yield* input.fail(`Turn ${turn.id} has no persisted execution link`)
       const outcome = yield* Effect.exit(
-        input.backend.steer(turn.id, text, input.nextSteeringIdentity(String(turn.id))),
+        input.backend.steerTurn(turn.executionLink, {
+          text,
+          idempotencyKey: input.nextSteeringIdentity(String(turn.id)),
+        }),
       )
       if (outcome._tag === "Failure") {
         input.dispatch({
@@ -54,13 +60,12 @@ export const makeInteractiveControl = (input: {
         threadId: turn.threadId,
         turnId: turn.id,
         action: "steered",
-        steeringSequence: outcome.value.sequence,
         steeringText: text,
       })
     })
   const steerQueued = (id: string, text: string) =>
     Effect.gen(function* () {
-      const turn = yield* input.active()
+      const turn = yield* input.active
       const candidate = yield* input.turns.get(Turn.TurnId.make(id))
       if (candidate?.status === "queued" && candidate.promptParts?.some((part) => part.type === "image") === true)
         return yield* input.fail("Queued turns with images cannot be steered")
@@ -74,7 +79,14 @@ export const makeInteractiveControl = (input: {
         queued.prompt ??
         text
       input.dispatch(input.queueMutation(taken.queue))
-      const outcome = yield* Effect.exit(input.backend.steer(turn.id, steeringText, `rika:queued-steer:${queued.id}`))
+      if (turn._tag !== "AgentExecution" || turn.executionLink === undefined)
+        return yield* input.fail(`Turn ${turn.id} has no persisted execution link`)
+      const outcome = yield* Effect.exit(
+        input.backend.steerTurn(turn.executionLink, {
+          text: steeringText,
+          idempotencyKey: `rika:queued-steer:${queued.id}`,
+        }),
+      )
       if (outcome._tag === "Failure") {
         const restored = yield* input.turns.copy(queued, input.pendingCapacity)
         if (restored.queue === undefined) return yield* input.fail(`Turn ${queued.id} was not restored to its queue`)
@@ -96,7 +108,6 @@ export const makeInteractiveControl = (input: {
         threadId: turn.threadId,
         turnId: turn.id,
         action: "steered",
-        steeringSequence: outcome.value.sequence,
         steeringText,
       })
     })

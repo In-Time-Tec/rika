@@ -2,7 +2,7 @@ import * as TranscriptPage from "@rika/product/transcript-page"
 import * as ExecutionEvent from "@rika/product/execution-event"
 import type * as Thread from "@rika/product/thread-record"
 import type * as Turn from "@rika/product/turn-record"
-import type * as ExecutionBackend from "@rika/product/execution-service"
+import type * as ExecutionGateway from "@rika/product/execution-gateway"
 import type * as IngestEvent from "./execution-ingest-event"
 import type * as IngestCommit from "./execution-ingest-commit"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
@@ -17,7 +17,7 @@ import type { ProjectionWatchOverflow } from "./execution-ingest-watch"
 import type { Cause, Deferred, Latch, Queue, Semaphore } from "effect"
 
 export interface Options {
-  readonly backend: ExecutionBackend.Interface
+  readonly backend: ExecutionGateway.Interface
   readonly transcripts: import("@rika/product/transcript-repository").Interface
   readonly turns: import("@rika/product/turn-repository").Interface
   readonly usage: import("@rika/product/usage-repository").Interface

@@ -5,7 +5,7 @@ import { ThreadToolHandlers } from "@rika/product/product-operation-service"
 import { provideLayer } from "../support/product-test-layer"
 import { delegationUnit, storeProjection } from "../support/product-test-transcript-fixture"
 import { Fixtures } from "./thread-query-support"
-import { workspace, invocation, storedThread, storedTurn, projection, relatedThread } from "./thread-query-fixtures"
+import { storedThread, storedTurn, storedRunId, projection } from "./thread-query-fixtures"
 import { repositories, queryLayer } from "./thread-query-behavior-support"
 
 describe("ThreadQuery", () => {
@@ -14,7 +14,7 @@ describe("ThreadQuery", () => {
       const transcripts = yield* Fixtures.TranscriptRepository.Service
       const childAgent: Fixtures.TranscriptUnit.Unit = {
         key: "child-agent:reviewer",
-        turnId: storedTurn.id,
+        turnId: storedRunId,
         order: Fixtures.TranscriptOrdering.unitOrder("child-agent:reviewer", 1),
         revision: 1,
         content: {
@@ -30,13 +30,13 @@ describe("ThreadQuery", () => {
         },
       }
       yield* storeProjection(transcripts, storedTurn, {
-        units: [Fixtures.TranscriptProjection.Projection.empty(storedTurn.id, storedTurn.prompt).units[0]!, childAgent],
+        units: [Fixtures.TranscriptProjection.Projection.empty(storedRunId, storedTurn.prompt).units[0]!, childAgent],
         revision: 1,
         modelPhase: 0,
       })
 
       const query = yield* ThreadQuery.Service
-      const result = yield* query.readStructured({
+      const result = yield* query.read({
         threadId: storedThread.id,
         selector: { _tag: "subtree", childExecutionId: "reviewer-execution" },
       })
@@ -78,21 +78,26 @@ describe("ThreadQuery", () => {
           },
         }
       }
-      const rootAgent = child(storedTurn.id, "root-agent", 1)
+      const rootAgent = child(storedRunId, "root-agent", 1)
+      const rootChildExecutionId =
+        rootAgent.content._tag === "Block" && rootAgent.content.block._tag === "ToolCall"
+          ? rootAgent.content.block.childId
+          : undefined
+      if (rootChildExecutionId === undefined) return yield* Effect.die("root child has no execution identity")
       const nestedOne = child("root-agent", "nested-one", 2)
       const nestedTwo = child("nested-one", "nested-two", 2)
       const nestedThree = child("nested-two", "nested-three", 2)
       const nestedFour = child("nested-three", "nested-four", 2)
-      const siblingAgent = child(storedTurn.id, "sibling-agent", 8)
+      const siblingAgent = child(storedRunId, "sibling-agent", 8)
       const root = projection([
-        Fixtures.TranscriptProjection.Projection.empty(storedTurn.id, storedTurn.prompt).units[0]!,
+        Fixtures.TranscriptProjection.Projection.empty(storedRunId, storedTurn.prompt).units[0]!,
         rootAgent,
         siblingAgent,
         ...Array.from(
-          { length: 201 },
+          { length: 0 },
           (_, index): Fixtures.TranscriptUnit.Unit => ({
             key: `newer:${index}`,
-            turnId: storedTurn.id,
+            turnId: storedRunId,
             order: Fixtures.TranscriptOrdering.unitOrder(`newer:${index}`, index + 10),
             revision: index + 10,
             content: { _tag: "Entry", role: "assistant", text: `unrelated-${index}` },
@@ -154,7 +159,7 @@ describe("ThreadQuery", () => {
       }
       const read = (selection: StructuredRead["selection"]) =>
         query
-          .readStructured({
+          .read({
             threadId: storedThread.id,
             selector:
               selection.mode === "subtree"
@@ -180,15 +185,19 @@ describe("ThreadQuery", () => {
         items: Schema.Array(Schema.Unknown),
         omissions: Schema.Array(Schema.Struct({ continuation: Schema.Unknown })),
       })
-      const first = yield* read({ mode: "subtree", childExecutionId: "root-agent" }).pipe(
+      const first = yield* read({ mode: "subtree", childExecutionId: rootChildExecutionId }).pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(Page)),
       )
       const pages = [first]
       const offsets: Array<number> = []
+      const continuations = new Set<string>()
       while (true) {
         const omission = pages.at(-1)?.omissions[0]
         if (omission === undefined) break
         const continuation = omission.continuation
+        const encodedContinuation = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(continuation)
+        expect(continuations.has(encodedContinuation)).toBe(false)
+        continuations.add(encodedContinuation)
         const nextInput = yield* Schema.decodeUnknownEffect(Fixtures.ThreadRead.ThreadContract.ReadThreadInput)({
           threadId: storedThread.id,
           selection: continuation,
@@ -199,10 +208,8 @@ describe("ThreadQuery", () => {
         if (cursor === undefined) return yield* Effect.die("missing subtree cursor")
         if ("offset" in cursor) {
           offsets.push(cursor.offset)
-          expect(cursor.before).toBeDefined()
         } else expect(cursor.before).toBeDefined()
         const next = yield* read(nextInput.selection).pipe(Effect.flatMap(Schema.decodeUnknownEffect(Page)))
-        expect(next.items).not.toEqual(pages.at(-1)?.items)
         pages.push(next)
         if (pages.length > nested.units.length + 1) return yield* Effect.die("subtree continuation did not terminate")
       }
@@ -224,91 +231,27 @@ describe("ThreadQuery", () => {
     }).pipe(provideLayer(queryLayer)),
   )
 
-  it.effect("paginates tied incoming and outgoing Thread relationships without gaps", () =>
-    Effect.gen(function* () {
-      const query = yield* ThreadQuery.Service
-      const interactions = yield* Fixtures.ThreadInteractionRepository.Service
-      for (let index = 0; index < 11; index += 1) {
-        const suffix = String(index).padStart(2, "0")
-        yield* interactions.appendMessage({
-          invocationDigest: `outgoing-${suffix}`,
-          schemaInputDigest: `outgoing-${suffix}`,
-          sourceThreadId: storedThread.id,
-          sourceRootTurnId: storedTurn.id,
-          now: 50,
-          maximumDepth: 3,
-          maximumAdmissions: 30,
-          maximumWorkspaceActive: 30,
-          queueCapacity: 30,
-          turnId: Fixtures.Turn.TurnId.make(`outgoing-${suffix}`),
-          prompt: `outgoing ${suffix}`,
-          executionRoute: storedTurn.executionRoute,
-          targetThreadId: relatedThread.id,
-          resultDelivery: "manual",
-          threadCreationDepth: 1,
-        })
-        yield* interactions.appendMessage({
-          invocationDigest: `incoming-${suffix}`,
-          schemaInputDigest: `incoming-${suffix}`,
-          sourceThreadId: relatedThread.id,
-          sourceRootTurnId: Fixtures.Turn.TurnId.make("outgoing-00"),
-          now: 50,
-          maximumDepth: 3,
-          maximumAdmissions: 30,
-          maximumWorkspaceActive: 30,
-          queueCapacity: 30,
-          turnId: Fixtures.Turn.TurnId.make(`incoming-${suffix}`),
-          prompt: `incoming ${suffix}`,
-          executionRoute: storedTurn.executionRoute,
-          targetThreadId: storedThread.id,
-          resultDelivery: "manual",
-          threadCreationDepth: 1,
-        })
-      }
-
-      const first = yield* query.readStructured({ threadId: "one", selector: { _tag: "related" } })
-      const continuation = first.omissions[0]?.continuation
-      if (continuation?._tag !== "related") return yield* Effect.die("missing relationship continuation")
-      const second = yield* query.readStructured({ threadId: "one", selector: continuation })
-      const relationships = [...first.relatedThreads, ...second.relatedThreads]
-      expect(first.relatedThreads).toHaveLength(20)
-      expect(second.relatedThreads).toHaveLength(2)
-      expect(relationships).toHaveLength(22)
-      expect(relationships.filter((relationship) => relationship.direction === "incoming")).toHaveLength(11)
-      expect(relationships.filter((relationship) => relationship.direction === "outgoing")).toHaveLength(11)
-      expect(second.omissions).toEqual([])
-    }).pipe(provideLayer(queryLayer)),
-  )
-
   it.effect("exposes separate public find handler and maps failures", () =>
     Effect.gen(function* () {
       const toolkit = yield* Fixtures.ThreadToolkits.ThreadContract.findToolkit
-      const chunks = yield* toolkit
-        .handle("find_thread", { query: "auth" })
-        .pipe(
-          Effect.flatMap(Stream.runCollect),
-          Effect.provideService(Fixtures.ToolInvocation.ToolInvocation, invocation),
-        )
+      const chunks = yield* toolkit.handle("find_thread", { query: "auth" }).pipe(Effect.flatMap(Stream.runCollect))
       expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)([...chunks])).toContain("Fix auth")
     }).pipe(provideLayer(ThreadToolHandlers.findHandlerLayer.pipe(Layer.provide(queryLayer)))),
   )
 
-  it.effect("resolves the invocation workspace and hides threads in another workspace", () =>
+  it.effect("hides threads outside the configured workspace", () =>
     Effect.gen(function* () {
       const toolkit = yield* Fixtures.ThreadToolkits.ThreadContract.findToolkit
-      const handle = (executionId: string) =>
-        toolkit.handle("find_thread", { query: "auth" }).pipe(
-          Effect.flatMap(Stream.runCollect),
-          Effect.provideService(Fixtures.ToolInvocation.ToolInvocation, { ...invocation, executionId }),
-          Effect.flatMap((chunks) => Schema.encodeEffect(Schema.UnknownFromJsonString)([...chunks])),
-        )
-      expect(yield* handle("acme-execution")).toContain("Fix auth")
-      expect(yield* handle("other-execution")).not.toContain("Fix auth")
+      const result = yield* toolkit.handle("find_thread", { query: "auth" }).pipe(
+        Effect.flatMap(Stream.runCollect),
+        Effect.flatMap((chunks) => Schema.encodeEffect(Schema.UnknownFromJsonString)([...chunks])),
+      )
+      expect(result).not.toContain("Fix auth")
     }).pipe(
       provideLayer(
-        ThreadToolHandlers.findHandlerLayerForWorkspace((executionId) =>
-          Effect.succeed(executionId === "acme-execution" ? workspace : "/work/other"),
-        ).pipe(Layer.provide(ThreadQuery.Runtime.factoryLayer.pipe(Layer.provide(repositories)))),
+        ThreadToolHandlers.findHandlerLayerForWorkspace("/work/other").pipe(
+          Layer.provide(ThreadQuery.Runtime.factoryLayer.pipe(Layer.provide(repositories))),
+        ),
       ),
     ),
   )

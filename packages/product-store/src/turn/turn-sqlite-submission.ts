@@ -23,8 +23,8 @@ export const makeTurnSqliteSubmission = (sql: SqlClient): Pick<Interface, "creat
     return yield* sql
       .withTransaction(
         Effect.gen(function* () {
-          yield* sql`INSERT INTO rika_turns (id, thread_id, turn_kind, prompt, prompt_parts_json, execution_route_json, review_fan_out_id, author_json, lineage_json, status, created_at, updated_at)
-            VALUES (${input.id}, ${input.threadId}, 'AgentExecution', ${input.prompt}, ${promptParts}, ${executionRoute}, ${input.reviewFanOutId ?? null}, ${author}, ${lineage},
+          yield* sql`INSERT INTO rika_turns (id, thread_id, turn_kind, prompt, prompt_parts_json, execution_route_json, author_json, lineage_json, status, created_at, updated_at)
+            VALUES (${input.id}, ${input.threadId}, 'AgentExecution', ${input.prompt}, ${promptParts}, ${executionRoute}, ${author}, ${lineage},
               CASE WHEN EXISTS (SELECT 1 FROM rika_turns WHERE thread_id = ${input.threadId} AND turn_kind = 'AgentExecution' AND status IN ('queued', 'accepted', 'running', 'waiting')) THEN 'queued' ELSE 'accepted' END,
               ${input.now}, ${input.now})`
           const rows = yield* sql`SELECT * FROM rika_turns WHERE id = ${input.id}`
@@ -67,20 +67,22 @@ export const makeTurnSqliteSubmission = (sql: SqlClient): Pick<Interface, "creat
       turn.promptParts === undefined
         ? null
         : yield* Schema.encodeEffect(turnRowJson.promptParts)(turn.promptParts).pipe(Effect.mapError(repositoryError))
-    const extensionPin =
-      turn.extensionPin === undefined
-        ? null
-        : yield* Schema.encodeEffect(turnRowJson.extensionPin)(turn.extensionPin).pipe(Effect.mapError(repositoryError))
     const executionRoute = yield* Schema.encodeEffect(turnRowJson.executionRoute)(turn.executionRoute).pipe(
       Effect.mapError(repositoryError),
     )
     const author = yield* Schema.encodeEffect(turnRowJson.author)(turn.author).pipe(Effect.mapError(repositoryError))
     const lineage = yield* Schema.encodeEffect(turnRowJson.lineage)(turn.lineage).pipe(Effect.mapError(repositoryError))
+    const executionLink =
+      turn.executionLink === undefined
+        ? null
+        : yield* Schema.encodeEffect(turnRowJson.executionLink)(turn.executionLink).pipe(
+            Effect.mapError(repositoryError),
+          )
     return yield* sql
       .withTransaction(
         Effect.gen(function* () {
-          yield* sql`INSERT INTO rika_turns (id, thread_id, turn_kind, prompt, prompt_parts_json, status, last_cursor, extension_pin_json, execution_route_json, review_fan_out_id, author_json, lineage_json, created_at, updated_at)
-            VALUES (${turn.id}, ${turn.threadId}, 'AgentExecution', ${turn.prompt}, ${promptParts}, ${turn.status}, ${turn.lastCursor ?? null}, ${extensionPin}, ${executionRoute}, ${turn.reviewFanOutId ?? null}, ${author}, ${lineage}, ${turn.createdAt}, ${turn.updatedAt})`
+          yield* sql`INSERT INTO rika_turns (id, thread_id, turn_kind, prompt, prompt_parts_json, status, execution_route_json, execution_link_json, author_json, lineage_json, created_at, updated_at)
+            VALUES (${turn.id}, ${turn.threadId}, 'AgentExecution', ${turn.prompt}, ${promptParts}, ${turn.status}, ${executionRoute}, ${executionLink}, ${author}, ${lineage}, ${turn.createdAt}, ${turn.updatedAt})`
           if (turn.status !== "queued") return turn
           yield* sql`INSERT INTO rika_thread_queue_state (thread_id) VALUES (${turn.threadId}) ON CONFLICT (thread_id) DO NOTHING`
           const queueRows = yield* sql`UPDATE rika_thread_queue_state

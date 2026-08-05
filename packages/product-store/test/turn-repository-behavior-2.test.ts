@@ -16,7 +16,6 @@ it.effect("memory copies exact queue status and requeues an unowned accepted cla
         author: { _tag: "Human" },
         lineage: { _tag: "Original" },
         status: "queued",
-        stopIntent: "none",
         createdAt: 1,
         updatedAt: 1,
       },
@@ -34,7 +33,6 @@ it.effect("memory copies exact queue status and requeues an unowned accepted cla
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
           status: "queued",
-          stopIntent: "none",
           createdAt: 2,
           updatedAt: 2,
         },
@@ -103,12 +101,12 @@ it.effect("memory rejects concurrent submissions beyond queue capacity without c
     })
     expect(replacement.queue).toMatchObject({ revision: 5, queuedCount: 3 })
     expect(yield* repository.claimNextQueued(threadId, 21)).toBeUndefined()
-    yield* repository.setStatus(active.id, "completed", undefined, 22)
+    yield* repository.setStatus(active.id, "completed", 22)
     expect((yield* repository.claimNextQueued(threadId, 23))?.turn.id).not.toBe(replacement.id)
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
-it.effect("memory lists nonterminal turns and rejects a missing extension pin", () =>
+it.effect("memory lists nonterminal turns", () =>
   Effect.gen(function* () {
     const repository = yield* TurnRepository.Service
     const threadId = Thread.ThreadId.make("thread-a")
@@ -117,18 +115,6 @@ it.effect("memory lists nonterminal turns and rejects a missing extension pin", 
       Turn.TurnId.make("a"),
     ])
     expect((yield* repository.findActive(threadId))?.id).toBe(Turn.TurnId.make("b"))
-    expect(
-      (yield* Effect.result(
-        repository.setExtensionPin(Turn.TurnId.make("missing"), {
-          generation: "g",
-          sourceDigest: "s",
-          configFingerprint: "c",
-          toolSchemaDigest: "t",
-          mcpFingerprint: "m",
-          resolvedContextDigest: "r",
-        }),
-      ))._tag,
-    ).toBe("Failure")
   }).pipe(
     provideLayer(
       TurnRepository.memoryLayer([
@@ -141,7 +127,6 @@ it.effect("memory lists nonterminal turns and rejects a missing extension pin", 
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
           status: "waiting",
-          stopIntent: "none",
           createdAt: 1,
           updatedAt: 1,
         },
@@ -154,7 +139,6 @@ it.effect("memory lists nonterminal turns and rejects a missing extension pin", 
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
           status: "running",
-          stopIntent: "none",
           createdAt: 1,
           updatedAt: 1,
         },

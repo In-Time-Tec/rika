@@ -4,7 +4,7 @@ import * as Support from "./usage-test-support"
 
 describe("UsageCost", () => {
   it.each([
-    ["missing-server-stamp", Support.Fixtures.unstampedLifecycle("execution", "start", "execution.started", 1, 1)],
+    ["missing-baton-stamp", Support.Fixtures.unstampedLifecycle("execution", "start", "execution.started", 1, 1)],
     ["invalid-identity", Support.Fixtures.lifecycle("", "start", "execution.started", 1, 1)],
     ["invalid-timestamp", Support.Fixtures.lifecycle("execution", "start", "execution.started", -1, 1)],
     ["invalid-sequence", Support.Fixtures.lifecycle("execution", "start", "execution.started", 1, -1)],
@@ -28,19 +28,6 @@ describe("UsageCost", () => {
     expect(Result.isSuccess(folded)).toBe(true)
     if (Result.isSuccess(folded)) expect(folded.success.activeEvents.size).toBe(2)
     expect(Support.RawUsageCost.empty.activeEvents.size).toBe(0)
-  })
-
-  it("validates a Relay root alias against its canonical execution identity", () => {
-    const result = Support.RawUsageCost.foldBatch(
-      Support.RawUsageCost.empty,
-      [
-        Support.Fixtures.lifecycle("execution:turn", "start", "execution.started", 1, 1),
-        Support.Fixtures.lifecycle("execution:turn", "done", "execution.completed", 2, 2),
-      ].map((event) => ({ threadId: "thread", turnId: "turn", event })),
-      new Set(["turn"]),
-    )
-    expect(Result.isSuccess(result)).toBe(true)
-    if (Result.isSuccess(result)) expect(result.success.executionEvents.has("turn")).toBe(true)
   })
 
   it("distinguishes unsupported snapshots from malformed current JSON", () => {

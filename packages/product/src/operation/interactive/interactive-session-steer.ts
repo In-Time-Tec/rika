@@ -1,26 +1,36 @@
 import { Function } from "effect"
-import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
+import * as Turn from "@rika/product/turn-record"
+import * as TurnRepository from "@rika/product/turn-repository"
 import { Effect } from "effect"
 import { OperationError, operationError, operationFailureDetail } from "../operation-error"
-import { OperationUnavailable } from "../contract/product-operation"
+import type { InteractiveEvent } from "./interactive-event"
+import type { InteractiveImplementationInput } from "./interactive-session-interface"
 
-const steerInteractiveTurnImpl = (input: any, text: string, targetTurnId?: string) => {
-  const safe: <A, E, R>(
-    dispatch: (event: import("./interactive-event").InteractiveEvent) => void,
-    effect: Effect.Effect<A, E, R>,
-  ) => Effect.Effect<A, OperationUnavailable, never> = input.safe
-  const active: () => Effect.Effect<import("@rika/product/turn-record").Turn, OperationError, never> = input.active
-  const nextSteeringIdentity: (turnId: string) => string = input.nextSteeringIdentity
+export interface InteractiveSteerInput {
+  readonly safe: InteractiveImplementationInput["safe"]
+  readonly active: Effect.Effect<Turn.Turn, OperationError | TurnRepository.RepositoryError, never>
+  readonly nextSteeringIdentity: (turnId: string) => string
+  readonly sessionDispatch: (event: InteractiveEvent) => void
+  readonly emit: (dispatch: (event: InteractiveEvent) => void, event: InteractiveEvent) => void
+}
+
+const steerInteractiveTurnImpl = (input: InteractiveSteerInput, text: string, targetTurnId?: string) => {
+  const { safe, active, nextSteeringIdentity, sessionDispatch, emit } = input
   return safe(
-    input.sessionDispatch,
+    sessionDispatch,
     Effect.gen(function* () {
-      const backend = yield* ExecutionBackend.Service
-      const turn = yield* active()
+      const backend = yield* ExecutionGateway.Service
+      const turn = yield* active
       if (targetTurnId !== undefined && String(turn.id) !== targetTurnId)
         return yield* operationError(`Steering target ${targetTurnId} is no longer the active turn`)
-      const outcome = yield* Effect.exit(backend.steer(turn.id, text, nextSteeringIdentity(String(turn.id))))
+      if (turn._tag !== "AgentExecution" || turn.executionLink === undefined)
+        return yield* operationError(`Turn ${turn.id} has no persisted execution link`)
+      const outcome = yield* Effect.exit(
+        backend.steerTurn(turn.executionLink, { text, idempotencyKey: nextSteeringIdentity(String(turn.id)) }),
+      )
       if (outcome._tag === "Failure")
-        return input.emit(input.sessionDispatch, {
+        return emit(sessionDispatch, {
           _tag: "ExecutionControlFailed",
           selectionEpoch: 0,
           threadId: turn.threadId,
@@ -29,13 +39,12 @@ const steerInteractiveTurnImpl = (input: any, text: string, targetTurnId?: strin
           message: operationFailureDetail(outcome.cause),
           steeringText: text,
         })
-      input.emit(input.sessionDispatch, {
+      emit(sessionDispatch, {
         _tag: "ExecutionControlled",
         selectionEpoch: 0,
         threadId: turn.threadId,
         turnId: turn.id,
         action: "steered",
-        steeringSequence: outcome.value.sequence,
         steeringText: text,
       })
     }),
@@ -43,6 +52,6 @@ const steerInteractiveTurnImpl = (input: any, text: string, targetTurnId?: strin
 }
 
 export const steerInteractiveTurn: {
-  (arg1: string, arg2?: string): (arg0: any) => ReturnType<typeof steerInteractiveTurnImpl>
-  (arg0: any, arg1: string, arg2?: string): ReturnType<typeof steerInteractiveTurnImpl>
+  (arg1: string, arg2?: string): (arg0: InteractiveSteerInput) => ReturnType<typeof steerInteractiveTurnImpl>
+  (arg0: InteractiveSteerInput, arg1: string, arg2?: string): ReturnType<typeof steerInteractiveTurnImpl>
 } = Function.dual(3, steerInteractiveTurnImpl)

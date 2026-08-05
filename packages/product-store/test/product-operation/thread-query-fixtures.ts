@@ -1,14 +1,6 @@
 import { Fixtures } from "./thread-query-support"
 
 export const workspace = "/work/acme"
-export const invocation = Fixtures.ToolInvocation.ToolInvocation.of({
-  executionId: "execution-one",
-  callId: "call-one",
-  toolName: "find_thread",
-  eventSequence: 1,
-  createdAt: 1,
-  idempotencyKeyDigest: "digest",
-})
 export const storedThread: Fixtures.Thread.Thread = {
   id: Fixtures.Thread.ThreadId.make("one"),
   workspace,
@@ -29,10 +21,11 @@ export const storedTurn: Fixtures.Turn.AgentExecutionTurn = {
   author: { _tag: "Human" },
   lineage: { _tag: "Original" },
   status: "completed",
-  stopIntent: "none",
+  executionLink: { runId: "turn-1-run", turnId: "turn-1", threadId: "one" },
   createdAt: 1,
   updatedAt: 2,
 }
+export const storedRunId = "turn-1-run"
 export const projection = (
   units: ReadonlyArray<Fixtures.TranscriptUnit.Unit>,
 ): Fixtures.TranscriptProjectionModel.Projection => ({

@@ -5,7 +5,7 @@ import { childOrder, unitOrder } from "../src/ordering/transcript-unit-order"
 import type { SourceEvent } from "../src/schema/transcript-source-event"
 
 describe("Transcript projection", () => {
-  it("projects every semantic block shape with stable keys across lifecycle revisions", () => {
+  it("projects canonical semantic blocks with stable keys across lifecycle revisions", () => {
     const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
       { cursor: "reason", sequence: 0, type: "model.reasoning.delta", createdAt: 0, text: "thinking" },
       {
@@ -22,99 +22,56 @@ describe("Transcript projection", () => {
         createdAt: 2,
         data: { tool_call_id: "orphan", output: "orphan result" },
       },
-      { cursor: "diff-1", sequence: 3, type: "workspace.diff", createdAt: 3, data: { path: "a.ts", patch: "-a\n+b" } },
-      { cursor: "diff-2", sequence: 4, type: "workspace.diff", createdAt: 4, data: { path: "a.ts", patch: "-a\n+c" } },
       {
         cursor: "usage",
         sequence: 5,
-        type: "model.usage.reported",
+        type: "model.attempt.completed",
         createdAt: 5,
         data: { input_tokens: 10, output_tokens: 20, model: "test" },
       },
       {
         cursor: "compaction-1",
         sequence: 6,
-        type: "agent.compaction.committed",
+        type: "agent.compaction.completed",
         createdAt: 6,
-        data: { summary: "Earlier work", checkpoint: "checkpoint-1" },
+        text: "Earlier work",
+        data: { checkpoint: "checkpoint-1" },
       },
       {
         cursor: "compaction-2",
         sequence: 7,
-        type: "agent.compaction.committed",
+        type: "agent.compaction.completed",
         createdAt: 7,
-        data: { summary: "Updated work", checkpoint: "checkpoint-2" },
+        text: "Updated work",
+        data: { checkpoint: "checkpoint-2" },
       },
       {
         cursor: "notice",
         sequence: 8,
-        type: "notification.created",
+        type: "model.retry.scheduled",
         createdAt: 8,
-        data: { title: "Ready", detail: "Review the result" },
+        data: { category: "rate_limit", delay_millis: 100 },
       },
       {
         cursor: "child-1",
         sequence: 11,
         type: "child_run.spawned",
         createdAt: 11,
-        data: { child_execution_id: "child", preset_name: "task" },
+        data: { child_execution_id: "child", invocation_id: "missing-call" },
       },
-      {
-        cursor: "child-2",
-        sequence: 12,
-        type: "child_run.completed",
-        createdAt: 12,
-        data: { child_execution_id: "child", preset_name: "task", summary: "done" },
-      },
-      {
-        cursor: "workflow-1",
-        sequence: 13,
-        type: "workflow.waiting",
-        createdAt: 13,
-        data: { run_id: "delivery-1", workflow: "delivery", step: "verification" },
-      },
-      {
-        cursor: "workflow-2",
-        sequence: 14,
-        type: "workflow.completed",
-        createdAt: 14,
-        data: { run_id: "delivery-1", workflow: "delivery", step: "done" },
-      },
-      {
-        cursor: "image",
-        sequence: 15,
-        type: "image.attachment.created",
-        createdAt: 15,
-        data: { id: "image-1", name: "shot.png", media_type: "image/png", width: 80, height: 40, bytes: 120 },
-      },
-      { cursor: "error", sequence: 16, type: "budget.exceeded", createdAt: 16, data: { message: "Budget exhausted" } },
+      { cursor: "error", sequence: 16, type: "program.operation.failed", createdAt: 16, text: "Budget exhausted" },
     ])
 
     expect(
       projection.units.flatMap((item) => (item.content._tag === "Block" ? [item.content.block._tag] : [])),
-    ).toEqual([
-      "Reasoning",
-      "ToolCall",
-      "ToolResult",
-      "Diff",
-      "Compaction",
-      "Notification",
-      "ChildAgent",
-      "Workflow",
-      "ImageAttachment",
-      "Error",
-    ])
-    expect(projection.units.filter((item) => item.key.includes("a.ts") && item.key.startsWith("diff:"))).toHaveLength(1)
-    expect(projection.units.filter((item) => item.key.startsWith("workflow:")).map((item) => item.revision)).toEqual([
-      14,
-    ])
+    ).toEqual(["Reasoning", "ToolCall", "ToolResult", "Compaction", "Notification", "ChildAgent", "Error"])
     expect(projection.units.find((item) => item.key === "compaction:turn-a")).toMatchObject({ revision: 7 })
     expect(projection.revision).toBe(16)
     expect(projection.oldestCursor).toBe("reason")
     expect(projection.checkpointCursor).toBe("error")
   })
 
-  it("checkpoints every observable Relay event shape without replay duplication", () => {
+  it("checkpoints every observable Baton event shape without replay duplication", () => {
     const events: ReadonlyArray<SourceEvent> = [
       { cursor: "accepted", sequence: 0, type: "execution.accepted", createdAt: 0 },
       { cursor: "started", sequence: 1, type: "execution.started", createdAt: 1 },
@@ -123,7 +80,7 @@ describe("Transcript projection", () => {
       {
         cursor: "usage",
         sequence: 4,
-        type: "model.usage.reported",
+        type: "model.attempt.completed",
         createdAt: 4,
         data: {
           provider: "openai",
@@ -158,24 +115,9 @@ describe("Transcript projection", () => {
         sequence: 15,
         type: "child_run.spawned",
         createdAt: 15,
-        data: { child_execution_id: "child" },
+        data: { child_execution_id: "child", invocation_id: "missing-call" },
       },
-      { cursor: "fan-out", sequence: 16, type: "child_fan_out.created", createdAt: 16, data: { fan_out_id: "fan" } },
-      {
-        cursor: "member",
-        sequence: 17,
-        type: "child_fan_out.member.terminal",
-        createdAt: 17,
-        data: { member: { child_execution_id: "member", status: "failed", error: "member failed" } },
-      },
-      {
-        cursor: "fan-terminal",
-        sequence: 18,
-        type: "child_fan_out.terminal",
-        createdAt: 18,
-        data: { fan_out_id: "fan" },
-      },
-      { cursor: "budget", sequence: 19, type: "budget.exceeded", createdAt: 19, data: { message: "budget" } },
+      { cursor: "budget", sequence: 19, type: "program.operation.failed", createdAt: 19, text: "budget" },
       { cursor: "completed", sequence: 20, type: "execution.completed", createdAt: 20 },
       { cursor: "failed", sequence: 21, type: "execution.failed", createdAt: 21, text: "failed" },
       { cursor: "cancelled", sequence: 22, type: "execution.cancelled", createdAt: 22 },
@@ -188,9 +130,6 @@ describe("Transcript projection", () => {
       expect(TranscriptProjection.Projection.applyEvent(projection, event)).toEqual(projection)
     }
 
-    expect(projection.units.find((item) => item.key === "child:turn-a:member")).toMatchObject({
-      content: { _tag: "Block", block: { status: "failed", summary: "member failed" } },
-    })
     expect(
       projection.units.filter((item) => item.content._tag === "Block" && item.content.block._tag === "Error"),
     ).toHaveLength(2)

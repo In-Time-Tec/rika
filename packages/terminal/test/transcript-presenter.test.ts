@@ -11,21 +11,15 @@ import {
   applyTurnDelta,
   applyTurnUnits,
 } from "../src/presentation/transcript/terminal-transcript-presentation"
-import { projectUnits } from "../src/presentation/transcript/terminal-transcript-projection"
 import { relocateRowEnd, resolveRowEnd, shiftRowEnd } from "../src/presentation/transcript/terminal-transcript-window"
 import { attachChildProjections, emptyAttachments } from "../src/presentation/transcript/transcript-attachment"
-import {
-  expandableRowIds,
-  transcriptUnits as transcriptRows,
-  transcriptUnitId as unitId,
-} from "../src/presentation/transcript/transcript-row"
+import { expandableRowIds, transcriptUnits as transcriptRows } from "../src/presentation/transcript/transcript-row"
 import { includeRowEnd } from "../src/presentation/transcript/transcript-row-window-include"
 import { pinnedRowWindow } from "../src/presentation/transcript/transcript-row-window-state"
 import { initial, type Model } from "../src/state/model/terminal-state"
 import { type TranscriptItem } from "../src/state/model/terminal-transcript-state"
 
 import { agentOutputText } from "../src/presentation/transcript/transcript-agent-response"
-import { transcriptUnitId, transcriptUnits } from "../src/presentation/transcript/transcript-row"
 import { transcriptFixtures } from "./transcript-presenter-support"
 const {
   event,
@@ -48,18 +42,6 @@ const {
   limit,
   noReport,
 } = transcriptFixtures
-it("projects turn units identically to the legacy projection", () => {
-  const legacy = projectUnits(initial("/work"), parentProjection.units)
-  const presenter = applyTurnUnits(initial("/work"), parentProjection.units)
-  expect(presenter).toEqual(legacy)
-})
-it("flattens nested rows identically to the legacy unit tree", () => {
-  const model = nestedModel()
-  const legacyUnits = transcriptUnits(model)
-  const rows = transcriptRows(model)
-  expect(rows).toEqual(legacyUnits)
-  expect(rows.map((unit) => unitId(model, unit))).toEqual(legacyUnits.map((unit) => transcriptUnitId(model, unit)))
-})
 it("keeps nested subagent rows at depth two with stable ids", () => {
   const model = nestedModel()
   const units = transcriptRows(model)
@@ -76,23 +58,19 @@ it("projects the same units twice into deep-equal models", () => {
 it("attaches child projections to their parent rows and skips replay turns", () => {
   const base = applyTurnUnits(initial("/work"), parentProjection.units)
   const projections = new Map([
-    ["child:turn:oracle", childProjection],
-    ["child:child:turn:oracle:nested", grandchildProjection],
+    ["run-oracle-01", childProjection],
+    ["run-nested-01", grandchildProjection],
     ["orphan-turn", grandchildProjection],
   ])
   const attached = attachChildProjections(base, new Set<string>(), projections)
   const expected = applyChildUnits(
     applyChildUnits(base, "turn:agent", childProjection.units),
-    TranscriptIdentity.scopedIdentity("child:turn:oracle", "nested"),
+    TranscriptIdentity.scopedIdentity("run-oracle-01", "nested"),
     grandchildProjection.units,
   )
   expect(attached.model).toEqual(expected)
-  expect(attached.attachments.get("child:turn:oracle")).toBe(childProjection.revision)
-  const replaySkipped = attachChildProjections(
-    base,
-    new Set(["child:turn:oracle", "child:child:turn:oracle:nested"]),
-    projections,
-  )
+  expect(attached.attachments.get("run-oracle-01")).toBe(childProjection.revision)
+  const replaySkipped = attachChildProjections(base, new Set(["run-oracle-01", "run-nested-01"]), projections)
   expect(replaySkipped.model).toBe(base)
 })
 it("returns the same model object for a no-op projection", () => {
@@ -172,7 +150,7 @@ it("removes nested child rows without disturbing their parent tool", () => {
   const nested = TranscriptNestedProjection.withNestedProjections(parentProjection, [
     { parentId: "turn:agent", projection: childProjection },
   ])
-  const childKeys = nested.units.filter((unit) => unit.turnId === "child:turn:oracle").map((unit) => unit.key)
+  const childKeys = nested.units.filter((unit) => unit.turnId === "run-oracle-01").map((unit) => unit.key)
   const base = applyTurnUnits(initial("/work"), nested.units)
   const updated = applyTurnDelta(base, "turn", { upsert: [], remove: childKeys })
   const itemIds = new Set(
@@ -221,7 +199,7 @@ it("removes every status derived from a hidden child outcome", () => {
   expect(removed.blocks).toEqual(fresh.blocks)
 })
 it("keeps an applied child outcome when the parent's stale units reproject", () => {
-  const failedChild = TranscriptProjection.Projection.project("child:turn:oracle", "", [
+  const failedChild = TranscriptProjection.Projection.project("run-oracle-01", "", [
     event("read", 0, "tool.call.requested", {
       data: { tool_call_id: "read", tool_name: "read", input: { path: "src/a.ts" } },
     }),
@@ -251,7 +229,7 @@ it("rewrites running rows to cancelled when a cancellation notice projects", () 
 })
 it("skips attachments whose revision is unchanged and re-attaches on bump", () => {
   const base = applyTurnUnits(initial("/work"), parentProjection.units)
-  const projections = new Map([["child:turn:oracle", childProjection]])
+  const projections = new Map([["run-oracle-01", childProjection]])
   const first = attachChildProjections(base, new Set<string>(), projections)
   const second = attachChildProjections(first.model, new Set<string>(), projections, first.attachments)
   expect(second.model).toBe(first.model)
@@ -263,18 +241,18 @@ it("skips attachments whose revision is unchanged and re-attaches on bump", () =
   const third = attachChildProjections(
     second.model,
     new Set<string>(),
-    new Map([["child:turn:oracle", bumped]]),
+    new Map([["run-oracle-01", bumped]]),
     second.attachments,
   )
   expect(third.model).not.toBe(second.model)
-  expect(third.attachments.get("child:turn:oracle")).toBe(bumped.revision)
+  expect(third.attachments.get("run-oracle-01")).toBe(bumped.revision)
   const cleared = attachChildProjections(
     third.model,
     new Set<string>(),
-    new Map([["child:turn:oracle", bumped]]),
+    new Map([["run-oracle-01", bumped]]),
     emptyAttachments,
   )
-  expect(cleared.attachments.get("child:turn:oracle")).toBe(bumped.revision)
+  expect(cleared.attachments.get("run-oracle-01")).toBe(bumped.revision)
 })
 it("keeps expandable row ids stable across reprojection", () => {
   const model = nestedModel()
@@ -435,7 +413,7 @@ it("emits only ToolCall children as rows while assistant and error children feed
       { _tag: "Block", index: 2, id: "block:error", parentId: "agent" },
     ],
   }
-  const units = transcriptUnits(model)
+  const units = transcriptRows(model)
   const parentUnit = units.find((unit) => unit.kind === "tool")
   expect(parentUnit?.kind).toBe("tool")
   if (parentUnit?.kind !== "tool") throw new Error("expected tool unit")

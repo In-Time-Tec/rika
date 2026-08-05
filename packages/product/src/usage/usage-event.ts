@@ -38,7 +38,7 @@ export interface ActiveEvent {
 }
 
 type ProjectionFailureReason =
-  | "missing-server-stamp"
+  | "missing-baton-stamp"
   | "invalid-identity"
   | "invalid-timestamp"
   | "invalid-sequence"
@@ -53,7 +53,7 @@ type ProjectionFailureReason =
 export class ProjectionFailure extends Schema.TaggedErrorClass<ProjectionFailure>()("UsageProjectionFailure", {
   message: Schema.String,
   reason: Schema.Literals([
-    "missing-server-stamp",
+    "missing-baton-stamp",
     "invalid-identity",
     "invalid-timestamp",
     "invalid-sequence",
@@ -85,14 +85,14 @@ const lifecycleEventTypes = new Set<string>([
   "execution.cancelled",
 ])
 
-const attemptEventTypes = new Set<string>(["model.usage.reported", "model.attempt.completed", "model.attempt.failed"])
+const attemptEventTypes = new Set<string>(["model.attempt.completed", "model.attempt.failed"])
 
 export const isObservedEvent = (event: ExecutionEvent.Event): boolean =>
   lifecycleEventTypes.has(event.type) || attemptEventTypes.has(event.type)
 
 export const isLifecycleEvent = (event: ExecutionEvent.Event): boolean => lifecycleEventTypes.has(event.type)
 
-export const isServerStamped = (event: ExecutionEvent.Event): boolean => event.timestampSource === "server"
+export const isBatonStamped = (event: ExecutionEvent.Event): boolean => event.timestampSource === "baton"
 
 const isActiveEventType = (type: string): type is ActiveEventType => lifecycleEventTypes.has(type)
 

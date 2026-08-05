@@ -145,7 +145,7 @@ tar -xzf "${staging}/${archive_file}" -C "$staging"
 [ -x "${staging}/${archive_root}/bin/rika" ] || fail "release archive is missing bin/rika"
 [ -f "${staging}/${archive_root}/bin/.rika-interactive" ] || fail "release archive is missing bin/.rika-interactive"
 [ -f "${staging}/${archive_root}/bin/.rika-performance" ] || fail "release archive is missing bin/.rika-performance"
-[ -f "${staging}/${archive_root}/bin/.rika-resident" ] || fail "release archive is missing bin/.rika-resident"
+[ -f "${staging}/${archive_root}/bin/.rika-server" ] || fail "release archive is missing bin/.rika-server"
 
 previous="${install_parent}/.rika-previous-$$"
 if [ -e "$install_root" ]; then

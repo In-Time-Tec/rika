@@ -8,7 +8,7 @@ export interface Result {
 }
 
 export interface Omission {
-  readonly reason: "olderTurns" | "responseBudget" | "unavailableChild" | "relationshipsUnavailable"
+  readonly reason: "olderTurns" | "responseBudget" | "unavailableChild"
   readonly continuation: Selector
 }
 
@@ -27,24 +27,12 @@ export interface Message {
   readonly children?: ReadonlyArray<Message>
 }
 
-export interface RelatedThread {
-  readonly kind: "created" | "message" | "reply" | "fork"
-  readonly direction: "incoming" | "outgoing"
-  readonly threadId: string
-  readonly turnId: string
-  readonly title: string
-  readonly archived: boolean
-  readonly available: boolean
-  readonly createdAt: string
-}
-
 export interface ReadSuccess {
   readonly schemaVersion: 2
   readonly threadId: string
   readonly title: string
   readonly selector: Selector
   readonly items: ReadonlyArray<ReadItem>
-  readonly relatedThreads: ReadonlyArray<RelatedThread>
   readonly nextCursor?: TurnCursor | TranscriptCursor
   readonly omissions: ReadonlyArray<Omission>
   readonly truncated: boolean

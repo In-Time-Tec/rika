@@ -1,7 +1,6 @@
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import * as ExecutionEvent from "@rika/product/execution-event"
-import * as ExecutionIdentifier from "@rika/product/execution-identifier"
 import * as EventFamily from "./execution-ingest-event-family"
 import type { Node, InterruptedOutcome, Pipeline, Options } from "./execution-ingest-state"
 export const fullyConsumed = (nodes: ReadonlyMap<string, Node>): boolean =>
@@ -9,7 +8,7 @@ export const fullyConsumed = (nodes: ReadonlyMap<string, Node>): boolean =>
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 export const executionKey = TranscriptCorrelation.executionKey
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
-import { Cause, Effect, Result } from "effect"
+import { Effect, Result } from "effect"
 import * as IngestProjection from "./execution-projection-state"
 import * as IngestState from "./execution-ingest-state"
 import type { VisibleDelta } from "./execution-projection-types"
@@ -18,18 +17,6 @@ import type { IngestFailure, Failure } from "./execution-ingest-failure"
 import type * as IngestProjectionContract from "./execution-projection-contract"
 import type * as UsageEvent from "../../usage/usage-event"
 import * as UsageFold from "../../usage/usage-fold"
-const failureDetails = (cause: Cause.Cause<unknown>) => {
-  const failure = Cause.squash(cause)
-  let kind: string
-  if (failure instanceof Error) kind = failure.name
-  else if (failure !== null && typeof failure === "object" && "_tag" in failure && typeof failure._tag === "string")
-    kind = failure._tag
-  else kind = typeof failure
-  return {
-    "rika.failure.kind": kind,
-    "rika.failure.message": failure instanceof Error ? failure.message : String(failure),
-  }
-}
 
 export interface Root {
   readonly threadId: import("@rika/product/thread-record").ThreadId
@@ -82,7 +69,6 @@ const isDescendant = (nodes: ReadonlyMap<string, Node>, node: Node, ancestorKey:
   return false
 }
 const settledStatus = EventFamily.settledStatus
-const isTerminalStatus = EventFamily.isTerminalStatus
 export const make = (dependencies: EventDependencies) => {
   const markCheckpoint = (pipeline: Pipeline, node: Node) => {
     pipeline.delta.checkpoints.add(node.key)
@@ -241,8 +227,7 @@ export const make = (dependencies: EventDependencies) => {
   const accept = (pipeline: Pipeline, node: Node, event: ExecutionEvent.Event) => {
     if (pipeline.stopped || !pipeline.accepting) return
     try {
-      if (event.executionId.length > 0 && !ExecutionIdentifier.ExecutionId.ownsExecution(node.key, event.executionId))
-        return
+      if (event.executionId.length > 0 && executionKey(event.executionId) !== node.key) return
       const visible: VisibleDelta = new Map()
       if (TranscriptProjection.Fold.isTransientEvent(event)) {
         const mutation = TranscriptProjection.Fold.applyFoldEvent(node.fold, event)
@@ -253,14 +238,16 @@ export const make = (dependencies: EventDependencies) => {
       }
       const cursorSequence = node.durableCursors.get(event.cursor)
       if (cursorSequence !== undefined) {
-        if (cursorSequence !== event.sequence)
+        if (cursorSequence === event.sequence) return
+        if (cursorSequence > event.sequence) {
           dependencies.fail(
             pipeline,
             node,
             "cursor-rejected",
-            `Execution ${node.executionId} reused durable cursor ${event.cursor} from sequence ${cursorSequence} at sequence ${event.sequence}`,
+            `Execution ${node.executionId} moved durable cursor ${event.cursor} backwards from sequence ${cursorSequence} to sequence ${event.sequence}`,
           )
-        return
+          return
+        }
       }
       if (event.sequence <= node.sequence) {
         if (node.resumed)
@@ -321,109 +308,6 @@ export const make = (dependencies: EventDependencies) => {
       dependencies.fail(pipeline, node, "backend", String(cause))
     }
   }
-  const pageNode = (pipeline: Pipeline, node: Node, reference: ExecutionIdentifier.ExecutionReference | undefined) =>
-    Effect.gen(function* () {
-      if (dependencies.options.backend.pageEvents === undefined) {
-        const result = yield* dependencies.options.backend.replay(node.executionId, node.cursor, reference)
-        for (const event of result.events.toSorted(EventFamily.bySequence)) accept(pipeline, node, event)
-        return
-      }
-      const cursors = new Set<string>()
-      let after = node.cursor
-      while (!pipeline.stopped) {
-        const page = yield* dependencies.options.backend.pageEvents(node.executionId, "forward", after, 200, reference)
-        for (const event of page.events.toSorted(EventFamily.bySequence)) accept(pipeline, node, event)
-        if (!page.hasMore) return
-        const next = page.newestCursor
-        if (page.events.length === 0 || next === undefined || next === after || cursors.has(next))
-          return dependencies.fail(
-            pipeline,
-            node,
-            "backend",
-            `Execution ${node.executionId} reported more events after cursor ${after ?? "start"} but its page cursor did not advance`,
-          )
-        cursors.add(next)
-        after = next
-      }
-    })
-  const followNode = (pipeline: Pipeline, node: Node) =>
-    Effect.gen(function* () {
-      if (node.status !== undefined) return
-      const reference = node.parentKey === undefined ? undefined : ExecutionIdentifier.executionReference
-      const inspection = yield* dependencies.options.backend.inspect(node.executionId, reference)
-      if (inspection !== undefined) for (const child of inspection.children) discover(pipeline, node, child.executionId)
-      const follow = dependencies.options.backend.follow
-      const owned = node.parentKey === undefined && !pipeline.catchUp
-      if (owned) {
-        if (inspection !== undefined) yield* pageNode(pipeline, node, reference)
-        release(pipeline, node)
-        caught(pipeline, node)
-        if (pipeline.stopped || node.status !== undefined) return
-        return yield* pipeline.rootSettled.await
-      }
-      if (follow === undefined) {
-        yield* pageNode(pipeline, node, reference)
-        if (pipeline.stopped || node.status !== undefined) return
-        if (inspection === undefined || !isTerminalStatus(inspection.status)) {
-          if (pipeline.catchUp)
-            return dependencies.fail(
-              pipeline,
-              node,
-              "backend",
-              `Execution ${node.executionId} ended catch-up without a durable terminal event`,
-            )
-          return
-        }
-        if (node.sequence < 0)
-          return dependencies.fail(
-            pipeline,
-            node,
-            "backend",
-            `Execution ${node.executionId} is terminal but exposed no durable events`,
-          )
-        return dependencies.fail(
-          pipeline,
-          node,
-          "backend",
-          `Execution ${node.executionId} is terminal without a projected durable terminal outcome`,
-        )
-      }
-      if (inspection === undefined || !isTerminalStatus(inspection.status)) caught(pipeline, node)
-      while (!pipeline.stopped) {
-        const before = node.cursor
-        const delivered = new Set<string>()
-        node.resumed = node.cursor !== undefined
-        const result = yield* follow(
-          node.executionId,
-          node.cursor,
-          (event) => {
-            delivered.add(event.cursor)
-            accept(pipeline, node, event)
-          },
-          reference,
-          "execution",
-        )
-        for (const event of result.events) if (!delivered.has(event.cursor)) accept(pipeline, node, event)
-        if (pipeline.stopped) return
-        if (node.status !== undefined) return
-        if (isTerminalStatus(result.status)) {
-          if (node.sequence < 0)
-            return dependencies.fail(
-              pipeline,
-              node,
-              "backend",
-              `Execution ${node.executionId} is terminal but exposed no durable events`,
-            )
-          return dependencies.fail(
-            pipeline,
-            node,
-            "backend",
-            `Execution ${node.executionId} is terminal without a projected durable terminal outcome`,
-          )
-        }
-        if (node.cursor === before) return
-      }
-    })
   release = (pipeline, root) => {
     const held = pipeline.delivered
     if (held === undefined) return
@@ -434,23 +318,11 @@ export const make = (dependencies: EventDependencies) => {
     pipeline.active += 1
     pipeline.reading += 1
     pipeline.fork(
-      followNode(pipeline, node).pipe(
-        Effect.catchCause((cause) =>
-          Cause.hasInterruptsOnly(cause)
-            ? Effect.void
-            : Effect.suspend(() => {
-                const details = failureDetails(cause)
-                dependencies.fail(pipeline, node, "backend", details["rika.failure.message"])
-                return Effect.logWarning("execution.ingest.follow.failed").pipe(
-                  Effect.annotateLogs({
-                    "rika.thread.id": String(pipeline.threadId),
-                    "rika.turn.id": String(pipeline.turnId),
-                    "rika.execution.id": node.executionId,
-                    ...details,
-                  }),
-                )
-              }),
-        ),
+      Effect.gen(function* () {
+        if (node.parentKey !== undefined) return
+        release(pipeline, node)
+        if (!pipeline.stopped && node.status === undefined) yield* pipeline.rootSettled.await
+      }).pipe(
         Effect.ensuring(
           Effect.suspend(() => {
             if (node.parentKey === undefined) release(pipeline, node)

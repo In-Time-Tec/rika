@@ -1,5 +1,5 @@
-import * as ResidentService from "@rika/product/resident-service"
-import * as ResidentProcessStartup from "../resident/process/resident-process"
+import * as ServerService from "@rika/product/server-service"
+import * as ServerProcessStartup from "../server/process/server-process"
 
 export const cleanInteractiveRuntimeExit = (exitCode: number): boolean =>
   exitCode === 0 || exitCode === 130 || exitCode === 129
@@ -13,11 +13,11 @@ export type InteractiveRuntimeRestartDecision =
 
 export const interactiveRuntimeRestartPlan = (input: {
   readonly exitCode: number
-  readonly restart: ResidentProcessStartup.RuntimeRestartMessage | undefined
+  readonly restart: ServerProcessStartup.RuntimeRestartMessage | undefined
   readonly attempt: number
   readonly limit: number
 }): InteractiveRuntimeRestartDecision => {
-  if (input.exitCode === ResidentService.ServiceRuntime.runtimeRestartExitCode && input.restart !== undefined) {
+  if (input.exitCode === ServerService.ServiceRuntime.runtimeRestartExitCode && input.restart !== undefined) {
     if (input.attempt >= input.limit)
       return { _tag: "fail", message: "Rika could not finish upgrading. Reinstall Rika, then run it again." }
     return {

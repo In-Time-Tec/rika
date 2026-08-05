@@ -1,4 +1,4 @@
-import * as ExecutionBackend from "../execution/contract/execution-service"
+import * as ExecutionGateway from "../execution/contract/execution-gateway"
 import { Function } from "effect"
 import * as TurnRepository from "../thread/repository/turn-repository"
 import { Cause, Schema } from "effect"
@@ -33,7 +33,14 @@ export const operationFailureDetail = (error: unknown) => {
     Schema.is(StaleQueuedTurns)(error)
   )
     return error.message
-  if (Schema.is(ExecutionBackend.BackendError)(error) && error.message.includes("cursor did not advance"))
+  if (
+    (Schema.is(ExecutionGateway.StartTurnFailure)(error) ||
+      Schema.is(ExecutionGateway.CancelTurnFailure)(error) ||
+      Schema.is(ExecutionGateway.SteeringFailure)(error) ||
+      Schema.is(ExecutionGateway.WatchTurnFailure)(error) ||
+      Schema.is(ExecutionGateway.InspectTurnFailure)(error)) &&
+    error.message.includes("cursor did not advance")
+  )
     return error.message
   return "Rika could not complete that action. Run rika diagnostics status if it keeps happening."
 }

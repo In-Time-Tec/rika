@@ -38,11 +38,11 @@ const publish = async (releases: string, version: string, marker: string, tamper
   await writeFile(join(payload, "bin", "rika"), marker)
   await writeFile(join(payload, "bin", ".rika-performance"), `performance-${marker}`)
   await writeFile(join(payload, "bin", ".rika-interactive"), `interactive-${marker}`)
-  await writeFile(join(payload, "bin", ".rika-resident"), `resident-${marker}`)
+  await writeFile(join(payload, "bin", ".rika-server"), `server-${marker}`)
   await chmod(join(payload, "bin", "rika"), 0o755)
   await chmod(join(payload, "bin", ".rika-performance"), 0o755)
   await chmod(join(payload, "bin", ".rika-interactive"), 0o755)
-  await chmod(join(payload, "bin", ".rika-resident"), 0o755)
+  await chmod(join(payload, "bin", ".rika-server"), 0o755)
   const archiveFile = `rika-${version}-${target}.tar.gz`
   const archivePath = join(releases, archiveFile)
   const child = Bun.spawn(["tar", "-czf", archivePath, payloadRoot], { cwd: stage })
@@ -86,7 +86,7 @@ test("re-running the installer upgrades in place, verifies checksums, and never 
     expect(await readFile(command, "utf8")).toBe("second")
     expect(await readFile(join(installRoot, "bin", ".rika-performance"), "utf8")).toBe("performance-second")
     expect(await readFile(join(installRoot, "bin", ".rika-interactive"), "utf8")).toBe("interactive-second")
-    expect(await readFile(join(installRoot, "bin", ".rika-resident"), "utf8")).toBe("resident-second")
+    expect(await readFile(join(installRoot, "bin", ".rika-server"), "utf8")).toBe("server-second")
     expect(await strays(dirname(installRoot))).toEqual([])
     expect(await strays(binDir)).toEqual([])
 

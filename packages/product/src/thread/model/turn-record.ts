@@ -1,9 +1,8 @@
 import { Schema } from "effect"
 import { ExecutionRouteSnapshot } from "../../execution/contract/execution-route-snapshot"
-import { ExecutionExtensionPin } from "../../execution/contract/execution-workflow"
+import { ExecutionLink } from "../../execution/contract/execution-gateway"
 import { PromptPart } from "../../execution/contract/execution-request"
 import { Status } from "../../execution/contract/execution-status"
-import { StopIntent } from "./thread-state"
 import { ThreadId } from "./thread-record"
 import { TurnAuthor, TurnLineage } from "./thread-relationship"
 import { RecordedShellResult } from "./thread-result"
@@ -17,11 +16,8 @@ export const AgentExecutionTurn = Schema.TaggedStruct("AgentExecution", {
   prompt: Schema.String,
   promptParts: Schema.optionalKey(Schema.Array(PromptPart)),
   status: Status,
-  stopIntent: StopIntent,
-  lastCursor: Schema.optionalKey(Schema.String),
-  extensionPin: Schema.optionalKey(ExecutionExtensionPin),
   executionRoute: ExecutionRouteSnapshot,
-  reviewFanOutId: Schema.optionalKey(Schema.String),
+  executionLink: Schema.optionalKey(ExecutionLink),
   author: TurnAuthor,
   lineage: TurnLineage,
   createdAt: Schema.Finite,
@@ -34,7 +30,6 @@ const RecordedShellFields = {
   threadId: ThreadId,
   prompt: Schema.String,
   command: Schema.NonEmptyString,
-  stopIntent: Schema.Literal("none"),
   author: Schema.TaggedStruct("Human", {}),
   lineage: Schema.TaggedStruct("Original", {}),
   createdAt: Schema.Finite,

@@ -32,17 +32,14 @@ type ProductOperationInteractiveSessionInput = Omit<
 
 export type ProductOperationInteractiveSessionFactory = (
   workspace: string,
-  settings?: { readonly initialThreadId?: string; readonly registerPromoter?: boolean },
+  settings?: { readonly initialThreadId?: string; readonly serverOwner?: boolean },
 ) => Effect.Effect<InteractiveSessionRuntimeResult, OperationError, never>
 
 export const makeProductOperationInteractiveSession = (
   input: ProductOperationInteractiveSessionInput,
 ): ProductOperationInteractiveSessionFactory => {
   let sequence = 0
-  return (
-    workspace: string,
-    settings: { readonly initialThreadId?: string; readonly registerPromoter?: boolean } = {},
-  ) => {
+  return (workspace: string, settings: { readonly initialThreadId?: string; readonly serverOwner?: boolean } = {}) => {
     const runtimeInput: InteractiveSessionInput = {
       ...input,
       selectionInitialTurnWindow,

@@ -417,10 +417,6 @@ test("drives keyboard, palette, resize, frame capture, and teardown", () =>
         expect(activityFrame).toContain("Edited src/main.ts +1 -1")
         model = update(model, {
           _tag: "BlockAdded",
-          block: { _tag: "Workflow", name: "release", step: "verify", status: "running" },
-        })
-        model = update(model, {
-          _tag: "BlockAdded",
           block: {
             _tag: "ImageAttachment",
             name: "screen.png",
@@ -434,7 +430,6 @@ test("drives keyboard, palette, resize, frame capture, and teardown", () =>
         surface.update(model)
         yield* openTui(() => setup.renderOnce())
         const metadataFrame = setup.captureCharFrame()
-        expect(metadataFrame).toContain("Workflow release")
         expect(metadataFrame).toContain("screen.png · image/png · 800×600 · 1.2 KB")
         setup.resize(50, 12)
         yield* openTui(() => setup.renderOnce())

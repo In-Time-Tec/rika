@@ -56,10 +56,6 @@ export const repositories = Layer.mergeAll(
   Fixtures.TurnRepository.memoryLayer([storedTurn, ...stateThreads.map(({ turn }) => turn)]),
   Fixtures.TranscriptRepository.memoryLayer,
   Layer.succeed(Fixtures.ThreadSearchRepository.Service, search),
-  Layer.effect(
-    Fixtures.ThreadInteractionRepository.Service,
-    Fixtures.ThreadInteractionRepository.makeMemory({ threads: [storedThread, relatedThread], turns: [storedTurn] }),
-  ),
 )
 export const queryLayer = Layer.merge(
   ThreadQuery.Runtime.layerForWorkspace(workspace).pipe(Layer.provide(repositories)),

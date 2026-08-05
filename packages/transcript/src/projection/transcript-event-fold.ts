@@ -1,5 +1,5 @@
 import { Function } from "effect"
-import { childScopeAndCallId, executionKey } from "../ordering/child-parent-correlation"
+import { executionKey } from "../ordering/child-parent-correlation"
 import { identityKey } from "../ordering/transcript-unit-identity"
 import type { Block } from "../schema/transcript-presentation-model"
 import type { SourceEvent } from "../schema/transcript-source-event"
@@ -7,7 +7,7 @@ import type { Unit } from "../schema/transcript-unit"
 import { applyAssistant, applyReasoning, applyUsage, assistantKey, reasoningKey } from "./transcript-model-event-fold"
 import { applyChild } from "./transcript-child-event-fold"
 import { genericBlock, genericKey } from "./transcript-generic-event-fold"
-import { applyToolDelta, applyToolRequested, applyToolResult } from "./transcript-tool-event-fold"
+import { applyToolDelta, applyToolProgress, applyToolRequested, applyToolResult } from "./transcript-tool-event-fold"
 import { settlementOperations } from "./transcript-settlement"
 const {
   advanceModelPhase,
@@ -23,7 +23,6 @@ import { foldState } from "./transcript-fold-state"
 import { mutationOperations } from "./transcript-fold-mutation"
 const { mutation, removeUnit, result, setState, upsertUnit, linkedToolUnitFor } = mutationOperations
 const {
-  addIndex,
   firstIndexedUnit,
   isTransientEvent,
   makeProjectionFold,
@@ -32,7 +31,6 @@ const {
   owner,
   rawToolId,
   record,
-  removeIndex,
   snapshotFoldState,
   snapshotFoldProjection,
   foldUnit,
@@ -51,20 +49,21 @@ const applyKnownEvent = (value: OwnedFold, change: MutableMutation, event: Sourc
     return
   }
   if (event.type === "model.output.delta") return applyAssistant({ value, change, turnId, event, complete: false })
-  if (event.type === "model.output.completed") return applyAssistant({ value, change, turnId, event, complete: true })
-  if (event.type === "model.cycle.completed") return applyAssistant({ value, change, turnId, event, complete: true })
+  if (event.type === "model.output.completed" || event.type === "model.cycle.completed")
+    return applyAssistant({ value, change, turnId, event, complete: true })
   if (event.type === "model.reasoning.completed")
     return applyReasoning({ value, change, turnId, event, complete: true })
-  if (event.type.includes("reasoning")) return applyReasoning({ value, change, turnId, event, complete: false })
+  if (event.type === "model.reasoning.delta") return applyReasoning({ value, change, turnId, event, complete: false })
   if (event.type === "model.toolcall.delta") return applyToolDelta({ value, change, turnId, event })
-  if (event.type === "tool.call.requested") {
+  if (event.type === "tool.call.requested" || event.type === "tool.started") {
     applyToolRequested({ value, change, turnId, event })
     advanceModelPhase(value, change, turnId)
     return
   }
+  if (event.type === "tool.progress") return applyToolProgress({ value, change, turnId, event })
   if (event.type === "tool.result.received") return applyToolResult({ value, change, turnId, event })
   if (event.type === "steering.delivered") return applySteeringDelivered(value, change, turnId, event)
-  if (event.type === "model.usage.reported") return applyUsage({ value, change, event })
+  if (event.type === "model.attempt.completed") return applyUsage({ value, change, event })
   if (event.type === "model.attempt.failed" || event.type === "model.call.failed") {
     if (!isTruncatedStream(event)) return
     const block: Block = {
@@ -127,7 +126,13 @@ const applyKnownEvent = (value: OwnedFold, change: MutableMutation, event: Sourc
     })
     return
   }
-  if (event.type.startsWith("child_run.") || event.type.startsWith("child_fan_out.member."))
+  if (
+    event.type === "child_run.spawned" ||
+    event.type === "child_run.started" ||
+    event.type === "child_run.completed" ||
+    event.type === "child_run.failed" ||
+    event.type === "child_run.cancelled"
+  )
     return applyChild({ value, change, turnId, event })
   const block = genericBlock({ turnId, event })
   if (block === undefined) return
@@ -180,7 +185,8 @@ const durableResolutionKey = (value: OwnedFold, event: SourceEvent): string | un
     return assistantKey({ turnId: value.turnId, phase: value.state.modelPhase })
   if (event.type === "model.reasoning.completed")
     return reasoningKey({ turnId: value.turnId, phase: value.state.modelPhase })
-  if (event.type === "tool.call.requested") return toolKey(value.turnId, rawToolId(event))
+  if (event.type === "tool.call.requested" || event.type === "tool.started")
+    return toolKey(value.turnId, rawToolId(event))
   return undefined
 }
 
@@ -204,6 +210,7 @@ const restoreTransientBase = (value: OwnedFold, change: MutableMutation, key: st
 const requiresResolvedTransients = (event: SourceEvent): boolean =>
   event.type === "model.input.prepared" ||
   event.type === "tool.call.requested" ||
+  event.type === "tool.started" ||
   event.type === "tool.result.received" ||
   event.type === "steering.delivered" ||
   event.type === "execution.completed" ||
@@ -211,7 +218,8 @@ const requiresResolvedTransients = (event: SourceEvent): boolean =>
   event.type === "execution.cancelled"
 
 const blockingTransientKeys = (value: OwnedFold, event: SourceEvent): ReadonlyArray<string> => {
-  const toolBatchBoundary = event.type === "tool.call.requested" || event.type === "tool.result.received"
+  const toolBatchBoundary =
+    event.type === "tool.call.requested" || event.type === "tool.started" || event.type === "tool.result.received"
   const unresolvedResultKey =
     event.type === "tool.result.received" ? toolKey(value.turnId, rawToolId(event)) : undefined
   return [...value.transientBases.keys()].filter((key) => {
@@ -247,7 +255,7 @@ const applyFoldEvent: {
     return result(change)
   }
   if (event.sequence <= value.state.revision) {
-    if (event.type === "model.usage.reported") applyUsage({ value, change, event })
+    if (event.type === "model.attempt.completed") applyUsage({ value, change, event })
     return result(change)
   }
   const unresolved = requiresResolvedTransients(event) ? blockingTransientKeys(value, event) : []
@@ -305,20 +313,7 @@ const applyChildOutcome: {
     const value = owner(fold)
     const change = mutation()
     const childKey = executionKey(childId)
-    const previous = value.childOutcomes.get(childKey)
-    if (previous !== undefined) {
-      const parsed = childScopeAndCallId(previous.childId)
-      if (parsed !== undefined)
-        removeIndex(
-          value.childOutcomesByScopeCall,
-          identityKey("agent-scope-call", parsed.scope, parsed.callId),
-          childKey,
-        )
-    }
     value.childOutcomes.set(childKey, { childId, outcome })
-    const parsed = childScopeAndCallId(childId)
-    if (parsed !== undefined)
-      addIndex(value.childOutcomesByScopeCall, identityKey("agent-scope-call", parsed.scope, parsed.callId), childKey)
     settleChildInto(value, change, childId, outcome.status, value.state.revision, true)
     return result(change)
   },

@@ -1,8 +1,8 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Effect, Function, Layer, Scope } from "effect"
-import * as ResidentEndpoint from "../src/resident/process/resident-endpoint"
-import { alive } from "./resident-transport-process"
-import { awaitExit } from "./resident-process-exit"
+import * as ServerEndpoint from "../src/server/process/server-endpoint"
+import { alive } from "./server-transport-process"
+import { awaitExit } from "./server-process-exit"
 
 export const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | Scope.Scope>) =>
   Effect.runPromise(
@@ -25,10 +25,10 @@ export const waitUntil: {
     }),
 )
 
-export const reapResidents = (dataRoot: string) =>
+export const reapServers = (dataRoot: string) =>
   Effect.gen(function* () {
-    const endpoint = yield* ResidentEndpoint.resolve("default", dataRoot)
-    const recorded = yield* ResidentEndpoint.recordedResidentProcesses(endpoint)
+    const endpoint = yield* ServerEndpoint.resolve("default", dataRoot)
+    const recorded = yield* ServerEndpoint.recordedServerProcesses(endpoint)
     const pids = recorded.map((entry) => entry.pid).filter(alive)
     yield* Effect.forEach(pids, (pid) => Effect.ignore(Effect.sync(() => process.kill(pid, "SIGKILL"))), {
       discard: true,

@@ -95,28 +95,4 @@ describe("ConfigService routing", () => {
       })
     }),
   )
-
-  it.effect("keeps base-derived aliases working and reports them as deprecated", () =>
-    Effect.gen(function* () {
-      const config = yield* ConfigurationService.effectiveConfiguration()
-      const alias = config.settings.models["legacy-sonnet"]!
-      expect(alias.limits).toEqual(ConfigContract.defaults.models.fable!.limits)
-      expect(alias.displayName).toBe("legacy-sonnet")
-      expect(config.diagnostics).toContainEqual({
-        path: "modelAliases.legacy-sonnet.base",
-        source: "global",
-        message: 'deprecated base "fable"; replace with preset "claude" and set displayName',
-      })
-    }).pipe(
-      provideLayer(
-        ConfigurationService.memoryConfigurationLayer({
-          global: {
-            modelAliases: {
-              "legacy-sonnet": { base: "fable", provider: "bedrock", candidates: ["us.anthropic.claude-sonnet-5"] },
-            },
-          },
-        }),
-      ),
-    ),
-  )
 })

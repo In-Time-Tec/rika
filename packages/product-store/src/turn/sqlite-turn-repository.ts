@@ -81,23 +81,7 @@ export const layer = Layer.effect(
           )
         return rows[0] === undefined ? undefined : yield* decodeAgent(rows[0])
       }),
-      listNonterminal: listAgentTurns(sql, "none", repositoryError).pipe(
-        Effect.withSpan("TurnRepository.listNonterminal"),
-      ),
-      listStopRequested: listAgentTurns(sql, "requested", repositoryError).pipe(
-        Effect.withSpan("TurnRepository.listStopRequested"),
-      ),
-      requestStop: Effect.fn("TurnRepository.requestStop")(function* (id, now): Effect.fn.Return<
-        import("@rika/product/turn-record").AgentExecutionTurn | undefined,
-        import("@rika/product/turn-repository").RepositoryError
-      > {
-        const rows = yield* sql`UPDATE rika_turns SET stop_intent = 'requested', updated_at = ${now}
-          WHERE id = ${id} AND turn_kind = 'AgentExecution' AND status IN ('queued', 'accepted', 'running', 'waiting') RETURNING *`.pipe(
-          Effect.mapError(repositoryError),
-        )
-        const row = rows[0]
-        return row === undefined ? undefined : yield* decodeAgent(row)
-      }),
+      listNonterminal: listAgentTurns(sql, repositoryError).pipe(Effect.withSpan("TurnRepository.listNonterminal")),
     })
   }),
 )

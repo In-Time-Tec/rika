@@ -31,8 +31,6 @@ export const cursorFor = (turn: Turn | undefined): PageCursor | undefined =>
 export interface MemoryQueueState {
   readonly revision: number
   readonly queuedCount: number
-  readonly wakeGeneration: number
-  readonly wakePending: boolean
 }
 
 export interface MemoryState {

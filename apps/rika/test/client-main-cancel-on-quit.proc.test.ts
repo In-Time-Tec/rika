@@ -35,7 +35,7 @@ const quitCancelsBlockedTurn = (
           { after: "Waiting", ...quit, delayMs: 500, timeoutMs: 22_000 },
         ],
         yield* blockedTurnScript,
-        { RIKA_INTERNAL_RESIDENT_GRACE: "20000", RIKA_INTERNAL_RESIDENT_ABANDON: abandonMilliseconds },
+        { RIKA_INTERNAL_SERVER_GRACE: "20000", RIKA_INTERNAL_SERVER_ABANDON: abandonMilliseconds },
       )
       expect(result.timedOut, result.output).toBe(false)
       expect(result.actionsCompleted, result.output).toBe(2)
@@ -51,7 +51,7 @@ test(
 )
 
 test(
-  "cancels a blocked turn after a terminated client leaves the resident",
+  "cancels a blocked turn after a terminated client leaves the server",
   () => quitCancelsBlockedTurn("quit on SIGTERM", { write: "", signal: "SIGTERM" }, "500"),
   120_000,
 )
@@ -81,7 +81,7 @@ test(
             { after: "", write: "", turnPrompt: prompt, turnStatus: "cancelled", timeoutMs: 22_000 },
           ],
           yield* blockedTurnScript,
-          { RIKA_INTERNAL_RESIDENT_GRACE: "20000", RIKA_INTERNAL_RESIDENT_ABANDON: withoutAbandonmentFallback },
+          { RIKA_INTERNAL_SERVER_GRACE: "20000", RIKA_INTERNAL_SERVER_ABANDON: withoutAbandonmentFallback },
         )
         expect(result.timedOut, result.output).toBe(false)
         expect(result.actionsCompleted, result.output).toBe(3)

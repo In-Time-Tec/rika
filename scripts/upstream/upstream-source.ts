@@ -10,13 +10,11 @@ const packages = [
   ["@batonfx/providers", "batonfx/packages/providers"],
   ["@batonfx/skills", "batonfx/packages/skills"],
   ["@batonfx/test", "batonfx/packages/test"],
-  ["@relayfx/sdk", "relayfx/packages/relay"],
 ] as const
 
 const consumers = [
   [".", packages.map(([name]) => name)],
   ["apps/rika", ["@batonfx/providers"]],
-  ["packages/relay-execution", ["@batonfx/core", "@batonfx/test", "@relayfx/sdk"]],
 ] as const
 
 class UpstreamError extends Data.TaggedError("UpstreamError")<{ readonly message: string }> {}
@@ -57,13 +55,12 @@ const status = Effect.gen(function* () {
 const link = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem
   const { path, project, projects } = yield* roots
-  for (const repository of ["batonfx", "relayfx"] as const) {
+  for (const repository of ["batonfx"] as const) {
     const repositoryPath = path.join(projects, repository)
     if (!(yield* fileSystem.exists(repositoryPath))) {
       return yield* new UpstreamError({ message: `Missing sibling repository: ${repositoryPath}` })
     }
   }
-  yield* run("bun", ["run", "build"], path.join(projects, "relayfx", "packages", "relay"))
   for (const [, relative] of packages) {
     yield* run("bun", ["run", "build"], path.join(projects, relative))
     yield* run("bun", ["link"], path.join(projects, relative))
@@ -88,7 +85,7 @@ const registry = Effect.gen(function* () {
 
 const command = Command.make("upstream").pipe(
   Command.withSubcommands([
-    Command.make("link", {}, () => link).pipe(Command.withDescription("Link sibling Baton and Relay packages")),
+    Command.make("link", {}, () => link).pipe(Command.withDescription("Link sibling Baton packages")),
     Command.make("status", {}, () => status).pipe(Command.withDescription("Verify sibling package links")),
     Command.make("registry", {}, () => registry).pipe(Command.withDescription("Restore registry dependencies")),
   ]),

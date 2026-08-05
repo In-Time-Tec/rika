@@ -15,9 +15,9 @@ Start at the interface people or callers use. Choose the lowest scope that can f
 | ------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
 | Unit    | One owner, rule, adapter, schema, state transition, or failure contract can prove the behavior | `*.test.ts` beside the matching path under `test/`         |
 | TUI app | A user-visible interactive behavior depends on the TUI and product stack working together      | `*.tui.test.ts` on the `apps/rika/test/tui-app.ts` harness |
-| Process | Process lifecycle or transport is the behavior: spawned residents, PTYs, kill fixtures         | `*.proc.test.ts` beside the matching path under `test/`    |
+| Process | Process lifecycle or transport is the behavior: spawned servers, PTYs, kill fixtures           | `*.proc.test.ts` beside the matching path under `test/`    |
 
-Real SQLite, filesystem, Relay, or OpenTUI adapters do not change a test's scope. Test scope follows the behavior being proved, not the runtime dependency. Unit tests never spawn child processes, never run packaged binaries, and never assert wall-clock durations — waits poll observable conditions with generous ceilings. TUI app and Process suites run through `bun run test-tui` and `bun run test-proc` in CI, not in `bun run check`.
+Real SQLite, filesystem, Baton, or OpenTUI adapters do not change a test's scope. Test scope follows the behavior being proved, not the runtime dependency. Unit tests never spawn child processes, never run packaged binaries, and never assert wall-clock durations — waits poll observable conditions with generous ceilings. TUI app and Process suites run through `bun run test-tui` and `bun run test-proc` in CI, not in `bun run check`.
 
 Packaged-product verification is `bun run release-smoke` after `bun run package`; it runs in the release workflow, not in `bun run test`.
 
@@ -42,7 +42,7 @@ For an existing bug, keep the regression test after the fix. For a refactor, pre
 
 ## TUI app rules
 
-- Build each test on `TuiApp.tuiApp({ script, ... })`: the real Surface on the OpenTUI test renderer, the real interactive loop from `apps/rika/src/main.ts`, and the real Operation, Relay, SQLite, and tool stack in one process.
+- Build each test on `TuiApp.tuiApp({ script, ... })`: the real Surface on the OpenTUI test renderer, the real interactive loop from `apps/rika/src/main.ts`, and the real Operation, Baton, SQLite, and tool stack in one process.
 - Script only the language model through `TuiApp.model`; provider models and network calls are forbidden.
 - Drive input through `app.type`, `app.pressEnter`, `app.pressKey`, and friends; wait for visible evidence with `app.waitFrame(marker)` instead of sleeping blindly.
 - Wait for a unique completion marker or tool result. Composer echo is not proof that a turn completed.

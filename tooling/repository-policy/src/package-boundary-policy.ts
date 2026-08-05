@@ -36,7 +36,6 @@ const externalFrameworks = new Set([
   "@batonfx/providers",
   "@batonfx/skills",
   "@batonfx/test",
-  "@relayfx/sdk",
 ])
 const languageModelProviderPackages = new Set([
   "@anthropic-ai/sdk",
@@ -51,17 +50,19 @@ const languageModelProviderPackages = new Set([
 ])
 const validKinds = new Set(["domain", "capability", "adapter", "application", "tooling"])
 const allowedPackageEdges: Readonly<Record<string, ReadonlySet<string>>> = {
+  "@rika/baton-execution": new Set(["@rika/coding-tools", "@rika/product"]),
+  "@rika/javascript-sandbox": new Set(),
   "@rika/coding-tools": new Set(["@rika/configuration"]),
   "@rika/transcript": new Set(["@rika/coding-tools"]),
   "@rika/product-store": new Set(["@rika/product", "@rika/transcript"]),
-  "@rika/relay-execution": new Set(["@rika/configuration", "@rika/coding-tools", "@rika/product"]),
   "@rika/product": new Set(["@rika/configuration", "@rika/extensions", "@rika/coding-tools", "@rika/transcript"]),
   "@rika/terminal": new Set(["@rika/configuration", "@rika/transcript"]),
   "@rika/cli": new Set([
+    "@rika/baton-execution",
     "@rika/configuration",
     "@rika/extensions",
+    "@rika/javascript-sandbox",
     "@rika/product-store",
-    "@rika/relay-execution",
     "@rika/coding-tools",
     "@rika/transcript",
     "@rika/product",
@@ -88,14 +89,10 @@ const packageOwner = (filePath: string) => {
 }
 const sourcePackageEdges: Readonly<Record<string, ReadonlySet<string>>> = allowedPackageEdges
 const extensionFrameworks = new Set(["@batonfx/core", "@batonfx/mcp", "@batonfx/skills"])
-const isReleasedFrameworkImport = (owner: string | undefined, specifier: string) => {
-  if (owner === "@rika/relay-execution")
-    return (
-      (specifier.startsWith("@batonfx/") || specifier.startsWith("@relayfx/")) &&
-      (!specifier.startsWith("@relayfx/") || specifier === "@relayfx/sdk" || specifier === "@relayfx/sdk/sqlite")
-    )
-  return owner === "@rika/extensions" && extensionFrameworks.has(specifier)
-}
+const isReleasedFrameworkImport = (owner: string | undefined, specifier: string) =>
+  (owner === "@rika/extensions" && extensionFrameworks.has(specifier)) ||
+  (owner === "@rika/javascript-sandbox" && specifier === "@batonfx/core") ||
+  (owner === "@rika/baton-execution" && specifier.startsWith("@batonfx/"))
 const sourceImportDiagnostics = (filePath: string, text: string): PolicyDiagnostic[] => {
   const owner = packageOwner(filePath)
   if (owner === undefined) return []
@@ -123,7 +120,7 @@ const sourceImportDiagnostics = (filePath: string, text: string): PolicyDiagnost
           "Move the contract inward and import the owning package's exact public subpath",
         ),
       )
-    if (specifier.startsWith("@batonfx/") || specifier.startsWith("@relayfx/") || isProvider(specifier)) {
+    if (specifier.startsWith("@batonfx/") || isProvider(specifier)) {
       if (!isReleasedFrameworkImport(owner, specifier))
         diagnostics.push(
           diagnostic(
@@ -131,7 +128,7 @@ const sourceImportDiagnostics = (filePath: string, text: string): PolicyDiagnost
             "forbidden-external-import",
             `${owner} imports forbidden framework or provider package ${specifier}`,
             owner === "@rika/cli"
-              ? "Move Relay, Baton, and provider construction behind @rika/relay-execution"
+              ? "Keep Baton runtime and provider construction in the application composition boundary"
               : "Keep framework and provider imports inside the owning adapter boundary",
           ),
         )
@@ -452,26 +449,10 @@ const sourceMetrics = (filePath: string, text: string): PolicyDiagnostic[] => {
   })
 }
 
-const migrationBasenamePattern = /^product-migration-(\d{3})-([a-z0-9]+(?:-[a-z0-9]+)*)\.ts$/
-const migrationBasename = (filePath: string) => {
-  const basename = filePath.split("/").pop() ?? ""
-  if (!/^product-migration-\d/.test(basename) || basename.endsWith(".test.ts")) return undefined
-  if (!migrationBasenamePattern.test(basename))
-    return diagnostic(
-      filePath,
-      "migration-basename",
-      "product migration basename must be product-migration-NNN-descriptive-kebab.ts",
-      "Use a three-digit unique migration ID followed by a nonempty descriptive kebab-case suffix",
-    )
-  return undefined
-}
-
 const frameworkConfigBasenames = new Set(["vitest.config.ts"])
 const checkSourceBasename = (filePath: string) => {
   const basename = filePath.split("/").pop() ?? ""
   if (frameworkConfigBasenames.has(basename)) return undefined
-  const migration = migrationBasename(filePath)
-  if (migration !== undefined || /^product-migration-\d/.test(basename)) return migration
   if (basename === "index.ts" || basename === "index.tsx")
     return diagnostic(
       filePath,
@@ -487,28 +468,6 @@ const checkSourceBasename = (filePath: string) => {
       "Rename the file to a descriptive semantic role",
     )
   return undefined
-}
-
-const checkMigrationIdentity = (filePaths: ReadonlyArray<string>): PolicyDiagnostic[] => {
-  const entries = filePaths.flatMap((filePath) => {
-    const basename = filePath.split("/").pop() ?? ""
-    const match = migrationBasenamePattern.exec(basename)
-    return match?.[1] === undefined ? [] : [{ filePath, id: match[1] }]
-  })
-  const ids = new Map<string, string[]>()
-  for (const entry of entries) ids.set(entry.id, [...(ids.get(entry.id) ?? []), entry.filePath])
-  return [...ids.entries()]
-    .filter(([, paths]) => paths.length > 1)
-    .flatMap(([id, paths]) =>
-      paths.map((filePath) =>
-        diagnostic(
-          filePath,
-          "migration-identity",
-          `product migration ID ${id} is used by more than one source file`,
-          "Assign every product migration a unique three-digit ID",
-        ),
-      ),
-    )
 }
 
 const validateOwnershipExceptions = (value: unknown): TestOwnershipException[] => {
@@ -678,10 +637,7 @@ const scanSourcePolicies = Effect.fn("RepositoryPolicy.scanSourcePolicies")(func
     ),
     { concurrency: "unbounded" },
   )
-  return [
-    ...diagnostics.flat(),
-    ...checkMigrationIdentity(sortedPaths.map((absolutePath) => path.relative(root, absolutePath))),
-  ]
+  return diagnostics.flat()
 })
 
 export const repositoryPolicy = {
@@ -695,7 +651,6 @@ export const repositoryPolicy = {
   checkTestTopology,
   checkPackageEdges,
   checkManifests,
-  checkMigrationIdentity,
   validateOwnershipExceptions,
   checkSourceBasename,
   readWorkspaceManifests,

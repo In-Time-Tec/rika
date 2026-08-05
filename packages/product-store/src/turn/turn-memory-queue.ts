@@ -28,8 +28,6 @@ export const makeTurnMemoryQueue = ({
   | "takeQueued"
   | "dequeue"
   | "requeueAccepted"
-  | "requestQueueWake"
-  | "consumeQueueWake"
 > => ({
   readQueue: Effect.fn("TurnRepository.readQueue")(function* (threadId) {
     const current = yield* readState
@@ -73,52 +71,46 @@ export const makeTurnMemoryQueue = ({
       ]
     })
   }),
-  finishQueuedClaim: Effect.fn("TurnRepository.finishQueuedClaim")(
-    function* (claim, status, lastCursor, extensionPin, now) {
-      return yield* modifyState((current): readonly [QueueClaimFinish, MemoryState] => {
-        const existing = current.turns.get(claim.turn.id)
-        if (
-          existing === undefined ||
-          !TurnResult.isAgentExecution(existing) ||
-          existing.status !== "queued" ||
-          current.claims.get(claim.turn.id) !== claim.token
-        )
-          return [{ _tag: "Unavailable" }, current]
-        const { lastCursor: previousCursor, ...withoutCursor } = existing
-        void previousCursor
-        const nextTurn: AgentExecutionTurn = {
-          ...withoutCursor,
-          status,
-          ...(lastCursor === undefined ? {} : { lastCursor }),
-          ...(extensionPin === undefined ? {} : { extensionPin: structuredClone(extensionPin) }),
-          updatedAt: now,
-        }
-        const previousQueue = queueState(current, existing.threadId)
-        const nextQueue = {
-          ...previousQueue,
-          revision: previousQueue.revision + 1,
-          queuedCount: Math.max(0, previousQueue.queuedCount - 1),
-        }
-        const queue: QueueItemChange = {
-          threadId: existing.threadId,
-          revision: nextQueue.revision,
-          queuedCount: nextQueue.queuedCount,
-          becameNonempty: false,
-          change: { _tag: "Removed", turnId: existing.id },
-        }
-        const claims = new Map(current.claims)
-        claims.delete(existing.id)
-        return [
-          { _tag: "Transitioned", turn: clone(nextTurn), queue },
-          withQueueState(
-            { ...current, turns: new Map(current.turns).set(existing.id, nextTurn), claims },
-            existing.threadId,
-            nextQueue,
-          ),
-        ]
-      })
-    },
-  ),
+  finishQueuedClaim: Effect.fn("TurnRepository.finishQueuedClaim")(function* (claim, status, now) {
+    return yield* modifyState((current): readonly [QueueClaimFinish, MemoryState] => {
+      const existing = current.turns.get(claim.turn.id)
+      if (
+        existing === undefined ||
+        !TurnResult.isAgentExecution(existing) ||
+        existing.status !== "queued" ||
+        current.claims.get(claim.turn.id) !== claim.token
+      )
+        return [{ _tag: "Unavailable" }, current]
+      const nextTurn: AgentExecutionTurn = {
+        ...existing,
+        status,
+        updatedAt: now,
+      }
+      const previousQueue = queueState(current, existing.threadId)
+      const nextQueue = {
+        ...previousQueue,
+        revision: previousQueue.revision + 1,
+        queuedCount: Math.max(0, previousQueue.queuedCount - 1),
+      }
+      const queue: QueueItemChange = {
+        threadId: existing.threadId,
+        revision: nextQueue.revision,
+        queuedCount: nextQueue.queuedCount,
+        becameNonempty: false,
+        change: { _tag: "Removed", turnId: existing.id },
+      }
+      const claims = new Map(current.claims)
+      claims.delete(existing.id)
+      return [
+        { _tag: "Transitioned", turn: clone(nextTurn), queue },
+        withQueueState(
+          { ...current, turns: new Map(current.turns).set(existing.id, nextTurn), claims },
+          existing.threadId,
+          nextQueue,
+        ),
+      ]
+    })
+  }),
   releaseQueuedClaim: Effect.fn("TurnRepository.releaseQueuedClaim")(function* (claim) {
     yield* updateState((current) => {
       if (current.claims.get(claim.turn.id) !== claim.token) return current
@@ -257,25 +249,5 @@ export const makeTurnMemoryQueue = ({
       return yield* RepositoryError.make({ message: `Turn ${id} is not an unowned accepted turn` })
     if (result._tag === "Full") return yield* result.error
     return result.value
-  }),
-  requestQueueWake: Effect.fn("TurnRepository.requestQueueWake")(function* (threadId) {
-    return yield* modifyState((current) => {
-      const queue = queueState(current, threadId)
-      if (queue.queuedCount === 0) return [undefined, current]
-      if (queue.wakePending)
-        return [{ threadId, generation: queue.wakeGeneration, queueRevision: queue.revision }, current]
-      const next = { ...queue, wakeGeneration: queue.wakeGeneration + 1, wakePending: true }
-      return [
-        { threadId, generation: next.wakeGeneration, queueRevision: next.revision },
-        withQueueState(current, threadId, next),
-      ]
-    })
-  }),
-  consumeQueueWake: Effect.fn("TurnRepository.consumeQueueWake")(function* (threadId, generation) {
-    return yield* modifyState((current) => {
-      const queue = queueState(current, threadId)
-      if (!queue.wakePending || queue.wakeGeneration !== generation) return [false, current]
-      return [true, withQueueState(current, threadId, { ...queue, wakePending: false })]
-    })
   }),
 })

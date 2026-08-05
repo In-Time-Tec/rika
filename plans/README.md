@@ -22,7 +22,6 @@ Each plan is tracked by a GitHub issue. Plans 004 and 008 were **not** filed as 
 | 005  | Turn the tool-runtime `realPath` defect into a typed tool failure     | P1       | S         | bug       | —                      | #152                    | DONE via 024 (the `canonicalWorkspace` defect site was removed)                                      |
 | 006  | SQL `appendAll` deletes transcript units the reducer removed          | P1       | M         | bug       | —                      | #153                    | TODO                                                                                                 |
 | 007  | Add `rika diagnostics view [--follow] [--thread]`                     | P2       | M         | direction | —                      | #154                    | TODO                                                                                                 |
-| 009  | Spike: load owner-authored workflows from `.rika/workflows`           | P2       | M (spike) | direction | —                      | #155                    | TODO                                                                                                 |
 | 008  | Spike: wire plugin-registry contributions into execution              | P2       | M (spike) | direction | 002 (soft)             | #145 (existing, + #141) | TODO                                                                                                 |
 | 011  | Transcript viewport: one scroll owner, collapse rendering, windowing  | P1       | L         | bug       | —                      | —                       | DONE (steps 1-5; collapse repro `test.fails` pending upstream OpenTUI buffer-clear; step 6 deferred) |
 | 012  | Subagents return free-form text only; all output schemas removed      | P1       | M         | bug       | —                      | —                       | DONE                                                                                                 |
@@ -38,7 +37,6 @@ The four independent bug fixes (003, 004, 005, 006) have no dependencies and can
 - **010 → 001/002 (decision, not code):** plan 010's trust-model choice (one unified gate vs three) should be settled before 001 and 002 are implemented, so all three land as one coherent boundary. 001 alone (tighten-only permissions) is safe to ship first regardless.
 - **002 depends on 001:** both change the config-merge / permission path in `config-service.ts` and `main.ts`; land 001 first to avoid conflicting edits.
 - **008 soft-depends on 002:** contributed plugin tools must inherit _enforced_ permission categories, or wiring them in would grant silent write/shell access. 008 is a spike, so it can be researched before 002 lands, but its implementation follow-on must wait for 002.
-- **009** is independent (workflow loader; touches `workflow-definitions.ts` + the workflows CLI only).
 
 ## Findings identified but not planned this round
 

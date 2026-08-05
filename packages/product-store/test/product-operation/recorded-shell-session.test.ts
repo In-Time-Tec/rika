@@ -10,29 +10,17 @@ import * as ThreadSummaryRepository from "@rika/product-store/sqlite-thread-summ
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
-import * as ExecutionBackend from "@rika/product/execution-service"
-import * as ExecutionInspection from "@rika/product/execution-inspection"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
-import { Context, Deferred, Effect, Fiber, Layer, Ref } from "effect"
+import { Context, Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect"
 import { projectionVersion } from "./interactive-session-base-support"
 
-const noInspection = (): ExecutionInspection.Inspection | undefined => undefined
-
-const backend = ExecutionBackend.Service.of({
-  invokeChild: () => Effect.die("unused"),
-  createFanOut: () => Effect.die("unused"),
-  inspectFanOut: () => Effect.die("unused"),
-  cancelFanOut: () => Effect.die("unused"),
-  registerWorkflows: () => Effect.die("unused"),
-  startWorkflow: () => Effect.die("unused"),
-  inspectWorkflow: () => Effect.die("unused"),
-  cancelWorkflow: () => Effect.die("unused"),
-  start: () => Effect.die("unused"),
-  replay: () => Effect.die("unused"),
-  cancel: () => Effect.die("unused"),
-  inspect: () => Effect.sync(noInspection),
-  resolveInvocationSource: () => Effect.die("unused"),
-  steer: () => Effect.die("unused"),
+const backend = ExecutionGateway.Service.of({
+  startTurn: () => Effect.die("unused"),
+  cancelTurn: () => Effect.die("unused"),
+  steerTurn: () => Effect.die("unused"),
+  watchTurn: () => Stream.die("unused"),
+  inspectTurn: () => Effect.succeed({ status: "unavailable" }),
 })
 
 interface HarnessOptions {
@@ -66,7 +54,7 @@ const makeHarness = Effect.fn("RecordedShellSessionTest.makeHarness")(function* 
       TranscriptRepository.Service,
       TranscriptRepository.Service.of(options.transcriptService?.(transcripts) ?? transcripts),
     ),
-    backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+    backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
     toolRuntimeLayer: () => ToolRuntime.testLayer(options.runTool),
     defaultWorkspace: "/work",
     makeThreadId: Effect.succeed(threadId),

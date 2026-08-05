@@ -17,9 +17,8 @@ export interface MemoryCoordinator {
   readonly withLock: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   readonly agentExecutions: Effect.Effect<ReadonlyArray<AgentExecutionTurn>>
   readonly adoptRefold: <A>(
-    expected: Pick<AgentExecutionTurn, "id" | "status" | "lastCursor">,
+    expected: Pick<AgentExecutionTurn, "id" | "status">,
     status: TerminalStatus,
-    cursor: string,
     write: (turn: AgentExecutionTurn) => Effect.Effect<MemoryRefoldWrite<A>>,
   ) => Effect.Effect<MemoryRefoldResult<A>>
   readonly writeRecordedShell: <A>(

@@ -1,9 +1,22 @@
 import { Effect } from "effect"
-import { buildProductOperationExecutionState } from "./product-operation-runtime-execution-state"
+import {
+  buildProductOperationExecutionState,
+  type ProductOperationExecutionState,
+  type ProductOperationExecutionStateInput,
+} from "./product-operation-runtime-execution-state"
 import { queueMutationEvent } from "./product-operation-runtime-support"
-import { makeProductOperationInteractiveSession } from "./product-operation-runtime-session"
+import {
+  makeProductOperationInteractiveSession,
+  type ProductOperationInteractiveSessionFactory,
+} from "./product-operation-runtime-session"
 
-export const makeProductOperationRuntimeState = (input: any): Effect.Effect<any, Error, never> =>
+export type ProductOperationRuntimeState = ProductOperationExecutionState & {
+  readonly makeInteractiveSession: ProductOperationInteractiveSessionFactory
+}
+
+export const makeProductOperationRuntimeState = (
+  input: ProductOperationExecutionStateInput,
+): Effect.Effect<ProductOperationRuntimeState, Error, never> =>
   Effect.gen(function* () {
     const runtime = yield* buildProductOperationExecutionState({ ...input, queueMutationEvent })
     const makeInteractiveSession = makeProductOperationInteractiveSession({ ...input, ...runtime })

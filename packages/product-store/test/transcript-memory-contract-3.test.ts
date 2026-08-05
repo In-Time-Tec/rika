@@ -4,7 +4,7 @@ import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
-import * as TranscriptUsage from "@rika/transcript/model-usage-fallback"
+import * as ModelAttemptUsage from "@rika/transcript/model-attempt-usage"
 import { event } from "./transcript-fixture-core"
 import { executionCheckpoint } from "./transcript-fixture-checkpoints"
 import { projectionVersion } from "./transcript-fixture-core"
@@ -226,7 +226,7 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
         ]),
         revision: 4,
         costUsd: 1.25,
-        pricingVersion: TranscriptUsage.pricingVersion,
+        pricingVersion: ModelAttemptUsage.pricingVersion,
         usableCompletionSequence: 3,
       }
       const parentTool = parent.units.find(
@@ -247,7 +247,7 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository delta contract
       const stored = yield* repository.get(target.id)
       const page = yield* repository.page(threadId, { limit: 1 })
       expect(stored?.units).toEqual(nested.units)
-      expect(stored?.pricingVersion).toBe(TranscriptUsage.pricingVersion)
+      expect(stored?.pricingVersion).toBe(ModelAttemptUsage.pricingVersion)
       expect(stored?.usableCompletionSequence).toBe(3)
       expect(page.threadCostUsd).toBe(3.75)
       expect(yield* repository.globalCostUsd).toBe(3.75)

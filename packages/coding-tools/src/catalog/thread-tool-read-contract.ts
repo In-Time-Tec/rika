@@ -30,7 +30,6 @@ const SubtreeCursor = Schema.Union([
   }),
   Schema.Struct({ before: TranscriptCursor }),
 ])
-const RelationshipCursor = Schema.Struct({ createdAt: Schema.Finite, targetTurnId: NonEmptyString })
 const ReadSelection = Schema.Union([
   Schema.Struct({ mode: Schema.tag("overview") }),
   Schema.Struct({
@@ -49,12 +48,9 @@ const ReadSelection = Schema.Union([
     childExecutionId: NonEmptyString,
     cursor: Schema.optionalKey(SubtreeCursor),
   }),
-  Schema.Struct({ mode: Schema.tag("related"), cursor: Schema.optionalKey(RelationshipCursor) }),
 ])
 export const ReadThreadInput = Schema.Struct({
   threadId: NonEmptyString,
   includeArchived: Schema.optionalKey(Schema.Boolean),
-  selection: Schema.optionalKey(ReadSelection),
-  maxTurns: Schema.optionalKey(PositiveInt),
-  maxChars: Schema.optionalKey(PositiveInt),
+  selection: ReadSelection,
 })

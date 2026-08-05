@@ -17,7 +17,6 @@ import * as IngestLifecycle from "./execution-ingest-lifecycle"
 import * as IngestFailureRuntime from "./execution-ingest-failure"
 import { IngestFailure, type Failure } from "./execution-ingest-failure"
 import * as IngestStop from "./execution-ingest-stop"
-import * as UsageBackfill from "./execution-ingest-usage-backfill"
 
 export const projectionVersion = 4
 
@@ -27,11 +26,10 @@ export const defaultWatchCapacity = 2_048
 
 export interface Interface {
   readonly ensure: (root: IngestEvent.Root) => Effect.Effect<void, Failure>
-  readonly backfillUsage: (root: IngestEvent.Root) => Effect.Effect<void>
   readonly watchThread: (
     threadId: IngestEvent.Root["threadId"],
   ) => Effect.Effect<IngestWatch.ProjectionWatch, never, Scope.Scope>
-  readonly deliver: (turnId: IngestEvent.Root["turnId"], event: any) => void
+  readonly deliver: (turnId: IngestEvent.Root["turnId"], event: import("@rika/product/execution-event").Event) => void
   readonly consumed: (turnId: IngestEvent.Root["turnId"]) => Effect.Effect<void, Failure>
   readonly flush: (turnId: IngestEvent.Root["turnId"]) => Effect.Effect<void, Failure>
   readonly settled: (turnId: IngestEvent.Root["turnId"]) => Effect.Effect<void, Failure>
@@ -176,13 +174,22 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
           return
         }
         if (turn === undefined || turn.status === "queued") return
+        if (turn.executionLink === undefined)
+          return yield* IngestFailure.make({
+            message: `Turn ${root.turnId} has no Baton Run link`,
+            threadId: String(root.threadId),
+            turnId: String(root.turnId),
+            executionId: "",
+            reason: "checkpoint",
+          })
+        const rootExecutionId = turn.executionLink.runId
         const stored = yield* options.transcripts.get(root.turnId).pipe(
           Effect.mapError((error) =>
             IngestFailure.make({
               message: String(error),
               threadId: String(root.threadId),
               turnId: String(root.turnId),
-              executionId: String(root.turnId),
+              executionId: rootExecutionId,
               reason: "repository",
             }),
           ),
@@ -192,7 +199,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
             message: `Transcript ${root.turnId} has unsupported projection version ${stored.projectionVersion}`,
             threadId: String(root.threadId),
             turnId: String(root.turnId),
-            executionId: String(root.turnId),
+            executionId: rootExecutionId,
             reason: "checkpoint",
           })
         const refolding = stored !== undefined && stored.projectionVersion < projectionVersion
@@ -257,7 +264,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
             message: restored.invalid,
             threadId: String(root.threadId),
             turnId: String(root.turnId),
-            executionId: String(root.turnId),
+            executionId: rootExecutionId,
             reason: "checkpoint",
           })
         if (!refolding && stored !== undefined) {
@@ -277,7 +284,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
               message: attachmentFailure,
               threadId: String(root.threadId),
               turnId: String(root.turnId),
-              executionId: String(root.turnId),
+              executionId: rootExecutionId,
               reason: "attachment",
             })
           for (const key of restored.order) {
@@ -307,23 +314,6 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
           }
         }
         failedPipelines.delete(String(root.turnId))
-        if (
-          !refolding &&
-          isTerminalStatus(turn.status) &&
-          fullyConsumed(restored.nodes) &&
-          usageFailure === undefined &&
-          usageRefoldFromVersion !== undefined &&
-          (yield* UsageBackfill.run({
-            backend: options.backend,
-            usage: options.usage,
-            root,
-            nodes: restored.nodes,
-            sourceId: usageSourceId,
-            source: usageSource,
-            fromVersion: usageRefoldFromVersion,
-          }))
-        )
-          return
         if (!refolding && isTerminalStatus(turn.status) && fullyConsumed(restored.nodes)) return
         const unitIndex = new Map<string, import("@rika/transcript/transcript-unit").Unit>()
         const unitOwners = new Map<string, string>()
@@ -337,7 +327,7 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
         const pipeline: Pipeline = {
           threadId: root.threadId,
           turnId: root.turnId,
-          rootKey: IngestEvent.executionKey(String(root.turnId)),
+          rootKey: IngestEvent.executionKey(rootExecutionId),
           streamId: `projection-${nextStreamId}`,
           nodes: restored.nodes,
           order: restored.order,
@@ -419,13 +409,8 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
     )
   })
 
-  const backfillUsage = Effect.fn("ExecutionIngestService.backfillUsage")(function* (root: IngestEvent.Root) {
-    yield* Effect.result(ensure(root))
-  })
-
   return {
     ensure,
-    backfillUsage,
     watchThread,
     deliver: (turnId, event) => {
       const pipeline = pipelines.get(String(turnId))
@@ -434,7 +419,8 @@ export const make = Effect.fn("ExecutionIngestService.make")(function* (options:
         pipeline.delivered.push(event)
         return
       }
-      accept(pipeline, pipeline.nodes.get(pipeline.rootKey)!, event)
+      const node = pipeline.nodes.get(IngestEvent.executionKey(String(event.executionId)))
+      accept(pipeline, node ?? pipeline.nodes.get(pipeline.rootKey)!, event)
     },
     consumed: Effect.fn("ExecutionIngestService.consumed")(function* (turnId: IngestEvent.Root["turnId"]) {
       const pipeline = pipelines.get(String(turnId))

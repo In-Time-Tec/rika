@@ -1,6 +1,7 @@
 import { Schema } from "effect"
 import { ModelRegistrationIdentity } from "./model-registration-identity"
 import { ProviderConnectionSnapshot } from "./provider-connection-snapshot"
+import { defaultCompactionSummaryPrompt } from "./execution-compaction-prompt"
 
 const ModelRouteRole = Schema.Literals([
   "main",
@@ -9,23 +10,28 @@ const ModelRouteRole = Schema.Literals([
   "compaction",
   "librarian",
   "painter",
-  "review",
   "readThread",
+  "review",
   "surgeon",
   "task",
 ])
 type ModelRouteRole = typeof ModelRouteRole.Type
 
-export const ExecutionRouteModelSnapshot = Schema.Struct({
-  role: ModelRouteRole,
-  alias: Schema.String,
+export const ExecutionRouteModelCandidateSnapshot = Schema.Struct({
   model: Schema.String,
   providerConnection: ProviderConnectionSnapshot,
   registrationIdentity: ModelRegistrationIdentity,
+  providerOptions: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
+})
+export type ExecutionRouteModelCandidateSnapshot = typeof ExecutionRouteModelCandidateSnapshot.Type
+
+export const ExecutionRouteModelSnapshot = Schema.Struct({
+  role: ModelRouteRole,
+  alias: Schema.String,
+  registrationIdentity: ModelRegistrationIdentity,
   effort: Schema.String,
   fast: Schema.Boolean,
-  requestVariant: Schema.String,
-  providerOptions: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
+  candidates: Schema.Array(ExecutionRouteModelCandidateSnapshot),
   compaction: Schema.Struct({
     contextWindow: Schema.Finite,
     reserveTokens: Schema.Finite,
@@ -35,30 +41,30 @@ export const ExecutionRouteModelSnapshot = Schema.Struct({
 export type ExecutionRouteModelSnapshot = typeof ExecutionRouteModelSnapshot.Type
 
 export const ExecutionRouteSnapshot = Schema.Struct({
-  version: Schema.Literal(1),
+  version: Schema.Literal(2),
   mode: Schema.String,
   tokenBudget: Schema.optionalKey(Schema.Finite),
-  title: Schema.optionalKey(ExecutionRouteModelSnapshot),
-  compactionSummary: Schema.optionalKey(ExecutionRouteModelSnapshot),
+  compaction: Schema.Struct({
+    strategy: Schema.Literal("default"),
+    summaryPrompt: Schema.String,
+  }),
+  title: ExecutionRouteModelSnapshot,
+  compactionSummary: ExecutionRouteModelSnapshot,
   main: ExecutionRouteModelSnapshot,
   oracle: ExecutionRouteModelSnapshot,
-  agents: Schema.optionalKey(
-    Schema.Struct({
-      librarian: ExecutionRouteModelSnapshot,
-      painter: ExecutionRouteModelSnapshot,
-      review: ExecutionRouteModelSnapshot,
-      readThread: ExecutionRouteModelSnapshot,
-      surgeon: ExecutionRouteModelSnapshot,
-      task: ExecutionRouteModelSnapshot,
-    }),
-  ),
+  agents: Schema.Struct({
+    librarian: ExecutionRouteModelSnapshot,
+    painter: ExecutionRouteModelSnapshot,
+    readThread: ExecutionRouteModelSnapshot,
+    review: ExecutionRouteModelSnapshot,
+    surgeon: ExecutionRouteModelSnapshot,
+    task: ExecutionRouteModelSnapshot,
+  }),
 })
 export type ExecutionRouteSnapshot = typeof ExecutionRouteSnapshot.Type
-export const ExecutionRoutePin = ExecutionRouteSnapshot
-export type ExecutionRoutePin = typeof ExecutionRoutePin.Type
+
 export const testExecutionRoute = (mode = "test"): ExecutionRouteSnapshot => {
-  const route = {
-    alias: "test",
+  const candidate = {
     model: "test",
     providerConnection: {
       provider: "test",
@@ -66,15 +72,20 @@ export const testExecutionRoute = (mode = "test"): ExecutionRouteSnapshot => {
       baseUrl: "test://model",
       authentication: "none" as const,
     },
-    registrationIdentity: "test" as ExecutionRouteModelSnapshot["registrationIdentity"],
+    registrationIdentity: "test" as ExecutionRouteModelCandidateSnapshot["registrationIdentity"],
+  }
+  const route = {
+    alias: "test",
+    registrationIdentity: "test-route" as ExecutionRouteModelSnapshot["registrationIdentity"],
     effort: "medium",
     fast: false,
-    requestVariant: "test",
+    candidates: [candidate],
     compaction: { contextWindow: 372_000, reserveTokens: 128_000, keepRecentTokens: 32_000 },
   }
   return {
-    version: 1,
+    version: 2,
     mode,
+    compaction: { strategy: "default", summaryPrompt: defaultCompactionSummaryPrompt },
     title: { ...route, role: "title", effort: "low" },
     compactionSummary: { ...route, role: "compaction" },
     main: { ...route, role: "main" },
@@ -82,8 +93,8 @@ export const testExecutionRoute = (mode = "test"): ExecutionRouteSnapshot => {
     agents: {
       librarian: { ...route, role: "librarian" },
       painter: { ...route, role: "painter" },
-      review: { ...route, role: "review" },
       readThread: { ...route, role: "readThread" },
+      review: { ...route, role: "review" },
       surgeon: { ...route, role: "surgeon" },
       task: { ...route, role: "task" },
     },
@@ -103,31 +114,34 @@ const requireKeys = (value: Record<string, unknown>, allowed: ReadonlyArray<stri
   if (Object.keys(value).some((key) => !allowedSet.has(key))) throw new Error(message)
 }
 
-const validateModel = (value: unknown, expectedRole: ModelRouteRole): void => {
-  const model = requireRecord(value, "Malformed execution route model")
-  requireKeys(
-    model,
-    [
-      "role",
-      "alias",
-      "model",
-      "providerConnection",
-      "registrationIdentity",
-      "effort",
-      "fast",
-      "requestVariant",
-      "providerOptions",
-      "compaction",
-    ],
-    "Unsupported execution route model field",
-  )
-  if (model.role !== expectedRole) throw new Error("Malformed execution route role")
-  const connection = requireRecord(model.providerConnection, "Malformed provider connection")
+const validateConnection = (value: unknown): void => {
+  const connection = requireRecord(value, "Malformed provider connection")
   requireKeys(
     connection,
     ["provider", "protocol", "baseUrl", "authentication", "apiKeyEnvironment", "credentialIdentity"],
     "Unsupported provider connection field",
   )
+}
+
+const validateModel = (value: unknown, expectedRole: ModelRouteRole): void => {
+  const model = requireRecord(value, "Malformed execution route model")
+  requireKeys(
+    model,
+    ["role", "alias", "registrationIdentity", "effort", "fast", "candidates", "compaction"],
+    "Unsupported execution route model field",
+  )
+  if (model.role !== expectedRole) throw new Error("Malformed execution route role")
+  if (!Array.isArray(model.candidates) || model.candidates.length === 0)
+    throw new Error("Malformed execution route candidates")
+  for (const candidateValue of model.candidates) {
+    const candidate = requireRecord(candidateValue, "Malformed execution route candidate")
+    requireKeys(
+      candidate,
+      ["model", "providerConnection", "registrationIdentity", "providerOptions"],
+      "Unsupported execution route candidate field",
+    )
+    validateConnection(candidate.providerConnection)
+  }
   const compaction = requireRecord(model.compaction, "Malformed execution route compaction")
   requireKeys(
     compaction,
@@ -140,24 +154,24 @@ export const toExecutionRouteSnapshot = (routeValue: unknown): ExecutionRouteSna
   const route = requireRecord(routeValue, "Malformed execution route")
   requireKeys(
     route,
-    ["version", "mode", "tokenBudget", "title", "compactionSummary", "main", "oracle", "agents"],
+    ["version", "mode", "tokenBudget", "compaction", "title", "compactionSummary", "main", "oracle", "agents"],
     "Unsupported execution route field",
   )
   if (route.version === undefined) throw new Error("Malformed execution route version")
-  if (route.version !== 1) throw new Error("Unsupported execution route version")
+  if (route.version !== 2) throw new Error("Unsupported execution route version")
   validateModel(route.main, "main")
   validateModel(route.oracle, "oracle")
-  if (route.title !== undefined) validateModel(route.title, "title")
-  if (route.compactionSummary !== undefined) validateModel(route.compactionSummary, "compaction")
-  if (route.agents !== undefined) {
-    const agents = requireRecord(route.agents, "Malformed execution route agents")
-    requireKeys(
-      agents,
-      ["librarian", "painter", "review", "readThread", "surgeon", "task"],
-      "Unsupported execution route agent",
-    )
-    for (const role of ["librarian", "painter", "review", "readThread", "surgeon", "task"] as const)
-      validateModel(agents[role], role)
-  }
-  return Schema.decodeUnknownSync(ExecutionRouteSnapshot)(route)
+  validateModel(route.title, "title")
+  validateModel(route.compactionSummary, "compaction")
+  const compaction = requireRecord(route.compaction, "Malformed execution route compaction intent")
+  requireKeys(compaction, ["strategy", "summaryPrompt"], "Unsupported execution route compaction intent field")
+  const agents = requireRecord(route.agents, "Malformed execution route agents")
+  requireKeys(
+    agents,
+    ["librarian", "painter", "readThread", "review", "surgeon", "task"],
+    "Unsupported execution route agent",
+  )
+  for (const role of ["librarian", "painter", "readThread", "review", "surgeon", "task"] as const)
+    validateModel(agents[role], role)
+  return Schema.decodeUnknownSync(ExecutionRouteSnapshot, { onExcessProperty: "error" })(route)
 }

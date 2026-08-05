@@ -1,21 +1,19 @@
 import * as Thread from "@rika/product/thread-record"
 import * as AuthenticationOperation from "./authentication-operation-dispatch"
-import * as ExecutionRecovery from "./execution-recovery-dispatch"
 import * as ExtensionOperations from "./../contract/extension-operation"
 import * as ConfigOperations from "./../contract/configuration-operation"
-import { Console, Deferred, Effect, FileSystem, Layer, Option, Path, Schema, Scope } from "effect"
-import { awaitSessionQuiescence, hasActiveExecutionWork } from "../../execution/lifecycle/product-execution-quiescence"
+import { Console, Effect, FileSystem, Layer, Option, Path, Schema, Scope } from "effect"
 import { queuedTurnPromoteMaxAgeMs, staleQueuedTurnsError } from "../../thread/queue/pending-turn-policy"
 import { OperationUnavailable } from "../contract/product-operation"
 import { Service } from "../contract/product-operation-service"
 import type { Input } from "../contract/product-operation"
 import { OperationError, operationError } from "../operation-error"
 import type { Interface } from "../contract/product-operation-service"
-import { isTerminalStatus } from "../../execution/contract/execution-status"
 import { makeProductOperationSchedule } from "./product-operation-schedule"
 import { makeProductOperationRuntimeState } from "./product-operation-runtime-state"
 import { makeProductOperationService } from "./product-operation-service"
 import type { ProductLayerOptions } from "./product-operation-options"
+import type { InteractiveEvent } from "../interactive/interactive-event"
 
 const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString)
 const unavailable = (input: Input, message = `${input._tag} is specified but not implemented yet`) =>
@@ -41,7 +39,6 @@ const markdownExport = (thread: Thread.Thread, turns: ReadonlyArray<import("@rik
   ].join("\n")
 
 export const runAuth = AuthenticationOperation.run
-export const reconcile = ExecutionRecovery.reconcile
 
 type ProductLayerError<
   ThreadError extends Error,
@@ -49,7 +46,6 @@ type ProductLayerError<
   BackendError extends Error,
   ThreadSummaryError extends Error,
   TranscriptError extends Error,
-  ThreadInteractionError extends Error,
   UsageError extends Error,
 > =
   | ThreadError
@@ -57,7 +53,6 @@ type ProductLayerError<
   | BackendError
   | ThreadSummaryError
   | TranscriptError
-  | ThreadInteractionError
   | UsageError
   | OperationError
   | OperationUnavailable
@@ -68,18 +63,9 @@ export const productLayer = <
   BackendError extends Error,
   ThreadSummaryError extends Error = never,
   TranscriptError extends Error = never,
-  ThreadInteractionError extends Error = never,
   UsageError extends Error = never,
 >(
-  options: ProductLayerOptions<
-    ThreadError,
-    TurnError,
-    BackendError,
-    ThreadSummaryError,
-    TranscriptError,
-    ThreadInteractionError,
-    UsageError
-  >,
+  options: ProductLayerOptions<ThreadError, TurnError, BackendError, ThreadSummaryError, TranscriptError, UsageError>,
 ): Layer.Layer<
   Service,
   | ThreadError
@@ -87,7 +73,6 @@ export const productLayer = <
   | BackendError
   | ThreadSummaryError
   | TranscriptError
-  | ThreadInteractionError
   | UsageError
   | OperationError
   | OperationUnavailable,
@@ -97,15 +82,7 @@ export const productLayer = <
     Service,
     Effect.gen(function* (): Effect.gen.Return<
       Interface,
-      ProductLayerError<
-        ThreadError,
-        TurnError,
-        BackendError,
-        ThreadSummaryError,
-        TranscriptError,
-        ThreadInteractionError,
-        UsageError
-      >,
+      ProductLayerError<ThreadError, TurnError, BackendError, ThreadSummaryError, TranscriptError, UsageError>,
       Scope.Scope
     > {
       const ownerScope = yield* Effect.scope
@@ -113,9 +90,9 @@ export const productLayer = <
       const fileSystem = yield* Effect.serviceOption(FileSystem.FileSystem)
       const path = yield* Effect.serviceOption(Path.Path)
       let activitySequence = 0
-      const interactiveSinks = new Map<number, (origin: number, event: any) => void>()
+      const interactiveSinks = new Map<number, (origin: number, event: InteractiveEvent) => void>()
       const sessionThreadViews = new Map<number, () => string | undefined>()
-      const publishInteractiveActivity = (origin: number, event: any): any => {
+      const publishInteractiveActivity = (origin: number, event: InteractiveEvent): InteractiveEvent => {
         const published =
           event._tag === "TurnStarted" || event._tag === "TurnSettled"
             ? { ...event, activitySequence: (activitySequence += 1) }
@@ -123,7 +100,7 @@ export const productLayer = <
         for (const [sessionId, sink] of interactiveSinks) if (sessionId !== origin) sink(origin, published)
         return published
       }
-      const publishTurnSettled = (turn: any, responseArrived?: boolean) => {
+      const publishTurnSettled = (turn: import("@rika/product/turn-record").Turn, responseArrived?: boolean) => {
         const status = turn.status
         if (status !== "completed" && status !== "failed" && status !== "cancelled") return Effect.void
         return Effect.sync(() =>
@@ -149,33 +126,17 @@ export const productLayer = <
         unavailable,
         operationError,
         encodeJson,
-        awaitSessionQuiescence,
         staleQueuedTurnsError,
         queuedTurnPromoteMaxAgeMs,
       }).pipe(Effect.mapError((error) => operationError(String(error))))
       const schedule = yield* makeProductOperationSchedule({
         options,
-        ...state,
-        publishInteractiveActivity,
-        hasActiveExecutionWork,
-        stopActiveExecutionWorkWithProjection: state.stopActiveExecutionWorkWithProjection,
-        isTerminalStatus,
-        queueMutationEvent: state.queueMutationEvent,
+        ownerScope,
+        makeInteractiveSession: state.makeInteractiveSession,
+        repairThreadSummaries: state.repairThreadSummaries,
+        executionDependencies: state.executionDependencies,
       })
-      yield* state.rootTurnOwner.install({
-        run: schedule.scheduleReconcile.pipe(
-          Effect.flatMap((value: Deferred.Deferred<void>) => Deferred.await(value)),
-          Effect.asVoid,
-          Effect.mapError((error) => operationError(String(error))),
-        ),
-        reconcile: schedule.scheduleReconcile.pipe(
-          Effect.flatMap((value: Deferred.Deferred<void>) => Deferred.await(value)),
-          Effect.asVoid,
-          Effect.mapError((error) => operationError(String(error))),
-        ),
-      })
-      const rootReconcile: Effect.Effect<void, Error> = state.rootTurnOwner.reconcile
-      yield* Effect.forkIn(rootReconcile, ownerScope).pipe(Effect.mapError((error) => operationError(String(error))))
+      yield* state.rootTurnOwner.install({ run: () => Effect.void })
       return makeProductOperationService({
         options,
         state,
@@ -184,12 +145,9 @@ export const productLayer = <
         fileSystem: Option.getOrUndefined(fileSystem),
         path: Option.getOrUndefined(path),
         executionDependencies: state.executionDependencies,
-        hasActiveExecutionWork,
         stopActiveExecutionWorkWithProjection: state.stopActiveExecutionWorkWithProjection,
         replacementAdmission: state.replacementAdmission,
         replacementState: state.replacementState,
-        activeWorkflows: state.activeWorkflows,
-        rawBackend: state.rawBackend,
         unavailable,
         operationError,
         publishInteractiveActivity,
@@ -200,11 +158,9 @@ export const productLayer = <
         configOperations: ConfigOperations,
         notifyThreadSummaries: state.notifyThreadSummaries,
         writeThread,
-        requireThread,
+        requireThread: (repository, id) =>
+          requireThread(repository, id).pipe(Effect.mapError((error) => operationError(error.message, error))),
         markdownExport,
-        turnMutationAdmission: state.turnMutationAdmission,
-        pendingTurnCapacity: state.pendingTurnCapacity,
-        awaitSessionQuiescence,
         staleQueuedTurnsError,
         queuedTurnPromoteMaxAgeMs,
       })

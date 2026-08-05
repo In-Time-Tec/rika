@@ -231,7 +231,7 @@ export const transcriptUnitId: {
         : orderedTranscriptItems(model).find(
             (candidate) => candidate._tag === "Entry" && candidate.index === unit.entry,
           )
-    return `entry:${item?.id ?? `${entry?.turnId ?? "legacy"}:${entry?.role ?? "entry"}:${unit.entry}`}`
+    return `entry:${item?.id ?? `${entry?.turnId ?? "missing"}:${entry?.role ?? "entry"}:${unit.entry}`}`
   }
   if (unit.kind === "tool") {
     const block = model.blocks[unit.blocks[0]!] as Extract<TranscriptBlock, { _tag: "ToolCall" }>

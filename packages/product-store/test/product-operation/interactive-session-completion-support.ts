@@ -29,7 +29,7 @@ export const completeActive = Effect.fn("InteractiveSessionTest.completeActive")
   transcripts: RuntimeFixtures.TranscriptRepository.Interface,
   updatedAt: number,
 ) {
-  const turn = yield* turns.setStatus(RuntimeFixtures.Turn.TurnId.make("active"), "completed", "done", updatedAt)
+  const turn = yield* turns.setStatus(RuntimeFixtures.Turn.TurnId.make("active"), "completed", updatedAt)
   yield* storeCompletedTranscript(transcripts, turn, "done")
   return turn
 })

@@ -111,10 +111,9 @@ const makeActive = (
   lineage: { _tag: "Original" },
   executionRoute: executionRoute(),
   status: "running",
-  stopIntent: "none",
   createdAt: 1,
   updatedAt: 1,
-  lastCursor: "active-cursor",
+  executionLink: { runId: "fixture-active-run", turnId: id, threadId: String(threadId) },
 })
 
 function activeImplementation(
@@ -142,7 +141,7 @@ export const active: Active = activeImplementation
 export const serverEvents = (
   events: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event>,
 ): ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event> =>
-  events.map((event) => ({ ...event, timestampSource: "server" as const }))
+  events.map((event) => ({ ...event, timestampSource: "baton" as const }))
 
 export const completeServerTimeline = (
   events: ReadonlyArray<RuntimeFixtures.ExecutionEvent.Event>,
@@ -158,7 +157,7 @@ export const completeServerTimeline = (
       sequence: 0,
       type: "execution.started",
       createdAt: first.createdAt - 1,
-      timestampSource: "server",
+      timestampSource: "baton",
     },
     ...stamped.map((event, index) => Object.assign({}, event, { sequence: index + 1 })),
   ]

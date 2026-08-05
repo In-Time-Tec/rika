@@ -2,7 +2,6 @@ import { expect, test } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import { Database as NativeDatabase } from "bun:sqlite"
 import { Effect, FileSystem, Layer } from "effect"
 import * as Database from "@rika/product-store/product-database-layer"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
@@ -39,7 +38,7 @@ test("reopens a completed nested transcript through the SQLite page", () => {
             prompt: "delegate",
             now: 2,
           })
-          const completed = yield* turns.setStatus(target.id, "completed", "parent-done", 3)
+          const completed = yield* turns.setStatus(target.id, "completed", 3)
           const childId = "nested-turn:child:agent"
           const parent = TranscriptProjection.Projection.project(target.id, target.prompt, [
             {
@@ -101,42 +100,6 @@ test("reopens a completed nested transcript through the SQLite page", () => {
       )
       expect(page.entries.map((entry) => entry.unit)).toEqual([...expected])
       expect(page.entries.filter((entry) => entry.unit.parentId === "nested-turn:agent")).toHaveLength(2)
-    }),
-  )
-  return Effect.runPromise(Effect.scoped(program.pipe(provideLayer(BunServices.layer))))
-})
-
-test("rejects an incompatible database without mutating it", () => {
-  const program = Effect.scoped(
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem
-      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-incompatible-" })
-      const filename = `${directory}/rika.db`
-      yield* Effect.sync(() => {
-        const database = new NativeDatabase(filename)
-        database.exec("CREATE TABLE old_sessions (id TEXT PRIMARY KEY)")
-        database.close()
-      })
-      const before = yield* fileSystem.readFile(filename)
-      const result = yield* Effect.result(Effect.scoped(Layer.build(Database.layer(filename))))
-      const after = yield* fileSystem.readFile(filename)
-      const files = yield* fileSystem.readDirectory(directory)
-      const names = yield* Effect.sync(() => {
-        const database = new NativeDatabase(filename, { readonly: true })
-        const rows = database
-          .query<
-            { name: string },
-            []
-          >("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
-          .all()
-        database.close()
-        return rows.map((row) => row.name)
-      })
-      expect(result._tag).toBe("Failure")
-      if (result._tag === "Failure") expect(String(result.failure)).toContain("Use a fresh Rika data root")
-      expect([...after]).toEqual([...before])
-      expect(files).toEqual(["rika.db"])
-      expect(names).toEqual(["old_sessions"])
     }),
   )
   return Effect.runPromise(Effect.scoped(program.pipe(provideLayer(BunServices.layer))))

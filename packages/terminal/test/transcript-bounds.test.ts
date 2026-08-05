@@ -117,7 +117,6 @@ const blocks: ReadonlyArray<TranscriptBlock> = [
     detail: nestedCommand,
   }),
   { _tag: "ChildAgent", id: "child", name: "oracle", summary: longText, status: "complete", activity: [longText] },
-  { _tag: "Workflow", name: "flow", step: longText, status: "waiting" },
 ]
 
 const boundedModel = (width: number): Model => {

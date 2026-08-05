@@ -17,7 +17,6 @@ const queued = (id: string, createdAt: number): Turn.AgentExecutionTurn => ({
   lineage: { _tag: "Original" },
   executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
   status: "queued",
-  stopIntent: "none",
   createdAt,
   updatedAt: createdAt,
 })

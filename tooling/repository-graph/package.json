@@ -29,7 +29,6 @@
     "@rika/configuration": "workspace:*",
     "@rika/extensions": "workspace:*",
     "@rika/product-store": "workspace:*",
-    "@rika/relay-execution": "workspace:*",
     "@rika/coding-tools": "workspace:*",
     "@rika/transcript": "workspace:*",
     "@rika/terminal": "workspace:*",

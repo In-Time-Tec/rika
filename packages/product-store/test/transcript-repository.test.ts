@@ -129,10 +129,11 @@ it.effect("authoritatively adopts corrected terminal outcomes in paired memory r
         expectedGeneration: before.checkpointGeneration,
       }
       const committed = yield* repository.replaceForRefold(target, replacement, options)
-      expect(committed).toMatchObject({ _tag: "Committed", turn: { status, lastCursor: `${status}-cursor` } })
-      expect(yield* turns.get(target.id)).toMatchObject({ status, lastCursor: `${status}-cursor` })
+      expect(committed).toMatchObject({ _tag: "Committed", turn: { status } })
+      expect(yield* turns.get(target.id)).toMatchObject({ status })
       expect(yield* repository.get(target.id)).toMatchObject({
-        turn: { status, lastCursor: `${status}-cursor` },
+        turn: { status },
+        executionCheckpoints: [{ cursor: `${status}-cursor` }],
         units: replacement.units,
       })
       expect(
@@ -143,7 +144,7 @@ it.effect("authoritatively adopts corrected terminal outcomes in paired memory r
           expectedGeneration: before.checkpointGeneration + 1,
         }),
       ).toEqual({ _tag: "Stale" })
-      expect(yield* turns.get(target.id)).toMatchObject({ status, lastCursor: `${status}-cursor` })
+      expect(yield* turns.get(target.id)).toMatchObject({ status })
     }
   }),
 )

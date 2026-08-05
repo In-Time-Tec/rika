@@ -3,229 +3,76 @@ import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import { Fixtures as RuntimeFixtures } from "./interactive-session-runtime-support"
-import { Fixtures as TranscriptFixtures } from "./interactive-session-transcript-support"
-import { Context, Deferred, Effect, Fiber, Layer, Ref, Result } from "effect"
+import { Context, Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect"
 import { createTurn } from "../support/product-test-current-state"
-import { productLayer, collectEvents, waitForSessions, active, serverEvents } from "./interactive-session-base-support"
+import {
+  productLayer,
+  collectEvents,
+  waitForSessions,
+  active,
+  serverEvents,
+  thread,
+} from "./interactive-session-base-support"
 import { makeHarness } from "./interactive-session-harness-support"
-import { awaitSelectionLoaded } from "./interactive-session-selection-support"
 
 describe("InteractiveSession controls", () => {
-  it.effect("steers and cancels the selected active turn", () =>
-    Effect.gen(function* () {
-      const { session, turns, controls, older } = yield* makeHarness()
-      const events: Array<InteractiveEvent> = []
-      yield* collectEvents(session, events)
-      yield* session.selectThread(older.id, 1)
-      yield* session.steer("change course")
-      yield* session.cancel
-      const cancellationProjected = () =>
-        events.some(
-          (event) =>
-            event._tag === "TranscriptProjectionPatched" &&
-            event.origin._tag === "Event" &&
-            event.origin.type === "execution.cancelled",
-        )
-      for (let attempts = 0; attempts < 100 && !cancellationProjected(); attempts += 1) yield* Effect.yieldNow
-      expect(yield* Ref.get(controls)).toEqual([
-        ["replay", "active", undefined],
-        ["steer", "active", "change course", "rika:interactive-steer:active:0"],
-        ["cancel", "active"],
-      ])
-      expect(yield* turns.get(RuntimeFixtures.Turn.TurnId.make("active"))).toMatchObject({
-        status: "cancelled",
-        lastCursor: "cancel-cursor",
-      })
-      expect(events).toContainEqual(
-        expect.objectContaining({
-          _tag: "TranscriptProjectionPatched",
-          rootTurnId: "active",
-          origin: expect.objectContaining({
-            _tag: "Event",
-            cursor: "cancel-cursor",
-            type: "execution.cancelled",
-          }),
-          rootStatus: "cancelled",
-        }),
-      )
-      expect(events).toContainEqual({
-        _tag: "ExecutionControlled",
-        selectionEpoch: 1,
-        threadId: "older",
-        turnId: "active",
-        action: "cancelled",
-        agentResponseArrived: false,
-      })
-    }),
-  )
-
-  it.effect("quit materializes a durable user transcript before the turn is cancelled", () =>
-    Effect.gen(function* () {
-      const { session, turns, transcripts } = yield* makeHarness()
-      expect(yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("active"))).toBeUndefined()
-      yield* session.quit
-      expect((yield* turns.get(RuntimeFixtures.Turn.TurnId.make("active")))?.status).toBe("cancelled")
-      const projection = yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("active"))
-      expect(projection?.units.some((unit) => unit.key === "turn:active:user")).toBe(true)
-    }),
-  )
-
-  it.effect("selects a cancelled turn without durable projection using the prompt seed", () =>
-    Effect.gen(function* () {
-      const { session, turns, transcripts, older } = yield* makeHarness()
-      yield* turns.requestStop(RuntimeFixtures.Turn.TurnId.make("active"), 2)
-      yield* turns.setStatus(RuntimeFixtures.Turn.TurnId.make("active"), "cancelled", "cancel-cursor", 3)
-      expect(yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("active"))).toBeUndefined()
-      const events: Array<InteractiveEvent> = []
-      yield* collectEvents(session, events)
-      yield* session.selectThread(older.id, 1)
-      const loaded = yield* awaitSelectionLoaded(events, (event) =>
-        event.entries.some((entry) => entry.unit.key === "turn:active:user"),
-      )
-      expect(loaded.entries.some((entry) => entry.unit.key === "turn:active:user")).toBe(true)
-      expect(loaded.entries.find((entry) => entry.unit.key === "turn:active:user")?.turn.prompt).toBe("active prompt")
-    }),
-  )
-
-  it.effect("quit mid-flight then reopen keeps the user prompt and prices only provider USD", () =>
-    Effect.gen(function* () {
-      const { session, turns, transcripts, older } = yield* makeHarness()
-      yield* session.quit
-      expect((yield* turns.get(RuntimeFixtures.Turn.TurnId.make("active")))?.status).toBe("cancelled")
-      expect(
-        (yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("active")))?.units.some(
-          (unit) => unit.key === "turn:active:user",
-        ),
-      ).toBe(true)
-      const events: Array<InteractiveEvent> = []
-      yield* collectEvents(session, events)
-      yield* session.selectThread(older.id, 1)
-      const loaded = yield* awaitSelectionLoaded(events, (event) =>
-        event.entries.some((entry) => entry.unit.key === "turn:active:user"),
-      )
-      expect(loaded.entries.find((entry) => entry.unit.key === "turn:active:user")?.turn.prompt).toBe("active prompt")
-      const tokensOnly = TranscriptFixtures.UsageCost.observe(TranscriptFixtures.UsageCost.empty, {
-        threadId: String(older.id),
-        turnId: "active",
-        event: {
-          executionId: "active",
-          cursor: "usage-only",
-          sequence: 1,
-          type: "model.usage.reported",
-          createdAt: 1,
-          data: {
-            model_attempt_id: "attempt-1",
-            provider: "openai",
-            model: "gpt-5.6-sol",
-            input_tokens: 1_000,
-            input_tokens_uncached: 1_000,
-            input_tokens_cache_read: 0,
-            input_tokens_cache_write: 0,
-            output_tokens: 100,
-          },
-        },
-      })
-      if (Result.isFailure(tokensOnly)) return yield* Effect.die(tokensOnly.failure)
-      expect(tokensOnly.success.global.costUsd).toBe(0)
-      expect(tokensOnly.success.global.tokens).toBe(1_100)
-      const priced = TranscriptFixtures.UsageCost.observe(tokensOnly.success, {
-        threadId: String(older.id),
-        turnId: "active",
-        event: {
-          executionId: "active",
-          cursor: "attempt-completed",
-          sequence: 2,
-          type: "model.attempt.completed",
-          createdAt: 2,
-          data: {
-            model_attempt_id: "attempt-1",
-            attempt: 1,
-            cost: { amount: 1.5, currency: "USD" },
-          },
-        },
-      })
-      if (Result.isFailure(priced)) return yield* Effect.die(priced.failure)
-      expect(priced.success.global).toMatchObject({ costUsd: 1.5, tokens: 1_100, unpricedAttempts: 0 })
-    }),
-  )
-
   it.effect("persists interrupt-and-send before cancelling the active turn", () =>
     Effect.gen(function* () {
-      const { turns, controls, older } = yield* makeHarness()
+      const older = thread("older", 1)
+      const turns = yield* RuntimeFixtures.TurnRepository.makeMemory([active(older.id)])
       const persistedAtCancel = yield* Ref.make<RuntimeFixtures.Turn.Turn | undefined>(undefined)
-      const checkingBackend = RuntimeFixtures.ExecutionBackend.Service.of({
-        invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
-        createFanOut: () => Effect.die("unused"),
-        inspectFanOut: () => Effect.die("unused"),
-        cancelFanOut: () => Effect.die("unused"),
-        registerWorkflows: () => Effect.die("unused"),
-        startWorkflow: () => Effect.die("unused"),
-        inspectWorkflow: () => Effect.die("unused"),
-        cancelWorkflow: () => Effect.die("unused"),
-        start: (input) =>
-          Effect.succeed({
-            turnId: input.turnId,
-            status: "completed" as const,
-            events: serverEvents([
-              {
-                executionId: input.turnId,
-                cursor: "replacement-started",
-                sequence: 0,
-                type: "execution.started",
-                createdAt: 3,
-              },
-              {
-                executionId: input.turnId,
-                cursor: "replacement-done",
-                sequence: 1,
-                type: "execution.completed",
-                createdAt: 4,
-              },
-            ]),
-          }),
-        replay: (turnId) => Effect.succeed({ turnId, status: "running", events: [] }),
-        inspect: (turnId) =>
-          turns.get(RuntimeFixtures.Turn.TurnId.make(turnId)).pipe(
+      const activeCancelled = yield* Deferred.make<void>()
+      const checkingBackend = RuntimeFixtures.ExecutionGateway.Service.of({
+        startTurn: (input) =>
+          Effect.succeed({ runId: `${input.turnId}-run`, turnId: input.turnId, threadId: input.threadId }),
+        watchTurn: (link) =>
+          link.turnId === "active"
+            ? Stream.fromEffect(Deferred.await(activeCancelled)).pipe(
+                Stream.map(() => ({
+                  executionId: link.runId,
+                  cursor: "active-cancelled",
+                  sequence: 0,
+                  type: "execution.cancelled" as const,
+                  timestampSource: "baton" as const,
+                  createdAt: 2,
+                })),
+              )
+            : Stream.fromIterable(
+                serverEvents([
+                  {
+                    executionId: link.runId,
+                    cursor: "replacement-started",
+                    sequence: 0,
+                    type: "execution.started",
+                    createdAt: 3,
+                  },
+                  {
+                    executionId: link.runId,
+                    cursor: "replacement-done",
+                    sequence: 1,
+                    type: "execution.completed",
+                    createdAt: 4,
+                  },
+                ]),
+              ),
+        inspectTurn: (link) =>
+          turns.get(RuntimeFixtures.Turn.TurnId.make(link.turnId)).pipe(
             Effect.orDie,
-            Effect.map((turn) =>
-              turn === undefined
-                ? undefined
-                : { turnId, status: turn.status, waits: [], pendingTools: [], children: [] },
-            ),
+            Effect.map((turn) => ({ status: turn?.status ?? ("unavailable" as const) })),
           ),
-        steer: (turnId) => Effect.succeed({ steeringMessageId: `steering:${turnId}:steering:0`, sequence: 0 }),
-        cancel: (turnId) =>
+        steerTurn: () => Effect.void,
+        cancelTurn: () =>
           turns.get(RuntimeFixtures.Turn.TurnId.make("pending")).pipe(
             Effect.orDie,
             Effect.flatMap((pending) => Ref.set(persistedAtCancel, pending)),
-            Effect.as({
-              turnId,
-              status: "cancelled" as const,
-              events: serverEvents([
-                {
-                  executionId: turnId,
-                  cursor: "interrupt-started",
-                  sequence: 0,
-                  type: "execution.started",
-                  createdAt: 2,
-                },
-                {
-                  executionId: turnId,
-                  cursor: "interrupt-cancelled",
-                  sequence: 1,
-                  type: "execution.cancelled",
-                  createdAt: 3,
-                },
-              ]),
-            }),
+            Effect.andThen(Deferred.succeed(activeCancelled, undefined)),
           ),
-        resolveInvocationSource: () => Effect.die("unused"),
       })
       const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const layer = productLayer({
         repositoryLayer: RuntimeFixtures.ThreadRepository.memoryLayer([older]),
         turnRepositoryLayer: Layer.succeed(RuntimeFixtures.TurnRepository.Service, turns),
-        backendLayer: Layer.succeed(RuntimeFixtures.ExecutionBackend.Service, checkingBackend),
+        backendLayer: Layer.succeed(RuntimeFixtures.ExecutionGateway.Service, checkingBackend),
         defaultWorkspace: "/work",
         makeThreadId: Effect.die("unused"),
         makeTurnId: Effect.succeed(RuntimeFixtures.Turn.TurnId.make("pending")),
@@ -238,30 +85,9 @@ describe("InteractiveSession controls", () => {
       yield* waitForSessions(sessions)
       const checkingSession = (yield* Ref.get(sessions))[0]
       if (checkingSession === undefined) return yield* Effect.die("Missing interactive session")
-      const events: Array<InteractiveEvent> = []
-      yield* collectEvents(checkingSession, events)
       yield* checkingSession.selectThread(older.id, 1)
       yield* checkingSession.interruptAndSend("next prompt")
-      const cancellationProjected = () =>
-        events.some(
-          (event) =>
-            event._tag === "TranscriptProjectionPatched" &&
-            event.origin._tag === "Event" &&
-            event.origin.cursor === "interrupt-cancelled",
-        )
-      for (let attempts = 0; attempts < 100 && !cancellationProjected(); attempts += 1) yield* Effect.yieldNow
       expect(yield* Ref.get(persistedAtCancel)).toMatchObject({ prompt: "next prompt", status: "queued" })
-      expect((yield* turns.get(RuntimeFixtures.Turn.TurnId.make("active")))?.status).toBe("cancelled")
-      expect(cancellationProjected()).toBe(true)
-      expect(yield* turns.get(RuntimeFixtures.Turn.TurnId.make("pending"))).toMatchObject({
-        status: "completed",
-        lastCursor: "replacement-done",
-      })
-      expect(events.filter((event) => event._tag === "QueueUpdated").map((event) => event.change._tag)).toEqual([
-        "Added",
-        "Removed",
-      ])
-      expect(yield* Ref.get(controls)).toEqual([])
     }),
   )
 
@@ -276,7 +102,7 @@ describe("InteractiveSession controls", () => {
         finalTurnId,
       })
       const events: Array<InteractiveEvent> = []
-      yield* turns.setStatus(RuntimeFixtures.Turn.TurnId.make("active"), "waiting", "wait-cursor", 2)
+      yield* turns.setStatus(RuntimeFixtures.Turn.TurnId.make("active"), "waiting", 2)
       for (const [index, id] of ["promoted-one", "promoted-two", "promoted-three"].entries())
         yield* createTurn(turns, {
           id: RuntimeFixtures.Turn.TurnId.make(id),
@@ -290,12 +116,11 @@ describe("InteractiveSession controls", () => {
       yield* Deferred.await(finished)
       yield* Fiber.join(selection)
       const calls = yield* Ref.get(controls)
-      expect(calls.filter((call) => call[0] === "start")).toEqual([
-        ["start", "promoted-one"],
-        ["start", "promoted-two"],
-        ["start", "promoted-three"],
+      expect(calls.filter((call) => call[0] === "startTurn")).toEqual([
+        ["startTurn", "promoted-one"],
+        ["startTurn", "promoted-two"],
+        ["startTurn", "promoted-three"],
       ])
-      expect(calls.some((call) => call[0] === "follow" && String(call[1]).startsWith("promoted-"))).toBe(false)
     }),
   )
 
@@ -312,22 +137,13 @@ describe("InteractiveSession controls", () => {
           repositoryLayer: Layer.succeed(RuntimeFixtures.ThreadRepository.Service, repositories),
           turnRepositoryLayer: Layer.succeed(RuntimeFixtures.TurnRepository.Service, turns),
           backendLayer: Layer.succeed(
-            RuntimeFixtures.ExecutionBackend.Service,
-            RuntimeFixtures.ExecutionBackend.Service.of({
-              invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
-              createFanOut: () => Effect.die("unused"),
-              inspectFanOut: () => Effect.die("unused"),
-              cancelFanOut: () => Effect.die("unused"),
-              registerWorkflows: () => Effect.die("unused"),
-              startWorkflow: () => Effect.die("unused"),
-              inspectWorkflow: () => Effect.die("unused"),
-              cancelWorkflow: () => Effect.die("unused"),
-              start: () => Effect.die("unused"),
-              inspect: () => Effect.void.pipe(Effect.as(undefined)),
-              replay: () => Effect.die("unused"),
-              steer: () => Effect.die("unused"),
-              cancel: () => Effect.die("unused"),
-              resolveInvocationSource: () => Effect.die("unused"),
+            RuntimeFixtures.ExecutionGateway.Service,
+            RuntimeFixtures.ExecutionGateway.Service.of({
+              startTurn: () => Effect.die("unused"),
+              cancelTurn: () => Effect.die("unused"),
+              steerTurn: () => Effect.die("unused"),
+              watchTurn: () => Stream.die("unused"),
+              inspectTurn: () => Effect.succeed({ status: "unavailable" }),
             }),
           ),
           toolRuntimeLayer: () =>

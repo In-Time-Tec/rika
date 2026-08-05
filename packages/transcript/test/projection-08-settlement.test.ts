@@ -18,7 +18,7 @@ describe("Transcript projection", () => {
         sequence: 2,
         type: "child_run.spawned",
         createdAt: 2,
-        data: { child_execution_id: "orphan-child", preset_name: "task" },
+        data: { child_execution_id: "orphan-child", invocation_id: "missing-call" },
       },
     ]
     const cancelled = TranscriptProjection.Projection.project("turn-a", "prompt", [
@@ -104,14 +104,14 @@ describe("Transcript projection", () => {
         sequence: 2,
         type: "child_run.spawned",
         createdAt: 2,
-        data: { tool_call_id: "call", child_execution_id: "child-1", preset_name: "task" },
+        data: { invocation_id: "call", child_execution_id: "child-1" },
       },
       {
         cursor: "orphan",
         sequence: 3,
         type: "child_run.spawned",
         createdAt: 3,
-        data: { child_execution_id: "orphan-child", preset_name: "task" },
+        data: { child_execution_id: "orphan-child", invocation_id: "missing-call" },
       },
     ])
     const settledLinked = settleChild(projection, "child-1", "complete", 99)

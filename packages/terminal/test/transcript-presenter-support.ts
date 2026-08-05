@@ -26,11 +26,11 @@ const parentProjection = TranscriptProjection.Projection.project("turn", "prompt
     data: { tool_call_id: "agent", tool_name: "oracle", input: { prompt: "Review the code" } },
   }),
   event("agent-spawned", 2, "child_run.spawned", {
-    data: { tool_call_id: "agent", child_execution_id: "child:turn:oracle" },
+    data: { invocation_id: "agent", child_execution_id: "run-oracle-01" },
   }),
 ])
 
-const childProjection = TranscriptProjection.Projection.project("child:turn:oracle", "", [
+const childProjection = TranscriptProjection.Projection.project("run-oracle-01", "", [
   event("read", 0, "tool.call.requested", {
     data: { tool_call_id: "read", tool_name: "read", input: { path: "src/a.ts" } },
   }),
@@ -39,11 +39,11 @@ const childProjection = TranscriptProjection.Projection.project("child:turn:orac
     data: { tool_call_id: "nested", tool_name: "task", input: { prompt: "Dig deeper" } },
   }),
   event("nested-spawned", 3, "child_run.spawned", {
-    data: { tool_call_id: "nested", child_execution_id: "child:child:turn:oracle:nested" },
+    data: { invocation_id: "nested", child_execution_id: "run-nested-01" },
   }),
 ])
 
-const grandchildProjection = TranscriptProjection.Projection.project("child:child:turn:oracle:nested", "", [
+const grandchildProjection = TranscriptProjection.Projection.project("run-nested-01", "", [
   event("shell", 0, "tool.call.requested", {
     data: { tool_call_id: "shell", tool_name: "bash", input: { command: "bun test" } },
   }),
@@ -63,13 +63,13 @@ const nestedModel = () => {
   model = applyChildUnits(model, "turn:agent", childProjection.units)
   model = applyChildUnits(
     model,
-    TranscriptIdentity.scopedIdentity("child:turn:oracle", "nested"),
+    TranscriptIdentity.scopedIdentity("run-oracle-01", "nested"),
     grandchildProjection.units,
   )
   return model
 }
 
-const childTurnId = (child: number) => `child:turn:agent-${child}`
+const childTurnId = (child: number) => `run-child-${child}`
 
 const childCount = 200
 const toolsPerChild = 20
@@ -80,7 +80,7 @@ const largeParent = TranscriptProjection.Projection.project("turn", "prompt", [
       data: { tool_call_id: `agent-${child}`, tool_name: "task", input: { prompt: `Task ${child}` } },
     }),
     event(`agent-${child}-spawned`, 2 + child * 2, "child_run.spawned", {
-      data: { tool_call_id: `agent-${child}`, child_execution_id: childTurnId(child) },
+      data: { invocation_id: `agent-${child}`, child_execution_id: childTurnId(child) },
     }),
   ]).flat(),
 ])

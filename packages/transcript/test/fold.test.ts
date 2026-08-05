@@ -60,20 +60,10 @@ describe("ProjectionFold", () => {
   it("uses source cursors for independent id-less generic events", () => {
     const fold = makeProjectionFold("turn", "prompt")
     const events: ReadonlyArray<SourceEvent> = [
-      { ...event(1, "notification.created", { title: "Retry", detail: "one" }), cursor: "notification-1" },
-      { ...event(2, "notification.created", { title: "Retry", detail: "two" }), cursor: "notification-2" },
-      { ...event(3, "operation.error", { title: "Error", message: "one" }), cursor: "error-1" },
-      { ...event(4, "operation.error", { title: "Error", message: "two" }), cursor: "error-2" },
-      {
-        ...event(5, "image.attachment.created", { name: "screen.png", media_type: "image/png" }),
-        cursor: "image-1",
-      },
-      {
-        ...event(6, "image.attachment.created", { name: "screen.png", media_type: "image/png" }),
-        cursor: "image-2",
-      },
-      { ...event(7, "workflow.started", { workflow: "review" }), cursor: "workflow-1" },
-      { ...event(8, "workflow.started", { workflow: "review" }), cursor: "workflow-2" },
+      { ...event(1, "model.retry.scheduled", { category: "rate_limit" }), cursor: "notification-1" },
+      { ...event(2, "model.retry.scheduled", { category: "overloaded" }), cursor: "notification-2" },
+      { ...event(3, "program.operation.failed", undefined, "one"), cursor: "error-1" },
+      { ...event(4, "program.operation.failed", undefined, "two"), cursor: "error-2" },
     ]
     for (const source of events) applyFoldEvent(fold, source)
     const blocks = snapshotFoldProjection(fold).units.flatMap((unit) =>
@@ -82,8 +72,6 @@ describe("ProjectionFold", () => {
 
     expect(blocks.filter((block) => block._tag === "Notification")).toHaveLength(2)
     expect(blocks.filter((block) => block._tag === "Error")).toHaveLength(2)
-    expect(blocks.filter((block) => block._tag === "ImageAttachment")).toHaveLength(2)
-    expect(blocks.filter((block) => block._tag === "Workflow")).toHaveLength(2)
   })
 
   it("emits deltas that reproduce every projection snapshot", () => {
@@ -95,7 +83,7 @@ describe("ProjectionFold", () => {
       event(2, "model.output.delta", undefined, "lo"),
       event(3, "tool.call.requested", { tool_call_id: "read", tool_name: "read", input: { path: "a" } }),
       event(4, "tool.result.received", { tool_call_id: "read", output: "ok" }),
-      event(5, "model.usage.reported", { provider: "openai", model: "gpt-5", input_tokens: 1 }),
+      event(5, "model.attempt.completed", { provider: "openai", model: "gpt-5", input_tokens: 1 }),
       event(6, "execution.completed"),
     ]
     for (const source of events) {
@@ -214,7 +202,7 @@ describe("ProjectionFold", () => {
     let enumerated = 0
     const fold = makeProjectionFold("turn", "prompt", { observer: { unitEnumerated: () => enumerated++ } })
     for (let sequence = 0; sequence < 500; sequence += 1)
-      applyFoldEvent(fold, event(sequence, "notification.created", { id: `${sequence}` }))
+      applyFoldEvent(fold, event(sequence, "model.retry.scheduled", { category: `${sequence}` }))
     applyFoldEvent(
       fold,
       event(501, "tool.call.requested", {
@@ -225,8 +213,9 @@ describe("ProjectionFold", () => {
     )
     applyFoldEvent(
       fold,
-      event(502, "child_run.started", {
+      event(502, "child_run.spawned", {
         child_execution_id: "child:turn:agent",
+        invocation_id: "agent",
       }),
     )
     enumerated = 0
@@ -253,9 +242,9 @@ describe("ProjectionFold", () => {
     const fold = makeProjectionFold("turn", "prompt")
     applyFoldEvent(
       fold,
-      event(1, "child_run.started", {
+      event(1, "child_run.spawned", {
         child_execution_id: "child:turn:agent",
-        activity: "starting",
+        invocation_id: "missing-call",
       }),
     )
     applyFoldEvent(
@@ -269,9 +258,9 @@ describe("ProjectionFold", () => {
 
     const mutation = applyFoldEvent(
       fold,
-      event(3, "child_run.started", {
+      event(3, "child_run.spawned", {
         child_execution_id: "child:turn:agent",
-        activity: "working",
+        invocation_id: "agent",
       }),
     )
 
@@ -293,8 +282,9 @@ describe("ProjectionFold", () => {
     )
     applyFoldEvent(
       fold,
-      event(2, "child_run.started", {
+      event(2, "child_run.spawned", {
         child_execution_id: "child:turn:agent",
+        invocation_id: "agent",
       }),
     )
 
@@ -323,21 +313,23 @@ describe("ProjectionFold", () => {
       )
       applyFoldEvent(
         fold,
-        event(index * 2 + 2, "child_run.started", {
+        event(index * 2 + 2, "child_run.spawned", {
           child_execution_id: childId,
+          invocation_id: `agent-${index}`,
         }),
       )
       applyChildOutcome(fold, childId, { status: "complete" })
     }
     enumerated = 0
 
-    applyFoldEvent(fold, event(401, "notification.created", { id: "unrelated" }))
+    applyFoldEvent(fold, event(401, "model.retry.scheduled", { category: "unrelated" }))
 
     expect(enumerated).toBe(0)
     applyFoldEvent(
       fold,
-      event(402, "child_run.started", {
+      event(402, "child_run.spawned", {
         child_execution_id: "child:turn:agent-100",
+        invocation_id: "agent-100",
       }),
     )
     expect(foldUnit(fold, "tool:turn:agent-100")).toMatchObject({
@@ -345,7 +337,7 @@ describe("ProjectionFold", () => {
     })
   })
 
-  it("restores terminal child authority before applying a late parent lifecycle event", () => {
+  it("restores terminal child authority before applying a replayed parent spawn", () => {
     const source = makeProjectionFold("turn", "prompt")
     applyFoldEvent(
       source,
@@ -357,8 +349,9 @@ describe("ProjectionFold", () => {
     )
     applyFoldEvent(
       source,
-      event(2, "child_run.started", {
+      event(2, "child_run.spawned", {
         child_execution_id: "child:turn:agent",
+        invocation_id: "agent",
       }),
     )
     applyChildOutcome(source, "child:turn:agent", { status: "failed", reason: "child failed" })
@@ -366,8 +359,9 @@ describe("ProjectionFold", () => {
 
     const mutation = applyFoldEvent(
       restored,
-      event(3, "child_run.started", {
+      event(3, "child_run.spawned", {
         child_execution_id: "child:turn:agent",
+        invocation_id: "agent",
       }),
     )
 
@@ -383,8 +377,9 @@ describe("ProjectionFold", () => {
     const fold = makeProjectionFold("turn", "prompt")
     applyFoldEvent(
       fold,
-      event(1, "child_run.started", {
+      event(1, "child_run.spawned", {
         child_execution_id: "unlinked-child",
+        invocation_id: "missing-call",
       }),
     )
 
@@ -457,7 +452,7 @@ describe("ProjectionFold", () => {
     let enumerated = 0
     const fold = makeProjectionFold("turn", "prompt", { observer: { unitEnumerated: () => enumerated++ } })
     for (let sequence = 0; sequence < 500; sequence += 1)
-      applyFoldEvent(fold, event(sequence, "notification.created", { id: `${sequence}` }))
+      applyFoldEvent(fold, event(sequence, "model.retry.scheduled", { category: `${sequence}` }))
     applyFoldEvent(
       fold,
       event(501, "tool.call.requested", {
@@ -540,7 +535,7 @@ describe("ProjectionFold", () => {
   it("accumulates usage cursors incrementally with replay deduplication", () => {
     const fold = makeProjectionFold("turn", "prompt")
     const usageEvent = (sequence: number) =>
-      event(sequence, "model.usage.reported", {
+      event(sequence, "model.attempt.completed", {
         provider: "openai",
         model: "gpt-5.6-sol",
         input_tokens: 250_000,

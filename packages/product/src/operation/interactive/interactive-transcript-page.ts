@@ -14,14 +14,33 @@ import {
   isNewerSelectionEpoch as _isNewerSelectionEpoch,
   selectionMatches as _selectionMatches,
 } from "./interactive-thread-selection"
-import { Effect, Clock, Ref, Semaphore } from "effect"
+import { Effect, Clock, Ref } from "effect"
 import { queueItem } from "./interactive-session-queue"
 import type { SelectionEpochState } from "./interactive-thread-selection"
 import { OperationError, operationError } from "../operation-error"
 import type { InteractiveEvent } from "./interactive-event"
-import type { InteractiveOperationFeed } from "./interactive-operation-feed"
+import type { InteractiveRuntimeContext } from "./interactive-session-runtime"
+import type { makeInteractiveTranscriptLifecycle } from "./interactive-transcript-lifecycle"
 
-export const makeInitialTranscriptWindow = (input: any) =>
+export type InteractiveTranscriptPageLoader = (
+  state: SelectionEpochState,
+  dispatch: (event: InteractiveEvent) => void,
+  before?: TranscriptPage.PageCursor,
+  clientLoadedKeys?: ReadonlySet<string>,
+) => Effect.Effect<
+  void,
+  OperationError | TurnRepository.RepositoryError | TranscriptRepository.RepositoryError,
+  TurnRepository.Service | TranscriptRepository.Service
+>
+
+export type InteractiveTranscriptPageInput = InteractiveRuntimeContext &
+  ReturnType<typeof makeInteractiveTranscriptLifecycle> & {
+    readonly initialTranscriptWindow: ReturnType<typeof makeInitialTranscriptWindow>
+  }
+
+export const makeInitialTranscriptWindow = (
+  input: Pick<InteractiveRuntimeContext, "ensureIngest" | "selectionInitialTurnWindow" | "selectionInitialEntryWindow">,
+) =>
   Effect.fn("ProductOperation.interactive.initialTranscriptWindow")(function* (state: SelectionEpochState) {
     const { ensureIngest, selectionInitialTurnWindow, selectionInitialEntryWindow } = input
     const turns = yield* TurnRepository.Service
@@ -37,7 +56,7 @@ export const makeInitialTranscriptWindow = (input: any) =>
     })
   })
 
-export const makeInteractiveTranscriptPage = (input: any) => {
+export const makeInteractiveTranscriptPage = (input: InteractiveTranscriptPageInput) => {
   const {
     isCurrentSelectionState,
     selectionRequest,
@@ -58,22 +77,6 @@ export const makeInteractiveTranscriptPage = (input: any) => {
     startSelectionUsage,
     initialTranscriptWindow,
   } = input
-  const typedSelectionRequest: Ref.Ref<number> = selectionRequest
-  const typedSelectionAdmission: Semaphore.Semaphore = selectionAdmission
-  const typedGetCandidateSelectionState: () => SelectionEpochState | undefined = getCandidateSelectionState
-  const typedGetSelectionLoad: () =>
-    | { readonly epoch: number; readonly threadId: string; committed: boolean }
-    | undefined = getSelectionLoad
-  const typedInterruptSelectionBackground: Effect.Effect<void, OperationError, never> = interruptSelectionBackground
-  const typedStartSelectionProjectionFeed: (
-    state: SelectionEpochState,
-    dispatch: (event: InteractiveEvent) => void,
-  ) => Effect.Effect<void, OperationError, never> = startSelectionProjectionFeed
-  const typedOperationFeed: InteractiveOperationFeed = operationFeed
-  const typedStartSelectionUsage: (
-    state: SelectionEpochState,
-    dispatch: (event: InteractiveEvent) => void,
-  ) => Effect.Effect<void, OperationError, never> = startSelectionUsage
   const loadTranscriptPage = Effect.fn("ProductOperation.interactive.loadTranscriptPage")(function* (
     state: SelectionEpochState,
     dispatch: (event: InteractiveEvent) => void,
@@ -124,7 +127,9 @@ export const makeInteractiveTranscriptPage = (input: any) => {
     if (transcriptPageEncoder.encode(encodeJson(entries)).byteLength > maximumTranscriptPayloadBytes)
       return yield* operationError("Transcript page exceeds the transcript event limit")
     const deliveredEntries =
-      clientLoadedKeys === undefined ? entries : entries.filter((entry: any) => !clientLoadedKeys.has(entry.unit.key))
+      clientLoadedKeys === undefined
+        ? entries
+        : entries.filter((entry: TranscriptPage.Entry) => !clientLoadedKeys.has(entry.unit.key))
     const completedAt = yield* Clock.currentTimeMillis
     if (isCurrentSelectionState(state) !== true) return
     state.transcriptCursor = oldestCursor
@@ -138,16 +143,15 @@ export const makeInteractiveTranscriptPage = (input: any) => {
     if (before === undefined) {
       const queue = yield* turns.readQueue(thread.id)
       const activeTurn = yield* turns.findActive(thread.id)
-      if (isCurrentSelectionState(state) !== true || (yield* Ref.get(typedSelectionRequest)) !== request) return
+      if (isCurrentSelectionState(state) !== true || (yield* Ref.get(selectionRequest)) !== request) return
       for (const entry of entries) state.loadedKeys.add(entry.unit.key)
-      yield* typedSelectionAdmission.withPermits(1)(
+      yield* selectionAdmission.withPermits(1)(
         Effect.uninterruptible(
           Effect.gen(function* () {
-            if ((yield* Ref.get(typedSelectionRequest)) !== request || typedGetCandidateSelectionState() !== state)
-              return
-            const loading = typedGetSelectionLoad()
+            if ((yield* Ref.get(selectionRequest)) !== request || getCandidateSelectionState() !== state) return
+            const loading = getSelectionLoad()
             if (loading === undefined || loading.epoch !== request || loading.threadId !== String(thread.id)) return
-            yield* typedInterruptSelectionBackground
+            yield* interruptSelectionBackground
             setActiveSelectionState(state)
             setCandidateSelectionState(undefined)
             setCurrentSelectionEpoch(request)
@@ -171,10 +175,10 @@ export const makeInteractiveTranscriptPage = (input: any) => {
               queue: queue.turns.map(queueItem),
               ...(activeTurn === undefined ? {} : { activeTurn }),
             })
-            yield* typedStartSelectionProjectionFeed(state, dispatch)
-            typedOperationFeed.releaseSelectionEvents(request, "Selection activity exceeded its bounded live window")
+            yield* startSelectionProjectionFeed(state, dispatch)
+            operationFeed.releaseSelectionEvents(request, "Selection activity exceeded its bounded live window")
             setSelectionLoad(undefined)
-            yield* typedStartSelectionUsage(state, dispatch)
+            yield* startSelectionUsage(state, dispatch)
           }),
         ),
       )

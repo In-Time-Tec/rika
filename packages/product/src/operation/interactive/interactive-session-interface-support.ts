@@ -4,9 +4,9 @@ export const agentResponseArrived = (events: ReadonlyArray<ExecutionEvent.Event>
   for (const event of events) {
     if (event.type === "execution.cancelled") return false
     if (
-      event.type.includes("reasoning") ||
+      event.type === "model.reasoning.delta" ||
+      event.type === "model.reasoning.completed" ||
       event.type === "model.output.delta" ||
-      event.type === "model.cycle.completed" ||
       event.type === "model.output.completed" ||
       event.type === "model.toolcall.delta" ||
       event.type === "tool.call.requested" ||

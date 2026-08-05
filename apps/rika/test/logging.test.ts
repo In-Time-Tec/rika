@@ -93,7 +93,7 @@ describe("Logging", () => {
                   authorization: secrets[4],
                   credential: secrets[5],
                   error: secrets[6],
-                  "rika.execution.id": "execution:42",
+                  "rika.execution.id": "run-42",
                   "rika.failure.category": "invalid_input",
                   "rika.failure.interrupted": false,
                   "rika.failure.kind": secrets[6],
@@ -118,7 +118,7 @@ describe("Logging", () => {
         assert.strictEqual(record.message, "diagnostic.unstructured")
         assert.strictEqual(record.detail, undefined)
         assert.deepStrictEqual(record.annotations, {
-          "rika.execution.id": "execution:42",
+          "rika.execution.id": "run-42",
           "rika.failure.category": "invalid_input",
           "rika.failure.interrupted": false,
           "rika.failure.outcome": "known",
@@ -141,14 +141,14 @@ describe("Logging", () => {
           Effect.logError("failure.tagged").pipe(Effect.annotateLogs(Diagnostic.failure(kind)))
         yield* Effect.scoped(
           Effect.flatMap(
-            Layer.build(Logging.layer({ dataRoot: root, role: "resident", version: "1", pid: 42 })),
+            Layer.build(Logging.layer({ dataRoot: root, role: "server", version: "1", pid: 42 })),
             (logging) =>
               Effect.all(
                 [
                   ...Diagnostic.modelBackendKinds.map((kind) =>
                     Effect.logInfo("model.backend.configured").pipe(Effect.annotateLogs(Diagnostic.modelBackend(kind))),
                   ),
-                  taggedFailure("ExecutionIngestFollowFailure"),
+                  taggedFailure("WatchTurnFailure"),
                   Effect.logError("failure.tagged").pipe(
                     Effect.annotateLogs(Diagnostic.failureFrom(new Error("invalid model configuration"))),
                   ),
@@ -164,7 +164,7 @@ describe("Logging", () => {
             { "rika.model.backend.kind": "provider" },
             { "rika.model.backend.kind": "test-script" },
             { "rika.model.backend.kind": "test-response" },
-            { "rika.failure.kind": "ExecutionIngestFollowFailure" },
+            { "rika.failure.kind": "WatchTurnFailure" },
             { "rika.failure.kind": "Error" },
           ],
         )
@@ -196,15 +196,15 @@ describe("Logging", () => {
           "rika.process.role",
           "rika.reconciliation.cursor.initial",
           "rika.reconciliation.cursor.replayed",
-          "rika.resident.client.kind",
-          "rika.resident.command.tag",
-          "rika.resident.connection.id",
-          "rika.resident.connection.role",
-          "rika.resident.rejection.reason",
-          "rika.resident.request.id",
-          "rika.resident.session.id",
-          "rika.resident.shutdown.reason",
-          "rika.resident.startup.role",
+          "rika.server.client.kind",
+          "rika.server.command.tag",
+          "rika.server.connection.id",
+          "rika.server.connection.role",
+          "rika.server.rejection.reason",
+          "rika.server.request.id",
+          "rika.server.session.id",
+          "rika.server.shutdown.reason",
+          "rika.server.startup.role",
           "rika.thread.id",
           "rika.tool.call.id",
           "rika.tool.dependency",
@@ -228,29 +228,6 @@ describe("Logging", () => {
         const { content, records } = yield* writtenRecords(root)
         assert.notInclude(content, opaque)
         assert.deepStrictEqual(records[0]?.annotations, { "rika.failure.kind": "TokenExpiredError" })
-      }),
-    )
-
-    test.effect("omits an opaque backend failure through recovered-root cancellation", () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-recovery-failure-" })
-        const opaque = "sk-live-9a2f7c1e"
-        yield* TestClock.adjust("1 minute")
-        yield* Effect.scoped(
-          Effect.flatMap(
-            Layer.build(Layer.mergeAll(Logging.layer({ dataRoot: root, role: "resident", version: "1", pid: 42 }))),
-            (context) =>
-              Effect.logError("execution.recovery.orphan_cancel_failed", opaque).pipe(
-                Effect.annotateLogs(Diagnostic.failure("RecoveredRootCancelFailure")),
-                Effect.provide(context),
-              ),
-          ),
-        )
-        const { content, records } = yield* writtenRecords(root)
-        assert.notInclude(content, opaque)
-        const failed = records.find((record) => record.message === "execution.recovery.orphan_cancel_failed")
-        assert.strictEqual(failed?.annotations["rika.failure.kind"], "RecoveredRootCancelFailure")
       }),
     )
 
@@ -297,13 +274,13 @@ describe("Logging", () => {
               Effect.logInfo("execution.follow.started").pipe(
                 Effect.annotateLogs({
                   "rika.failure.cause": "UsageRepositoryError",
-                  "rika.failure.kind": "ExecutionBackendError",
+                  "rika.failure.kind": "WatchTurnFailure",
                   "rika.failure.message": "ExecutionNotFound",
                   "rika.follow.cursor": "cursor-42",
                   "rika.follow.reason": "thread-open",
                   "rika.follow.scope": "tree",
                   "rika.reconnect.attempt": 3,
-                  "rika.reconnect.message": "relay stream closed",
+                  "rika.reconnect.message": "execution stream closed",
                   "rika.unknown.annotation": "dropped-annotation-a41c",
                 }),
                 Effect.provide(logging),
@@ -312,7 +289,7 @@ describe("Logging", () => {
         )
         const { content, records } = yield* writtenRecords(root)
         assert.deepStrictEqual(records[0]?.annotations, {
-          "rika.failure.kind": "ExecutionBackendError",
+          "rika.failure.kind": "WatchTurnFailure",
           "rika.failure.message": "ExecutionNotFound",
           "rika.follow.cursor": "cursor-42",
           "rika.follow.reason": "thread-open",
@@ -405,8 +382,8 @@ describe("Logging", () => {
         yield* fs.writeFileString(path.join(diagnostics, "client.jsonl"), "{}\n", { mode: 0o600 })
         yield* fs.writeFileString(path.join(diagnostics, "crash.open.jsonl"), '{"truncated":', { mode: 0o600 })
         yield* fs.writeFileString(path.join(diagnostics, "public.jsonl"), "secret", { mode: 0o644 })
-        yield* fs.writeFileString(path.join(diagnostics, "resident.token"), "secret", { mode: 0o600 })
-        yield* fs.symlink(path.join(diagnostics, "resident.token"), path.join(diagnostics, "leak.jsonl"))
+        yield* fs.writeFileString(path.join(diagnostics, "server.token"), "secret", { mode: 0o600 })
+        yield* fs.symlink(path.join(diagnostics, "server.token"), path.join(diagnostics, "leak.jsonl"))
         const output = path.join(outputRoot, "export")
         assert.strictEqual(yield* Logging.exportLogs(root, output), output)
         assert.deepStrictEqual((yield* fs.readDirectory(output)).toSorted(), ["client.jsonl", "crash.open.jsonl"])
@@ -431,7 +408,7 @@ describe("Logging", () => {
         const diagnostics = yield* Logging.directory(root)
         yield* fs.makeDirectory(diagnostics, { mode: 0o700 })
         const expired = path.join(diagnostics, "client-expired.jsonl")
-        const crash = path.join(diagnostics, "resident-expired.open.jsonl")
+        const crash = path.join(diagnostics, "server-expired.open.jsonl")
         yield* fs.writeFileString(expired, "{}\n", { mode: 0o600 })
         yield* fs.writeFileString(crash, '{"partial":', { mode: 0o600 })
         yield* fs.utimes(expired, 0, 0)
@@ -450,7 +427,7 @@ describe("Logging", () => {
         const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-" })
         yield* Effect.scoped(
           Effect.flatMap(
-            Layer.build(Logging.layer({ dataRoot: root, role: "resident", version: "1", level: "error", pid: 7 })),
+            Layer.build(Logging.layer({ dataRoot: root, role: "server", version: "1", level: "error", pid: 7 })),
             (logging) =>
               Effect.all([Effect.logInfo("level.hidden"), Effect.logError("level.visible")]).pipe(
                 Effect.provide(logging),

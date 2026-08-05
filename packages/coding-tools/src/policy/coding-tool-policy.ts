@@ -21,7 +21,6 @@ export const Presentation = Schema.Struct({
       "guidance file",
       "search",
       "web search",
-      "review",
       "GitHub check",
       "list",
     ]),

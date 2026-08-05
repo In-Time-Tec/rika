@@ -10,25 +10,27 @@ import { renderTranscriptStyled } from "../../src/opentui/rendering/opentui-rend
 import { transcriptUnitId, transcriptUnits } from "../../src/presentation/transcript/transcript-row"
 import { event } from "./execution-events-characterization-1-support"
 it("dedupes a nested child agent into an existing matching agent tool across batches", () => {
+  const childId = "run-agent-01"
+  const grandchildId = "run-grandchild-01"
   const parent = TranscriptProjection.Projection.project("turn", "delegate", [
     event("agent", 0, "tool.call.requested", {
       data: { tool_call_id: "agent", tool_name: "task", input: { prompt: "Coordinate the work" } },
     }),
     event("spawned", 1, "child_run.spawned", {
-      data: { tool_call_id: "agent", child_execution_id: "child:turn:agent" },
+      data: { invocation_id: "agent", child_execution_id: childId },
     }),
   ])
-  const firstBatch = TranscriptProjection.Projection.project("child:turn:agent", "", [
+  const firstBatch = TranscriptProjection.Projection.project(childId, "", [
     event("gc", 0, "tool.call.requested", {
       data: { tool_call_id: "gc", tool_name: "task", input: { prompt: "Run the nested work" } },
     }),
     event("gc-spawned", 1, "child_run.spawned", {
-      data: { tool_call_id: "gc", child_execution_id: "grandchild" },
+      data: { invocation_id: "gc", child_execution_id: grandchildId },
     }),
   ])
-  const secondBatch = TranscriptProjection.Projection.project("child:turn:agent", "", [
+  const secondBatch = TranscriptProjection.Projection.project(childId, "", [
     event("gc-done", 0, "child_run.completed", {
-      data: { child_execution_id: "grandchild", profile: "task" },
+      data: { invocation_id: "gc", child_execution_id: grandchildId, profile: "task" },
     }),
   ])
   let model = projectUnits(initial("/work"), parent.units)
@@ -38,24 +40,24 @@ it("dedupes a nested child agent into an existing matching agent tool across bat
 
   const grandchildTools = model.blocks.filter(
     (block) =>
-      (block as TranscriptBlock)._tag === "ToolCall" && (block as { childId?: string }).childId === "grandchild",
+      (block as TranscriptBlock)._tag === "ToolCall" && (block as { childId?: string }).childId === grandchildId,
   )
   expect(grandchildTools).toHaveLength(1)
   expect(grandchildTools[0]).toMatchObject({
-    id: TranscriptIdentity.scopedIdentity("child:turn:agent", "gc"),
+    id: TranscriptIdentity.scopedIdentity(childId, "gc"),
     status: "complete",
   })
   expect(model.blocks.some((block) => (block as TranscriptBlock)._tag === "ChildAgent")).toBe(false)
   expect(model.blocks.filter((block) => (block as TranscriptBlock)._tag === "ToolCall").length).toBe(toolCount)
 })
 it("renders a completed child response from its parent result when child events are unavailable", () => {
-  const childId = "execution:child:turn:complete"
+  const childId = "run-complete-01"
   const projection = TranscriptProjection.Projection.project("turn", "prompt", [
     event("agent", 0, "tool.call.requested", {
       data: { tool_call_id: "agent", tool_name: "task", input: { prompt: "Complete the work" } },
     }),
     event("agent-spawned", 1, "child_run.spawned", {
-      data: { tool_call_id: "agent", child_execution_id: childId },
+      data: { invocation_id: "agent", child_execution_id: childId },
     }),
     event("agent-result", 2, "tool.result.received", {
       data: {
@@ -78,7 +80,7 @@ it("renders a completed child response from its parent result when child events 
   expect(rendered).toContain("Child completed the boundary.")
 })
 it("presents a subagent as finished when its durable child lifecycle completes after a tool error", () => {
-  const childId = "execution:child:turn:task"
+  const childId = "run-task-01"
   const projection = TranscriptProjection.Projection.project("turn", "prompt", [
     event("agent", 0, "tool.call.requested", {
       data: {
@@ -88,13 +90,13 @@ it("presents a subagent as finished when its durable child lifecycle completes a
       },
     }),
     event("agent-spawned", 1, "child_run.spawned", {
-      data: { tool_call_id: "agent", child_execution_id: childId },
+      data: { invocation_id: "agent", child_execution_id: childId },
     }),
     event("agent-failed", 2, "tool.result.received", {
       data: { tool_call_id: "agent", error: "AgentToolError: Model gpt-5.6-luna is not available" },
     }),
     event("child-completed", 3, "child_run.completed", {
-      data: { child_execution_id: childId, profile: "task" },
+      data: { invocation_id: "agent", child_execution_id: childId, profile: "task" },
     }),
   ])
 
@@ -112,30 +114,8 @@ it("presents a subagent as finished when its durable child lifecycle completes a
       .join(""),
   ).toContain("Subagent finished")
 })
-it("merges Relay child ids that encode the uncorrelated tool call", () => {
-  const turnId = "turn"
-  const toolCallId = "rika:execution%3Aturn:cancel-agent"
-  const childId = "child:execution%3Aturn:rika:execution%3Aturn:cancel-agent"
-  const projection = TranscriptProjection.Projection.project(turnId, "delegate", [
-    event("agent", 0, "tool.call.requested", {
-      data: { tool_call_id: toolCallId, tool_name: "task", input: { prompt: "Wait until cancelled." } },
-    }),
-    event("spawned", 1, "child_run.spawned", { data: { child_execution_id: childId } }),
-  ])
-
-  const model = projectUnits(initial("/work"), projection.units)
-
-  expect(model.blocks).toEqual([
-    expect.objectContaining({
-      _tag: "ToolCall",
-      id: TranscriptIdentity.scopedIdentity(turnId, toolCallId),
-      childId,
-      status: "running",
-    }),
-  ])
-})
 it("uses Subagent as the fallback descriptor instead of Task", () => {
-  const childId = "execution:child:turn:task"
+  const childId = "run-task-02"
   const projection = TranscriptProjection.Projection.project("turn", "prompt", [
     event("agent", 0, "tool.call.requested", {
       data: {
@@ -145,10 +125,10 @@ it("uses Subagent as the fallback descriptor instead of Task", () => {
       },
     }),
     event("agent-spawned", 1, "child_run.spawned", {
-      data: { tool_call_id: "agent", child_execution_id: childId },
+      data: { invocation_id: "agent", child_execution_id: childId },
     }),
     event("agent-started", 2, "child_run.started", {
-      data: { child_execution_id: childId, profile: "task" },
+      data: { invocation_id: "agent", child_execution_id: childId, profile: "task" },
     }),
   ])
 
@@ -163,7 +143,7 @@ it("uses Subagent as the fallback descriptor instead of Task", () => {
   expect(JSON.stringify(model.blocks)).not.toContain("Task working")
 })
 it("moves a live child row expansion onto the stable subagent unit key", () => {
-  const childId = "execution:child:turn:task"
+  const childId = "run-task-03"
   let projection = TranscriptProjection.Projection.project("turn", "prompt", [
     event("agent", 0, "tool.call.requested", {
       data: {
@@ -173,7 +153,7 @@ it("moves a live child row expansion onto the stable subagent unit key", () => {
       },
     }),
     event("agent-started", 1, "child_run.started", {
-      data: { child_execution_id: childId, profile: "task" },
+      data: { invocation_id: "agent", child_execution_id: childId, profile: "task" },
     }),
   ])
   let model = projectUnits(initial("/work"), projection.units)
@@ -182,7 +162,7 @@ it("moves a live child row expansion onto the stable subagent unit key", () => {
   projection = TranscriptProjection.Projection.applyEvent(
     projection,
     event("agent-spawned", 2, "child_run.spawned", {
-      data: { tool_call_id: "agent", child_execution_id: childId },
+      data: { invocation_id: "agent", child_execution_id: childId },
     }),
   )
 
@@ -193,7 +173,7 @@ it("moves a live child row expansion onto the stable subagent unit key", () => {
   expect(model.expandedRowKeys).toEqual(["tool:turn:agent"])
 })
 it("projects a durable nested projection to the same tree as live child events", () => {
-  const childId = "turn:child:oracle"
+  const childId = "run-oracle-01"
   const parent = TranscriptProjection.Projection.project("turn", "delegate", [
     event("agent", 0, "tool.call.requested", {
       data: {
@@ -203,7 +183,7 @@ it("projects a durable nested projection to the same tree as live child events",
       },
     }),
     event("spawned", 1, "child_run.spawned", {
-      data: { tool_call_id: "agent", child_execution_id: `execution:${childId}` },
+      data: { invocation_id: "agent", child_execution_id: childId },
     }),
   ])
   const childProjection = TranscriptProjection.Projection.project(childId, "", [
@@ -240,15 +220,16 @@ it("projects a durable nested projection to the same tree as live child events",
   expect(shape(reloadedModel)).toEqual(shape(liveModel))
 })
 it("replays a child with an internal tool error and completed final response as finished", () => {
+  const childId = "run-oracle-02"
   const parent = TranscriptProjection.Projection.project("turn", "delegate", [
     event("agent", 0, "tool.call.requested", {
       data: { tool_call_id: "agent", tool_name: "oracle", input: { prompt: "Review" } },
     }),
     event("spawned", 1, "child_run.spawned", {
-      data: { tool_call_id: "agent", child_execution_id: "execution:child", profile: "oracle" },
+      data: { invocation_id: "agent", child_execution_id: childId, profile: "oracle" },
     }),
   ])
-  const child = TranscriptProjection.Projection.project("child", "", [
+  const child = TranscriptProjection.Projection.project(childId, "", [
     event("inner", 0, "tool.call.requested", {
       data: { tool_call_id: "inner", tool_name: "read", input: { path: "missing.ts" } },
     }),

@@ -60,7 +60,7 @@ const welcomeMarkFrame = (rows: ReadonlyArray<string>): ReadonlyArray<string> =>
 
 const shiftWelcomeMarkRow = (row: string): string => ` ${row}`.slice(0, 40)
 
-const _legacyWelcomeMarkFrames = [
+const _unusedWelcomeMarkFrames = [
   welcomeMarkFrame([
     "            •••••••••••••               ",
     "         ••••••••••●●••••••••           ",

@@ -85,7 +85,7 @@ export const resolveModelRoute: {
     resolveRoute(settings, settings.modes[mode][role], `Mode ${mode} ${role}`),
 )
 
-export const agentIds = ["librarian", "painter", "review", "readThread", "surgeon", "task"] as const
+export const agentIds = ["librarian", "painter", "readThread", "review", "surgeon", "task"] as const
 
 const resolveAgentRouteImpl = (
   settings: ConfigurationSettings,

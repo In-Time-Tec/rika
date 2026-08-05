@@ -24,7 +24,7 @@ const event = (
 
 const recoveredReport = {
   _tag: "Report" as const,
-  childExecutionId: "execution:child",
+  childExecutionId: "run-child-01",
   status: "completed" as const,
   output: [{ type: "text" as const, text: "The finding" }],
 }
@@ -48,7 +48,7 @@ const delegation = (
   parent = TranscriptProjection.Projection.applyEvent(
     parent,
     event("spawned", 1, "child_run.spawned", {
-      data: { tool_call_id: "agent", child_execution_id: "execution:child" },
+      data: { invocation_id: "agent", child_execution_id: "run-child-01" },
     }),
   )
   if (result !== "stale parent failure")
@@ -57,7 +57,7 @@ const delegation = (
       event("result", 2, "tool.result.received", { data: { tool_call_id: "agent", output: result } }),
     )
   const child = TranscriptProjection.Projection.project(
-    "child",
+    "run-child-01",
     "",
     childEvents.length === 0 ? [event("done", 0, "execution.completed")] : childEvents,
   )
@@ -77,7 +77,7 @@ const renderExpanded = (model: Model): string =>
     .join(" ")}`
 
 it("projects cancelled root and child tools as terminal without a duplicate notice", () => {
-  const childId = "turn:child:task"
+  const childId = "run-task-01"
   const parent = TranscriptProjection.Projection.project("turn", "delegate", [
     event("agent", 0, "tool.call.requested", {
       data: {
@@ -87,7 +87,7 @@ it("projects cancelled root and child tools as terminal without a duplicate noti
       },
     }),
     event("spawned", 1, "child_run.spawned", {
-      data: { tool_call_id: "agent", child_execution_id: `execution:${childId}` },
+      data: { invocation_id: "agent", child_execution_id: childId },
     }),
   ])
   const child = TranscriptProjection.Projection.project(childId, "", [
@@ -199,11 +199,11 @@ it("restores a recovered Report verdict when the child failure arrives before th
   parent = TranscriptProjection.Projection.applyEvent(
     parent,
     event("spawned", 1, "child_run.spawned", {
-      data: { tool_call_id: "agent", child_execution_id: "execution:child" },
+      data: { invocation_id: "agent", child_execution_id: "run-child-01" },
     }),
   )
   let model = projectUnits(initial("/work"), parent.units)
-  const child = TranscriptProjection.Projection.project("child", "", [
+  const child = TranscriptProjection.Projection.project("run-child-01", "", [
     event("answer", 0, "model.output.completed", { text: "The finding" }),
     failedChildEvent(1),
   ])
