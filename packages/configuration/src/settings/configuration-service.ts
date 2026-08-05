@@ -2,7 +2,7 @@ import { Config, Context, Effect, Layer, Redacted, Schema } from "effect"
 import { configurationDiagnostics } from "./configuration-diagnostic"
 import { mergeConfigurationSettings, withWebSearchConfiguration } from "./configuration-merge"
 import type { ConfigurationEnvironment, EffectiveConfiguration } from "./configuration-settings"
-import type { SettingsInput } from "./configuration-settings-input"
+import type { ConfigurationSettingsInput } from "./configuration-settings-input"
 
 export interface ConfigurationServiceShape {
   readonly effective: Effect.Effect<EffectiveConfiguration>
@@ -24,8 +24,8 @@ export class WebProviderConfigurationError extends Schema.TaggedErrorClass<WebPr
 
 export const memoryConfigurationLayer = (
   options: {
-    readonly global?: SettingsInput
-    readonly workspace?: SettingsInput
+    readonly global?: ConfigurationSettingsInput
+    readonly workspace?: ConfigurationSettingsInput
     readonly environment?: ConfigurationEnvironment
   } = {},
 ) => {
@@ -59,8 +59,8 @@ export const testConfigurationLayer = memoryConfigurationLayer
 
 export const liveConfigurationLayer = (options: {
   readonly webProviders: ReadonlyArray<WebProviderDescriptor>
-  readonly global?: SettingsInput
-  readonly workspace?: SettingsInput
+  readonly global?: ConfigurationSettingsInput
+  readonly workspace?: ConfigurationSettingsInput
 }) =>
   Layer.effect(
     ConfigurationService,

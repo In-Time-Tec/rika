@@ -5,14 +5,13 @@ import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
-import * as ExecutionBackend from "@rika/product/execution-service"
-import { Effect, Fiber, Layer, Ref } from "effect"
-import { TestClock } from "effect/testing"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
+import { Deferred, Effect, Layer, Ref, Stream } from "effect"
 
 import { executionRoute } from "../support/product-test-current-state"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { collectEvents, holdSession, openInteractiveSession, settleEvents } from "../support/operation-session-harness"
-import { backend, inspectFromTurns } from "../support/operation-execution-fixtures"
+import { backend, inspectTurnFromTurns } from "../support/operation-execution-fixtures"
 import { turnProvenance, threadLineage, selectionThread } from "../support/operation-selection-fixtures"
 
 describe("Operation", () => {
@@ -27,8 +26,12 @@ describe("Operation", () => {
           threadId: thread.id,
           prompt: "active",
           executionRoute: executionRoute(),
+          executionLink: {
+            runId: "steer-failure-run",
+            turnId: "steer-failure-active",
+            threadId: String(thread.id),
+          },
           status: "running",
-          stopIntent: "none",
           createdAt: 1,
           updatedAt: 1,
         },
@@ -39,7 +42,6 @@ describe("Operation", () => {
           prompt: "keep this prompt",
           executionRoute: executionRoute(),
           status: "queued",
-          stopIntent: "none",
           createdAt: 2,
           updatedAt: 2,
         },
@@ -50,15 +52,15 @@ describe("Operation", () => {
           prompt: "later prompt",
           executionRoute: executionRoute(),
           status: "queued",
-          stopIntent: "none",
           createdAt: 3,
           updatedAt: 3,
         },
       ])
-      const failingBackend = ExecutionBackend.Service.of({
+      const failingBackend = ExecutionGateway.Service.of({
         ...backend,
-        inspect: (turnId) => Effect.succeed({ turnId, status: "running", waits: [], pendingTools: [], children: [] }),
-        steer: () => Effect.fail(ExecutionBackend.BackendError.make({ message: "forced steer failure" })),
+        inspectTurn: () => Effect.succeed({ status: "running" }),
+        watchTurn: () => Stream.never,
+        steerTurn: () => Effect.fail(ExecutionGateway.SteeringFailure.make({ message: "forced steer failure" })),
       })
       const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const received: Array<InteractiveEvent> = []
@@ -79,7 +81,7 @@ describe("Operation", () => {
           productLayer({
             repositoryLayer: ThreadRepository.memoryLayer([thread]),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-            backendLayer: Layer.succeed(ExecutionBackend.Service, failingBackend),
+            backendLayer: Layer.succeed(ExecutionGateway.Service, failingBackend),
             defaultWorkspace: "/work",
             pendingTurnCapacity: 2,
             makeThreadId: Effect.die("unused"),
@@ -124,14 +126,15 @@ describe("Operation", () => {
           threadId: thread.id,
           prompt: "active",
           executionRoute: executionRoute(),
+          executionLink: { runId: "interrupt-active-run", turnId: "active", threadId: String(thread.id) },
           status: "running",
-          stopIntent: "none",
           createdAt: 1,
           updatedAt: 1,
         },
       ])
       const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const events = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])
+      const cancelled = yield* Deferred.make<void>()
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       yield* Effect.gen(function* () {
         const session = yield* openInteractiveSession(sessions, {
@@ -149,9 +152,23 @@ describe("Operation", () => {
           productLayer({
             repositoryLayer: ThreadRepository.memoryLayer([thread]),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-            backendLayer: Layer.succeed(ExecutionBackend.Service, {
+            backendLayer: Layer.succeed(ExecutionGateway.Service, {
               ...backend,
-              inspect: inspectFromTurns(turns),
+              inspectTurn: inspectTurnFromTurns(turns),
+              cancelTurn: () => Deferred.succeed(cancelled, undefined),
+              watchTurn: (link) =>
+                link.turnId === "active"
+                  ? Stream.fromEffect(Deferred.await(cancelled)).pipe(
+                      Stream.map(() => ({
+                        executionId: link.runId,
+                        cursor: "interrupt-cancelled",
+                        sequence: 0,
+                        type: "execution.cancelled" as const,
+                        timestampSource: "baton" as const,
+                        createdAt: 2,
+                      })),
+                    )
+                  : backend.watchTurn(link),
             }),
             defaultWorkspace: "/work",
             makeThreadId: Effect.die("unused"),
@@ -163,86 +180,6 @@ describe("Operation", () => {
       expect(yield* turns.get(Turn.TurnId.make("active"))).toMatchObject({ status: "cancelled" })
       expect(yield* turns.get(Turn.TurnId.make("replacement"))).toMatchObject({ status: "completed" })
       expect((yield* Ref.get(events)).map((event) => event._tag)).toContain("QueueUpdated")
-    }),
-  )
-
-  it.effect("holds a replacement queued until the cancelled execution tree quiesces", () =>
-    Effect.gen(function* () {
-      const thread = selectionThread("quiescence-thread")
-      const turns = yield* TurnRepository.makeMemory([
-        {
-          id: Turn.TurnId.make("active"),
-          ...turnProvenance,
-          threadId: thread.id,
-          prompt: "active",
-          executionRoute: executionRoute(),
-          status: "running",
-          stopIntent: "none",
-          createdAt: 1,
-          updatedAt: 1,
-        },
-      ])
-      const childLive = yield* Ref.make(true)
-      const starts = yield* Ref.make<ReadonlyArray<string>>([])
-      const cancelledExecutions = yield* Ref.make<ReadonlyArray<string>>([])
-      const childId = "child:active:worker"
-      const gateBackend = ExecutionBackend.Service.of({
-        ...backend,
-        inspect: (turnId, reference) =>
-          Effect.gen(function* () {
-            const live = yield* Ref.get(childLive)
-            const childStatus = live ? ("running" as const) : ("cancelled" as const)
-            if (reference !== undefined)
-              return { turnId, status: childStatus, waits: [], pendingTools: [], children: [] }
-            const turn = yield* turns.get(Turn.TurnId.make(turnId)).pipe(Effect.orDie)
-            if (turn === undefined) return undefined
-            return {
-              turnId,
-              status: turn.status,
-              waits: [],
-              pendingTools: [],
-              children: turnId === "active" ? [{ executionId: childId, status: childStatus }] : [],
-            }
-          }),
-        cancel: (turnId) =>
-          Ref.update(cancelledExecutions, (all) => [...all, turnId]).pipe(
-            Effect.as({ turnId, status: "cancelled" as const, events: [] }),
-          ),
-        start: (input) =>
-          Ref.update(starts, (all) => [...all, String(input.turnId)]).pipe(Effect.andThen(backend.start(input))),
-      })
-      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
-      yield* Effect.gen(function* () {
-        const session = yield* openInteractiveSession(sessions, {
-          _tag: "Interactive",
-          prompt: [],
-          ephemeral: false,
-        })
-        yield* session.reopenThread(1)
-        const interrupted = yield* Effect.forkChild(session.interruptAndSend("replacement prompt"))
-        for (let index = 0; index < 40; index += 1) yield* Effect.yieldNow
-        expect(yield* Ref.get(starts)).toEqual([])
-        expect(yield* turns.get(Turn.TurnId.make("active"))).toMatchObject({ status: "cancelled" })
-        expect(yield* turns.get(Turn.TurnId.make("replacement"))).toMatchObject({ status: "queued" })
-        expect(yield* Ref.get(cancelledExecutions)).toEqual(["active"])
-        yield* Ref.set(childLive, false)
-        yield* TestClock.adjust("250 millis")
-        yield* Fiber.join(interrupted)
-      }).pipe(
-        provideLayer(
-          productLayer({
-            repositoryLayer: ThreadRepository.memoryLayer([thread]),
-            turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-            backendLayer: Layer.succeed(ExecutionBackend.Service, gateBackend),
-            defaultWorkspace: "/work",
-            makeThreadId: Effect.die("unused"),
-            makeTurnId: Effect.succeed(Turn.TurnId.make("replacement")),
-            interactive: holdSession(sessions),
-          }),
-        ),
-      )
-      expect(yield* Ref.get(starts)).toEqual(["replacement"])
-      expect(yield* turns.get(Turn.TurnId.make("replacement"))).toMatchObject({ status: "completed" })
     }),
   )
 })

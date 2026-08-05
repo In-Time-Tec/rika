@@ -41,7 +41,6 @@ const RepairRow = Schema.Struct({
   turn_id: Schema.String,
   thread_id: Schema.String,
   status: Schema.String,
-  last_cursor: Schema.NullOr(Schema.String),
 })
 
 const repositoryError = (error: unknown) => RepositoryError.make({ message: String(error) })
@@ -89,7 +88,6 @@ const decodeRepair = (row: unknown) =>
       turnId,
       threadId,
       status,
-      ...(value.last_cursor === null ? {} : { lastCursor: value.last_cursor }),
     })
   }).pipe(Effect.mapError(repositoryError))
 
@@ -156,13 +154,11 @@ export const layer = Layer.effect(
         const rows = yield* sql`SELECT
           turn.id AS turn_id,
           turn.thread_id,
-          turn.status,
-          turn.last_cursor
+          turn.status
         FROM rika_turns AS turn
         LEFT JOIN rika_thread_turn_activity AS activity ON activity.turn_id = turn.id
         WHERE turn.turn_kind = 'AgentExecution' AND (
           activity.turn_id IS NULL
-          OR activity.projected_cursor IS NOT turn.last_cursor
           OR (turn.status IN ('completed', 'failed', 'cancelled') AND activity.complete = 0)
         )
         ORDER BY turn.created_at ASC, turn.rowid ASC

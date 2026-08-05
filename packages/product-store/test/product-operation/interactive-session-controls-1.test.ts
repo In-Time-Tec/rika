@@ -3,7 +3,7 @@ import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { Service } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
 import { Fixtures as RuntimeFixtures } from "./interactive-session-runtime-support"
-import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref } from "effect"
+import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { createTurn } from "../support/product-test-current-state"
 import { productLayer, collectEvents, waitForSessions, serverEvents } from "./interactive-session-base-support"
@@ -47,27 +47,18 @@ describe("InteractiveSession controls", () => {
       const toolWorkspaces: Array<string> = []
       const threadSequence = yield* Ref.make(0)
       const turnSequence = yield* Ref.make(0)
-      const backend = RuntimeFixtures.ExecutionBackend.Service.of({
-        invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
-        createFanOut: () => Effect.die("unused"),
-        inspectFanOut: () => Effect.die("unused"),
-        cancelFanOut: () => Effect.die("unused"),
-        registerWorkflows: () => Effect.die("unused"),
-        startWorkflow: () => Effect.die("unused"),
-        inspectWorkflow: () => Effect.die("unused"),
-        cancelWorkflow: () => Effect.die("unused"),
-        inspect: () => Effect.void.pipe(Effect.as(undefined)),
-        start: (input) => Effect.succeed({ turnId: input.turnId, status: "completed" as const, events: [] }),
-        replay: (turnId, cursor) =>
-          Effect.succeed({ turnId, status: "completed" as const, events: [], lastCursor: cursor }),
-        steer: () => Effect.die("unused"),
-        cancel: () => Effect.die("unused"),
-        resolveInvocationSource: () => Effect.die("unused"),
+      const backend = RuntimeFixtures.ExecutionGateway.Service.of({
+        startTurn: (input) =>
+          Effect.succeed({ runId: "workspace-session-run", turnId: input.turnId, threadId: input.threadId }),
+        cancelTurn: () => Effect.die("unused"),
+        steerTurn: () => Effect.die("unused"),
+        watchTurn: () => Stream.empty,
+        inspectTurn: () => Effect.succeed({ status: "completed" }),
       })
       const layer = productLayer({
         repositoryLayer: Layer.succeed(RuntimeFixtures.ThreadRepository.Service, repositories),
         turnRepositoryLayer: Layer.succeed(RuntimeFixtures.TurnRepository.Service, turns),
-        backendLayer: Layer.succeed(RuntimeFixtures.ExecutionBackend.Service, backend),
+        backendLayer: Layer.succeed(RuntimeFixtures.ExecutionGateway.Service, backend),
         toolRuntimeLayer: (workspace) => {
           toolWorkspaces.push(workspace)
           return RuntimeFixtures.ToolRuntime.testLayer(() => Effect.succeed({ text: workspace, truncated: false }))
@@ -126,53 +117,43 @@ describe("InteractiveSession controls", () => {
       const repositories = yield* RuntimeFixtures.ThreadRepository.makeMemory()
       const turns = yield* RuntimeFixtures.TurnRepository.makeMemory()
       const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
-      const submittedBackend = RuntimeFixtures.ExecutionBackend.Service.of({
-        invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
-        createFanOut: () => Effect.die("unused"),
-        inspectFanOut: () => Effect.die("unused"),
-        cancelFanOut: () => Effect.die("unused"),
-        registerWorkflows: () => Effect.die("unused"),
-        startWorkflow: () => Effect.die("unused"),
-        inspectWorkflow: () => Effect.die("unused"),
-        cancelWorkflow: () => Effect.die("unused"),
-        inspect: () => Effect.void.pipe(Effect.as(undefined)),
-        start: (input) =>
-          Effect.succeed({
-            turnId: input.turnId,
-            status: "completed" as const,
-            events: serverEvents([
+      const submittedBackend = RuntimeFixtures.ExecutionGateway.Service.of({
+        startTurn: (input) =>
+          Effect.succeed({ runId: `${input.turnId}-run`, turnId: input.turnId, threadId: input.threadId }),
+        cancelTurn: () => Effect.die("unused"),
+        steerTurn: () => Effect.die("unused"),
+        watchTurn: (link) =>
+          Stream.fromIterable(
+            serverEvents([
               {
-                executionId: input.turnId,
+                executionId: link.runId,
                 cursor: "started",
                 sequence: 0,
                 type: "execution.started",
                 createdAt: 0,
               },
               {
-                executionId: input.turnId,
+                executionId: link.runId,
                 cursor: "output",
                 sequence: 1,
                 type: "model.output.completed",
                 createdAt: 1,
               },
               {
-                executionId: input.turnId,
+                executionId: link.runId,
                 cursor: "done",
                 sequence: 2,
                 type: "execution.completed",
                 createdAt: 2,
               },
             ]),
-          }),
-        replay: () => Effect.die("unused"),
-        steer: () => Effect.die("unused"),
-        cancel: () => Effect.die("unused"),
-        resolveInvocationSource: () => Effect.die("unused"),
+          ),
+        inspectTurn: () => Effect.succeed({ status: "completed" }),
       })
       const layer = productLayer({
         repositoryLayer: Layer.succeed(RuntimeFixtures.ThreadRepository.Service, repositories),
         turnRepositoryLayer: Layer.succeed(RuntimeFixtures.TurnRepository.Service, turns),
-        backendLayer: Layer.succeed(RuntimeFixtures.ExecutionBackend.Service, submittedBackend),
+        backendLayer: Layer.succeed(RuntimeFixtures.ExecutionGateway.Service, submittedBackend),
         defaultWorkspace: "/work",
         makeThreadId: Effect.succeed(RuntimeFixtures.Thread.ThreadId.make("created")),
         makeTurnId: Effect.succeed(RuntimeFixtures.Turn.TurnId.make("created-turn")),
@@ -243,7 +224,7 @@ describe("InteractiveSession controls", () => {
           rootTurnId: "created-turn",
           origin: {
             _tag: "Event",
-            executionId: "created-turn",
+            executionId: "created-turn-run",
             cursor: "started",
             sequence: 0,
             type: "execution.started",
@@ -259,7 +240,7 @@ describe("InteractiveSession controls", () => {
           rootTurnId: "created-turn",
           origin: {
             _tag: "Event",
-            executionId: "created-turn",
+            executionId: "created-turn-run",
             cursor: "output",
             sequence: 1,
             type: "model.output.completed",
@@ -275,7 +256,7 @@ describe("InteractiveSession controls", () => {
           rootTurnId: "created-turn",
           origin: {
             _tag: "Event",
-            executionId: "created-turn",
+            executionId: "created-turn-run",
             cursor: "done",
             sequence: 2,
             type: "execution.completed",
@@ -288,8 +269,6 @@ describe("InteractiveSession controls", () => {
           _tag: "ThreadUsageUpdated",
           selectionEpoch: 0,
           threadId: "created",
-          revision: 1,
-          time: { _tag: "Available", accumulatedMillis: 2 },
         },
       ])
       expect(yield* repositories.get(RuntimeFixtures.Thread.ThreadId.make("created"))).toMatchObject({
@@ -297,7 +276,6 @@ describe("InteractiveSession controls", () => {
       })
       expect(yield* turns.get(RuntimeFixtures.Turn.TurnId.make("created-turn"))).toMatchObject({
         status: "completed",
-        lastCursor: "done",
       })
     }),
   )
@@ -312,34 +290,43 @@ describe("InteractiveSession controls", () => {
       const activeSubmitted = yield* Deferred.make<void>()
       const releaseActive = yield* Deferred.make<void>()
       const pendingStarted = yield* Deferred.make<void>()
-      const backend = RuntimeFixtures.ExecutionBackend.Service.of({
-        invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
-        createFanOut: () => Effect.die("unused"),
-        inspectFanOut: () => Effect.die("unused"),
-        cancelFanOut: () => Effect.die("unused"),
-        registerWorkflows: () => Effect.die("unused"),
-        startWorkflow: () => Effect.die("unused"),
-        inspectWorkflow: () => Effect.die("unused"),
-        cancelWorkflow: () => Effect.die("unused"),
-        inspect: () => Effect.void.pipe(Effect.as(undefined)),
-        start: (input) =>
+      const backend = RuntimeFixtures.ExecutionGateway.Service.of({
+        startTurn: (input) =>
           input.turnId === "turn-0"
             ? Deferred.succeed(activeStarted, undefined).pipe(
-                Effect.andThen(Deferred.await(releaseActive)),
-                Effect.as({ turnId: input.turnId, status: "completed" as const, events: [] }),
+                Effect.as({ runId: "active-queue-run", turnId: input.turnId, threadId: input.threadId }),
               )
             : Deferred.succeed(pendingStarted, undefined).pipe(
-                Effect.as({ turnId: input.turnId, status: "completed" as const, events: [] }),
+                Effect.as({ runId: "promoted-queue-run", turnId: input.turnId, threadId: input.threadId }),
               ),
-        replay: () => Effect.die("unused"),
-        steer: () => Effect.die("unused"),
-        cancel: () => Effect.die("unused"),
-        resolveInvocationSource: () => Effect.die("unused"),
+        cancelTurn: () => Effect.die("unused"),
+        steerTurn: () => Effect.die("unused"),
+        watchTurn: (link) =>
+          link.turnId === "turn-0"
+            ? Stream.fromEffect(Deferred.await(releaseActive)).pipe(
+                Stream.map(() => ({
+                  executionId: link.runId,
+                  cursor: "active-completed",
+                  sequence: 0,
+                  type: "execution.completed" as const,
+                  timestampSource: "baton" as const,
+                  createdAt: 1,
+                })),
+              )
+            : Stream.succeed({
+                executionId: link.runId,
+                cursor: "promoted-completed",
+                sequence: 0,
+                type: "execution.completed" as const,
+                timestampSource: "baton" as const,
+                createdAt: 2,
+              }),
+        inspectTurn: () => Effect.succeed({ status: "running" }),
       })
       const layer = productLayer({
         repositoryLayer: Layer.succeed(RuntimeFixtures.ThreadRepository.Service, repositories),
         turnRepositoryLayer: Layer.succeed(RuntimeFixtures.TurnRepository.Service, turns),
-        backendLayer: Layer.succeed(RuntimeFixtures.ExecutionBackend.Service, backend),
+        backendLayer: Layer.succeed(RuntimeFixtures.ExecutionGateway.Service, backend),
         defaultWorkspace: "/work",
         pendingTurnCapacity: 2,
         makeThreadId: Effect.succeed(RuntimeFixtures.Thread.ThreadId.make("thread")),

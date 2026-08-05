@@ -22,7 +22,6 @@ export interface Options {
   readonly globalConfigPath: string
   readonly workspaceConfigPath: string
   readonly productDatabasePath: string
-  readonly executionDatabasePath: string
 }
 
 const json = (value: unknown) => Console.log(JSON.stringify(value, null, 2))
@@ -111,14 +110,10 @@ export const run = Effect.fn("ConfigOperations.run")(function* (
       yield* adapter.edit(input.workspace ? options.workspaceConfigPath : options.globalConfigPath)
     return
   }
-  const [productDatabase, executionDatabase] = yield* Effect.all([
-    adapter.exists(options.productDatabasePath),
-    adapter.exists(options.executionDatabasePath),
-  ])
+  const productDatabase = yield* adapter.exists(options.productDatabasePath)
   yield* json({
     databases: {
       product: productDatabase ? "present" : "missing",
-      execution: executionDatabase ? "present" : "missing",
     },
     config: {
       diagnostics: config.diagnostics,

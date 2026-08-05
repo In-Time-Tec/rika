@@ -8,9 +8,9 @@ import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
-import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionEvent from "@rika/product/execution-event"
-import { Deferred, Effect, Fiber, Layer, Queue, Schema } from "effect"
+import { Deferred, Effect, Fiber, Layer, Queue, Schema, Stream } from "effect"
 
 type Client = {
   readonly session: InteractiveSession
@@ -42,85 +42,65 @@ it.effect("delivers each joined subscriber suffix exactly once through subscribe
     const releases = yield* Queue.unbounded<void>()
     const started = yield* Deferred.make<void>()
     const following = yield* Deferred.make<void>()
-    const liveEvents = yield* Queue.unbounded<ExecutionEvent.Event>()
     const emitted: Array<ExecutionEvent.Event> = []
     const lifecycleEvents: ReadonlyArray<ExecutionEvent.Event> = [
       {
-        executionId: "execution:churn-turn",
+        executionId: "churn-runtime-run",
         cursor: "churn-accepted",
         sequence: 1,
         type: "execution.accepted",
         createdAt: 1,
-        timestampSource: "server",
+        timestampSource: "baton",
       },
       {
-        executionId: "execution:churn-turn",
+        executionId: "churn-runtime-run",
         cursor: "churn-started",
         sequence: 2,
         type: "execution.started",
         createdAt: 2,
-        timestampSource: "server",
+        timestampSource: "baton",
       },
     ]
     const streamed: ReadonlyArray<ExecutionEvent.Event> = Array.from({ length: 8 }, (_, index) => ({
-      executionId: "execution:churn-turn",
+      executionId: "churn-runtime-run",
       cursor: `churn-${index}`,
       sequence: index + 3,
       type: index === 7 ? "execution.completed" : "model.output.delta",
       createdAt: index + 3,
-      timestampSource: "server",
+      timestampSource: "baton",
       ...(index === 7 ? {} : { text: String(index) }),
     }))
     let running = false
-    const backend = ExecutionBackend.Service.of({
-      invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
-      createFanOut: () => Effect.die("unused"),
-      inspectFanOut: () => Effect.die("unused"),
-      cancelFanOut: () => Effect.die("unused"),
-      registerWorkflows: () => Effect.die("unused"),
-      startWorkflow: () => Effect.die("unused"),
-      inspectWorkflow: () => Effect.die("unused"),
-      cancelWorkflow: () => Effect.die("unused"),
-      start: (input) =>
+    const backend = ExecutionGateway.Service.of({
+      startTurn: (input) =>
         Effect.gen(function* () {
           running = true
           yield* Deferred.succeed(started, undefined)
-          for (const event of streamed) {
-            yield* Queue.take(releases)
-            emitted.push(event)
-            yield* Queue.offer(liveEvents, event)
-          }
-          running = false
-          return { turnId: input.turnId, status: "completed" as const, events: streamed }
+          return { runId: "churn-runtime-run", turnId: input.turnId, threadId: input.threadId }
         }),
-      follow: (turnId, _afterCursor, onEvent) =>
-        Effect.gen(function* () {
-          yield* Deferred.succeed(following, undefined)
-          const events: Array<ExecutionEvent.Event> = [...lifecycleEvents]
-          for (const event of lifecycleEvents) {
-            emitted.push(event)
-            onEvent?.(event)
-          }
-          while (events.length < streamed.length + lifecycleEvents.length) {
-            const event = yield* Queue.take(liveEvents)
-            events.push(event)
-            onEvent?.(event)
-          }
-          return { turnId, status: "completed" as const, events }
-        }),
-      replay: (turnId) =>
-        Effect.succeed({
-          turnId,
-          status: running ? ("running" as const) : ("completed" as const),
-          events: [...emitted],
-        }),
-      cancel: (turnId) => Effect.succeed({ turnId, status: "cancelled" as const, events: [] }),
-      inspect: (turnId) =>
-        Effect.succeed(
-          running ? { turnId, status: "running" as const, waits: [], pendingTools: [], children: [] } : undefined,
+      watchTurn: () =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            yield* Deferred.succeed(following, undefined)
+            for (const event of lifecycleEvents) {
+              emitted.push(event)
+            }
+            const live = Stream.fromIterable(streamed).pipe(
+              Stream.mapEffect((event) =>
+                Queue.take(releases).pipe(
+                  Effect.tap(() => Effect.sync(() => emitted.push(event))),
+                  Effect.as(event),
+                ),
+              ),
+            )
+            return Stream.concat(Stream.fromIterable(lifecycleEvents), live).pipe(
+              Stream.ensuring(Effect.sync(() => (running = false))),
+            )
+          }),
         ),
-      steer: (turnId) => Effect.succeed({ steeringMessageId: `steering:${turnId}:steering:0`, sequence: 0 }),
-      resolveInvocationSource: () => Effect.die("unused"),
+      cancelTurn: () => Effect.void,
+      inspectTurn: () => Effect.succeed({ status: running ? "running" : "completed" }),
+      steerTurn: () => Effect.void,
     })
     const registrations = yield* Queue.unbounded<{
       readonly session: InteractiveSession
@@ -130,7 +110,7 @@ it.effect("delivers each joined subscriber suffix exactly once through subscribe
     const layer = productLayer({
       repositoryLayer: ThreadRepository.memoryLayer([thread]),
       turnRepositoryLayer: TurnRepository.memoryLayer(),
-      backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+      backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
       defaultWorkspace: "/work",
       makeThreadId: Effect.die("unused"),
       makeTurnId: Effect.succeed(Turn.TurnId.make("churn-turn")),

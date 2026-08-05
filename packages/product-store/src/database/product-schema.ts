@@ -1,0 +1,420 @@
+import { Effect } from "effect"
+import { SqlClient } from "effect/unstable/sql/SqlClient"
+
+export interface SchemaObject {
+  readonly type: string
+  readonly name: string
+  readonly table_name: string
+  readonly sql: string | null
+}
+
+export const schemaFingerprint = (objects: ReadonlyArray<SchemaObject>): string =>
+  JSON.stringify(
+    objects
+      .filter(({ name }) => name !== "rika_schema_identity")
+      .map(({ type, name, table_name, sql }) => [type, name, table_name, sql])
+      .toSorted((left, right) => String(left[1]).localeCompare(String(right[1]))),
+  )
+
+export const create = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`CREATE TABLE rika_workspaces (
+    path TEXT PRIMARY KEY NOT NULL,
+    created_at INTEGER NOT NULL
+  )`
+  yield* sql`CREATE TABLE rika_threads (
+    id TEXT PRIMARY KEY NOT NULL,
+    workspace TEXT NOT NULL REFERENCES rika_workspaces(path),
+    title TEXT NOT NULL,
+    labels_json TEXT NOT NULL DEFAULT '[]',
+    pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
+    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+    lineage_json TEXT NOT NULL DEFAULT '{"_tag":"Original"}',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`
+  yield* sql`CREATE INDEX rika_threads_listing ON rika_threads (pinned DESC, updated_at DESC, id ASC)`
+  yield* sql`CREATE TABLE rika_turns (
+    id TEXT PRIMARY KEY NOT NULL,
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    prompt TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('accepted', 'queued', 'running', 'waiting', 'completed', 'failed', 'cancelled')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    prompt_parts_json TEXT,
+    execution_route_json TEXT,
+    execution_link_json TEXT,
+    queue_claim_token TEXT,
+    author_json TEXT NOT NULL DEFAULT '{"_tag":"Human"}',
+    lineage_json TEXT NOT NULL DEFAULT '{"_tag":"Original"}',
+    shell_command TEXT,
+    shell_result_text TEXT,
+    shell_result_truncated INTEGER,
+    shell_result_exit_code INTEGER,
+    turn_kind TEXT NOT NULL DEFAULT 'AgentExecution'
+      CHECK (
+        (
+          turn_kind = 'AgentExecution'
+          AND execution_route_json IS NOT NULL
+          AND shell_command IS NULL
+          AND shell_result_text IS NULL
+          AND shell_result_truncated IS NULL
+          AND shell_result_exit_code IS NULL
+        )
+        OR
+        (
+          turn_kind = 'RecordedShell'
+          AND shell_command IS NOT NULL
+          AND length(shell_command) > 0
+          AND prompt = '$ ' || shell_command
+          AND prompt_parts_json IS NULL
+          AND execution_route_json IS NULL
+          AND execution_link_json IS NULL
+          AND queue_claim_token IS NULL
+          AND author_json = '{"_tag":"Human"}'
+          AND lineage_json = '{"_tag":"Original"}'
+          AND status IN ('running', 'completed', 'failed', 'cancelled')
+          AND (
+            (status = 'running' AND shell_result_text IS NULL AND shell_result_truncated IS NULL AND shell_result_exit_code IS NULL)
+            OR
+            (status IN ('completed', 'failed', 'cancelled') AND shell_result_text IS NOT NULL AND shell_result_truncated IN (0, 1) AND (shell_result_exit_code IS NULL OR typeof(shell_result_exit_code) = 'integer'))
+          )
+        )
+      )
+  )`
+  yield* sql`CREATE INDEX rika_turns_thread ON rika_turns (thread_id, created_at ASC, id ASC)`
+  yield* sql`CREATE INDEX rika_turns_queue ON rika_turns (thread_id, status, created_at ASC, id ASC)`
+  yield* sql`CREATE UNIQUE INDEX rika_turns_queue_claim ON rika_turns (thread_id) WHERE queue_claim_token IS NOT NULL`
+  yield* sql`CREATE INDEX rika_turns_thread_updated ON rika_turns (thread_id, updated_at DESC)`
+  yield* sql`CREATE INDEX rika_turns_thread_nonqueued ON rika_turns (thread_id, created_at DESC, id DESC)
+    WHERE status <> 'queued'`
+  yield* sql`CREATE TABLE rika_thread_queue_state (
+    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    queued_count INTEGER NOT NULL DEFAULT 0 CHECK (queued_count >= 0)
+  )`
+  yield* sql`CREATE TABLE rika_thread_turn_activity (
+    turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    projected_cursor TEXT,
+    complete INTEGER NOT NULL DEFAULT 0 CHECK (complete IN (0, 1)),
+    added INTEGER NOT NULL DEFAULT 0 CHECK (added >= 0),
+    modified INTEGER NOT NULL DEFAULT 0 CHECK (modified >= 0),
+    removed INTEGER NOT NULL DEFAULT 0 CHECK (removed >= 0),
+    last_event_at INTEGER,
+    updated_at INTEGER NOT NULL
+  )`
+  yield* sql`CREATE INDEX rika_thread_turn_activity_summary ON rika_thread_turn_activity (thread_id, last_event_at DESC)`
+  yield* sql`CREATE TABLE rika_thread_read_state (
+    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    last_read_at INTEGER NOT NULL
+  )`
+  yield* sql`CREATE VIRTUAL TABLE rika_thread_search USING fts5(
+    thread_id UNINDEXED,
+    title,
+    labels,
+    human_prompts,
+    agent_prompts,
+    root_assistant,
+    child_assistant,
+    files,
+    tokenize = 'unicode61'
+  )`
+  yield* sql`CREATE TABLE rika_thread_search_files (
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    PRIMARY KEY (thread_id, path)
+  )`
+  yield* sql`CREATE INDEX rika_thread_search_files_path ON rika_thread_search_files (path, thread_id)`
+  yield* sql`CREATE TABLE rika_transcript_checkpoints (
+    turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    checkpoint_generation INTEGER NOT NULL DEFAULT 0 CHECK (checkpoint_generation >= 0),
+    revision INTEGER NOT NULL DEFAULT -1 CHECK (revision >= -1),
+    projection_version INTEGER NOT NULL DEFAULT 1 CHECK (projection_version >= 1),
+    model_phase INTEGER NOT NULL DEFAULT -1 CHECK (model_phase >= -1),
+    usable_completion_sequence INTEGER CHECK (usable_completion_sequence IS NULL OR usable_completion_sequence >= 0),
+    oldest_cursor TEXT,
+    checkpoint_cursor TEXT,
+    cost_usd REAL CHECK (cost_usd IS NULL OR cost_usd >= 0),
+    usage_cursors_json TEXT,
+    pricing_version TEXT,
+    updated_at INTEGER NOT NULL
+  )`
+  yield* sql`CREATE TABLE rika_transcript_execution_checkpoints (
+    turn_id TEXT NOT NULL REFERENCES rika_transcript_checkpoints(turn_id) ON DELETE CASCADE,
+    execution_key TEXT COLLATE BINARY NOT NULL CHECK (length(execution_key) > 0),
+    execution_id TEXT NOT NULL CHECK (length(execution_id) > 0),
+    cursor TEXT NOT NULL,
+    sequence INTEGER NOT NULL CHECK (sequence >= -1),
+    status TEXT CHECK (status IS NULL OR status IN ('completed', 'failed', 'cancelled')),
+    revision INTEGER NOT NULL CHECK (revision >= -1),
+    model_phase INTEGER NOT NULL CHECK (model_phase >= -1),
+    usable_completion_sequence INTEGER CHECK (usable_completion_sequence IS NULL OR usable_completion_sequence >= 0),
+    oldest_cursor TEXT,
+    checkpoint_cursor TEXT,
+    cost_usd REAL CHECK (cost_usd IS NULL OR cost_usd >= 0),
+    usage_cursors_json TEXT,
+    pricing_version TEXT,
+    parent_execution_key TEXT COLLATE BINARY,
+    parent_unit_key TEXT,
+    parent_id TEXT,
+    parent_order_key TEXT COLLATE BINARY,
+    is_root INTEGER NOT NULL CHECK (is_root IN (0, 1)),
+    CHECK (revision = sequence),
+    CHECK (coalesce(checkpoint_cursor, '') = cursor),
+    CHECK (
+      (is_root = 1 AND parent_execution_key IS NULL AND parent_unit_key IS NULL AND parent_id IS NULL AND parent_order_key IS NULL)
+      OR
+      (is_root = 0 AND parent_execution_key IS NOT NULL AND parent_unit_key IS NOT NULL AND parent_id IS NOT NULL AND parent_order_key IS NOT NULL)
+    ),
+    PRIMARY KEY (turn_id, execution_key),
+    FOREIGN KEY (turn_id, parent_execution_key)
+      REFERENCES rika_transcript_execution_checkpoints(turn_id, execution_key)
+      DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (turn_id, parent_unit_key, parent_execution_key, parent_order_key, parent_id)
+      REFERENCES rika_transcript_units(turn_id, unit_key, execution_key, unit_order_key, tool_id)
+      DEFERRABLE INITIALLY DEFERRED
+  )`
+  yield* sql`CREATE TABLE rika_transcript_units (
+    turn_id TEXT NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    unit_key TEXT NOT NULL,
+    execution_key TEXT COLLATE BINARY CHECK (execution_key IS NULL OR length(execution_key) > 0),
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    unit_order_key TEXT COLLATE BINARY NOT NULL,
+    tool_id TEXT,
+    parent_id TEXT,
+    revision INTEGER NOT NULL,
+    unit_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (turn_id, unit_key),
+    UNIQUE (turn_id, unit_order_key),
+    UNIQUE (turn_id, unit_key, execution_key, unit_order_key, tool_id),
+    FOREIGN KEY (turn_id, execution_key)
+      REFERENCES rika_transcript_execution_checkpoints(turn_id, execution_key)
+      ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
+  )`
+  yield* sql`CREATE INDEX rika_transcript_units_page ON rika_transcript_units (
+    thread_id, created_at DESC, turn_id DESC, unit_order_key DESC
+  )`
+  yield* sql`CREATE INDEX rika_transcript_units_turn ON rika_transcript_units (turn_id, unit_order_key ASC)`
+  yield* sql`CREATE TABLE rika_turn_usage (
+    source_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    projection_version INTEGER NOT NULL DEFAULT 2,
+    fold_json TEXT,
+    cost_nano_usd INTEGER CHECK (cost_nano_usd IS NULL OR cost_nano_usd >= 0),
+    tokens INTEGER CHECK (tokens IS NULL OR tokens >= 0),
+    active_millis INTEGER CHECK (active_millis IS NULL OR active_millis >= 0),
+    active_intervals_json TEXT,
+    priced_attempts INTEGER NOT NULL DEFAULT 0 CHECK (priced_attempts >= 0),
+    unpriced_attempts INTEGER NOT NULL DEFAULT 0 CHECK (unpriced_attempts >= 0),
+    counted_attempts INTEGER NOT NULL DEFAULT 0 CHECK (counted_attempts >= 0),
+    uncounted_attempts INTEGER NOT NULL DEFAULT 0 CHECK (uncounted_attempts >= 0),
+    source_complete INTEGER NOT NULL DEFAULT 0 CHECK (source_complete IN (0, 1)),
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (turn_id, source_id)
+  )`
+  yield* sql`CREATE INDEX rika_turn_usage_thread ON rika_turn_usage (thread_id, turn_id, source_id)`
+  yield* sql`CREATE TABLE rika_thread_picker_summary (
+    thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    workspace TEXT NOT NULL,
+    title TEXT NOT NULL,
+    pinned INTEGER NOT NULL CHECK (pinned IN (0, 1)),
+    archived INTEGER NOT NULL CHECK (archived IN (0, 1)),
+    status_rank INTEGER NOT NULL,
+    waiting_count INTEGER NOT NULL CHECK (waiting_count >= 0),
+    running_count INTEGER NOT NULL CHECK (running_count >= 0),
+    queued_count INTEGER NOT NULL CHECK (queued_count >= 0),
+    last_status TEXT,
+    last_turn_created_at INTEGER,
+    last_turn_id TEXT,
+    last_activity_at INTEGER NOT NULL,
+    turn_count INTEGER NOT NULL CHECK (turn_count >= 0),
+    current_activity_count INTEGER NOT NULL CHECK (current_activity_count >= 0),
+    added INTEGER NOT NULL CHECK (added >= 0),
+    modified INTEGER NOT NULL CHECK (modified >= 0),
+    removed INTEGER NOT NULL CHECK (removed >= 0)
+  )`
+  yield* sql`CREATE INDEX rika_thread_picker_summary_listing ON rika_thread_picker_summary (
+    archived, pinned DESC, last_activity_at DESC, thread_id ASC
+  )`
+  yield* sql`CREATE TRIGGER rika_thread_picker_summary_thread_insert
+    AFTER INSERT ON rika_threads BEGIN
+      INSERT INTO rika_thread_picker_summary (
+        thread_id, workspace, title, pinned, archived, status_rank, waiting_count, running_count, queued_count,
+        last_activity_at, turn_count, current_activity_count, added, modified, removed
+      ) VALUES (NEW.id, NEW.workspace, NEW.title, NEW.pinned, NEW.archived, 0, 0, 0, 0,
+        NEW.created_at, 0, 0, 0, 0, 0);
+    END`
+  yield* sql`CREATE TRIGGER rika_thread_picker_summary_thread_update
+    AFTER UPDATE OF workspace, title, pinned, archived ON rika_threads BEGIN
+      UPDATE rika_thread_picker_summary SET workspace = NEW.workspace, title = NEW.title,
+        pinned = NEW.pinned, archived = NEW.archived WHERE thread_id = NEW.id;
+    END`
+  yield* sql`CREATE TRIGGER rika_thread_picker_summary_turn_insert
+    AFTER INSERT ON rika_turns BEGIN
+      UPDATE rika_thread_picker_summary SET
+        waiting_count = waiting_count + (NEW.status = 'waiting'),
+        running_count = running_count + (NEW.status IN ('accepted', 'running')),
+        queued_count = queued_count + (NEW.status = 'queued'),
+        status_rank = MAX(status_rank, CASE WHEN NEW.status = 'waiting' THEN 3
+          WHEN NEW.status IN ('accepted', 'running') THEN 2 WHEN NEW.status = 'queued' THEN 1 ELSE 0 END),
+        last_status = CASE WHEN last_turn_created_at IS NULL OR (NEW.created_at, NEW.id) >
+          (last_turn_created_at, last_turn_id) THEN NEW.status ELSE last_status END,
+        last_turn_created_at = CASE WHEN last_turn_created_at IS NULL OR (NEW.created_at, NEW.id) >
+          (last_turn_created_at, last_turn_id) THEN NEW.created_at ELSE last_turn_created_at END,
+        last_turn_id = CASE WHEN last_turn_created_at IS NULL OR (NEW.created_at, NEW.id) >
+          (last_turn_created_at, last_turn_id) THEN NEW.id ELSE last_turn_id END,
+        last_activity_at = MAX(last_activity_at, NEW.updated_at),
+        turn_count = turn_count + 1
+      WHERE thread_id = NEW.thread_id;
+    END`
+  yield* sql`CREATE TRIGGER rika_thread_picker_summary_turn_update
+    AFTER UPDATE OF status, updated_at ON rika_turns BEGIN
+      UPDATE rika_thread_picker_summary SET
+        waiting_count = waiting_count - (OLD.status = 'waiting') + (NEW.status = 'waiting'),
+        running_count = running_count - (OLD.status IN ('accepted', 'running')) + (NEW.status IN ('accepted', 'running')),
+        queued_count = queued_count - (OLD.status = 'queued') + (NEW.status = 'queued'),
+        status_rank = CASE
+          WHEN waiting_count - (OLD.status = 'waiting') + (NEW.status = 'waiting') > 0 THEN 3
+          WHEN running_count - (OLD.status IN ('accepted', 'running')) + (NEW.status IN ('accepted', 'running')) > 0 THEN 2
+          WHEN queued_count - (OLD.status = 'queued') + (NEW.status = 'queued') > 0 THEN 1 ELSE 0 END,
+        last_status = CASE WHEN last_turn_id = NEW.id THEN NEW.status ELSE last_status END,
+        last_activity_at = MAX(last_activity_at, NEW.updated_at),
+        current_activity_count = current_activity_count + COALESCE((SELECT
+          (NEW.status NOT IN ('completed', 'failed', 'cancelled') OR activity.complete = 1) -
+          (OLD.status NOT IN ('completed', 'failed', 'cancelled') OR activity.complete = 1)
+          FROM rika_thread_turn_activity AS activity WHERE activity.turn_id = NEW.id), 0)
+      WHERE thread_id = NEW.thread_id;
+    END`
+  yield* sql`CREATE TRIGGER rika_thread_picker_summary_turn_before_delete
+    BEFORE DELETE ON rika_turns BEGIN
+      UPDATE rika_thread_picker_summary SET
+        current_activity_count = current_activity_count - COALESCE((SELECT
+          OLD.status NOT IN ('completed', 'failed', 'cancelled') OR activity.complete = 1
+          FROM rika_thread_turn_activity AS activity WHERE activity.turn_id = OLD.id), 0),
+        added = added - COALESCE((SELECT added FROM rika_thread_turn_activity WHERE turn_id = OLD.id), 0),
+        modified = modified - COALESCE((SELECT modified FROM rika_thread_turn_activity WHERE turn_id = OLD.id), 0),
+        removed = removed - COALESCE((SELECT removed FROM rika_thread_turn_activity WHERE turn_id = OLD.id), 0)
+      WHERE thread_id = OLD.thread_id;
+    END`
+  yield* sql`CREATE TRIGGER rika_thread_picker_summary_turn_delete
+    AFTER DELETE ON rika_turns BEGIN
+      UPDATE rika_thread_picker_summary SET
+        waiting_count = waiting_count - (OLD.status = 'waiting'),
+        running_count = running_count - (OLD.status IN ('accepted', 'running')),
+        queued_count = queued_count - (OLD.status = 'queued'),
+        status_rank = CASE WHEN waiting_count - (OLD.status = 'waiting') > 0 THEN 3
+          WHEN running_count - (OLD.status IN ('accepted', 'running')) > 0 THEN 2
+          WHEN queued_count - (OLD.status = 'queued') > 0 THEN 1 ELSE 0 END,
+        turn_count = turn_count - 1,
+        last_status = CASE WHEN last_turn_id = OLD.id THEN (SELECT status FROM rika_turns WHERE thread_id = OLD.thread_id ORDER BY created_at DESC, id DESC LIMIT 1) ELSE last_status END,
+        last_turn_created_at = CASE WHEN last_turn_id = OLD.id THEN (SELECT created_at FROM rika_turns WHERE thread_id = OLD.thread_id ORDER BY created_at DESC, id DESC LIMIT 1) ELSE last_turn_created_at END,
+        last_turn_id = CASE WHEN last_turn_id = OLD.id THEN (SELECT id FROM rika_turns WHERE thread_id = OLD.thread_id ORDER BY created_at DESC, id DESC LIMIT 1) ELSE last_turn_id END,
+        last_activity_at = MAX(
+          (SELECT created_at FROM rika_threads WHERE id = OLD.thread_id),
+          COALESCE((SELECT MAX(updated_at) FROM rika_turns WHERE thread_id = OLD.thread_id), 0),
+          COALESCE((SELECT MAX(last_event_at) FROM rika_thread_turn_activity WHERE thread_id = OLD.thread_id), 0)
+        )
+      WHERE thread_id = OLD.thread_id;
+    END`
+  yield* sql`CREATE TRIGGER rika_thread_picker_summary_activity_insert
+    AFTER INSERT ON rika_thread_turn_activity BEGIN
+      UPDATE rika_thread_picker_summary SET
+        current_activity_count = current_activity_count + COALESCE((SELECT
+          turn.status NOT IN ('completed', 'failed', 'cancelled') OR NEW.complete = 1
+          FROM rika_turns AS turn WHERE turn.id = NEW.turn_id), 0),
+        added = added + NEW.added, modified = modified + NEW.modified, removed = removed + NEW.removed,
+        last_activity_at = MAX(last_activity_at, COALESCE(NEW.last_event_at, last_activity_at))
+      WHERE thread_id = NEW.thread_id;
+    END`
+  yield* sql`CREATE TRIGGER rika_thread_picker_summary_activity_update
+    AFTER UPDATE OF complete, added, modified, removed, last_event_at ON rika_thread_turn_activity BEGIN
+      UPDATE rika_thread_picker_summary SET
+        current_activity_count = current_activity_count + COALESCE((SELECT
+          (turn.status NOT IN ('completed', 'failed', 'cancelled') OR NEW.complete = 1) -
+          (turn.status NOT IN ('completed', 'failed', 'cancelled') OR OLD.complete = 1)
+          FROM rika_turns AS turn WHERE turn.id = NEW.turn_id), 0),
+        added = added - OLD.added + NEW.added,
+        modified = modified - OLD.modified + NEW.modified,
+        removed = removed - OLD.removed + NEW.removed,
+        last_activity_at = CASE WHEN OLD.last_event_at = last_activity_at AND
+          COALESCE(NEW.last_event_at, 0) < OLD.last_event_at THEN MAX(
+            (SELECT created_at FROM rika_threads WHERE id = NEW.thread_id),
+            COALESCE((SELECT MAX(updated_at) FROM rika_turns WHERE thread_id = NEW.thread_id), 0),
+            COALESCE((SELECT MAX(last_event_at) FROM rika_thread_turn_activity WHERE thread_id = NEW.thread_id), 0)
+          ) ELSE MAX(last_activity_at, COALESCE(NEW.last_event_at, last_activity_at)) END
+      WHERE thread_id = NEW.thread_id;
+    END`
+  yield* sql`CREATE TRIGGER rika_thread_picker_summary_activity_delete
+    AFTER DELETE ON rika_thread_turn_activity
+    WHEN EXISTS (SELECT 1 FROM rika_turns WHERE id = OLD.turn_id) BEGIN
+      UPDATE rika_thread_picker_summary SET
+        current_activity_count = current_activity_count - COALESCE((SELECT
+          turn.status NOT IN ('completed', 'failed', 'cancelled') OR OLD.complete = 1
+          FROM rika_turns AS turn WHERE turn.id = OLD.turn_id), 0),
+        added = added - OLD.added, modified = modified - OLD.modified, removed = removed - OLD.removed,
+        last_activity_at = CASE WHEN OLD.last_event_at = last_activity_at THEN MAX(
+          (SELECT created_at FROM rika_threads WHERE id = OLD.thread_id),
+          COALESCE((SELECT MAX(updated_at) FROM rika_turns WHERE thread_id = OLD.thread_id), 0),
+          COALESCE((SELECT MAX(last_event_at) FROM rika_thread_turn_activity WHERE thread_id = OLD.thread_id), 0)
+        ) ELSE last_activity_at END
+      WHERE thread_id = OLD.thread_id;
+    END`
+  yield* sql`CREATE TABLE rika_schema_identity (
+    id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
+    fingerprint TEXT NOT NULL
+  )`
+  const objects = yield* sql<SchemaObject>`SELECT type, name, tbl_name AS table_name, sql
+    FROM sqlite_schema
+    WHERE type IN ('table', 'index', 'trigger', 'view') AND name NOT LIKE 'sqlite_%'
+    ORDER BY name ASC`
+  yield* sql`INSERT INTO rika_schema_identity (id, fingerprint) VALUES (1, ${schemaFingerprint(objects)})`
+})
+
+export const schemaObjects: ReadonlyArray<string> = [
+  "table:rika_workspaces",
+  "table:rika_threads",
+  "index:rika_threads_listing",
+  "table:rika_turns",
+  "index:rika_turns_thread",
+  "index:rika_turns_queue",
+  "index:rika_turns_queue_claim",
+  "index:rika_turns_thread_updated",
+  "index:rika_turns_thread_nonqueued",
+  "table:rika_thread_queue_state",
+  "table:rika_thread_turn_activity",
+  "index:rika_thread_turn_activity_summary",
+  "table:rika_thread_read_state",
+  "table:rika_thread_search",
+  "table:rika_thread_search_data",
+  "table:rika_thread_search_idx",
+  "table:rika_thread_search_content",
+  "table:rika_thread_search_docsize",
+  "table:rika_thread_search_config",
+  "table:rika_thread_search_files",
+  "index:rika_thread_search_files_path",
+  "table:rika_transcript_checkpoints",
+  "table:rika_transcript_execution_checkpoints",
+  "table:rika_transcript_units",
+  "index:rika_transcript_units_page",
+  "index:rika_transcript_units_turn",
+  "table:rika_turn_usage",
+  "index:rika_turn_usage_thread",
+  "table:rika_thread_picker_summary",
+  "index:rika_thread_picker_summary_listing",
+  "trigger:rika_thread_picker_summary_thread_insert",
+  "trigger:rika_thread_picker_summary_thread_update",
+  "trigger:rika_thread_picker_summary_turn_insert",
+  "trigger:rika_thread_picker_summary_turn_update",
+  "trigger:rika_thread_picker_summary_turn_before_delete",
+  "trigger:rika_thread_picker_summary_turn_delete",
+  "trigger:rika_thread_picker_summary_activity_insert",
+  "trigger:rika_thread_picker_summary_activity_update",
+  "trigger:rika_thread_picker_summary_activity_delete",
+  "table:rika_schema_identity",
+]

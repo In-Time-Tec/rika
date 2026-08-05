@@ -1,10 +1,5 @@
 import { Function } from "effect"
-import {
-  candidateCallId,
-  childScopeAndCallId,
-  executionKey,
-  type ChildParentCandidate,
-} from "../ordering/child-parent-correlation"
+import { executionKey } from "../ordering/child-parent-correlation"
 import type { Block, Content } from "../schema/transcript-presentation-model"
 import type { Projection, ProjectionState } from "../schema/transcript-projection-model"
 import type { SourceEvent } from "../schema/transcript-source-event"
@@ -61,7 +56,6 @@ interface OwnedFold {
   readonly units: Map<string, Unit>
   readonly toolsById: Map<string, string>
   readonly toolsByChild: Map<string, Set<string>>
-  readonly agentToolsByScopeCall: Map<string, Set<string>>
   readonly toolsByProcess: Map<string, Set<string>>
   readonly childUnitsById: Map<string, Set<string>>
   readonly runningUnits: Set<string>
@@ -71,7 +65,6 @@ interface OwnedFold {
   readonly rootUserUnits: Set<string>
   readonly outcomeUnits: Set<string>
   readonly childOutcomes: Map<string, ChildOutcome>
-  readonly childOutcomesByScopeCall: Map<string, Set<string>>
   readonly usageCursorSet: Set<string>
   readonly usageCursorList: Array<string>
   readonly transientIndexes: Map<string, number>
@@ -133,7 +126,7 @@ const outputText = (output: unknown): string => {
 
 const rawToolId = (event: SourceEvent): string => {
   const value = event.type === "tool.result.received" ? resultPayload(event) : callPayload(event)
-  return string(value.tool_call_id ?? value.call_id ?? value.callId ?? value.id, event.cursor)
+  return string(value.tool_call_id ?? value.id, event.cursor)
 }
 
 const toolKey = (turnId: string, id: string): string => identityKey("tool", turnId, id)
@@ -171,26 +164,12 @@ const compactionBlockFrom = (unit: Unit): Extract<Block, { _tag: "Compaction" }>
 
 const isRootUnit = (unit: Unit): boolean => unit.parentId === undefined && unit.order.length === 1
 
-const agentScopeCallKey = (candidate: ChildParentCandidate): string =>
-  identityKey("agent-scope-call", executionKey(candidate.scope), candidateCallId(candidate))
-
 const indexUnit = (value: OwnedFold, unit: Unit): void => {
   value.observer?.unitIndexed?.(unit)
   const tool = toolBlockFrom(unit)
   if (tool !== undefined) {
     value.toolsById.set(tool.id, unit.key)
     if (tool.childId !== undefined) addIndex(value.toolsByChild, executionKey(tool.childId), unit.key)
-    if (tool.presentation.family === "agent")
-      addIndex(
-        value.agentToolsByScopeCall,
-        agentScopeCallKey({
-          id: tool.id,
-          scope: unit.turnId,
-          childId: tool.childId,
-          family: tool.presentation.family,
-        }),
-        unit.key,
-      )
     if (tool.process?.processId !== undefined) addIndex(value.toolsByProcess, tool.process.processId, unit.key)
     if (tool.status === "running") value.runningUnits.add(unit.key)
     if (isRootUnit(unit)) {
@@ -254,17 +233,6 @@ const unindexUnit = (value: OwnedFold, unit: Unit): void => {
   if (tool !== undefined) {
     if (value.toolsById.get(tool.id) === unit.key) value.toolsById.delete(tool.id)
     if (tool.childId !== undefined) removeIndex(value.toolsByChild, executionKey(tool.childId), unit.key)
-    if (tool.presentation.family === "agent")
-      removeIndex(
-        value.agentToolsByScopeCall,
-        agentScopeCallKey({
-          id: tool.id,
-          scope: unit.turnId,
-          childId: tool.childId,
-          family: tool.presentation.family,
-        }),
-        unit.key,
-      )
     if (tool.process?.processId !== undefined) removeIndex(value.toolsByProcess, tool.process.processId, unit.key)
     value.runningUnits.delete(unit.key)
     value.rootToolUnits.delete(unit.key)
@@ -337,13 +305,6 @@ const restoreChildOutcome = (value: OwnedFold, restored: ChildOutcome): void => 
   if (previous !== undefined && previous.outcome.status !== restored.outcome.status)
     throw new RangeError(`Transcript child outcome ${restored.childId} is contradictory`)
   value.childOutcomes.set(childKey, previous ?? restored)
-  const parsed = childScopeAndCallId(restored.childId)
-  if (parsed === undefined) return
-  const scopeCall = identityKey("agent-scope-call", parsed.scope, parsed.callId)
-  const matches = value.childOutcomesByScopeCall.get(scopeCall)
-  if (matches !== undefined && !matches.has(childKey))
-    throw new RangeError(`Transcript child outcome scope ${parsed.scope}:${parsed.callId} is ambiguous`)
-  addIndex(value.childOutcomesByScopeCall, scopeCall, childKey)
 }
 
 const makeFold = (projection: Projection, options?: ProjectionFoldOptions): ProjectionFold => {
@@ -356,7 +317,6 @@ const makeFold = (projection: Projection, options?: ProjectionFoldOptions): Proj
     units,
     toolsById: new Map(),
     toolsByChild: new Map(),
-    agentToolsByScopeCall: new Map(),
     toolsByProcess: new Map(),
     childUnitsById: new Map(),
     runningUnits: new Set(),
@@ -366,7 +326,6 @@ const makeFold = (projection: Projection, options?: ProjectionFoldOptions): Proj
     rootUserUnits: new Set(),
     outcomeUnits: new Set(),
     childOutcomes: new Map(),
-    childOutcomesByScopeCall: new Map(),
     usageCursorSet: new Set(projection.usageCursors),
     usageCursorList: projection.usageCursors === undefined ? [] : [...projection.usageCursors],
     transientIndexes: new Map(),
@@ -476,7 +435,6 @@ export const foldState = {
   childBlockFrom,
   compactionBlockFrom,
   isRootUnit,
-  agentScopeCallKey,
   indexUnit,
   recomputeLatestRootTool,
   unindexUnit,

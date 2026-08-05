@@ -9,6 +9,7 @@
         "@batonfx/core": "catalog:",
         "@batonfx/mcp": "catalog:",
         "@batonfx/providers": "catalog:",
+        "@batonfx/runtime": "catalog:",
         "@batonfx/skills": "catalog:",
         "@effect/ai-anthropic": "4.0.0-beta.98",
         "@effect/ai-openai": "4.0.0-beta.98",
@@ -17,7 +18,6 @@
         "@effect/platform-bun": "catalog:",
         "@effect/sql-pg": "4.0.0-beta.98",
         "@effect/sql-sqlite-bun": "catalog:",
-        "@relayfx/sdk": "catalog:",
         "@rika/product": "workspace:*",
         "@rika/product-store": "workspace:*",
         "@rika/transcript": "workspace:*",
@@ -46,19 +46,20 @@
     },
     "apps/rika": {
       "name": "@rika/cli",
-      "version": "0.1.10",
+      "version": "0.2.0",
       "bin": {
         "rika": "./dist/client-main.js",
       },
       "dependencies": {
         "@effect/platform-bun": "catalog:",
         "@opentui/core": "catalog:",
+        "@rika/baton-execution": "workspace:*",
         "@rika/coding-tools": "workspace:*",
         "@rika/configuration": "workspace:*",
         "@rika/extensions": "workspace:*",
+        "@rika/javascript-sandbox": "workspace:*",
         "@rika/product": "workspace:*",
         "@rika/product-store": "workspace:*",
-        "@rika/relay-execution": "workspace:*",
         "@rika/terminal": "workspace:*",
         "@rika/transcript": "workspace:*",
         "effect": "catalog:",
@@ -78,6 +79,26 @@
         "@opentui/core-linux-x64-musl": "catalog:",
         "@opentui/core-win32-arm64": "catalog:",
         "@opentui/core-win32-x64": "catalog:",
+      },
+    },
+    "packages/baton-execution": {
+      "name": "@rika/baton-execution",
+      "version": "0.0.0",
+      "dependencies": {
+        "@batonfx/core": "catalog:",
+        "@batonfx/providers": "catalog:",
+        "@batonfx/runtime": "catalog:",
+        "@batonfx/test": "catalog:",
+        "@rika/coding-tools": "workspace:*",
+        "@rika/product": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
+        "@rika/javascript-sandbox": "workspace:*",
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
       },
     },
     "packages/coding-tools": {
@@ -127,6 +148,22 @@
         "vitest": "catalog:",
       },
     },
+    "packages/javascript-sandbox": {
+      "name": "@rika/javascript-sandbox",
+      "version": "0.0.0",
+      "dependencies": {
+        "@batonfx/core": "catalog:",
+        "@jitl/quickjs-singlefile-cjs-release-sync": "0.32.0",
+        "effect": "catalog:",
+        "quickjs-emscripten-core": "0.32.0",
+      },
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "packages/product": {
       "name": "@rika/product",
       "version": "0.0.0",
@@ -159,26 +196,6 @@
         "@rika/coding-tools": "workspace:*",
         "@rika/configuration": "workspace:*",
         "@rika/extensions": "workspace:*",
-        "@types/bun": "catalog:",
-        "typescript": "catalog:",
-        "vitest": "catalog:",
-      },
-    },
-    "packages/relay-execution": {
-      "name": "@rika/relay-execution",
-      "version": "0.0.0",
-      "dependencies": {
-        "@batonfx/core": "catalog:",
-        "@relayfx/sdk": "catalog:",
-        "@rika/coding-tools": "workspace:*",
-        "@rika/configuration": "workspace:*",
-        "@rika/product": "workspace:*",
-        "effect": "catalog:",
-      },
-      "devDependencies": {
-        "@batonfx/test": "catalog:",
-        "@effect/platform-bun": "catalog:",
-        "@effect/vitest": "catalog:",
         "@types/bun": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",
@@ -235,7 +252,6 @@
         "@rika/extensions": "workspace:*",
         "@rika/product": "workspace:*",
         "@rika/product-store": "workspace:*",
-        "@rika/relay-execution": "workspace:*",
         "@rika/terminal": "workspace:*",
         "@rika/transcript": "workspace:*",
         "@types/bun": "catalog:",
@@ -268,11 +284,12 @@
   },
   "catalog": {
     "@ast-grep/cli": "0.44.0",
-    "@batonfx/core": "0.12.1",
-    "@batonfx/mcp": "0.12.1",
-    "@batonfx/providers": "0.12.1",
-    "@batonfx/skills": "0.12.1",
-    "@batonfx/test": "0.12.1",
+    "@batonfx/core": "0.15.0",
+    "@batonfx/mcp": "0.15.0",
+    "@batonfx/providers": "0.15.0",
+    "@batonfx/runtime": "0.15.0",
+    "@batonfx/skills": "0.15.0",
+    "@batonfx/test": "0.15.0",
     "@effect/platform-bun": "4.0.0-beta.98",
     "@effect/sql-mysql2": "4.0.0-beta.98",
     "@effect/sql-sqlite-bun": "4.0.0-beta.98",
@@ -289,7 +306,6 @@
     "@opentui/core-win32-arm64": "0.4.3",
     "@opentui/core-win32-x64": "0.4.3",
     "@pierre/diffs": "1.2.11",
-    "@relayfx/sdk": "0.8.7",
     "@tsconfig/bun": "1.0.9",
     "@types/bun": "1.3.13",
     "@types/node": "24.12.2",
@@ -409,15 +425,17 @@
 
     "@babel/types": ["@babel/types@7.29.7", "", { "dependencies": { "@babel/helper-string-parser": "^7.29.7", "@babel/helper-validator-identifier": "^7.29.7" } }, "sha512-4zBIxpPzowiZpusoFkyGVwakdRJUyuH5PxQ/PrqghfdFWWasvnCdPfQXHrenDai+gyLARulZjZowCOj6fjT4pA=="],
 
-    "@batonfx/core": ["@batonfx/core@0.12.1", "", { "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-H9E8/jS1atFTwConjDxJQpCwXwAdSjk7aoLvlXfVROAeAApXrCs65kEETki8H3BPhgl6oE3RfrRCaRRz5jrCjQ=="],
+    "@batonfx/core": ["@batonfx/core@0.15.0", "", { "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-2fsd0WXXYWDLpyY5U+fWfHI9gyG5YTd2Yea4zQByA1rT8nQCCxNAi3wupEAaIyrq16IBnl7fcBKwGl4B3s2PAA=="],
 
-    "@batonfx/mcp": ["@batonfx/mcp@0.12.1", "", { "dependencies": { "@batonfx/core": "0.12.1", "@modelcontextprotocol/sdk": "1.29.0" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-qOBpCn+aCD3574sDve2IxqUju/RfMyTf6NtWCz+Dpyb/6zETZehd21X7jzcFPlX5yZaJrTcpLqQlaokQ3ujeyw=="],
+    "@batonfx/mcp": ["@batonfx/mcp@0.15.0", "", { "dependencies": { "@batonfx/core": "0.15.0", "@modelcontextprotocol/sdk": "1.29.0" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-XHw35j5qh0E6wArchq2XDQfZpAvX7roMLeACJAMh9Y/Q58P/htDIM73IlOb2hJpo4D+jQ6vasC09urJKcnS3hg=="],
 
-    "@batonfx/providers": ["@batonfx/providers@0.12.1", "", { "dependencies": { "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/credential-provider-node": "3.859.0", "@batonfx/core": "0.12.1", "@effect/ai-anthropic": "4.0.0-beta.98", "@effect/ai-openai": "4.0.0-beta.98", "@effect/ai-openai-compat": "4.0.0-beta.98", "@effect/ai-openrouter": "4.0.0-beta.98", "@smithy/types": "4.3.1" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-muATvvKTSnpJQYbNTJbzUrPbQFmXDeMSZ/YvmMEVC38SCYaDeF3+BvxlbCF00PFswvyWX8NVioasMArlPWx4gA=="],
+    "@batonfx/providers": ["@batonfx/providers@0.15.0", "", { "dependencies": { "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/credential-provider-node": "3.859.0", "@batonfx/core": "0.15.0", "@effect/ai-anthropic": "4.0.0-beta.98", "@effect/ai-openai": "4.0.0-beta.98", "@effect/ai-openai-compat": "4.0.0-beta.98", "@effect/ai-openrouter": "4.0.0-beta.98", "@smithy/types": "4.3.1" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-CD8a+uidMRM9J+7092w2Ol9Q8RmLoKLxMGZqYZxQAG+eSYZ1HVajYeNzI8Wt6KJtTgLq57VAoQsYisFISe0PsA=="],
 
-    "@batonfx/skills": ["@batonfx/skills@0.12.1", "", { "dependencies": { "@batonfx/core": "0.12.1" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-H6dqtArDxw3082NE36E/Bc+KWo2JPuCPYpokJetfa2mXh9JrnVYW6Q13ShDOxDvZRGi0IFC2ImnZtwtoTzmhKA=="],
+    "@batonfx/runtime": ["@batonfx/runtime@0.15.0", "", { "dependencies": { "@batonfx/core": "0.15.0", "@effect/sql-mysql2": "4.0.0-beta.98", "@effect/sql-pg": "4.0.0-beta.98", "@effect/sql-sqlite-bun": "4.0.0-beta.98" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-+AR08pthC8pLTMTJeasl4Ls77s/gmG4P3fB4mgYx3BYzY4VU88YUufVt+eGGC+937Oz+VICzGQ2zK5RN3v8D/Q=="],
 
-    "@batonfx/test": ["@batonfx/test@0.12.1", "", { "dependencies": { "@batonfx/core": "0.12.1" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-1b7vFDiBL03KXSFCrI2RZnJPyHvczCP4jdN1PNNXFSSrZBpRwARR1sTsay/Rmf7SIEiC9GZSAD37cr8l7+Sh8Q=="],
+    "@batonfx/skills": ["@batonfx/skills@0.15.0", "", { "dependencies": { "@batonfx/core": "0.15.0" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-Vy79EBmXsrHFNT6Z5X2Jxr0/hQJWQDXDmo+OoaAI7rZht/1waqSN735Lx3tgxyZvDoYcXctzBTmVYPeK/4UgNQ=="],
+
+    "@batonfx/test": ["@batonfx/test@0.15.0", "", { "dependencies": { "@batonfx/core": "0.15.0" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-DBBVuap8krt8xYioNbpdXWZ4lQBgmFPbGVcGMLu6dHBEdMM+JYOBdUv1ndtP9W1GoGp5/i/cmaWm96SBWzMDbg=="],
 
     "@bcoe/v8-coverage": ["@bcoe/v8-coverage@1.0.2", "", {}, "sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA=="],
 
@@ -535,6 +553,10 @@
 
     "@humanwhocodes/retry": ["@humanwhocodes/retry@0.4.3", "", {}, "sha512-bV0Tgo9K4hfPCek+aMAn81RppFKv2ySDQeMoSZuvTASywNTnVJCArCZE2FWqpvIatKu7VMRLWlR1EazvVhDyhQ=="],
 
+    "@jitl/quickjs-ffi-types": ["@jitl/quickjs-ffi-types@0.32.0", "", {}, "sha512-v9T+GQpmk43VDJ7d72sf0Nexhk+ArvtUihW27dy7lqAl0zBObFKtSBBIm5RBjwIhE8VwsPPm9PNuvPvNqLWUEg=="],
+
+    "@jitl/quickjs-singlefile-cjs-release-sync": ["@jitl/quickjs-singlefile-cjs-release-sync@0.32.0", "", { "dependencies": { "@jitl/quickjs-ffi-types": "0.32.0" } }, "sha512-NjUUcw26PoeJHND6nmflAH8nIvAJvxJ2qkSPi95wfiBqPim80GtcdWommroiWb8hh1/7fVettEwodAsGt2Mrsg=="],
+
     "@jridgewell/resolve-uri": ["@jridgewell/resolve-uri@3.1.2", "", {}, "sha512-bRISgCIjP20/tbWSPWMEi54QVPRZExkuD9lJL+UIxUKtwVJA8wW1Trb1jMs1RFXo1CBTNZ/5hpC9QvmKWdopKw=="],
 
     "@jridgewell/sourcemap-codec": ["@jridgewell/sourcemap-codec@1.5.5", "", {}, "sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og=="],
@@ -629,7 +651,7 @@
 
     "@pierre/theming": ["@pierre/theming@0.0.1", "", { "peerDependencies": { "@pierre/theme": "^1.0.0", "@shikijs/themes": "^3.0.0 || ^4.0.0", "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0", "shiki": "^3.0.0 || ^4.0.0" }, "optionalPeers": ["@pierre/theme", "@shikijs/themes", "react", "react-dom", "shiki"] }, "sha512-1thlEtJbqdyLzc1ZS2KQa1q7FzDGHT4dTEdKHoyQjOMeWWOmbVG5/ndEfOKfAb5Fzkz8cNJrOjFLiZoDH/A03A=="],
 
-    "@relayfx/sdk": ["@relayfx/sdk@0.8.7", "", { "dependencies": { "@aws-sdk/client-s3": "3.1094.0", "@batonfx/core": "0.12.1", "@batonfx/providers": "0.12.1", "@effect/ai-anthropic": "4.0.0-beta.98", "@effect/ai-openai": "4.0.0-beta.98", "@effect/ai-openai-compat": "4.0.0-beta.98", "@effect/ai-openrouter": "4.0.0-beta.98", "@effect/platform-bun": "4.0.0-beta.98", "@effect/sql-mysql2": "4.0.0-beta.98", "@effect/sql-pg": "4.0.0-beta.98", "@effect/sql-sqlite-bun": "4.0.0-beta.98", "drizzle-orm": "1.0.0-rc.3", "effect": "4.0.0-beta.98", "pg": "8.21.0" } }, "sha512-vZgzyQ1VREqpyXxL+GjSHiESRMbdQApDMsxWDYgtCg9qO+WYdZkLoPD0UIcOWp1nl+o358y68RI3SlCOk9JyAQ=="],
+    "@rika/baton-execution": ["@rika/baton-execution@workspace:packages/baton-execution"],
 
     "@rika/cli": ["@rika/cli@workspace:apps/rika"],
 
@@ -639,11 +661,11 @@
 
     "@rika/extensions": ["@rika/extensions@workspace:packages/extensions"],
 
+    "@rika/javascript-sandbox": ["@rika/javascript-sandbox@workspace:packages/javascript-sandbox"],
+
     "@rika/product": ["@rika/product@workspace:packages/product"],
 
     "@rika/product-store": ["@rika/product-store@workspace:packages/product-store"],
-
-    "@rika/relay-execution": ["@rika/relay-execution@workspace:packages/relay-execution"],
 
     "@rika/repository-graph": ["@rika/repository-graph@workspace:tooling/repository-graph"],
 
@@ -1342,6 +1364,8 @@
     "pure-rand": ["pure-rand@8.4.2", "", {}, "sha512-vvuOGgcuPJAirlHvuQw1TrOiw7ptaIXXmIbNuiNOY6lNGJJH49PQ1Kj4nd783nPdQhQdicgOjVI2yI/9BD6/Ng=="],
 
     "qs": ["qs@6.15.3", "", { "dependencies": { "es-define-property": "^1.0.1", "side-channel": "^1.1.1" } }, "sha512-O9gl3zCl5h5blw1KGUzQKhA5oUXSl8rwUIM5o0S3nCXMliSvy5Dzx7/DJcI+SwgICv+IneSZwhBh1oSyEHA71A=="],
+
+    "quickjs-emscripten-core": ["quickjs-emscripten-core@0.32.0", "", { "dependencies": { "@jitl/quickjs-ffi-types": "0.32.0" } }, "sha512-QFnPfjFey8EqknSrSxe1hZrf1/8z7/6s1QzGOmKo6++02r7QRRX7ZoyNaZh7JuVjWsVW87KnQrbZqnHkOAzUyg=="],
 
     "range-parser": ["range-parser@1.3.0", "", {}, "sha512-hek2mFQpPuI4E1BBKrSto+BU3e3x4xuarsbiwr3+lf7p44juvFMV0XFWQAP3xUyqXA4RrXLIoaSUGbSt056ZMw=="],
 

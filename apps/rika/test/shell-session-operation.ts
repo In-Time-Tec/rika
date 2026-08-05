@@ -6,12 +6,12 @@ import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-rep
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
-import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { MediaAnalysisError, analyzerTestLayer } from "@rika/coding-tools/media-view-service"
 import * as ReadWebPage from "@rika/coding-tools/read-web-page-service"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as WebSearch from "@rika/coding-tools/web-search-service"
-import { Config, Context, Deferred, Effect, FileSystem, Layer, Path } from "effect"
+import { Config, Context, Deferred, Effect, FileSystem, Layer, Path, Stream } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import {
   productLayer,
@@ -51,36 +51,23 @@ export const startShellOperation = Effect.fn("ShellSession.startOperation")(func
   const sessionReady = yield* Deferred.make<InteractiveSession.InteractiveSession>()
   const releaseSession = yield* Deferred.make<void>()
   let nextTurn = 0
-  const relayReads: Array<"inspect" | "replay"> = []
-  const backend = ExecutionBackend.Service.of({
-    invokeChild: (requestInput) => Effect.succeed({ ...requestInput, type: "accepted" }),
-    resolveInvocationSource: () => Effect.die("unused"),
-    createFanOut: () => Effect.die("unused"),
-    inspectFanOut: () => Effect.die("unused"),
-    cancelFanOut: () => Effect.die("unused"),
-    registerWorkflows: () => Effect.die("unused"),
-    startWorkflow: () => Effect.die("unused"),
-    inspectWorkflow: () => Effect.die("unused"),
-    cancelWorkflow: () => Effect.die("unused"),
-    start: () => Effect.die("unused"),
-    inspect: () =>
+  const executionReads: Array<"inspect"> = []
+  const backend = ExecutionGateway.Service.of({
+    startTurn: () => Effect.die("unused"),
+    cancelTurn: () => Effect.die("unused"),
+    steerTurn: () => Effect.die("unused"),
+    watchTurn: () => Stream.die("unused"),
+    inspectTurn: () =>
       Effect.sync(() => {
-        relayReads.push("inspect")
-        return undefined
+        executionReads.push("inspect")
+        return { status: "unavailable" as const }
       }),
-    replay: (turnId) =>
-      Effect.sync(() => {
-        relayReads.push("replay")
-        return { turnId, status: "completed" as const, events: [] }
-      }),
-    steer: () => Effect.die("unused"),
-    cancel: () => Effect.die("unused"),
   })
   const operationLayer: Layer.Layer<Service, never, never> = productLayer({
     repositoryLayer,
     turnRepositoryLayer,
     transcriptRepositoryLayer,
-    backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+    backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
     toolRuntimeLayer: (directory) =>
       ToolRuntime.layer(directory).pipe(
         Layer.provide(
@@ -108,5 +95,5 @@ export const startShellOperation = Effect.fn("ShellSession.startOperation")(func
   )
   const operationFiber = yield* Effect.forkChild(operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }))
   const session = yield* Deferred.await(sessionReady)
-  return { workspace, repositoryLayer, repositories, operationFiber, session, releaseSession, relayReads }
+  return { workspace, repositoryLayer, repositories, operationFiber, session, releaseSession, executionReads }
 })

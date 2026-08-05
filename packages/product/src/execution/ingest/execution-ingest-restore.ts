@@ -28,12 +28,13 @@ const rootProjectionOf = (
   stored: TranscriptPage.Projection,
   state: TranscriptProjectionModel.ProjectionState,
 ): TranscriptProjectionModel.Projection | string => {
+  const rootExecutionId = turn.executionLink?.runId ?? String(turn.id)
   const rootUnits = stored.units.filter((unit) => unit.parentId === undefined)
-  if (rootUnits.some((unit) => unit.turnId !== turn.id)) return `Transcript ${turn.id} has a foreign root unit`
-  if (stored.units.some((unit) => unit.parentId !== undefined && unit.turnId === turn.id))
+  if (rootUnits.some((unit) => unit.turnId !== rootExecutionId)) return `Transcript ${turn.id} has a foreign root unit`
+  if (stored.units.some((unit) => unit.parentId !== undefined && unit.turnId === rootExecutionId))
     return `Transcript ${turn.id} has a root unit attached beneath another execution`
-  const promptKey = `turn:${String(turn.id)}:user`
-  const expectedPrompt = TranscriptProjection.Projection.empty(String(turn.id), turn.prompt).units[0]!
+  const promptKey = `turn:${rootExecutionId}:user`
+  const expectedPrompt = TranscriptProjection.Projection.empty(rootExecutionId, turn.prompt).units[0]!
   const prompts = rootUnits.filter((unit) => unit.key === promptKey)
   if (prompts.length !== 1) return `Transcript ${turn.id} has no unique root prompt`
   const prompt = prompts[0]!
@@ -48,7 +49,9 @@ const rootProjectionOf = (
 }
 
 const restoreImpl = (turn: Turn.AgentExecutionTurn, stored: TranscriptPage.Projection | undefined): Restored => {
-  const rootKey = TranscriptCorrelation.executionKey(String(turn.id))
+  if (turn.executionLink === undefined)
+    return { nodes: new Map(), order: [], invalid: `Transcript ${turn.id} has no Baton Run link` }
+  const rootKey = TranscriptCorrelation.executionKey(turn.executionLink.runId)
   const checkpoints = new Map(
     (stored?.executionCheckpoints ?? []).map((checkpoint) => [checkpoint.executionKey, checkpoint]),
   )
@@ -70,11 +73,11 @@ const restoreImpl = (turn: Turn.AgentExecutionTurn, stored: TranscriptPage.Proje
     rootCheckpoint === undefined || rootCheckpoint.cursor.length === 0 ? undefined : rootCheckpoint.cursor
   const rootProjection =
     stored === undefined || rootCheckpoint === undefined
-      ? TranscriptProjection.Projection.empty(String(turn.id), turn.prompt)
+      ? TranscriptProjection.Projection.empty(turn.executionLink.runId, turn.prompt)
       : rootProjectionOf(turn, stored, rootCheckpoint.state)
   if (typeof rootProjection === "string") return { nodes: new Map(), order: [], invalid: rootProjection }
   const root: Node = {
-    executionId: rootCheckpoint?.executionId ?? String(turn.id),
+    executionId: rootCheckpoint?.executionId ?? turn.executionLink.runId,
     key: rootKey,
     parentKey: undefined,
     fold: TranscriptProjection.Fold.restoreProjectionFold(rootProjection),

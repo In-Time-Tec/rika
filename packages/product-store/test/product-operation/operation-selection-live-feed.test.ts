@@ -1,4 +1,3 @@
-import type { InteractiveSession } from "@rika/product/interactive-session"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
@@ -6,150 +5,19 @@ import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
-import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionEvent from "@rika/product/execution-event"
-import { Clock, Deferred, Effect, Fiber, Layer, Queue, Ref } from "effect"
+import { Deferred, Effect, Fiber, Layer, Queue, Stream } from "effect"
 import { it as rawIt } from "vitest"
 
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { collectEvents, openInteractiveSession, settleEvents } from "../support/operation-session-harness"
 import { executionStarted, backend } from "../support/operation-execution-fixtures"
 
-import { turnProvenance, threadLineage } from "../support/operation-selection-fixtures"
 import { makeSelectionLoadHarness } from "../support/operation-selection-harness"
-import { operationService, testExecutionRoute } from "./operation-selection-live-feed-support"
-import type { ThreadQueueWake, TurnPromoter } from "./operation-selection-live-feed-support"
+import { operationService } from "./operation-selection-live-feed-support"
 
 describe("Operation", () => {
-  rawIt("publishes one promoted lifecycle and one copy of every streamed cursor to every session", () =>
-    Effect.runPromise(
-      Effect.gen(function* () {
-        const thread: Thread.Thread = {
-          id: Thread.ThreadId.make("promoted-thread"),
-          lineage: threadLineage,
-          workspace: "/work",
-          title: "Promoted",
-          labels: [],
-          pinned: false,
-          archived: false,
-          createdAt: 1,
-          updatedAt: 1,
-        }
-        const turns = yield* TurnRepository.makeMemory([
-          {
-            id: Turn.TurnId.make("promoted-turn"),
-            ...turnProvenance,
-            threadId: thread.id,
-            prompt: "queued",
-            status: "queued",
-            stopIntent: "none",
-            executionRoute: testExecutionRoute("medium"),
-            createdAt: yield* Clock.currentTimeMillis,
-            updatedAt: yield* Clock.currentTimeMillis,
-          },
-        ])
-        const starts = yield* Ref.make<ReadonlyArray<string>>([])
-        const promoters = yield* Ref.make<ReadonlyArray<TurnPromoter>>([])
-        const wakes = yield* Ref.make<ReadonlyArray<ThreadQueueWake>>([])
-        const sessions = yield* Queue.unbounded<{
-          readonly workspace: string
-          readonly session: InteractiveSession
-        }>()
-        const events = new Map<string, Array<InteractiveEvent>>()
-        const feedCompleted = Symbol("feed-completed")
-        const streamed = [
-          executionStarted("promoted-turn"),
-          {
-            executionId: "promoted-turn",
-            cursor: "streamed",
-            sequence: 1,
-            type: "model.output.completed",
-            createdAt: 3,
-            text: "done",
-          },
-          {
-            executionId: "promoted-turn",
-            cursor: "terminal",
-            sequence: 2,
-            type: "execution.completed",
-            timestampSource: "server",
-            createdAt: 4,
-          },
-        ] as const
-        const promotedBackend = ExecutionBackend.Service.of({
-          ...backend,
-          start: (input) =>
-            Ref.update(starts, (values) => [...values, String(input.turnId)]).pipe(
-              Effect.tap(() =>
-                Effect.sync(() => {
-                  for (const event of streamed) input.onEvent?.(event)
-                }),
-              ),
-              Effect.as({ turnId: input.turnId, status: "completed" as const, events: streamed }),
-            ),
-          wakeThreadHost: (wake) => Ref.update(wakes, (values) => [...values, wake]),
-          registerTurnPromoter: (promoter) => Ref.update(promoters, (values) => [...values, promoter]),
-        })
-        const layer = productLayer({
-          repositoryLayer: ThreadRepository.memoryLayer([thread]),
-          turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-          backendLayer: Layer.succeed(ExecutionBackend.Service, promotedBackend),
-          defaultWorkspace: "/work",
-          makeThreadId: Effect.die("unused"),
-          makeTurnId: Effect.die("unused"),
-          interactive: (input, session) =>
-            Effect.gen(function* () {
-              const workspace = input.workspace ?? "unknown"
-              events.set(workspace, [])
-              yield* Queue.offer(sessions, { workspace, session })
-              yield* session
-                .events((event) => {
-                  events.get(workspace)!.push(event)
-                  if (event._tag === "TranscriptProjectionStopped" && event.status === "completed") throw feedCompleted
-                })
-                .pipe(Effect.catchDefect((defect) => (defect === feedCompleted ? Effect.void : Effect.die(defect))))
-            }),
-        })
-        yield* Effect.gen(function* () {
-          const operation = yield* operationService
-          const coordinate = Effect.gen(function* () {
-            const one = yield* Queue.take(sessions)
-            const two = yield* Queue.take(sessions)
-            yield* Effect.all([one.session.selectThread(thread.id, 1), two.session.selectThread(thread.id, 1)], {
-              concurrency: 2,
-            })
-            while ((yield* Ref.get(wakes)).length === 0) yield* Effect.sleep("10 millis")
-            const promoter = (yield* Ref.get(promoters))[0]
-            const wake = (yield* Ref.get(wakes))[0]
-            if (promoter === undefined || wake === undefined) return yield* Effect.die("Missing promoter wake")
-            expect(yield* promoter(thread.id, wake.generation)).toBe(1)
-          })
-          yield* Effect.all(
-            [
-              operation.run({ _tag: "Interactive", prompt: [], workspace: "/one", ephemeral: false }),
-              operation.run({ _tag: "Interactive", prompt: [], workspace: "/two", ephemeral: false }),
-              coordinate,
-            ],
-            { concurrency: 3, discard: true },
-          )
-        }).pipe(provideLayer(layer))
-        expect(yield* Ref.get(starts)).toEqual(["promoted-turn"])
-        for (const received of events.values()) {
-          expect(received.filter((event) => event._tag === "TurnStarted")).toHaveLength(1)
-          expect(
-            received
-              .filter((event) => event._tag === "TranscriptProjectionPatched")
-              .map((event) =>
-                event._tag === "TranscriptProjectionPatched" && event.origin._tag === "Event"
-                  ? event.origin.cursor
-                  : "",
-              ),
-          ).toEqual(["promoted-turn:started", "streamed", "terminal"])
-        }
-      }),
-    ),
-  )
-
   rawIt(
     "recovers a complete atomic selection after the source feed exceeds its bounded window",
     () =>
@@ -157,11 +25,11 @@ describe("Operation", () => {
         Effect.gen(function* () {
           const eventCount = 8_300
           const streamed: ReadonlyArray<ExecutionEvent.Event> = [
-            executionStarted("overflow-turn"),
+            executionStarted("overflow-live-run"),
             ...Array.from(
               { length: eventCount },
               (_, index): ExecutionEvent.Event => ({
-                executionId: "overflow-turn",
+                executionId: "overflow-live-run",
                 cursor: `chunk-${index + 1}`,
                 sequence: index + 1,
                 type: "model.output.delta",
@@ -170,11 +38,11 @@ describe("Operation", () => {
               }),
             ),
             {
-              executionId: "overflow-turn",
+              executionId: "overflow-live-run",
               cursor: "terminal",
               sequence: eventCount + 1,
               type: "execution.completed",
-              timestampSource: "server",
+              timestampSource: "baton",
               createdAt: eventCount + 1,
             },
           ]
@@ -182,22 +50,18 @@ describe("Operation", () => {
           const transcripts = yield* TranscriptRepository.makeMemory({ turns })
           let recovered: Extract<InteractiveEvent, { readonly _tag: "SelectionLoaded" }> | undefined
           let resyncRequested = false
-          const overflowBackend = ExecutionBackend.Service.of({
+          const overflowBackend = ExecutionGateway.Service.of({
             ...backend,
-            start: (input) =>
-              Effect.sync(() => {
-                for (const event of streamed) input.onEvent?.(event)
-                return { turnId: input.turnId, status: "completed" as const, events: streamed }
-              }),
-            inspect: (turnId) =>
-              Effect.succeed({ turnId, status: "completed" as const, waits: [], pendingTools: [], children: [] }),
-            replay: (turnId) => Effect.succeed({ turnId, status: "completed" as const, events: streamed }),
+            startTurn: (input) =>
+              Effect.succeed({ runId: "overflow-live-run", turnId: input.turnId, threadId: input.threadId }),
+            watchTurn: () => Stream.fromIterable(streamed),
+            inspectTurn: () => Effect.succeed({ status: "completed" }),
           })
           const layer = productLayer({
             repositoryLayer: ThreadRepository.memoryLayer(),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
             transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
-            backendLayer: Layer.succeed(ExecutionBackend.Service, overflowBackend),
+            backendLayer: Layer.succeed(ExecutionGateway.Service, overflowBackend),
             defaultWorkspace: "/work",
             makeThreadId: Effect.succeed(Thread.ThreadId.make("overflow-thread")),
             makeTurnId: Effect.succeed(Turn.TurnId.make("overflow-turn")),
@@ -317,7 +181,7 @@ describe("Operation", () => {
               (event) =>
                 event._tag === "TranscriptProjectionPatched" &&
                 event.origin._tag === "Event" &&
-                event.origin.executionId === "selection-live-turn",
+                event.origin.executionId === "selection-live-run",
             )
             .map((event) =>
               event._tag === "TranscriptProjectionPatched" && event.origin._tag === "Event" ? event.origin.cursor : "",

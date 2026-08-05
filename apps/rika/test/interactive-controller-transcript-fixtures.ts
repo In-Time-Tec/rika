@@ -43,7 +43,6 @@ const entriesImpl = (
     lineage: { _tag: "Original" } as const,
     executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
     status: "completed" as const,
-    stopIntent: "none" as const,
     createdAt,
     updatedAt: createdAt,
   }

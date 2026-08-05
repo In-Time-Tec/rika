@@ -1,75 +1,58 @@
-import { AiError, LanguageModel } from "effect/unstable/ai"
-import { Tool } from "effect/unstable/ai"
-import { Context, Effect, Layer, Schema, Stream } from "effect"
-import { ModelRegistry, TestModel } from "@rika/relay-execution/scripted-model-runtime"
-
-export const model = {
-  text: (text: string, delayMs?: number) =>
-    TestModel.turn([TestModel.text(text)], delayMs === undefined ? {} : { delay: `${delayMs} millis` }),
-  turn: TestModel.turn,
-  part: TestModel.text,
-  reasoning: TestModel.reasoning,
-  toolCall: (name: string, params: unknown, id?: string) =>
-    TestModel.toolCall(name, params, id === undefined ? {} : { id }),
-  failure: (description: string) =>
-    TestModel.failure(
-      AiError.make({
-        module: "TestModel",
-        method: "streamText",
-        reason: AiError.UnknownError.make({ description }),
-      }),
-    ),
+export interface TextPart {
+  readonly _tag: "Text"
+  readonly text: string
 }
 
-export type Script = ReadonlyArray<Parameters<typeof TestModel.make>[0][number]>
+export interface ReasoningPart {
+  readonly _tag: "Reasoning"
+  readonly text: string
+}
+
+export interface ToolCallPart {
+  readonly _tag: "ToolCall"
+  readonly name: string
+  readonly params: unknown
+  readonly id?: string
+}
+
+export type Part = TextPart | ReasoningPart | ToolCallPart
+
+export interface TurnStep {
+  readonly _tag: "Turn"
+  readonly parts: ReadonlyArray<Part>
+  readonly delay?: string
+}
+
+export interface FailureStep {
+  readonly _tag: "Failure"
+  readonly error: Error
+}
+
+export const model = {
+  text: (text: string, delayMs?: number): TurnStep => ({
+    _tag: "Turn",
+    parts: [{ _tag: "Text", text }],
+    ...(delayMs === undefined ? {} : { delay: `${delayMs} millis` }),
+  }),
+  turn: (parts: TurnStep["parts"], options: { readonly delay?: string } = {}): TurnStep => ({
+    _tag: "Turn",
+    parts,
+    ...options,
+  }),
+  part: (text: string): TextPart => ({ _tag: "Text", text }),
+  reasoning: (text: string): ReasoningPart => ({ _tag: "Reasoning", text }),
+  toolCall: (name: string, params: unknown, id?: string): ToolCallPart => ({
+    _tag: "ToolCall",
+    name,
+    params,
+    ...(id === undefined ? {} : { id }),
+  }),
+  failure: (description: string): FailureStep => ({ _tag: "Failure", error: new Error(description) }),
+}
+
+export type Script = ReadonlyArray<Part | TurnStep | FailureStep>
 
 export interface TuiAppLane {
   readonly when?: (prompt: string) => boolean
   readonly script: Script
 }
-
-export const makeRoutedModel = Effect.fn("TuiApp.makeRoutedModel")(function* (lanes: ReadonlyArray<TuiAppLane>) {
-  const encodePrompt = Schema.encodeEffect(Schema.UnknownFromJsonString)
-  const fixtures = yield* Effect.forEach(lanes, (lane) =>
-    TestModel.make([...lane.script], {
-      metadata: {
-        provider: "test",
-        model: "scripted",
-        contextWindow: 1_000_000,
-        maxOutput: 1_000_000,
-        pricing: { inputPerMTok: 0, outputPerMTok: 0 },
-      },
-    }),
-  )
-  const services = yield* Effect.forEach(fixtures, (built) =>
-    Layer.build(built.layer).pipe(Effect.map((context) => Context.get(context, LanguageModel.LanguageModel))),
-  )
-  const selectLane = (text: string) => {
-    const index = lanes.findIndex((lane) => lane.when !== undefined && lane.when(text))
-    return services[index < 0 ? 0 : index]!
-  }
-  const routedModel: LanguageModel.Service = {
-    ...services[0]!,
-    streamText: (request) =>
-      Stream.unwrap(
-        encodePrompt(request.prompt).pipe(
-          Effect.mapError((error) =>
-            AiError.make({
-              module: "TuiApp",
-              method: "routePrompt",
-              reason: AiError.UnknownError.make({ description: error.message }),
-            }),
-          ),
-          Effect.map((prompt) => selectLane(prompt).streamText(request)),
-        ),
-      ),
-  }
-  const fixture = fixtures[0]!
-  const registration = yield* ModelRegistry.registration({
-    ...fixture.selection,
-    layer: Layer.succeed(LanguageModel.LanguageModel, routedModel),
-    ...(fixture.registration.metadata === undefined ? {} : { metadata: fixture.registration.metadata }),
-    toolJsonSchemaCompiler: (tool: Tool.Any) => Effect.succeed(Tool.getJsonSchema(tool)),
-  })
-  return { fixture, registration }
-})

@@ -35,7 +35,7 @@ test("renames the open diagnostics log on a process.exit that bypasses the scope
         const diagnostics = `${dataRoot}/diagnostics`
         const names = yield* fs.readDirectory(diagnostics)
         expect(names.filter((name) => name.endsWith(".open.jsonl"))).toEqual([])
-        expect(names.filter((name) => /^resident-.+\.jsonl$/.test(name))).toHaveLength(1)
+        expect(names.filter((name) => /^server-.+\.jsonl$/.test(name))).toHaveLength(1)
       }),
     ),
   ))

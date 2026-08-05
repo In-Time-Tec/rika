@@ -6,7 +6,7 @@ import * as ThreadToolHandlers from "../../thread/tool/thread-tool-action"
 export interface Interface {
   readonly run: (input: Input) => Effect.Effect<void, OperationUnavailable>
   readonly hasActiveExecutionWork?: Effect.Effect<boolean, OperationUnavailable>
-  readonly authorizeResidentReplacement?: Effect.Effect<"defer" | "supersede", OperationUnavailable>
+  readonly authorizeServerReplacement?: Effect.Effect<"defer" | "supersede", OperationUnavailable>
   readonly stopActiveExecutionWork?: Effect.Effect<void, OperationUnavailable>
 }
 

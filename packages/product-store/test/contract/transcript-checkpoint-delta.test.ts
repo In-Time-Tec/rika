@@ -25,7 +25,7 @@ const createTurn = Effect.fn("TranscriptCheckpointDeltaTest.createTurn")(functio
     queueCapacity: 128,
     now: 2,
   })
-  return yield* turns.setStatus(turnId, "completed", undefined, 3)
+  return yield* turns.setStatus(turnId, "completed", 3)
 })
 
 it.effect("merges stored child checkpoints when a SQLite delta supplies the root and a child unit", () =>

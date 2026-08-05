@@ -11,7 +11,7 @@ export interface InstallLayout {
   readonly installRoot: string
   readonly binary: string
   readonly interactive: string
-  readonly resident: string
+  readonly server: string
 }
 
 const platformFailure = (operation: string) => (error: PlatformError.PlatformError) => {
@@ -57,10 +57,10 @@ export const installLayout = Effect.fn("ReleaseInstall.layout")(function* (execu
     installRoot,
     binary: path.join(installRoot, "bin", "rika"),
     interactive: path.join(installRoot, "bin", ".rika-interactive"),
-    resident: path.join(installRoot, "bin", ".rika-resident"),
+    server: path.join(installRoot, "bin", ".rika-server"),
   }
   const present = yield* Effect.all(
-    [fileSystem.exists(layout.binary), fileSystem.exists(layout.interactive), fileSystem.exists(layout.resident)],
+    [fileSystem.exists(layout.binary), fileSystem.exists(layout.interactive), fileSystem.exists(layout.server)],
     { concurrency: 2 },
   ).pipe(Effect.mapError(platformFailure("inspect the current install")))
   if (present.includes(false))
@@ -101,7 +101,7 @@ export const publishInstall = Effect.fn("ReleaseInstall.publish")(function* (opt
     [
       fileSystem.exists(path.join(payload, "bin", "rika")),
       fileSystem.exists(path.join(payload, "bin", ".rika-interactive")),
-      fileSystem.exists(path.join(payload, "bin", ".rika-resident")),
+      fileSystem.exists(path.join(payload, "bin", ".rika-server")),
     ],
     { concurrency: 2 },
   ).pipe(Effect.mapError(platformFailure(`inspect ${options.archiveFile}`)))

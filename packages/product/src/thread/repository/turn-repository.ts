@@ -1,7 +1,6 @@
 import { Context, Effect, Schema } from "effect"
 import { ThreadId } from "@rika/product/thread-record"
 import { AgentExecutionTurn, Turn, TurnId } from "@rika/product/turn-record"
-import type { ExecutionExtensionPin } from "@rika/product/execution-workflow"
 import type { CreateInput } from "./turn-repository-contract"
 import type { PageOptions, PageResult } from "./turn-repository-pagination"
 import type {
@@ -9,7 +8,6 @@ import type {
   QueueClaimFinish,
   QueueItemChange,
   QueueSnapshot,
-  QueueWake,
   QueuedTurnTake,
   Submission,
 } from "./turn-repository-queue"
@@ -45,14 +43,10 @@ export interface Interface {
   readonly findActive: (threadId: ThreadId) => Effect.Effect<AgentExecutionTurn | undefined, RepositoryError>
   readonly readQueue: (threadId: ThreadId) => Effect.Effect<QueueSnapshot, RepositoryError>
   readonly listNonterminal: Effect.Effect<ReadonlyArray<AgentExecutionTurn>, RepositoryError>
-  readonly listStopRequested: Effect.Effect<ReadonlyArray<AgentExecutionTurn>, RepositoryError>
-  readonly requestStop: (id: TurnId, now: number) => Effect.Effect<AgentExecutionTurn | undefined, RepositoryError>
   readonly claimNextQueued: (threadId: ThreadId, now: number) => Effect.Effect<QueueClaim | undefined, RepositoryError>
   readonly finishQueuedClaim: (
     claim: QueueClaim,
     status: "running" | "failed",
-    lastCursor: string | undefined,
-    extensionPin: ExecutionExtensionPin | undefined,
     now: number,
   ) => Effect.Effect<QueueClaimFinish, RepositoryError>
   readonly releaseQueuedClaim: (claim: QueueClaim) => Effect.Effect<void, RepositoryError>
@@ -69,26 +63,18 @@ export interface Interface {
     queueCapacity: number,
     now: number,
   ) => Effect.Effect<AgentExecutionTurn & { readonly queue: QueueItemChange }, RepositoryError | QueueFull>
-  readonly requestQueueWake: (threadId: ThreadId) => Effect.Effect<QueueWake | undefined, RepositoryError>
-  readonly consumeQueueWake: (threadId: ThreadId, generation: number) => Effect.Effect<boolean, RepositoryError>
-  readonly setExtensionPin: (
-    id: TurnId,
-    pin: ExecutionExtensionPin,
-  ) => Effect.Effect<AgentExecutionTurn, RepositoryError>
   readonly setStatus: (
     id: TurnId,
     status: import("@rika/product/execution-status").Status,
-    lastCursor: string | undefined,
+    now: number,
+  ) => Effect.Effect<AgentExecutionTurn, RepositoryError>
+  readonly attachExecutionLink: (
+    id: TurnId,
+    link: import("@rika/product/execution-gateway").ExecutionLink,
     now: number,
   ) => Effect.Effect<AgentExecutionTurn, RepositoryError>
   readonly startAccepted: (id: TurnId, now: number) => Effect.Effect<boolean, RepositoryError>
   readonly cancelAccepted: (id: TurnId, now: number) => Effect.Effect<boolean, RepositoryError>
-  readonly repairCursor: (
-    id: TurnId,
-    status: import("@rika/product/execution-status").Status,
-    expectedCursor: string | undefined,
-    cursor: string | undefined,
-  ) => Effect.Effect<boolean, RepositoryError>
 }
 
 export class Service extends Context.Service<Service, Interface>()(

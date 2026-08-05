@@ -41,18 +41,6 @@ const ownsCommand = Effect.fn("LocalInstall.ownsCommand")((command: string, bina
   }),
 )
 
-const isLegacyRikaCommand = Effect.fn("LocalInstall.isLegacyRikaCommand")((command: string) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem
-    if (!(yield* fileSystem.exists(command).pipe(mapInstallError("check legacy command")))) return false
-    if (Option.isSome(yield* Effect.option(fileSystem.readLink(command)))) return false
-    const entry = yield* fileSystem.stat(command).pipe(mapInstallError("inspect legacy command"))
-    if (entry.type !== "File") return false
-    const contents = yield* fileSystem.readFileString(command).pipe(mapInstallError("read legacy command"))
-    return contents.includes('SHARE_DIR="$SCRIPT_DIR/../share/rika"') && contents.includes('exec "$SCRIPT_DIR/rika-')
-  }),
-)
-
 const normalizeOperatingSystem = (value: string) => {
   switch (value.trim().toLowerCase()) {
     case "darwin":
@@ -107,7 +95,7 @@ export const installLocal = Effect.fn("LocalInstall.installLocal")(() =>
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
       const { installRoot, command, binary } = yield* installPaths()
       const commandExists = yield* fileSystem.exists(command).pipe(mapInstallError("check command"))
-      if (commandExists && !(yield* ownsCommand(command, binary)) && !(yield* isLegacyRikaCommand(command))) {
+      if (commandExists && !(yield* ownsCommand(command, binary))) {
         return yield* installFailure("validate command", `Refusing to overwrite existing command: ${command}`)
       }
       const root = yield* path

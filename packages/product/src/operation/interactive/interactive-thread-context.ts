@@ -27,11 +27,12 @@ export const readThreadContext = Effect.fn("ProductOperation.readThreadContext")
     .filter((turn) => turn.status !== "queued")
     .toSorted((left, right) => right.createdAt - left.createdAt || String(right.id).localeCompare(String(left.id)))
   for (const turn of candidates) {
+    if (turn.executionLink === undefined) continue
     const source = yield* input.usage.loadSourceFold(String(turn.id), String(turn.id))
     if (source?.foldJson === undefined || source.projectionVersion !== UsageSnapshot.projectionVersion) continue
     const decoded = UsageCodec.deserialize(source.foldJson)
     if (Result.isFailure(decoded)) continue
-    const reading = decoded.success.executionContexts.get(TranscriptCorrelation.executionKey(String(turn.id)))
+    const reading = decoded.success.executionContexts.get(TranscriptCorrelation.executionKey(turn.executionLink.runId))
     if (reading === undefined) continue
     return {
       _tag: "Available" as const,

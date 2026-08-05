@@ -1,5 +1,4 @@
 import * as ExecutionEvent from "@rika/product/execution-event"
-import { ExecutionId } from "../../execution/contract/execution-identifier"
 import * as ExecutionStatus from "../../execution/contract/execution-status"
 import * as ThreadSummary from "../model/thread-summary"
 import * as ThreadSummaryRepository from "../repository/thread-summary-repository"
@@ -10,14 +9,6 @@ import { Function } from "effect"
 
 const record = (value: unknown): Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null ? (value as Readonly<Record<string, unknown>>) : {}
-
-const patchFromExplicitEvent = (event: ExecutionEvent.Event): string | undefined => {
-  if (!event.type.includes("diff")) return undefined
-  if (event.text !== undefined && event.text.length > 0) return event.text
-  const data = event.data ?? record(event.content?.[0])
-  const patch = data.patch ?? data.diff
-  return typeof patch === "string" && patch.length > 0 ? patch : undefined
-}
 
 const patchFromToolResult = (event: ExecutionEvent.Event): string | undefined => {
   if (event.type !== "tool.result.received") return undefined
@@ -61,17 +52,10 @@ export const editTotalsForPatch = (patch: string): ThreadSummary.EditTotals => {
 
 export const editTotals = (events: ReadonlyArray<ExecutionEvent.Event>): ThreadSummary.EditTotals => {
   const ordered = events.toSorted((left, right) => left.sequence - right.sequence)
-  const explicit = ordered.flatMap((event) => {
-    const patch = patchFromExplicitEvent(event)
+  const patches = ordered.flatMap((event) => {
+    const patch = patchFromToolResult(event)
     return patch === undefined ? [] : [patch]
   })
-  const patches =
-    explicit.length > 0
-      ? explicit
-      : ordered.flatMap((event) => {
-          const patch = patchFromToolResult(event)
-          return patch === undefined ? [] : [patch]
-        })
   return patches.reduce(
     (total, patch) => {
       const next = editTotalsForPatch(patch)
@@ -86,16 +70,13 @@ export const editTotals = (events: ReadonlyArray<ExecutionEvent.Event>): ThreadS
 }
 
 export const latestCursor: {
-  (turnId: string, events: ReadonlyArray<ExecutionEvent.Event>): string | undefined
-  (events: ReadonlyArray<ExecutionEvent.Event>): (turnId: string) => string | undefined
+  (runId: string, events: ReadonlyArray<ExecutionEvent.Event>): string | undefined
+  (events: ReadonlyArray<ExecutionEvent.Event>): (runId: string) => string | undefined
 } = Function.dual(
   2,
-  (turnId: string, events: ReadonlyArray<ExecutionEvent.Event>): string | undefined =>
+  (runId: string, events: ReadonlyArray<ExecutionEvent.Event>): string | undefined =>
     events
-      .filter(
-        (event) =>
-          ExecutionId.ownsExecution(turnId, event.executionId) && !TranscriptProjection.Fold.isTransientEvent(event),
-      )
+      .filter((event) => event.executionId === runId && !TranscriptProjection.Fold.isTransientEvent(event))
       .reduce<
         ExecutionEvent.Event | undefined
       >((current, event) => (current === undefined || event.sequence >= current.sequence ? event : current), undefined)

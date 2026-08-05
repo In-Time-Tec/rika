@@ -67,7 +67,7 @@ export const delegationUnit: {
         sequence: sequence + 1,
         type: "child_run.spawned",
         createdAt: sequence + 1,
-        data: { tool_call_id: callId, child_execution_id: childExecutionId },
+        data: { invocation_id: callId, child_execution_id: childExecutionId },
       },
     ])
     const unit = projection.units.find(
@@ -149,7 +149,8 @@ const inferredExecutionCheckpoints = (
   projection: TranscriptProjectionModel.Projection,
   options: StoreProjectionOptions,
 ): ReadonlyArray<TranscriptPage.ExecutionCheckpoint> => {
-  const rootKey = TranscriptCorrelation.executionKey(String(turn.id))
+  const rootExecutionId = String(turn._tag === "AgentExecution" ? (turn.executionLink?.runId ?? turn.id) : turn.id)
+  const rootKey = TranscriptCorrelation.executionKey(rootExecutionId)
   const executions = new Map<string, { readonly executionId: string; readonly units: Array<TranscriptUnit.Unit> }>()
   for (const unit of projection.units) {
     const key = TranscriptCorrelation.executionKey(unit.turnId)
@@ -157,7 +158,7 @@ const inferredExecutionCheckpoints = (
     if (execution === undefined) executions.set(key, { executionId: unit.turnId, units: [unit] })
     else execution.units.push(unit)
   }
-  if (!executions.has(rootKey)) executions.set(rootKey, { executionId: String(turn.id), units: [] })
+  if (!executions.has(rootKey)) executions.set(rootKey, { executionId: rootExecutionId, units: [] })
   const checkpoints: Array<TranscriptPage.ExecutionCheckpoint> = []
   for (const [executionKey, execution] of executions) {
     const { executionId, units } = execution

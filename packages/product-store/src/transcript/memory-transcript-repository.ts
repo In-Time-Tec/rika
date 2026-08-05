@@ -238,7 +238,8 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
                   ]
               }
             }
-            const root = checkpointFor(TranscriptCorrelation.executionKey(String(turn.id)))
+            const rootKey = TranscriptCorrelation.executionKey(turn.executionLink?.runId ?? String(turn.id))
+            const root = checkpointFor(rootKey)
             if (
               root === undefined ||
               root.attachment !== undefined ||
@@ -306,7 +307,7 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
                   },
                   entries,
                 ]
-              if (executionKey === TranscriptCorrelation.executionKey(String(turn.id))) {
+              if (executionKey === rootKey) {
                 if (unit.parentId !== undefined)
                   return [
                     {
@@ -387,8 +388,7 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
               current.projection.checkpointGeneration !== options.expectedGeneration ||
               options.projectionVersion <= current.projection.projectionVersion ||
               !TurnResult.isAgentExecution(current.projection.turn) ||
-              current.projection.turn.status !== turn.status ||
-              current.projection.turn.lastCursor !== turn.lastCursor
+              current.projection.turn.status !== turn.status
             )
               return [{ _tag: "Stale" as const }, entries] as const
             entries.set(turn.id, memoryEntry(adopted, projection, options, current.projection.checkpointGeneration + 1))
@@ -400,12 +400,7 @@ export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
             ? { _tag: "Stale" as const }
             : { _tag: "Committed" as const, turn: replacementTurn }
         }
-        const written = yield* coordinator.adoptRefold(
-          turn,
-          replacementTurn.status,
-          replacementTurn.lastCursor,
-          writeProjection,
-        )
+        const written = yield* coordinator.adoptRefold(turn, replacementTurn.status, writeProjection)
         return written._tag === "Stale"
           ? { _tag: "Stale" as const }
           : { _tag: "Committed" as const, turn: written.turn }

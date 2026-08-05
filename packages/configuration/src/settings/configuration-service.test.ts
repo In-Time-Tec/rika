@@ -115,9 +115,7 @@ describe("ConfigService", () => {
       const alias = config.settings.models["bedrock-terra"]!
       expect(alias.provider).toBe("bedrock")
       expect(alias.candidates).toEqual(["workspace-model"])
-      expect(alias.limits).toEqual(ConfigContract.defaults.models.sol!.limits)
-      expect(alias.variants).toEqual(ConfigContract.defaults.models.sol!.variants)
-      expect(alias.displayName).toBe("bedrock-terra")
+      expect(alias.displayName).toBe("Workspace Terra")
       expect(config.settings.modes.medium).toEqual({
         main: { alias: "bedrock-terra", effort: "xhigh" },
         oracle: { alias: "bedrock-terra", effort: "medium" },
@@ -130,8 +128,18 @@ describe("ConfigService", () => {
         ConfigurationService.memoryConfigurationLayer({
           global: {
             modelAliases: {
-              "bedrock-terra": { base: "terra", provider: "bedrock", candidates: ["global-model"] },
-              "bedrock-fable": { base: "fable", provider: "bedrock", candidates: ["fable-model"] },
+              "bedrock-terra": {
+                preset: "openai",
+                displayName: "Global Terra",
+                provider: "bedrock",
+                candidates: ["global-model"],
+              },
+              "bedrock-fable": {
+                preset: "claude",
+                displayName: "Bedrock Fable",
+                provider: "bedrock",
+                candidates: ["fable-model"],
+              },
             },
             modelRoutes: {
               modes: { medium: { main: "bedrock-terra" } },
@@ -141,7 +149,12 @@ describe("ConfigService", () => {
           },
           workspace: {
             modelAliases: {
-              "bedrock-terra": { base: "sol", provider: "bedrock", candidates: ["workspace-model"] },
+              "bedrock-terra": {
+                preset: "openai",
+                displayName: "Workspace Terra",
+                provider: "bedrock",
+                candidates: ["workspace-model"],
+              },
             },
             modelRoutes: {
               modes: { medium: { oracle: "bedrock-terra" } },

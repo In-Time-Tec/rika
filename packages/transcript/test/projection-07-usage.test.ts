@@ -5,7 +5,7 @@ import * as TranscriptProjection from "../src/projection/transcript-projection"
 const usage = (cursor: string, sequence: number): SourceEvent => ({
   cursor,
   sequence,
-  type: "model.usage.reported",
+  type: "model.attempt.completed",
   createdAt: sequence,
   data: {
     provider: "openai",

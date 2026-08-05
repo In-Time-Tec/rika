@@ -11,7 +11,6 @@ describe("interactive feed overflow", () => {
     threadId: Thread.ThreadId.make("thread"),
     prompt: "prompt",
     status: "running",
-    stopIntent: "none",
     executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
     author: { _tag: "Human" },
     lineage: { _tag: "Original" },

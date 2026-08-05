@@ -24,8 +24,8 @@ export const executionCheckpoint: {
     state: TranscriptProjection.ProjectionStateSource,
     status?: TranscriptPage.ExecutionCheckpoint["status"],
   ): TranscriptPage.ExecutionCheckpoint => ({
-    executionKey: TranscriptCorrelation.executionKey(String(target.id)),
-    executionId: String(target.id),
+    executionKey: TranscriptCorrelation.executionKey(String(target.executionLink?.runId ?? target.id)),
+    executionId: String(target.executionLink?.runId ?? target.id),
     cursor: state.checkpointCursor ?? "",
     sequence: state.revision,
     ...(status === undefined ? {} : { status }),
@@ -124,7 +124,7 @@ export const nestedProjection: {
       attachedExecutionCheckpoint(
         childExecutionId,
         child,
-        TranscriptCorrelation.executionKey(String(target.id)),
+        TranscriptCorrelation.executionKey(String(target.executionLink?.runId ?? target.id)),
         parent,
       ),
     ],
@@ -155,7 +155,7 @@ export const invalidCheckpointGraphs: {
     const peer = attachedExecutionCheckpoint(
       peerExecutionId,
       peerState,
-      TranscriptCorrelation.executionKey(String(target.id)),
+      TranscriptCorrelation.executionKey(String(target.executionLink?.runId ?? target.id)),
       nested.parent,
     )
     if (peer.attachment === undefined) throw new TypeError("Nested transcript fixture has no peer attachment")

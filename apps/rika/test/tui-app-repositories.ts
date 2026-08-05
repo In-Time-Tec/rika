@@ -52,8 +52,6 @@ export const seedHistoricalTranscript = Effect.fn("TuiApp.seedHistoricalTranscri
     threadId,
     prompt: "Historical transcript fixture",
     status: "completed",
-    stopIntent: "none",
-    lastCursor: cursor,
     executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
     author: { _tag: "Human" },
     lineage: { _tag: "Original" },

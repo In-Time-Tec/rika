@@ -2,7 +2,7 @@
 import * as ProductOperation from "@rika/product/product-operation"
 import * as InteractiveSession from "@rika/product/interactive-session"
 import * as TranscriptPage from "@rika/product/transcript-page"
-import * as InteractiveFeed from "@rika/product/resident-interactive-feed"
+import * as InteractiveFeed from "@rika/product/server-interactive-feed"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"

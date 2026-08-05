@@ -1,6 +1,6 @@
 import { Data, Effect, FileSystem, Path } from "effect"
 
-export type PerformanceRole = "launcher" | "interactive" | "resident"
+export type PerformanceRole = "launcher" | "interactive" | "server"
 
 export interface RoleObservation {
   readonly role: PerformanceRole
@@ -44,9 +44,9 @@ export const roleRuntimes = (input: {
     interactive: input.packaged
       ? { executable: sibling(".rika-interactive"), arguments: [], evidencePath: sibling(".rika-interactive") }
       : { executable: input.executable, arguments: [source("interactive")], evidencePath: source("interactive") },
-    resident: input.packaged
-      ? { executable: sibling(".rika-resident"), arguments: [], evidencePath: sibling(".rika-resident") }
-      : { executable: input.executable, arguments: [source("resident")], evidencePath: source("resident") },
+    server: input.packaged
+      ? { executable: sibling(".rika-server"), arguments: [], evidencePath: sibling(".rika-server") }
+      : { executable: input.executable, arguments: [source("server")], evidencePath: source("server") },
   }
 }
 
@@ -183,8 +183,7 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
             ...process.env,
             HOME: temporaryHome,
             RIKA_DATABASE: path.join(temporaryHome, ".rika", "rika.db"),
-            RIKA_EXECUTION_DATABASE: path.join(temporaryHome, ".rika", "execution.db"),
-            RIKA_INTERNAL_RESIDENT_GRACE: "30000",
+            RIKA_INTERNAL_SERVER_GRACE: "30000",
             RIKA_TEST_MODEL_RESPONSE: "performance fixture",
             TERM: "xterm-256color",
           },
@@ -201,11 +200,11 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
         for (let attempt = 0; attempt <= 40; attempt += 1) {
           const readyRows = descendants(yield* readProcessRows, child.pid).filter((row) => !baselinePids.has(row.pid))
           for (const row of readyRows)
-            if (matchesRole(row, "launcher") || matchesRole(row, "interactive") || matchesRole(row, "resident"))
+            if (matchesRole(row, "launcher") || matchesRole(row, "interactive") || matchesRole(row, "server"))
               ownedPids.add(row.pid)
           const ready =
             readyRows.some((row) => matchesRole(row, "interactive") && row.rss > 1024) &&
-            readyRows.some((row) => matchesRole(row, "resident") && row.rss > 1024)
+            readyRows.some((row) => matchesRole(row, "server") && row.rss > 1024)
           if (ready || attempt === 40) break
           yield* Effect.sleep("250 millis")
         }
@@ -213,7 +212,7 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
         yield* Effect.sleep("8 seconds")
         let previousRows = yield* readProcessRows
         const roleCpu = new Map<PerformanceRole, Array<number>>(
-          (["launcher", "interactive", "resident"] as const).map((role) => [role, []]),
+          (["launcher", "interactive", "server"] as const).map((role) => [role, []]),
         )
         const totalCpu: Array<number> = []
         let stableRoles = true
@@ -226,7 +225,7 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
           const previousTree = descendants(previousRows, child.pid).filter((row) => !baselinePids.has(row.pid))
           const currentTree = descendants(currentRows, child.pid).filter((row) => !baselinePids.has(row.pid))
           let total = 0
-          for (const name of ["launcher", "interactive", "resident"] as const) {
+          for (const name of ["launcher", "interactive", "server"] as const) {
             const before = previousTree.find((row) => matchesRole(row, name))
             const after = currentTree.find((row) => matchesRole(row, name))
             if (after !== undefined) ownedPids.add(after.pid)
@@ -244,8 +243,8 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
         const tree = descendants(currentRows, child.pid).filter((row) => !baselinePids.has(row.pid))
         const launcherRow = tree.find((row) => matchesRole(row, "launcher"))
         const interactiveRow = tree.find((row) => matchesRole(row, "interactive"))
-        const residentRow = tree.find((row) => matchesRole(row, "resident"))
-        for (const row of [launcherRow, interactiveRow, residentRow]) if (row !== undefined) ownedPids.add(row.pid)
+        const serverRow = tree.find((row) => matchesRole(row, "server"))
+        for (const row of [launcherRow, interactiveRow, serverRow]) if (row !== undefined) ownedPids.add(row.pid)
         const role = (name: PerformanceRole, row: PsRow, executable: string): RoleObservation => ({
           role: name,
           pid: row.pid,
@@ -259,9 +258,9 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
             ...(interactiveRow === undefined
               ? []
               : [role("interactive", interactiveRow, runtimes.interactive.evidencePath)]),
-            ...(residentRow === undefined ? [] : [role("resident", residentRow, runtimes.resident.evidencePath)]),
+            ...(serverRow === undefined ? [] : [role("server", serverRow, runtimes.server.evidencePath)]),
           ],
-          ...(interactiveRow === undefined || residentRow === undefined
+          ...(interactiveRow === undefined || serverRow === undefined
             ? {}
             : {
                 sampleCount: totalCpu.length,
@@ -276,7 +275,7 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
                   : {}),
               }),
           executableBytes,
-          ...(interactiveRow === undefined || residentRow === undefined
+          ...(interactiveRow === undefined || serverRow === undefined
             ? { unsupportedReason: "The isolated PTY did not expose every expected process role before sampling." }
             : {}),
         }

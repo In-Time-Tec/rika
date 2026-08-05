@@ -300,7 +300,6 @@ test("renders every transcript block variant and sidebar state", () => {
       recovery: "Press Enter to retry.",
     },
     { _tag: "ChildAgent", id: "child", name: "child", summary: "work", status: "running", activity: [] },
-    { _tag: "Workflow", name: "flow", step: "wait", status: "waiting" },
     { _tag: "ImageAttachment", name: "a.png", mediaType: "image/png" },
     { _tag: "ImageAttachment", name: "partial.png", mediaType: "image/png", width: 2 },
     { _tag: "ImageAttachment", name: "b.png", mediaType: "image/png", width: 2, height: 3, bytes: 4 },

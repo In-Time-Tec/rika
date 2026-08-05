@@ -10,7 +10,6 @@ export interface CreateInput {
   readonly prompt: string
   readonly promptParts?: ReadonlyArray<PromptPart>
   readonly executionRoute: ExecutionRouteSnapshot
-  readonly reviewFanOutId?: string
   readonly author?: TurnAuthor
   readonly lineage?: TurnLineage
   readonly queueCapacity: number

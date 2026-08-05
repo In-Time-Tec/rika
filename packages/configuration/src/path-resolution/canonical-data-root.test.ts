@@ -8,33 +8,25 @@ const withBunServices = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem
     Effect.scoped(Effect.flatMap(Layer.build(BunServices.layer), (context) => Effect.provide(effect, context))),
   )
 
-test("uses one canonical directory for both resident databases", () =>
+test("returns the canonical product data directory", () =>
   withBunServices(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-data-root-" })
-      const other = path.join(root, "other")
       const alias = path.join(root, "alias")
-      yield* fs.makeDirectory(other)
       yield* fs.symlink(root, alias)
-      expect(yield* canonicalDataRoot(path.join(root, "rika.db"), path.join(alias, "execution.db"))).toBe(
-        yield* fs.realPath(root),
-      )
-      expect(
-        (yield* Effect.exit(canonicalDataRoot(path.join(root, "rika.db"), path.join(other, "execution.db"))))._tag,
-      ).toBe("Failure")
+      expect(yield* canonicalDataRoot(path.join(alias, "rika.db"))).toBe(yield* fs.realPath(root))
     }).pipe(Effect.scoped),
   ))
 
-test("accepts any pair of database filenames that share one directory", () =>
+test("creates the product data directory", () =>
   withBunServices(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-data-root-" })
-      expect(yield* canonicalDataRoot(path.join(root, "product.db"), path.join(root, "durable.db"))).toBe(
-        yield* fs.realPath(root),
-      )
+      const parent = yield* fs.makeTempDirectoryScoped({ prefix: "rika-data-root-" })
+      const root = path.join(parent, "profile")
+      expect(yield* canonicalDataRoot(path.join(root, "rika.db"))).toBe(yield* fs.realPath(root))
     }).pipe(Effect.scoped),
   ))

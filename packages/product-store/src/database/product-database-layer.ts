@@ -1,10 +1,8 @@
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient"
-import * as SqliteMigrator from "@effect/sql-sqlite-bun/SqliteMigrator"
 import { Effect, FileSystem, Layer, Path, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import { productMigrations, migrationNames } from "../migration/product-migration-registry"
+import { create } from "./product-schema"
 import { inspectDatabase, validateKnown } from "./product-database-inspection"
-import { preflight } from "./product-database-preflight"
 
 export class ProductDatabaseError extends Schema.TaggedErrorClass<ProductDatabaseError>()("ProductDatabaseError", {
   message: Schema.String,
@@ -19,18 +17,18 @@ const enableForeignKeys = Effect.gen(function* () {
   )
 })
 
-const validateCurrent = Effect.gen(function* () {
+const prepare = Effect.gen(function* () {
   const state = yield* inspectDatabase()
-  yield* validateKnown(state)
-  if (state.migrationRows.length !== migrationNames.length)
-    return yield* fail("Rika product database does not match the current schema. Use a fresh Rika data root.")
+  const kind = yield* validateKnown(state)
+  if (kind === "fresh") {
+    const sql = yield* SqlClient
+    yield* sql
+      .withTransaction(create)
+      .pipe(Effect.mapError((error) => fail(`Could not create the Rika product database: ${String(error)}`)))
+  }
+  yield* enableForeignKeys
+  yield* inspectDatabase().pipe(Effect.flatMap(validateKnown))
 })
-
-const prepare = SqliteMigrator.run({ loader: productMigrations, table: "rika_migrations" }).pipe(
-  Effect.mapError((error) => fail(`Could not migrate the Rika product database: ${String(error)}`)),
-  Effect.andThen(enableForeignKeys),
-  Effect.andThen(validateCurrent),
-)
 
 const directoryLayer = (filename: string) =>
   Layer.effectDiscard(
@@ -44,7 +42,4 @@ const directoryLayer = (filename: string) =>
 const currentLayer = (filename: string) =>
   Layer.effectDiscard(prepare).pipe(Layer.provideMerge(SqliteClient.layer({ filename })))
 
-export const layer = (filename: string) =>
-  Layer.unwrap(preflight(filename).pipe(Effect.as(currentLayer(filename)))).pipe(
-    Layer.provideMerge(directoryLayer(filename)),
-  )
+export const layer = (filename: string) => currentLayer(filename).pipe(Layer.provideMerge(directoryLayer(filename)))

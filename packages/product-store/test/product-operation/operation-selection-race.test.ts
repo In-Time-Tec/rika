@@ -4,7 +4,7 @@ import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
-import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { Deferred, Effect, Fiber, Layer, Ref, Scheduler } from "effect"
 
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
@@ -55,7 +55,7 @@ describe("Operation", () => {
             threadId: harness.previous.id,
             origin: expect.objectContaining({
               _tag: "Event",
-              executionId: "selection-live-turn",
+              executionId: "selection-live-run",
             }),
             delta: expect.objectContaining({ upsert: expect.any(Array), remove: expect.any(Array) }),
           }),
@@ -101,7 +101,7 @@ describe("Operation", () => {
             threadId: harness.previous.id,
             origin: expect.objectContaining({
               _tag: "Event",
-              executionId: "selection-live-turn",
+              executionId: "selection-live-run",
             }),
             delta: expect.objectContaining({ upsert: expect.any(Array), remove: expect.any(Array) }),
           }),
@@ -201,7 +201,7 @@ describe("Operation", () => {
       const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, interleavingRepository),
         turnRepositoryLayer: TurnRepository.memoryLayer(),
-        backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+        backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
         defaultWorkspace: "/work",
         makeThreadId: Effect.die("unused"),
         makeTurnId: Effect.die("unused"),

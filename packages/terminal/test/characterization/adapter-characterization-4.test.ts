@@ -265,7 +265,7 @@ test("keeps wrapped response continuations inside the rail and curls the final r
     entries: [
       {
         role: "assistant",
-        text: "1. Splitting the resident endpoint into separate host and client transports removes the restart complexity.",
+        text: "1. Splitting the server endpoint into separate host and client transports removes the restart complexity.",
         turnId: "child:agent",
       },
     ],

@@ -27,8 +27,4 @@ export const TurnResult = {
     turn._tag === "RecordedShell" && turn.status === "running",
   isTerminalRecordedShell: (turn: Turn): turn is TerminalRecordedShellTurn =>
     turn._tag === "RecordedShell" && turn.status !== "running",
-  lastCursor: (turn: Turn): string | undefined =>
-    turn._tag === "AgentExecution"
-      ? (turn as Extract<Turn, { readonly _tag: "AgentExecution" }>).lastCursor
-      : undefined,
 }

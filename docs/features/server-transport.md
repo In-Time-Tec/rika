@@ -1,0 +1,5 @@
+# Server transport
+
+Stateful clients use an authenticated, versioned WebSocket connection to the Rika Server on loopback. The protocol version is the compatibility epoch for the full wire schema, not only the handshake. The typed contract carries operations, interactive commands, output, heartbeats, sequenced feed events, acknowledgements, replay, resync, completion, and typed failures; identities, nonces, connection roles, and connection identifiers prevent a client from attaching to the wrong Server or trusting an unauthenticated incompatibility claim.
+
+Frames, fragments, feeds, and outbound queues are bounded. Feed overflow or an oversized live event requests an ordered resync from durable state instead of failing the Execution. Compatible different builds reconnect and resync the selected Thread beneath one stable interactive callback. Reads may resume after reconnect, but a client does not resend a mutation when its outcome is unknown. A launch build mismatch initiates takeover; a reattach build mismatch is accepted and never supersedes. Only an epoch mismatch yields a restart-required failure.

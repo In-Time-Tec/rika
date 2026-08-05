@@ -100,8 +100,6 @@ export const renderBlock: {
         else if (block.status === "cancelled") status = "cancelled"
         return `${icon} Subagent ${status} ▸\n${body(`${block.name} · ${block.summary}`)}`
       }
-      case "Workflow":
-        return `◫ Workflow ${block.name} [${block.status}]\n${body(block.step)}`
       case "ImageAttachment": {
         const dimensions =
           block.width !== undefined && block.height !== undefined ? ` · ${block.width}×${block.height}` : ""

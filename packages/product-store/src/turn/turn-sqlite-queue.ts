@@ -4,14 +4,13 @@ import type { SqlError } from "effect/unstable/sql/SqlError"
 import { QueueFull, QueuedTurnUnavailable, RepositoryError } from "@rika/product/turn-repository"
 import type { Interface } from "@rika/product/turn-repository"
 import type { AgentExecutionTurn } from "@rika/product/turn-record"
-import { decodeAgent, decodeQueueState, encodeExtensionPin } from "./turn-row-codec"
+import { decodeAgent, decodeQueueState } from "./turn-row-codec"
 import { queuedTurnUnavailable, repositoryError, submissionError, takeQueuedError } from "./turn-memory-errors"
 type QueueSnapshot = Effect.Success<ReturnType<Interface["readQueue"]>>
 type QueueClaim = Parameters<Interface["finishQueuedClaim"]>[0]
 type QueueClaimFinish = Effect.Success<ReturnType<Interface["finishQueuedClaim"]>>
 type QueueItemChange = Effect.Success<ReturnType<Interface["dequeue"]>>
 type QueuedTurnTake = Effect.Success<ReturnType<Interface["takeQueued"]>>
-type QueueWake = NonNullable<Effect.Success<ReturnType<Interface["requestQueueWake"]>>>
 
 export const makeTurnSqliteQueue = (
   sql: SqlClient,
@@ -26,8 +25,6 @@ export const makeTurnSqliteQueue = (
   | "takeQueued"
   | "dequeue"
   | "requeueAccepted"
-  | "requestQueueWake"
-  | "consumeQueueWake"
 > => ({
   readQueue: Effect.fn("TurnRepository.readQueue")(function* (threadId): Effect.fn.Return<
     QueueSnapshot,
@@ -71,38 +68,38 @@ export const makeTurnSqliteQueue = (
       )
       .pipe(Effect.mapError(repositoryError))
   }),
-  finishQueuedClaim: Effect.fn("TurnRepository.finishQueuedClaim")(
-    function* (claim, status, lastCursor, extensionPin, now): Effect.fn.Return<QueueClaimFinish, RepositoryError> {
-      const encodedPin = extensionPin === undefined ? undefined : yield* encodeExtensionPin(extensionPin)
-      return yield* sql
-        .withTransaction(
-          Effect.gen(function* () {
-            const rows = yield* sql`UPDATE rika_turns
-      SET status = ${status}, last_cursor = ${lastCursor ?? null}, extension_pin_json = COALESCE(extension_pin_json, ${encodedPin ?? null}), updated_at = ${now}, queue_claim_token = NULL
+  finishQueuedClaim: Effect.fn("TurnRepository.finishQueuedClaim")(function* (claim, status, now): Effect.fn.Return<
+    QueueClaimFinish,
+    RepositoryError
+  > {
+    return yield* sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const rows = yield* sql`UPDATE rika_turns
+      SET status = ${status}, updated_at = ${now}, queue_claim_token = NULL
       WHERE id = ${claim.turn.id} AND turn_kind = 'AgentExecution' AND status = 'queued' AND queue_claim_token = ${claim.token} RETURNING *`
-            if (rows[0] === undefined) return { _tag: "Unavailable" as const }
-            const turn = yield* decodeAgent(rows[0])
-            const queueRows = yield* sql`UPDATE rika_thread_queue_state
+          if (rows[0] === undefined) return { _tag: "Unavailable" as const }
+          const turn = yield* decodeAgent(rows[0])
+          const queueRows = yield* sql`UPDATE rika_thread_queue_state
       SET revision = revision + 1, queued_count = MAX(queued_count - 1, 0)
       WHERE thread_id = ${turn.threadId} RETURNING *`
-            if (queueRows[0] === undefined) return yield* repositoryError(`Queue state ${turn.threadId} does not exist`)
-            const state = yield* decodeQueueState(queueRows[0])
-            return {
-              _tag: "Transitioned" as const,
-              turn,
-              queue: {
-                threadId: turn.threadId,
-                revision: state.revision,
-                queuedCount: state.queued_count,
-                becameNonempty: false,
-                change: { _tag: "Removed" as const, turnId: turn.id },
-              },
-            }
-          }),
-        )
-        .pipe(Effect.mapError(repositoryError))
-    },
-  ),
+          if (queueRows[0] === undefined) return yield* repositoryError(`Queue state ${turn.threadId} does not exist`)
+          const state = yield* decodeQueueState(queueRows[0])
+          return {
+            _tag: "Transitioned" as const,
+            turn,
+            queue: {
+              threadId: turn.threadId,
+              revision: state.revision,
+              queuedCount: state.queued_count,
+              becameNonempty: false,
+              change: { _tag: "Removed" as const, turnId: turn.id },
+            },
+          }
+        }),
+      )
+      .pipe(Effect.mapError(repositoryError))
+  }),
   releaseQueuedClaim: Effect.fn("TurnRepository.releaseQueuedClaim")(function* (claim): Effect.fn.Return<
     void,
     RepositoryError
@@ -256,39 +253,5 @@ export const makeTurnSqliteQueue = (
         }),
       )
       .pipe(Effect.mapError(submissionError))
-  }),
-  requestQueueWake: Effect.fn("TurnRepository.requestQueueWake")(function* (threadId): Effect.fn.Return<
-    QueueWake | undefined,
-    RepositoryError
-  > {
-    return yield* sql
-      .withTransaction(
-        Effect.gen(function* () {
-          yield* sql`INSERT INTO rika_thread_queue_state (thread_id) VALUES (${threadId}) ON CONFLICT (thread_id) DO NOTHING`
-          const existingRows = yield* sql`SELECT * FROM rika_thread_queue_state WHERE thread_id = ${threadId}`
-          if (existingRows[0] === undefined) return yield* repositoryError(`Queue state ${threadId} does not exist`)
-          const existing = yield* decodeQueueState(existingRows[0])
-          if (existing.queued_count === 0) return undefined
-          if (existing.wake_pending === 1)
-            return { threadId, generation: existing.wake_generation, queueRevision: existing.revision }
-          const rows = yield* sql`UPDATE rika_thread_queue_state
-          SET wake_generation = wake_generation + 1, wake_pending = 1
-          WHERE thread_id = ${threadId} AND queued_count > 0 AND wake_pending = 0
-          RETURNING *`
-          if (rows[0] === undefined) return undefined
-          const state = yield* decodeQueueState(rows[0])
-          return { threadId, generation: state.wake_generation, queueRevision: state.revision }
-        }),
-      )
-      .pipe(Effect.mapError(repositoryError))
-  }),
-  consumeQueueWake: Effect.fn("TurnRepository.consumeQueueWake")(function* (threadId, generation): Effect.fn.Return<
-    boolean,
-    RepositoryError
-  > {
-    const rows = yield* sql`UPDATE rika_thread_queue_state SET wake_pending = 0
-    WHERE thread_id = ${threadId} AND wake_pending = 1 AND wake_generation = ${generation}
-    RETURNING thread_id`.pipe(Effect.mapError(repositoryError))
-    return rows[0] !== undefined
   }),
 })

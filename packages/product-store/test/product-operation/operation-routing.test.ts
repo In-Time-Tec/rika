@@ -4,7 +4,7 @@ import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
-import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { Effect, Layer, Ref } from "effect"
 import { TestConsole } from "effect/testing"
 
@@ -35,7 +35,7 @@ describe("Operation", () => {
         productLayer({
           repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
           turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-          backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+          backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
           defaultWorkspace: "/work",
           makeThreadId: Effect.die("A reused thread must not create an id"),
           makeTurnId: Effect.succeed(Turn.TurnId.make("turn-existing")),
@@ -59,9 +59,9 @@ describe("Operation", () => {
       expect(persisted).toEqual([thread])
       expect(turn).toMatchObject({ threadId: "thread-existing", prompt: "existing prompt", status: "completed" })
       expect(output.filter((line): line is string => typeof line === "string" && line.startsWith("{"))).toEqual([
-        '{"executionId":"turn-existing","cursor":"cursor-started","sequence":0,"type":"execution.started","timestampSource":"server","createdAt":0}',
-        '{"executionId":"turn-existing","cursor":"cursor-a","sequence":1,"type":"model.output.completed","createdAt":1,"text":"answer"}',
-        '{"executionId":"turn-existing","cursor":"cursor-b","sequence":2,"type":"execution.completed","timestampSource":"server","createdAt":2}',
+        '{"executionId":"turn-existing-run","cursor":"cursor-started","sequence":0,"type":"execution.started","timestampSource":"baton","createdAt":0}',
+        '{"executionId":"turn-existing-run","cursor":"cursor-a","sequence":1,"type":"model.output.completed","createdAt":1,"text":"answer"}',
+        '{"executionId":"turn-existing-run","cursor":"cursor-b","sequence":2,"type":"execution.completed","timestampSource":"baton","createdAt":2}',
       ])
     }),
   )
@@ -90,7 +90,7 @@ describe("Operation", () => {
         productLayer({
           repositoryLayer: ThreadRepository.memoryLayer(),
           turnRepositoryLayer: TurnRepository.memoryLayer(),
-          backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+          backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
           defaultWorkspace: "/work",
           makeThreadId: Effect.succeed(Thread.ThreadId.make("thread-a")),
           makeTurnId: Effect.succeed(Turn.TurnId.make("turn-a")),
@@ -117,7 +117,7 @@ describe("Operation", () => {
         productLayer({
           repositoryLayer: ThreadRepository.memoryLayer(),
           turnRepositoryLayer: TurnRepository.memoryLayer(),
-          backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+          backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
           defaultWorkspace: "/work",
           makeThreadId: Effect.succeed(Thread.ThreadId.make("thread-a")),
           makeTurnId: Effect.succeed(Turn.TurnId.make("turn-a")),
@@ -149,7 +149,6 @@ describe("Operation", () => {
           ...turnProvenance,
           executionRoute: executionRoute(),
           status: "running",
-          stopIntent: "none",
           createdAt: 1,
           updatedAt: 1,
         },
@@ -159,12 +158,12 @@ describe("Operation", () => {
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         backendLayer: Layer.succeed(
-          ExecutionBackend.Service,
-          ExecutionBackend.Service.of({
+          ExecutionGateway.Service,
+          ExecutionGateway.Service.of({
             ...backend,
-            inspect: (turnId) =>
-              Effect.succeed({ turnId, status: "running", waits: [], pendingTools: [], children: [] }),
-            start: (input) => Ref.update(starts, (count) => count + 1).pipe(Effect.andThen(backend.start(input))),
+            inspectTurn: () => Effect.succeed({ status: "running" }),
+            startTurn: (input) =>
+              Ref.update(starts, (count) => count + 1).pipe(Effect.andThen(backend.startTurn(input))),
           }),
         ),
         defaultWorkspace: "/work",
@@ -212,10 +211,10 @@ describe("Operation", () => {
           repositoryLayer: ThreadRepository.memoryLayer(),
           turnRepositoryLayer: TurnRepository.memoryLayer(),
           backendLayer: Layer.succeed(
-            ExecutionBackend.Service,
-            ExecutionBackend.Service.of({
+            ExecutionGateway.Service,
+            ExecutionGateway.Service.of({
               ...backend,
-              start: () => Effect.fail(ExecutionBackend.BackendError.make({ message: "backend failed" })),
+              startTurn: () => Effect.fail(ExecutionGateway.StartTurnFailure.make({ message: "backend failed" })),
             }),
           ),
           defaultWorkspace: "/work",

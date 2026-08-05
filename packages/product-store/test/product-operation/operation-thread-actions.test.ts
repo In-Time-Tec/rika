@@ -8,33 +8,19 @@ import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionStatus from "@rika/product/execution-status"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
-import * as ExecutionBackend from "@rika/product/execution-service"
-import { Console, Effect, Layer, Ref } from "effect"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
+import { Console, Effect, Layer, Ref, Stream } from "effect"
 import { TestConsole } from "effect/testing"
 import { projectionVersion } from "./interactive-session-base-support"
 
 import { provideLayer } from "../support/product-test-layer"
 
-const backend = ExecutionBackend.Service.of({
-  invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
-  createFanOut: () => Effect.die("unused"),
-  inspectFanOut: () => Effect.die("unused"),
-  cancelFanOut: () => Effect.die("unused"),
-  registerWorkflows: () => Effect.die("unused"),
-  startWorkflow: () => Effect.die("unused"),
-  inspectWorkflow: () => Effect.die("unused"),
-  cancelWorkflow: () => Effect.die("unused"),
-  start: () => Effect.die("unused"),
-  replay: (turnId) => {
-    let status: "failed" | "cancelled" | "completed" = "completed"
-    if (turnId === "failed") status = "failed"
-    else if (turnId === "cancelled") status = "cancelled"
-    return Effect.succeed({ turnId, status, events: [] })
-  },
-  cancel: () => Effect.die("unused"),
-  inspect: () => Effect.void.pipe(Effect.as(undefined)),
-  steer: () => Effect.die("unused"),
-  resolveInvocationSource: () => Effect.die("unused"),
+const backend = ExecutionGateway.Service.of({
+  startTurn: () => Effect.die("unused"),
+  cancelTurn: () => Effect.die("unused"),
+  steerTurn: () => Effect.die("unused"),
+  watchTurn: () => Stream.die("unused"),
+  inspectTurn: () => Effect.succeed({ status: "unavailable" }),
 })
 
 const thread = (id: string, overrides: Partial<Thread.Thread> = {}): Thread.Thread => ({
@@ -72,7 +58,6 @@ describe("Operation thread actions", () => {
             _tag: "AgentExecution",
             id: Turn.TurnId.make(status),
             threadId: alpha.id,
-            stopIntent: "none" as const,
             prompt: `${status} prompt`,
             author: { _tag: "Human" },
             lineage: { _tag: "Original" },
@@ -88,7 +73,7 @@ describe("Operation thread actions", () => {
         productLayer({
           repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
           turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-          backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+          backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
           defaultWorkspace: "/work",
           makeThreadId: Effect.succeed(Thread.ThreadId.make("unused")),
           makeTurnId: Effect.succeed(Turn.TurnId.make("unused-turn")),
@@ -140,7 +125,7 @@ describe("Operation thread actions", () => {
       const emptyLayer = productLayer({
         repositoryLayer: ThreadRepository.memoryLayer(),
         turnRepositoryLayer: TurnRepository.memoryLayer(),
-        backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+        backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
         defaultWorkspace: "/work",
         makeThreadId: Effect.die("unused"),
         makeTurnId: Effect.die("unused"),
@@ -171,10 +156,8 @@ describe("Operation thread actions", () => {
           lineage: { _tag: "Original" },
           executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
           status: "completed",
-          stopIntent: "none",
           createdAt: 1,
           updatedAt: 2,
-          lastCursor: "a",
         },
         {
           _tag: "AgentExecution",
@@ -185,7 +168,6 @@ describe("Operation thread actions", () => {
           lineage: { _tag: "Original" },
           executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
           status: "failed",
-          stopIntent: "none",
           createdAt: 3,
           updatedAt: 4,
         },
@@ -197,7 +179,7 @@ describe("Operation thread actions", () => {
       const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-        backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+        backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
         defaultWorkspace: "/work",
         makeThreadId: next(threadIds).pipe(Effect.map(Thread.ThreadId.make)),
         makeTurnId: next(turnIds).pipe(Effect.map(Turn.TurnId.make)),
@@ -218,7 +200,7 @@ describe("Operation thread actions", () => {
       }).pipe(provideLayer(layer))
       expect(yield* turns.list(Thread.ThreadId.make("bounded"))).toHaveLength(1)
       expect(yield* turns.list(Thread.ThreadId.make("complete"))).toMatchObject([
-        { prompt: "one", status: "completed", lastCursor: "a" },
+        { prompt: "one", status: "completed" },
         { prompt: "two", status: "failed" },
       ])
       expect(yield* repository.get(Thread.ThreadId.make("bounded"))).toMatchObject({ labels: ["copy-me"] })
@@ -226,7 +208,7 @@ describe("Operation thread actions", () => {
     }),
   )
 
-  it.effect("forks terminal recorded shells with their canonical transcript and no Relay execution", () =>
+  it.effect("forks terminal recorded shells with their canonical transcript and no Baton Run", () =>
     Effect.gen(function* () {
       const source = thread("shell-source")
       const repository = yield* ThreadRepository.makeMemory([source])
@@ -240,7 +222,6 @@ describe("Operation thread actions", () => {
           lineage: { _tag: "Original" },
           executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
           status: "completed",
-          stopIntent: "none",
           createdAt: 1,
           updatedAt: 2,
         },
@@ -256,7 +237,6 @@ describe("Operation thread actions", () => {
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
           status: "completed",
-          stopIntent: "none",
           createdAt: 3,
           updatedAt: 4,
           result: { text: "copied", truncated: false, exitCode: 0 },
@@ -264,16 +244,17 @@ describe("Operation thread actions", () => {
         projectionVersion,
       )
       const inspected = yield* Ref.make<ReadonlyArray<string>>([])
-      const forkBackend = ExecutionBackend.Service.of({
+      const forkBackend = ExecutionGateway.Service.of({
         ...backend,
-        inspect: (turnId) => Ref.update(inspected, (ids) => [...ids, turnId]).pipe(Effect.as(undefined)),
+        inspectTurn: (link) =>
+          Ref.update(inspected, (ids) => [...ids, link.turnId]).pipe(Effect.as({ status: "unavailable" })),
       })
       const turnIds = yield* Ref.make<ReadonlyArray<string>>(["fork-agent", "fork-shell"])
       const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
-        backendLayer: Layer.succeed(ExecutionBackend.Service, forkBackend),
+        backendLayer: Layer.succeed(ExecutionGateway.Service, forkBackend),
         defaultWorkspace: "/work",
         makeThreadId: Effect.succeed(Thread.ThreadId.make("shell-fork")),
         makeTurnId: Ref.modify(turnIds, (ids) => [Turn.TurnId.make(ids[0] ?? "missing"), ids.slice(1)] as const),
@@ -312,7 +293,7 @@ describe("Operation thread actions", () => {
         executionCheckpoints: [],
         projectionVersion: projectionVersion,
       })
-      expect(yield* Ref.get(inspected)).toEqual(["source-agent"])
+      expect(yield* Ref.get(inspected)).toEqual([])
     }),
   )
 
@@ -332,7 +313,6 @@ describe("Operation thread actions", () => {
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
           status: "running",
-          stopIntent: "none",
           createdAt: 1,
           updatedAt: 1,
         },
@@ -343,8 +323,8 @@ describe("Operation thread actions", () => {
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
         transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
         backendLayer: Layer.succeed(
-          ExecutionBackend.Service,
-          ExecutionBackend.Service.of({ ...backend, inspect: () => Effect.die("recorded shell reached Relay") }),
+          ExecutionGateway.Service,
+          ExecutionGateway.Service.of({ ...backend, inspectTurn: () => Effect.die("recorded shell reached gateway") }),
         ),
         defaultWorkspace: "/work",
         makeThreadId: Effect.succeed(Thread.ThreadId.make("forbidden-shell-fork")),

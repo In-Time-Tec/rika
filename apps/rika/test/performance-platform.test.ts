@@ -13,7 +13,7 @@ describe("performance role runtime resolution", () => {
       arguments: ["/repo/apps/rika/src/interactive-main.ts"],
       evidencePath: "/repo/apps/rika/src/interactive-main.ts",
     })
-    expect(runtimes.resident.arguments).toEqual(["/repo/apps/rika/src/resident-main.ts"])
+    expect(runtimes.server.arguments).toEqual(["/repo/apps/rika/src/server-main.ts"])
   })
 
   test("locates packaged role executables beside the performance executable", () => {
@@ -23,8 +23,8 @@ describe("performance role runtime resolution", () => {
       sourceDirectory: "/install/bin",
     })
     expect(runtimes.interactive.executable).toBe("/install/bin/.rika-interactive")
-    expect(runtimes.resident.executable).toBe("/install/bin/.rika-resident")
+    expect(runtimes.server.executable).toBe("/install/bin/.rika-server")
     expect(runtimes.launcher.executable).toBe("/install/bin/rika")
-    expect(runtimes.resident.executable).not.toBe(runtimes.interactive.executable)
+    expect(runtimes.server.executable).not.toBe(runtimes.interactive.executable)
   })
 })

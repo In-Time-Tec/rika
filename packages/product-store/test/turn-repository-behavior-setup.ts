@@ -14,7 +14,7 @@ export type CurrentCreateInput = Omit<
   Parameters<TurnContract.Interface["createForSubmission"]>[0],
   "executionRoute" | "queueCapacity"
 > & {
-  readonly executionRoute?: ExecutionRouteSnapshot.ExecutionRoutePin
+  readonly executionRoute?: ExecutionRouteSnapshot.ExecutionRouteSnapshot
   readonly queueCapacity?: number
 }
 

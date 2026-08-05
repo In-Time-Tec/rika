@@ -9,12 +9,6 @@ export interface QueueSnapshot {
   readonly turns: ReadonlyArray<AgentExecutionTurn>
 }
 
-export interface QueueWake {
-  readonly threadId: ThreadId
-  readonly generation: number
-  readonly queueRevision: number
-}
-
 export interface QueueItemChange {
   readonly threadId: ThreadId
   readonly revision: number

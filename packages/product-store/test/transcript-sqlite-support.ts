@@ -50,13 +50,13 @@ export const createTurn = Effect.fn("TranscriptRepositoryTest.createTurn")(funct
     queueCapacity: 128,
     now: 2,
   })
-  return yield* turns.setStatus(turnId, "completed", undefined, 3)
+  return yield* turns.setStatus(turnId, "completed", 3)
 })
 
 export const _usageEvent: TranscriptSourceEvent.SourceEvent = {
   cursor: "usage-5",
   sequence: 5,
-  type: "model.usage.reported",
+  type: "model.attempt.completed",
   createdAt: 5,
   data: {
     provider: "openai",

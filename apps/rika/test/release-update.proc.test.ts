@@ -53,7 +53,7 @@ const buildArchive = Effect.fn("ReleaseUpdateProc.buildArchive")(function* (opti
     yield* fileSystem.writeFileString(path.join(stage, "bin", ".rika-interactive"), `interactive ${latest}`, {
       mode: 0o755,
     })
-    yield* fileSystem.writeFileString(path.join(stage, "bin", ".rika-resident"), `resident ${latest}`, {
+    yield* fileSystem.writeFileString(path.join(stage, "bin", ".rika-server"), `server ${latest}`, {
       mode: 0o755,
     })
   }
@@ -83,7 +83,7 @@ const installed = Effect.fn("ReleaseUpdateProc.installed")(function* (prefix: st
   yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-interactive"), "interactive 0.0.3", {
     mode: 0o755,
   })
-  yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-resident"), "resident 0.0.3", {
+  yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-server"), "server 0.0.3", {
     mode: 0o755,
   })
   const command = path.join(binDirectory, "rika")
@@ -148,8 +148,8 @@ it.effect("replaces a verified install in one rename and keeps the command on PA
       expect(yield* fileSystem.readFileString(path.join(install.installRoot, "bin", ".rika-interactive"))).toBe(
         `interactive ${latest}`,
       )
-      expect(yield* fileSystem.readFileString(path.join(install.installRoot, "bin", ".rika-resident"))).toBe(
-        `resident ${latest}`,
+      expect(yield* fileSystem.readFileString(path.join(install.installRoot, "bin", ".rika-server"))).toBe(
+        `server ${latest}`,
       )
       expect(yield* fileSystem.readFileString(install.command)).toBe(`rika ${latest}`)
       expect(yield* fileSystem.readDirectory(path.dirname(install.installRoot))).toEqual(["current"])

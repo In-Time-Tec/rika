@@ -4,8 +4,6 @@ import { ThreadId } from "@rika/product/thread-record"
 import { Turn, TurnId } from "@rika/product/turn-record"
 import { Status } from "@rika/product/execution-status"
 import { turnRowJson } from "./turn-row-json-codec"
-import { ExecutionExtensionPin } from "@rika/product/execution-workflow"
-import type { StopIntent } from "@rika/product/thread-state"
 import { RepositoryError } from "@rika/product/turn-repository"
 
 const Row = Schema.Struct({
@@ -14,11 +12,8 @@ const Row = Schema.Struct({
   turn_kind: Schema.String,
   prompt: Schema.String,
   status: Schema.String,
-  stop_intent: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  last_cursor: Schema.NullOr(Schema.String),
-  extension_pin_json: Schema.optionalKey(Schema.NullOr(Schema.String)),
   execution_route_json: Schema.NullOr(Schema.String),
-  review_fan_out_id: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  execution_link_json: Schema.optionalKey(Schema.NullOr(Schema.String)),
   prompt_parts_json: Schema.optionalKey(Schema.NullOr(Schema.String)),
   shell_command: Schema.NullOr(Schema.String),
   shell_result_text: Schema.NullOr(Schema.String),
@@ -34,14 +29,12 @@ const QueueStateRow = Schema.Struct({
   thread_id: Schema.String,
   revision: Schema.Finite,
   queued_count: Schema.Finite,
-  wake_generation: Schema.Finite,
-  wake_pending: Schema.Finite,
 })
 
 const {
-  extensionPin: ExtensionPinJson,
   promptParts: PromptPartsJson,
   executionRoute: ExecutionRouteJson,
+  executionLink: ExecutionLinkJson,
   author: AuthorJson,
   lineage: LineageJson,
 } = turnRowJson
@@ -75,7 +68,6 @@ export const decode = (row: unknown) =>
         prompt: value.prompt,
         command: value.shell_command,
         status: value.status,
-        stopIntent: "none",
         author,
         lineage,
         createdAt: value.created_at,
@@ -96,15 +88,15 @@ export const decode = (row: unknown) =>
     if (value.execution_route_json === null)
       return yield* RepositoryError.make({ message: `Agent execution turn ${id} has no execution route` })
     const status = yield* Schema.decodeUnknownEffect(Status)(value.status)
-    const extensionPin =
-      value.extension_pin_json == null
-        ? undefined
-        : yield* Schema.decodeUnknownEffect(ExtensionPinJson)(value.extension_pin_json)
     const promptParts =
       value.prompt_parts_json == null
         ? undefined
         : yield* Schema.decodeUnknownEffect(PromptPartsJson)(value.prompt_parts_json)
     const executionRoute = yield* Schema.decodeUnknownEffect(ExecutionRouteJson)(value.execution_route_json)
+    const executionLink =
+      value.execution_link_json == null
+        ? undefined
+        : yield* Schema.decodeUnknownEffect(ExecutionLinkJson)(value.execution_link_json)
     return {
       _tag: "AgentExecution" as const,
       id,
@@ -112,11 +104,8 @@ export const decode = (row: unknown) =>
       prompt: value.prompt,
       ...(promptParts === undefined ? {} : { promptParts }),
       status,
-      stopIntent: (value.stop_intent === "requested" ? "requested" : "none") satisfies StopIntent as StopIntent,
-      ...(value.last_cursor === null ? {} : { lastCursor: value.last_cursor }),
-      ...(extensionPin === undefined ? {} : { extensionPin }),
       executionRoute,
-      ...(value.review_fan_out_id == null ? {} : { reviewFanOutId: value.review_fan_out_id }),
+      ...(executionLink === undefined ? {} : { executionLink }),
       author,
       lineage,
       createdAt: value.created_at,
@@ -128,6 +117,3 @@ export const decodeAgent = (row: unknown) =>
   decode(row).pipe(
     Effect.filterOrFail(TurnResult.isAgentExecution, () => repositoryError("Expected an AgentExecution turn")),
   )
-
-export const encodeExtensionPin = (pin: ExecutionExtensionPin) =>
-  Schema.encodeEffect(ExtensionPinJson)(pin).pipe(Effect.mapError(repositoryError))

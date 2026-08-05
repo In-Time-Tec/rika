@@ -2,8 +2,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { describe, expect, it } from "@effect/vitest"
-import { Database as NativeDatabase } from "bun:sqlite"
-import { Effect, FileSystem, Layer, Schema } from "effect"
+import { Effect, FileSystem, Layer } from "effect"
 import * as Database from "../src/database/product-database-layer"
 import * as ThreadRepository from "../src/thread/sqlite-thread-repository"
 import * as Search from "../src/search/sqlite-thread-search-repository"
@@ -13,7 +12,6 @@ import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 
 const provideBun = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Layer.build(BunServices.layer).pipe(Effect.flatMap((context) => Effect.provide(effect, context)))
-const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString)
 
 const thread = (id: string, updatedAt: number, archived = false): Thread.Thread => ({
   id: Thread.ThreadId.make(id),
@@ -33,7 +31,6 @@ const turn = (target: Thread.Thread, prompt: string): Turn.AgentExecutionTurn =>
   threadId: target.id,
   prompt,
   status: "completed",
-  stopIntent: "none",
   executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
   author: { _tag: "Human" },
   lineage: { _tag: "Original" },
@@ -194,120 +191,6 @@ describe("thread search repository", () => {
         })
         expect(sqlResult.child).toEqual([["childAssistant"]])
         expect(sqlResult.file).toEqual([Thread.ThreadId.make("a")])
-      }).pipe(provideBun),
-    ),
-  )
-
-  it.effect("migrates schema 16 and backfills titles, labels, and existing prompts as Human", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem
-        const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-search-backfill-" })
-        const filename = `${directory}/rika.db`
-        yield* Layer.build(Database.layer(filename))
-        yield* Effect.sync(() => {
-          const database = new NativeDatabase(filename)
-          database.exec(`
-          DROP TRIGGER rika_thread_picker_summary_thread_insert;
-          DROP TRIGGER rika_thread_picker_summary_thread_update;
-          DROP TRIGGER rika_thread_picker_summary_turn_insert;
-          DROP TRIGGER rika_thread_picker_summary_turn_update;
-          DROP TRIGGER rika_thread_picker_summary_turn_before_delete;
-          DROP TRIGGER rika_thread_picker_summary_turn_delete;
-          DROP TRIGGER rika_thread_picker_summary_activity_insert;
-          DROP TRIGGER rika_thread_picker_summary_activity_update;
-          DROP TRIGGER rika_thread_picker_summary_activity_delete;
-          DROP TABLE rika_thread_picker_summary;
-          DROP INDEX rika_turns_thread_updated;
-          DROP INDEX rika_turns_thread_nonqueued;
-          DROP TABLE rika_turn_usage;
-          DROP TABLE rika_thread_search;
-          DROP TABLE rika_thread_search_files;
-          DROP TABLE rika_thread_relationships;
-          DROP TABLE rika_thread_invocation_receipts;
-          DROP TABLE rika_thread_result_routes;
-          DROP TABLE rika_thread_root_results;
-          ALTER TABLE rika_turns DROP COLUMN turn_kind;
-          ALTER TABLE rika_turns DROP COLUMN shell_command;
-          ALTER TABLE rika_turns DROP COLUMN shell_result_text;
-          ALTER TABLE rika_turns DROP COLUMN shell_result_truncated;
-          ALTER TABLE rika_turns DROP COLUMN shell_result_exit_code;
-          ALTER TABLE rika_threads DROP COLUMN lineage_json;
-          ALTER TABLE rika_turns DROP COLUMN author_json;
-          ALTER TABLE rika_turns DROP COLUMN lineage_json;
-          ALTER TABLE rika_turns DROP COLUMN stop_intent;
-          DROP TABLE rika_transcript_execution_checkpoints;
-          DROP TABLE rika_transcript_units;
-          DROP TABLE rika_transcript_checkpoints;
-          CREATE TABLE rika_transcript_checkpoints (
-            turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
-            thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
-            drafts_json TEXT NOT NULL DEFAULT '[]',
-            revision INTEGER NOT NULL DEFAULT -1,
-            projection_version INTEGER NOT NULL DEFAULT 2,
-            oldest_cursor TEXT,
-            checkpoint_cursor TEXT,
-            cost_usd REAL,
-            updated_at INTEGER NOT NULL,
-            model_phase INTEGER NOT NULL DEFAULT -1,
-            usage_cursors_json TEXT,
-            pricing_version TEXT
-          );
-          CREATE TABLE rika_transcript_units (
-            unit_key TEXT PRIMARY KEY NOT NULL,
-            turn_id TEXT NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
-            thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
-            unit_sequence INTEGER NOT NULL,
-            unit_part INTEGER NOT NULL,
-            revision INTEGER NOT NULL,
-            unit_json TEXT NOT NULL,
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL
-          );
-          CREATE INDEX rika_transcript_units_page ON rika_transcript_units (
-            thread_id, created_at DESC, turn_id DESC, unit_sequence DESC, unit_part DESC, unit_key DESC
-          );
-          CREATE INDEX rika_transcript_units_turn ON rika_transcript_units (
-            turn_id, unit_sequence ASC, unit_part ASC, unit_key ASC
-          );
-          CREATE TABLE rika_transcript_entries (
-            turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
-            thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
-            prompt TEXT NOT NULL,
-            status TEXT NOT NULL,
-            events_json TEXT NOT NULL DEFAULT '[]',
-            revision INTEGER NOT NULL DEFAULT 1,
-            projection_version INTEGER NOT NULL DEFAULT 1,
-            oldest_cursor TEXT,
-            checkpoint_cursor TEXT,
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL
-          );
-          CREATE INDEX rika_transcript_page ON rika_transcript_entries (
-            thread_id, created_at DESC, turn_id DESC
-          );
-          DELETE FROM rika_migrations WHERE migration_id IN (17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28);
-          INSERT INTO rika_workspaces (path, created_at) VALUES ('/work/current', 1);
-          INSERT INTO rika_threads (id, workspace, title, labels_json, created_at, updated_at)
-            VALUES ('legacy', '/work/current', 'Legacy title', '["legacy-label"]', 1, 2);
-          INSERT INTO rika_turns (id, thread_id, prompt, status, execution_route_json, created_at, updated_at)
-            VALUES ('legacy-turn', 'legacy', 'historical prompt', 'completed', '${encodeJson(ExecutionRouteSnapshot.testExecutionRoute()).replaceAll("'", "''")}', 1, 2);
-        `)
-          database.close()
-        })
-        const database = Database.layer(filename)
-        const context = yield* Layer.build(Layer.mergeAll(database, Search.layer.pipe(Layer.provide(database))))
-        const repository = yield* Search.Service.pipe(Effect.provide(context))
-        const result = yield* repository.search({ workspace: "/work/current", query: "historical" })
-        expect(result.results).toMatchObject([{ threadId: "legacy", matchedBy: ["humanPrompt"] }])
-        yield* Effect.sync(() => {
-          const migrated = new NativeDatabase(filename, { readonly: true })
-          expect(
-            migrated.query("SELECT migration_id, name FROM rika_migrations ORDER BY migration_id DESC LIMIT 1").all(),
-          ).toEqual([{ migration_id: 28, name: "product_route_snapshot" }])
-          expect(migrated.query("SELECT COUNT(*) AS count FROM rika_migrations").all()).toEqual([{ count: 28 }])
-          migrated.close()
-        })
       }).pipe(provideBun),
     ),
   )

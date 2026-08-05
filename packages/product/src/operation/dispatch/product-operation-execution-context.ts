@@ -5,39 +5,25 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionRequest from "@rika/product/execution-request"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"
-import * as ExecutionRecovery from "./execution-recovery-dispatch"
 import * as ContextMentions from "../../context/context-mention-parser"
 import * as FileMentions from "../../context/file-mention-parser"
 import * as ResolvedContext from "../../context/context-resolution-service"
-import { Context, Effect } from "effect"
+import { Effect } from "effect"
 import { operationError } from "../operation-error"
+import type { ProductOperationExecutionStateInput } from "./product-operation-runtime-execution-state"
 
 const untrustedData = (value: unknown) => JSON.stringify(value).replaceAll("<", "\\u003c")
 const markdownExport = (thread: Thread.Thread, turns: ReadonlyArray<Turn.Turn>) =>
   turns.map((turn) => turn.prompt).join("\\n")
 
-export const makeExecutionContext = (input: any) =>
+export const makeExecutionContext = (input: Pick<ProductOperationExecutionStateInput, "options">) =>
   Effect.sync(() => {
-    const {
-      options,
-      extensionService,
-      executionDependencies,
-      claimTurnObserver,
-      releaseTurnObserver,
-      claimQueuedTurn,
-    } = input
-    const typedExecutionDependencies: Context.Context<
-      | TurnRepository.Service
-      | ThreadRepository.Service
-      | ResolvedContext.Service
-      | ExecutionExtensions.ExecutionExtensionService
-    > = executionDependencies
+    const { options } = input
     const typedExecutionExtensions:
       | {
           readonly mcpFingerprint: Effect.Effect<string, never, never>
         }
       | undefined = options.executionExtensions
-    const { startReviewSettlement } = input
     const testRoute = (mode: Parameters<typeof ExecutionRouteSnapshot.testExecutionRoute>[0]) =>
       Effect.succeed(ExecutionRouteSnapshot.testExecutionRoute(mode))
     const resolveExecutionRoute = options.resolveExecutionRoute ?? testRoute
@@ -109,7 +95,6 @@ export const makeExecutionContext = (input: any) =>
     const prepareExecution = Effect.fn("ProductOperation.prepareExecution")(function* (
       turn: Turn.AgentExecutionTurn,
       workspace: string,
-      persistExtensionPin: boolean = true,
     ) {
       const resolved = yield* executionPrompt(workspace, turn.prompt, turn.promptParts)
       let promptParts = turn.promptParts
@@ -117,42 +102,10 @@ export const makeExecutionContext = (input: any) =>
         promptParts = [...promptParts, { type: "text" as const, text: resolved.prompt.slice(turn.prompt.length) }]
       }
       if (typedExecutionExtensions === undefined)
-        return { prompt: resolved.prompt, promptParts, extensionPin: turn.extensionPin, messages: resolved.messages }
+        return { prompt: resolved.prompt, promptParts, messages: resolved.messages }
       const extensions = yield* ExecutionExtensions.ExecutionExtensionService
-      if (turn.extensionPin !== undefined) {
-        yield* extensions.resume(turn.extensionPin)
-        return { prompt: resolved.prompt, promptParts, extensionPin: turn.extensionPin, messages: resolved.messages }
-      }
-      const activated = yield* extensions.future(yield* typedExecutionExtensions.mcpFingerprint, resolved.digest)
-      if (persistExtensionPin) {
-        const turns = yield* TurnRepository.Service
-        yield* turns.setExtensionPin(turn.id, activated.pin)
-      }
-      return { prompt: resolved.prompt, promptParts, extensionPin: activated.pin, messages: resolved.messages }
+      yield* extensions.future(yield* typedExecutionExtensions.mcpFingerprint, resolved.digest)
+      return { prompt: resolved.prompt, promptParts, messages: resolved.messages }
     })
-    const reconcileExecutions = ExecutionRecovery.reconcileInternal(
-      extensionService,
-      (turn, workspace) =>
-        prepareExecution(turn, workspace, false).pipe(
-          Effect.provide(typedExecutionDependencies),
-          Effect.mapError((error) => operationError(String(error))),
-        ),
-      (turn, inspection) =>
-        startReviewSettlement(turn, inspection.fanOutId, inspection).pipe(
-          Effect.provide(typedExecutionDependencies),
-          Effect.asVoid,
-          Effect.mapError((error) => operationError(String(error))),
-        ),
-      {
-        claim: (turn) => claimTurnObserver(turn.id, turn.status),
-        release: releaseTurnObserver,
-        claimQueued: claimQueuedTurn,
-      },
-      false,
-    ).pipe(
-      Effect.provide(typedExecutionDependencies),
-      Effect.scoped,
-      Effect.mapError((error) => operationError(String(error))),
-    )
-    return { resolveExecutionRoute, executionPrompt, prepareExecution, reconcileExecutions }
+    return { resolveExecutionRoute, executionPrompt, prepareExecution }
   }).pipe(Effect.mapError((error) => operationError(String(error), error)))

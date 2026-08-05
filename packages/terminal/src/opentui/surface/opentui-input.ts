@@ -122,7 +122,7 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
     const contextCells = availableWidth < 40 ? 4 : 8
     const contextPrefix = availableWidth < 40 ? " " : " ctx "
     const border = toOpenColor(colors.text)
-    const legacyUsageText = (): string => {
+    const compactUsageText = (): string => {
       if (model.usageDisplay === "time") {
         if (model.usageTime?._tag === "Available")
           return formatActiveTime(activeTimeAt(model.usageTime, this.currentTimeMillis()))
@@ -142,7 +142,7 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
     }
     const buildUsageChunks = (): Array<TextChunk> => {
       if (!contextVisible) {
-        const usageText = legacyUsageText()
+        const usageText = compactUsageText()
         if (usageText.length === 0) return []
         const usage = fg(model.currentThreadId === undefined ? border : colors[model.mode])(` ${usageText} `)
         return [this.usageLabelHovered ? bold(usage) : usage]

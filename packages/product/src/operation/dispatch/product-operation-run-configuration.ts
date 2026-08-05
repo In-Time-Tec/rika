@@ -3,8 +3,9 @@ import * as ConfigOperations from "../contract/configuration-operation"
 import * as ConfigurationService from "@rika/configuration/configuration-service"
 import type { Input, OperationUnavailable } from "../contract/product-operation"
 import type { ProductConfigOperations } from "./product-operation-integrations"
+import type { ProductOperationRunFactory } from "./product-operation-run-branches"
 const runConfigurationOperationImpl = (
-  factory: any,
+  factory: ProductOperationRunFactory,
   input: Extract<Input, { readonly _tag: "Config" | "Doctor" | "Mcp" }>,
 ) =>
   Effect.gen(function* () {
@@ -37,12 +38,12 @@ const runConfigurationOperationImpl = (
 export const runConfigurationOperation: {
   (
     arg1: Extract<Input, { readonly _tag: "Config" | "Doctor" | "Mcp" }>,
-  ): (arg0: any) => ReturnType<typeof runConfigurationOperationImpl>
+  ): (arg0: ProductOperationRunFactory) => ReturnType<typeof runConfigurationOperationImpl>
   (
-    arg0: any,
+    arg0: ProductOperationRunFactory,
     arg1: Extract<Input, { readonly _tag: "Config" | "Doctor" | "Mcp" }>,
   ): ReturnType<typeof runConfigurationOperationImpl>
 } = Function.dual(2, runConfigurationOperationImpl)
 
-const unavailable = (factory: any, input: Input, message?: string): OperationUnavailable =>
+const unavailable = (factory: ProductOperationRunFactory, input: Input, message?: string): OperationUnavailable =>
   factory.unavailable(input, message ?? "Operation unavailable")

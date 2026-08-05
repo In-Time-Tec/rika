@@ -1,10 +1,10 @@
 import { expect, test } from "vitest"
-import { Deferred, Effect, FileSystem, Path } from "effect"
+import { Effect, FileSystem, Path } from "effect"
 import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
-import { makeProjectionsLegacy } from "./tui-app-legacy-projection"
 
 const activeTimePattern = /◷ [0-9]+s/u
+const tuiTestTimeout = 30_000
 
 const spanHasColor = (app: TuiApp.TuiApp, text: string, color: string): boolean =>
   app
@@ -33,7 +33,7 @@ test(
             {
               when: (prompt) => !prompt.includes("Delegate nested work, then fail."),
               script: [
-                model.toolCall("review", { prompt: "Run nested work." }, "nested-agent"),
+                model.toolCall("oracle", { prompt: "Run nested work." }, "nested-agent"),
                 model.toolCall("await_subagents", {}, "top-join"),
                 model.text("TOP_LEVEL_RELOAD_COMPLETE"),
               ],
@@ -65,7 +65,7 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -99,7 +99,7 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -123,7 +123,7 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -175,7 +175,7 @@ test(
         )
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -226,7 +226,7 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -251,7 +251,7 @@ test(
             {
               when: (prompt) => !prompt.includes("ROOT_USER_PROMPT"),
               script: [
-                model.toolCall("review", { prompt: "NESTED_AGENT_PROMPT" }, "nested-agent"),
+                model.toolCall("oracle", { prompt: "NESTED_AGENT_PROMPT" }, "nested-agent"),
                 model.toolCall("await_subagents", {}, "parent-join"),
                 model.text("PARENT_AGENT_FINAL"),
               ],
@@ -276,7 +276,7 @@ test(
           const rootRow = lines.findIndex((line) => line.includes("ROOT_USER_PROMPT"))
           const parentPromptRow = lines.findIndex((line) => line.includes("PARENT_AGENT_PROMPT"))
           const nestedHeaderRow = lines.findIndex(
-            (line, index) => index > parentPromptRow && line.includes("Reviewed code"),
+            (line, index) => index > parentPromptRow && line.includes("Oracle has spoken"),
           )
           const nestedHeader = nestedHeaderRow < 0 ? undefined : lines[nestedHeaderRow]
           const nestedPrompt = lines.find((line) => line.includes("NESTED_AGENT_PROMPT"))
@@ -303,11 +303,11 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
-  "distinguishes a reported, an unreported, and a failed subagent in the transcript",
+  "distinguishes reported, silent, and failed subagents in the transcript",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -348,7 +348,6 @@ test(
             yield* Effect.promise(() => app.type(prompt))
             app.pressEnter()
             yield* app.waitFrame(marker)
-            yield* app.settled
           })
 
         yield* delegate("Delegate work that reports back.", "ROOT_AFTER_REPORT")
@@ -359,16 +358,16 @@ test(
 
         yield* delegate("Delegate work that reports nothing.", "ROOT_AFTER_NO_REPORT")
         const unreported = app.frame()
-        expect(unreported.match(/Subagent finished/g) ?? []).toHaveLength(1)
-        expect(unreported.match(/Subagent failed/g) ?? []).toHaveLength(1)
+        expect(unreported.match(/Subagent finished/g) ?? []).toHaveLength(2)
+        expect(unreported.match(/Subagent failed/g) ?? []).toHaveLength(0)
 
         yield* delegate("Delegate work that fails outright.", "ROOT_AFTER_FAILURE")
         const failed = app.frame()
-        expect(failed.match(/Subagent failed/g) ?? []).toHaveLength(2)
+        expect(failed.match(/Subagent failed/g) ?? []).toHaveLength(1)
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -401,7 +400,7 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -479,7 +478,7 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -499,7 +498,7 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -545,7 +544,7 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -577,7 +576,7 @@ test(
         yield* app.done
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -601,7 +600,7 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -629,7 +628,7 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -674,51 +673,7 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
-)
-
-test(
-  "reports rebuild progress while a legacy thread refolds and clears it once the projection lands",
-  () =>
-    TuiApp.run(
-      Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem
-        const root = yield* fileSystem.makeTempDirectoryScoped({ directory: "/tmp", prefix: "rika-refold-" })
-
-        yield* Effect.scoped(
-          Effect.gen(function* () {
-            const app = yield* TuiApp.tuiApp({ root, script: [model.text("LEGACY_TURN_COMPLETE")] })
-            yield* Effect.promise(() => app.type("Persist a legacy turn."))
-            app.pressEnter()
-            yield* app.waitFrame("LEGACY_TURN_COMPLETE")
-            yield* app.settled
-            yield* app.quit
-          }),
-        )
-
-        expect(yield* makeProjectionsLegacy(root)).toContain("tui-turn-0")
-        const held = yield* Deferred.make<void>()
-
-        yield* Effect.scoped(
-          Effect.gen(function* () {
-            const app = yield* TuiApp.tuiApp({
-              root,
-              initialThreadId: "tui-thread-0",
-              idStart: 10,
-              script: [],
-              holdExecutionFollows: held,
-            })
-            const rebuilding = yield* app.waitFrame("Rebuilding thread projection")
-            expect(rebuilding).toContain("Persist a legacy turn.")
-            yield* Deferred.succeed(held, undefined)
-            const rebuilt = yield* app.waitGone("Rebuilding thread projection")
-            expect(rebuilt).toContain("LEGACY_TURN_COMPLETE")
-            yield* app.quit
-          }),
-        )
-      }),
-    ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -746,5 +701,5 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )

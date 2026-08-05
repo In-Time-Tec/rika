@@ -1,43 +1,15 @@
-import * as ThreadRepository from "@rika/product/thread-repository"
-import * as TurnRepository from "@rika/product/turn-repository"
-import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
-import * as TranscriptRepository from "@rika/product/transcript-repository"
-import * as ExecutionBackend from "@rika/product/execution-service"
-import * as ResolvedContext from "../../context/context-resolution-service"
-import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"
-import { Context, Effect } from "effect"
+import { Effect } from "effect"
 import type { InteractiveEvent } from "./interactive-event"
 import { makeInteractiveQueue } from "./interactive-session-queue"
 import { makeInteractiveSubmission } from "./interactive-session-submission"
+import type { InteractiveRuntimeContext } from "./interactive-session-runtime"
 
-export const makeInteractiveExecution = (input: any) => {
-  const typedExecutionDependencies: Context.Context<
-    | ThreadRepository.Service
-    | TurnRepository.Service
-    | ThreadSummaryRepository.Service
-    | TranscriptRepository.Service
-    | ExecutionBackend.Service
-    | ResolvedContext.Service
-    | ExecutionExtensions.ExecutionExtensionService
-  > = input.executionDependencies
+export const makeInteractiveExecution = (input: InteractiveRuntimeContext) => {
   const queue = makeInteractiveQueue(input)
   const submit = makeInteractiveSubmission({ ...input, ...queue })
-  const safe = <E>(
-    dispatch: (event: InteractiveEvent) => void,
-    effect: Effect.Effect<
-      void,
-      E,
-      | ThreadRepository.Service
-      | TurnRepository.Service
-      | ThreadSummaryRepository.Service
-      | TranscriptRepository.Service
-      | ExecutionBackend.Service
-      | ResolvedContext.Service
-      | ExecutionExtensions.ExecutionExtensionService
-    >,
-  ) =>
+  const safe = <A, E, R>(dispatch: (event: InteractiveEvent) => void, effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
-      Effect.provide(typedExecutionDependencies),
+      Effect.provide(input.executionDependencies),
       Effect.scoped,
       Effect.catch((error) => Effect.sync(() => input.dispatchFailure(dispatch, error))),
     )

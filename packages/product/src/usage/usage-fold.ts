@@ -1,12 +1,12 @@
 import { Function } from "effect"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import * as TranscriptUsage from "@rika/transcript/model-usage-fallback"
+import * as ModelAttemptUsage from "@rika/transcript/model-attempt-usage"
 import { Result } from "effect"
 import type { AttemptCost } from "./usage-attempt"
 import { Attempt } from "./usage-attempt"
 import type { ActiveEvent, RootExecution } from "./usage-event"
-import { Lifecycle, ProjectionFailure, isLifecycleEvent, isObservedEvent, isServerStamped } from "./usage-event"
+import { Lifecycle, ProjectionFailure, isBatonStamped, isLifecycleEvent, isObservedEvent } from "./usage-event"
 import { executionIntervals } from "./usage-active-time"
 import type { ContextReading } from "./usage-context-reading"
 import { empty, type Snapshot } from "./usage-snapshot"
@@ -215,11 +215,11 @@ const applyActive = (
     cursor: event.cursor,
     sequence: event.sequence,
   }
-  if (!isServerStamped(event))
+  if (!isBatonStamped(event))
     return Result.fail(
       ProjectionFailure.make({
-        reason: "missing-server-stamp",
-        message: "Lifecycle event lacks a server timestamp",
+        reason: "missing-baton-stamp",
+        message: "Lifecycle event lacks a Baton timestamp",
         ...context,
       }),
     )
@@ -403,8 +403,8 @@ const applyAttempt = (
     tokens: { _tag: "Announced" },
   }
   let next = current
-  if (event.type === "model.usage.reported") {
-    const decoded = TranscriptUsage.usageTokens(event.data ?? {})
+  if (event.type === "model.attempt.completed" || event.type === "model.attempt.failed") {
+    const decoded = ModelAttemptUsage.usageTokens(event.data ?? {})
     next = {
       ...current,
       tokens:
@@ -412,7 +412,7 @@ const applyAttempt = (
           ? Attempt.countedTokens(current.tokens, decoded.total)
           : Attempt.uncountable(current.tokens, "usage-uncountable"),
     }
-    const inputTokens = TranscriptUsage.usageInputTokens(event.data ?? {})
+    const inputTokens = ModelAttemptUsage.usageInputTokens(event.data ?? {})
     const modelCallId = Attempt.stringField(event.data, "model_call_id") ?? attemptId
     const attempt = integerField(event.data, "attempt") ?? 0
     if (
@@ -450,8 +450,18 @@ const applyAttempt = (
         value.changed.executionContexts = true
       }
     }
-  } else if (event.type === "model.attempt.failed") next = Attempt.settle(current, "attempt-failed")
-  else if (event.data !== undefined && Object.hasOwn(event.data, "cost")) {
+    if (event.data !== undefined && Object.hasOwn(event.data, "cost")) {
+      const amount = Attempt.providerCostUsd(event.data)
+      next = {
+        ...next,
+        cost:
+          amount === undefined
+            ? Attempt.unpriceable(next.cost, "provider-cost-malformed")
+            : Attempt.providerPriced(next.cost, amount),
+      }
+    }
+    if (event.type === "model.attempt.failed") next = Attempt.settle(next, "attempt-failed")
+  } else if (event.data !== undefined && Object.hasOwn(event.data, "cost")) {
     const amount = Attempt.providerCostUsd(event.data)
     next = {
       ...current,

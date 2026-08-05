@@ -80,14 +80,17 @@ export const layer = layerWithStore.pipe(
 export const testLayer = (connect: McpRuntimeInterface["connect"]) =>
   Layer.succeed(McpRuntimeService, McpRuntimeService.of({ connect }))
 
-export const discover = Effect.fn("McpRuntime.discover")(function* (server: Server) {
-  const runtime = yield* McpRuntimeService
-  const source = yield* runtime.connect(server)
-  return yield* source.tools.pipe(
-    Effect.map((tools) => tools.toSorted((left, right) => left.name.localeCompare(right.name))),
-    Effect.mapError((error) => Diagnostic.make({ server: server.name, phase: "discover", message: String(error) })),
-  )
-})
+export const discover: (
+  server: Server,
+) => Effect.Effect<ReadonlyArray<McpToolSource.DiscoveredTool>, Diagnostic, McpRuntimeService | Scope.Scope> =
+  Effect.fn("McpRuntime.discover")(function* (server: Server) {
+    const runtime = yield* McpRuntimeService
+    const source = yield* runtime.connect(server)
+    return yield* source.tools.pipe(
+      Effect.map((tools) => tools.toSorted((left, right) => left.name.localeCompare(right.name))),
+      Effect.mapError((error) => Diagnostic.make({ server: server.name, phase: "discover", message: String(error) })),
+    )
+  })
 
 export const call = Effect.fn("McpRuntime.call")(function* (
   server: Server,

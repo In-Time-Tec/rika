@@ -1,81 +1,41 @@
-import { describe, expect, it } from "@effect/vitest"
-import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
-import * as ExecutionEvent from "@rika/product/execution-event"
-import * as ExecutionIdentifier from "@rika/product/execution-identifier"
-import { Context, Effect, Layer } from "effect"
-import { lazyBackendLayer } from "../src/resident/composition/lazy-execution-backend"
+import { expect, it } from "@effect/vitest"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
+import { Context, Effect, Layer, Stream } from "effect"
+import { lazyBackendLayer } from "../src/server/composition/lazy-execution-backend"
 
-const completedResult = (turnId: string): ExecutionEvent.Result => ({ turnId, status: "completed", events: [] })
+it.effect("delegates the five execution operations through the deferred backend", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const calls: Array<string> = []
+      const link = { runId: "opaque-run", turnId: "turn-1", threadId: "thread-1" }
+      const service = Layer.succeed(
+        ExecutionGateway.Service,
+        ExecutionGateway.Service.of({
+          startTurn: () => Effect.sync(() => (calls.push("start"), link)),
+          cancelTurn: () => Effect.sync(() => calls.push("cancel")),
+          steerTurn: () => Effect.sync(() => calls.push("steer")),
+          watchTurn: () => Stream.fromEffect(Effect.sync(() => calls.push("watch"))).pipe(Stream.drain),
+          inspectTurn: () => Effect.sync(() => (calls.push("inspect"), { status: "running" as const })),
+        }),
+      )
+      const context = yield* Layer.build(lazyBackendLayer(service))
+      const backend = Context.get(context, ExecutionGateway.Service)
 
-const recordingBackend = (calls: Array<ReadonlyArray<unknown>>) => {
-  const record = (...call: ReadonlyArray<unknown>) => Effect.sync(() => calls.push(call))
-  return ExecutionBackend.Service.of({
-    invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
-    resolveInvocationSource: () => Effect.die("unused"),
-    createFanOut: () => Effect.die("unused"),
-    inspectFanOut: () => Effect.die("unused"),
-    cancelFanOut: () => Effect.die("unused"),
-    registerWorkflows: () => Effect.die("unused"),
-    startWorkflow: () => Effect.die("unused"),
-    inspectWorkflow: () => Effect.die("unused"),
-    cancelWorkflow: () => Effect.die("unused"),
-    start: (input) => Effect.succeed(completedResult(String(input.turnId))),
-    replay: (turnId, afterCursor, reference) =>
-      record("replay", turnId, afterCursor, reference).pipe(Effect.as(completedResult(turnId))),
-    pageEvents: (turnId, direction, cursor, limit, reference) =>
-      record("pageEvents", turnId, direction, cursor, limit, reference).pipe(Effect.as({ events: [], hasMore: false })),
-    cancel: (turnId, reference) => record("cancel", turnId, reference).pipe(Effect.as(completedResult(turnId))),
-    inspect: (turnId, reference) =>
-      record("inspect", turnId, reference).pipe(
-        Effect.as({ turnId, status: "completed" as const, waits: [], pendingTools: [], children: [] }),
-      ),
-    steer: (turnId, text, idempotencyIdentity, reference) =>
-      record("steer", turnId, text, idempotencyIdentity, reference).pipe(
-        Effect.as({ steeringMessageId: `steering:${turnId}`, sequence: 0 }),
-      ),
-  })
-}
-
-describe("lazyBackendLayer", () => {
-  it.effect("forwards execution references and pageEvents to the deferred backend", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const calls: Array<ReadonlyArray<unknown>> = []
-        const context = yield* Layer.build(
-          lazyBackendLayer(Layer.succeed(ExecutionBackend.Service, recordingBackend(calls))),
-        )
-        const backend = Context.get(context, ExecutionBackend.Service)
-        const reference = ExecutionIdentifier.executionReference
-        const childId = "child:execution%3Aturn-a:call_1"
-        yield* backend.inspect(childId, reference)
-        yield* backend.replay(childId, "cursor-1", reference)
-        yield* backend.cancel(childId, reference)
-        yield* backend.steer(childId, "steer", "steer-child-1", reference)
-        expect(backend.pageEvents).toBeDefined()
-        yield* backend.pageEvents!(childId, "forward", "cursor-2", 200, reference)
-        expect(calls).toEqual([
-          ["inspect", childId, reference],
-          ["replay", childId, "cursor-1", reference],
-          ["cancel", childId, reference],
-          ["steer", childId, "steer", "steer-child-1", reference],
-          ["pageEvents", childId, "forward", "cursor-2", 200, reference],
-        ])
-      }),
-    ),
-  )
-
-  it.effect("answers listOpenRootExecutions without loading the deferred backend", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const calls: Array<ReadonlyArray<unknown>> = []
-        const context = yield* Layer.build(
-          lazyBackendLayer(Layer.succeed(ExecutionBackend.Service, recordingBackend(calls))),
-        )
-        const backend = Context.get(context, ExecutionBackend.Service)
-        expect(backend.listOpenRootExecutions).toBeDefined()
-        expect(yield* backend.listOpenRootExecutions!).toEqual([])
-        expect(calls).toEqual([])
-      }),
-    ),
-  )
-})
+      expect(
+        yield* backend.startTurn({
+          threadId: link.threadId,
+          turnId: link.turnId,
+          workspace: "/workspace",
+          prompt: "test",
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute("medium"),
+        }),
+      ).toEqual(link)
+      yield* backend.cancelTurn(link)
+      yield* backend.steerTurn(link, { text: "continue", idempotencyKey: "steer-1" })
+      yield* Stream.runDrain(backend.watchTurn(link))
+      expect(yield* backend.inspectTurn(link)).toEqual({ status: "running" })
+      expect(calls).toEqual(["start", "cancel", "steer", "watch", "inspect"])
+    }),
+  ),
+)

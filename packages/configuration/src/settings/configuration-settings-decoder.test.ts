@@ -91,7 +91,8 @@ describe("ConfigContract", () => {
     const input = {
       modelAliases: {
         "bedrock-terra": {
-          base: "terra",
+          preset: "openai",
+          displayName: "Bedrock Terra",
           provider: "bedrock",
           candidates: ["us.anthropic.claude-sonnet-4-20250514-v1:0"],
         },
@@ -105,9 +106,16 @@ describe("ConfigContract", () => {
     expect(ConfigContract.decodeSettingsInput("settings.json", input)).toBe(input)
     expect(() =>
       ConfigContract.decodeSettingsInput("settings.json", {
-        modelAliases: { terra: { base: "terra", provider: "bedrock", candidates: ["model"] } },
+        modelAliases: { terra: { preset: "openai", displayName: "Terra", provider: "bedrock", candidates: ["model"] } },
       }),
     ).toThrowError(/cannot replace a built-in model alias/)
+    expect(() =>
+      ConfigContract.decodeSettingsInput("settings.json", {
+        modelAliases: {
+          old: { base: "terra", provider: "bedrock", candidates: ["model"], displayName: "Old" },
+        },
+      }),
+    ).toThrowError(/unknown key base/)
   })
 
   it("accepts arbitrary web search provider credentials and rejects malformed entries", () => {

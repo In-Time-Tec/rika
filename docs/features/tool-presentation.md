@@ -19,7 +19,6 @@ Unselected summaries show the action or agent identity as primary text and mute 
 | `task`, `spawn_child_run`            | `Subagent working`               | `Subagent finished`             | delegated task         |
 | other `transfer_to_*`                | `Subagent (<name>) working`      | `Subagent (<name>) finished`    | delegated task         |
 | `finder`, codebase search            | `Searching codebase`             | `Searched codebase`             | delegated task         |
-| review agents                        | `Reviewing code`                 | `Reviewed code`                 | delegated task         |
 | `web_search`                         | `Web Search <query>`             | `Web Search <query>`            | none                   |
 | `read_web_page`                      | `Read <url>`                     | `Read <url>`                    | none                   |
 | `read_thread_transcript`             | `Reading Thread <thread>`        | `Read Thread <thread>`          | bounded result         |
@@ -27,7 +26,6 @@ Unselected summaries show the action or agent identity as primary text and mute 
 | `list_agent_modes`                   | `Checking available agent modes` | `Checked available agent modes` | bounded result         |
 | `load_plugin`                        | `Loading plugin`                 | `Loaded plugin`                 | bounded result         |
 | `archive_current_thread`             | `Archiving this thread`          | `Archived this thread`          | bounded result         |
-| `create_thread`                      | `Creating thread`                | `Created thread`                | bounded result         |
 | `send_message_to_thread`             | `Sending message to thread`      | `Sent message to thread`        | bounded result         |
 | `send_message_to_puck`               | `Sending message to Puck`        | `Sent message to Puck`          | bounded result         |
 | `slack_read`, `slack_write`          | `Slack <detail>`                 | `Slack <detail>`                | bounded result         |

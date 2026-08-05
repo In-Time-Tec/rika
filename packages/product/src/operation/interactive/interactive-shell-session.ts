@@ -2,12 +2,19 @@ import * as ThreadRepository from "@rika/product/thread-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import { OperationError } from "../operation-error"
-import { Clock, Context, Effect, Layer, Ref, Semaphore } from "effect"
+import { Clock, Context, Effect, Layer, Ref } from "effect"
 import { clampThreadTitle } from "../../thread/query/thread-title-policy"
 import { runRecordedShell } from "./interactive-recorded-shell"
 import { operationError } from "../operation-error"
+import type { InteractiveRuntimeContext } from "./interactive-session-runtime"
 
-export const makeInteractiveShell = (input: any): any => {
+export const makeInteractiveShell = (
+  input: InteractiveRuntimeContext,
+): ((
+  requestedThreadId: Thread.ThreadId | undefined,
+  command: string,
+  incognito: boolean,
+) => Effect.Effect<void, never, never>) => {
   const {
     options,
     sessionDispatch,
@@ -29,18 +36,9 @@ export const makeInteractiveShell = (input: any): any => {
     recordedShellStartedEvent,
     recordedShellSettledEvents,
   } = input
-  const typedSelectionAdmission: Semaphore.Semaphore = selectionAdmission
-  const typedInteractiveThread: Ref.Ref<Thread.Thread | undefined> = interactiveThread
-  const typedMakeThreadId: Effect.Effect<Thread.ThreadId, never, never> = options.makeThreadId
-  const typedExecutionDependencies: Context.Context<ThreadRepository.Service> = executionDependencies
-  const typedActivateCreatedThread: (
-    thread: Thread.Thread,
-    epoch: number,
-    dispatch: (event: import("./interactive-event").InteractiveEvent) => void,
-  ) => Effect.Effect<void, OperationError, never> = activateCreatedThread
   return (requestedThreadId: Thread.ThreadId | undefined, command: string, incognito: boolean) => {
     const dispatch = sessionDispatch
-    const typedToolRuntimeLayer: Layer.Layer<ToolRuntime.Service, OperationError, never> | undefined =
+    const toolRuntimeLayer: Layer.Layer<ToolRuntime.Service, OperationError, never> | undefined =
       options.toolRuntimeLayer?.(workspace)
     let ownerThreadId = requestedThreadId
     const runOwnedShell = (thread: Thread.Thread) =>
@@ -65,7 +63,7 @@ export const makeInteractiveShell = (input: any): any => {
       )
     const program = Effect.gen(function* () {
       const threads = yield* ThreadRepository.Service
-      const thread = yield* typedSelectionAdmission.withPermits(1)(
+      const thread = yield* selectionAdmission.withPermits(1)(
         Effect.gen(function* () {
           if (requestedThreadId !== undefined) {
             const requested = yield* threads.get(requestedThreadId)
@@ -76,21 +74,21 @@ export const makeInteractiveShell = (input: any): any => {
               )
             return requested
           }
-          const selected = yield* Ref.get(typedInteractiveThread)
+          const selected = yield* Ref.get(interactiveThread)
           if (selected !== undefined) return selected
           const now = yield* Clock.currentTimeMillis
           const created = yield* threads.create({
-            id: yield* typedMakeThreadId,
+            id: yield* options.makeThreadId,
             workspace,
             title: incognito ? "New thread" : clampThreadTitle(`$ ${command}`),
             now,
           })
-          yield* typedActivateCreatedThread(created, getCurrentSelectionEpoch(), dispatch)
+          yield* activateCreatedThread(created, getCurrentSelectionEpoch(), dispatch)
           return created
         }),
       )
       ownerThreadId = thread.id
-      if (typedToolRuntimeLayer === undefined) {
+      if (toolRuntimeLayer === undefined) {
         dispatch({
           _tag: "ExecutionFailed",
           selectionEpoch: 0,
@@ -99,14 +97,14 @@ export const makeInteractiveShell = (input: any): any => {
         })
         return
       }
-      const toolContext = yield* Layer.build(typedToolRuntimeLayer)
+      const toolContext = yield* Layer.build(toolRuntimeLayer)
       yield* runOwnedShell(thread).pipe(
         Effect.provide(Context.merge(executionDependencies, toolContext)),
         Effect.catch((error) => Effect.sync(() => dispatchFailure(dispatch, error, thread.id))),
       )
     })
     return program.pipe(
-      Effect.provide(typedExecutionDependencies),
+      Effect.provide(executionDependencies),
       Effect.scoped,
       Effect.catch((error) => Effect.sync(() => dispatchFailure(dispatch, error, ownerThreadId))),
       Effect.forkIn(sessionScope),

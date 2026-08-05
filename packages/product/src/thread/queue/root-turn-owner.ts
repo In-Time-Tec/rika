@@ -3,15 +3,14 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionStatus from "@rika/product/execution-status"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TurnQueuePromotion from "../repository/turn-repository-queue"
-import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionEvent from "@rika/product/execution-event"
-import * as ExecutionRequest from "@rika/product/execution-request"
-import * as ExecutionIdentifier from "@rika/product/execution-identifier"
-import { Cause, Effect, Fiber, Scope, Semaphore } from "effect"
+import * as TranscriptRepository from "@rika/product/transcript-repository"
+import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import { Cause, Clock, Effect, Fiber, Scope, Semaphore, Stream } from "effect"
 
 export interface Lifecycle {
   readonly run: (turnId: Turn.TurnId) => Effect.Effect<void, Error>
-  readonly reconcile: Effect.Effect<void, Error>
 }
 
 export interface Interface {
@@ -24,24 +23,24 @@ export interface Interface {
     threadId: Thread.ThreadId,
     now: number,
   ) => Effect.Effect<TurnQueuePromotion.QueueClaim | undefined, TurnRepository.RepositoryError>
-  readonly start: (
-    input: ExecutionRequest.StartInput,
-  ) => Effect.Effect<ExecutionEvent.Result, ExecutionBackend.BackendError>
-  readonly follow: (
+  readonly startTurn: (
+    input: ExecutionGateway.StartTurn,
+  ) => Effect.Effect<ExecutionGateway.ExecutionLink, ExecutionGateway.StartTurnFailure | TurnRepository.RepositoryError>
+  readonly watchTurn: (
     turnId: Turn.TurnId,
-    checkpoint: ExecutionEvent.ExecutionCheckpoint | string | undefined,
     onEvent?: (event: ExecutionEvent.Event) => void,
-    reference?: ExecutionIdentifier.ExecutionReference,
-    eventScope?: ExecutionRequest.EventScope,
-  ) => Effect.Effect<ExecutionEvent.Result, ExecutionBackend.BackendError>
+  ) => Effect.Effect<
+    ExecutionEvent.Result,
+    ExecutionGateway.WatchTurnFailure | TurnRepository.RepositoryError | TranscriptRepository.RepositoryError
+  >
   readonly install: (lifecycle: Lifecycle) => Effect.Effect<void>
   readonly accepted: (turnId: Turn.TurnId) => Effect.Effect<void>
-  readonly reconcile: Effect.Effect<void>
 }
 
 export const make = Effect.fn("RootTurnOwner.make")(function* (
   turns: TurnRepository.Interface,
-  backend: ExecutionBackend.Interface,
+  transcripts: TranscriptRepository.Interface,
+  backend: ExecutionGateway.Interface,
   scope?: Scope.Scope,
 ) {
   const admission = yield* Semaphore.make(1)
@@ -105,23 +104,65 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
     claim,
     release,
     claimQueued,
-    start: (input) => backend.start(input),
-    follow: (turnId, checkpoint, onEvent, reference, eventScope) => {
-      if (backend.follow === undefined)
-        return Effect.fail(ExecutionBackend.BackendError.make({ message: "Execution follow is unavailable" }))
-      return backend.follow(turnId, checkpoint, onEvent, reference, eventScope)
-    },
+    startTurn: (input) =>
+      Effect.uninterruptible(
+        Effect.gen(function* () {
+          const link = yield* backend.startTurn(input)
+          yield* turns.attachExecutionLink(Turn.TurnId.make(input.turnId), link, yield* Clock.currentTimeMillis)
+          return link
+        }),
+      ),
+    watchTurn: (turnId, onEvent) =>
+      Effect.gen(function* () {
+        const turn = yield* turns.get(turnId)
+        if (turn === undefined || turn._tag !== "AgentExecution" || turn.executionLink === undefined)
+          return yield* ExecutionGateway.WatchTurnFailure.make({
+            message: `Turn ${turnId} has no persisted execution link`,
+          })
+        const executionLink = turn.executionLink
+        const projection = yield* transcripts.get(turnId)
+        const rootKey = TranscriptCorrelation.executionKey(executionLink.runId)
+        const rootCheckpoint = projection?.executionCheckpoints.find(
+          (checkpoint) => checkpoint.executionKey === rootKey,
+        )
+        const cursor =
+          rootCheckpoint === undefined || rootCheckpoint.cursor.length === 0 ? undefined : rootCheckpoint.cursor
+        const events: Array<ExecutionEvent.Event> = []
+        yield* backend.watchTurn(executionLink, cursor).pipe(
+          Stream.runForEach((event) =>
+            Effect.sync(() => {
+              events.push(event)
+              onEvent?.(event)
+            }),
+          ),
+        )
+        const last = events.at(-1)
+        const terminal = events.findLast(
+          (event) =>
+            event.executionId === executionLink.runId &&
+            (event.type === "execution.completed" ||
+              event.type === "execution.failed" ||
+              event.type === "execution.cancelled" ||
+              event.type === "wait.created" ||
+              event.type === "execution.resolution.required"),
+        )
+        let status: ExecutionStatus.Status = "running"
+        if (terminal?.type === "execution.completed") status = "completed"
+        else if (terminal?.type === "execution.failed") status = "failed"
+        else if (terminal?.type === "execution.cancelled") status = "cancelled"
+        else if (terminal?.type === "wait.created" || terminal?.type === "execution.resolution.required")
+          status = "waiting"
+        return {
+          turnId: String(turnId),
+          status,
+          events,
+          ...(last === undefined ? {} : { checkpoint: { cursor: last.cursor, sequence: last.sequence } }),
+        }
+      }),
     install: (installed) =>
       Effect.sync(() => {
         lifecycle = installed
       }),
     accepted: launch,
-    reconcile: Effect.suspend(() => (lifecycle === undefined ? Effect.void : lifecycle.reconcile)).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logError("root-turn-owner.reconcile.failed").pipe(
-          Effect.annotateLogs("rika.failure.message", String(cause)),
-        ),
-      ),
-    ),
   } satisfies Interface
 })

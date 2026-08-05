@@ -767,7 +767,7 @@
           "width": 1
         },
         {
-          "text": " Relay              ",
+          "text": " Baton              ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -943,7 +943,7 @@
           "width": 1
         },
         {
-          "text": " Agent loop                                          ",
+          "text": " Product state                                       ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -985,7 +985,7 @@
           "width": 1
         },
         {
-          "text": " Baton              ",
+          "text": " Rika               ",
           "fg": {
             "buffer": {
               "0": 1984,

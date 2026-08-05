@@ -2,7 +2,7 @@ import type { ModeId } from "./behavior-mode"
 
 export namespace ModelRoute {
   export type Role = "main" | "oracle"
-  export type AgentId = "librarian" | "painter" | "review" | "readThread" | "surgeon" | "task"
+  export type AgentId = "librarian" | "painter" | "readThread" | "review" | "surgeon" | "task"
   export type Effort = "low" | "medium" | "high" | "xhigh" | "max"
   export type ProviderId = "openai" | "anthropic" | "bedrock"
 

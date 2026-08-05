@@ -379,7 +379,7 @@ it("shows the session total and updates it when child usage arrives", () => {
       {
         cursor: "parent-usage",
         sequence: 0,
-        type: "model.usage.reported",
+        type: "model.attempt.completed",
         createdAt: 2,
         data: { cost_usd: 0.5 },
       },

@@ -5,11 +5,9 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./agent-role-toolkits": "./src/catalog/agent-role-toolkits.ts",
     "./coding-tool-catalog": "./src/catalog/coding-tool-catalog.ts",
     "./thread-tool-contract": "./src/catalog/thread-tool-contract.ts",
-    "./tool-invocation": "./src/catalog/tool-invocation.ts",
-    "./agent-tool-contract": "./src/delegation/agent-tool-contract.ts",
-    "./agent-tool-result": "./src/delegation/agent-tool-result.ts",
     "./media-view-service": "./src/media/media-view-service.ts",
     "./view-media-tool": "./src/media/view-media-tool.ts",
     "./coding-tool-policy": "./src/policy/coding-tool-policy.ts",

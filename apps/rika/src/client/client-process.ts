@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 import * as ProductOperation from "@rika/product/product-operation"
 import * as Operation from "@rika/product/product-operation-service"
-import * as ResidentHandshake from "@rika/product/resident-service-handshake"
-import * as ResidentService from "@rika/product/resident-service"
+import * as ServerHandshake from "@rika/product/server-service-handshake"
+import * as ServerService from "@rika/product/server-service"
 import {
   Config,
   Console,
@@ -21,9 +21,9 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { Command } from "effect/unstable/cli"
 import { command, version } from "../command/root/rika-command"
 import * as Logging from "../diagnostic-file-logging"
-import { layer as residentLayer } from "../transport/client/resident-client-transport"
-import * as ResidentProcessStartup from "../resident/process/resident-process"
-import { spawn as spawnResident } from "../resident/process/resident-process-spawn"
+import { layer as serverLayer } from "../transport/client/server-client-transport"
+import * as ServerProcessStartup from "../server/process/server-process"
+import { spawn as spawnServer } from "../server/process/server-process-spawn"
 import * as DataRoot from "@rika/configuration/canonical-data-root"
 import { resolveProfileDataPaths } from "@rika/configuration/profile-data-paths"
 import { interactiveRuntimeRestartLimit, interactiveRuntimeRestartPlan } from "./interactive-runtime-restart"
@@ -43,7 +43,7 @@ const provideLayerScoped =
     )
 
 const withClientWorkspace = (input: ProductOperation.Input, workspace: string): ProductOperation.Input => {
-  if (input._tag === "Interactive" || input._tag === "Run" || input._tag === "Review")
+  if (input._tag === "Interactive" || input._tag === "Run")
     return { ...input, clientWorkspace: workspace, workspace: input.workspace ?? workspace }
   if (
     input._tag === "Skill" ||
@@ -52,8 +52,7 @@ const withClientWorkspace = (input: ProductOperation.Input, workspace: string): 
     input._tag === "Config" ||
     input._tag === "Auth" ||
     input._tag === "Doctor" ||
-    input._tag === "Thread" ||
-    input._tag === "Workflow"
+    input._tag === "Thread"
   )
     return { ...input, clientWorkspace: workspace }
   return input
@@ -89,7 +88,7 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
   Layer.effect(
     Operation.Service,
     Effect.gen(function* () {
-      const resident = yield* ResidentService.Service
+      const server = yield* ServerService.Service
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
       const stdio = yield* Stdio.Stdio
       const platform = yield* Effect.context<
@@ -103,9 +102,8 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
             const paths = resolveProfileDataPaths({
               home,
               productDatabase: Option.getOrUndefined(yield* Config.option(Config.string("RIKA_DATABASE"))),
-              executionDatabase: Option.getOrUndefined(yield* Config.option(Config.string("RIKA_EXECUTION_DATABASE"))),
             })
-            const dataRoot = yield* DataRoot.canonicalDataRoot(paths.database, paths.executionDatabase)
+            const dataRoot = yield* DataRoot.canonicalDataRoot(paths.database)
             const forwardedArguments = argv ?? (yield* stdio.args)
             return yield* Effect.scoped(
               Effect.gen(function* () {
@@ -119,7 +117,7 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                       RIKA_INTERNAL_LAUNCH_ARGUMENTS: encodeLaunchArguments(forwardedArguments),
                       RIKA_INTERNAL_RUNTIME_RESTART_ATTEMPT: "0",
                     }
-                    delete environment[ResidentProcessStartup.runtimeRestart.runtimeRestartFdEnvironment]
+                    delete environment[ServerProcessStartup.runtimeRestart.runtimeRestartFdEnvironment]
                     const execve = process.execve
                     if (execve === undefined)
                       return yield* ProductOperation.OperationUnavailable.make({
@@ -141,8 +139,8 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                         extendEnv: true,
                         env: {
                           RIKA_INTERNAL_CLIENT_RUNTIME: "1",
-                          [ResidentProcessStartup.runtimeRestart.runtimeRestartFdEnvironment]: String(
-                            ResidentProcessStartup.runtimeRestart.runtimeRestartFd,
+                          [ServerProcessStartup.runtimeRestart.runtimeRestartFdEnvironment]: String(
+                            ServerProcessStartup.runtimeRestart.runtimeRestartFd,
                           ),
                           ...restartEnvironment,
                         },
@@ -161,7 +159,7 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                     )
                     const restartLine = yield* Stream.runFold(
                       Stream.splitLines(
-                        Stream.decodeText(handle.getOutputFd(ResidentProcessStartup.runtimeRestart.runtimeRestartFd)),
+                        Stream.decodeText(handle.getOutputFd(ServerProcessStartup.runtimeRestart.runtimeRestartFd)),
                       ),
                       () => Option.none<string>(),
                       (first, text) => (Option.isSome(first) ? first : Option.some(text)),
@@ -174,7 +172,7 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                     )
                     const restart = Option.isSome(restartLine)
                       ? Option.getOrUndefined(
-                          yield* ResidentProcessStartup.runtimeRestart
+                          yield* ServerProcessStartup.runtimeRestart
                             .decodeRuntimeRestart(restartLine.value)
                             .pipe(Effect.option),
                         )
@@ -196,27 +194,25 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                     restartEnvironment = decision.environment
                   }
                 }
-                let clientKind: ResidentHandshake.Handshake["clientKind"]
+                let clientKind: ServerHandshake.Handshake["clientKind"]
                 if (input._tag === "Thread") clientKind = "thread-continue"
                 else if (input._tag === "Run") clientKind = "run"
-                else if (input._tag === "Review") clientKind = "review"
-                else if (input._tag === "Workflow") clientKind = "workflow"
                 else clientKind = "product"
-                const residentRuntime = yield* privateRuntime("resident")
-                const connected = yield* resident.getOrCreate({
+                const serverRuntime = yield* privateRuntime("server")
+                const connected = yield* server.getOrCreate({
                   profile: "default",
                   dataRoot,
                   clientKind,
                   startHost: () =>
-                    spawnResident({
-                      executable: residentRuntime.executable,
-                      arguments: residentRuntime.prefixArguments,
+                    spawnServer({
+                      executable: serverRuntime.executable,
+                      arguments: serverRuntime.prefixArguments,
                       environment: {
-                        RIKA_INTERNAL_RESIDENT_HOST: "1",
-                        RIKA_INTERNAL_RESIDENT_PROFILE: "default",
-                        RIKA_INTERNAL_RESIDENT_DATA_ROOT: dataRoot,
+                        RIKA_INTERNAL_SERVER_HOST: "1",
+                        RIKA_INTERNAL_SERVER_PROFILE: "default",
+                        RIKA_INTERNAL_SERVER_DATA_ROOT: dataRoot,
                       },
-                    }).pipe(Effect.tap(() => Effect.logInfo("resident.spawned"))),
+                    }).pipe(Effect.tap(() => Effect.logInfo("server.spawned"))),
                 })
                 yield* connected.run(withClientWorkspace(input, process.cwd()), {
                   stdout: (text) => Effect.sync(() => process.stdout.write(text)),
@@ -249,7 +245,7 @@ export const run = Effect.fn("ClientMain.run")(function* (argv?: ReadonlyArray<s
       "rika.version": version,
     }),
   )
-  return yield* program.pipe(provideLayerScoped(dispatcherLayer(argv).pipe(Layer.provide(residentLayer))))
+  return yield* program.pipe(provideLayerScoped(dispatcherLayer(argv).pipe(Layer.provide(serverLayer))))
 })
 
 export const isInteractiveClientLaunch = (): boolean => interactiveClientLaunch
