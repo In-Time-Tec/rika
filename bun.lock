@@ -95,6 +95,7 @@
       },
       "devDependencies": {
         "@effect/vitest": "catalog:",
+        "@rika/configuration": "workspace:*",
         "@rika/javascript-sandbox": "workspace:*",
         "@types/bun": "catalog:",
         "typescript": "catalog:",

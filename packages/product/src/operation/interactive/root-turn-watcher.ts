@@ -100,14 +100,16 @@ export const observeRootTurn = (input: {
   input.turn.executionLink === undefined
     ? Effect.succeed(false)
     : Effect.uninterruptibleMask((restore) =>
-        input.claim(input.turn.id).pipe(
-          Effect.flatMap((claimed) =>
-            !claimed
-              ? Effect.succeed(false)
+        input
+          .claim(input.turn.id)
+          .pipe(
+            Effect.flatMap((claimed) =>
+              !claimed
+                ? Effect.succeed(false)
                 : restore(input.watch).pipe(
                     Effect.as(true),
                     Effect.ensuring(input.release(input.turn.id, false).pipe(Effect.ignore)),
                   ),
+            ),
           ),
-        ),
       )

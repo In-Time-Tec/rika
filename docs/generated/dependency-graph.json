@@ -10664,6 +10664,14 @@
     },
     {
       "from": "apps/rika/src/interactive/input/goodbye-message.ts",
+      "to": "external:os",
+      "specifier": "os",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/input/goodbye-message.ts",
       "to": "packages/configuration/src/model-routing/behavior-mode.ts",
       "specifier": "@rika/configuration/behavior-mode",
       "kind": "import",
@@ -17382,6 +17390,15 @@
       "relationship": "runtime",
       "production": true,
       "dependencySection": "dependencies"
+    },
+    {
+      "from": "package:@rika/baton-execution",
+      "to": "package:@rika/configuration",
+      "specifier": "@rika/configuration",
+      "kind": "package",
+      "relationship": "test",
+      "production": false,
+      "dependencySection": "devDependencies"
     },
     {
       "from": "package:@rika/baton-execution",

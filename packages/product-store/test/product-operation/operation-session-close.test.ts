@@ -7,7 +7,7 @@ import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
-import { Deferred, Effect, Fiber, Layer, Ref } from "effect"
+import { Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect"
 import { it as rawIt } from "vitest"
 
 import { createTurn } from "../support/product-test-current-state"
@@ -112,9 +112,10 @@ describe("Operation", () => {
           startTurn: (input) =>
             Ref.update(starts, (count) => count + 1).pipe(
               Effect.andThen(Deferred.succeed(started, undefined)),
-              Effect.andThen(Deferred.await(release)),
               Effect.andThen(backend.startTurn(input)),
             ),
+          watchTurn: (link) =>
+            Stream.fromEffect(Deferred.await(release)).pipe(Stream.flatMap(() => backend.watchTurn(link))),
         })
         yield* Effect.gen(function* () {
           const operation = yield* Service

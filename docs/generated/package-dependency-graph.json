@@ -236,6 +236,15 @@
     },
     {
       "from": "package:@rika/baton-execution",
+      "to": "package:@rika/configuration",
+      "specifier": "@rika/configuration",
+      "kind": "package",
+      "relationship": "test",
+      "production": false,
+      "dependencySection": "devDependencies"
+    },
+    {
+      "from": "package:@rika/baton-execution",
       "to": "package:@rika/javascript-sandbox",
       "specifier": "@rika/javascript-sandbox",
       "kind": "package",

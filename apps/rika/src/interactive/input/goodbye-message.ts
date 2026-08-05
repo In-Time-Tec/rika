@@ -1,4 +1,5 @@
 import type { ModeId } from "@rika/configuration/behavior-mode"
+import { homedir } from "node:os"
 export type GoodbyeMode = ModeId
 
 export interface GoodbyeInput {
@@ -31,7 +32,13 @@ const muted = "\x1b[38;5;8m"
 const detailColumn = 17
 
 export const renderGoodbye = (input: GoodbyeInput): string => {
-  const workspaceLine = input.workspace.replace(/^\/Users\/[^/]+/, "~")
+  const home = homedir()
+  const workspaceLine =
+    input.workspace === home
+      ? "~"
+      : input.workspace.startsWith(`${home}/`)
+        ? `~${input.workspace.slice(home.length)}`
+        : input.workspace.replace(/^\/Users\/[^/]+(?=\/|$)/, "~")
   const [markR, markG, markB] = modeRgb[input.mode]
   const details = new Map<number, string>([
     [1, input.threadTitle === undefined || input.threadTitle.length === 0 ? "" : input.threadTitle],

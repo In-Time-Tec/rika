@@ -7390,6 +7390,14 @@
     },
     {
       "from": "apps/rika/src/interactive/input/goodbye-message.ts",
+      "to": "external:os",
+      "specifier": "os",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/input/goodbye-message.ts",
       "to": "packages/configuration/src/model-routing/behavior-mode.ts",
       "specifier": "@rika/configuration/behavior-mode",
       "kind": "import",

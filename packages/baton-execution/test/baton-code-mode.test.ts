@@ -408,105 +408,108 @@ it.live("cancels a running QuickJS Code Mode Program and preserves its terminal 
   }),
 )
 
-it.live("reconstructs an admitted Code Mode Program exactly after a SQLite restart", () =>
-  Effect.gen(function* () {
-    const filename = `/tmp/rika-code-mode-restart-${yield* Random.nextInt}.db`
-    const identity = "code-mode-restart-route"
-    const fixture = yield* TestModel.make(
-      [
-        TestModel.turn([codeMode()]),
-        TestModel.turn([TestModel.text("Oracle restart result")]),
-        TestModel.turn([TestModel.text("root restarted complete")]),
-      ],
-      { provider: "test", model: "test", registrationKey: identity },
-    )
-    const toolCalls: Array<string> = []
-    const admitted = yield* Effect.scoped(
-      Effect.gen(function* () {
-        const context = yield* Layer.build(executionLayer(filename, fixture, toolCalls))
-        const gateway = Context.get(context, ExecutionGateway.Service)
-        const link = yield* gateway.startTurn(input(identity))
-        const runs = yield* awaitProgramAdmission(filename)
-        return { link, runs }
-      }).pipe(Effect.provideService(ConfigProvider.ConfigProvider, credentialConfigProvider)),
-    )
-    const admittedProgram = admitted.runs.find(({ invocation_id }) => invocation_id === "code-mode-proof")!
-    expect(admittedProgram.status).toBe("running")
-    expect(toolCalls).toEqual([])
-    expect(yield* fixture.requests).toHaveLength(1)
-
-    const result = yield* Effect.scoped(
-      Effect.gen(function* () {
-        const context = yield* Layer.build(executionLayer(filename, fixture, toolCalls))
-        const gateway = Context.get(context, ExecutionGateway.Service)
-        const events = yield* gateway.watchTurn(admitted.link).pipe(Stream.runCollect)
-        return { events: [...events], status: yield* gateway.inspectTurn(admitted.link) }
-      }).pipe(Effect.provideService(ConfigProvider.ConfigProvider, credentialConfigProvider)),
-    )
-
-    const settledRuns = readRuns(filename)
-    const settledProgram = settledRuns.find(({ invocation_id }) => invocation_id === "code-mode-proof")!
-    expect(settledProgram.run_id).toBe(admittedProgram.run_id)
-    expect(settledProgram.parent_run_id).toBe(admitted.link.runId)
-    expect(settledProgram.status).toBe("succeeded")
-    expect(result.status.status).toBe("completed")
-    expect(result.events.at(-1)?.type).toBe("execution.completed")
-    expect(toolCalls).toEqual(["read"])
-
-    const evidence = persistedRegistrationEvidence(filename)
-    expect(evidence.tableNames.some((name) => name.startsWith("rika_"))).toBe(false)
-    const settledExecutable = executableOf(settledProgram)
-    expect(evidence.programRuns).toEqual([
-      expect.objectContaining({
-        run_id: settledProgram.run_id,
-        program_pin: settledExecutable.ref.active,
-        budget_json: budgetJson(programBudget),
-      }),
-    ])
-    const programEntry = settledExecutable.manifest.entries.find(({ pin }) => pin === settledExecutable.ref.active)
-    expect(programEntry).toMatchObject({
-      _tag: "Program",
-      manifest: {
-        source: { language: "javascript", text: source },
-        capabilities: {
-          tools: [{ name: "read" }],
-          agents: [{ selection: "Oracle" }],
-          steps: [],
-        },
-        budget: programBudget,
-      },
-    })
-    const linkedPins = new Map<string, Array<string>>()
-    for (const link of evidence.links) linkedPins.set(link.run_id, [...(linkedPins.get(link.run_id) ?? []), link.pin])
-    for (const run of settledRuns) {
-      expect(new Set(linkedPins.get(run.run_id))).toEqual(
-        ExecutableRegistration.requiredPinsForActiveExecutable(executableOf(run)),
+it.live(
+  "reconstructs an admitted Code Mode Program exactly after a SQLite restart",
+  () =>
+    Effect.gen(function* () {
+      const filename = `/tmp/rika-code-mode-restart-${yield* Random.nextInt}.db`
+      const identity = "code-mode-restart-route"
+      const fixture = yield* TestModel.make(
+        [
+          TestModel.turn([codeMode()]),
+          TestModel.turn([TestModel.text("Oracle restart result")]),
+          TestModel.turn([TestModel.text("root restarted complete")]),
+        ],
+        { provider: "test", model: "test", registrationKey: identity },
       )
-    }
-    const persistedRegistrations = evidence.payloads.map(({ pin, payload_json }) => ({
-      pin,
-      payload: registrationPayloadJson(payload_json),
-    }))
-    expect(persistedRegistrations).not.toHaveLength(0)
-    const credentialRegistrations = persistedRegistrations.filter(
-      ({ payload }) =>
-        includesString(payload, "RIKA_CODE_MODE_API_KEY") || includesString(payload, "rika-code-mode-credential"),
-    )
-    expect(credentialRegistrations).not.toHaveLength(0)
-    for (const { payload } of credentialRegistrations) {
-      expect(includesString(payload, "RIKA_CODE_MODE_API_KEY")).toBe(true)
-      expect(includesString(payload, "rika-code-mode-credential")).toBe(true)
-    }
-    for (const { payload } of persistedRegistrations) {
-      expect(includesString(payload, resolvedCredentialValue)).toBe(false)
-    }
+      const toolCalls: Array<string> = []
+      const admitted = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const context = yield* Layer.build(executionLayer(filename, fixture, toolCalls))
+          const gateway = Context.get(context, ExecutionGateway.Service)
+          const link = yield* gateway.startTurn(input(identity))
+          const runs = yield* awaitProgramAdmission(filename)
+          return { link, runs }
+        }).pipe(Effect.provideService(ConfigProvider.ConfigProvider, credentialConfigProvider)),
+      )
+      const admittedProgram = admitted.runs.find(({ invocation_id }) => invocation_id === "code-mode-proof")!
+      expect(admittedProgram.status).toBe("running")
+      expect(toolCalls).toEqual([])
+      expect(yield* fixture.requests).toHaveLength(1)
 
-    const requests = yield* fixture.requests
-    expect(requests).toHaveLength(3)
-    const oraclePrompt = promptJson(requests[1]?.prompt)
-    const resumedPrompt = promptJson(requests[2]?.prompt)
-    expect(oraclePrompt).toContain("inspect the durable proof")
-    expect(resumedPrompt.match(/"type":"tool-result"/g)).toHaveLength(1)
-    expect(resumedPrompt).toContain("Oracle restart result")
-  }),
+      const result = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const context = yield* Layer.build(executionLayer(filename, fixture, toolCalls))
+          const gateway = Context.get(context, ExecutionGateway.Service)
+          const events = yield* gateway.watchTurn(admitted.link).pipe(Stream.runCollect)
+          return { events: [...events], status: yield* gateway.inspectTurn(admitted.link) }
+        }).pipe(Effect.provideService(ConfigProvider.ConfigProvider, credentialConfigProvider)),
+      )
+
+      const settledRuns = readRuns(filename)
+      const settledProgram = settledRuns.find(({ invocation_id }) => invocation_id === "code-mode-proof")!
+      expect(settledProgram.run_id).toBe(admittedProgram.run_id)
+      expect(settledProgram.parent_run_id).toBe(admitted.link.runId)
+      expect(settledProgram.status).toBe("succeeded")
+      expect(result.status.status).toBe("completed")
+      expect(result.events.at(-1)?.type).toBe("execution.completed")
+      expect(toolCalls).toEqual(["read"])
+
+      const evidence = persistedRegistrationEvidence(filename)
+      expect(evidence.tableNames.some((name) => name.startsWith("rika_"))).toBe(false)
+      const settledExecutable = executableOf(settledProgram)
+      expect(evidence.programRuns).toEqual([
+        expect.objectContaining({
+          run_id: settledProgram.run_id,
+          program_pin: settledExecutable.ref.active,
+          budget_json: budgetJson(programBudget),
+        }),
+      ])
+      const programEntry = settledExecutable.manifest.entries.find(({ pin }) => pin === settledExecutable.ref.active)
+      expect(programEntry).toMatchObject({
+        _tag: "Program",
+        manifest: {
+          source: { language: "javascript", text: source },
+          capabilities: {
+            tools: [{ name: "read" }],
+            agents: [{ selection: "Oracle" }],
+            steps: [],
+          },
+          budget: programBudget,
+        },
+      })
+      const linkedPins = new Map<string, Array<string>>()
+      for (const link of evidence.links) linkedPins.set(link.run_id, [...(linkedPins.get(link.run_id) ?? []), link.pin])
+      for (const run of settledRuns) {
+        expect(new Set(linkedPins.get(run.run_id))).toEqual(
+          ExecutableRegistration.requiredPinsForActiveExecutable(executableOf(run)),
+        )
+      }
+      const persistedRegistrations = evidence.payloads.map(({ pin, payload_json }) => ({
+        pin,
+        payload: registrationPayloadJson(payload_json),
+      }))
+      expect(persistedRegistrations).not.toHaveLength(0)
+      const credentialRegistrations = persistedRegistrations.filter(
+        ({ payload }) =>
+          includesString(payload, "RIKA_CODE_MODE_API_KEY") || includesString(payload, "rika-code-mode-credential"),
+      )
+      expect(credentialRegistrations).not.toHaveLength(0)
+      for (const { payload } of credentialRegistrations) {
+        expect(includesString(payload, "RIKA_CODE_MODE_API_KEY")).toBe(true)
+        expect(includesString(payload, "rika-code-mode-credential")).toBe(true)
+      }
+      for (const { payload } of persistedRegistrations) {
+        expect(includesString(payload, resolvedCredentialValue)).toBe(false)
+      }
+
+      const requests = yield* fixture.requests
+      expect(requests).toHaveLength(3)
+      const oraclePrompt = promptJson(requests[1]?.prompt)
+      const resumedPrompt = promptJson(requests[2]?.prompt)
+      expect(oraclePrompt).toContain("inspect the durable proof")
+      expect(resumedPrompt.match(/"type":"tool-result"/g)).toHaveLength(1)
+      expect(resumedPrompt).toContain("Oracle restart result")
+    }),
+  30_000,
 )

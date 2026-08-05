@@ -1,9 +1,9 @@
-export interface TextPart {
+interface TextPart {
   readonly _tag: "Text"
   readonly text: string
 }
 
-export interface ReasoningPart {
+interface ReasoningPart {
   readonly _tag: "Reasoning"
   readonly text: string
 }
@@ -23,7 +23,7 @@ export interface TurnStep {
   readonly delay?: string
 }
 
-export interface FailureStep {
+interface FailureStep {
   readonly _tag: "Failure"
   readonly error: Error
 }
