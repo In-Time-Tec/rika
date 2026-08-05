@@ -49,8 +49,8 @@ test(
         const turnId = Turn.TurnId.make("tui-turn-0")
         for (let attempt = 0; attempt < 250; attempt += 1) {
           const projection = yield* app.transcript(turnId)
-          const entries = (projection?.units ?? []).flatMap((unit) =>
-            unit.content._tag === "Entry" ? [unit.content.text] : [],
+          const entries = new Set(
+            (projection?.units ?? []).flatMap((unit) => (unit.content._tag === "Entry" ? [unit.content.text] : [])),
           )
           const hasRunningTool = (projection?.units ?? []).some(
             (unit) =>
@@ -58,11 +58,7 @@ test(
               unit.content.block._tag === "ToolCall" &&
               unit.content.block.status === "running",
           )
-          if (
-            entries.includes("TOP_LEVEL_RELOAD_COMPLETE") &&
-            entries.includes("NESTED_RELOAD_COMPLETE") &&
-            !hasRunningTool
-          )
+          if (entries.has("TOP_LEVEL_RELOAD_COMPLETE") && entries.has("NESTED_RELOAD_COMPLETE") && !hasRunningTool)
             break
           if (attempt === 249) return yield* Effect.die("nested subagents did not settle into the durable transcript")
           yield* Effect.sleep("20 millis")
