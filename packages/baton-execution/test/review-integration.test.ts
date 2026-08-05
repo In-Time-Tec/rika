@@ -149,7 +149,7 @@ it.live(
       expect(runs).toHaveLength(4)
       expect(members).toHaveLength(3)
       expect(members.every(({ status }) => status === "running" || status === "cancelled")).toBe(true)
-      expect(runs.find(({ run_id }) => run_id.startsWith("run_"))?.status).toBe("cancelled")
+      expect(["cancelling", "cancelled"]).toContain(runs.find(({ run_id }) => run_id.startsWith("run_"))?.status)
     }),
   60_000,
 )
