@@ -3203,6 +3203,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/terminal/test/welcome-orb-anchor.test.ts",
+      "path": "packages/terminal/test/welcome-orb-anchor.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/transcript/test/partial-input.test.ts",
       "path": "packages/transcript/test/partial-input.test.ts",
       "workspace": "@rika/transcript",
@@ -8848,6 +8858,14 @@
     },
     {
       "from": "packages/terminal/test/web-page-tool-detail.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/welcome-orb-anchor.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
