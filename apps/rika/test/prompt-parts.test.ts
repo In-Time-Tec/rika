@@ -1,8 +1,6 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { afterEach, expect, test } from "vitest"
 import { Config, Data, Effect, FileSystem, Layer, Path, Stream } from "effect"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import * as ViewState from "@rika/terminal/terminal-state"
 import * as Reducer from "@rika/terminal/terminal-state-reducer"
 import * as Session from "@rika/terminal/terminal-session"
@@ -12,7 +10,6 @@ import {
   pasteClipboardPng,
   pastedImagePath,
   persistPastedImage,
-  readChangedFiles,
   refreshChangedFilesOn,
 } from "../src/interactive/process/process-workspace"
 import { initialSubmitAction } from "../src/interactive/input/command-input"
@@ -32,12 +29,6 @@ const provide = <A, E, R, ROut, E2, RIn>(effect: Effect.Effect<A, E, R>, layer: 
 
 const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices>) =>
   Effect.runPromise(provide(effect, BunServices.layer))
-
-const command = (name: string, ...args: ReadonlyArray<string>) =>
-  Effect.gen(function* () {
-    const spawner = yield* ChildProcessSpawner
-    return yield* spawner.exitCode(ChildProcess.make(name, args))
-  })
 
 test("reports why image paste is blocked while editing a queued turn", () => {
   expect(
@@ -273,54 +264,6 @@ test("rejects missing, directory, and empty targets as typed local file failures
     }),
   ))
 
-test("loads tracked counts from a repository without HEAD and omits untracked counts", () =>
-  run(
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const root = yield* workspace("rika-unborn-head-")
-      yield* command("git", "init", "-q", root)
-      yield* fileSystem.writeFileString(path.join(root, "staged.ts"), "one\ntwo\nthree\n")
-      yield* fileSystem.writeFileString(path.join(root, "untracked.ts"), "one\ntwo")
-      yield* command("git", "-C", root, "add", "staged.ts")
-      expect(yield* readChangedFiles(root)).toEqual([
-        { path: "staged.ts", status: "A", added: 3, removed: 0 },
-        { path: "untracked.ts", status: "??" },
-      ])
-    }),
-  ))
-
-test("does not read untracked file contents while listing changed files", () =>
-  run(
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const root = yield* workspace("rika-untracked-files-")
-      yield* command("git", "init", "-q", root)
-      const paths = Array.from({ length: 256 }, (_, index) => `untracked-${index}.ts`)
-      yield* Effect.forEach(
-        paths,
-        (relative) => fileSystem.writeFileString(path.join(root, relative), "one\ntwo\nthree\n"),
-        { concurrency: 16, discard: true },
-      )
-      let readFileCalls = 0
-      const countingFileSystem: FileSystem.FileSystem = {
-        ...fileSystem,
-        readFile: (filename) => {
-          readFileCalls += 1
-          return fileSystem.readFile(filename)
-        },
-      }
-
-      const changed = yield* readChangedFiles(root).pipe(
-        Effect.provideService(FileSystem.FileSystem, countingFileSystem),
-      )
-      expect(changed).toHaveLength(paths.length)
-      expect(readFileCalls).toBe(0)
-      expect(changed.every((file) => file.added === undefined && file.removed === undefined)).toBe(true)
-    }),
-  ))
-
 test("refreshes changed files once per watcher burst and never while idle or closed", () =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -341,36 +284,6 @@ test("refreshes changed files once per watcher burst and never while idle or clo
 
       yield* refreshChangedFilesOn(Stream.make(1), () => false, refresh)
       expect(refreshes).toBe(1)
-    }),
-  ))
-
-test("parses the exact NUL-delimited output from a real Git repository", () =>
-  run(
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const spawner = yield* ChildProcessSpawner
-      const root = yield* workspace("rika-changed-files-")
-      yield* command("git", "init", "-q", root)
-      yield* command("git", "-C", root, "config", "user.email", "test@example.com")
-      yield* command("git", "-C", root, "config", "user.name", "Test")
-      yield* fileSystem.writeFileString(path.join(root, "old name.ts"), "one\ntwo\nthree\n")
-      yield* command("git", "-C", root, "add", ".")
-      yield* command("git", "-C", root, "commit", "-qm", "initial")
-      yield* fileSystem.makeDirectory(path.join(root, "docs", "nested"), { recursive: true })
-      yield* fileSystem.makeDirectory(path.join(root, "untracked", "deep"), { recursive: true })
-      yield* command("git", "-C", root, "mv", "old name.ts", "docs/nested/new -> name.ts")
-      yield* fileSystem.writeFileString(path.join(root, "untracked", "deep", "file with spaces.ts"), "new")
-      const status = yield* spawner.string(
-        ChildProcess.make("git", ["-C", root, "status", "--porcelain=v1", "-z", "--untracked-files=all"]),
-      )
-      const numstat = yield* spawner.string(
-        ChildProcess.make("git", ["-C", root, "diff", "--numstat", "-z", "-M", "HEAD"]),
-      )
-      expect(parseChangedFiles(status, numstat)).toEqual([
-        { path: "docs/nested/new -> name.ts", status: "R", added: 0, removed: 0 },
-        { path: "untracked/deep/file with spaces.ts", status: "??" },
-      ])
     }),
   ))
 

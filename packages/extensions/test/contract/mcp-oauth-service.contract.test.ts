@@ -1,27 +1,32 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { OAuth } from "@batonfx/mcp"
 import { describe, expect, it } from "@effect/vitest"
-import { Context, Effect, FileSystem, Fiber, Layer, Option, Redacted, Ref } from "effect"
+import { Context, Effect, FileSystem, Fiber, Layer, Option, Redacted, Ref, Sink, Stream } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcessSpawner } from "effect/unstable/process"
 import * as McpOAuth from "../../src/mcp/mcp-oauth-service"
 import { provideLayer } from "../support/extension-test-layer"
 
+const processHandle = (exitCode: number) =>
+  ChildProcessSpawner.makeHandle({
+    pid: ChildProcessSpawner.ProcessId(1),
+    exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(exitCode)),
+    isRunning: Effect.succeed(false),
+    kill: () => Effect.void,
+    stdin: Sink.drain,
+    stdout: Stream.empty,
+    stderr: Stream.empty,
+    all: Stream.empty,
+    getInputFd: () => Sink.drain,
+    getOutputFd: () => Stream.empty,
+    unref: Effect.succeed(Effect.void),
+  })
+
 const spawnerLayer = (exitCode: Ref.Ref<number>) =>
-  Layer.effect(
+  Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
-    ChildProcessSpawner.ChildProcessSpawner.pipe(
-      Effect.map((spawner) =>
-        ChildProcessSpawner.make(() =>
-          Ref.get(exitCode).pipe(
-            Effect.flatMap((code) =>
-              spawner.spawn(ChildProcess.make("sh", ["-c", `exit ${code}`], { stdout: "ignore", stderr: "ignore" })),
-            ),
-          ),
-        ),
-      ),
-    ),
-  ).pipe(Layer.provide(BunServices.layer))
+    ChildProcessSpawner.make(() => Ref.get(exitCode).pipe(Effect.map(processHandle))),
+  )
 
 describe("McpOAuth", () => {
   it.effect("opens the browser and maps command failures", () =>

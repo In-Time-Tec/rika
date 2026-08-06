@@ -253,14 +253,14 @@
       "testKind": "unit-test"
     },
     {
-      "id": "apps/rika/test/logging-process.test.ts",
-      "path": "apps/rika/test/logging-process.test.ts",
+      "id": "apps/rika/test/logging-process.proc.test.ts",
+      "path": "apps/rika/test/logging-process.proc.test.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
       "production": false,
       "publicExports": [],
-      "testKind": "unit-test"
+      "testKind": "process-test"
     },
     {
       "id": "apps/rika/test/logging.test.ts",
@@ -311,6 +311,16 @@
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
+    },
+    {
+      "id": "apps/rika/test/prompt-parts.proc.test.ts",
+      "path": "apps/rika/test/prompt-parts.proc.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "process-test"
     },
     {
       "id": "apps/rika/test/prompt-parts.test.ts",
@@ -383,6 +393,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "apps/rika/test/server-startup.proc.test.ts",
+      "path": "apps/rika/test/server-startup.proc.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "process-test"
+    },
+    {
       "id": "apps/rika/test/server-startup.test.ts",
       "path": "apps/rika/test/server-startup.test.ts",
       "workspace": "@rika/cli",
@@ -413,14 +433,14 @@
       "testKind": "process-test"
     },
     {
-      "id": "apps/rika/test/server-transport-reconnect.test.ts",
-      "path": "apps/rika/test/server-transport-reconnect.test.ts",
+      "id": "apps/rika/test/server-transport-reconnect.proc.test.ts",
+      "path": "apps/rika/test/server-transport-reconnect.proc.test.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
       "production": false,
       "publicExports": [],
-      "testKind": "unit-test"
+      "testKind": "process-test"
     },
     {
       "id": "apps/rika/test/server-transport.proc.test.ts",
@@ -4311,7 +4331,7 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/logging-process.test.ts",
+      "from": "apps/rika/test/logging-process.proc.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -4319,7 +4339,7 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/logging-process.test.ts",
+      "from": "apps/rika/test/logging-process.proc.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4327,7 +4347,7 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/logging-process.test.ts",
+      "from": "apps/rika/test/logging-process.proc.test.ts",
       "to": "external:effect/unstable/process",
       "specifier": "effect/unstable/process",
       "kind": "import",
@@ -4335,7 +4355,7 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/logging-process.test.ts",
+      "from": "apps/rika/test/logging-process.proc.test.ts",
       "to": "external:url",
       "specifier": "url",
       "kind": "import",
@@ -4343,7 +4363,7 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/logging-process.test.ts",
+      "from": "apps/rika/test/logging-process.proc.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -4479,6 +4499,46 @@
       "production": false
     },
     {
+      "from": "apps/rika/test/prompt-parts.proc.test.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/prompt-parts.proc.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/prompt-parts.proc.test.ts",
+      "to": "external:effect/unstable/process/ChildProcess",
+      "specifier": "effect/unstable/process/ChildProcess",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/prompt-parts.proc.test.ts",
+      "to": "external:effect/unstable/process/ChildProcessSpawner",
+      "specifier": "effect/unstable/process/ChildProcessSpawner",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/prompt-parts.proc.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "apps/rika/test/prompt-parts.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
@@ -4490,22 +4550,6 @@
       "from": "apps/rika/test/prompt-parts.test.ts",
       "to": "external:effect",
       "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/prompt-parts.test.ts",
-      "to": "external:effect/unstable/process/ChildProcess",
-      "specifier": "effect/unstable/process/ChildProcess",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/prompt-parts.test.ts",
-      "to": "external:effect/unstable/process/ChildProcessSpawner",
-      "specifier": "effect/unstable/process/ChildProcessSpawner",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -4695,6 +4739,54 @@
       "production": false
     },
     {
+      "from": "apps/rika/test/server-startup.proc.test.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/server-startup.proc.test.ts",
+      "to": "external:bun:sqlite",
+      "specifier": "bun:sqlite",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/server-startup.proc.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/server-startup.proc.test.ts",
+      "to": "external:effect/unstable/process",
+      "specifier": "effect/unstable/process",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/server-startup.proc.test.ts",
+      "to": "external:url",
+      "specifier": "url",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/server-startup.proc.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "apps/rika/test/server-startup.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
@@ -4704,32 +4796,8 @@
     },
     {
       "from": "apps/rika/test/server-startup.test.ts",
-      "to": "external:bun:sqlite",
-      "specifier": "bun:sqlite",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/server-startup.test.ts",
       "to": "external:effect",
       "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/server-startup.test.ts",
-      "to": "external:effect/unstable/process",
-      "specifier": "effect/unstable/process",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/server-startup.test.ts",
-      "to": "external:url",
-      "specifier": "url",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -4775,7 +4843,7 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/server-transport-reconnect.test.ts",
+      "from": "apps/rika/test/server-transport-reconnect.proc.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4783,7 +4851,7 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/server-transport-reconnect.test.ts",
+      "from": "apps/rika/test/server-transport-reconnect.proc.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
