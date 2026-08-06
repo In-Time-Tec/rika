@@ -23,7 +23,7 @@
       "@effect/platform-bun": "4.0.0-beta.98",
       "@effect/sql-mysql2": "4.0.0-beta.98",
       "@effect/sql-sqlite-bun": "4.0.0-beta.98",
-      "@effect/tsgo": "0.21.0",
+      "@effect/tsgo": "0.27.1",
       "@effect/vitest": "4.0.0-beta.98",
       "@opentui/core": "0.4.3",
       "@opentui/core-darwin-arm64": "0.4.3",
@@ -63,7 +63,7 @@
     "build": "bun turbo build",
     "check": "bun turbo run --continue build typecheck \"//#test-unit\" \"//#repository-policy\" \"//#repository-graph-check\" \"//#diagnostics\" \"//#ast-grep-check\" \"//#format-check\" \"//#lint\"",
     "dev": "bun --cwd apps/rika start",
-    "diagnostics": "bun node_modules/@effect/tsgo/dist/effect-tsgo.js diagnostics --project ./tsconfig.json --format pretty --strict",
+    "diagnostics": "bun node_modules/@effect/tsgo/dist/effect-tsgo.cjs diagnostics --project ./tsconfig.json --format pretty --strict",
     "format": "prettier --write .",
     "format-check": "prettier --check .",
     "install-local": "bun run scripts/installation/install-local.ts",
@@ -126,13 +126,5 @@
   "rika": {
     "kind": "application",
     "domain": "repository"
-  },
-  "patchedDependencies": {
-    "@effect/tsgo-darwin-arm64@0.21.0": "patches/@effect%2Ftsgo-darwin-arm64@0.21.0.patch",
-    "@effect/tsgo-darwin-x64@0.21.0": "patches/@effect%2Ftsgo-darwin-x64@0.21.0.patch",
-    "@effect/tsgo-linux-arm@0.21.0": "patches/@effect%2Ftsgo-linux-arm@0.21.0.patch",
-    "@effect/tsgo-linux-arm64@0.21.0": "patches/@effect%2Ftsgo-linux-arm64@0.21.0.patch",
-    "@effect/tsgo-linux-x64@0.21.0": "patches/@effect%2Ftsgo-linux-x64@0.21.0.patch",
-    "effect@4.0.0-beta.98": "patches/effect@4.0.0-beta.98.patch"
   }
 }
