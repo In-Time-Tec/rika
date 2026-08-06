@@ -5,22 +5,27 @@ import type { MutableMutation, OwnedFold } from "./transcript-fold-state"
 import { foldState } from "./transcript-fold-state"
 import { mutationOperations } from "./transcript-fold-mutation"
 const { linkedToolFor, removeUnit, updateTool, upsertUnit } = mutationOperations
-const { childBlockFrom, enumerateKeys, makeUnit, record, sourcePayload, string } = foldState
+const { childBlockFrom, enumerateKeys, makeUnit, sourcePayload, string } = foldState
 import { identityKey } from "../ordering/transcript-unit-identity"
 
 import { executionKey } from "../ordering/child-parent-correlation"
-const childStatus = (
-  event: SourceEvent,
-  value: Record<string, unknown>,
-): "running" | "complete" | "failed" | "cancelled" => {
-  const raw = string(value.status ?? value.state).toLowerCase()
-  if (raw === "failed" || raw === "error") return "failed"
-  if (raw === "cancelled" || raw === "canceled") return "cancelled"
-  if (raw === "completed" || raw === "complete" || raw === "succeeded" || raw === "terminal") return "complete"
-  if (event.type.includes("failed")) return "failed"
-  if (event.type.includes("cancel")) return "cancelled"
-  if (event.type.includes("terminal") || event.type.includes("completed")) return "complete"
-  return "running"
+
+type ChildStatus = "running" | "complete" | "failed" | "cancelled"
+
+const childLifecycleStatus = (event: SourceEvent): ChildStatus | undefined => {
+  switch (event.type) {
+    case "child_run.spawned":
+    case "child_run.started":
+      return "running"
+    case "child_run.completed":
+      return "complete"
+    case "child_run.failed":
+      return "failed"
+    case "child_run.cancelled":
+      return "cancelled"
+    default:
+      return undefined
+  }
 }
 
 const applyChild = ({
@@ -34,33 +39,18 @@ const applyChild = ({
   readonly turnId: string
   readonly event: SourceEvent
 }): void => {
-  const outer = sourcePayload(event)
-  const payload = Object.keys(record(outer.member)).length > 0 ? record(outer.member) : outer
-  const childId = string(
-    payload.child_execution_id ??
-      payload.child_run_id ??
-      payload.childId ??
-      payload.child_id ??
-      outer.child_execution_id ??
-      outer.child_run_id ??
-      outer.childId,
-    event.cursor,
-  )
-  const correlatedToolId = string(payload.tool_call_id ?? payload.parent_tool_call_id)
+  const payload = sourcePayload(event)
+  const childId = string(payload.child_execution_id)
+  const correlatedToolId = string(payload.invocation_id ?? payload.tool_call_id)
+  if (childId.length === 0 || correlatedToolId.length === 0) return
+  const status = childLifecycleStatus(event) ?? "running"
   const linkedTool = linkedToolFor(value, turnId, childId, correlatedToolId)
   if (linkedTool !== undefined) {
     const id = linkedTool.id
-    const nextStatus = childStatus(event, payload)
-    const profile = Catalog.agentProfile(string(payload.profile ?? payload.preset_name ?? payload.name))
-    const presentation = profile.length === 0 ? linkedTool.presentation : Catalog.resolveAgentPresentation(profile)
     const updated = updateTool(value, change, id, event.sequence, (tool) => ({
       ...tool,
       childId,
-      status: nextStatus,
-      presentation,
-      ...(string(payload.summary ?? payload.output ?? payload.error).length === 0
-        ? {}
-        : { output: string(payload.summary ?? payload.output ?? payload.error) }),
+      status,
     }))
     if (updated !== undefined) {
       const childKeys = value.childUnitsById.get(executionKey(childId))
@@ -80,7 +70,7 @@ const applyChild = ({
       string(payload.profile ?? payload.preset_name ?? payload.name, previous?.name ?? "child"),
     ),
     summary: string(payload.summary ?? payload.output ?? payload.error, previous?.summary ?? ""),
-    status: childStatus(event, payload),
+    status,
     activity: activity.length === 0 ? (previous?.activity ?? []) : [...(previous?.activity ?? []), activity],
   }
   upsertUnit(

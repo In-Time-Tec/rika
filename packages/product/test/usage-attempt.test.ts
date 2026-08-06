@@ -28,15 +28,15 @@ describe("UsageCost", () => {
   })
 
   it("keeps token and provider-cost completeness independent", () => {
-    const provider = Support.Fixtures.usage("provider", 2)
-    const missingBreakdown = Support.Fixtures.reportedTokens("tokens", "unknown", 10, 5, {
-      model_attempt_id: provider.data?.model_attempt_id,
+    const completed = Support.Fixtures.reportedTokens("completed", "unknown", 10, 5, {
       input_tokens_uncached: null,
+      cost: { amount: 2, currency: "USD" },
     })
-    const snapshot = [provider, missingBreakdown].reduce(
-      (current, event) => Support.UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
-      Support.UsageCost.empty,
-    )
+    const snapshot = Support.UsageCost.observe(Support.UsageCost.empty, {
+      threadId: "thread",
+      turnId: "turn",
+      event: completed,
+    })
 
     expect(Support.UsageCost.threadTotals(snapshot, "thread").costUsd).toBe(2)
     expect(Support.UsageCost.threadTotals(snapshot, "thread").unpricedAttempts === 0).toBe(true)
@@ -79,33 +79,26 @@ describe("UsageCost", () => {
     expect(missingAttempt.global.unpricedAttempts === 0).toBe(false)
   })
 
-  it("prices only from provider USD while counting usage tokens in either arrival order", () => {
-    const report = Support.Fixtures.reportedTokens("report", "gpt-5.6-sol", 10_000, 100, {
-      model_attempt_id: "shared-attempt",
+  it("prices only from provider USD while counting the completed attempt usage", () => {
+    const completed = Support.Fixtures.reportedTokens("completed", "gpt-5.6-sol", 10_000, 100, {
       input_tokens_uncached: 1_000,
       input_tokens_cache_read: 9_000,
+      cost: { amount: 2.5, currency: "USD" },
     })
-    const completed = {
-      ...Support.Fixtures.usage("completed", 2.5),
-      data: { ...Support.Fixtures.usage("completed", 2.5).data, model_attempt_id: "shared-attempt" },
-    }
-    for (const events of [
-      [report, completed],
-      [completed, report],
-    ]) {
-      const snapshot = events.reduce(
-        (current, event) => Support.UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
-        Support.UsageCost.empty,
-      )
-      expect(snapshot.global.costUsd).toBe(2.5)
-      expect(snapshot.global.tokens).toBe(10_100)
-      expect(snapshot.global.unpricedAttempts === 0).toBe(true)
-    }
+    const snapshot = Support.UsageCost.observe(Support.UsageCost.empty, {
+      threadId: "thread",
+      turnId: "turn",
+      event: completed,
+    })
+    expect(snapshot.global.costUsd).toBe(2.5)
+    expect(snapshot.global.tokens).toBe(10_100)
+    expect(snapshot.global.unpricedAttempts === 0).toBe(true)
   })
 
   it("does not invent USD from usage tokens when provider cost is absent", () => {
     const report = Support.Fixtures.reportedTokens("report", "gpt-5.6-sol", 10_000, 100, {
       model_attempt_id: "attempt",
+      model_call_id: "call",
       input_tokens_uncached: 1_000,
       input_tokens_cache_read: 9_000,
     })
@@ -147,14 +140,11 @@ describe("UsageCost", () => {
       input_tokens_uncached: 1_000,
       input_tokens_cache_read: 9_000,
     })
-    const completed = {
-      ...Support.Fixtures.usage("completed", 0),
-      data: { model_call_id: "call", model_attempt_id: "attempt", attempt: 1 },
-    }
-    const open = [completed, report].reduce(
-      (current, event) => Support.UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
-      Support.UsageCost.empty,
-    )
+    const open = Support.UsageCost.observe(Support.UsageCost.empty, {
+      threadId: "thread",
+      turnId: "turn",
+      event: report,
+    })
     const settled = Support.UsageCost.observe(open, {
       threadId: "thread",
       turnId: "turn",
@@ -190,27 +180,20 @@ describe("UsageCost", () => {
     expect(settled.global).toMatchObject({ costUsd: 1, unpricedAttempts: 1 })
   })
 
-  it("keeps a thread total while a completed attempt waits for its usage report", () => {
+  it("keeps a thread total when another completed attempt has usage but no provider cost", () => {
     const priced = Support.UsageCost.observe(Support.UsageCost.empty, {
       threadId: "thread",
       turnId: "turn",
       event: Support.Fixtures.usage("first", 2),
     })
-    const awaiting = Support.UsageCost.observe(priced, {
-      threadId: "thread",
-      turnId: "turn",
-      event: Support.Fixtures.attemptCompleted("second", "attempt-second"),
-    })
-    const reported = Support.UsageCost.observe(awaiting, {
+    const reported = Support.UsageCost.observe(priced, {
       threadId: "thread",
       turnId: "turn",
       event: Support.Fixtures.reportedTokens("second-usage", "gpt-5.6-sol", 100, 0, {
-        model_attempt_id: "attempt-second",
         input_tokens_uncached: 100,
       }),
     })
 
-    expect(Support.UsageCost.threadTotals(awaiting, "thread")).toMatchObject({ costUsd: 2, unpricedAttempts: 0 })
     expect(Support.UsageCost.threadTotals(reported, "thread").costUsd).toBe(2)
     expect(Support.UsageCost.threadTotals(reported, "thread").tokens).toBe(100)
     expect(Support.UsageCost.threadTotals(reported, "thread").unpricedAttempts).toBe(0)
@@ -228,10 +211,11 @@ describe("UsageCost", () => {
       event: Support.Fixtures.lifecycle("execution", "done", "execution.completed", 2, 9),
     })
 
-    expect(Support.UsageCost.threadTotals(awaiting, "thread")).toEqual(Support.UsageCost.noTotals)
-    expect(awaiting.threads).toBe(Support.UsageCost.empty.threads)
-    expect(awaiting.turns).toBe(Support.UsageCost.empty.turns)
-    expect(awaiting.global).toBe(Support.UsageCost.empty.global)
+    expect(Support.UsageCost.threadTotals(awaiting, "thread")).toMatchObject({
+      costUsd: 0,
+      unpricedAttempts: 0,
+      uncountedAttempts: 1,
+    })
     expect(Support.UsageCost.threadTotals(settled, "thread")).toMatchObject({
       costUsd: 0,
       unpricedAttempts: 1,

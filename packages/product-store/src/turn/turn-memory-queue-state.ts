@@ -4,8 +4,6 @@ import type { MemoryQueueState, MemoryState } from "./turn-memory-state"
 export const emptyQueueState: MemoryQueueState = {
   revision: 0,
   queuedCount: 0,
-  wakeGeneration: 0,
-  wakePending: false,
 }
 
 export function queueState(state: MemoryState): (threadId: ThreadId) => MemoryQueueState

@@ -112,7 +112,7 @@ const program = Effect.gen(function* () {
             const { identity } = yield* buildIdentity()
             yield* checkedBuild("client-main.ts", path.join(bin, "rika"), target, identity)
             yield* checkedBuild("interactive-main.ts", path.join(bin, ".rika-interactive"), target, identity)
-            yield* checkedBuild("resident-main.ts", path.join(bin, ".rika-resident"), target, identity)
+            yield* checkedBuild("server-main.ts", path.join(bin, ".rika-server"), target, identity)
             yield* checkedBuild("performance-main.ts", path.join(bin, ".rika-performance"), target, identity)
             yield* fileSystem.writeFileString(
               path.join(stage, "INSTALL"),

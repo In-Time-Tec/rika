@@ -8,6 +8,10 @@ import { displayInput } from "../../state/model/terminal-composer-state"
 import { truncateToWidth } from "../../presentation/terminal/terminal-format"
 import type { Command } from "../../presentation/terminal/command-palette"
 import type { ModeRouteLabel } from "../../state/model/terminal-mode-route"
+import {
+  modeSelectorLabels,
+  modeSelectorNotchAtPosition,
+} from "../../presentation/terminal/terminal-mode-selector-layout"
 const displayCursorOffset = (model: Model): number => {
   let offset = model.cursor
   for (const attachment of model.pastedText) {
@@ -41,7 +45,10 @@ const shortcutRows: ReadonlyArray<ReadonlyArray<readonly [string, string]>> = [
     ["Ctrl+V", "paste images"],
     ["Shift+Enter", "newline"],
   ],
-  [["Ctrl+S", "switch modes"]],
+  [
+    ["Ctrl+S", "switch modes"],
+    ["Ctrl+Y", "context & usage"],
+  ],
   [
     ["Ctrl+G", "edit in $EDITOR"],
     ["Opt+T", "toggle file tree"],
@@ -50,7 +57,10 @@ const shortcutRows: ReadonlyArray<ReadonlyArray<readonly [string, string]>> = [
     ["@ / @@", "mention files/threads"],
     ["Tab/Shift+Tab", "navigate messages"],
   ],
-  [["?", "toggle this help"]],
+  [
+    ["D", "toggle details"],
+    ["?", "toggle this help"],
+  ],
 ]
 
 const sidebarShortcutRows: ReadonlyArray<readonly [string, string]> = [
@@ -148,12 +158,11 @@ const paletteContentImpl = (
   return new StyledText(chunks)
 }
 
-const modeGaugeFill = { low: 2, medium: 19, high: 36, ultra: 54 } as const
 const routeLabel = (route: ModeRouteLabel | undefined): string =>
   route === undefined ? "" : `${route.name} ${route.effort}${route.fast ? " fast" : ""}`
 const modeDescription = {
   low: "Fast, low-cost mode for small, well-defined tasks",
-  medium: "Balanced intelligence, speed, and cost for most tasks",
+  medium: "Balanced default for everyday work",
   high: "Deep reasoning for hard tasks",
   ultra: "The most capable mode for hard, open-ended tasks",
 } as const
@@ -173,37 +182,56 @@ export const paletteContent: {
 } = Function.dual(4, paletteContentImpl)
 
 const modePickerContentImpl = (model: Model, innerWidth: number): StyledText => {
-  const modes = modeIds
-  const selected = modes[model.modePicker.selected] ?? model.mode
-  if (innerWidth < 40)
-    return new StyledText([
-      bold(fg(colors[selected])(truncateToWidth(selected, innerWidth))),
-      fg(colors.text)("\n"),
-      fg(colors.muted)(truncateToWidth(modeDescription[selected], innerWidth)),
-    ])
-  const gaugeWidth = Math.min(54, innerWidth)
-  const fill = Math.min(gaugeWidth, modeGaugeFill[selected])
+  const selected = modeIds[model.modePicker.selected] ?? model.mode
+  const compact = innerWidth < 40 || model.height <= 12
   const chunks: Array<TextChunk> = []
-  chunks.push(fg(colors[selected])("•".repeat(fill)))
-  chunks.push(fg(colors.muted)("·".repeat(Math.max(0, gaugeWidth - fill))))
-  chunks.push(fg(colors.text)("\n"))
-  const labelStarts = [0, 16, 33, 49].map((start) => Math.floor((start * gaugeWidth) / 54))
+  const line = (value = "", style: (text: string) => TextChunk = fg(colors.text)) => {
+    if (chunks.length > 0) chunks.push(fg(colors.text)("\n"))
+    chunks.push(style(truncateToWidth(value, innerWidth)))
+  }
+  const labels = modeSelectorLabels(innerWidth)
+  const targetPosition = model.modePicker.selected
+  const fromPosition = model.modePicker.fromPosition ?? model.modePicker.from ?? targetPosition
+  const progress = Math.min(1, ((model.modePicker.turnTick ?? 4) + 1) / 4)
+  const position = fromPosition + (targetPosition - fromPosition) * (1 - (1 - progress) * (1 - progress))
+  const center = modeSelectorNotchAtPosition(labels, position)
+  const target = modeSelectorNotchAtPosition(labels, targetPosition)
+  const from = modeSelectorNotchAtPosition(labels, fromPosition)
+  const targetLabel = labels[model.modePicker.selected]
+  const thumbWidth = targetLabel === undefined ? selected.length : targetLabel.end - targetLabel.start
+  const dial = Array.from({ length: innerWidth }, () => "╌")
+  for (let index = 0; index < thumbWidth; index += 1) if (center + index < dial.length) dial[center + index] = "━"
+  if (model.modePicker.turnTick !== undefined) {
+    const edge = target >= from ? center + thumbWidth : center - 1
+    if (edge >= 0 && edge < dial.length) dial[edge] = "╾"
+  }
+  if (!compact) line("")
+  line(dial.join(""), (value) => fg(colors[selected])(value))
+  const labelChunks: Array<TextChunk> = []
   let column = 0
-  modes.forEach((mode, index) => {
-    const start = labelStarts[index]!
-    chunks.push(fg(colors.text)(" ".repeat(Math.max(0, start - column))))
-    chunks.push(mode === selected ? bold(fg(colors[mode])(mode)) : fg(colors.muted)(mode))
-    column = Math.max(column, start) + mode.length
-  })
-  chunks.push(fg(colors.text)("\n\n"))
+  for (const label of labels) {
+    labelChunks.push(fg(colors.text)(" ".repeat(Math.max(0, label.start - column))))
+    labelChunks.push(
+      label.mode === selected ? bold(fg(colors[selected])(label.text)) : dim(fg(colors.text)(label.text)),
+    )
+    column = label.end
+  }
+  chunks.push(fg(colors.text)("\n"), ...labelChunks)
+  if (compact) {
+    line(modeDescription[selected], (value) => fg(colors.muted)(value))
+    return new StyledText(chunks)
+  }
+  line("")
+  line(" ".repeat(innerWidth))
+  line("")
   const routes = model.modeRoutes[selected]
-  chunks.push(bold(fg(colors.text)("Agent:")))
-  chunks.push(fg(colors.muted)(`  ${routeLabel(routes?.main)}`))
-  chunks.push(fg(colors.text)("\n"))
-  chunks.push(bold(fg(colors.text)("Oracle:")))
-  chunks.push(fg(colors.muted)(` ${routeLabel(routes?.oracle)}`))
-  chunks.push(fg(colors.text)("\n\n"))
-  chunks.push(fg(colors.text)(modeDescription[selected]))
+  line(`Agent     ${routeLabel(routes?.main)}`)
+  line(`Oracle    ${routeLabel(routes?.oracle)}`)
+  line("")
+  line(" ".repeat(innerWidth))
+  line("")
+  line(modeDescription[selected])
+  line("")
   return new StyledText(chunks)
 }
 

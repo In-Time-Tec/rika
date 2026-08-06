@@ -76,11 +76,7 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
         })
         const currentProjected = history.flatMap((turn) => {
           const activity = activityValues.get(turn.id)
-          return activity !== undefined &&
-            (TurnResult.isAgentExecution(turn)
-              ? activity.projectedCursor === turn.lastCursor &&
-                (!ExecutionStatus.isTerminalStatus(turn.status) || activity.complete)
-              : !ExecutionStatus.isTerminalStatus(turn.status) || activity.complete)
+          return activity !== undefined && (!ExecutionStatus.isTerminalStatus(turn.status) || activity.complete)
             ? [activity]
             : []
         })
@@ -161,11 +157,7 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
         .filter(TurnResult.isAgentExecution)
         .filter((turn) => {
           const activity = activityValues.get(turn.id)
-          return (
-            activity === undefined ||
-            activity.projectedCursor !== turn.lastCursor ||
-            (ExecutionStatus.isTerminalStatus(turn.status) && !activity.complete)
-          )
+          return activity === undefined || (ExecutionStatus.isTerminalStatus(turn.status) && !activity.complete)
         })
         .slice(0, listLimit(limit))
         .map((turn) =>
@@ -173,7 +165,6 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
             turnId: turn.id,
             threadId: turn.threadId,
             status: turn.status,
-            ...(turn.lastCursor === undefined ? {} : { lastCursor: turn.lastCursor }),
           }),
         )
     }),

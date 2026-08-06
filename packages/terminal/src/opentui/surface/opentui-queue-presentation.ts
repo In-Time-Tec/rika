@@ -21,7 +21,7 @@ export const queueEditingHint: ReadonlyArray<QueueHintSegment> = [
 ]
 const minimumInlineQueueMessageWidth = 12
 export const queueHintWidth = (segments: ReadonlyArray<QueueHintSegment>): number =>
-  stringWidth(` ${segments.map((segment) => `${segment.accent}${segment.suffix}`).join(" · ")} `)
+  stringWidth(` ${segments.map((segment) => `${segment.accent}${segment.suffix}`).join(" ── ")} `)
 const fittingQueueHintImpl = (
   segments: ReadonlyArray<QueueHintSegment>,
   width: number,

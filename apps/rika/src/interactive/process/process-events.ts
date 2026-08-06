@@ -84,6 +84,8 @@ export const makeEventRouter = (runtime: Runtime) => {
       if (event._tag === "SelectionLoaded") {
         loop.loadingOlder = false
         loop.pendingNewer = undefined
+        if (loop.model.currentThreadId === event.thread.id)
+          loop.model = update(loop.model, { _tag: "ThreadOpenCompleted" })
       } else if (
         event._tag === "TranscriptPageAppended" &&
         loop.pendingNewer?.threadId === event.threadId &&
@@ -300,6 +302,9 @@ export const makeEventRouter = (runtime: Runtime) => {
             units: turn.units.map((unit) => Schema.decodeUnknownSync(TranscriptUnit.Unit)(unit)),
           })),
         })
+    } else if (event._tag === "ThreadPreviewFailed") {
+      if (loop.model.threadSwitcher.open && selectedThreadMetadata(loop.model)?.id === event.threadId)
+        loop.model = update(loop.model, event)
     } else {
       loop.model = update(loop.model, event)
     }

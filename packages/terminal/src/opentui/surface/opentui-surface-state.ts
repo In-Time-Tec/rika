@@ -36,6 +36,9 @@ export interface Handlers {
   readonly contextToggle?: () => void
   readonly usageToggle?: () => void
   readonly modeToggle?: () => void
+  readonly modeCommit?: (selected: number) => void
+  readonly modeHover?: (selected: number) => void
+  readonly animationTick?: () => void
   readonly composerResize?: (height: number) => void
   readonly sidebarResize?: (width: number) => void
   readonly threadSidebarSelect?: (index: number) => void
@@ -73,6 +76,8 @@ export class SurfaceState {
   public contextDividerOne!: TextRenderable
   public contextDividerTwo!: TextRenderable
   public contextFooter!: TextRenderable
+  public overlayHintOne!: TextRenderable
+  public overlayHintTwo!: TextRenderable
   public overlayEditor!: EditBufferRenderable & { sync(text: string, cursor: number): void }
   public sidebar!: TextRenderable
   public changedFilesBox!: ScrollBoxRenderable & {
@@ -84,14 +89,12 @@ export class SurfaceState {
   public statusLabel!: TextRenderable
   public toastBox!: BoxRenderable
   public toast!: TextRenderable
-  protected welcomePhase = 0
   protected welcomeChild: TextRenderable | undefined
   protected welcomeKey = ""
-  protected welcomeTimer: Fiber.Fiber<void> | undefined
-  protected welcomeStopTimer: Fiber.Fiber<void> | undefined
+  protected welcomePhase = 0
+  protected welcomeTimer: TimerHandle | undefined
   protected toastTimer: Fiber.Fiber<void> | undefined
   protected usageLabelWidth = 0
-  protected modeLabelContentKey: string | undefined
   protected usageLabelHovered = false
   protected modeLabelHovered = false
   protected modeSegmentStart = 0

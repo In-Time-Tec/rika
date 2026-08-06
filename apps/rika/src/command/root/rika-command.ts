@@ -10,10 +10,9 @@ import { mcpCommand } from "../product/mcp-command"
 import { skillCommand } from "../product/skill-command"
 import { threadCommand } from "../product/thread-command"
 import { toolCatalogCommand } from "../product/tool-catalog-command"
-import { workflowCommand } from "../product/workflow-command"
+import { reviewCommand } from "../product/review-command"
 import { dispatch, type CliOperationService } from "./cli-operation-dispatch"
 import { executeRun, runCommand } from "./noninteractive-run-command"
-import { reviewCommand } from "./review-command"
 import * as ReleaseUpdate from "../../release/release-update"
 import { version } from "../../application-version"
 
@@ -102,6 +101,7 @@ export const command = Command.make(
   Command.withDescription("Local durable coding agent"),
   Command.withSubcommands([
     runCommand,
+    reviewCommand,
     threadCommand,
     Command.make("last", {}, () => dispatch({ _tag: "Thread", action: "last" })),
     Command.make("top", {}, () => dispatch({ _tag: "Thread", action: "top" })),
@@ -112,8 +112,6 @@ export const command = Command.make(
     skillCommand,
     mcpCommand,
     extensionCommand,
-    workflowCommand,
-    reviewCommand,
     Command.make("doctor", {}, () => dispatch({ _tag: "Doctor" })),
     updateCommand,
     Command.make("version", {}, () => Console.log(version)),

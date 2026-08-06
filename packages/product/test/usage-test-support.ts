@@ -73,7 +73,7 @@ const reportedTokens = (
   executionId: "execution",
   cursor,
   sequence: 0,
-  type: "model.usage.reported",
+  type: "model.attempt.completed",
   createdAt: 1,
   data: {
     model_call_id: `call-${cursor}`,
@@ -104,7 +104,7 @@ const lifecycle = (
     | "execution.cancelled",
   createdAt: number,
   sequence: number,
-): ExecutionEvent.Event => ({ executionId, cursor: id, sequence, type, createdAt, timestampSource: "server" })
+): ExecutionEvent.Event => ({ executionId, cursor: id, sequence, type, createdAt, timestampSource: "baton" })
 
 const unstampedLifecycle = (
   executionId: string,

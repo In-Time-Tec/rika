@@ -25,8 +25,8 @@ Rika is a local coding-agent CLI and OpenTUI app written in Effect TypeScript. R
 
 ## Boundaries
 
-- Relay owns durable execution; Baton owns the agent loop; Rika owns product semantics and projections.
-- Use released Baton, Relay, Effect, and OpenTUI package exports. Never edit, import from, format, build, or test `repos/*`.
+- Baton owns durable execution and the agent loop; Rika owns product semantics and projections.
+- Use released Baton, Effect, and OpenTUI package exports. Never edit, import from, format, build, or test `repos/*`.
 - Use Effect services, schemas, streams, scopes, typed errors, platform APIs, and structured concurrency. Keep raw Promise or host APIs in a named outer adapter only when Effect has no equivalent.
 - Run Effects only at app, process, test-host, or framework boundaries. Keep pure computations pure.
 - Build CLI surfaces with `effect/unstable/cli`, use Effect SQL for Rika SQLite state, use WebSockets for Rika process transport, and keep OpenTUI imports in the TUI adapter.
@@ -41,7 +41,9 @@ Rika is a local coding-agent CLI and OpenTUI app written in Effect TypeScript. R
 - `docs/features/<capability>.md` owns one current capability contract. Keep it short and merge overlap into the owning capability.
 - `docs/decisions/<slug>.md` records only a lasting choice and why. `docs/tradeoffs/<slug>.md` records only a meaningful gain, cost, and rejected options.
 - Do not create documentation indexes, ledgers, status or evidence tables, numbered specs, decision-record metadata, plans, history sections, related-link sections, or Markdown meaning/structure validators.
-- `PLAN.md`, `TODO.md`, and `ISSUES.md` may track unfinished work but never define architecture or product behavior.
+- `PLAN.md`, `TODO.md`, and `ISSUES.md` may track unfinished work but never define implemented product behavior.
+- The Baton native-runtime `PLAN.md` may record target interface changes and release acceptance for this clean-break migration.
+- A test-only Vitest alias may resolve Baton package imports to the Baton worktree before `0.15.0` is published. Production source must keep package-name imports. Remove the alias after Rika pins the released packages.
 
 ## Scripts and verification
 
@@ -50,7 +52,7 @@ Rika is a local coding-agent CLI and OpenTUI app written in Effect TypeScript. R
 - Do not add colon-named aliases, dispatchers that hide old aliases, or wrappers for Git, Docker, status, logs, watch, coverage, vendor, or upstream commands.
 - Use `bun run package -- --target <target>` for target packaging.
 - Unit tests are the default and use `*.test.ts` for one owned behavior or interface. They may use real SQLite, filesystem, process, or OpenTUI adapters.
-- User-visible interactive behavior is tested in-process with `apps/rika/test/tui-app.ts` (`*.tui.test.ts`, run by `bun run test-tui` in CI): the real Surface on the OpenTUI test renderer, the real interactive loop, and the real product stack with a scripted model. Process-lifecycle and transport tests that spawn residents, PTYs, or kill fixtures use `*.proc.test.ts` and run by `bun run test-proc` in CI. `bun run check` and `bun run test` stay fast and deterministic: no child processes, no packaged binaries, and no wall-clock assertions — waits poll observable conditions with generous ceilings instead of asserting durations.
+- User-visible interactive behavior is tested in-process with `apps/rika/test/tui-app.ts` (`*.tui.test.ts`, run by `bun run test-tui` in CI): the real Surface on the OpenTUI test renderer, the real interactive loop, and the real product stack with a scripted model. Process-lifecycle and transport tests that spawn servers, PTYs, or kill fixtures use `*.proc.test.ts` and run by `bun run test-proc` in CI. `bun run check` and `bun run test` stay fast and deterministic: no child processes, no packaged binaries, and no wall-clock assertions — waits poll observable conditions with generous ceilings instead of asserting durations.
 - `bun run test` owns all deterministic checks. Use `@effect/vitest` and `TestClock` for Effect behavior and time; use `bun:test` only when a Bun API requires it.
 - Packaged-product verification lives in `bun run release-smoke` (after `bun run package`) and runs in the release workflow, not per push. Manual TUI acceptance uses the pilotty and agent-tty skills.
 - Run focused tests while working, then `bun run check` when the risk and time budget permit. Report what ran and what did not.

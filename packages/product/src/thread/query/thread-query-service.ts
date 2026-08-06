@@ -1,5 +1,4 @@
 import * as ThreadRepository from "@rika/product/thread-repository"
-import * as ThreadInteractionRepository from "@rika/product/thread-interaction-repository"
 import * as ThreadSearchRepository from "@rika/product/thread-search-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product/turn-repository"
@@ -8,7 +7,7 @@ import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Context, DateTime, Effect, Layer, Schema } from "effect"
 import * as ThreadState from "@rika/product/thread-state"
-import type { FindInput, LegacyReadInput, ReadInput } from "./thread-query-input"
+import type { FindInput, ReadInput } from "./thread-query-input"
 import type { FindSuccess, Message, Omission, ReadItem, ReadSuccess, Result } from "./thread-result-delivery"
 
 export const QueryPolicy = { schemaVersion: 2 as const, transcriptBudget: 36_000 }
@@ -16,12 +15,9 @@ export const QueryPolicy = { schemaVersion: 2 as const, transcriptBudget: 36_000
 export interface Interface {
   readonly find: (input: FindInput) => Effect.Effect<FindSuccess, QueryError>
   readonly search: (input: FindInput) => Effect.Effect<Result, QueryError>
-  readonly readStructured: (
+  readonly read: (
     input: ReadInput,
   ) => Effect.Effect<ReadSuccess, QueryError | ThreadNotFoundError | ArchivedThreadError>
-  readonly read: (
-    input: LegacyReadInput,
-  ) => Effect.Effect<Result, QueryError | ThreadNotFoundError | ArchivedThreadError>
 }
 export class Service extends Context.Service<Service, Interface>()(
   "@rika/product/thread/query/thread-query-service/Service",
@@ -168,7 +164,6 @@ const makeForWorkspace = (workspace: string) =>
   Effect.gen(function* () {
     const threadRepository = yield* ThreadRepository.Service
     const searches = yield* ThreadSearchRepository.Service
-    const interactions = yield* ThreadInteractionRepository.Service
     const turns = yield* TurnRepository.Service
     const transcripts = yield* TranscriptRepository.Service
     const rebuildWorkspaceSearch = Effect.fn("ThreadQueryService.rebuildWorkspaceSearch")(function* () {
@@ -220,7 +215,7 @@ const makeForWorkspace = (workspace: string) =>
       )
       return { schemaVersion: QueryPolicy.schemaVersion, threads: results, truncated: page.nextCursor !== undefined }
     })
-    const readStructured = Effect.fn("ThreadQueryService.readStructured")(function* (input: ReadInput) {
+    const read = Effect.fn("ThreadQueryService.read")(function* (input: ReadInput) {
       if (input.threadId.trim().length === 0 || input.threadId.trim() !== input.threadId)
         return yield* QueryError.make({ message: "threadId must be a non-empty identifier" })
       const threadId = Thread.ThreadId.make(input.threadId)
@@ -234,48 +229,8 @@ const makeForWorkspace = (workspace: string) =>
         threadId: input.threadId,
         title: thread.title,
         selector: input.selector,
-        relatedThreads: [],
       }
       if (input.selector._tag === "overview") return encodeBounded(base, [], [])
-      if (input.selector._tag === "related") {
-        const relationships = yield* interactions
-          .listRelationships(threadId, 21, input.selector.before)
-          .pipe(Effect.mapError(mapError))
-        const page = relationships.slice(0, 20)
-        const relatedThreads = yield* Effect.forEach(page, (relationship) =>
-          Effect.gen(function* () {
-            const outgoing = relationship.sourceThreadId === threadId
-            const relatedThreadId = outgoing ? relationship.targetThreadId : relationship.sourceThreadId
-            const relatedTurnId = outgoing ? relationship.targetTurnId : relationship.sourceTurnId
-            const related = yield* threadRepository.get(relatedThreadId).pipe(Effect.mapError(mapError))
-            const available = related !== undefined && related.workspace === workspace
-            return {
-              kind: relationship.kind,
-              direction: outgoing ? ("outgoing" as const) : ("incoming" as const),
-              threadId: relatedThreadId,
-              turnId: relatedTurnId,
-              title: available ? related.title : "Unavailable Thread",
-              archived: available ? related.archived : false,
-              available,
-              createdAt: iso(relationship.createdAt),
-            }
-          }),
-        )
-        const last = page.at(-1)
-        const omissions: ReadonlyArray<Omission> =
-          relationships.length > page.length && last !== undefined
-            ? [
-                {
-                  reason: "relationshipsUnavailable",
-                  continuation: {
-                    _tag: "related",
-                    before: { createdAt: last.createdAt, targetTurnId: last.targetTurnId },
-                  },
-                },
-              ]
-            : []
-        return encodeBounded({ ...base, relatedThreads }, [], omissions)
-      }
       if (input.selector._tag === "subtree") {
         const childExecutionId = input.selector.childExecutionId
         const page = yield* transcripts
@@ -416,28 +371,14 @@ const makeForWorkspace = (workspace: string) =>
       const result = yield* find(input)
       return { text: encodeJson(result), truncated: result.truncated }
     })
-    const read = Effect.fn("ThreadQueryService.read")(function* (input: LegacyReadInput) {
-      const limit = yield* bounded("maxTurns", input.maxTurns, 10, 20)
-      yield* bounded("maxChars", input.maxChars, QueryPolicy.transcriptBudget, QueryPolicy.transcriptBudget)
-      const result = yield* readStructured({
-        threadId: input.threadId,
-        selector: { _tag: "recent", limit },
-        ...(input.includeArchived === undefined ? {} : { includeArchived: input.includeArchived }),
-      })
-      return { text: encodeJson(result), truncated: result.truncated }
-    })
-    return Service.of({ find, search, readStructured, read })
+    return Service.of({ find, search, read })
   })
 const layerForWorkspace = (workspace: string) => Layer.effect(Service, makeForWorkspace(workspace))
 const factoryLayer = Layer.effect(
   Factory,
   Effect.gen(function* () {
     const context = yield* Effect.context<
-      | ThreadRepository.Service
-      | ThreadSearchRepository.Service
-      | ThreadInteractionRepository.Service
-      | TurnRepository.Service
-      | TranscriptRepository.Service
+      ThreadRepository.Service | ThreadSearchRepository.Service | TurnRepository.Service | TranscriptRepository.Service
     >()
     return Factory.of({
       forWorkspace: (workspace) => makeForWorkspace(workspace).pipe(Effect.provideContext(context)),

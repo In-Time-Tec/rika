@@ -5,7 +5,7 @@ import * as TranscriptOrderingModule from "@rika/transcript/transcript-unit-orde
 import * as TranscriptProjectionModule from "@rika/transcript/transcript-projection"
 import * as TranscriptProjectionModelModule from "@rika/transcript/transcript-projection-model"
 import * as TranscriptUnitModule from "@rika/transcript/transcript-unit"
-import * as TranscriptUsageModule from "@rika/transcript/model-usage-fallback"
+import * as ModelAttemptUsageModule from "@rika/transcript/model-attempt-usage"
 import * as UsageCostModule from "@rika/product/usage-projection"
 
 export namespace Fixtures {
@@ -16,6 +16,6 @@ export namespace Fixtures {
   export import TranscriptProjection = TranscriptProjectionModule
   export import TranscriptProjectionModel = TranscriptProjectionModelModule
   export import TranscriptUnit = TranscriptUnitModule
-  export import TranscriptUsage = TranscriptUsageModule
+  export import TranscriptUsage = ModelAttemptUsageModule
   export import UsageCost = UsageCostModule
 }

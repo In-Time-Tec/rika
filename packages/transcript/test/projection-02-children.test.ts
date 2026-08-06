@@ -3,33 +3,10 @@ import * as TranscriptProjection from "../src/projection/transcript-projection"
 import type { SourceEvent } from "../src/schema/transcript-source-event"
 
 describe("Transcript projection", () => {
-  it("uses child payload status and keeps one stable child row", () => {
-    const projection = TranscriptProjection.Projection.project("turn-a", "delegate", [
-      {
-        cursor: "1",
-        sequence: 1,
-        type: "child_run.spawned",
-        createdAt: 1,
-        data: { child_execution_id: "child-1", preset_name: "Oracle" },
-      },
-      {
-        cursor: "2",
-        sequence: 2,
-        type: "child_run.event",
-        createdAt: 2,
-        data: { child_execution_id: "child-1", preset_name: "Oracle", status: "failed", error: "no result" },
-      },
-    ])
-    expect(projection.units).toHaveLength(2)
-    expect(projection.units[1]).toMatchObject({
-      key: "child:turn-a:child-1",
-      content: { _tag: "Block", block: { _tag: "ChildAgent", id: "child-1", status: "failed" } },
-    })
-  })
-
-  it("merges a correlated spawn and child lifecycle into one named tool unit", () => {
+  it("merges a correlated spawn and authoritative child outcome into one named tool unit", () => {
     const childId = "execution:turn-a:child:oracle"
-    const projection = TranscriptProjection.Projection.project("turn-a", "delegate", [
+    const fold = TranscriptProjection.Fold.makeProjectionFold("turn-a", "delegate")
+    for (const event of [
       {
         cursor: "call",
         sequence: 1,
@@ -37,8 +14,8 @@ describe("Transcript projection", () => {
         createdAt: 1,
         data: {
           tool_call_id: "agent",
-          tool_name: "spawn_child_run",
-          input: { profile: "oracle", prompt: "Find the projection defect" },
+          tool_name: "transfer_to_oracle",
+          input: { prompt: "Find the projection defect" },
         },
       },
       {
@@ -46,28 +23,17 @@ describe("Transcript projection", () => {
         sequence: 2,
         type: "child_run.spawned",
         createdAt: 2,
-        data: { tool_call_id: "agent", child_execution_id: childId },
+        data: { invocation_id: "agent", child_execution_id: childId },
       },
-      {
-        cursor: "started",
-        sequence: 3,
-        type: "child_run.started",
-        createdAt: 3,
-        data: { child_execution_id: childId, profile: "oracle" },
-      },
-      {
-        cursor: "completed",
-        sequence: 4,
-        type: "child_run.completed",
-        createdAt: 4,
-        data: { child_execution_id: childId, profile: "oracle" },
-      },
-    ])
+    ] satisfies ReadonlyArray<SourceEvent>)
+      TranscriptProjection.Fold.applyFoldEvent(fold, event)
+    TranscriptProjection.Fold.applyChildOutcome(fold, childId, { status: "complete" })
+    const projection = TranscriptProjection.Fold.snapshotFoldProjection(fold)
 
     expect(projection.units).toHaveLength(2)
     expect(projection.units[1]).toMatchObject({
       key: "tool:turn-a:agent",
-      revision: 4,
+      revision: 2,
       content: {
         _tag: "Block",
         block: {
@@ -103,7 +69,7 @@ describe("Transcript projection", () => {
     expect(block?.presentation.activeLabel).not.toContain("(task)")
   })
 
-  it("uses a later durable child completion instead of an earlier subagent tool error", () => {
+  it("replays a child outcome over an earlier subagent tool error", () => {
     const events: ReadonlyArray<SourceEvent> = [
       {
         cursor: "call",
@@ -124,24 +90,21 @@ describe("Transcript projection", () => {
         data: { tool_call_id: "agent", error: "AgentToolError: Model gpt-5.6-luna is not available" },
       },
       {
-        cursor: "completed",
+        cursor: "spawned",
         sequence: 3,
-        type: "child_run.completed",
+        type: "child_run.spawned",
         createdAt: 3,
-        data: {
-          tool_call_id: "agent",
-          child_execution_id: "child:agent",
-          profile: "task",
-          summary: "The child recovered and returned an answer.",
-        },
+        data: { invocation_id: "agent", child_execution_id: "child:agent" },
       },
     ]
-    const live = TranscriptProjection.Projection.project("turn-a", "delegate", events)
-    const replayed = events.reduce(
-      (current, event) => TranscriptProjection.Projection.applyEvent(current, event),
-      TranscriptProjection.Projection.empty("turn-a", "delegate"),
+    const live = TranscriptProjection.Fold.makeProjectionFold("turn-a", "delegate")
+    for (const event of events) TranscriptProjection.Fold.applyFoldEvent(live, event)
+    const replayed = TranscriptProjection.Fold.restoreProjectionFold(
+      TranscriptProjection.Fold.snapshotFoldProjection(live),
     )
-    for (const projection of [live, replayed])
+    for (const fold of [live, replayed]) {
+      TranscriptProjection.Fold.applyChildOutcome(fold, "child:agent", { status: "complete" })
+      const projection = TranscriptProjection.Fold.snapshotFoldProjection(fold)
       expect(projection.units[1]).toMatchObject({
         key: "tool:turn-a:agent",
         content: {
@@ -150,32 +113,8 @@ describe("Transcript projection", () => {
             _tag: "ToolCall",
             status: "complete",
             detail: "Inspect the projection",
-            output: "The child recovered and returned an answer.",
           },
         },
-      })
-  })
-
-  it("keeps a terminal child result from presenting a failed or cancelled subagent as finished", () => {
-    for (const status of ["failed", "cancelled"] as const) {
-      const projection = TranscriptProjection.Projection.project("turn-a", "delegate", [
-        {
-          cursor: `call-${status}`,
-          sequence: 1,
-          type: "tool.call.requested",
-          createdAt: 1,
-          data: { tool_call_id: "agent", tool_name: "task", input: { prompt: "Inspect the projection" } },
-        },
-        {
-          cursor: `result-${status}`,
-          sequence: 2,
-          type: "tool.result.received",
-          createdAt: 2,
-          data: { tool_call_id: "agent", output: { childExecutionId: "child:agent", status, output: [] } },
-        },
-      ])
-      expect(projection.units[1]).toMatchObject({
-        content: { _tag: "Block", block: { _tag: "ToolCall", status } },
       })
     }
   })
@@ -285,5 +224,170 @@ describe("Transcript projection", () => {
         reason: "internal tool failed",
       })
     }
+  })
+
+  it("settles a linked child tool through the child_run lifecycle family", () => {
+    const projection = TranscriptProjection.Projection.project("turn-a", "delegate", [
+      {
+        cursor: "call",
+        sequence: 1,
+        type: "tool.call.requested",
+        createdAt: 1,
+        data: { tool_call_id: "agent", tool_name: "task", input: { prompt: "work" } },
+      },
+      {
+        cursor: "spawned",
+        sequence: 2,
+        type: "child_run.spawned",
+        createdAt: 2,
+        data: { invocation_id: "agent", child_execution_id: "child-1" },
+      },
+      {
+        cursor: "started",
+        sequence: 3,
+        type: "child_run.started",
+        createdAt: 3,
+        data: { invocation_id: "agent", child_execution_id: "child-1", profile: "task" },
+      },
+      {
+        cursor: "failed",
+        sequence: 4,
+        type: "child_run.failed",
+        createdAt: 4,
+        data: { invocation_id: "agent", child_execution_id: "child-1", error: "child failed" },
+      },
+      {
+        cursor: "completed",
+        sequence: 5,
+        type: "child_run.completed",
+        createdAt: 5,
+        data: { invocation_id: "agent", child_execution_id: "child-1", profile: "task" },
+      },
+    ])
+
+    expect(projection.units[1]).toMatchObject({
+      key: "tool:turn-a:agent",
+      content: { _tag: "Block", block: { _tag: "ToolCall", childId: "child-1", status: "complete" } },
+    })
+    expect(
+      projection.units.filter((unit) => unit.content._tag === "Block" && unit.content.block._tag === "ChildAgent"),
+    ).toHaveLength(0)
+  })
+
+  it("restores a durable child completion over an earlier subagent tool error", () => {
+    const projection = TranscriptProjection.Projection.project("turn-a", "delegate", [
+      {
+        cursor: "call",
+        sequence: 1,
+        type: "tool.call.requested",
+        createdAt: 1,
+        data: { tool_call_id: "agent", tool_name: "task", input: { prompt: "work" } },
+      },
+      {
+        cursor: "spawned",
+        sequence: 2,
+        type: "child_run.spawned",
+        createdAt: 2,
+        data: { invocation_id: "agent", child_execution_id: "child-1" },
+      },
+      {
+        cursor: "tool-error",
+        sequence: 3,
+        type: "tool.result.received",
+        createdAt: 3,
+        data: { tool_call_id: "agent", error: "AgentToolError: Model gpt-5.6-luna is not available" },
+      },
+      {
+        cursor: "child-completed",
+        sequence: 4,
+        type: "child_run.completed",
+        createdAt: 4,
+        data: { invocation_id: "agent", child_execution_id: "child-1", profile: "task" },
+      },
+    ])
+
+    expect(projection.units[1]).toMatchObject({
+      key: "tool:turn-a:agent",
+      content: { _tag: "Block", block: { _tag: "ToolCall", status: "complete" } },
+    })
+  })
+
+  it("projects a terminal child placeholder from a replayed lifecycle batch", () => {
+    const projection = TranscriptProjection.Projection.project("child", "", [
+      {
+        cursor: "done",
+        sequence: 0,
+        type: "child_run.completed",
+        createdAt: 0,
+        data: { invocation_id: "gc", child_execution_id: "grandchild", profile: "task" },
+      },
+    ])
+
+    expect(projection.units).toHaveLength(2)
+    expect(projection.units[1]).toMatchObject({
+      key: "child:child:grandchild",
+      content: {
+        _tag: "Block",
+        block: { _tag: "ChildAgent", id: "grandchild", name: "task", status: "complete" },
+      },
+    })
+  })
+
+  it("correlates a spawned child through tool_call_id when invocation_id is absent", () => {
+    const projection = TranscriptProjection.Projection.project("turn-a", "delegate", [
+      {
+        cursor: "call",
+        sequence: 1,
+        type: "tool.call.requested",
+        createdAt: 1,
+        data: { tool_call_id: "agent", tool_name: "task", input: { prompt: "work" } },
+      },
+      {
+        cursor: "spawned",
+        sequence: 2,
+        type: "child_run.spawned",
+        createdAt: 2,
+        data: { tool_call_id: "agent", child_execution_id: "child-1" },
+      },
+    ])
+
+    expect(projection.units[1]).toMatchObject({
+      key: "tool:turn-a:agent",
+      content: { _tag: "Block", block: { _tag: "ToolCall", childId: "child-1", status: "running" } },
+    })
+    expect(
+      projection.units.filter((unit) => unit.content._tag === "Block" && unit.content.block._tag === "ChildAgent"),
+    ).toHaveLength(0)
+  })
+
+  it("cancels a linked child tool from its child_run lifecycle event", () => {
+    const projection = TranscriptProjection.Projection.project("turn-a", "delegate", [
+      {
+        cursor: "call",
+        sequence: 1,
+        type: "tool.call.requested",
+        createdAt: 1,
+        data: { tool_call_id: "agent", tool_name: "task", input: { prompt: "work" } },
+      },
+      {
+        cursor: "spawned",
+        sequence: 2,
+        type: "child_run.spawned",
+        createdAt: 2,
+        data: { invocation_id: "agent", child_execution_id: "child-1" },
+      },
+      {
+        cursor: "cancelled",
+        sequence: 3,
+        type: "child_run.cancelled",
+        createdAt: 3,
+        data: { invocation_id: "agent", child_execution_id: "child-1" },
+      },
+    ])
+
+    expect(projection.units[1]).toMatchObject({
+      key: "tool:turn-a:agent",
+      content: { _tag: "Block", block: { _tag: "ToolCall", status: "cancelled" } },
+    })
   })
 })

@@ -8,13 +8,11 @@ import * as Logging from "../../diagnostic-file-logging"
 const dataRoot = Effect.fn("DiagnosticsCommand.dataRoot")(function* () {
   const home = yield* Config.option(Config.string("HOME"))
   const productDatabase = yield* Config.option(Config.string("RIKA_DATABASE"))
-  const executionDatabase = yield* Config.option(Config.string("RIKA_EXECUTION_DATABASE"))
   const paths = resolveProfileDataPaths({
     home: Option.getOrElse(home, () => "."),
     productDatabase: Option.getOrUndefined(productDatabase),
-    executionDatabase: Option.getOrUndefined(executionDatabase),
   })
-  return yield* DataRoot.canonicalDataRoot(paths.database, paths.executionDatabase)
+  return yield* DataRoot.canonicalDataRoot(paths.database)
 })
 
 const pathCommand = Command.make("path", {}, () =>

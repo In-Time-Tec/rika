@@ -1,24 +1,22 @@
-import * as ExecutionBackend from "@rika/product/execution-service"
-import * as Turn from "@rika/product/turn-record"
-import { Effect, Ref } from "effect"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
+import { Effect, Ref, Semaphore } from "effect"
 
-export const makeProductOperationAdmission = (input: any) => {
-  const { rawBackend, replacementAdmission, replacementState, activeWorkflows, workflowReplacementKey } = input
-  const withExecutionAdmission = <A, E, R>(
-    effect: Effect.Effect<A, E, R>,
-  ): Effect.Effect<A, E | ExecutionBackend.BackendError, R> =>
+export interface ProductOperationAdmissionInput {
+  readonly rawBackend: ExecutionGateway.Interface
+  readonly replacementAdmission: Semaphore.Semaphore
+  readonly replacementState: Ref.Ref<{ readonly closed: boolean; readonly active: number }>
+}
+
+export const makeProductOperationAdmission = (input: ProductOperationAdmissionInput) => {
+  const { rawBackend, replacementAdmission, replacementState } = input
+  const withExecutionAdmission = <A, E, R>(effect: Effect.Effect<A, E, R>, closed: E): Effect.Effect<A, E, R> =>
     Effect.acquireUseRelease(
       replacementAdmission.withPermits(1)(
-        Ref.modify(replacementState, (state: { closed: boolean; active: number }) =>
+        Ref.modify(replacementState, (state) =>
           state.closed ? [false, state] : [true, { ...state, active: state.active + 1 }],
         ),
       ),
-      (admitted): Effect.Effect<A, E | ExecutionBackend.BackendError, R> =>
-        admitted === true
-          ? effect
-          : Effect.fail(
-              ExecutionBackend.BackendError.make({ message: "Resident replacement has closed execution admission" }),
-            ),
+      (admitted): Effect.Effect<A, E, R> => (admitted === true ? effect : Effect.fail(closed)),
       (admitted) =>
         admitted === true
           ? Ref.update(replacementState, (state: { closed: boolean; active: number }) => ({
@@ -27,43 +25,24 @@ export const makeProductOperationAdmission = (input: any) => {
             }))
           : Effect.void,
     )
-  const acquiredBackend = ExecutionBackend.Service.of({
-    ...rawBackend,
-    start: (backendInput: Parameters<typeof rawBackend.start>[0]) =>
-      withExecutionAdmission(rawBackend.start(backendInput)),
-    ...(rawBackend.follow === undefined
-      ? {}
-      : {
-          follow: (
-            turnId: Turn.TurnId,
-            afterCursor: string | undefined,
-            onEvent: any,
-            reference: any,
-            eventScope: any,
-          ) => rawBackend.follow!(turnId, afterCursor, onEvent, reference, eventScope),
-        }),
-    cancel: (turnId: Turn.TurnId, reference?: any) => withExecutionAdmission(rawBackend.cancel(turnId, reference)),
-    invokeChild: (backendInput: Parameters<typeof rawBackend.invokeChild>[0]) =>
-      withExecutionAdmission(rawBackend.invokeChild(backendInput)),
-    createFanOut: (backendInput: Parameters<typeof rawBackend.createFanOut>[0]) =>
-      withExecutionAdmission(rawBackend.createFanOut(backendInput)),
-    startWorkflow: (name: string, runId: string, revision: number, ownerTurnId?: string, workspace?: string) =>
+  const acquiredBackend = ExecutionGateway.Service.of({
+    startTurn: (backendInput) =>
       withExecutionAdmission(
-        rawBackend.startWorkflow(name, runId, revision, ownerTurnId, workspace).pipe(
-          Effect.tap((inspection: any) =>
-            Effect.sync(() => {
-              const key = workflowReplacementKey(runId, ownerTurnId, workspace)
-              if (inspection.status === "running")
-                activeWorkflows.set(key, {
-                  runId,
-                  ...(ownerTurnId === undefined ? {} : { ownerTurnId }),
-                  ...(workspace === undefined ? {} : { workspace }),
-                })
-              else activeWorkflows.delete(key)
-            }),
-          ),
-        ),
+        rawBackend.startTurn(backendInput),
+        ExecutionGateway.StartTurnFailure.make({ message: "Server replacement has closed execution admission" }),
       ),
+    cancelTurn: (link, reason) =>
+      withExecutionAdmission(
+        rawBackend.cancelTurn(link, reason),
+        ExecutionGateway.CancelTurnFailure.make({ message: "Server replacement has closed execution admission" }),
+      ),
+    steerTurn: (link, steering) =>
+      withExecutionAdmission(
+        rawBackend.steerTurn(link, steering),
+        ExecutionGateway.SteeringFailure.make({ message: "Server replacement has closed execution admission" }),
+      ),
+    watchTurn: (link, cursor) => rawBackend.watchTurn(link, cursor),
+    inspectTurn: (link) => rawBackend.inspectTurn(link),
   })
   return { withExecutionAdmission, acquiredBackend }
 }

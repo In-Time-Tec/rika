@@ -6,7 +6,6 @@ import type { Model, ThreadItem } from "@rika/terminal/terminal-state"
 import { update as updateModel } from "@rika/terminal/terminal-state-reducer"
 import type { State, ProjectionStream, TranscriptEvent, Update } from "./interactive-controller"
 import {
-  retaining,
   activeSeedEntries,
   project,
   projectionEntries,
@@ -56,6 +55,10 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
     const usageCost = availableUsageCost ?? event.cost
     const lastAvailableUsageCost = event.cost._tag === "Available" ? event.cost : state.lastAvailableUsageCost
     const { costUsd: _, ...withoutCost } = state.model
+    const contextModel =
+      contextUsage === undefined
+        ? state.model
+        : updateModel(state.model, { _tag: "ContextUsageReplaced", contextUsage })
     return {
       state: {
         ...state,
@@ -64,7 +67,9 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
         ...(lastAvailableUsageCost === undefined ? {} : { lastAvailableUsageCost }),
         model: updateModel(
           {
+            ...contextModel,
             ...withoutCost,
+            contextAnimation: contextModel.contextAnimation,
             usageCost,
             usageTokens: event.tokens,
             usageTime: event.time,
@@ -72,7 +77,6 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
             ...(threadCostUsd === undefined ? {} : { costUsd: threadCostUsd }),
           },
           { _tag: "UsageReported" },
-          contextUsage,
         ),
       },
       preserveAnchor: false,
@@ -114,10 +118,13 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
       event.entries.some((entry) => entry.projectionRevision < (state.revisions.get(entry.turn.id) ?? -1))
     )
       return unchanged(state)
-    const sameSelection =
-      event.selectionEpoch === state.selectionEpoch && state.model.currentThreadId === event.thread.id
+    const sameThread = state.model.currentThreadId === event.thread.id
     const lifecycleFresh = event.activitySequence >= (state.activitySequence ?? 0)
     const activeTurn = lifecycleFresh ? event.activeTurn : undefined
+    const projectionTurn =
+      event.activeTurn !== undefined && (lifecycleFresh || state.model.activeTurnId === event.activeTurn.id)
+        ? event.activeTurn
+        : undefined
     const keepNewerQueue =
       event.selectionEpoch === state.selectionEpoch &&
       state.model.queueThreadId === event.thread.id &&
@@ -125,11 +132,16 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
     const queue = keepNewerQueue ? state.model.queue : event.queue
     const queueRevision = keepNewerQueue ? state.model.queueRevision : event.queueRevision
     const entries = normalizeEntries(event.entries)
-    const sameThread = state.model.currentThreadId === event.thread.id
     const preservedUsageCost = sameThread
       ? (state.lastAvailableUsageCost ??
         (state.model.usageCost?._tag === "Available" ? state.model.usageCost : undefined))
       : undefined
+    const preservedContextUsage =
+      sameThread && state.model.contextUsage?._tag === "Available" ? state.model.contextUsage : undefined
+    const preservedUsageTokens =
+      sameThread && state.model.usageTokens?._tag === "Available" ? state.model.usageTokens : undefined
+    const preservedUsageTime =
+      sameThread && state.model.usageTime?._tag === "Available" ? state.model.usageTime : undefined
     let lifecycle: Pick<Model, "activeTurnId" | "busy" | "activity">
     if (lifecycleFresh)
       lifecycle = {
@@ -137,19 +149,18 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
         busy: activeTurn !== undefined,
         activity: activeTurn === undefined ? undefined : { _tag: "Waiting" },
       }
-    else if (sameSelection)
+    else if (sameThread)
       lifecycle = { activeTurnId: state.model.activeTurnId, busy: state.model.busy, activity: state.model.activity }
     else lifecycle = { activeTurnId: undefined, busy: false, activity: undefined }
     const model = cleared({
       ...state.model,
-      ...(preservedUsageCost === undefined
-        ? {
-            usageCost: { _tag: "Loading" as const },
-            usageTokens: { _tag: "Loading" as const },
-            usageTime: { _tag: "Loading" as const },
-            contextUsage: { _tag: "Loading" as const },
-          }
-        : { usageCost: preservedUsageCost }),
+      usageCost: preservedUsageCost ?? { _tag: "Loading" as const },
+      usageTokens: preservedUsageTokens ?? { _tag: "Loading" as const },
+      usageTime: preservedUsageTime ?? { _tag: "Loading" as const },
+      contextUsage: preservedContextUsage ?? { _tag: "Loading" as const },
+      contextAnimation: sameThread
+        ? state.model.contextAnimation
+        : { flashTicks: 0, flashed75: false, flashed90: false },
       ...lifecycle,
       currentThreadId: String(event.thread.id),
       currentThreadTitle: event.thread.title,
@@ -172,49 +183,108 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
     })
     const selectedCostUsd =
       event.threadCostUsd ?? (sameThread ? (state.threadCostUsd ?? preservedUsageCost?.usd) : undefined)
+    const {
+      threadCostUsd: _threadCostUsd,
+      lastAvailableUsageCost: _lastAvailableUsageCost,
+      ...stateWithoutRetainedUsage
+    } = state
     const activeProjection =
-      activeTurn === undefined
+      projectionTurn === undefined
         ? undefined
         : projectionFromEntries(
-            normalizeEntries([...entries, ...activeSeedEntries(activeTurn, entries)]),
-            activeTurn.id,
-            activeTurn.prompt,
+            normalizeEntries([...entries, ...activeSeedEntries(projectionTurn, entries)]),
+            projectionTurn.id,
+            projectionTurn.prompt,
           )
-    const history = activeTurn === undefined ? entries : entries.filter((entry) => entry.turn.id !== activeTurn.id)
+    const history =
+      projectionTurn === undefined ? entries : entries.filter((entry) => entry.turn.id !== projectionTurn.id)
     const boundedSelection = boundWindow(history, "oldest")
     const selected = boundedSelection.entries
     const replayTurns = new Map([
       ...selected.map((entry) => [entry.turn.id, entry.turn] as const),
-      ...(activeTurn === undefined ? [] : [[activeTurn.id, activeTurn] as const]),
+      ...(projectionTurn === undefined ? [] : [[projectionTurn.id, projectionTurn] as const]),
     ])
     const liveProjections = new Map(
-      activeTurn === undefined || activeProjection === undefined ? [] : ([[activeTurn.id, activeProjection]] as const),
+      projectionTurn === undefined || activeProjection === undefined
+        ? []
+        : ([[projectionTurn.id, activeProjection]] as const),
     )
     const projected = project(
       model,
-      displayedEntries(selected, replayTurns, liveProjections, undefined, activeTurn?.id),
+      displayedEntries(selected, replayTurns, liveProjections, undefined, projectionTurn?.id),
       selectedCostUsd,
     )
-    if (
-      state.model.currentThreadId === String(event.thread.id) &&
-      projected.items.length === 0 &&
-      state.model.items.length > 0
-    )
+    const activeScopedReload =
+      projectionTurn !== undefined && event.hasOlder && entries.every((entry) => entry.turn.id === projectionTurn.id)
+    const previousActiveTurnId = state.model.activeTurnId
+    if (sameThread && activeScopedReload && state.model.items.length > 0) {
+      let retainedCandidates = displayedEntries(
+        state.entries,
+        state.replayTurns,
+        state.liveProjections,
+        state.projectionStreams,
+        previousActiveTurnId,
+      )
+      const streamedRoots = projectedRootIds(state.projectionStreams)
+      for (const [rootTurnId, projection] of state.liveProjections) {
+        if (streamedRoots.has(rootTurnId)) continue
+        const turn = state.replayTurns.get(rootTurnId)
+        if (turn === undefined) continue
+        retainedCandidates = [
+          ...retainedCandidates.filter((entry) => String(entry.turn.id) !== rootTurnId),
+          ...projectionEntries(turn, projection),
+        ]
+      }
+      const retained = boundWindow(
+        normalizeEntries([...retainedCandidates, ...selected]).filter(
+          (entry) => projectionTurn === undefined || entry.turn.id !== projectionTurn.id,
+        ),
+        "oldest",
+      )
+      const retainedReplayTurns = replayTurnsForWindow(
+        retained.entries,
+        state.replayTurns,
+        undefined,
+        projectionTurn?.id,
+      )
+      const retainedRevisions = new Map(
+        revisionsForWindow(retained.entries, projectionTurn?.id, state.revisions, undefined),
+      )
+      if (projectionTurn !== undefined && activeProjection !== undefined)
+        retainedRevisions.set(projectionTurn.id, activeProjection.revision)
+      const nextReplayTurns = new Map([...retainedReplayTurns, [projectionTurn.id, projectionTurn] as const])
+      const retainedModel = reconcileTranscriptBlocks(
+        project(
+          model,
+          displayedEntries(retained.entries, nextReplayTurns, liveProjections, undefined, projectionTurn.id),
+          selectedCostUsd,
+        ),
+      )
       return {
         state: {
-          ...state,
+          ...stateWithoutRetainedUsage,
           selectionEpoch: event.selectionEpoch,
-          model: retaining(model, state.model),
-          replayTurns:
-            activeTurn === undefined
-              ? state.replayTurns
-              : new Map([...state.replayTurns, [activeTurn.id, activeTurn] as const]),
+          activitySequence: lifecycleFresh ? event.activitySequence : (state.activitySequence ?? 0),
+          model: retainedModel,
+          replayTurns: nextReplayTurns,
+          entries: retained.entries,
+          revisions: retainedRevisions,
+          liveProjections,
+          projectionStreams: new Map(),
+          hasOlder: event.hasOlder || retained.evicted,
+          oldestCursor:
+            state.oldestCursor !== undefined &&
+            retained.entries.some((entry) => sameCursor(cursorForEntry(entry), state.oldestCursor))
+              ? state.oldestCursor
+              : cursorForEntry(retained.entries[0]),
+          newestCursor: cursorForEntry(retained.entries.at(-1)),
           ...(selectedCostUsd === undefined ? {} : { threadCostUsd: selectedCostUsd }),
           ...(preservedUsageCost === undefined ? {} : { lastAvailableUsageCost: preservedUsageCost }),
         },
         preserveAnchor: true,
         discarded: true,
       }
+    }
     return {
       state: {
         selectionEpoch: event.selectionEpoch,
@@ -224,9 +294,9 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
         entries: selected,
         revisions: new Map([
           ...selected.map((entry) => [entry.turn.id, entry.projectionRevision] as const),
-          ...(activeTurn === undefined || activeProjection === undefined
+          ...(projectionTurn === undefined || activeProjection === undefined
             ? []
-            : ([[activeTurn.id, activeProjection.revision]] as const)),
+            : ([[projectionTurn.id, activeProjection.revision]] as const)),
         ]),
         liveProjections,
         projectionStreams: new Map(),
@@ -423,6 +493,26 @@ const updateStateImpl = (state: State, event: TranscriptEvent): Update => {
         ...model,
         activity: activityAfterOrigin(state.model.activity, event.origin, event.state, model),
       }
+    if (event.origin._tag === "Event") {
+      let compactionStatus: "running" | "complete" | "failed" | "cancelled" | undefined
+      switch (event.origin.type) {
+        case "agent.compaction.started":
+          compactionStatus = "running"
+          break
+        case "agent.compaction.completed":
+        case "agent.compaction.committed":
+          compactionStatus = "complete"
+          break
+        case "agent.compaction.failed":
+          compactionStatus = "failed"
+          break
+        case "agent.compaction.cancelled":
+          compactionStatus = "cancelled"
+          break
+      }
+      if (compactionStatus !== undefined)
+        model = updateModel(model, { _tag: "CompactionChanged", status: compactionStatus })
+    }
     if (
       event.origin._tag === "Event" &&
       event.origin.type === "steering.delivered" &&

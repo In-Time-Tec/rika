@@ -2,6 +2,7 @@ import { expect, test, vi } from "vitest"
 import { Effect } from "effect"
 import { buildTranscript, renderTranscriptStyled } from "../../src/opentui/rendering/opentui-renderer"
 import { renderBlock, renderSidebar } from "../../src/opentui/rendering/opentui-render-block"
+import { colors } from "../../src/presentation/terminal/terminal-theme"
 
 const opentuiValue = vi.hoisted(() => {
   const boxChildren: Array<object> = []
@@ -300,7 +301,6 @@ test("renders every transcript block variant and sidebar state", () => {
       recovery: "Press Enter to retry.",
     },
     { _tag: "ChildAgent", id: "child", name: "child", summary: "work", status: "running", activity: [] },
-    { _tag: "Workflow", name: "flow", step: "wait", status: "waiting" },
     { _tag: "ImageAttachment", name: "a.png", mediaType: "image/png" },
     { _tag: "ImageAttachment", name: "partial.png", mediaType: "image/png", width: 2 },
     { _tag: "ImageAttachment", name: "b.png", mediaType: "image/png", width: 2, height: 3, bytes: 4 },
@@ -308,8 +308,9 @@ test("renders every transcript block variant and sidebar state", () => {
   const renderedBlocks = blocks.map((block) => renderBlock(block)).join("\n")
   expect(renderedBlocks).toContain("✕ Result")
   expect(renderedBlocks).toContain("↻ Auto-compacting context…")
-  expect(renderedBlocks).toContain("✓ Auto-compacted context at 42\n  Kept recent turns")
-  expect(renderedBlocks).toContain("✓ Auto-compacted context\n  No checkpoint")
+  expect(renderedBlocks).toContain("❋ Auto-compacted\n  Kept recent turns")
+  expect(renderedBlocks).toContain("❋ Auto-compacted\n  No checkpoint")
+  expect(renderedBlocks).not.toContain(" at 42")
   expect(renderedBlocks).toContain(
     "✖ ERROR: Execution failed · Turn turn-4\n  Model unavailable\n  Next: Press Enter to retry.",
   )
@@ -351,6 +352,30 @@ test("renders hidden tool output as inline presentation status in plain transcri
   expect(renderBlock(block)).toBe("✓ Web Search Find current documentation")
   expect(transcript).toContain("Web Search")
   expect(transcript).not.toContain("HIDDEN SEARCH RESULT")
+})
+test("progressively discloses error detail while keeping recovery visible", () => {
+  const block = {
+    _tag: "Error" as const,
+    title: "Execution failed",
+    detail: "Model unavailable",
+    turnId: "turn-4",
+    recovery: "Press Enter to retry.",
+  }
+  const collapsed = buildTranscript(model({ blocks: [block] }))
+  const collapsedText = collapsed.styled.chunks.map((chunk) => chunk.text).join("")
+
+  expect(collapsed.ranges).toMatchObject([{ unit: "block:Error:0", expandable: true }])
+  expect(collapsedText).toContain("✖ ERROR: Execution failed · Turn turn-4 ▸")
+  expect(collapsedText).toContain("Next: Press Enter to retry.")
+  expect(collapsedText).not.toContain("Model unavailable")
+  expect(collapsed.styled.chunks.find((chunk) => chunk.text.includes("ERROR: Execution failed"))?.fg).toBe(colors.red)
+
+  const expandedText = buildTranscript(model({ blocks: [block], expandedRowKeys: ["block:Error:0"] }))
+    .styled.chunks.map((chunk) => chunk.text)
+    .join("")
+  expect(expandedText).toContain("✖ ERROR: Execution failed · Turn turn-4 ▾")
+  expect(expandedText).toContain("Model unavailable")
+  expect(expandedText).toContain("Next: Press Enter to retry.")
 })
 test("keeps tool cards generic without removed activity assumptions", () => {
   const rendered = renderBlock({

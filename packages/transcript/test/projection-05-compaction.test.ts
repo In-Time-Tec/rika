@@ -79,9 +79,10 @@ describe("Transcript projection", () => {
       {
         cursor: "compaction-committed",
         sequence: 1,
-        type: "agent.compaction.committed",
+        type: "agent.compaction.completed",
         createdAt: 1,
-        data: { checkpoint_id: "entry:checkpoint", session_id: "session:one", summary_present: true },
+        text: "Earlier work",
+        data: { checkpoint: "entry:checkpoint" },
       },
     ])
     const committedUnit = committed.units.find((item) => item.key === "compaction:turn-a")
@@ -140,7 +141,7 @@ describe("Transcript projection", () => {
     },
   )
 
-  it("attaches the checkpoint when summarize completed is followed by committed", () => {
+  it("attaches the checkpoint from the applied compaction event", () => {
     const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
       {
         cursor: "compaction-started",
@@ -159,9 +160,9 @@ describe("Transcript projection", () => {
       {
         cursor: "compaction-committed",
         sequence: 2,
-        type: "agent.compaction.committed",
+        type: "agent.compaction.completed",
         createdAt: 2,
-        data: { checkpoint_id: "entry:checkpoint", session_id: "session:one", compaction_id: "c1" },
+        data: { checkpoint: "entry:checkpoint", compaction_id: "c1", kind: "summarize" },
       },
     ])
     expect(projection.units.find((item) => item.key === "compaction:turn-a")).toMatchObject({

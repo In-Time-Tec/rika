@@ -5,19 +5,21 @@ export interface ProfileDataPathOptions {
   readonly home: string
   readonly hostDataRoot?: string | undefined
   readonly productDatabase?: string | undefined
-  readonly executionDatabase?: string | undefined
+  readonly batonDatabase?: string | undefined
 }
 
 export interface ProfileDataPaths {
   readonly dataRoot: string
   readonly database: string
-  readonly executionDatabase: string
+  readonly batonDatabase: string
 }
+
+export const batonDatabaseName = "baton.db"
 
 export const dataPaths = (home: string): ProfileDataPaths => ({
   dataRoot: under(home, ".rika"),
   database: under(home, ".rika", "rika.db"),
-  executionDatabase: under(home, ".rika", "execution.db"),
+  batonDatabase: under(home, ".rika", batonDatabaseName),
 })
 
 export const resolveProfileDataPaths = (options: ProfileDataPathOptions): ProfileDataPaths => {
@@ -25,22 +27,12 @@ export const resolveProfileDataPaths = (options: ProfileDataPathOptions): Profil
     return {
       dataRoot: options.hostDataRoot,
       database: under(options.hostDataRoot, "rika.db"),
-      executionDatabase: under(options.hostDataRoot, "execution.db"),
+      batonDatabase: under(options.hostDataRoot, batonDatabaseName),
     }
   const defaults = dataPaths(options.home)
   return {
     dataRoot: defaults.dataRoot,
     database: options.productDatabase ?? defaults.database,
-    executionDatabase: options.executionDatabase ?? defaults.executionDatabase,
+    batonDatabase: options.batonDatabase ?? defaults.batonDatabase,
   }
 }
-
-const parentDirectory = (filename: string): string => {
-  const separator = filename.lastIndexOf("/")
-  if (separator < 0) return "."
-  if (separator === 0) return "/"
-  return filename.slice(0, separator)
-}
-
-export const executionEventHistoryFor = (executionDatabase: string): string =>
-  under(parentDirectory(executionDatabase), "execution-event-history")

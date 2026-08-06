@@ -1,22 +1,21 @@
 import { Function } from "effect"
-import { presetForBase, type PresetId, presets, defaults as modelDefaults } from "../model-routing/model-preset"
+import { type PresetId, presets } from "../model-routing/model-preset"
 import { isStreamingOnlyBaseUrl } from "../model-routing/model-route"
 import type { ModelRoute } from "../model-routing/model-route"
 import type { ConfigurationSettings } from "./configuration-settings"
 import { settingsDefaults } from "./configuration-defaults"
 import { ConfigurationSettingsFileError } from "./configuration-settings-decoder"
-import type { ModelAliasInput, RoleRouteInput, SettingsInput } from "./configuration-settings-input"
+import type { ConfigurationSettingsInput, ModelAliasInput, RoleRouteInput } from "./configuration-settings-input"
 
 const aliasFromInput = (name: string, input: ModelAliasInput): ModelRoute.ModelAlias => {
-  const presetId = input.preset ?? (input.base === undefined ? undefined : presetForBase(input.base))
+  const presetId = input.preset
   const preset = presetId === undefined ? undefined : presets[presetId as PresetId]
-  const inherited = input.base === undefined ? undefined : modelDefaults[input.base as keyof typeof modelDefaults]
   return {
     displayName: input.displayName ?? name,
     supportsMedia: input.supportsMedia ?? preset !== undefined,
     provider: input.provider,
     candidates: input.candidates,
-    limits: input.limits ?? inherited?.limits ?? preset!.limits,
+    limits: input.limits ?? preset!.limits,
     variants:
       input.efforts === undefined
         ? (preset!.variants(preset!.efforts) as ModelRoute.ModelAlias["variants"])
@@ -56,8 +55,8 @@ export const mergeConfigurationSettings = ({
   global,
   workspace,
 }: {
-  readonly global: SettingsInput
-  readonly workspace: SettingsInput
+  readonly global: ConfigurationSettingsInput
+  readonly workspace: ConfigurationSettingsInput
 }): ConfigurationSettings => {
   const webSearchProviders = { ...global.webSearch?.providers, ...workspace.webSearch?.providers }
   const provider = (id: ModelRoute.ProviderId): ModelRoute.ProviderConnection => {

@@ -11,9 +11,9 @@ import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
-import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as WebSearchProvider from "@rika/coding-tools/web-search-provider"
-import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, Schema, Scope } from "effect"
+import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, Schema, Scope, Stream } from "effect"
 import { TestConsole } from "effect/testing"
 import { expect, it } from "@effect/vitest"
 import { run } from "../src/command/root/rika-command"
@@ -33,7 +33,7 @@ const PresenceStatus = Schema.Literals(["present", "missing"])
 const CredentialStatus = Schema.Literals(["present", "missing", "not-configured"])
 const DoctorReport = Schema.fromJsonString(
   Schema.Struct({
-    databases: Schema.Struct({ product: PresenceStatus, execution: PresenceStatus }),
+    databases: Schema.Struct({ product: PresenceStatus }),
     config: Schema.Struct({
       diagnostics: Schema.Array(Schema.Struct({ path: Schema.String, source: Schema.String, message: Schema.String })),
       global: PresenceStatus,
@@ -47,21 +47,13 @@ const DoctorReport = Schema.fromJsonString(
   }),
 )
 
-const backend = ExecutionBackend.Service.of({
-  invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
-  resolveInvocationSource: () => Effect.die("unused"),
-  createFanOut: () => Effect.die("unused"),
-  inspectFanOut: () => Effect.die("unused"),
-  cancelFanOut: () => Effect.die("unused"),
-  registerWorkflows: () => Effect.die("unused"),
-  startWorkflow: () => Effect.die("unused"),
-  inspectWorkflow: () => Effect.die("unused"),
-  cancelWorkflow: () => Effect.die("unused"),
-  start: (input) => Effect.succeed({ turnId: input.turnId, status: "completed", events: [] }),
-  replay: (turnId) => Effect.succeed({ turnId, status: "completed", events: [] }),
-  cancel: (turnId) => Effect.succeed({ turnId, status: "cancelled", events: [] }),
-  inspect: () => Effect.void.pipe(Effect.as(undefined)),
-  steer: (turnId) => Effect.succeed({ steeringMessageId: `steering:${turnId}:steering:0`, sequence: 0 }),
+const backend = ExecutionGateway.Service.of({
+  startTurn: (input) =>
+    Effect.succeed({ runId: `opaque-run:${input.turnId}`, turnId: input.turnId, threadId: input.threadId }),
+  cancelTurn: () => Effect.void,
+  steerTurn: () => Effect.void,
+  watchTurn: () => Stream.empty,
+  inspectTurn: () => Effect.succeed({ status: "unavailable" }),
 })
 
 const withServices = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | Scope.Scope>) =>
@@ -71,7 +63,6 @@ interface CliSandbox {
   readonly root: string
   readonly workspace: string
   readonly databasePath: string
-  readonly executionDatabasePath: string
   readonly globalConfigPath: string
   readonly workspaceConfigPath: string
   readonly adapter: ConfigOperations.AdapterInterface
@@ -94,7 +85,6 @@ const sandbox = Effect.gen(function* () {
     root,
     workspace,
     databasePath: path.join(root, "rika.db"),
-    executionDatabasePath: path.join(root, "execution.db"),
     globalConfigPath: path.join(root, "home", ".config", "rika", "settings.json"),
     workspaceConfigPath: path.join(workspace, ".rika", "settings.json"),
     adapter,
@@ -105,7 +95,7 @@ const sandbox = Effect.gen(function* () {
 let identifierSequence = 0
 
 const configServiceLayer = (input: {
-  readonly workspace?: ConfigurationSettingsInput.Input.SettingsInput
+  readonly workspace?: ConfigurationSettingsInput.Input.ConfigurationSettingsInput
   readonly env?: Readonly<Record<string, string>>
 }) =>
   ConfigurationService.liveConfigurationLayer({
@@ -121,7 +111,7 @@ const operationLayer = (
   context: CliSandbox,
   options: {
     readonly config?: {
-      readonly workspace?: ConfigurationSettingsInput.Input.SettingsInput
+      readonly workspace?: ConfigurationSettingsInput.Input.ConfigurationSettingsInput
       readonly env?: Readonly<Record<string, string>>
     }
   } = {},
@@ -137,12 +127,12 @@ const operationLayer = (
     repositoryLayer,
     turnRepositoryLayer,
     transcriptRepositoryLayer,
-    backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+    backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
     defaultWorkspace: context.workspace,
     makeThreadId: Effect.sync(() => Thread.ThreadId.make(`cli-thread-${(identifierSequence += 1)}`)),
     makeTurnId: Effect.sync(() => Turn.TurnId.make(`cli-turn-${(identifierSequence += 1)}`)),
     configOperations: {
-      layer: Layer.merge(
+      layer: Layer.mergeAll(
         ConfigOperations.testLayer(context.adapter),
         configServiceLayer(options.config ?? {}),
         BunServices.layer,
@@ -151,7 +141,6 @@ const operationLayer = (
         globalConfigPath: context.globalConfigPath,
         workspaceConfigPath: context.workspaceConfigPath,
         productDatabasePath: context.databasePath,
-        executionDatabasePath: context.executionDatabasePath,
       },
     },
     interactive: () => Effect.void,
@@ -218,6 +207,25 @@ it.effect(
 )
 
 it.effect(
+  "review dispatches the immutable three-lane product policy",
+  () =>
+    withServices(
+      Effect.gen(function* () {
+        const dispatched: Array<import("@rika/product/product-operation").Input> = []
+        const cli = yield* openCli(
+          Layer.succeed(
+            Service,
+            Service.of({ run: (input) => Effect.sync(() => dispatched.push(input)).pipe(Effect.asVoid) }),
+          ),
+        )
+        expectSuccess(yield* cli.invoke(["review", "inspect", "the", "change"]))
+        expect(dispatched).toEqual([{ _tag: "Review", prompt: ["inspect", "the", "change"], ephemeral: false }])
+      }),
+    ).pipe(Effect.scoped),
+  20_000,
+)
+
+it.effect(
   "tools list and show expose the catalog and reject unknown tools",
   () =>
     withServices(
@@ -260,7 +268,7 @@ it.effect(
         const result = expectSuccess(yield* cli.invoke(["doctor"]))
         const report = yield* Schema.decodeUnknownEffect(DoctorReport)(jsonOutput(result))
         expect(Object.keys(report).toSorted()).toEqual(["config", "credentials", "databases", "model"])
-        expect(report.databases).toEqual({ product: "present", execution: "missing" })
+        expect(report.databases).toEqual({ product: "present" })
         expect(report.config).toMatchObject({ diagnostics: [], global: "missing", workspace: "missing" })
       }),
     ),

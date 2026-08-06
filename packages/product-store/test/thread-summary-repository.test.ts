@@ -43,7 +43,7 @@ describe("memory thread summaries", () => {
       expect(yield* summaries.list()).toMatchObject([
         { id: threadId, status: "running", unread: true, editTotals: { added: 0, modified: 0, removed: 0 } },
       ])
-      yield* turns.setStatus(turn.id, "completed", "cursor-1", 3)
+      yield* turns.setStatus(turn.id, "completed", 3)
       yield* summaries.replaceTurn({
         turnId: turn.id,
         threadId,
@@ -79,8 +79,8 @@ describe("memory thread summaries", () => {
       expect(yield* summaries.listRepairCandidates()).toMatchObject([{ turnId, threadId }])
       yield* summaries.ensureTurn(turn.id, turn.threadId, 100)
       expect((yield* summaries.list())[0]?.lastActivityAt).toBe(2)
-      yield* turns.setStatus(turn.id, "completed", "cursor-2", 3)
-      expect(yield* summaries.listRepairCandidates()).toMatchObject([{ turnId, lastCursor: "cursor-2" }])
+      yield* turns.setStatus(turn.id, "completed", 3)
+      expect(yield* summaries.listRepairCandidates()).toMatchObject([{ turnId, threadId }])
       expect((yield* summaries.list())[0]?.editTotals).toBeUndefined()
       yield* summaries.replaceTurn({
         turnId,
@@ -92,7 +92,7 @@ describe("memory thread summaries", () => {
         now: 101,
       })
       expect((yield* summaries.list())[0]?.editTotals).toBeUndefined()
-      expect(yield* summaries.listRepairCandidates()).toMatchObject([{ turnId, lastCursor: "cursor-2" }])
+      expect(yield* summaries.listRepairCandidates()).toMatchObject([{ turnId, threadId }])
       yield* summaries.replaceTurn({
         turnId,
         threadId,
@@ -166,15 +166,15 @@ describe("memory thread summaries", () => {
       expect(queued.status).toBe("queued")
       expect(yield* summaries.list({ limit: 0 })).toHaveLength(1)
       expect((yield* summaries.list())[0]?.status).toBe("running")
-      yield* turns.setStatus(running.id, "completed", undefined, 4)
+      yield* turns.setStatus(running.id, "completed", 4)
       expect((yield* summaries.list())[0]?.status).toBe("queued")
       const claimed = yield* turns.claimNextQueued(threadId, 5)
       if (claimed === undefined) return yield* Effect.die("queued turn was not claimed")
-      yield* turns.finishQueuedClaim(claimed, "running", undefined, undefined, 5)
+      yield* turns.finishQueuedClaim(claimed, "running", 5)
       expect((yield* summaries.list())[0]?.status).toBe("running")
-      yield* turns.setStatus(claimed.turn.id, "waiting", undefined, 6)
+      yield* turns.setStatus(claimed.turn.id, "waiting", 6)
       expect((yield* summaries.list())[0]?.status).toBe("running")
-      yield* turns.setStatus(claimed.turn.id, "completed", undefined, 7)
+      yield* turns.setStatus(claimed.turn.id, "completed", 7)
       expect((yield* summaries.list())[0]?.status).toBe("idle")
     }).pipe(provideLayer(layer)),
   )
@@ -186,7 +186,7 @@ describe("memory thread summaries", () => {
       const summaries = yield* ThreadSummaryRepository.Service
       yield* threads.create({ id: threadId, workspace: "/work", title: "First", now: 1 })
       const turn = yield* create(turns, { id: turnId, threadId, prompt: "edit", now: 2 })
-      yield* turns.setStatus(turn.id, "running", "newer", 2)
+      yield* turns.setStatus(turn.id, "running", 2)
       yield* summaries.replaceTurn({
         turnId: turn.id,
         threadId,

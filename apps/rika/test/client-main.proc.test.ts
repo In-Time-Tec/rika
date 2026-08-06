@@ -70,7 +70,6 @@ const stubbedInteractive = Effect.fn("ClientMainTest.stubbedInteractive")(functi
       env: {
         HOME: root,
         RIKA_DATABASE: `${root}/rika.db`,
-        RIKA_EXECUTION_DATABASE: `${root}/execution.db`,
         RIKA_TEST_RUNTIME_EXECUTABLE: stub,
         RIKA_TEST_STUB_STATE: state,
         RIKA_TEST_STUB_MODE: mode,

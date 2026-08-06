@@ -49,11 +49,12 @@ it.effect("authoritatively adopts corrected durable terminal outcomes during ref
             }
             expect(yield* repository.replaceForRefold(target, replacement, options)).toMatchObject({
               _tag: "Committed",
-              turn: { status, lastCursor: `${status}-cursor` },
+              turn: { status },
             })
-            expect(yield* turns.get(turnId)).toMatchObject({ status, lastCursor: `${status}-cursor` })
+            expect(yield* turns.get(turnId)).toMatchObject({ status })
             expect(yield* repository.get(turnId)).toMatchObject({
-              turn: { status, lastCursor: `${status}-cursor` },
+              turn: { status },
+              executionCheckpoints: [{ cursor: `${status}-cursor` }],
               units: replacement.units,
             })
             expect(

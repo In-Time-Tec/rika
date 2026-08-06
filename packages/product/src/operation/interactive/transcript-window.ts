@@ -12,8 +12,8 @@ import type { SelectionEpochState } from "./interactive-thread-selection"
 
 export const initialTranscriptWindow = (input: {
   readonly state: SelectionEpochState
-  readonly turns: TurnRepository.Interface
-  readonly transcripts: TranscriptRepository.Interface
+  readonly turns: Pick<TurnRepository.Interface, "page">
+  readonly transcripts: Pick<TranscriptRepository.Interface, "get">
   readonly ensureIngest: (
     threadId: Turn.Turn["threadId"],
     turnId: Turn.Turn["id"],

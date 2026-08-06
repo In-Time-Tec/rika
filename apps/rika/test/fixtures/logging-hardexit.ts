@@ -20,7 +20,7 @@ const program = Effect.gen(function* () {
   const dataRoot = yield* Config.string("RIKA_TEST_LOG_DATA_ROOT")
   return yield* Effect.logInfo("logging.hardexit.fixture").pipe(
     Effect.andThen(Effect.sync(() => process.exit(0))),
-    provideScoped(Logging.layer({ dataRoot, role: "resident", version: "test" })),
+    provideScoped(Logging.layer({ dataRoot, role: "server", version: "test" })),
   )
 })
 

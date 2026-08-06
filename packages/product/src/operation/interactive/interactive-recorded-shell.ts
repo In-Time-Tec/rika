@@ -1,7 +1,6 @@
 import { Function } from "effect"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
 import * as Thread from "@rika/product/thread-record"
-import * as Turn from "@rika/product/turn-record"
 import * as ThreadResult from "@rika/product/thread-result"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
@@ -9,13 +8,39 @@ import * as ExecutionIngest from "../../execution/ingest/execution-ingest-servic
 import { Cause, Clock, Effect } from "effect"
 import type { Exit } from "effect"
 import { OperationError, operationError, failureKind } from "../operation-error"
+import type { InteractiveEvent } from "./interactive-event"
+import type { InteractiveExecutionContext, InteractiveSessionInput } from "./interactive-session-runtime"
 
 const appendRecordedShellOutput = (output: { readonly text: string; readonly truncated: boolean }, text: string) => {
   const accepted = text.slice(0, Math.max(0, 64 * 1024 - output.text.length))
   return { text: output.text + accepted, truncated: output.truncated || accepted.length < text.length }
 }
 
-const runRecordedShellImpl = (input: any, thread: Thread.Thread, command: string, incognito: boolean) => {
+export interface InteractiveRecordedShellInput {
+  readonly options: InteractiveSessionInput["options"]
+  readonly dispatch: (event: InteractiveEvent) => void
+  readonly emit: (dispatch: (event: InteractiveEvent) => void, event: InteractiveEvent) => void
+  readonly ensureTurnSummary: InteractiveSessionInput["ensureTurnSummary"]
+  readonly notifyThreadSummaries: InteractiveSessionInput["notifyThreadSummaries"]
+  readonly notifyTurnChanged: InteractiveSessionInput["notifyTurnChanged"]
+  readonly publishInteractiveActivity: InteractiveSessionInput["publishInteractiveActivity"]
+  readonly sessionId: number
+  readonly executionDependencies: InteractiveExecutionContext
+  readonly executeShellCommand: InteractiveSessionInput["executeShellCommand"]
+  readonly recordedShellStartedEvent: InteractiveSessionInput["recordedShellStartedEvent"]
+  readonly recordedShellSettledEvents: InteractiveSessionInput["recordedShellSettledEvents"]
+}
+
+const runRecordedShellImpl = (
+  input: InteractiveRecordedShellInput,
+  thread: Thread.Thread,
+  command: string,
+  incognito: boolean,
+): Effect.Effect<
+  void,
+  OperationError,
+  ThreadSummaryRepository.Service | TranscriptRepository.Service | ToolRuntime.Service
+> => {
   const {
     options,
     dispatch,
@@ -25,29 +50,14 @@ const runRecordedShellImpl = (input: any, thread: Thread.Thread, command: string
     notifyTurnChanged,
     publishInteractiveActivity,
     sessionId,
-    executionDependencies: _executionDependencies,
     executeShellCommand,
     recordedShellStartedEvent,
     recordedShellSettledEvents,
   } = input
-  const typedEnsureTurnSummary: (turn: Turn.Turn) => Effect.Effect<void, OperationError, never> = ensureTurnSummary
-  const typedNotifyThreadSummaries: Effect.Effect<void, OperationError, never> = notifyThreadSummaries
-  const typedNotifyTurnChanged: (
-    turn: Pick<Turn.Turn, "id" | "threadId">,
-  ) => Effect.Effect<void, OperationError, never> = notifyTurnChanged
-  const typedMakeTurnId: Effect.Effect<Turn.TurnId, never, never> = options.makeTurnId
-  const typedExecuteShellCommand: (
-    tools: ToolRuntime.Interface,
-    command: string,
-  ) => Effect.Effect<
-    { readonly text: string; readonly truncated: boolean; readonly exitCode?: number },
-    OperationError,
-    never
-  > = executeShellCommand
   return Effect.gen(function* () {
     const tools = yield* ToolRuntime.Service
     if (incognito) {
-      const result = yield* typedExecuteShellCommand(tools, command)
+      const result = yield* executeShellCommand(tools, command)
       dispatch({
         _tag: "ShellCompleted",
         threadId: thread.id,
@@ -62,12 +72,11 @@ const runRecordedShellImpl = (input: any, thread: Thread.Thread, command: string
     const now = yield* Clock.currentTimeMillis
     const runningTurn: ThreadResult.RunningRecordedShellTurn = {
       _tag: "RecordedShell",
-      id: yield* typedMakeTurnId,
+      id: yield* options.makeTurnId,
       threadId: thread.id,
       prompt: `$ ${command}`,
       command,
       status: "running",
-      stopIntent: "none",
       author: { _tag: "Human" },
       lineage: { _tag: "Original" },
       createdAt: now,
@@ -79,7 +88,7 @@ const runRecordedShellImpl = (input: any, thread: Thread.Thread, command: string
         emit(dispatch, recordedShellStartedEvent(runningTurn, runningProjection))
         const processExit = (yield* Effect.exit(
           restore(
-            typedEnsureTurnSummary(runningTurn).pipe(
+            ensureTurnSummary(runningTurn).pipe(
               Effect.catchCause((cause) =>
                 Cause.hasInterrupts(cause)
                   ? Effect.failCause(cause)
@@ -91,7 +100,7 @@ const runRecordedShellImpl = (input: any, thread: Thread.Thread, command: string
                       }),
                     ),
               ),
-              Effect.andThen(typedExecuteShellCommand(tools, command)),
+              Effect.andThen(executeShellCommand(tools, command)),
             ),
           ),
         )) as Exit.Exit<{ readonly text: string; readonly truncated: boolean; readonly exitCode?: number }, unknown>
@@ -146,8 +155,8 @@ const runRecordedShellImpl = (input: any, thread: Thread.Thread, command: string
             lastEventAt: terminalTurn.updatedAt,
             now: terminalTurn.updatedAt,
           })
-          yield* typedNotifyThreadSummaries
-          yield* typedNotifyTurnChanged(terminalTurn)
+          yield* notifyThreadSummaries
+          yield* notifyTurnChanged(terminalTurn)
         }).pipe(
           Effect.catchCause((cause) =>
             Effect.logError("recorded-shell.summary.settle.failed").pipe(
@@ -166,6 +175,15 @@ const runRecordedShellImpl = (input: any, thread: Thread.Thread, command: string
 }
 
 export const runRecordedShell: {
-  (arg1: Thread.Thread, arg2: string, arg3: boolean): (arg0: any) => ReturnType<typeof runRecordedShellImpl>
-  (arg0: any, arg1: Thread.Thread, arg2: string, arg3: boolean): ReturnType<typeof runRecordedShellImpl>
+  (
+    arg1: Thread.Thread,
+    arg2: string,
+    arg3: boolean,
+  ): (arg0: InteractiveRecordedShellInput) => ReturnType<typeof runRecordedShellImpl>
+  (
+    arg0: InteractiveRecordedShellInput,
+    arg1: Thread.Thread,
+    arg2: string,
+    arg3: boolean,
+  ): ReturnType<typeof runRecordedShellImpl>
 } = Function.dual(4, runRecordedShellImpl)

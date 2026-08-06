@@ -8,4 +8,4 @@ While a cancellation is pending, Ctrl+S is inert and Enter continues to queue du
 
 Interrupt-and-send first admits a replacement prompt durably, then cancels the active Turn and promotes the replacement. If admission fails, the active Turn continues.
 
-Relay owns cancellation. Control requests report failure instead of pretending the action succeeded.
+Baton owns cancellation. Control requests report failure instead of pretending the action succeeded.

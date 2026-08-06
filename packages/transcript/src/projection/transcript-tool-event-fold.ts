@@ -273,6 +273,7 @@ const applyToolResult = ({
   const outputStatus = string(record(output).status).toLowerCase()
   const process = processResult(output)
   const failed =
+    payload.is_failure === true ||
     typeof payload.error === "string" ||
     record(output)._tag === "ToolError" ||
     outputStatus === "failed" ||
@@ -346,4 +347,25 @@ const applyToolResult = ({
   )
 }
 
-export { applyToolDelta, applyToolRequested, applyToolResult, toolBlock }
+const applyToolProgress = ({
+  value,
+  change,
+  turnId,
+  event,
+}: {
+  readonly value: OwnedFold
+  readonly change: MutableMutation
+  readonly turnId: string
+  readonly event: SourceEvent
+}): void => {
+  const rawId = rawToolId(event)
+  const id = scopedIdentity(turnId, rawId)
+  const message = event.text ?? ""
+  if (message.length === 0) return
+  updateTool(value, change, id, event.sequence, (tool) => ({
+    ...tool,
+    output: tool.output === undefined || tool.output.length === 0 ? message : `${tool.output}\n${message}`,
+  }))
+}
+
+export { applyToolDelta, applyToolProgress, applyToolRequested, applyToolResult, toolBlock }

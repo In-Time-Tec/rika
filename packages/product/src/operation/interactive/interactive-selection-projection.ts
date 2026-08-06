@@ -73,12 +73,23 @@ export const transcriptProjectionEvent = (change: ProjectionChange): Interactive
   }
 }
 
-export const makeInteractiveSelectionProjection = (input: any) => {
+export interface InteractiveSelectionProjectionInput {
+  readonly executionIngest: ExecutionIngest.Interface
+  readonly sessionScope: Scope.Scope
+  readonly selectionBackground: Array<import("effect").Fiber.Fiber<unknown, unknown>>
+  readonly operationFeed: import("./interactive-operation-feed").InteractiveOperationFeed
+  readonly activitySequence: number
+  readonly interactiveThread: Ref.Ref<Thread.Thread | undefined>
+  readonly setActiveSelectionState: (value: SelectionEpochState) => void
+  readonly setCurrentSelectionEpoch: (value: number) => void
+  readonly setSelectedThreadId: (value: string) => void
+}
+
+export const makeInteractiveSelectionProjection = (input: InteractiveSelectionProjectionInput) => {
   const {
     executionIngest,
     sessionScope,
     selectionBackground,
-    operationFeed: _operationFeed,
     activitySequence,
     interactiveThread,
     setActiveSelectionState,
@@ -88,9 +99,7 @@ export const makeInteractiveSelectionProjection = (input: any) => {
   const openSelectionProjectionFeed = (state: SelectionEpochState): Effect.Effect<void, OperationError, never> =>
     Effect.gen(function* () {
       const scope = yield* Scope.make()
-      const watch = yield* typedExecutionIngest
-        .watchThread(state.thread.id)
-        .pipe(Effect.provideService(Scope.Scope, scope))
+      const watch = yield* executionIngest.watchThread(state.thread.id).pipe(Effect.provideService(Scope.Scope, scope))
       state.projectionFeed = { watch, scope, promoted: false }
     }).pipe(Effect.mapError((error) => OperationError.make({ message: String(error), cause: error })))
   const startSelectionProjectionFeed = Effect.fn("ProductOperation.interactive.startSelectionProjectionFeed")(
@@ -132,7 +141,6 @@ export const makeInteractiveSelectionProjection = (input: any) => {
       const feed = state.projectionFeed
       return feed === undefined || feed.promoted ? Effect.void : Scope.close(feed.scope, Exit.void)
     })
-  const typedExecutionIngest: ExecutionIngest.Interface = executionIngest
   const activateCreatedThread = Effect.fn("ProductOperation.interactive.activateCreatedThread")(function* (
     thread: Thread.Thread,
     epoch: number,

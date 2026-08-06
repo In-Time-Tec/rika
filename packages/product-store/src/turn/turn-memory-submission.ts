@@ -44,7 +44,6 @@ export const makeTurnMemorySubmission = ({
         author: input.author ?? { _tag: "Human" },
         lineage: input.lineage ?? { _tag: "Original" },
         status: active ? "queued" : "accepted",
-        stopIntent: "none",
         createdAt: now,
         updatedAt: now,
       }

@@ -10,7 +10,7 @@ const {
   checkSourceMetrics,
   checkTestTopology,
   checkSourceBasename,
-  checkMigrationIdentity,
+  checkPackageEdges,
 } = repositoryPolicy
 
 const manifest = (name: string, dependencies: Record<string, string>, extra: Record<string, unknown> = {}) => ({
@@ -20,21 +20,43 @@ const manifest = (name: string, dependencies: Record<string, string>, extra: Rec
 
 describe("repository policy", () => {
   test("rejects forbidden local links and external framework workspace links", () => {
-    expect(checkDependencyManifests([manifest("@rika/relay-execution", { "@relayfx/sdk": "workspace:*" })])).toEqual([
-      "@rika/relay-execution/package.json: @relayfx/sdk uses external workspace linking",
+    expect(checkDependencyManifests([manifest("@rika/cli", { "@batonfx/core": "workspace:*" })])).toEqual([
+      "@rika/cli/package.json: @batonfx/core uses external workspace linking",
     ])
-    expect(checkDependencyManifests([manifest("@rika/cli", { "@relayfx/sdk": "file:/tmp/other/a.tgz" })])).toEqual([
-      "@rika/cli/package.json: @relayfx/sdk uses file:/tmp/other/a.tgz",
+    expect(checkDependencyManifests([manifest("@rika/cli", { "@batonfx/core": "file:/tmp/other/a.tgz" })])).toEqual([
+      "@rika/cli/package.json: @batonfx/core uses file:/tmp/other/a.tgz",
     ])
   })
 
   test("allows the autoresearch link and web research SDK", () => {
     expect(
       checkDependencyManifests([
-        manifest("@rika/cli", { "@relayfx/sdk": "file:/private/tmp/rika-autoresearch-links/a.tgz" }),
+        manifest("@rika/cli", { "@batonfx/core": "file:/private/tmp/rika-autoresearch-links/a.tgz" }),
       ]),
     ).toEqual([])
     expect(checkDependencyManifests([manifest("@rika/coding-tools", { "parallel-web": "1.1.0" })])).toEqual([])
+  })
+
+  test("admits the Baton adapter as the CLI execution boundary", () => {
+    expect(
+      checkPackageEdges([
+        manifest(
+          "@rika/cli",
+          { "@rika/baton-execution": "workspace:*" },
+          {
+            rika: { kind: "application", domain: "cli" },
+          },
+        ),
+        manifest(
+          "@rika/baton-execution",
+          { "@rika/product": "workspace:*" },
+          {
+            rika: { kind: "adapter", domain: "execution" },
+          },
+        ),
+        manifest("@rika/product", {}),
+      ]),
+    ).toEqual([])
   })
 
   test("rejects model providers only in tools", () => {
@@ -100,22 +122,9 @@ describe("repository policy", () => {
 
   test("allows maintained framework configuration basenames without path waivers", () => {
     expect(checkSourceBasename("vitest.config.ts")).toBeUndefined()
-    expect(checkSourceBasename("test/live/vitest.config.ts")).toBeUndefined()
-    expect(checkSourceBasename("test/live/custom-vitest.config.ts")).toEqual(
+    expect(checkSourceBasename("test/integration/vitest.config.ts")).toBeUndefined()
+    expect(checkSourceBasename("test/integration/custom-vitest.config.ts")).toEqual(
       expect.objectContaining({ rule: "basename", severity: "error" }),
     )
-  })
-
-  test("enforces unique product migration IDs", () => {
-    expect(checkMigrationIdentity(["packages/a/product-migration-007-route-pins.ts"])).toEqual([])
-    expect(
-      checkMigrationIdentity([
-        "packages/a/product-migration-007-route-pins.ts",
-        "packages/b/product-migration-007-other-pins.ts",
-      ]),
-    ).toEqual([
-      expect.objectContaining({ path: "packages/a/product-migration-007-route-pins.ts", rule: "migration-identity" }),
-      expect.objectContaining({ path: "packages/b/product-migration-007-other-pins.ts", rule: "migration-identity" }),
-    ])
   })
 })

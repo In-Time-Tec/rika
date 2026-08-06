@@ -1,9 +1,8 @@
 import type { Block } from "../schema/transcript-presentation-model"
 import type { SourceEvent } from "../schema/transcript-source-event"
-import { toolBlock } from "./transcript-tool-event-fold"
-import { foldState } from "./transcript-fold-state"
-const { encodeInput, sourcePayload, string } = foldState
-import { identityKey, scopedIdentity } from "../ordering/transcript-unit-identity"
+import { identityKey } from "../ordering/transcript-unit-identity"
+
+const text = (value: unknown): string => (typeof value === "string" ? value : "")
 
 const genericBlock = ({
   turnId,
@@ -12,81 +11,48 @@ const genericBlock = ({
   readonly turnId: string
   readonly event: SourceEvent
 }): Block | undefined => {
-  const value = sourcePayload(event)
-  if (event.type.startsWith("permission.ask.") || event.type.startsWith("tool.approval.")) return undefined
-  if (event.type.includes("diff"))
-    return { _tag: "Diff", path: string(value.path, "diff"), patch: event.text ?? string(value.patch ?? value.diff) }
+  const data = event.data ?? {}
   if (event.type === "agent.compaction.started")
-    return { _tag: "Compaction", summary: event.text ?? string(value.summary), status: "running" }
+    return { _tag: "Compaction", summary: event.text ?? "", status: "running" }
   if (event.type === "agent.compaction.completed")
     return {
       _tag: "Compaction",
-      summary: event.text ?? string(value.summary),
+      summary: event.text ?? "",
       status: "complete",
-    }
-  if (event.type === "agent.compaction.committed")
-    return {
-      _tag: "Compaction",
-      summary: event.text ?? string(value.summary),
-      status: "complete",
-      ...(string(value.checkpoint ?? value.checkpoint_id).length === 0
-        ? {}
-        : { checkpoint: string(value.checkpoint ?? value.checkpoint_id) }),
+      ...(text(data.checkpoint).length === 0 ? {} : { checkpoint: text(data.checkpoint) }),
     }
   if (event.type === "agent.compaction.failed")
-    return {
-      _tag: "Compaction",
-      summary: event.text ?? string(value.summary ?? value.message),
-      status: "failed",
-    }
-  if (event.type.includes("notification"))
+    return { _tag: "Compaction", summary: event.text ?? "", status: "failed" }
+  if (event.type === "model.retry.scheduled")
     return {
       _tag: "Notification",
-      title: string(value.title ?? value.name, "Notification"),
-      detail: event.text ?? string(value.detail ?? value.message),
+      title: "Retrying model response",
+      detail: `${text(data.category).replaceAll("-", " ")}${typeof data.delay_millis === "number" ? ` · retrying in ${Math.max(1, Math.ceil(data.delay_millis / 1_000))}s` : ""}${typeof data.attempt === "number" ? ` · attempt ${data.attempt}` : ""}`,
     }
-  if (event.type.includes("image") && event.type.includes("attachment"))
+  if (event.type === "fan_out.admitted")
     return {
-      _tag: "ImageAttachment",
-      name: string(value.name ?? value.filename, "image"),
-      mediaType: string(value.media_type ?? value.mediaType, "application/octet-stream"),
-      ...(typeof value.width === "number" ? { width: value.width } : {}),
-      ...(typeof value.height === "number" ? { height: value.height } : {}),
-      ...(typeof value.bytes === "number" ? { bytes: value.bytes } : {}),
+      _tag: "Notification",
+      title: "Running child executions",
+      detail: `${typeof data.member_count === "number" ? data.member_count : 0} admitted, up to ${typeof data.concurrency === "number" ? data.concurrency : 0} at once`,
     }
-  if (event.type.includes("workflow")) {
-    let status: Extract<Block, { _tag: "Workflow" }>["status"] = "running"
-    if (event.type.includes("failed")) status = "failed"
-    else if (event.type.includes("completed")) status = "complete"
-    else if (event.type.includes("wait")) status = "waiting"
+  if (event.type === "fan_out.joined")
     return {
-      _tag: "Workflow",
-      name: string(value.workflow ?? value.name, "workflow"),
-      step: event.text ?? string(value.step ?? value.status),
-      status,
+      _tag: "Notification",
+      title: data.status === "succeeded" ? "Child executions completed" : "Child executions settled",
+      detail: `${typeof data.succeeded === "number" ? data.succeeded : 0} succeeded, ${typeof data.failed === "number" ? data.failed : 0} failed, ${typeof data.cancelled === "number" ? data.cancelled : 0} cancelled, ${typeof data.abandoned === "number" ? data.abandoned : 0} abandoned`,
+    }
+  if (event.type === "program.log") {
+    if (data.level === "debug") return undefined
+    if (data.level === "error")
+      return { _tag: "Error", title: text(data.operation) || "Program", detail: event.text ?? "", turnId }
+    return {
+      _tag: "Notification",
+      title: text(data.operation) || (data.level === "warn" ? "Program warning" : "Program"),
+      detail: event.text ?? "",
     }
   }
-  if (event.type.includes("error") || event.type.includes("failed") || event.type === "budget.exceeded")
-    return {
-      _tag: "Error",
-      title: string(value.title, event.type === "budget.exceeded" ? "Budget exceeded" : "Error"),
-      detail: event.text ?? string(value.message ?? value.error, event.type),
-      turnId,
-      ...(string(value.recovery).length === 0 ? {} : { recovery: string(value.recovery) }),
-    }
-  if (event.type.includes("tool") && (event.type.includes("result") || event.type.includes("completed")))
-    return {
-      _tag: "ToolResult",
-      id: scopedIdentity(turnId, string(value.callId ?? value.call_id ?? value.id, event.cursor)),
-      output: event.text ?? string(value.output ?? value.result),
-      failed: event.type.includes("failed") || value.failed === true,
-    }
-  if (event.type.includes("tool")) {
-    const id = scopedIdentity(turnId, string(value.callId ?? value.call_id ?? value.id, event.cursor))
-    const name = string(value.name ?? value.tool, "tool")
-    const input = encodeInput(value.input ?? value)
-    return toolBlock({ id, name, input, previous: undefined })
-  }
+  if (event.type === "program.operation.failed")
+    return { _tag: "Error", title: "Program operation failed", detail: event.text ?? "", turnId }
   return undefined
 }
 
@@ -99,29 +65,10 @@ const genericKey = ({
   readonly event: SourceEvent
   readonly block: Block
 }): string => {
-  const value = sourcePayload(event)
-  switch (block._tag) {
-    case "Diff":
-      return identityKey("diff", turnId, block.path)
-    case "Compaction":
-      return identityKey("compaction", turnId)
-    case "ChildAgent":
-      return identityKey("child", turnId, block.id)
-    case "Workflow": {
-      const id = string(value.run_id ?? value.runId ?? value.workflow_id)
-      return identityKey("workflow", turnId, id.length === 0 ? event.cursor : id)
-    }
-    case "ImageAttachment":
-      return identityKey("image", turnId, string(value.id, event.cursor))
-    case "Notification":
-      return identityKey("notification", turnId, string(value.id, event.cursor))
-    case "Error":
-      return identityKey("error", turnId, string(value.id, event.cursor))
-    default: {
-      const id = "id" in block && typeof block.id === "string" ? block.id : `${event.sequence}:${event.type}`
-      return identityKey("event", turnId, id)
-    }
-  }
+  if (block._tag === "Compaction") return identityKey("compaction", turnId)
+  if (event.type === "fan_out.admitted" || event.type === "fan_out.joined")
+    return identityKey("fan-out", turnId, text(event.data?.fan_out_id))
+  return identityKey("event", turnId, event.sequence, event.type)
 }
 
 export { genericBlock, genericKey }

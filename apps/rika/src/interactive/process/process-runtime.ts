@@ -275,13 +275,11 @@ export const makeProcessRuntime = (runtime: Runtime) => {
         if (generation !== loop.selectionGeneration) return
         loop.model = update(loop.model, { _tag: "ThreadOpenRequested" })
         loop.renderer?.surface.update(loop.model)
-        loop.renderSuppressed = true
       })
       yield* effect.pipe(
         Effect.ensuring(
           Effect.sync(() => {
             if (generation !== loop.selectionGeneration) return
-            loop.renderSuppressed = false
             loop.model = update(loop.model, { _tag: "ThreadOpenCompleted" })
             if (loop.renderer !== undefined) loop.renderer.surface.update(loop.model)
           }),

@@ -265,7 +265,7 @@ test("keeps wrapped response continuations inside the rail and curls the final r
     entries: [
       {
         role: "assistant",
-        text: "1. Splitting the resident endpoint into separate host and client transports removes the restart complexity.",
+        text: "1. Splitting the server endpoint into separate host and client transports removes the restart complexity.",
         turnId: "child:agent",
       },
     ],
@@ -427,13 +427,15 @@ it.effect("constructs the render tree and forwards key and resize events", () =>
     const callbacks = handlers()
     const { surface } = yield* createScoped(callbacks)
 
-    expect(opentui.rootChildren.length).toBeGreaterThanOrEqual(6)
-    expect(opentui.rootChildren.slice(-6)).toEqual([
+    expect(opentui.rootChildren.length).toBeGreaterThanOrEqual(8)
+    expect(opentui.rootChildren.slice(-8)).toEqual([
       surface.main,
       surface.modeLabel,
       surface.statusLabel,
       surface.workspaceLabel,
       surface.paletteBox,
+      surface.overlayHintOne,
+      surface.overlayHintTwo,
       surface.toastBox,
     ])
     expect(opentui.boxChildren).toContain(surface.input)

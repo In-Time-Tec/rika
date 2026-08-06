@@ -4,7 +4,7 @@ import * as Support from "./usage-test-support"
 
 describe("UsageCost", () => {
   it.each([
-    ["missing-server-stamp", Support.Fixtures.unstampedLifecycle("execution", "start", "execution.started", 1, 1)],
+    ["missing-baton-stamp", Support.Fixtures.unstampedLifecycle("execution", "start", "execution.started", 1, 1)],
     ["invalid-identity", Support.Fixtures.lifecycle("", "start", "execution.started", 1, 1)],
     ["invalid-timestamp", Support.Fixtures.lifecycle("execution", "start", "execution.started", -1, 1)],
     ["invalid-sequence", Support.Fixtures.lifecycle("execution", "start", "execution.started", 1, -1)],
@@ -28,19 +28,6 @@ describe("UsageCost", () => {
     expect(Result.isSuccess(folded)).toBe(true)
     if (Result.isSuccess(folded)) expect(folded.success.activeEvents.size).toBe(2)
     expect(Support.RawUsageCost.empty.activeEvents.size).toBe(0)
-  })
-
-  it("validates a Relay root alias against its canonical execution identity", () => {
-    const result = Support.RawUsageCost.foldBatch(
-      Support.RawUsageCost.empty,
-      [
-        Support.Fixtures.lifecycle("execution:turn", "start", "execution.started", 1, 1),
-        Support.Fixtures.lifecycle("execution:turn", "done", "execution.completed", 2, 2),
-      ].map((event) => ({ threadId: "thread", turnId: "turn", event })),
-      new Set(["turn"]),
-    )
-    expect(Result.isSuccess(result)).toBe(true)
-    if (Result.isSuccess(result)) expect(result.success.executionEvents.has("turn")).toBe(true)
   })
 
   it("distinguishes unsupported snapshots from malformed current JSON", () => {
@@ -140,6 +127,50 @@ describe("UsageCost", () => {
       new Set(["execution"]),
     )
     expect(Result.isFailure(invalid) && invalid.failure.reason).toBe("invalid-transition")
+  })
+
+  it("persists only the latest exact conversational root context reading", () => {
+    const input = { threadId: "thread", turnId: "turn" }
+    const events = [
+      {
+        ...Support.Fixtures.reportedTokens("conversation-1", "gpt-5.6-sol", 120, 10),
+        sequence: 4,
+      },
+      {
+        ...Support.Fixtures.reportedTokens("compaction", "gpt-5.6-sol", 40, 5, {
+          model_call_id: "call:compaction-summary",
+          model_attempt_id: "attempt-compaction",
+        }),
+        sequence: 5,
+      },
+      {
+        ...Support.Fixtures.reportedTokens("structured", "gpt-5.6-sol", 60, 5, {
+          model_call_id: "call:structured-output",
+          model_attempt_id: "attempt-structured",
+        }),
+        sequence: 6,
+      },
+      {
+        ...Support.Fixtures.reportedTokens("conversation-2", "gpt-5.6-sol", 180, 12),
+        sequence: 7,
+      },
+    ]
+    const folded = events.reduce(
+      (snapshot, event) => Support.UsageCost.observe(snapshot, { ...input, event }),
+      Support.UsageCost.empty,
+    )
+    expect([...folded.executionContexts.values()]).toEqual([
+      {
+        inputTokens: 180,
+        sequence: 7,
+        modelCallId: "call-conversation-2",
+        modelAttemptId: "attempt-conversation-2",
+        attempt: 1,
+      },
+    ])
+    expect([...Support.UsageCost.deserialize(Support.UsageCost.serialize(folded)).executionContexts.values()]).toEqual([
+      ...folded.executionContexts.values(),
+    ])
   })
 
   it("round trips every fold state and continues identically", () => {

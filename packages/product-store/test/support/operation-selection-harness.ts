@@ -3,12 +3,12 @@ import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as TurnContract from "@rika/product/turn-repository"
-import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionEvent from "@rika/product/execution-event"
 import * as Turn from "@rika/product/turn-record"
 import { Service } from "@rika/product/product-operation-service"
 
-import { Deferred, Effect, Layer, Ref } from "effect"
+import { Deferred, Effect, Layer, Ref, Stream } from "effect"
 import { productLayer } from "./operation-layer-harness"
 import { backend } from "./operation-execution-fixtures"
 import { selectionThread } from "./operation-selection-fixtures"
@@ -46,7 +46,7 @@ export const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLo
     },
   })
   const streamed: ReadonlyArray<ExecutionEvent.Event> = Array.from({ length: eventCount }, (_, index) => ({
-    executionId: "selection-live-turn",
+    executionId: "selection-live-run",
     cursor: `selection-live-${index + 1}`,
     sequence: index + 1,
     type: "model.output.delta",
@@ -54,10 +54,10 @@ export const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLo
     text: String(index + 1),
   }))
   const usage: ExecutionEvent.Event = {
-    executionId: "selection-live-turn",
+    executionId: "selection-live-run",
     cursor: "selection-live-usage",
     sequence: eventCount + 1,
-    type: "model.usage.reported",
+    type: "model.attempt.completed",
     createdAt: eventCount + 1,
     data: {
       provider: "openai",
@@ -70,19 +70,19 @@ export const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLo
     },
   }
   const completed: ExecutionEvent.Event = {
-    executionId: "selection-live-turn",
+    executionId: "selection-live-run",
     cursor: "selection-live-completed",
     sequence: eventCount + (deferredUsage ? 2 : 1),
     type: "execution.completed",
-    timestampSource: "server",
+    timestampSource: "baton",
     createdAt: eventCount + (deferredUsage ? 2 : 1),
   }
   const started: ExecutionEvent.Event = {
-    executionId: "selection-live-turn",
+    executionId: "selection-live-run",
     cursor: "selection-live-started",
     sequence: 0,
     type: "execution.started",
-    timestampSource: "server",
+    timestampSource: "baton",
     createdAt: 0,
   }
   const targetPageEntered = yield* Deferred.make<void>()
@@ -100,33 +100,28 @@ export const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLo
       return turns.page(threadId, options)
     },
   })
-  const selectionBackend = ExecutionBackend.Service.of({
+  const selectionBackend = ExecutionGateway.Service.of({
     ...backend,
-    start: (input) =>
-      Effect.sync(() => {
-        input.onEvent?.(started)
-        for (const event of streamed) input.onEvent?.(event)
-      }).pipe(
-        Effect.andThen(Deferred.succeed(liveEventsEmitted, undefined)),
-        Effect.andThen(deferredUsage ? Deferred.await(usageRequested) : Effect.void),
-        Effect.tap(() => (deferredUsage ? Effect.sync(() => input.onEvent?.(usage)) : Effect.void)),
-        Effect.andThen(Deferred.await(releaseExecution)),
-        Effect.as({
-          turnId: input.turnId,
-          status: "completed" as const,
-          events: deferredUsage ? [started, ...streamed, usage, completed] : [started, ...streamed, completed],
-        }),
+    startTurn: (input) =>
+      Effect.succeed({ runId: "selection-live-run", turnId: input.turnId, threadId: input.threadId }),
+    watchTurn: () =>
+      Stream.fromIterable([started, ...streamed]).pipe(
+        Stream.concat(Stream.fromEffect(Deferred.succeed(liveEventsEmitted, undefined)).pipe(Stream.drain)),
+        Stream.concat(
+          deferredUsage ? Stream.fromEffect(Deferred.await(usageRequested)).pipe(Stream.drain) : Stream.empty,
+        ),
+        Stream.concat(deferredUsage ? Stream.succeed(usage) : Stream.empty),
+        Stream.concat(Stream.fromEffect(Deferred.await(releaseExecution)).pipe(Stream.drain)),
+        Stream.concat(Stream.succeed(completed)),
       ),
-    inspect: (turnId) =>
-      Effect.succeed({ turnId, status: "running" as const, waits: [], pendingTools: [], children: [] }),
-    replay: (turnId) => Effect.succeed({ turnId, status: "running" as const, events: [] }),
+    inspectTurn: () => Effect.succeed({ status: "running" }),
   })
   const transcripts = yield* TranscriptRepository.makeMemory({ turns: selectionTurns })
   const layer: Layer.Layer<Service, Error, never> = productLayer({
     repositoryLayer: Layer.succeed(ThreadRepository.Service, delayedRepository),
     turnRepositoryLayer: Layer.succeed(TurnRepository.Service, selectionTurns),
     transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
-    backendLayer: Layer.succeed(ExecutionBackend.Service, selectionBackend),
+    backendLayer: Layer.succeed(ExecutionGateway.Service, selectionBackend),
     defaultWorkspace: "/work",
     makeThreadId: Effect.die("unused"),
     makeTurnId: Effect.succeed(Turn.TurnId.make("selection-live-turn")),

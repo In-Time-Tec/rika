@@ -9,4 +9,4 @@
 │ Cost       $1.25     │
 │ Active     ◷ 1m 43s  │
 │                      │
-╰───Ctrl+Y─toggle────e…╯
+╰── Ctrl+Y toggle ── e…╯

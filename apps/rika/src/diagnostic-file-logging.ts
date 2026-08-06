@@ -1,7 +1,7 @@
 import * as Diagnostic from "./diagnostic-file-logging-contract"
 import { Clock, DateTime, Duration, Effect, FileSystem, Layer, Logger, Option, Path, Queue, References } from "effect"
 
-export type ProcessRole = "client" | "resident"
+export type ProcessRole = "client" | "server"
 export type LogLevel = "debug" | "info" | "warning" | "error"
 
 const activeSettlers = new Set<() => void>()
@@ -30,7 +30,10 @@ const threadOrTurnId = matching(
   /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|(?:thread|turn)-[a-z0-9][a-z0-9._-]{0,127})$/i,
   128,
 )
-const executionId = matching(/^(?:execution:|child:|auxiliary:)[a-z0-9][a-z0-9._:%-]{0,223}$/i, 256)
+const executionId = matching(
+  /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|(?:run|turn)-[a-z0-9][a-z0-9._-]{0,223})$/i,
+  256,
+)
 const eventCursor = matching(
   /^(?:start|(?:cursor|event|follow)[-:][a-z0-9][a-z0-9._:%-]{0,223}|[a-z0-9_-]{1,64}~[a-z0-9_-]{20})$/i,
   256,
@@ -56,6 +59,7 @@ const annotationSchemas: Readonly<Record<string, AnnotationSchema>> = {
   ),
   "rika.failure.interrupted": boolean,
   "rika.failure.kind": knownFailureKinds,
+  "rika.failure.message": matching(/^[\s\S]{1,4096}$/, 4096),
   "rika.failure.outcome": oneOf("known", "unknown"),
   "rika.follow.cursor": eventCursor,
   "rika.follow.reason": oneOf("thread-open", "reattach", "resume", "recovery"),
@@ -67,7 +71,6 @@ const annotationSchemas: Readonly<Record<string, AnnotationSchema>> = {
     "compaction",
     "librarian",
     "painter",
-    "review",
     "readThread",
     "surgeon",
     "task",
@@ -75,7 +78,7 @@ const annotationSchemas: Readonly<Record<string, AnnotationSchema>> = {
   "rika.model.backend.kind": oneOf(...Diagnostic.modelBackendKinds),
   "rika.process.instance": matching(/^\d{1,16}-\d{1,10}$/, 32),
   "rika.process.pid": boundedNumber,
-  "rika.process.role": oneOf("client", "resident"),
+  "rika.process.role": oneOf("client", "server"),
   "rika.reconciliation.certified": boolean,
   "rika.reconciliation.children.confirmed": boundedNumber,
   "rika.reconciliation.children.inspected": boundedNumber,
@@ -91,27 +94,27 @@ const annotationSchemas: Readonly<Record<string, AnnotationSchema>> = {
   "rika.reconciliation.terminal": boolean,
   "rika.reconciliation.tree.verified": boolean,
   "rika.reconnect.attempt": boundedNumber,
-  "rika.resident.client.kind": oneOf("interactive", "run", "review", "workflow", "thread-continue", "product"),
-  "rika.resident.command.sequence": boundedNumber,
-  "rika.resident.connection.duration.ms": boundedNumber,
-  "rika.resident.connection.failures": boundedNumber,
-  "rika.resident.connection.id": uuid,
-  "rika.resident.connection.retry": boundedNumber,
-  "rika.resident.connection.retry_delay.ms": boundedNumber,
-  "rika.resident.connection.role": oneOf("launch", "reattach"),
-  "rika.resident.feed.fragments": boundedNumber,
-  "rika.resident.feed.overflowed": boolean,
-  "rika.resident.feed.queued": boundedNumber,
-  "rika.resident.feed.sent": boundedNumber,
-  "rika.resident.feed.sequence": boundedNumber,
-  "rika.resident.generation": boundedNumber,
-  "rika.resident.port": boundedNumber,
-  "rika.resident.previous.pid": boundedNumber,
-  "rika.resident.rejection.reason": oneOf("accepted", "incompatible", "active-execution-work"),
-  "rika.resident.request.id": uuid,
-  "rika.resident.session.id": uuid,
-  "rika.resident.startup.pid": boundedNumber,
-  "rika.resident.startup.role": oneOf("owner", "child", "reclaimer"),
+  "rika.server.client.kind": oneOf("interactive", "run", "thread-continue", "product"),
+  "rika.server.command.sequence": boundedNumber,
+  "rika.server.connection.duration.ms": boundedNumber,
+  "rika.server.connection.failures": boundedNumber,
+  "rika.server.connection.id": uuid,
+  "rika.server.connection.retry": boundedNumber,
+  "rika.server.connection.retry_delay.ms": boundedNumber,
+  "rika.server.connection.role": oneOf("launch", "reattach"),
+  "rika.server.feed.fragments": boundedNumber,
+  "rika.server.feed.overflowed": boolean,
+  "rika.server.feed.queued": boundedNumber,
+  "rika.server.feed.sent": boundedNumber,
+  "rika.server.feed.sequence": boundedNumber,
+  "rika.server.generation": boundedNumber,
+  "rika.server.port": boundedNumber,
+  "rika.server.previous.pid": boundedNumber,
+  "rika.server.rejection.reason": oneOf("accepted", "incompatible", "active-execution-work"),
+  "rika.server.request.id": uuid,
+  "rika.server.session.id": uuid,
+  "rika.server.startup.pid": boundedNumber,
+  "rika.server.startup.role": oneOf("owner", "child", "reclaimer"),
   "rika.thread.id": threadOrTurnId,
   "rika.tool.call.id": toolCallId,
   "rika.tool.deadline.ms": boundedNumber,

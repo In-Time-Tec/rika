@@ -50,7 +50,8 @@ const refoldTurn = Effect.fn("TranscriptRepository.refoldTurn")(function* (
   projection: TranscriptProjectionModel.Projection,
   options: RefoldOptions,
 ) {
-  const rootKey = TranscriptCorrelation.executionKey(String(expected.id))
+  const rootExecutionId = expected.executionLink?.runId ?? String(expected.id)
+  const rootKey = TranscriptCorrelation.executionKey(rootExecutionId)
   const roots = options.executionCheckpoints.filter((checkpoint) => checkpoint.executionKey === rootKey)
   if (roots.length !== 1)
     return yield* RepositoryError.make({ message: `Transcript ${expected.id} has no unique root execution checkpoint` })
@@ -58,7 +59,7 @@ const refoldTurn = Effect.fn("TranscriptRepository.refoldTurn")(function* (
   if (root.attachment !== undefined || root.status === undefined || root.cursor.length === 0)
     return yield* RepositoryError.make({ message: `Transcript ${expected.id} has no durable terminal root outcome` })
   const outcomes = projection.units.filter(
-    (unit) => unit.turnId === expected.id && unit.parentId === undefined && unit.executionOutcome !== undefined,
+    (unit) => unit.turnId === rootExecutionId && unit.parentId === undefined && unit.executionOutcome !== undefined,
   )
   if (outcomes.length !== 1)
     return yield* RepositoryError.make({ message: `Transcript ${expected.id} has no unique projected root outcome` })
@@ -68,7 +69,7 @@ const refoldTurn = Effect.fn("TranscriptRepository.refoldTurn")(function* (
     return yield* RepositoryError.make({
       message: `Transcript ${expected.id} has contradictory terminal root outcomes`,
     })
-  return { ...expected, status: root.status, lastCursor: root.cursor }
+  return { ...expected, status: root.status }
 })
 
 const pageSize = (limit: number | undefined) => Math.min(200, Math.max(1, Math.floor(limit ?? 50)))
@@ -246,7 +247,7 @@ const validateCheckpoint = (
   const checkpoints = options.executionCheckpoints
   if (checkpoints.length === 0)
     return Effect.fail(RepositoryError.make({ message: `Transcript ${turn.id} has no execution checkpoint` }))
-  const rootKey = TranscriptCorrelation.executionKey(String(turn.id))
+  const rootKey = TranscriptCorrelation.executionKey(turn.executionLink?.runId ?? String(turn.id))
   const keys = new Set<string>()
   const parents = new Map<string, string | undefined>()
   let root: ExecutionCheckpoint | undefined
@@ -354,7 +355,7 @@ const attachmentSetError = (
   checkpoints: ReadonlyArray<ExecutionCheckpoint>,
 ): RepositoryError | undefined => {
   if (checkpoints.length === 0 && units.length === 0) return undefined
-  const rootKey = TranscriptCorrelation.executionKey(String(turn.id))
+  const rootKey = TranscriptCorrelation.executionKey(turn.executionLink?.runId ?? String(turn.id))
   const byExecution = new Map(checkpoints.map((checkpoint) => [checkpoint.executionKey, checkpoint]))
   const byUnit = new Map(units.map((unit) => [unit.key, unit]))
   for (const checkpoint of checkpoints) {

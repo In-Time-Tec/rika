@@ -1,13 +1,14 @@
 import { Function } from "effect"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import * as TranscriptUsage from "@rika/transcript/model-usage-fallback"
+import * as ModelAttemptUsage from "@rika/transcript/model-attempt-usage"
 import { Result } from "effect"
 import type { AttemptCost } from "./usage-attempt"
 import { Attempt } from "./usage-attempt"
 import type { ActiveEvent, RootExecution } from "./usage-event"
-import { Lifecycle, ProjectionFailure, isLifecycleEvent, isObservedEvent, isServerStamped } from "./usage-event"
+import { Lifecycle, ProjectionFailure, isBatonStamped, isLifecycleEvent, isObservedEvent } from "./usage-event"
 import { executionIntervals } from "./usage-active-time"
+import type { ContextReading } from "./usage-context-reading"
 import { empty, type Snapshot } from "./usage-snapshot"
 import { accumulate, difference, noTotals, shifts, type Totals } from "./usage-total"
 import * as ExecutionEvent from "@rika/product/execution-event"
@@ -25,6 +26,7 @@ type MutableUsage = {
   deliveries: Map<string, import("./usage-event").DeliveryIdentity>
   attempts: Map<string, AttemptCost>
   executionAttempts: Map<string, Set<string>>
+  executionContexts: Map<string, ContextReading>
   activeEvents: Map<string, ActiveEvent>
   executionEvents: Map<string, Array<ActiveEvent>>
 }
@@ -36,6 +38,7 @@ type UsageChanged = {
   deliveries: boolean
   attempts: boolean
   executionAttempts: boolean
+  executionContexts: boolean
   activeEvents: boolean
   executionEvents: boolean
 }
@@ -61,6 +64,7 @@ const mutableFromSnapshot = (snapshot: Snapshot): MutableUsage => ({
   deliveries: new Map(snapshot.deliveries),
   attempts: new Map(snapshot.attempts),
   executionAttempts: cloneExecutionAttempts(snapshot.executionAttempts),
+  executionContexts: new Map(snapshot.executionContexts),
   activeEvents: new Map(snapshot.activeEvents),
   executionEvents: cloneExecutionEvents(snapshot.executionEvents),
 })
@@ -71,6 +75,7 @@ const unchangedUsageChanged = (): UsageChanged => ({
   deliveries: false,
   attempts: false,
   executionAttempts: false,
+  executionContexts: false,
   activeEvents: false,
   executionEvents: false,
 })
@@ -110,6 +115,9 @@ export const snapshotUsageFold = (fold: UsageFold): Snapshot => {
     executionAttempts: value.changed.executionAttempts
       ? cloneExecutionAttempts(value.mutable.executionAttempts)
       : value.published.executionAttempts,
+    executionContexts: value.changed.executionContexts
+      ? new Map(value.mutable.executionContexts)
+      : value.published.executionContexts,
     activeEvents: value.changed.activeEvents ? new Map(value.mutable.activeEvents) : value.published.activeEvents,
     executionEvents: value.changed.executionEvents
       ? cloneExecutionEvents(value.mutable.executionEvents)
@@ -207,11 +215,11 @@ const applyActive = (
     cursor: event.cursor,
     sequence: event.sequence,
   }
-  if (!isServerStamped(event))
+  if (!isBatonStamped(event))
     return Result.fail(
       ProjectionFailure.make({
-        reason: "missing-server-stamp",
-        message: "Lifecycle event lacks a server timestamp",
+        reason: "missing-baton-stamp",
+        message: "Lifecycle event lacks a Baton timestamp",
         ...context,
       }),
     )
@@ -310,6 +318,14 @@ const applyActive = (
   return Result.succeed(undefined)
 }
 
+const integerField = (data: Readonly<Record<string, unknown>> | undefined, name: string) => {
+  const field = data?.[name]
+  return typeof field === "number" && Number.isSafeInteger(field) && field >= 0 ? field : undefined
+}
+
+const isConversationCall = (modelCallId: string): boolean =>
+  !modelCallId.endsWith(":compaction-summary") && !modelCallId.endsWith(":structured-output")
+
 const applyAttempt = (
   value: OwnedUsageFold,
   input: RootExecution & { readonly event: ExecutionEvent.Event },
@@ -387,8 +403,8 @@ const applyAttempt = (
     tokens: { _tag: "Announced" },
   }
   let next = current
-  if (event.type === "model.usage.reported") {
-    const decoded = TranscriptUsage.usageTokens(event.data ?? {})
+  if (event.type === "model.attempt.completed" || event.type === "model.attempt.failed") {
+    const decoded = ModelAttemptUsage.usageTokens(event.data ?? {})
     next = {
       ...current,
       tokens:
@@ -396,8 +412,56 @@ const applyAttempt = (
           ? Attempt.countedTokens(current.tokens, decoded.total)
           : Attempt.uncountable(current.tokens, "usage-uncountable"),
     }
-  } else if (event.type === "model.attempt.failed") next = Attempt.settle(current, "attempt-failed")
-  else if (event.data !== undefined && Object.hasOwn(event.data, "cost")) {
+    const inputTokens = ModelAttemptUsage.usageInputTokens(event.data ?? {})
+    const modelCallId = Attempt.stringField(event.data, "model_call_id") ?? attemptId
+    const attempt = integerField(event.data, "attempt") ?? 0
+    if (
+      inputTokens._tag === "Available" &&
+      isConversationCall(modelCallId) &&
+      Number.isSafeInteger(event.sequence) &&
+      event.sequence >= 0
+    ) {
+      const reading: ContextReading = {
+        inputTokens: inputTokens.total,
+        sequence: event.sequence,
+        modelCallId,
+        modelAttemptId: attemptId,
+        attempt,
+      }
+      const executionKey = TranscriptCorrelation.executionKey(event.executionId)
+      const previousReading = value.mutable.executionContexts.get(executionKey)
+      if (
+        previousReading?.sequence === event.sequence &&
+        Attempt.canonicalJson(previousReading) !== Attempt.canonicalJson(reading)
+      )
+        return Result.fail(
+          ProjectionFailure.make({
+            reason: "duplicate-sequence",
+            message: "Context usage sequence has conflicting content",
+            threadId: input.threadId,
+            turnId: input.turnId,
+            executionId: event.executionId,
+            cursor: event.cursor,
+            sequence: event.sequence,
+          }),
+        )
+      if (previousReading === undefined || event.sequence > previousReading.sequence) {
+        value.mutable.executionContexts.set(executionKey, reading)
+        value.changed.executionContexts = true
+      }
+    }
+    if (event.data !== undefined && Object.hasOwn(event.data, "cost")) {
+      const amount = Attempt.providerCostUsd(event.data)
+      next = {
+        ...next,
+        cost:
+          amount === undefined
+            ? Attempt.unpriceable(next.cost, "provider-cost-malformed")
+            : Attempt.providerPriced(next.cost, amount),
+      }
+    }
+    if (event.type === "model.attempt.failed") next = Attempt.settle(next, "attempt-failed")
+  } else if (event.data !== undefined && Object.hasOwn(event.data, "cost")) {
     const amount = Attempt.providerCostUsd(event.data)
     next = {
       ...current,

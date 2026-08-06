@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url"
 import { Config, Duration, Effect, FileSystem, Schema, Stream } from "effect"
 import { expect } from "vitest"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { reapResidents, waitUntil } from "./client-process-test-runtime"
+import { reapServers, waitUntil } from "./client-process-test-runtime"
 
 export const PtyResult = Schema.fromJsonString(
   Schema.Struct({
@@ -48,7 +48,9 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
     readonly timeoutMs?: number
   }>,
   modelScript?: string,
-  residentEnvironment?: Readonly<Record<string, string>>,
+  serverEnvironment?: Readonly<Record<string, string | undefined>>,
+  entrypointArguments: ReadonlyArray<string> = [],
+  serverDataRoot?: string,
 ) {
   const fs = yield* FileSystem.FileSystem
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -57,7 +59,8 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
   const workspace = `${root}/workspace`
   const state = `${root}/state`
   yield* Effect.forEach([home, workspace, state], (directory) => fs.makeDirectory(directory))
-  yield* Effect.addFinalizer(() => reapResidents(state))
+  const activeDataRoot = serverDataRoot ?? state
+  yield* Effect.addFinalizer(() => reapServers(activeDataRoot))
   const directory = fileURLToPath(new URL(".", import.meta.url))
   const helper = `${directory}/fixtures/interactive-pty.py`
   const path = yield* Config.string("PATH").pipe(
@@ -68,12 +71,8 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
     PATH: path,
     TERM: "xterm-256color",
     RIKA_DATABASE: `${state}/rika.db`,
-    RIKA_EXECUTION_DATABASE: `${state}/execution.db`,
-    RIKA_INTERNAL_RESIDENT_GRACE: "100",
-    RELAY_EVENT_POLL_INTERVAL_MILLIS: "50",
-    RELAY_EVENT_POLL_IDLE_INTERVAL_MILLIS: "250",
-    RELAY_SCHEDULER_POLL_INTERVAL_MILLIS: "100",
-    ...residentEnvironment,
+    RIKA_INTERNAL_SERVER_GRACE: "100",
+    ...serverEnvironment,
     ...(modelScript === undefined
       ? { RIKA_TEST_MODEL_RESPONSE: "completed" }
       : { RIKA_TEST_MODEL_SCRIPT: modelScript }),
@@ -82,7 +81,14 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
   const handle = yield* spawner.spawn(
     ChildProcess.make(
       "python3",
-      [helper, process.execPath, directory.replace(/\/test\/$/, ""), environment, encodedActions],
+      [
+        helper,
+        process.execPath,
+        directory.replace(/\/test\/$/, ""),
+        environment,
+        encodedActions,
+        ...(entrypointArguments.length === 0 ? [] : ["src/client-main.ts", ...entrypointArguments]),
+      ],
       { stdin: "ignore", stdout: "pipe", stderr: "pipe" },
     ),
   )
@@ -106,17 +112,17 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
   )
   expect(Number(helperExitCode), stderr).toBe(0)
   const result = yield* Schema.decodeUnknownEffect(PtyResult)(stdout.trim())
-  const settlesDiagnostics = residentEnvironment === undefined && !actions.some((action) => action.signal !== undefined)
+  const settlesDiagnostics = serverEnvironment === undefined && !actions.some((action) => action.signal !== undefined)
   if (settlesDiagnostics)
     yield* waitUntil(
       fs
-        .readDirectory(`${state}/diagnostics`)
+        .readDirectory(`${activeDataRoot}/diagnostics`)
         .pipe(Effect.map((names) => names.every((name) => !name.endsWith(".open.jsonl")))),
     )
-  const names = yield* fs.readDirectory(`${state}/diagnostics`)
+  const names = yield* fs.readDirectory(`${activeDataRoot}/diagnostics`)
   const clientLogs = yield* Effect.forEach(
-    names.filter((name) => name.startsWith("client-") && name.endsWith(".jsonl")),
-    (name) => fs.readFileString(`${state}/diagnostics/${name}`),
+    names.filter((name) => name.startsWith("client-") && name.endsWith(".jsonl") && !name.endsWith(".open.jsonl")),
+    (name) => fs.readFileString(`${activeDataRoot}/diagnostics/${name}`),
   )
   const workspaceFiles = yield* fs.readDirectory(workspace)
   return {
@@ -125,6 +131,6 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
     clientLogs: clientLogs.join("\n"),
     names,
     workspaceFiles,
-    database: `${state}/rika.db`,
+    database: `${activeDataRoot}/rika.db`,
   }
 })

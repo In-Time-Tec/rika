@@ -413,12 +413,12 @@ test("renders changed files as an indented path tree", () => {
     renderChangedFiles(model({ changedFiles: ready([{ path: "src/main.ts", status: "M", added: 3, removed: 1 }]) }), 28)
       .chunks,
   ).toEqual([
-    { text: "src/", fg: opentui.RGBA.fromIndex(8) },
+    { text: "src/", fg: opentui.RGBA.fromIndex(7), attributes: 2 },
     { text: "\n", fg: opentui.RGBA.fromIndex(7) },
     { text: "  ", fg: opentui.RGBA.fromIndex(7) },
-    { text: "main.ts", fg: opentui.RGBA.fromIndex(3) },
-    { text: " +3", fg: opentui.RGBA.fromIndex(2) },
-    { text: " -1", fg: opentui.RGBA.fromIndex(1) },
+    { text: "main.ts", fg: opentui.RGBA.fromIndex(7) },
+    { text: " +3", fg: opentui.RGBA.fromIndex(2), attributes: 2 },
+    { text: " -1", fg: opentui.RGBA.fromIndex(1), attributes: 2 },
   ])
 })
 test("renders base transcript text with an explicit terminal palette color", () => {

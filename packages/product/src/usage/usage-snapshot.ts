@@ -1,9 +1,10 @@
 import type { AttemptCost } from "./usage-attempt"
 import type { ActiveEvent, DeliveryIdentity } from "./usage-event"
+import type { ContextReading } from "./usage-context-reading"
 import type { Interval } from "./usage-active-time"
 import { noTotals, type Totals } from "./usage-total"
 
-export const projectionVersion = 3
+export const projectionVersion = 4
 
 export interface Materialized {
   readonly costNanoUsd?: number
@@ -51,6 +52,7 @@ export interface Snapshot {
   readonly deliveries: ReadonlyMap<string, DeliveryIdentity>
   readonly attempts: ReadonlyMap<string, AttemptCost>
   readonly executionAttempts: ReadonlyMap<string, ReadonlySet<string>>
+  readonly executionContexts: ReadonlyMap<string, ContextReading>
   readonly activeEvents: ReadonlyMap<string, ActiveEvent>
   readonly executionEvents: ReadonlyMap<string, ReadonlyArray<ActiveEvent>>
 }
@@ -62,6 +64,7 @@ export const empty: Snapshot = {
   deliveries: new Map(),
   attempts: new Map(),
   executionAttempts: new Map(),
+  executionContexts: new Map(),
   activeEvents: new Map(),
   executionEvents: new Map(),
 }

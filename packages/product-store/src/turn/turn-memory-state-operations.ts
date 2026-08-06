@@ -43,19 +43,14 @@ export const makeTurnMemoryState = (initial: ReadonlyArray<Turn>) =>
     const agentExecutions: MemoryCoordinator["agentExecutions"] = Ref.get(state).pipe(
       Effect.map((current) => [...current.turns.values()].filter(TurnResult.isAgentExecution).map(clone)),
     )
-    const adoptRefold: MemoryCoordinator["adoptRefold"] = (expected, status, cursor, write) =>
+    const adoptRefold: MemoryCoordinator["adoptRefold"] = (expected, status, write) =>
       withLock(
         Effect.gen(function* () {
           const currentState = yield* Ref.get(state)
           const current = currentState.turns.get(expected.id)
-          if (
-            current === undefined ||
-            !TurnResult.isAgentExecution(current) ||
-            current.status !== expected.status ||
-            current.lastCursor !== expected.lastCursor
-          )
+          if (current === undefined || !TurnResult.isAgentExecution(current) || current.status !== expected.status)
             return { _tag: "Stale" as const }
-          const next: AgentExecutionTurn = { ...current, status, lastCursor: cursor }
+          const next: AgentExecutionTurn = { ...current, status }
           const written = yield* write(clone(next))
           if (written._tag === "Stale") return written
           yield* Ref.set(state, { ...currentState, turns: new Map(currentState.turns).set(expected.id, next) })

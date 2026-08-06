@@ -14,7 +14,6 @@ export const runningTurn = (id: string): Turn.AgentExecutionTurn => ({
   lineage: { _tag: "Original" },
   executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
   status: "running",
-  stopIntent: "none",
   createdAt: 2,
   updatedAt: 2,
 })

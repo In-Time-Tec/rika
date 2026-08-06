@@ -20,7 +20,6 @@ const running = (id: string): ThreadResult.RunningRecordedShellTurn => ({
   prompt: "$ printf shell",
   command: "printf shell",
   status: "running",
-  stopIntent: "none",
   author: { _tag: "Human" },
   lineage: { _tag: "Original" },
   createdAt: 10,
@@ -62,8 +61,6 @@ const exercise = Effect.fn("RecordedShellRepositoryTest.exercise")(function* (
   expect(yield* turns.get(initialTurn.id)).toEqual(initialTurn)
   expect(yield* turns.findActive(threadId)).toBeUndefined()
   expect(yield* turns.listNonterminal).toEqual([])
-  expect(yield* turns.listStopRequested).toEqual([])
-  expect(yield* turns.requestStop(initialTurn.id, 11)).toBeUndefined()
   expect(yield* turns.claimNextQueued(threadId, 11)).toBeUndefined()
   expect((yield* turns.readQueue(threadId)).turns).toEqual([])
 

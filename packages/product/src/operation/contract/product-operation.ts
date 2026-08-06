@@ -31,12 +31,11 @@ const Run = Schema.Struct({
 const Review = Schema.Struct({
   ...ClientWorkspace,
   _tag: Schema.tag("Review"),
-  staged: Schema.Boolean,
-  base: Schema.optionalKey(Schema.String),
+  prompt: Schema.Array(Schema.String),
+  mode: Schema.optionalKey(Mode),
   workspace: Schema.optionalKey(Schema.String),
+  threadId: Schema.optionalKey(Schema.String),
   ephemeral: Schema.Boolean,
-  json: Schema.Boolean,
-  paths: Schema.Array(Schema.String),
 })
 
 const ThreadNoInput = Schema.Struct({
@@ -187,20 +186,6 @@ const Extension = Schema.Struct({
 })
 const ExtensionList = Schema.Struct({ ...ClientWorkspace, _tag: Schema.tag("Extension"), action: Schema.tag("list") })
 const Doctor = Schema.Struct({ ...ClientWorkspace, _tag: Schema.tag("Doctor") })
-const WorkflowStart = Schema.Struct({
-  ...ClientWorkspace,
-  _tag: Schema.tag("Workflow"),
-  action: Schema.tag("start"),
-  name: Schema.Literals(["delivery", "research-synthesis"]),
-  runId: Schema.String,
-  revision: Schema.optionalKey(Schema.Int),
-})
-const WorkflowInspect = Schema.Struct({
-  ...ClientWorkspace,
-  _tag: Schema.tag("Workflow"),
-  action: Schema.Literals(["inspect", "cancel"]),
-  runId: Schema.String,
-})
 
 export const Input = Schema.Union([
   Interactive,
@@ -232,8 +217,6 @@ export const Input = Schema.Union([
   Extension,
   ExtensionList,
   Doctor,
-  WorkflowStart,
-  WorkflowInspect,
 ])
 export type Input = typeof Input.Type
 

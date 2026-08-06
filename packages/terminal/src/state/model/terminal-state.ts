@@ -21,14 +21,23 @@ const WorkspaceFilesSchema = Schema.Union([
   Schema.TaggedStruct("Ready", { value: Schema.Array(Schema.String) }),
 ])
 const PaletteStateSchema = Schema.Struct({ open: Schema.Boolean, query: Schema.String, selected: Schema.Finite })
-const ModePickerStateSchema = Schema.Struct({ open: Schema.Boolean, selected: Schema.Finite })
+const ModePickerStateSchema = Schema.Struct({
+  open: Schema.Boolean,
+  selected: Schema.Finite,
+  from: Schema.optional(Schema.Finite),
+  fromPosition: Schema.optional(Schema.Finite),
+  turnTick: Schema.optional(Schema.Finite),
+})
+const ModeCommitAnimationSchema = Schema.Struct({ from: Mode, to: Mode, tick: Schema.Finite })
 const ContextAnimationSchema = Schema.Struct({
   compactFromPercent: Schema.optional(Schema.Finite),
   compactTick: Schema.optional(Schema.Finite),
+  compactionPending: Schema.optional(Schema.Boolean),
   flashTicks: Schema.Finite,
   flashed75: Schema.Boolean,
   flashed90: Schema.Boolean,
 })
+const CompactionShimmerSchema = Schema.Struct({ tick: Schema.Finite, remaining: Schema.Finite })
 const FilePickerStateSchema = Schema.Struct({
   open: Schema.Boolean,
   query: Schema.String,
@@ -70,6 +79,7 @@ const ThreadPreviewSchema = Schema.Union([
   loadableSchemas.idle,
   Schema.TaggedStruct("Loading", { previous: Schema.optionalKey(ThreadPreviewValueSchema) }),
   Schema.TaggedStruct("Ready", { value: ThreadPreviewValueSchema }),
+  Schema.TaggedStruct("Failed", { message: Schema.String }),
 ])
 export const Model = Schema.Struct({
   workspace: Schema.String,
@@ -110,6 +120,7 @@ export const Model = Schema.Struct({
   contextUsage: Schema.optional(ContextUsage),
   contextAnimation: ContextAnimationSchema,
   animationTick: Schema.Finite,
+  compactionShimmer: Schema.optional(CompactionShimmerSchema),
   contextDetailsOpen: Schema.Boolean,
   usageDisplay: Schema.optional(UsageDisplay),
   usageTime: Schema.optional(UsageTime),
@@ -130,6 +141,7 @@ export const Model = Schema.Struct({
   paletteOpen: Schema.Boolean,
   palette: PaletteStateSchema,
   modePicker: ModePickerStateSchema,
+  modeCommit: Schema.optional(ModeCommitAnimationSchema),
   filePicker: FilePickerStateSchema,
   threadSwitcher: ThreadSwitcherStateSchema,
   shortcutsOpen: Schema.Boolean,
@@ -192,11 +204,13 @@ const initialImpl: {
     contextUsage: { _tag: "Loading" },
     contextAnimation: { flashTicks: 0, flashed75: false, flashed90: false },
     animationTick: 0,
+    compactionShimmer: undefined,
     contextDetailsOpen: false,
     usageDisplay: "cost",
     paletteOpen: false,
     palette: { open: false, query: "", selected: 0 },
     modePicker: { open: false, selected: 0 },
+    modeCommit: undefined,
     filePicker: { open: false, query: "", selected: 0, items: loadableIdle },
     threadSwitcher: { open: false, query: "", selected: 0, kind: "switch", previewScroll: 0 },
     shortcutsOpen: false,
@@ -219,7 +233,7 @@ const initialImpl: {
     fastMode: false,
     changedFilesOpen: false,
     changedFiles: loadableIdle,
-    sidebarWidth: 36,
+    sidebarWidth: 52,
     threadLoading: false,
     refoldingThreadIds: [],
     threadPreview: loadableIdle,

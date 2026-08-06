@@ -151,19 +151,6 @@ while time.monotonic() < deadline:
             break
         if "turnStatus" in action and turn_status(action["turnPrompt"]) != action["turnStatus"]:
             break
-        child_status = action.get("childStatus")
-        if child_status is not None:
-            try:
-                connection = sqlite3.connect(environment["RIKA_RELAY_DATABASE"])
-                child_count = connection.execute(
-                    "select count(*) from relay_executions where id like 'child:%' and status = ?",
-                    (child_status,),
-                ).fetchone()[0]
-                connection.close()
-            except sqlite3.OperationalError:
-                break
-            if child_count < action.get("childCount", 1):
-                break
         waited, current_status = os.waitpid(pid, os.WNOHANG)
         running = waited == 0
         if action.get("checkRunning", False):

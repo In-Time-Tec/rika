@@ -6,8 +6,8 @@ import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
-import * as ExecutionBackend from "@rika/product/execution-service"
-import { Deferred, Effect, Fiber, Layer, Ref } from "effect"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
+import { Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect"
 import { it as rawIt } from "vitest"
 
 import { createTurn } from "../support/product-test-current-state"
@@ -28,9 +28,9 @@ describe("Operation", () => {
         createForSubmission: (input) =>
           Ref.update(writes, (count) => count + 1).pipe(Effect.andThen(createTurn(turns, input))),
       })
-      const closedBackend = ExecutionBackend.Service.of({
+      const closedBackend = ExecutionGateway.Service.of({
         ...backend,
-        start: (input) => Ref.update(starts, (count) => count + 1).pipe(Effect.andThen(backend.start(input))),
+        startTurn: (input) => Ref.update(starts, (count) => count + 1).pipe(Effect.andThen(backend.startTurn(input))),
       })
       yield* Effect.gen(function* () {
         const operation = yield* Service
@@ -74,7 +74,7 @@ describe("Operation", () => {
           productLayer({
             repositoryLayer: ThreadRepository.memoryLayer(),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, repository),
-            backendLayer: Layer.succeed(ExecutionBackend.Service, closedBackend),
+            backendLayer: Layer.succeed(ExecutionGateway.Service, closedBackend),
             defaultWorkspace: "/work",
             makeThreadId: Effect.succeed(Thread.ThreadId.make("closed-thread")),
             makeTurnId: Effect.succeed(Turn.TurnId.make("closed-turn")),
@@ -107,14 +107,15 @@ describe("Operation", () => {
         const submitted = yield* Deferred.make<Fiber.Fiber<void, OperationUnavailable>>()
         const starts = yield* Ref.make(0)
         const turns = yield* TurnRepository.makeMemory([])
-        const admittedBackend = ExecutionBackend.Service.of({
+        const admittedBackend = ExecutionGateway.Service.of({
           ...backend,
-          start: (input) =>
+          startTurn: (input) =>
             Ref.update(starts, (count) => count + 1).pipe(
               Effect.andThen(Deferred.succeed(started, undefined)),
-              Effect.andThen(Deferred.await(release)),
-              Effect.andThen(backend.start(input)),
+              Effect.andThen(backend.startTurn(input)),
             ),
+          watchTurn: (link) =>
+            Stream.fromEffect(Deferred.await(release)).pipe(Stream.flatMap(() => backend.watchTurn(link))),
         })
         yield* Effect.gen(function* () {
           const operation = yield* Service
@@ -127,7 +128,7 @@ describe("Operation", () => {
             productLayer({
               repositoryLayer: ThreadRepository.memoryLayer([thread]),
               turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-              backendLayer: Layer.succeed(ExecutionBackend.Service, admittedBackend),
+              backendLayer: Layer.succeed(ExecutionGateway.Service, admittedBackend),
               defaultWorkspace: "/work",
               makeThreadId: Effect.die("unused"),
               makeTurnId: Effect.succeed(Turn.TurnId.make("admitted-turn")),

@@ -30,6 +30,5 @@ export const RepairCandidate = Schema.Struct({
   turnId: TurnId,
   threadId: ThreadId,
   status: Schema.Literals(["accepted", "queued", "running", "waiting", "completed", "failed", "cancelled"]),
-  lastCursor: Schema.optionalKey(Schema.String),
 })
 export type RepairCandidate = typeof RepairCandidate.Type

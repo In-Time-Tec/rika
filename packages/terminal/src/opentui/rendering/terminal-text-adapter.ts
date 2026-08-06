@@ -34,7 +34,9 @@ const toOpenColorImpl = (value: TerminalColor | RGBA | undefined): RGBA | undefi
       white: 7,
       brightBlack: 8,
     }
-    return value.startsWith("#") ? RGBA.fromHex(value) : RGBA.fromIndex(indexes[value] ?? 7)
+    if (!value.startsWith("#")) return RGBA.fromIndex(indexes[value] ?? 7)
+    if (typeof RGBA.fromHex === "function") return RGBA.fromHex(value)
+    return RGBA.fromIndex(7)
   }
   if (isTerminalColorWithInts(value)) {
     if (value.intent === "indexed" && value.slot !== undefined) return RGBA.fromIndex(value.slot)

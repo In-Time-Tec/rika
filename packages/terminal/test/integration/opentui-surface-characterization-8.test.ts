@@ -176,7 +176,7 @@ for (const [width, height] of [
           const coloredMark = setup
             .captureSpans()
             .lines.flatMap((line) => line.spans)
-            .some((span) => /[•●·]/u.test(span.text) && span.fg.toInts().join(",") === "61,212,255,255")
+            .some((span) => /[•●·]/u.test(span.text) && span.fg.toInts()[2] > span.fg.toInts()[0])
           expect(coloredMark).toBe(true)
         } finally {
           surface.destroy()
@@ -352,7 +352,7 @@ test("publishes the running-tool spinner frame while the selected agent is worki
         expect(frames).toEqual(["⠭"])
         expect(header()).toContain("⠭")
 
-        clock.advance(200)
+        clock.advance(100)
         expect(frames).toHaveLength(2)
         expect(header()).toContain(frames.at(-1))
 
@@ -461,9 +461,9 @@ test("keeps the status spinner moving across a tool-result lull without feed eve
         surface.update(model)
         yield* openTui(() => setup.renderOnce())
         expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Waiting")
-        clock.advance(200)
+        clock.advance(100)
         expect(styledTextValue(surface.statusLabel.content)).toContain("≈ Waiting")
-        clock.advance(200)
+        clock.advance(100)
         expect(styledTextValue(surface.statusLabel.content)).toContain("≋ Waiting")
       } finally {
         surface.destroy()

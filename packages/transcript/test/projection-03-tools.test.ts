@@ -75,9 +75,9 @@ describe("Transcript projection", () => {
     })
   })
 
-  it("links a Relay handoff spawn to its encoded tool call and keeps the supplied prompt", () => {
-    const callId = "rika:execution%3Aparent:spawn-oracle"
-    const childId = `execution:parent:child:${callId}`
+  it("links an opaque child run to its explicit invocation and keeps the supplied prompt", () => {
+    const callId = "invoke-oracle"
+    const childId = "run-child-oracle"
     const projection = TranscriptProjection.Projection.project("turn-a", "delegate", [
       {
         cursor: "call",
@@ -97,7 +97,7 @@ describe("Transcript projection", () => {
         sequence: 2,
         type: "child_run.spawned",
         createdAt: 2,
-        data: { child_execution_id: childId, preset_name: "Oracle" },
+        data: { child_execution_id: childId, invocation_id: callId },
       },
     ])
 
@@ -117,60 +117,24 @@ describe("Transcript projection", () => {
     })
   })
 
-  it("strips the relay depth suffix from a linked child spawn", () => {
-    const callId = "rika:execution%3Aparent:spawn-task"
-    const childId = `execution:parent:child:${callId}`
-    const projection = TranscriptProjection.Projection.project("turn-a", "delegate", [
-      {
-        cursor: "call",
-        sequence: 1,
-        type: "tool.call.requested",
-        createdAt: 1,
-        data: {
-          tool_call_id: callId,
-          tool_name: "task",
-          input: { input: [{ type: "text", text: "Investigate the failure." }] },
-        },
-      },
-      {
-        cursor: "spawned",
-        sequence: 2,
-        type: "child_run.spawned",
-        createdAt: 2,
-        data: { child_execution_id: childId, preset_name: "Task:1" },
-      },
-    ])
-
-    expect(projection.units[1]).toMatchObject({
-      content: {
-        _tag: "Block",
-        block: {
-          _tag: "ToolCall",
-          childId,
-          presentation: { activeLabel: "Subagent working", completeLabel: "Subagent finished" },
-        },
-      },
-    })
-  })
-
-  it("strips the relay depth suffix from an unlinked child block name", () => {
+  it("defaults an unlinked canonical child spawn to child", () => {
     const projection = TranscriptProjection.Projection.project("turn-a", "delegate", [
       {
         cursor: "spawned",
         sequence: 1,
         type: "child_run.spawned",
         createdAt: 1,
-        data: { child_execution_id: "execution:parent:child:orphan", preset_name: "Task:2" },
+        data: { child_execution_id: "run-child-orphan", invocation_id: "missing-call" },
       },
     ])
 
     expect(projection.units[1]).toMatchObject({
-      content: { _tag: "Block", block: { _tag: "ChildAgent", name: "Task" } },
+      content: { _tag: "Block", block: { _tag: "ChildAgent", name: "child", status: "running" } },
     })
   })
 
-  it("links a child spawn with a percent-encoded parent execution id to the requesting tool", () => {
-    const childId = "child:execution%3Aturn-a:call_1"
+  it("links a child spawn only through its explicit invocation id", () => {
+    const childId = "run-child-call-1"
     const projection = TranscriptProjection.Projection.project("turn-a", "delegate", [
       {
         cursor: "call",
@@ -188,19 +152,15 @@ describe("Transcript projection", () => {
         sequence: 2,
         type: "child_run.spawned",
         createdAt: 2,
-        data: { child_execution_id: childId, preset_name: "Oracle" },
-      },
-      {
-        cursor: `execution:turn-a:child:${childId}:completed`,
-        sequence: 3,
-        type: "child_run.event",
-        createdAt: 3,
-        data: { child_execution_id: childId, status: "completed" },
+        data: { child_execution_id: childId, invocation_id: "call_1" },
       },
     ])
+    const fold = TranscriptProjection.Fold.restoreProjectionFold(projection)
+    TranscriptProjection.Fold.applyChildOutcome(fold, childId, { status: "complete" })
+    const settled = TranscriptProjection.Fold.snapshotFoldProjection(fold)
 
-    expect(projection.units).toHaveLength(2)
-    expect(projection.units[1]).toMatchObject({
+    expect(settled.units).toHaveLength(2)
+    expect(settled.units[1]).toMatchObject({
       key: "tool:turn-a:call_1",
       content: {
         _tag: "Block",
@@ -215,5 +175,26 @@ describe("Transcript projection", () => {
     expect(
       projection.units.some((unit) => unit.content._tag === "Block" && unit.content.block._tag === "ChildAgent"),
     ).toBe(false)
+  })
+
+  it("projects a tool.started event into one stable tool row", () => {
+    const projection = TranscriptProjection.Projection.project("turn-a", "prompt", [
+      {
+        cursor: "started",
+        sequence: 1,
+        type: "tool.started",
+        createdAt: 1,
+        content: [{ id: "t", name: "Read", input: "a.ts" }],
+      },
+    ])
+
+    expect(projection.units[1]).toMatchObject({
+      key: "tool:turn-a:t",
+      content: {
+        _tag: "Block",
+        block: { _tag: "ToolCall", id: "turn-a:t", name: "Read", input: "a.ts", status: "running" },
+      },
+    })
+    expect(projection.units).toHaveLength(2)
   })
 })

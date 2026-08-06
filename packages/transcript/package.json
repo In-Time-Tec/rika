@@ -8,7 +8,7 @@
     "./child-parent-correlation": "./src/ordering/child-parent-correlation.ts",
     "./transcript-unit-identity": "./src/ordering/transcript-unit-identity.ts",
     "./transcript-unit-order": "./src/ordering/transcript-unit-order.ts",
-    "./model-usage-fallback": "./src/presentation/model-usage-fallback.ts",
+    "./model-attempt-usage": "./src/presentation/model-attempt-usage.ts",
     "./recorded-shell-presentation": "./src/presentation/recorded-shell-presentation.ts",
     "./nested-transcript-projection": "./src/projection/nested-transcript-projection.ts",
     "./partial-tool-input": "./src/projection/partial-tool-input.ts",

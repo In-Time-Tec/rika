@@ -2,21 +2,13 @@ import type { Block } from "../schema/transcript-presentation-model"
 import { ToolFile as ToolFileSchema } from "../schema/transcript-presentation-model"
 type ToolFile = typeof ToolFileSchema.Type
 import type { Unit } from "../schema/transcript-unit"
+import type { ModelFailure } from "../schema/transcript-projection-model"
 import type { MutableMutation, OwnedFold, FoldMutation } from "./transcript-fold-state"
 import { foldState } from "./transcript-fold-state"
-import { childScopeAndCallId, executionKey } from "../ordering/child-parent-correlation"
-import { identityKey, scopedIdentity } from "../ordering/transcript-unit-identity"
+import { executionKey } from "../ordering/child-parent-correlation"
+import { scopedIdentity } from "../ordering/transcript-unit-identity"
 
-const {
-  agentScopeCallKey,
-  childBlockFrom,
-  enumerateKeys,
-  firstIndexedUnit,
-  indexUnit,
-  recomputeLatestRootTool,
-  toolBlockFrom,
-  unindexUnit,
-} = foldState
+const { childBlockFrom, enumerateKeys, indexUnit, recomputeLatestRootTool, toolBlockFrom, unindexUnit } = foldState
 
 interface MutableProjectionState {
   revision: number
@@ -26,6 +18,7 @@ interface MutableProjectionState {
   checkpointCursor: string | undefined
   costUsd: number | undefined
   pricingVersion: string | undefined
+  modelFailure: ModelFailure | undefined
 }
 
 interface ChildOutcome {
@@ -57,17 +50,7 @@ const outcomeForUnit = (value: OwnedFold, unit: Unit): ChildOutcome | undefined 
   const tool = toolBlockFrom(unit)
   if (tool !== undefined) {
     if (tool.childId !== undefined) return value.childOutcomes.get(executionKey(tool.childId))
-    if (tool.presentation.family !== "agent") return undefined
-    const matches = value.childOutcomesByScopeCall.get(
-      agentScopeCallKey({
-        id: tool.id,
-        scope: unit.turnId,
-        childId: undefined,
-        family: tool.presentation.family,
-      }),
-    )
-    if (matches?.size !== 1) return undefined
-    return value.childOutcomes.get(matches.values().next().value!)
+    return undefined
   }
   const child = childBlockFrom(unit)
   return child === undefined ? undefined : value.childOutcomes.get(executionKey(child.id))
@@ -164,16 +147,8 @@ const linkedToolUnitFor = (
       linkedFallback ??= unit
       if (executionKey(tool.id) !== childKey) return unit
     }
-  const parsed = childScopeAndCallId(childId)
-  if (parsed !== undefined) {
-    const matched = firstIndexedUnit(
-      value,
-      value.agentToolsByScopeCall.get(identityKey("agent-scope-call", parsed.scope, parsed.callId)),
-    )
-    if (matched !== undefined) return matched
-  }
   if (linkedFallback !== undefined) return linkedFallback
-  return parsed === undefined ? undefined : unitByToolId(value, scopedIdentity(turnId, parsed.rawCallId))
+  return undefined
 }
 
 const linkedToolFor = (

@@ -144,7 +144,6 @@ it.effect("renders client help without creating the configured data root", () =>
           env: {
             HOME: path.join(root, "home"),
             RIKA_DATABASE: path.join(dataRoot, "rika.db"),
-            RIKA_EXECUTION_DATABASE: path.join(dataRoot, "execution.db"),
           },
         })
         yield* runClient(["--help"]).pipe(Effect.provideService(ConfigProvider.ConfigProvider, provider))
@@ -169,14 +168,13 @@ it.effect("inspects and exports malformed crash evidence without dispatching an 
           const diagnostics = path.join(dataRoot, "diagnostics")
           const destination = path.join(root, "export")
           yield* fileSystem.makeDirectory(diagnostics, { recursive: true, mode: 0o700 })
-          yield* fileSystem.writeFileString(path.join(diagnostics, "resident-crash.open.jsonl"), '{"partial":', {
+          yield* fileSystem.writeFileString(path.join(diagnostics, "server-crash.open.jsonl"), '{"partial":', {
             mode: 0o600,
           })
           const provider = ConfigProvider.fromEnv({
             env: {
               HOME: path.join(root, "home"),
               RIKA_DATABASE: path.join(dataRoot, "rika.db"),
-              RIKA_EXECUTION_DATABASE: path.join(dataRoot, "execution.db"),
             },
           })
           yield* run(["diagnostics", "path"]).pipe(Effect.provideService(ConfigProvider.ConfigProvider, provider))
@@ -187,7 +185,7 @@ it.effect("inspects and exports malformed crash evidence without dispatching an 
           const output = yield* TestConsole.logLines
           expect(output).toContain(yield* fileSystem.realPath(diagnostics))
           expect(output).toContain("1 log file, 11 bytes")
-          expect(yield* fileSystem.readFileString(path.join(destination, "resident-crash.open.jsonl"))).toBe(
+          expect(yield* fileSystem.readFileString(path.join(destination, "server-crash.open.jsonl"))).toBe(
             '{"partial":',
           )
         }),
@@ -198,7 +196,7 @@ it.effect("inspects and exports malformed crash evidence without dispatching an 
   }),
 )
 
-it.effect("updates the install in this process instead of dispatching to the resident", () =>
+it.effect("updates the install in this process instead of dispatching to the server", () =>
   Effect.gen(function* () {
     const calls = yield* Ref.make<ReadonlyArray<Input>>([])
     const layer = Layer.mergeAll(BunServices.layer, TestConsole.layer, testLayer(calls))
@@ -355,7 +353,7 @@ it.effect("rejects invalid thread relationships", () =>
   }),
 )
 
-it.effect("dispatches catalog, extension, review, and maintenance operations", () =>
+it.effect("dispatches catalog, extension, and maintenance operations", () =>
   Effect.gen(function* () {
     const cases: ReadonlyArray<readonly [ReadonlyArray<string>, Input]> = [
       [["config", "list"], { _tag: "Config", action: "list" }],
@@ -381,21 +379,6 @@ it.effect("dispatches catalog, extension, review, and maintenance operations", (
       [["extensions", "enable", "x"], { _tag: "Extension", action: "enable", name: "x" }],
       [["extensions", "disable", "x"], { _tag: "Extension", action: "disable", name: "x" }],
       [["extensions", "rollback", "x"], { _tag: "Extension", action: "rollback", name: "x" }],
-      [
-        ["review", "--staged", "--base", "main", "--workspace", ".", "--ephemeral", "--json", "a", "b"],
-        { _tag: "Review", staged: true, base: "main", workspace, ephemeral: true, json: true, paths: ["a", "b"] },
-      ],
-      [["review"], { _tag: "Review", staged: false, ephemeral: false, json: false, paths: [] }],
-      [
-        ["workflows", "start", "delivery", "delivery-1"],
-        { _tag: "Workflow", action: "start", name: "delivery", runId: "delivery-1" },
-      ],
-      [
-        ["workflows", "start", "research-synthesis", "research-1", "--revision", "2"],
-        { _tag: "Workflow", action: "start", name: "research-synthesis", runId: "research-1", revision: 2 },
-      ],
-      [["workflows", "inspect", "delivery-1"], { _tag: "Workflow", action: "inspect", runId: "delivery-1" }],
-      [["workflows", "cancel", "delivery-1"], { _tag: "Workflow", action: "cancel", runId: "delivery-1" }],
     ]
     for (const [argv, expected] of cases) expect(yield* capture(argv)).toEqual([expected])
   }),

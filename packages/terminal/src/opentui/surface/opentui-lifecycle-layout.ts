@@ -125,7 +125,7 @@ export abstract class SurfaceLifecycleLayout extends SurfaceInput {
     this.queueHint.top = hintTop
     const hintChunks: Array<TextChunk> = []
     for (const [index, segment] of hintSegments.entries()) {
-      hintChunks.push(dim(fg(toOpenColor(colors.text))(index === 0 ? " " : " · ")))
+      hintChunks.push(dim(fg(toOpenColor(colors.text))(index === 0 ? " " : " ── ")))
       hintChunks.push(fg(colors[model.mode])(segment.accent))
       if (segment.suffix.length > 0) hintChunks.push(dim(fg(toOpenColor(colors.text))(segment.suffix)))
     }
@@ -195,6 +195,7 @@ export abstract class SurfaceLifecycleLayout extends SurfaceInput {
       previousModel === undefined ||
       previousModel.threadSidebar !== model.threadSidebar ||
       previousModel.threads !== model.threads ||
+      previousModel.mode !== model.mode ||
       previousModel.width !== model.width ||
       previousModel.height !== model.height
     if (sidebarChanged)
@@ -208,6 +209,8 @@ export abstract class SurfaceLifecycleLayout extends SurfaceInput {
         ? ` Changed files (${readyOr(model.changedFiles, []).length}) `
         : ` Files (${readyOr(model.filePicker.items, []).length}) `
       this.changedFilesBox.titleAlignment = "left"
+      this.changedFilesBox.titleColor = toOpenColor(colors[model.mode])
+      this.changedFilesText.fg = toOpenColor(colors.text)
       this.refreshSidebarRows(model)
       if (
         previousModel === undefined ||
@@ -217,7 +220,8 @@ export abstract class SurfaceLifecycleLayout extends SurfaceInput {
         previousModel.changedFilesOpen !== model.changedFilesOpen ||
         previousModel.changedFiles !== model.changedFiles ||
         previousModel.workspaceFilesOpen !== model.workspaceFilesOpen ||
-        previousModel.filePicker.items !== model.filePicker.items
+        previousModel.filePicker.items !== model.filePicker.items ||
+        previousModel.mode !== model.mode
       )
         this.refreshSidebarAfterLayout()
     } else {

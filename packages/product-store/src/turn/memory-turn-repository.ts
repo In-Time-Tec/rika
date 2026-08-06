@@ -13,7 +13,7 @@ import { makeTurnMemorySubmission } from "./turn-memory-submission"
 export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
   Effect.gen(function* () {
     const { context, coordinator, get } = yield* makeTurnMemoryState(initial)
-    const { readState, modifyState } = context
+    const { readState } = context
     return Service.of({
       ...coordinator,
       ...makeTurnMemorySubmission(context),
@@ -68,37 +68,11 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
         return [...(yield* readState).turns.values()]
           .filter(
             (turn): turn is AgentExecutionTurn =>
-              TurnResult.isAgentExecution(turn) &&
-              ExecutionStatus.occupiesQueue(turn.status) &&
-              turn.stopIntent === "none",
+              TurnResult.isAgentExecution(turn) && ExecutionStatus.occupiesQueue(turn.status),
           )
           .toSorted((left, right) => left.createdAt - right.createdAt)
           .map(clone)
       }).pipe(Effect.withSpan("TurnRepository.listNonterminal")),
-      listStopRequested: Effect.gen(function* () {
-        return [...(yield* readState).turns.values()]
-          .filter(
-            (turn): turn is AgentExecutionTurn =>
-              TurnResult.isAgentExecution(turn) &&
-              ExecutionStatus.occupiesQueue(turn.status) &&
-              turn.stopIntent === "requested",
-          )
-          .toSorted((left, right) => left.createdAt - right.createdAt)
-          .map(clone)
-      }).pipe(Effect.withSpan("TurnRepository.listStopRequested")),
-      requestStop: Effect.fn("TurnRepository.requestStop")(function* (id, now) {
-        return yield* modifyState((current) => {
-          const existing = current.turns.get(id)
-          if (
-            existing === undefined ||
-            !TurnResult.isAgentExecution(existing) ||
-            !ExecutionStatus.occupiesQueue(existing.status)
-          )
-            return [undefined, current] as const
-          const updated: AgentExecutionTurn = { ...existing, stopIntent: "requested", updatedAt: now }
-          return [clone(updated), { ...current, turns: new Map(current.turns).set(id, updated) }] as const
-        })
-      }),
     })
   })
 

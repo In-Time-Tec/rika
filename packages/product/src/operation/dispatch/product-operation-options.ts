@@ -6,7 +6,6 @@ export interface ProductLayerOptions<
   BackendError extends Error,
   ThreadSummaryError extends Error = never,
   TranscriptError extends Error = never,
-  ThreadInteractionError extends Error = never,
   UsageError extends Error = never,
 > {
   readonly repositoryLayer: import("effect").Layer.Layer<import("@rika/product/thread-repository").Service, ThreadError>
@@ -19,16 +18,11 @@ export interface ProductLayerOptions<
     import("@rika/product/transcript-repository").Service,
     TranscriptError
   >
-  readonly threadInteractionRepositoryLayer?: import("effect").Layer.Layer<
-    import("@rika/product/thread-interaction-repository").Service,
-    ThreadInteractionError
-  >
   readonly usageRepositoryLayer?: import("effect").Layer.Layer<
     import("@rika/product/usage-repository").Service,
     UsageError
   >
-  readonly threadToolGateway?: import("../../thread/tool/thread-tool-service").Gateway
-  readonly backendLayer: import("effect").Layer.Layer<import("@rika/product/execution-service").Service, BackendError>
+  readonly backendLayer: import("effect").Layer.Layer<import("@rika/product/execution-gateway").Service, BackendError>
   readonly resolveExecutionRoute?: (
     mode: import("@rika/configuration/behavior-mode").ModeId,
     tuning?: { readonly fastMode?: boolean },
@@ -36,12 +30,7 @@ export interface ProductLayerOptions<
   ) => import("effect").Effect.Effect<
     import("@rika/product/execution-route-snapshot").ExecutionRouteSnapshot,
     import("../operation-error").OperationError,
-    import("@rika/product/execution-service").Service
-  >
-  readonly productAgentLayer?: import("effect").Layer.Layer<
-    import("../../agent/product-agent-service").Service,
-    import("../operation-error").OperationError,
-    import("@rika/product/execution-service").Service
+    import("@rika/product/execution-gateway").Service
   >
   readonly toolRuntimeLayer?: (
     workspace: string,

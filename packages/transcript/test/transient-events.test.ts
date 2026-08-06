@@ -80,7 +80,7 @@ describe("transient events", () => {
   it("identifies transients by type and transient index", () => {
     expect(isTransientEvent(transientDelta(1, "a"))).toBe(true)
     expect(
-      isTransientEvent({ cursor: "legacy", sequence: 5, type: "model.output.delta", createdAt: 5, text: "a" }),
+      isTransientEvent({ cursor: "delta", sequence: 5, type: "model.output.delta", createdAt: 5, text: "a" }),
     ).toBe(false)
     expect(
       isTransientEvent({
@@ -111,7 +111,7 @@ describe("transient events", () => {
     expect(streamed.oldestCursor).toBe(base.oldestCursor)
   })
 
-  it("replaces streamed cycle text with the durable cycle completion without duplication", () => {
+  it("replaces streamed text with the durable model output without duplication", () => {
     const base = TranscriptProjection.Projection.applyEvent(TranscriptProjection.Projection.empty("turn-a", "prompt"), {
       cursor: "prepared",
       sequence: 1,
@@ -125,9 +125,9 @@ describe("transient events", () => {
     const completed = TranscriptProjection.Projection.applyEvent(streamed, {
       cursor: "cycle-0",
       sequence: 2,
-      type: "model.cycle.completed",
+      type: "model.output.completed",
       createdAt: 3,
-      data: { text: "hello" },
+      text: "hello",
     })
 
     expect(assistantText(completed)).toBe("hello")
@@ -161,7 +161,7 @@ describe("transient events", () => {
   it("projects a replay-only history to the same content as the live stream", () => {
     const durable: ReadonlyArray<SourceEvent> = [
       { cursor: "prepared-0", sequence: 1, type: "model.input.prepared", createdAt: 1 },
-      { cursor: "cycle-0", sequence: 2, type: "model.cycle.completed", createdAt: 2, data: { text: "first cycle" } },
+      { cursor: "cycle-0", sequence: 2, type: "model.output.completed", createdAt: 2, text: "first cycle" },
       { cursor: "cycle-r-0", sequence: 3, type: "model.reasoning.completed", createdAt: 3, data: { text: "thoughts" } },
       {
         cursor: "tool-0",
@@ -172,15 +172,7 @@ describe("transient events", () => {
       },
       { cursor: "result-0", sequence: 5, type: "tool.result.received", createdAt: 5, data: { tool_call_id: "call" } },
       { cursor: "prepared-1", sequence: 6, type: "model.input.prepared", createdAt: 6 },
-      { cursor: "cycle-1", sequence: 7, type: "model.cycle.completed", createdAt: 7, data: { text: "final answer" } },
-      {
-        cursor: "completed",
-        sequence: 8,
-        type: "model.output.completed",
-        createdAt: 8,
-        data: { model_output: "final answer" },
-        text: "final answer",
-      },
+      { cursor: "cycle-1", sequence: 7, type: "model.output.completed", createdAt: 7, text: "final answer" },
       { cursor: "terminal", sequence: 9, type: "execution.completed", createdAt: 9 },
     ]
     const live = [
@@ -218,7 +210,7 @@ describe("transient events", () => {
         durableEvent(6, "model.attempt.first_output"),
         transientDelta(2, reply, 6),
         durableEvent(7, "model.attempt.first_output"),
-        durableEvent(8, "model.cycle.completed", { text: reply }),
+        { ...durableEvent(8, "model.output.completed"), text: reply },
         durableEvent(9, "model.reasoning.completed", { text: thoughts }),
         durableEvent(10, "tool.call.requested", { tool_call_id: "call_t80", tool_name: "read", input: "{}" }),
         durableEvent(11, "tool.call.requested", { tool_call_id: "call_BLq", tool_name: "read", input: "{}" }),
@@ -248,14 +240,14 @@ describe("transient events", () => {
         durableEvent(2, "model.input.prepared"),
         durableEvent(5, "model.attempt.first_output"),
         transientDelta(1, first, 5),
-        durableEvent(8, "model.cycle.completed", { text: first }),
+        { ...durableEvent(8, "model.output.completed"), text: first },
         durableEvent(10, "tool.call.requested", { tool_call_id: "call_mAk", tool_name: "read", input: "{}" }),
         durableEvent(11, "tool.result.received", { tool_call_id: "call_mAk" }),
         durableEvent(15, "steering.delivered", { message_count: 1 }),
         durableEvent(16, "model.call.started"),
         durableEvent(26, "steering.delivered", { message_count: 1 }),
         durableEvent(29, "model.attempt.first_output"),
-        durableEvent(32, "model.cycle.completed", { text: latest }),
+        { ...durableEvent(32, "model.output.completed"), text: latest },
         durableEvent(34, "tool.call.requested", { tool_call_id: "call_Alg", tool_name: "read", input: "{}" }),
         durableEvent(46, "execution.cancelled"),
       ],
@@ -307,7 +299,7 @@ describe("transient events", () => {
         durableEvent(2, "model.input.prepared"),
         durableEvent(5, "model.attempt.first_output"),
         transientDelta(1, "partial", 5),
-        durableEvent(8, "model.cycle.completed", { text: "the complete answer" }),
+        { ...durableEvent(8, "model.output.completed"), text: "the complete answer" },
       ],
       TranscriptProjection.Projection.empty("turn-e", "prompt"),
     )
@@ -472,23 +464,27 @@ describe("transient events", () => {
     )
   })
 
-  it("keeps legacy durable delta histories advancing the revision", () => {
-    const base = TranscriptProjection.Projection.applyEvent(TranscriptProjection.Projection.empty("turn-a", "prompt"), {
-      cursor: "prepared",
-      sequence: 1,
-      type: "model.input.prepared",
-      createdAt: 1,
-    })
-    const legacy = TranscriptProjection.Projection.applyEvent(base, {
-      cursor: "legacy-delta",
-      sequence: 2,
-      type: "model.output.delta",
-      createdAt: 2,
-      text: "legacy",
+  it("replaces streamed text with a durable cycle completion sharing the head sequence", () => {
+    const base = TranscriptProjection.Projection.project("turn-a", "prompt", [
+      { cursor: "started", sequence: 1, type: "execution.started", createdAt: 1 },
+      { cursor: "prepared", sequence: 2, type: "model.input.prepared", createdAt: 2 },
+    ])
+    const streamed = TranscriptProjection.Projection.applyEvent(
+      TranscriptProjection.Projection.applyEvent(base, transientDelta(1, "hel", 2)),
+      transientDelta(2, "lo", 2),
+    )
+    expect(assistantText(streamed)).toBe("hello")
+    expect(streamed.revision).toBe(2)
+    const completed = TranscriptProjection.Projection.applyEvent(streamed, {
+      cursor: "cycle-3",
+      sequence: 3,
+      type: "model.cycle.completed",
+      createdAt: 6,
+      text: "hello world",
     })
 
-    expect(assistantText(legacy)).toBe("legacy")
-    expect(legacy.revision).toBe(2)
-    expect(legacy.checkpointCursor).toBe("legacy-delta")
+    expect(assistantText(completed)).toBe("hello world")
+    expect(completed.revision).toBe(3)
+    expect(completed.checkpointCursor).toBe("cycle-3")
   })
 })

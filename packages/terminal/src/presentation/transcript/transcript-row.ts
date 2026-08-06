@@ -168,7 +168,13 @@ export const isExpandableUnit: {
   (model: Model, unit: TranscriptUnit): boolean
   (unit: TranscriptUnit): (model: Model) => boolean
 } = Function.dual(2, (model: Model, unit: TranscriptUnit): boolean => {
-  if (unit.kind !== "tool") return unit.kind === "reasoning" || unit.kind === "diff" || unit.kind === "childAgent"
+  if (unit.kind !== "tool") {
+    if (unit.kind === "block") {
+      const block = model.blocks[unit.block] as TranscriptBlock
+      return block._tag === "Error" && block.detail.length > 0
+    }
+    return unit.kind === "reasoning" || unit.kind === "diff" || unit.kind === "childAgent"
+  }
   if ((unit.children?.length ?? 0) > 0 || unit.agentResponse !== undefined) return true
   if (unit.group === "explore" || unit.group === "edit" || (unit.group === "shell" && unit.blocks.length > 1))
     return true
@@ -231,7 +237,7 @@ export const transcriptUnitId: {
         : orderedTranscriptItems(model).find(
             (candidate) => candidate._tag === "Entry" && candidate.index === unit.entry,
           )
-    return `entry:${item?.id ?? `${entry?.turnId ?? "legacy"}:${entry?.role ?? "entry"}:${unit.entry}`}`
+    return `entry:${item?.id ?? `${entry?.turnId ?? "missing"}:${entry?.role ?? "entry"}:${unit.entry}`}`
   }
   if (unit.kind === "tool") {
     const block = model.blocks[unit.blocks[0]!] as Extract<TranscriptBlock, { _tag: "ToolCall" }>

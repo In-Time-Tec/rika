@@ -1,4 +1,4 @@
-import * as ExecutionBackend from "../../execution/contract/execution-service"
+import * as ExecutionGateway from "../../execution/contract/execution-gateway"
 import * as UsageSnapshot from "@rika/product/usage-snapshot"
 import * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
 import * as Thread from "../../thread/model/thread-record"
@@ -10,7 +10,6 @@ import * as ThreadResult from "@rika/product/thread-result"
 import * as ExecutionStatus from "@rika/product/execution-status"
 import * as TurnRepository from "../../thread/repository/turn-repository"
 import * as UsageRepository from "../../thread/repository/usage-repository"
-import * as ThreadActivity from "../../thread/query/thread-activity"
 import { clampThreadTitle } from "../../thread/query/thread-title-policy"
 import { Input } from "../contract/product-operation"
 import { OperationUnavailable } from "../contract/product-operation"
@@ -23,7 +22,7 @@ export interface Dependencies {
   readonly makeThreadId: Effect.Effect<Thread.ThreadId>
   readonly makeTurnId: Effect.Effect<Turn.TurnId>
   readonly turnMutationAdmission: Semaphore.Semaphore
-  readonly backend: ExecutionBackend.Interface
+  readonly backend: ExecutionGateway.Interface
   readonly usageRepository: UsageRepository.Interface
   readonly notifyThreadSummaries: Effect.Effect<void, OperationError, ThreadSummaryRepository.Service>
   readonly writeThread: (thread: Thread.Thread) => Effect.Effect<void>
@@ -91,7 +90,6 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
       }
       case "continue": {
         yield* Effect.gen(function* () {
-          const backend = yield* ExecutionBackend.Service
           let selected: Thread.Thread | ReadonlyArray<Thread.Thread>
           if ("last" in input) {
             const thread = (yield* repository.list({ limit: 1 }))[0]
@@ -106,16 +104,12 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
           const continued = yield* Effect.forEach(selectedThreads, (thread) =>
             Effect.gen(function* () {
               const threadTurns = yield* turns.list(thread.id)
-              const history = yield* Effect.forEach(threadTurns, (turn) =>
-                backend
-                  .replay(turn.id)
-                  .pipe(Effect.map((result) => ({ turn, status: result.status, events: result.events }))),
-              )
+              const history = threadTurns.map((turn) => ({ turn, status: turn.status }))
               return { ...thread, turns: history }
             }),
           )
           yield* Console.log(dependencies.encodeJson(Array.isArray(selected) ? continued : continued[0]))
-        }).pipe(Effect.provide(Context.make(ExecutionBackend.Service, dependencies.backend)), Effect.scoped)
+        }).pipe(Effect.provide(Context.make(ExecutionGateway.Service, dependencies.backend)), Effect.scoped)
         return
       }
       case "rename":
@@ -252,18 +246,7 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
                   { ...sourceTurn, id, threadId: fork.id },
                   dependencies.pendingTurnCapacity,
                 )
-                const execution = yield* dependencies.backend.inspect(sourceTurn.id)
-                if (execution === undefined) yield* summaries.ensureTurn(copied.id, copied.threadId, copied.updatedAt)
-                else {
-                  const replayed = yield* dependencies.backend.replay(sourceTurn.id)
-                  yield* summaries.replaceTurn(
-                    ThreadActivity.projectionInput(
-                      fork.id,
-                      { ...replayed, turnId: copied.id },
-                      yield* Clock.currentTimeMillis,
-                    ),
-                  )
-                }
+                yield* summaries.ensureTurn(copied.id, copied.threadId, copied.updatedAt)
               }
               const published = yield* repository.setArchived(fork.id, false, now)
               yield* dependencies.notifyThreadSummaries

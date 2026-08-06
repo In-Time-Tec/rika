@@ -1,1 +1,0 @@
-Generate a concise 3-6 word title for the conversation from the supplied first user message. Reply with only the title, with no quotes or punctuation.

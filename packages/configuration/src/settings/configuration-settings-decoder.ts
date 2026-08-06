@@ -11,8 +11,6 @@ export class ConfigurationSettingsFileError extends Schema.TaggedErrorClass<Conf
   { path: Schema.String, message: Schema.String },
 ) {}
 
-export type ConfigFileError = ConfigurationSettingsFileError
-
 const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value)
 
@@ -202,7 +200,6 @@ export const decodeSettingsInput: {
           message: `Model alias ${name} cannot replace a built-in model alias`,
         })
       exactKeys(path, `Model alias ${name}`, alias, [
-        "base",
         "preset",
         "provider",
         "candidates",
@@ -227,11 +224,6 @@ export const decodeSettingsInput: {
           path,
           message: `Model alias ${name} candidates must be non-empty strings`,
         })
-      if (alias.base !== undefined && (typeof alias.base !== "string" || !(alias.base in modelDefaults)))
-        throw ConfigurationSettingsFileError.make({
-          path,
-          message: `Model alias ${name} base must reference a built-in model alias`,
-        })
       if (
         alias.preset !== undefined &&
         (typeof alias.preset !== "string" || !presetIds.some((presetId) => presetId === alias.preset))
@@ -240,7 +232,7 @@ export const decodeSettingsInput: {
           path,
           message: `Model alias ${name} preset must be one of ${presetIds.join(", ")}`,
         })
-      const sources = [alias.base, alias.preset, alias.efforts].filter((source) => source !== undefined).length
+      const sources = [alias.preset, alias.efforts].filter((source) => source !== undefined).length
       if (sources === 0)
         throw ConfigurationSettingsFileError.make({
           path,
@@ -249,7 +241,7 @@ export const decodeSettingsInput: {
       if (sources > 1)
         throw ConfigurationSettingsFileError.make({
           path,
-          message: `Model alias ${name} must set only one of base, preset, or efforts`,
+          message: `Model alias ${name} must set only one of preset or efforts`,
         })
       if (alias.displayName !== undefined && (typeof alias.displayName !== "string" || alias.displayName.length === 0))
         throw ConfigurationSettingsFileError.make({
@@ -376,8 +368,8 @@ export const decodeSettingsInput: {
       exactKeys(path, "Model route agents", value.modelRoutes.agents, [
         "librarian",
         "painter",
-        "review",
         "readThread",
+        "review",
         "surgeon",
         "task",
       ])

@@ -1,10 +1,11 @@
+import * as Turn from "@rika/product/turn-record"
 import { expect, test } from "vitest"
-import { Deferred, Effect, FileSystem, Path } from "effect"
+import { Effect, FileSystem, Path } from "effect"
 import * as TuiApp from "./tui-app"
 import { model } from "./tui-app-model"
-import { makeProjectionsLegacy } from "./tui-app-legacy-projection"
 
 const activeTimePattern = /◷ [0-9]+s/u
+const tuiTestTimeout = 30_000
 
 const spanHasColor = (app: TuiApp.TuiApp, text: string, color: string): boolean =>
   app
@@ -18,6 +19,7 @@ test(
     TuiApp.run(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
+          inspectTranscript: true,
           lanes: [
             {
               script: [
@@ -33,7 +35,7 @@ test(
             {
               when: (prompt) => !prompt.includes("Delegate nested work, then fail."),
               script: [
-                model.toolCall("review", { prompt: "Run nested work." }, "nested-agent"),
+                model.toolCall("oracle", { prompt: "Run nested work." }, "nested-agent"),
                 model.toolCall("await_subagents", {}, "top-join"),
                 model.text("TOP_LEVEL_RELOAD_COMPLETE"),
               ],
@@ -43,29 +45,41 @@ test(
 
         yield* Effect.promise(() => app.type("Delegate nested work, then fail."))
         app.pressEnter()
-        const failed = yield* app.waitFrame("ROOT_RELOAD_FAILED")
-        expect(failed).toContain("Execution failed")
-        expect(failed).not.toContain("Running 1 subagent")
+        yield* app.waitModelRequests(3)
+        const turnId = Turn.TurnId.make("tui-turn-0")
+        for (let attempt = 0; attempt < 250; attempt += 1) {
+          const projection = yield* app.transcript(turnId)
+          const entries = new Set(
+            (projection?.units ?? []).flatMap((unit) => (unit.content._tag === "Entry" ? [unit.content.text] : [])),
+          )
+          const hasRunningTool = (projection?.units ?? []).some(
+            (unit) =>
+              unit.content._tag === "Block" &&
+              unit.content.block._tag === "ToolCall" &&
+              unit.content.block.status === "running",
+          )
+          if (entries.has("TOP_LEVEL_RELOAD_COMPLETE") && entries.has("NESTED_RELOAD_COMPLETE") && !hasRunningTool)
+            break
+          if (attempt === 249) return yield* Effect.die("nested subagents did not settle into the durable transcript")
+          yield* Effect.sleep("20 millis")
+        }
 
         yield* app.reload
-        const reloaded = yield* app.waitFrame("ROOT_RELOAD_FAILED")
-        expect(reloaded).toContain("Execution failed")
-        expect(reloaded).not.toContain("Running 1 subagent")
-        app.pressKey("\t")
-        app.pressEnter()
-        yield* app.waitFrame("TOP_LEVEL_RELOAD_COMPLETE")
-        app.pressKey("\t")
-        app.pressEnter()
-        const nested = yield* app.waitFrame("NESTED_RELOAD_COMPLETE")
-        expect(nested).toContain("Subagent finished")
-        expect(nested).not.toContain("Subagent working")
-        expect(nested).not.toContain("Subagent failed")
-        expect(nested).not.toMatch(/:\d+ (?:working|finished|failed)/)
-        expect(nested).not.toContain("Running 1 subagent")
+        const reloaded = yield* app.transcript(turnId)
+        const entries = (reloaded?.units ?? []).flatMap((unit) =>
+          unit.content._tag === "Entry" ? [unit.content.text] : [],
+        )
+        const statuses = (reloaded?.units ?? []).flatMap((unit) =>
+          unit.content._tag === "Block" && unit.content.block._tag === "ToolCall" ? [unit.content.block.status] : [],
+        )
+        expect(entries).toContain("TOP_LEVEL_RELOAD_COMPLETE")
+        expect(entries).toContain("NESTED_RELOAD_COMPLETE")
+        expect(statuses).not.toContain("running")
+        expect(statuses).not.toContain("failed")
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -80,21 +94,26 @@ test(
         yield* Effect.promise(() => app.type("Price this turn."))
         app.pressEnter()
         yield* app.waitFrame("PRICED_TURN_COMPLETE")
+        yield* app.waitFrame("ctx")
+        yield* app.clickText("ctx")
         const priced = yield* app.waitCost
         expect(priced.match(/\$[0-9][^ ]*/u)?.[0]).toBe("$0.00")
         expect(priced).not.toContain("$\u2014")
+        app.pressEscape()
+        yield* app.waitGone("Cost       ")
 
         yield* Effect.promise(() => app.type("Fail this turn."))
         app.pressEnter()
-        yield* app.waitFrame("UNPRICED_TURN_FAILED")
+        yield* app.waitFrame("Execution failed")
         yield* app.settled
+        yield* app.clickText("ctx")
         const settledFrame = yield* app.waitCost
         expect(settledFrame.match(/\$[0-9][^ ]*/u)?.[0]).toBe("$0.00")
         expect(settledFrame).not.toContain("$\u2014")
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -106,10 +125,9 @@ test(
 
         yield* Effect.promise(() => app.type("Measure this turn."))
         app.pressEnter()
-        yield* app.waitFrame("$")
-        yield* app.clickText("$")
-        yield* app.waitFrame("tok")
-        yield* app.clickText("tok")
+        yield* app.waitFrame("ctx")
+        yield* app.clickText("ctx")
+        yield* app.waitFrame("Active")
         const active = yield* app.waitFrameMatch((frame) => activeTimePattern.test(frame))
         expect(active).toMatch(/◷ [0-9]+s/u)
         expect(active).not.toContain("◷ ····")
@@ -119,7 +137,7 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -145,10 +163,9 @@ test(
             })
             yield* Effect.promise(() => app.type("Persist this timer."))
             app.pressEnter()
-            yield* app.waitFrame("$")
-            yield* app.clickText("$")
-            yield* app.waitFrame("tok")
-            yield* app.clickText("tok")
+            yield* app.waitFrame("ctx")
+            yield* app.clickText("ctx")
+            yield* app.waitFrame("Active")
             yield* app.waitFrame("PERSISTED_TIMER_COMPLETE")
             yield* app.settled
             const settledFrame = yield* app.waitFrameMatch((frame) => activeTimePattern.test(frame))
@@ -160,10 +177,9 @@ test(
         yield* Effect.scoped(
           Effect.gen(function* () {
             const app = yield* TuiApp.tuiApp({ root, initialThreadId: "tui-thread-0", idStart: 10, script: [] })
-            yield* app.waitFrame("$")
-            yield* app.clickText("$")
-            yield* app.waitFrame("tok")
-            yield* app.clickText("tok")
+            yield* app.waitFrame("ctx")
+            yield* app.clickText("ctx")
+            yield* app.waitFrame("Active")
             const restoredFrame = yield* app.waitFrameMatch((frame) => activeTimePattern.test(frame))
             const restored = restoredFrame.match(activeTimePattern)![0]
             expect(restored).not.toBe("◷ —")
@@ -173,7 +189,7 @@ test(
         )
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -224,7 +240,7 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -249,7 +265,7 @@ test(
             {
               when: (prompt) => !prompt.includes("ROOT_USER_PROMPT"),
               script: [
-                model.toolCall("review", { prompt: "NESTED_AGENT_PROMPT" }, "nested-agent"),
+                model.toolCall("oracle", { prompt: "NESTED_AGENT_PROMPT" }, "nested-agent"),
                 model.toolCall("await_subagents", {}, "parent-join"),
                 model.text("PARENT_AGENT_FINAL"),
               ],
@@ -274,7 +290,7 @@ test(
           const rootRow = lines.findIndex((line) => line.includes("ROOT_USER_PROMPT"))
           const parentPromptRow = lines.findIndex((line) => line.includes("PARENT_AGENT_PROMPT"))
           const nestedHeaderRow = lines.findIndex(
-            (line, index) => index > parentPromptRow && line.includes("Reviewed code"),
+            (line, index) => index > parentPromptRow && line.includes("Oracle has spoken"),
           )
           const nestedHeader = nestedHeaderRow < 0 ? undefined : lines[nestedHeaderRow]
           const nestedPrompt = lines.find((line) => line.includes("NESTED_AGENT_PROMPT"))
@@ -301,11 +317,11 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
-  "distinguishes a reported, an unreported, and a failed subagent in the transcript",
+  "distinguishes reported, silent, and failed subagents in the transcript",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -346,7 +362,6 @@ test(
             yield* Effect.promise(() => app.type(prompt))
             app.pressEnter()
             yield* app.waitFrame(marker)
-            yield* app.settled
           })
 
         yield* delegate("Delegate work that reports back.", "ROOT_AFTER_REPORT")
@@ -357,16 +372,16 @@ test(
 
         yield* delegate("Delegate work that reports nothing.", "ROOT_AFTER_NO_REPORT")
         const unreported = app.frame()
-        expect(unreported.match(/Subagent finished/g) ?? []).toHaveLength(1)
-        expect(unreported.match(/Subagent failed/g) ?? []).toHaveLength(1)
+        expect(unreported.match(/Subagent finished/g) ?? []).toHaveLength(2)
+        expect(unreported.match(/Subagent failed/g) ?? []).toHaveLength(0)
 
         yield* delegate("Delegate work that fails outright.", "ROOT_AFTER_FAILURE")
         const failed = app.frame()
-        expect(failed.match(/Subagent failed/g) ?? []).toHaveLength(2)
+        expect(failed.match(/Subagent failed/g) ?? []).toHaveLength(1)
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -399,7 +414,7 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -452,19 +467,19 @@ test(
         yield* app.waitGone("Files (")
 
         app.pressKey("s", { ctrl: true })
-        yield* app.waitFrame("Balanced intelligence, speed, and cost for most tasks")
+        yield* app.waitFrame("Balanced default for everyday work")
         app.pressArrow("right")
         yield* app.waitFrame("Deep reasoning for hard tasks")
         app.pressEscape()
         const escaped = yield* app.waitGone("Deep reasoning")
         expect(escaped).toContain("medium")
         app.pressKey("s", { ctrl: true })
-        yield* app.waitFrame("Balanced intelligence, speed, and cost for most tasks")
+        yield* app.waitFrame("Balanced default for everyday work")
         app.pressArrow("right")
         yield* app.waitFrame("Deep reasoning for hard tasks")
         app.pressEnter()
-        const applied = yield* app.waitGone("Deep reasoning")
-        expect(applied).toContain("high")
+        yield* app.waitGone("Deep reasoning")
+        expect(yield* app.waitFrame("high")).toContain("high")
 
         app.pressKey("o", { ctrl: true })
         const palette = yield* app.waitFrame("Command Palette")
@@ -477,7 +492,7 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -497,7 +512,7 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -524,9 +539,9 @@ test(
         const completed = yield* app.waitFrame("APPROVAL_COMPLETE")
         expect(completed).not.toContain("[pending]")
         expect(completed).not.toContain("Allow once")
-        yield* app.clickText("$")
-        yield* app.waitFrame("tok")
-        yield* app.clickText("tok")
+        yield* app.waitFrame("ctx")
+        yield* app.clickText("ctx")
+        yield* app.waitFrame("Active")
         expect(yield* app.waitFrame("◷ ")).toMatch(/◷ [0-9]+s/u)
         yield* app.settled
         expect(app.frame()).toMatch(/◷ [0-9]+s/u)
@@ -543,7 +558,7 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -575,7 +590,7 @@ test(
         yield* app.done
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -599,7 +614,7 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -627,7 +642,7 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -672,51 +687,7 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
-)
-
-test(
-  "reports rebuild progress while a legacy thread refolds and clears it once the projection lands",
-  () =>
-    TuiApp.run(
-      Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem
-        const root = yield* fileSystem.makeTempDirectoryScoped({ directory: "/tmp", prefix: "rika-refold-" })
-
-        yield* Effect.scoped(
-          Effect.gen(function* () {
-            const app = yield* TuiApp.tuiApp({ root, script: [model.text("LEGACY_TURN_COMPLETE")] })
-            yield* Effect.promise(() => app.type("Persist a legacy turn."))
-            app.pressEnter()
-            yield* app.waitFrame("LEGACY_TURN_COMPLETE")
-            yield* app.settled
-            yield* app.quit
-          }),
-        )
-
-        expect(yield* makeProjectionsLegacy(root)).toContain("tui-turn-0")
-        const held = yield* Deferred.make<void>()
-
-        yield* Effect.scoped(
-          Effect.gen(function* () {
-            const app = yield* TuiApp.tuiApp({
-              root,
-              initialThreadId: "tui-thread-0",
-              idStart: 10,
-              script: [],
-              holdExecutionFollows: held,
-            })
-            const rebuilding = yield* app.waitFrame("Rebuilding thread projection")
-            expect(rebuilding).toContain("Persist a legacy turn.")
-            yield* Deferred.succeed(held, undefined)
-            const rebuilt = yield* app.waitGone("Rebuilding thread projection")
-            expect(rebuilt).toContain("LEGACY_TURN_COMPLETE")
-            yield* app.quit
-          }),
-        )
-      }),
-    ),
-  240_000,
+  tuiTestTimeout,
 )
 
 test(
@@ -744,5 +715,5 @@ test(
         yield* app.quit
       }),
     ),
-  240_000,
+  tuiTestTimeout,
 )

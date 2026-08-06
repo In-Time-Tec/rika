@@ -99,24 +99,6 @@ const threadBrowser = (): Model => ({
 
 export const scenarios = (): ReadonlyArray<readonly [string, Model, number, number]> => {
   const reasoning = block({ _tag: "Reasoning", text: "Inspecting stable inputs" })
-  const restarted = update(
-    update(base(), {
-      _tag: "EventReplayed",
-      event: {
-        id: "event-1",
-        cursor: "cursor-1",
-        block: { _tag: "Workflow", name: "restart", step: "resume", status: "running" },
-      },
-    }),
-    {
-      _tag: "EventReplayed",
-      event: {
-        id: "event-1",
-        cursor: "cursor-1",
-        block: { _tag: "Workflow", name: "restart", step: "resume", status: "running" },
-      },
-    },
-  )
   return [
     ["welcome", base(), 80, 24],
     ["prompt", { ...base(), input: "Explain this repository", cursor: 23 }, 80, 24],
@@ -133,7 +115,7 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
         entries: [
           {
             role: "assistant",
-            text: "# Styled Markdown\n\n**bold** and *emphasis* with `inline code`.\n\n| Layer | Owner |\n|---|---|\n| Durable execution | Relay |\n| Agent loop | Baton |\n\n> muted quote\n\n```ts\nconst answer = 42\n```",
+            text: "# Styled Markdown\n\n**bold** and *emphasis* with `inline code`.\n\n| Layer | Owner |\n|---|---|\n| Durable execution | Baton |\n| Product state | Rika |\n\n> muted quote\n\n```ts\nconst answer = 42\n```",
           },
         ],
       },
@@ -376,18 +358,6 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
       24,
     ],
     [
-      "child-workflow",
-      {
-        ...base(),
-        blocks: [
-          { _tag: "ChildAgent", name: "review", summary: "Checking tests", status: "running" },
-          { _tag: "Workflow", name: "release", step: "verify", status: "waiting" },
-        ],
-      },
-      80,
-      24,
-    ],
-    [
       "cancelled-subagent",
       {
         ...base(),
@@ -447,6 +417,7 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
       24,
     ],
     ["narrow-layout", { ...base(), width: 50, height: 12, input: "narrow", cursor: 6 }, 50, 12],
+    ["compact-mode-selector", { ...base(), modePicker: { open: true, selected: 1 } }, 24, 12],
     ["narrow-mode-overlay", { ...base(), modePicker: { open: true, selected: 1 } }, 32, 12],
     [
       "narrow-palette-overlay",
@@ -454,7 +425,6 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
       32,
       12,
     ],
-    ["restart-replay", restarted, 80, 24],
   ]
 }
 

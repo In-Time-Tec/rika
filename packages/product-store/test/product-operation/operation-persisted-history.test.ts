@@ -5,7 +5,7 @@ import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
-import * as ExecutionBackend from "@rika/product/execution-service"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { Deferred, Effect, Fiber, Layer, Ref } from "effect"
 import { TestConsole } from "effect/testing"
 
@@ -37,7 +37,6 @@ describe("Operation", () => {
         ...turnProvenance,
         executionRoute: executionRoute(),
         status: "completed",
-        stopIntent: "none",
         createdAt: 3,
         updatedAt: 4,
       }
@@ -46,7 +45,7 @@ describe("Operation", () => {
         productLayer({
           repositoryLayer: ThreadRepository.memoryLayer([thread]),
           turnRepositoryLayer: TurnRepository.memoryLayer([turn]),
-          backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+          backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
           defaultWorkspace: "/work",
           makeThreadId: Effect.succeed(Thread.ThreadId.make("unused")),
           makeTurnId: Effect.succeed(Turn.TurnId.make("unused")),
@@ -94,7 +93,6 @@ describe("Operation", () => {
           prompt: "one",
           executionRoute: executionRoute(),
           status: "completed",
-          stopIntent: "none",
           createdAt: 3,
           updatedAt: 4,
         },
@@ -105,7 +103,6 @@ describe("Operation", () => {
           prompt: "two",
           executionRoute: executionRoute(),
           status: "completed",
-          stopIntent: "none",
           createdAt: 5,
           updatedAt: 6,
         },
@@ -113,7 +110,7 @@ describe("Operation", () => {
       const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-        backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+        backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
         defaultWorkspace: "/work",
         makeThreadId: Effect.succeed(Thread.ThreadId.make("fork")),
         makeTurnId: Effect.succeed(Turn.TurnId.make("fork-turn")),
@@ -138,7 +135,6 @@ describe("Operation", () => {
           prompt: "history",
           executionRoute: executionRoute(),
           status: "completed",
-          stopIntent: "none",
           createdAt: 1,
           updatedAt: 1,
         },
@@ -149,7 +145,6 @@ describe("Operation", () => {
           prompt: "queued one",
           executionRoute: executionRoute(),
           status: "queued",
-          stopIntent: "none",
           createdAt: 2,
           updatedAt: 2,
         },
@@ -160,7 +155,6 @@ describe("Operation", () => {
           prompt: "queued two",
           executionRoute: executionRoute(),
           status: "queued",
-          stopIntent: "none",
           createdAt: 3,
           updatedAt: 3,
         },
@@ -171,7 +165,7 @@ describe("Operation", () => {
       const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-        backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+        backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
         defaultWorkspace: "/work",
         pendingTurnCapacity: 2,
         makeThreadId: Effect.succeed(Thread.ThreadId.make("queued-fork")),
@@ -213,7 +207,6 @@ describe("Operation", () => {
             prompt: id,
             executionRoute: executionRoute(),
             status: "queued",
-            stopIntent: "none",
             createdAt: index + 1,
             updatedAt: index + 1,
           }),
@@ -222,7 +215,7 @@ describe("Operation", () => {
       const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-        backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+        backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
         defaultWorkspace: "/work",
         pendingTurnCapacity: 1,
         makeThreadId: Effect.succeed(Thread.ThreadId.make("bounded-fork")),
@@ -255,7 +248,6 @@ describe("Operation", () => {
           prompt: "source active",
           executionRoute: executionRoute(),
           status: "running",
-          stopIntent: "none",
           createdAt: 1,
           updatedAt: 1,
         },
@@ -266,7 +258,6 @@ describe("Operation", () => {
           prompt: "source queued",
           executionRoute: executionRoute(),
           status: "queued",
-          stopIntent: "none",
           createdAt: 2,
           updatedAt: 2,
         },
@@ -283,18 +274,18 @@ describe("Operation", () => {
               )
             : turns.copy(turn, capacity),
       })
-      const forkBackend = ExecutionBackend.Service.of({
+      const forkBackend = ExecutionGateway.Service.of({
         ...backend,
-        inspect: (turnId) => Effect.succeed({ turnId, status: "running", waits: [], pendingTools: [], children: [] }),
-        replay: (turnId) => Effect.succeed({ turnId, status: "running", events: [] }),
-        start: (input) => Effect.succeed({ turnId: input.turnId, status: "running", events: [] }),
+        inspectTurn: () => Effect.succeed({ status: "running" }),
+        startTurn: (input) =>
+          Effect.succeed({ runId: "atomic-fork-run", turnId: input.turnId, threadId: input.threadId }),
       })
       const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const turnSequence = yield* Ref.make(0)
       const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, delayedTurns),
-        backendLayer: Layer.succeed(ExecutionBackend.Service, forkBackend),
+        backendLayer: Layer.succeed(ExecutionGateway.Service, forkBackend),
         defaultWorkspace: "/work",
         pendingTurnCapacity: 1,
         makeThreadId: Effect.succeed(forkId),

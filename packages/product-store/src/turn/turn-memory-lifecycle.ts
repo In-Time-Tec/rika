@@ -1,45 +1,23 @@
 import { TurnResult } from "@rika/product/thread-result"
-import { Effect, Schema } from "effect"
+import { Effect } from "effect"
 import { AgentExecutionTurn } from "@rika/product/turn-record"
 import { RepositoryError } from "@rika/product/turn-repository"
 import type { Interface } from "@rika/product/turn-repository"
-import { turnRowJson } from "./turn-row-json-codec"
 import { isTerminalStatus } from "./turn-memory-coordination"
-import { missing, repositoryError } from "./turn-memory-errors"
+import { missing } from "./turn-memory-errors"
 import { clone } from "./turn-memory-state"
 import type { MemoryState } from "./turn-memory-state"
 import type { TurnMemoryContext } from "./turn-memory-state-operations"
 
+type ExecutionLinkUpdate =
+  | { readonly _tag: "Missing" }
+  | { readonly _tag: "Conflict" }
+  | { readonly _tag: "Ok"; readonly turn: AgentExecutionTurn }
+
 export const makeTurnMemoryLifecycle = ({
   modifyState,
-  readUnlocked,
-  setUnlocked,
-  withLock,
-}: TurnMemoryContext): Pick<
-  Interface,
-  "setExtensionPin" | "setStatus" | "startAccepted" | "cancelAccepted" | "repairCursor"
-> => ({
-  setExtensionPin: Effect.fn("TurnRepository.setExtensionPin")(function* (id, pin) {
-    const encoded = yield* Schema.encodeEffect(turnRowJson.extensionPin)(pin).pipe(Effect.mapError(repositoryError))
-    return yield* withLock(
-      Effect.gen(function* () {
-        const currentState = yield* readUnlocked
-        const current = currentState.turns.get(id)
-        if (current === undefined || !TurnResult.isAgentExecution(current)) return yield* missing(id)
-        if (
-          current.extensionPin !== undefined &&
-          (yield* Schema.encodeEffect(turnRowJson.extensionPin)(current.extensionPin).pipe(
-            Effect.mapError(repositoryError),
-          )) !== encoded
-        )
-          return yield* RepositoryError.make({ message: `Turn ${id} extension pin is immutable` })
-        const next = { ...current, extensionPin: structuredClone(pin) }
-        yield* setUnlocked({ ...currentState, turns: new Map(currentState.turns).set(id, next) })
-        return clone(next)
-      }),
-    )
-  }),
-  setStatus: Effect.fn("TurnRepository.setStatus")(function* (id, status, lastCursor, now) {
+}: TurnMemoryContext): Pick<Interface, "setStatus" | "attachExecutionLink" | "startAccepted" | "cancelAccepted"> => ({
+  setStatus: Effect.fn("TurnRepository.setStatus")(function* (id, status, now) {
     const updated = yield* modifyState(
       (
         currentState,
@@ -56,12 +34,9 @@ export const makeTurnMemoryLifecycle = ({
         if (!TurnResult.isAgentExecution(current)) return [{ _tag: "Missing" }, currentState]
         if (status === "queued" || current.status === "queued") return [{ _tag: "Queued" }, currentState]
         if (isTerminalStatus(current.status)) return [{ _tag: "Ok", turn: clone(current) }, currentState]
-        const { lastCursor: previousCursor, ...withoutCursor } = current
-        void previousCursor
         const next: AgentExecutionTurn = {
-          ...withoutCursor,
+          ...current,
           status,
-          ...(lastCursor === undefined ? {} : { lastCursor }),
           updatedAt: now,
         }
         const withTurn: MemoryState = {
@@ -76,6 +51,32 @@ export const makeTurnMemoryLifecycle = ({
       return yield* RepositoryError.make({
         message: `Turn ${id} cannot transition into or out of 'queued' via setStatus`,
       })
+    return updated.turn
+  }),
+  attachExecutionLink: Effect.fn("TurnRepository.attachExecutionLink")(function* (id, link, now) {
+    const updated = yield* modifyState((currentState): readonly [ExecutionLinkUpdate, MemoryState] => {
+      const current = currentState.turns.get(id)
+      if (current === undefined || !TurnResult.isAgentExecution(current))
+        return [{ _tag: "Missing" as const }, currentState] as const
+      if (current.executionLink !== undefined) {
+        const matches =
+          current.executionLink.runId === link.runId &&
+          current.executionLink.turnId === link.turnId &&
+          current.executionLink.threadId === link.threadId
+        return [
+          matches ? { _tag: "Ok" as const, turn: clone(current) } : { _tag: "Conflict" as const },
+          currentState,
+        ] as const
+      }
+      const next: AgentExecutionTurn = { ...current, executionLink: structuredClone(link), updatedAt: now }
+      return [
+        { _tag: "Ok" as const, turn: clone(next) },
+        { ...currentState, turns: new Map(currentState.turns).set(id, next) },
+      ] as const
+    })
+    if (updated._tag === "Missing") return yield* missing(id)
+    if (updated._tag === "Conflict")
+      return yield* RepositoryError.make({ message: `Turn ${id} already has a different execution link` })
     return updated.turn
   }),
   startAccepted: Effect.fn("TurnRepository.startAccepted")(function* (id, now) {
@@ -93,25 +94,6 @@ export const makeTurnMemoryLifecycle = ({
       if (current === undefined || !TurnResult.isAgentExecution(current) || current.status !== "accepted")
         return [false, currentState]
       const next: AgentExecutionTurn = { ...current, status: "cancelled", updatedAt: now }
-      return [true, { ...currentState, turns: new Map(currentState.turns).set(id, next) }]
-    })
-  }),
-  repairCursor: Effect.fn("TurnRepository.repairCursor")(function* (id, status, expectedCursor, cursor) {
-    return yield* modifyState((currentState) => {
-      const current = currentState.turns.get(id)
-      if (
-        current === undefined ||
-        !TurnResult.isAgentExecution(current) ||
-        current.status !== status ||
-        current.lastCursor !== expectedCursor
-      )
-        return [false, currentState]
-      const { lastCursor: previousCursor, ...withoutCursor } = current
-      void previousCursor
-      const next: AgentExecutionTurn = {
-        ...withoutCursor,
-        ...(cursor === undefined ? {} : { lastCursor: cursor }),
-      }
       return [true, { ...currentState, turns: new Map(currentState.turns).set(id, next) }]
     })
   }),

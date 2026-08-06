@@ -26,7 +26,7 @@ live(
         expect(observation.unsupportedReason).toBeDefined()
         return
       }
-      expect(observation.roles.map((role) => role.role)).toEqual(["launcher", "interactive", "resident"])
+      expect(observation.roles.map((role) => role.role)).toEqual(["launcher", "interactive", "server"])
       for (const role of observation.roles) expect(isRunning(role.pid)).toBe(false)
     }),
   30_000,

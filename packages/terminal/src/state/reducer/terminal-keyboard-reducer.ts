@@ -56,6 +56,14 @@ const reduceKeyboardImpl = (
           filePicker: { ...model.filePicker, open: false },
         }
       }
+      if (
+        (key.sequence === "D" || (key.name === "d" && key.shift)) &&
+        !key.ctrl &&
+        !key.alt &&
+        !key.meta &&
+        model.input.length === 0
+      )
+        return update(model, { _tag: "AllDetailsToggled" })
       if ((key.name === "tab" || key.name === "backtab") && !key.ctrl && !key.alt && !key.meta)
         return update(model, { _tag: "DetailMoved", offset: key.name === "backtab" || key.shift ? -1 : 1 })
       if (

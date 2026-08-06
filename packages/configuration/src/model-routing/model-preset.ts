@@ -68,13 +68,10 @@ export const defaults = {
   luna: gpt(catalog.gpt56Luna),
   terra: gpt(catalog.gpt56Terra),
   sol: gpt(catalog.gpt56Sol),
-  review: gpt(catalog.gpt55),
   fable: claude(catalog.claudeFable5, [catalog.claudeFable5.id, catalog.claudeOpus48.id]),
   opus5: claude(catalog.claudeOpus5, [catalog.claudeOpus5.id, catalog.claudeFable5.id]),
   opus: claude(catalog.claudeOpus48, [catalog.claudeOpus48.id]),
 } satisfies Readonly<Record<string, ModelRoute.ModelAlias>>
-
-export const presetForBase = (base: string): PresetId => (base === "fable" || base === "opus" ? "claude" : "openai")
 
 export const defaultCompaction = {
   contextWindow: catalog.gpt56Luna.limits.contextWindow,

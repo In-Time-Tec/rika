@@ -161,7 +161,7 @@ describe("UsageCost", () => {
     })
   })
 
-  it("resumes active time when Relay continues directly from a durable wake", () => {
+  it("resumes active time when Baton continues directly from a durable wake", () => {
     const snapshot = Support.Fixtures.fold([
       Support.Fixtures.lifecycle("execution", "start", "execution.started", 1_000, 1),
       Support.Fixtures.lifecycle("execution", "wait", "wait.created", 2_000, 7),

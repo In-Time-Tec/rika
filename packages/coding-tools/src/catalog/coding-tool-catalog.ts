@@ -1,8 +1,5 @@
 import * as RuntimeTools from "@rika/coding-tools/coding-tool-runtime"
 import * as RuntimeRegistrations from "../runtime/coding-tool-runtime-tools"
-import * as AgentSelection from "../delegation/agent-tool-selection"
-import * as AgentToolkits from "../delegation/agent-tool-toolkits"
-import * as AgentRegistrations from "../delegation/agent-tool-registrations"
 import * as ThreadToolkits from "./thread-toolkits"
 import { Effect, Function, Schema } from "effect"
 import * as ToolPolicy from "../policy/coding-tool-policy"
@@ -20,8 +17,6 @@ export type Definition = typeof Definition.Type
 
 const tools: ReadonlyArray<ToolPolicy.RegisteredTool> = [
   ...Object.values(RuntimeTools.toolkit.tools),
-  ...Object.values(AgentToolkits.modelToolkit.tools),
-  ...Object.values(AgentToolkits.joinToolkit.tools),
   ...Object.values(ThreadToolkits.allToolkit.tools),
 ]
 
@@ -74,7 +69,6 @@ export const handlerLayer = RuntimeTools.toolkit.toLayer(
 
 const registrations: ReadonlyArray<ToolPolicy.Registration> = [
   ...RuntimeRegistrations.registrations,
-  ...AgentRegistrations.registrations,
   ...ThreadToolkits.registrations,
 ]
 
@@ -144,6 +138,14 @@ const agentPresentation = (action: string, activeLabel: string, completeLabel: s
 
 const genericAgentNames = new Set(["", "child", "task", "subagent"])
 
+const agentPresentations: Readonly<Record<string, ToolPolicy.Presentation>> = {
+  task: agentPresentation("task", "Subagent working", "Subagent finished"),
+  oracle: agentPresentation("oracle", "Oracle exploring", "Oracle has spoken"),
+  librarian: agentPresentation("librarian", "Librarian researching", "Librarian researched"),
+  surgeon: agentPresentation("surgeon", "Surgeon operating", "Surgeon closed up"),
+  read_thread: { ...agentPresentation("read-thread", "Reading Thread", "Read Thread"), counter: "thread" },
+}
+
 const agentToolName = (profile: string): string => {
   if (genericAgentNames.has(profile)) return "task"
   return profile === "readthread" ? "read_thread" : profile
@@ -164,7 +166,7 @@ const agentDisplay = (name: string): string => {
 const resolveAgentPresentation = (name: string): ToolPolicy.Presentation => {
   const profile = agentProfile(name).toLowerCase()
   const toolName = agentToolName(profile)
-  const defined = AgentSelection.isDelegationToolName(toolName) ? get(toolName)?.presentation : undefined
+  const defined = agentPresentations[toolName]
   if (defined !== undefined) return defined
   const display = agentDisplay(name)
   return agentPresentation(profile, `${display} working`, `${display} finished`)
@@ -186,6 +188,8 @@ const resolvePresentation = (rawName: string): ToolPolicy.Presentation => {
   const name = rawName.toLowerCase()
   const defined = get(name)?.presentation
   if (defined !== undefined) return defined
+  const agent = agentPresentations[name]
+  if (agent !== undefined) return agent
   if (name === "read" || name === "view_file" || name === "get_diagnostics")
     return { family: "explore", action: "read", activeLabel: "Exploring", completeLabel: "Explored", counter: "file" }
   if (name === "grep" || name === "glob" || name === "ripgrep")
@@ -204,10 +208,17 @@ const resolvePresentation = (rawName: string): ToolPolicy.Presentation => {
     return { family: "direct", action: "painter", activeLabel: "Painter", completeLabel: "Painter" }
   if (name === "finder" || name === "search" || name.includes("codebase"))
     return agentPresentation("finder", "Searching codebase", "Searched codebase")
-  if (name === "review" || name.includes("review"))
-    return agentPresentation("review", "Reviewing code", "Reviewed code")
   if (name.startsWith("transfer_to_")) return resolveAgentPresentation(name.slice("transfer_to_".length))
   if (name === "spawn_child_run") return resolveAgentPresentation("task")
+  if (name === "await_subagents")
+    return {
+      family: "direct",
+      action: "await-subagents",
+      activeLabel: "Waiting for subagents",
+      completeLabel: "Collected subagents",
+      failedLabel: "Subagent wait failed",
+      rowDisplay: "continuation",
+    }
   if (name === "skill")
     return { family: "explore", action: "skill", activeLabel: "Exploring", completeLabel: "Explored", counter: "skill" }
   if (name === "list_agent_modes")

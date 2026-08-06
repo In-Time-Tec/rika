@@ -5,15 +5,13 @@ import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
-import * as ExecutionBackend from "@rika/product/execution-service"
-import * as ExecutionRequest from "@rika/product/execution-request"
-import * as ExecutionIdentifier from "@rika/product/execution-identifier"
-import { Effect, Layer, Ref } from "effect"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
+import { Deferred, Effect, Layer, Ref, Stream } from "effect"
 
 import { executionRoute } from "../support/product-test-current-state"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { holdSession, openInteractiveSession, settleEvents } from "../support/operation-session-harness"
-import { executionStarted, backend, inspectFromTurns } from "../support/operation-execution-fixtures"
+import { backend, inspectTurnFromTurns } from "../support/operation-execution-fixtures"
 import { turnProvenance, threadLineage } from "../support/operation-selection-fixtures"
 
 describe("Operation", () => {
@@ -33,12 +31,11 @@ describe("Operation", () => {
             prompt: "queued",
             executionRoute: executionRoute(),
             status: "queued",
-            stopIntent: "none",
             createdAt: 1,
             updatedAt: 1,
           },
         ]),
-        backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+        backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
         defaultWorkspace: "/work",
         makeThreadId: Effect.succeed(Thread.ThreadId.make("thread")),
         makeTurnId: Effect.succeed(Turn.TurnId.make("turn")),
@@ -72,14 +69,12 @@ describe("Operation", () => {
     }),
   )
 
-  it.effect("admits 100 queued turns with constant-size deltas and no per-submit host wake", () =>
+  it.effect("admits 100 queued turns with constant-size FIFO deltas while the server observes active work", () =>
     Effect.gen(function* () {
       const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const events = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const dispatch = (event: InteractiveEvent) => runSync(Ref.update(events, (all) => [...all, event]))
-      const wakes = yield* Ref.make<ReadonlyArray<ExecutionRequest.ThreadQueueWake>>([])
-      const promoters = yield* Ref.make<ReadonlyArray<ExecutionIdentifier.TurnPromoter>>([])
       const started = yield* Ref.make<ReadonlyArray<string>>([])
       const turnSequence = yield* Ref.make(0)
       const thread: Thread.Thread = {
@@ -93,26 +88,14 @@ describe("Operation", () => {
         createdAt: 1,
         updatedAt: 1,
       }
-      const hostedBackend = ExecutionBackend.Service.of({
+      const hostedBackend = ExecutionGateway.Service.of({
         ...backend,
-        start: (input) =>
+        startTurn: (input) =>
           Ref.update(started, (all) => [...all, input.turnId]).pipe(
-            Effect.as({ turnId: input.turnId, status: "completed" as const, events: [] }),
+            Effect.as({ runId: "hosted-queue-run", turnId: input.turnId, threadId: input.threadId }),
           ),
-        inspect: (turnId) =>
-          Effect.succeed(
-            turnId === "busy"
-              ? {
-                  turnId,
-                  status: "running" as const,
-                  waits: [],
-                  pendingTools: [],
-                  children: [],
-                }
-              : undefined,
-          ),
-        wakeThreadHost: (wake) => Ref.update(wakes, (all) => [...all, wake]),
-        registerTurnPromoter: (promoter) => Ref.update(promoters, (all) => [...all, promoter]),
+        watchTurn: () => Stream.never,
+        inspectTurn: (link) => Effect.succeed({ status: link.turnId === "busy" ? "running" : "unavailable" }),
       })
       const turns = yield* TurnRepository.makeMemory([
         {
@@ -121,8 +104,8 @@ describe("Operation", () => {
           threadId: thread.id,
           prompt: "active",
           executionRoute: executionRoute(),
+          executionLink: { runId: "busy-run", turnId: "busy", threadId: String(thread.id) },
           status: "running",
-          stopIntent: "none",
           createdAt: 1,
           updatedAt: 1,
         },
@@ -130,7 +113,7 @@ describe("Operation", () => {
       const layer = productLayer({
         repositoryLayer: ThreadRepository.memoryLayer([thread]),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-        backendLayer: Layer.succeed(ExecutionBackend.Service, hostedBackend),
+        backendLayer: Layer.succeed(ExecutionGateway.Service, hostedBackend),
         defaultWorkspace: "/work",
         pendingTurnCapacity: 128,
         makeThreadId: Effect.succeed(thread.id),
@@ -156,13 +139,8 @@ describe("Operation", () => {
         yield* settleEvents
       }).pipe(provideLayer(layer))
       expect(yield* Ref.get(started)).toEqual([])
-      expect(yield* Ref.get(wakes)).toEqual([])
-      expect((yield* Ref.get(promoters)).length).toBeGreaterThan(0)
       expect((yield* Ref.get(events)).filter((event) => event._tag === "QueueUpdated")).toHaveLength(100)
       expect(yield* turns.readQueue(thread.id)).toMatchObject({ revision: 100, queuedCount: 100 })
-      const promoter = (yield* Ref.get(promoters))[0]
-      if (promoter === undefined) return yield* Effect.die("missing promoter")
-      expect(yield* promoter("missing-thread", 1)).toBe(0)
     }),
   )
 
@@ -187,8 +165,12 @@ describe("Operation", () => {
           threadId: thread.id,
           prompt: "active",
           executionRoute: executionRoute(),
+          executionLink: {
+            runId: "active-control-run",
+            turnId: "active-control",
+            threadId: String(thread.id),
+          },
           status: "running",
-          stopIntent: "none",
           createdAt: 1,
           updatedAt: 1,
         },
@@ -199,7 +181,6 @@ describe("Operation", () => {
           prompt: "queued",
           executionRoute: executionRoute(),
           status: "queued",
-          stopIntent: "none",
           createdAt: 2,
           updatedAt: 2,
         },
@@ -210,35 +191,42 @@ describe("Operation", () => {
           prompt: "queued second",
           executionRoute: executionRoute(),
           status: "queued",
-          stopIntent: "none",
           createdAt: 3,
           updatedAt: 3,
         },
       ])
       const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       const events = yield* Ref.make<ReadonlyArray<InteractiveEvent>>([])
+      const activeCancelled = yield* Deferred.make<void>()
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const dispatch = (event: InteractiveEvent) => runSync(Ref.update(events, (current) => [...current, event]))
-      const controlBackend = ExecutionBackend.Service.of({
+      const controlBackend = ExecutionGateway.Service.of({
         ...backend,
-        inspect: inspectFromTurns(turns),
-        cancel: (turnId) =>
-          Effect.succeed({
-            turnId,
-            status: "cancelled",
-            stopIntent: "none",
-            events: [
-              executionStarted(String(turnId)),
-              {
-                executionId: String(turnId),
-                cursor: "cancelled",
-                sequence: 1,
-                type: "execution.cancelled",
-                timestampSource: "server",
-                createdAt: 3,
-              },
-            ],
-          }),
+        inspectTurn: inspectTurnFromTurns(turns),
+        watchTurn: (link, cursor) =>
+          link.turnId === "active-control"
+            ? Stream.concat(
+                Stream.make({
+                  executionId: link.runId,
+                  cursor: "active-control-started",
+                  sequence: 0,
+                  type: "execution.started" as const,
+                  timestampSource: "baton" as const,
+                  createdAt: 1,
+                }),
+                Stream.fromEffect(Deferred.await(activeCancelled)).pipe(
+                  Stream.map(() => ({
+                    executionId: link.runId,
+                    cursor: "active-control-cancelled",
+                    sequence: 1,
+                    type: "execution.cancelled" as const,
+                    timestampSource: "baton" as const,
+                    createdAt: 4,
+                  })),
+                ),
+              )
+            : backend.watchTurn(link, cursor),
+        cancelTurn: () => Deferred.succeed(activeCancelled, undefined),
       })
       yield* Effect.gen(function* () {
         const session = yield* openInteractiveSession(sessions, {
@@ -254,14 +242,15 @@ describe("Operation", () => {
         yield* session.submit("later")
         yield* session.steerQueued("queued-control-2", "redirect")
         yield* session.cancel
+        while ((yield* turns.get(Turn.TurnId.make("submitted-control")))?.status !== "completed") yield* Effect.yieldNow
         yield* session.reopenThread(2)
-        yield* Effect.yieldNow
+        yield* settleEvents
       }).pipe(
         provideLayer(
           productLayer({
             repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-            backendLayer: Layer.succeed(ExecutionBackend.Service, controlBackend),
+            backendLayer: Layer.succeed(ExecutionGateway.Service, controlBackend),
             defaultWorkspace: "/work",
             makeThreadId: Effect.die("unused"),
             makeTurnId: Effect.succeed(Turn.TurnId.make("submitted-control")),
@@ -271,7 +260,6 @@ describe("Operation", () => {
       )
       const dispatched = yield* Ref.get(events)
       expect(dispatched.some((event) => event._tag === "SelectionLoaded")).toBe(true)
-      expect(dispatched.some((event) => event._tag === "QueueUpdated")).toBe(true)
       expect(
         dispatched
           .filter((event) => event._tag === "ExecutionControlled")
@@ -280,7 +268,6 @@ describe("Operation", () => {
       expect(dispatched.some((event) => event._tag === "TranscriptProjectionPatched")).toBe(true)
       expect(yield* turns.get(Turn.TurnId.make("active-control"))).toMatchObject({
         status: "cancelled",
-        lastCursor: "cancelled",
       })
       expect(yield* turns.get(Turn.TurnId.make("queued-control-2"))).toBeUndefined()
       expect(yield* turns.get(Turn.TurnId.make("submitted-control"))).toMatchObject({ status: "completed" })

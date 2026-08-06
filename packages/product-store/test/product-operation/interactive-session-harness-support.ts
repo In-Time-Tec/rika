@@ -3,9 +3,9 @@ import { Service } from "@rika/product/product-operation-service"
 import * as ThreadRepositoryContract from "@rika/product/thread-repository"
 import * as TranscriptRepositoryContract from "@rika/product/transcript-repository"
 import * as TurnContract from "@rika/product/turn-repository"
-import { Context, Effect, Deferred, Layer, Ref, Scope } from "effect"
+import { Context, Effect, Deferred, Layer, Ref, Scope, Stream } from "effect"
 import { Fixtures as RuntimeFixtures } from "./interactive-session-runtime-support"
-import { productLayer, thread, active, serverEvents, waitForSessions } from "./interactive-session-base-support"
+import { productLayer, thread, active, waitForSessions } from "./interactive-session-base-support"
 import { storeCompletedTranscript } from "./interactive-session-completion-support"
 
 export interface InteractiveHarness {
@@ -49,7 +49,6 @@ const makeHarnessImplementation: (
       initialTurnsCompleted
         ? Object.assign({}, turn, {
             status: "completed" as const,
-            lastCursor: `${turn.id}-completed`,
             updatedAt: 2,
           })
         : turn,
@@ -61,176 +60,68 @@ const makeHarnessImplementation: (
     const hiddenExecutions = yield* Ref.make<ReadonlySet<string>>(new Set())
     const transcripts = yield* RuntimeFixtures.TranscriptRepository.makeMemory({ turns })
     if (initialTurnsCompleted)
-      yield* Effect.forEach(initialTurns, (turn) => storeCompletedTranscript(transcripts, turn, turn.lastCursor!), {
-        discard: true,
-      })
+      yield* Effect.forEach(
+        initialTurns,
+        (turn) => storeCompletedTranscript(transcripts, turn, `${turn.id}-completed`),
+        { discard: true },
+      )
     const record = (...call: ReadonlyArray<unknown>) => Ref.update(controls, (calls) => [...calls, call])
-    const backend = RuntimeFixtures.ExecutionBackend.Service.of({
-      invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
-      createFanOut: () => Effect.die("unused"),
-      inspectFanOut: () => Effect.die("unused"),
-      cancelFanOut: () => Effect.die("unused"),
-      registerWorkflows: () => Effect.die("unused"),
-      startWorkflow: () => Effect.die("unused"),
-      inspectWorkflow: () => Effect.die("unused"),
-      cancelWorkflow: () => Effect.die("unused"),
-      start: (input) =>
+    const backend = RuntimeFixtures.ExecutionGateway.Service.of({
+      startTurn: (input) =>
         completion !== undefined
-          ? record("start", input.turnId).pipe(
+          ? record("startTurn", input.turnId).pipe(
               Effect.tap(() =>
                 input.turnId === completion.finalTurnId
                   ? Deferred.succeed(completion.finished, undefined)
                   : Effect.void,
               ),
-              Effect.as({
-                turnId: input.turnId,
-                status: "completed" as const,
-                events: serverEvents([
-                  {
-                    executionId: input.turnId,
-                    cursor: "queued-started",
-                    sequence: 0,
-                    type: "execution.started",
-                    createdAt: 2,
-                  },
-                  {
-                    executionId: input.turnId,
-                    cursor: "queued-done",
-                    sequence: 1,
-                    type: "execution.completed",
-                    createdAt: 3,
-                  },
-                ]),
-              }),
+              Effect.as({ runId: `${input.turnId}-run`, turnId: input.turnId, threadId: input.threadId }),
             )
           : Effect.die("unused"),
-      ...(completion !== undefined
-        ? {
-            follow: (
-              turnId: string,
-              checkpoint: string | RuntimeFixtures.ExecutionEvent.ExecutionCheckpoint | undefined,
-              onEvent?: (event: RuntimeFixtures.ExecutionEvent.Event) => void,
-            ) => {
-              const afterCursor = typeof checkpoint === "string" ? checkpoint : checkpoint?.cursor
-              const output: RuntimeFixtures.ExecutionEvent.Event = {
-                executionId: turnId,
-                cursor: "resumed-output",
-                sequence: 2,
-                type: "model.output.completed",
-                createdAt: 2,
-                timestampSource: "server",
-                text: "created file",
-              }
-              const completed: RuntimeFixtures.ExecutionEvent.Event = {
-                executionId: turnId,
-                cursor: "resumed-done",
-                sequence: 3,
-                type: "execution.completed",
-                createdAt: 3,
-                timestampSource: "server",
-              }
-              return record("follow", turnId, afterCursor).pipe(
-                Effect.andThen(turnId === "active" ? Deferred.await(completion.release) : Effect.void),
-                Effect.tap(() => Effect.sync(() => onEvent?.(output))),
-                Effect.tap(() => Effect.sync(() => onEvent?.(completed))),
-                Effect.as({ turnId, status: "completed" as const, events: [output, completed] }),
-              )
-            },
-          }
-        : {}),
-      inspect: (turnId) =>
+      watchTurn: (link, cursor) =>
+        completion !== undefined
+          ? Stream.unwrap(
+              Effect.gen(function* () {
+                yield* record("watchTurn", link.turnId, cursor)
+                if (link.turnId === "active") yield* Deferred.await(completion.release)
+                const output: RuntimeFixtures.ExecutionEvent.Event = {
+                  executionId: link.runId,
+                  cursor: "resumed-output",
+                  sequence: 2,
+                  type: "model.output.completed",
+                  createdAt: 2,
+                  timestampSource: "baton",
+                  text: "created file",
+                }
+                const completed: RuntimeFixtures.ExecutionEvent.Event = {
+                  executionId: link.runId,
+                  cursor: "resumed-done",
+                  sequence: 3,
+                  type: "execution.completed",
+                  createdAt: 3,
+                  timestampSource: "baton",
+                }
+                return Stream.fromIterable([output, completed])
+              }),
+            )
+          : Stream.empty,
+      inspectTurn: (link) =>
         Ref.get(hiddenExecutions).pipe(
           Effect.map((hidden) =>
-            turnId === "recorded-shell" || hidden.has(turnId)
-              ? undefined
-              : { turnId, status: "running" as const, waits: [], pendingTools: [], children: [] },
+            link.turnId === "recorded-shell" || hidden.has(link.turnId)
+              ? { status: "unavailable" as const }
+              : { status: "running" as const },
           ),
         ),
-      steer: (turnId, text, idempotencyIdentity) =>
-        record("steer", turnId, text, idempotencyIdentity).pipe(
-          Effect.as({ steeringMessageId: `steering:${turnId}:steering:0`, sequence: 0 }),
-        ),
-      cancel: (turnId) =>
-        record("cancel", turnId).pipe(
+      steerTurn: (link, input) => record("steerTurn", link.turnId, input.text, input.idempotencyKey),
+      cancelTurn: (link) =>
+        record("cancelTurn", link.turnId).pipe(
           Effect.andThen(
             cancelFailure
-              ? Effect.fail(RuntimeFixtures.ExecutionBackend.BackendError.make({ message: "cancel unavailable" }))
+              ? Effect.fail(RuntimeFixtures.ExecutionGateway.CancelTurnFailure.make({ message: "cancel unavailable" }))
               : Effect.void,
           ),
-          Effect.as({
-            turnId,
-            status: "cancelled" as const,
-            events: serverEvents([
-              {
-                executionId: turnId,
-                cursor: "cancel-cursor",
-                sequence: 1,
-                type: "execution.cancelled",
-                createdAt: 1,
-              },
-            ]),
-          }),
         ),
-      replay: (turnId, cursor) =>
-        record("replay", turnId, cursor).pipe(
-          Effect.as({
-            turnId,
-            status: "running" as const,
-            events:
-              cursor === undefined
-                ? serverEvents([
-                    {
-                      executionId: turnId,
-                      cursor: "active-cursor",
-                      sequence: 0,
-                      type: "execution.started",
-                      createdAt: 0,
-                    },
-                  ])
-                : [],
-            lastCursor: cursor ?? "active-cursor",
-          }),
-        ),
-      ...(pagedEvents === undefined
-        ? {}
-        : {
-            pageEvents: (turnId: string, direction: "forward" | "backward", cursor?: string, limit = 200) => {
-              let boundary: number
-              if (cursor === undefined) {
-                boundary = direction === "forward" ? 0 : pagedEvents.length
-              } else {
-                boundary = pagedEvents.findIndex((event) => event.cursor === cursor)
-                if (direction === "forward") boundary += 1
-              }
-              const page =
-                direction === "forward"
-                  ? pagedEvents.slice(boundary, boundary + limit)
-                  : pagedEvents.slice(Math.max(0, boundary - limit), boundary)
-              const hasMore =
-                direction === "forward" ? boundary + page.length < pagedEvents.length : boundary > page.length
-              return record("page", turnId, direction, cursor, limit).pipe(
-                Effect.as({
-                  events: page,
-                  hasMore,
-                  ...(page[0] === undefined
-                    ? {}
-                    : {
-                        oldestCursor:
-                          direction === "backward" && stalePageCursor && cursor !== undefined ? cursor : page[0].cursor,
-                      }),
-                  ...(page.at(-1) === undefined
-                    ? {}
-                    : {
-                        newestCursor:
-                          direction === "forward" && stalePageCursor && cursor !== undefined
-                            ? cursor
-                            : page.at(-1)!.cursor,
-                      }),
-                }),
-              )
-            },
-          }),
-      resolveInvocationSource: () => Effect.die("unused"),
     })
     const selectionTurns: TurnContract.Interface =
       turnPageRequests === undefined
@@ -246,7 +137,7 @@ const makeHarnessImplementation: (
       repositoryLayer: Layer.succeed(RuntimeFixtures.ThreadRepository.Service, repositories),
       turnRepositoryLayer: Layer.succeed(RuntimeFixtures.TurnRepository.Service, selectionTurns),
       transcriptRepositoryLayer: Layer.succeed(RuntimeFixtures.TranscriptRepository.Service, transcripts),
-      backendLayer: Layer.succeed(RuntimeFixtures.ExecutionBackend.Service, backend),
+      backendLayer: Layer.succeed(RuntimeFixtures.ExecutionGateway.Service, backend),
       defaultWorkspace: "/work",
       makeThreadId: Effect.die("unused"),
       makeTurnId: Effect.succeed(RuntimeFixtures.Turn.TurnId.make("pending")),

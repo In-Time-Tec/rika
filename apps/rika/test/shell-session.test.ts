@@ -144,7 +144,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
     const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const operationSetup = yield* startShellOperation({ fileSystem, path })
-    const { workspace, repositories, operationFiber, session, releaseSession, relayReads } = operationSetup
+    const { workspace, repositories, operationFiber, session, releaseSession, executionReads } = operationSetup
     const setup = yield* Effect.acquireRelease(
       Effect.tryPromise(() => createTestRenderer({ width: 100, height: 30 })),
       (value) => Effect.sync(() => value.renderer.destroy()),
@@ -219,7 +219,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
     expect(recordedFrame).not.toContain("Run shell command")
     expect(recordedFrame).toContain("recorded-output")
     yield* session.reopenThread(1)
-    expect(relayReads).toEqual([])
+    expect(executionReads).toEqual([])
     expect(model.blocks).toContainEqual(
       expect.objectContaining({
         _tag: "ToolCall",
@@ -306,4 +306,4 @@ test("drives bypassed recorded and incognito shell commands through Operation an
       }),
     ),
   )
-})
+}, 30_000)

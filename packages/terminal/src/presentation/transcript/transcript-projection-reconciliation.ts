@@ -221,7 +221,6 @@ const nestedChildUnitImpl = (
     case "Diff":
     case "ContextUsage":
     case "Compaction":
-    case "Workflow":
     case "ImageAttachment":
       return undefined
     default:

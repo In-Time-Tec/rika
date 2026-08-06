@@ -6,8 +6,6 @@
   "type": "module",
   "exports": {
     "./behavior-mode": "./src/model-routing/behavior-mode.ts",
-    "./model-catalog": "./src/model-routing/model-catalog.ts",
-    "./model-preset": "./src/model-routing/model-preset.ts",
     "./model-route": "./src/model-routing/model-route.ts",
     "./model-route-label": "./src/model-routing/model-route-label.ts",
     "./model-route-resolution": "./src/model-routing/model-route-resolution.ts",

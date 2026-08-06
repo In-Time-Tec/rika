@@ -35,6 +35,22 @@ test("settles cancellation without adding a textual notice", () => {
   expect(cancelled.items).toEqual([])
   expect(cancelled.input).toBe("")
 })
+test("does not append a generic failure after the durable error arrived", () => {
+  const failure = { _tag: "Error" as const, title: "Model authentication failed", detail: "Credential rejected" }
+  const model: Model = {
+    ...initial("/work"),
+    busy: true,
+    activeTurnId: "turn",
+    blocks: [failure],
+    items: [{ _tag: "Block", index: 0, turnId: "turn" }],
+  }
+
+  const settled = update(model, { _tag: "ExecutionFailed", turnId: "turn", message: "Execution failed" })
+
+  expect(settled.blocks).toEqual([failure])
+  expect(settled.items).toHaveLength(1)
+  expect(settled.busy).toBe(false)
+})
 test("does not add a fallback marker when the parent cancellation event arrived first", () => {
   const parent = {
     _tag: "ToolCall" as const,
@@ -227,6 +243,21 @@ test("toggles every transcript detail as one reducer action", () => {
   expect(model.expandedRowKeys).toEqual(["block:Reasoning:0", "tool:read", "block:Diff:2"])
   model = update(model, { _tag: "AllDetailsToggled" })
   expect(model.expandedRowKeys).toEqual([])
+})
+test("toggles all error details with uppercase D only when the composer is empty", () => {
+  const base = {
+    ...initial("/work"),
+    blocks: [{ _tag: "Error", title: "Execution failed", detail: "Model unavailable" }],
+  } as Model
+
+  const expanded = update(base, { _tag: "KeyPressed", key: key({ name: "d", sequence: "D", shift: true }) })
+  expect(expanded.expandedRowKeys).toEqual(["block:Error:0"])
+
+  const typed = update(
+    { ...base, input: "draft", cursor: 5 },
+    { _tag: "KeyPressed", key: key({ name: "d", sequence: "D", shift: true }) },
+  )
+  expect(typed).toMatchObject({ input: "draftD", expandedRowKeys: [] })
 })
 test("keeps an unchanged changed-files snapshot stable", () => {
   const files = [{ path: "src/a.ts", status: "M", added: 1, removed: 2 }]

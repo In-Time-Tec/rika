@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest"
 import * as ContextMeter from "../src/state/model/terminal-context-meter"
+import { glyphFallbacks } from "../src/state/model/terminal-context-meter-glyph"
 
 const reading = (inputTokens: number): ContextMeter.Reading => ({
   inputTokens,
@@ -15,20 +16,32 @@ describe("ContextMeter", () => {
     expect(ContextMeter.meter(reading(900_000))).toMatchObject({ percent: 98, tone: "critical" })
   })
 
-  test("renders a fixed-width fractional bar with a deterministic active shimmer", () => {
+  test("renders the v0.1.7 line-weight meter and bouncing scanner", () => {
     const idle = ContextMeter.meter(reading(208_294))
-    const active = ContextMeter.meter(reading(208_294), { animated: true, phase: 1 })
-
     expect(idle.glyphs).toHaveLength(8)
-    expect(idle.glyphs.join("")).toBe("█▊░░░░░░")
-    expect(active.glyphs).toEqual(idle.glyphs)
-    expect(active.highlight).toBe(1)
-    expect(ContextMeter.loadingMeter(3).join("")).toBe("░░░▓░░░░")
+    expect(idle.glyphs.join("")).toBe("━━╌╌╌╌╌╌")
+    expect(ContextMeter.loadingMeter(0).join("")).toBe("╌╌╌╌╌╌╌━")
+    expect(ContextMeter.loadingMeter(7).join("")).toBe("━╌╌╌╌╌╌╌")
+    expect(ContextMeter.loadingMeter(8).join("")).toBe("╌━╌╌╌╌╌╌")
+  })
+
+  test("renders deterministic muncher, vacuum, flash, and fallback glyphs", () => {
+    expect(ContextMeter.animatedGlyphs(reading(208_294), { cells: 8, tick: 0, streaming: true }).join("")).toBe(
+      "━ᗧ······",
+    )
+    expect(ContextMeter.animatedGlyphs(reading(208_294), { cells: 8, tick: 1, streaming: true }).join("")).toBe(
+      "━ᗤ······",
+    )
+    expect(ContextMeter.animatedGlyphs(reading(208_294), { cells: 8, tick: 0, flashTicks: 2 }).join("")).toBe(
+      "━✦╌╌╌╌╌╌",
+    )
+    expect(ContextMeter.animatedGlyphs(reading(208_294), { cells: 8, tick: 0, compactFromPercent: 75 })).toContain("≪")
+    expect(glyphFallbacks).toEqual({ muncherOpen: "C", muncherClosed: "c" })
   })
 
   test("caps the visual indicator while preserving over-budget pressure", () => {
     expect(ContextMeter.meter(reading(1_000_000))).toMatchObject({
-      glyphs: ["█", "█", "█", "█", "█", "█", "█", "█"],
+      glyphs: ["━", "━", "━", "━", "━", "━", "━", "━"],
       percent: 100,
       tone: "critical",
     })

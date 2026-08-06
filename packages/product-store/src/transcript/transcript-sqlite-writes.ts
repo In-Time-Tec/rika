@@ -52,12 +52,12 @@ const makeTranscriptSqliteWrites = (
       .withTransaction(
         Effect.gen(function* () {
           yield* sql`INSERT INTO rika_turns (
-            id, thread_id, turn_kind, prompt, shell_command, status, stop_intent,
+            id, thread_id, turn_kind, prompt, shell_command, status,
             shell_result_text, shell_result_truncated, shell_result_exit_code,
             author_json, lineage_json, created_at, updated_at
           ) VALUES (
             ${turn.id}, ${turn.threadId}, 'RecordedShell', ${turn.prompt}, ${turn.command},
-            ${turn.status}, 'none', ${result?.text ?? null},
+            ${turn.status}, ${result?.text ?? null},
             ${resultTruncated}, ${result?.exitCode ?? null},
             '{"_tag":"Human"}', '{"_tag":"Original"}', ${turn.createdAt}, ${turn.updatedAt}
           )`
@@ -128,9 +128,8 @@ const makeTranscriptSqliteWrites = (
         .withTransaction(
           Effect.gen(function* () {
             const adopted = yield* sql`UPDATE rika_turns
-          SET status = ${replacementTurn.status}, last_cursor = ${replacementTurn.lastCursor}
+          SET status = ${replacementTurn.status}
           WHERE id = ${turn.id} AND status = ${turn.status}
-            AND last_cursor IS ${turn.lastCursor ?? null}
           RETURNING id`
             if (adopted.length === 0) return yield* refoldStale
             if (!(yield* replaceCheckpointForRefold(replacementTurn, projection, options))) return yield* refoldStale

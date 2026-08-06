@@ -1,12 +1,19 @@
 import * as Thread from "@rika/product/thread-record"
+import * as TurnRepository from "@rika/product/turn-repository"
 import { Effect, Fiber, Ref, Scope, Semaphore } from "effect"
 import { OperationUnavailable } from "../contract/product-operation"
-import { makeInteractiveOperationFeed } from "./interactive-operation-feed"
+import { OperationError } from "../operation-error"
+import type * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
+import type { InteractiveEvent } from "./interactive-event"
+import {
+  makeInteractiveOperationFeed,
+  type InteractiveOperationFeed,
+  type SelectionLoad,
+} from "./interactive-operation-feed"
 import { makeInteractiveSessionComposition } from "./interactive-session-composition"
 import { makeInteractiveSelectionProjection } from "./interactive-selection-projection"
 import { dispatchInteractiveFailure } from "./interactive-session-errors"
 import type { SelectionEpochState } from "./interactive-thread-selection"
-import type { InteractiveOperationFeed } from "./interactive-operation-feed"
 
 export interface InteractiveSessionState {
   readonly operationFeed: InteractiveOperationFeed
@@ -20,9 +27,61 @@ export interface InteractiveSessionState {
   readonly getSelectedThreadId: () => string | undefined
   readonly getActiveSelectionState: () => SelectionEpochState | undefined
   readonly dispatchFailure: typeof dispatchInteractiveFailure
+  readonly selectionDispatch: InteractiveOperationFeed["selectionDispatch"]
+  readonly sessionDispatch: InteractiveOperationFeed["sessionDispatch"]
+  readonly selectionRequest: Ref.Ref<number>
+  readonly interactiveThread: Ref.Ref<Thread.Thread | undefined>
+  readonly getSelectionLoad: () => SelectionLoad | undefined
+  readonly setSelectionLoad: (value: SelectionLoad | undefined) => void
+  readonly getSelectionLoadFiber: () => Fiber.Fiber<unknown, unknown> | undefined
+  readonly setSelectionLoadFiber: (value: Fiber.Fiber<unknown, unknown> | undefined) => void
+  readonly setCurrentSelectionEpoch: (value: number) => void
+  readonly setSelectedThreadId: (value: string | undefined) => void
+  readonly getCandidateSelectionState: () => SelectionEpochState | undefined
+  readonly setCandidateSelectionState: (value: SelectionEpochState | undefined) => void
+  readonly setActiveSelectionState: (value: SelectionEpochState | undefined) => void
+  readonly selectionBackground: Array<Fiber.Fiber<unknown, unknown>>
+  readonly isCurrentSelectionState: (state: SelectionEpochState) => boolean
+  readonly finishSelection: (epoch: number) => Effect.Effect<void, never, never>
+  readonly interruptSelectionBackground: Effect.Effect<void, never, never>
+  readonly interruptSelectionLoad: Effect.Effect<void, never, never>
+  readonly openSelectionProjectionFeed: (state: SelectionEpochState) => Effect.Effect<void, OperationError, never>
+  readonly startSelectionProjectionFeed: (
+    state: SelectionEpochState,
+    dispatch: (event: InteractiveEvent) => void,
+  ) => Effect.Effect<void, never, never>
+  readonly closeCandidateProjectionFeed: (state: SelectionEpochState) => Effect.Effect<void, never, never>
+  readonly activateCreatedThread: (
+    thread: Thread.Thread,
+    epoch: number,
+    dispatch: (event: InteractiveEvent) => void,
+  ) => Effect.Effect<void, OperationError | TurnRepository.RepositoryError, TurnRepository.Service>
+  readonly selectionAdmission: Semaphore.Semaphore
+  readonly transcriptPageAdmission: Semaphore.Semaphore
+  readonly submissionAdmission: Semaphore.Semaphore
+  readonly sessionClosed: OperationUnavailable
 }
 
-export const makeInteractiveSessionState = (input: any): Effect.Effect<InteractiveSessionState, never, never> =>
+export interface InteractiveSessionStateInput {
+  readonly sessionId: number
+  readonly executionIngest: ExecutionIngest.Interface
+  readonly publishInteractiveActivity: (origin: number, event: InteractiveEvent) => InteractiveEvent
+  readonly activitySequence: number
+  readonly initialThreadId: string | undefined
+  readonly serverOwner: boolean
+  readonly options: import("../dispatch/product-operation-options").ProductLayerOptions<
+    Error,
+    Error,
+    Error,
+    Error,
+    Error,
+    Error
+  >
+}
+
+export const makeInteractiveSessionState = (
+  input: InteractiveSessionStateInput,
+): Effect.Effect<InteractiveSessionState, never, never> =>
   Effect.gen(function* () {
     const { sessionId, executionIngest, publishInteractiveActivity, activitySequence, initialThreadId } = input
     let selectedThreadId = initialThreadId
@@ -131,17 +190,17 @@ export const makeInteractiveSessionState = (input: any): Effect.Effect<Interacti
       selectionRequest,
       interactiveThread,
       getSelectionLoad: () => selectionLoad,
-      setSelectionLoad: (value: any) => (selectionLoad = value),
+      setSelectionLoad: (value: SelectionLoad | undefined) => (selectionLoad = value),
       getSelectionLoadFiber: () => selectionLoadFiber,
-      setSelectionLoadFiber: (value: any) => (selectionLoadFiber = value),
+      setSelectionLoadFiber: (value: Fiber.Fiber<unknown, unknown> | undefined) => (selectionLoadFiber = value),
       getCurrentSelectionEpoch: () => currentSelectionEpoch,
       setCurrentSelectionEpoch: (value: number) => (currentSelectionEpoch = value),
       getSelectedThreadId: () => selectedThreadId,
       setSelectedThreadId: (value: string | undefined) => (selectedThreadId = value),
       getActiveSelectionState: () => activeSelectionState,
-      setActiveSelectionState: (value: any) => (activeSelectionState = value),
+      setActiveSelectionState: (value: SelectionEpochState | undefined) => (activeSelectionState = value),
       getCandidateSelectionState: () => candidateSelectionState,
-      setCandidateSelectionState: (value: any) => (candidateSelectionState = value),
+      setCandidateSelectionState: (value: SelectionEpochState | undefined) => (candidateSelectionState = value),
       selectionBackground,
       isCurrentSelectionState,
       finishSelection,

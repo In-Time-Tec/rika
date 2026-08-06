@@ -1,15 +1,14 @@
 import { CliRenderEvents } from "@opentui/core"
 import type { Model } from "../../state/model/terminal-state"
 import { contentColumnWidth } from "../../state/model/terminal-layout-state"
-import { isThreadBusy } from "../../state/model/terminal-thread-predicate"
-import { type ThreadItem } from "../../state/model/terminal-thread-state"
 import { pinnedRowWindow } from "../../presentation/transcript/transcript-row-window-state"
 import { isFollowing } from "../../presentation/transcript/transcript-viewport"
 import { prependedTranscriptItems } from "./opentui-lifecycle-transcript"
 import { maxMountedTranscriptEntries } from "../rendering/opentui-render-transcript-window"
 import { idleSpinnerFrame, spinnerInterval } from "../rendering/opentui-spinner"
 import { SurfaceLifecycleTranscript } from "./opentui-lifecycle-transcript-update"
-import { panelLoading } from "./opentui-surface-content"
+import { animationActive } from "./opentui-surface-content"
+import { welcomeAnimationActive } from "./opentui-welcome-state"
 
 export abstract class SurfaceLifecycle extends SurfaceLifecycleTranscript {
   protected readonly onSelection = (selection: { getSelectedText: () => string }) => {
@@ -112,21 +111,19 @@ export abstract class SurfaceLifecycle extends SurfaceLifecycleTranscript {
         if (this.model !== undefined) this.syncTranscriptScrollbar()
       })
     }
-    const panelLoadingLabel = panelLoading(model)
-    const loaderActive =
-      model.busy ||
-      model.activity !== undefined ||
-      panelLoadingLabel !== undefined ||
-      (model.usageDisplay === "time" &&
-        model.usageTime?._tag === "Available" &&
-        model.usageTime.activeSince !== undefined) ||
-      (model.threadSidebar.open &&
-        (model.threads as ReadonlyArray<ThreadItem>).some((thread) => isThreadBusy(thread.status)))
+    const loaderActive = animationActive(model)
     if (this.options.animate !== false && loaderActive && this.loaderTimer === undefined) {
       this.loaderTimer = this.clock.setInterval(() => this.tickLoader(), spinnerInterval)
     } else if ((this.options.animate === false || !loaderActive) && this.loaderTimer !== undefined) {
       this.clock.clearInterval(this.loaderTimer)
       this.loaderTimer = undefined
+    }
+    const welcomeActive = welcomeAnimationActive(model)
+    if (this.options.animate !== false && welcomeActive && this.welcomeTimer === undefined) {
+      this.welcomeTimer = this.clock.setInterval(() => this.tickWelcome(), spinnerInterval)
+    } else if ((this.options.animate === false || !welcomeActive) && this.welcomeTimer !== undefined) {
+      this.clock.clearInterval(this.welcomeTimer)
+      this.welcomeTimer = undefined
     }
     this.updateOverlay(
       model,

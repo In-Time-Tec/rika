@@ -18,7 +18,6 @@ export const Presentation = Schema.Struct({
       "guidance file",
       "search",
       "web search",
-      "review",
       "GitHub check",
       "list",
     ]),
@@ -90,11 +89,6 @@ const ChildAgent = Schema.TaggedStruct("ChildAgent", {
   status: Schema.Literals(["running", "complete", "failed", "cancelled"]),
   activity: Schema.Array(Schema.String),
 })
-const Workflow = Schema.TaggedStruct("Workflow", {
-  name: Schema.String,
-  step: Schema.String,
-  status: Schema.Literals(["running", "waiting", "complete", "failed"]),
-})
 const ImageAttachment = Schema.TaggedStruct("ImageAttachment", {
   name: Schema.String,
   mediaType: Schema.String,
@@ -113,7 +107,6 @@ export const Block = Schema.Union([
   Notification,
   ErrorBlock,
   ChildAgent,
-  Workflow,
   ImageAttachment,
 ])
 export type Block = typeof Block.Type

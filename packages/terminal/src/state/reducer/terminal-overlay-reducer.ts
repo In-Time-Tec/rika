@@ -139,20 +139,28 @@ const reduceOverlayImpl = (
         activeTurnId: undefined,
       }
     }
-    case "ExecutionFailed":
+    case "ExecutionFailed": {
       if (message.turnId !== undefined && model.activeTurnId !== message.turnId) return model
+      const alreadyPresented = (model.items as ReadonlyArray<TranscriptItem>).some(
+        (item) =>
+          item._tag === "Block" &&
+          (message.turnId === undefined || item.turnId === message.turnId) &&
+          (model.blocks[item.index] as TranscriptBlock | undefined)?._tag === "Error",
+      )
       return {
         ...model,
-        blocks: [
-          ...model.blocks,
-          {
-            _tag: "Error",
-            title: "Message failed",
-            detail: message.message,
-            recovery: "Press Enter to try again.",
-          },
-        ],
-        items: [...model.items, { _tag: "Block", index: model.blocks.length }],
+        blocks: alreadyPresented
+          ? model.blocks
+          : [
+              ...model.blocks,
+              {
+                _tag: "Error",
+                title: "Message failed",
+                detail: message.message,
+                recovery: "Press Enter to try again.",
+              },
+            ],
+        items: alreadyPresented ? model.items : [...model.items, { _tag: "Block", index: model.blocks.length }],
         submittedDrafts: dropSubmittedDrafts(model.submittedDrafts, message.turnId),
         pendingSteering: settleSteering(model, message.turnId ?? model.activeTurnId).pendingSteering,
         cancelPending: false,
@@ -160,6 +168,7 @@ const reduceOverlayImpl = (
         activity: undefined,
         activeTurnId: undefined,
       }
+    }
     case "ExecutionCancelled": {
       const turnId = message.turnId ?? model.activeTurnId
       const taken = takeSubmittedDraft(model.submittedDrafts, turnId)
@@ -264,6 +273,8 @@ const reduceOverlayImpl = (
           turns: message.turns.map((turn) => ({ prompt: turn.prompt, units: [...turn.units] })),
         }),
       }
+    case "ThreadPreviewFailed":
+      return { ...model, threadPreview: { _tag: "Failed", message: message.message } }
     case "ComposerReplaced":
       return {
         ...model,

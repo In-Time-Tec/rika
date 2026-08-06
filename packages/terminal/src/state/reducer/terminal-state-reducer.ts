@@ -8,12 +8,13 @@ import type { Model } from "../model/terminal-state"
 import type { TranscriptBlock } from "../model/terminal-transcript-state"
 import type { ChangedFile } from "../model/terminal-changed-file"
 import type { ComposerAttachment } from "../model/terminal-composer-state"
-import type { ContextUsage } from "../model/terminal-context-usage"
 import { reduceData } from "./terminal-data-reducer"
 import { reduceExecution } from "./terminal-execution-reducer"
 import { reduceOverlay } from "./terminal-overlay-reducer"
 import { reduceKeyboard } from "./terminal-keyboard-reducer"
 import { advanceAnimation } from "./terminal-animation-reducer"
+import { contentColumnWidth } from "../model/terminal-layout-state"
+import { reduceModeInteraction } from "./terminal-mode-reducer"
 
 const sameChangedFiles = (left: ReadonlyArray<ChangedFile>, right: ReadonlyArray<ChangedFile>): boolean =>
   left.length === right.length &&
@@ -158,6 +159,10 @@ const toggleContextDetails = (model: Model): Model => {
   return {
     ...model,
     contextDetailsOpen: open,
+    threadSidebar:
+      open && contentColumnWidth(model) < 24
+        ? { ...model.threadSidebar, open: false, focused: false }
+        : model.threadSidebar,
     paletteOpen: false,
     palette: { open: false, query: "", selected: 0 },
     modePicker: { ...model.modePicker, open: false },
@@ -169,6 +174,7 @@ const toggleContextDetails = (model: Model): Model => {
 }
 
 export const canSubmit = (model: Model): boolean =>
+  !model.threadLoading &&
   model.editingTurnId === undefined &&
   !model.threadSwitcher.open &&
   !model.threadSidebar.focused &&
@@ -200,7 +206,7 @@ export const context = {
 }
 
 const updateImpl = (model: Model, message: Message): Model =>
-  (message._tag === "ContextDetailsToggled" ? toggleContextDetails(model) : undefined) ??
+  (message._tag === "ContextDetailsToggled" ? toggleContextDetails(model) : reduceModeInteraction(model, message)) ??
   reduceData(model, message, update) ??
   reduceExecution(model, message, update) ??
   reduceOverlay(model, message, update) ??
@@ -208,12 +214,14 @@ const updateImpl = (model: Model, message: Message): Model =>
   model
 
 export const update: {
-  (model: Model, message: Message, usage?: ContextUsage): Model
+  (model: Model, message: Message): Model
   (message: Message): (model: Model) => Model
 } = Function.dual(
   2,
-  (model: Model, message: Message, usage?: ContextUsage): Model =>
-    advanceAnimation(model, updateImpl(model, message), usage),
+  (model: Model, message: Message): Model =>
+    message._tag === "ContextUsageReplaced"
+      ? advanceAnimation(model, { ...model, contextUsage: message.contextUsage }, message.contextUsage)
+      : advanceAnimation(model, updateImpl(model, message), undefined),
 )
 
 export const reduce = update

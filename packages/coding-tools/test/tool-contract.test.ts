@@ -6,81 +6,6 @@ import { Catalog } from "@rika/coding-tools/coding-tool-catalog"
 import { provide } from "./test-layer"
 
 describe("tool contracts", () => {
-  it.effect("defines the model-facing Task spawn contract without model routing controls", () =>
-    Effect.gen(function* () {
-      const schema = Tool.getJsonSchema(contractFixtures.AgentDefinitions.taskTool)
-      expect(contractFixtures.AgentDefinitions.taskTool.description).toContain(
-        "Start a durable Task subagent for workspace investigation, codebase exploration, reproductions, or implementation",
-      )
-      expect(contractFixtures.AgentDefinitions.taskTool.description).toContain(
-        "Returns immediately while the subagent runs in the background; collect its report with await_subagents.",
-      )
-      expect(contractFixtures.AgentDefinitions.taskTool.description).toContain("prefer the smallest useful batch")
-      expect(contractFixtures.AgentDefinitions.oracleTool.description).toContain("already-gathered evidence")
-      expect(contractFixtures.AgentDefinitions.oracleTool.description).toContain(
-        "do not use it for primary workspace or codebase exploration",
-      )
-      expect(contractFixtures.AgentDefinitions.librarianTool.description).toContain(
-        "substantive external documentation, repository, or codebase research",
-      )
-      expect(contractFixtures.AgentDefinitions.librarianTool.description).toContain("access-controlled GitHub-oriented")
-      expect(contractFixtures.AgentDefinitions.librarianTool.description).toContain("public semantic-code searches")
-      expect(schema).toMatchObject({
-        properties: {
-          prompt: { type: "string" },
-        },
-        required: ["prompt"],
-      })
-      expect(schema.properties).not.toHaveProperty("_batch")
-      expect(schema.properties).not.toHaveProperty("model")
-      expect(
-        yield* Schema.decodeUnknownEffect(contractFixtures.AgentContract.AgentContract.TaskInput)({
-          prompt: "List files",
-        }),
-      ).toEqual({
-        prompt: "List files",
-      })
-    }),
-  )
-
-  it.effect("defines the model-facing subagent join contract", () =>
-    Effect.gen(function* () {
-      const schema = Tool.getJsonSchema(contractFixtures.AgentSelection.awaitSubagentsTool)
-      expect(contractFixtures.AgentSelection.awaitSubagentsTool.name).toBe("await_subagents")
-      expect(contractFixtures.AgentSelection.awaitSubagentsTool.description).toContain(
-        "Collect the reports of subagents started earlier in this turn",
-      )
-      expect(contractFixtures.AgentSelection.awaitSubagentsTool.description).toContain(
-        "You must collect every subagent you started before giving your final answer.",
-      )
-      expect(schema.required).toBeUndefined()
-      expect(yield* Schema.decodeUnknownEffect(contractFixtures.AgentDefinitions.AwaitSubagentsInput)({})).toEqual({})
-      expect(
-        yield* Schema.decodeUnknownEffect(contractFixtures.AgentDefinitions.AwaitSubagentsInput)({ subagents: null }),
-      ).toEqual({
-        subagents: null,
-      })
-      expect(
-        yield* Schema.decodeUnknownEffect(contractFixtures.AgentDefinitions.AwaitSubagentsInput)({
-          subagents: ["child-a"],
-        }),
-      ).toEqual({
-        subagents: ["child-a"],
-      })
-    }),
-  )
-
-  it("reports a started subagent as a running handle instead of a verdict", () => {
-    expect(
-      contractFixtures.AgentContract.AgentContract.spawned({ childExecutionId: "child:execution%3Aturn:call-1" }),
-    ).toEqual({
-      _tag: "Spawned",
-      childExecutionId: "child:execution%3Aturn:call-1",
-      status: "running",
-      next: contractFixtures.AgentContract.AgentContract.spawnedNext,
-    })
-  })
-
   it("defines execution and output policies for every initial tool", () => {
     expect(Catalog.definitions.length).toBeGreaterThanOrEqual(9)
     expect(Catalog.get("missing")).toBeUndefined()
@@ -91,96 +16,23 @@ describe("tool contracts", () => {
       "write",
       "edit",
       "bash",
-      "task",
-      "oracle",
-      "librarian",
-      "review",
-      "surgeon",
-      "read_thread",
-      "await_subagents",
-      "create_thread",
-      "thread_interact",
     ])
   })
 
-  it.effect("defines bounded public thread coordination contracts and policies", () =>
+  it.effect("defines bounded read-only Thread contracts and policies", () =>
     Effect.gen(function* () {
       expect(Object.keys(contractFixtures.ThreadToolkits.toolkit.tools)).toEqual([
         "search_threads",
         "read_thread_transcript",
       ])
       expect(Object.keys(contractFixtures.ThreadToolkits.findToolkit.tools)).toEqual(["find_thread"])
-      expect(Object.keys(contractFixtures.ThreadToolkits.coordinationToolkit.tools)).toEqual([
-        "create_thread",
-        "thread_interact",
-        "wait_for_threads",
-      ])
-      expect(Object.keys(contractFixtures.ThreadToolkits.publicToolkit.tools)).toEqual([
-        "find_thread",
-        "create_thread",
-        "thread_interact",
-        "wait_for_threads",
-      ])
+      expect(Object.keys(contractFixtures.ThreadToolkits.publicToolkit.tools)).toEqual(["find_thread"])
       expect(Object.keys(contractFixtures.ThreadToolkits.allToolkit.tools)).toEqual([
         "search_threads",
         "read_thread_transcript",
         "find_thread",
-        "create_thread",
-        "thread_interact",
-        "wait_for_threads",
       ])
-      expect(
-        yield* Schema.decodeUnknownEffect(contractFixtures.ThreadCoordination.CreateThreadInput)({
-          prompt: "Investigate",
-          mode: "ultra",
-          resultDelivery: "manual",
-        }),
-      ).toEqual({ prompt: "Investigate", mode: "ultra", resultDelivery: "manual" })
-      yield* Effect.flip(
-        Schema.decodeUnknownEffect(contractFixtures.ThreadCoordination.CreateThreadInput)({ prompt: "x", mode: "max" }),
-      )
-      yield* Effect.flip(
-        Schema.decodeUnknownEffect(contractFixtures.ThreadCoordination.CreateThreadInput)({
-          prompt: "😀".repeat(100_001),
-        }),
-      )
-      yield* Effect.flip(
-        Schema.decodeUnknownEffect(contractFixtures.ThreadCoordination.ThreadInteractInput)({
-          action: "status",
-          message: "not valid for status",
-        }),
-      )
-      yield* Effect.flip(
-        Schema.decodeUnknownEffect(contractFixtures.ThreadCoordination.ThreadInteractInput)({
-          action: "steer",
-          threadId: "thread-1",
-        }),
-      )
-      yield* Effect.flip(
-        Schema.decodeUnknownEffect(contractFixtures.ThreadCoordination.WaitForThreadsInput)({
-          targets: [],
-          timeoutSeconds: 1,
-        }),
-      )
-      yield* Effect.flip(
-        Schema.decodeUnknownEffect(contractFixtures.ThreadCoordination.WaitForThreadsInput)({
-          targets: Array.from({ length: 11 }, (_, index) => ({ threadId: `t-${index}`, turnId: `r-${index}` })),
-        }),
-      )
-      yield* Effect.flip(
-        Schema.decodeUnknownEffect(contractFixtures.ThreadCoordination.WaitForThreadsInput)({
-          targets: [{ threadId: "t", turnId: "r" }],
-          timeoutSeconds: 601,
-        }),
-      )
       expect(Catalog.get("find_thread")).toMatchObject({ idempotency: "safe" })
-      expect(Catalog.get("create_thread")).toMatchObject({ idempotency: "unsafe" })
-      expect(Catalog.get("thread_interact")).toMatchObject({ idempotency: "unsafe" })
-      expect(Catalog.get("wait_for_threads")).toMatchObject({
-        idempotency: "safe",
-        outputLimit: 40_000,
-      })
-      expect(contractFixtures.ThreadToolkits.waitHandlerOutputBudget).toBe(36_000)
       expect(contractFixtures.ThreadFind.findDefaultLimit).toBe(10)
       expect(contractFixtures.ThreadFind.findMaximumLimit).toBe(50)
       expect(contractFixtures.ThreadFind.previewDefaultLimit).toBe(10)
@@ -188,63 +40,18 @@ describe("tool contracts", () => {
       yield* Effect.flip(
         Schema.decodeUnknownEffect(contractFixtures.ThreadFind.FindThreadInput)({ query: "all", limit: 51 }),
       )
-      yield* Effect.flip(
-        Schema.decodeUnknownEffect(contractFixtures.ThreadCoordination.ThreadInteractInput)({
-          action: "preview_messages",
-          threadId: "thread-1",
-          limit: 21,
-        }),
-      )
-      expect(
-        yield* Schema.decodeUnknownEffect(contractFixtures.ThreadCoordination.AcceptedSuccess)({
-          schemaVersion: 2,
-          threadId: "thread-1",
-          turnId: "turn-1",
-          resultDelivery: "reply",
-          state: "running",
-        }),
-      ).toMatchObject({ schemaVersion: 2, state: "running" })
-      yield* Effect.flip(
-        Schema.decodeUnknownEffect(contractFixtures.ThreadCoordination.AcceptedSuccess)({
-          schemaVersion: 2,
-          threadId: "thread-1",
-          turnId: "turn-1",
-          resultDelivery: "reply",
-          state: "stopped",
-        }),
-      )
     }),
   )
 
   it("builds the catalog from every registered built-in tool contract", () => {
     const tools = [
       ...Object.values(contractFixtures.RuntimeTools.toolkit.tools),
-      ...Object.values(contractFixtures.AgentToolkits.modelToolkit.tools),
-      ...Object.values(contractFixtures.AgentToolkits.joinToolkit.tools),
       ...Object.values(contractFixtures.ThreadToolkits.allToolkit.tools),
     ]
     expect(Catalog.definitions.map(({ name, description }) => ({ name, description }))).toEqual(
       tools.map(({ name, description }) => ({ name, description })),
     )
   })
-
-  it.effect("preserves Relay invocation time and derives one absolute deadline", () =>
-    Effect.gen(function* () {
-      const invocation = yield* Schema.decodeUnknownEffect(contractFixtures.ToolInvocation.ValueSchema)({
-        executionId: "execution-1",
-        callId: "call-1",
-        toolName: "wait_for_threads",
-        eventSequence: 12,
-        createdAt: 1_721_234_567_890.5,
-        idempotencyKeyDigest: "digest",
-      })
-      expect(invocation.createdAt).toBe(1_721_234_567_890.5)
-      expect(contractFixtures.ToolInvocation.absoluteDeadline(invocation.createdAt, 600_000)).toBe(1_721_235_167_890.5)
-      expect(() => contractFixtures.ToolInvocation.absoluteDeadline(invocation.createdAt, -1)).toThrow(
-        "Invalid tool deadline",
-      )
-    }),
-  )
 
   it("rejects duplicated tools and incomplete registration", () => {
     const registration = contractFixtures.RuntimeTools.registrations.find(({ tool }) => tool.name === "read")!
@@ -329,7 +136,7 @@ describe("tool contracts", () => {
       rowDisplay: "continuation",
       failedLabel: "Command wait failed",
     })
-    expect(Catalog.get("await_subagents")?.presentation).toMatchObject({
+    expect(Catalog.resolvePresentation("await_subagents")).toMatchObject({
       family: "direct",
       action: "await-subagents",
       rowDisplay: "continuation",
@@ -355,7 +162,7 @@ describe("tool contracts", () => {
       activeLabel: "Reading Thread",
       completeLabel: "Read Thread",
     })
-    expect(Catalog.get("oracle")?.presentation).toMatchObject({
+    expect(Catalog.resolvePresentation("oracle")).toMatchObject({
       family: "agent",
       activeLabel: "Oracle exploring",
       completeLabel: "Oracle has spoken",
@@ -373,7 +180,6 @@ describe("tool contracts", () => {
         "run_terminal_command",
         "write_file",
         "finder",
-        "review",
         "transfer_to_oracle",
         "transfer_to_librarian",
         "spawn_child_run",
@@ -381,7 +187,6 @@ describe("tool contracts", () => {
         "list_agent_modes",
         "load_plugin",
         "archive_current_thread",
-        "create_thread",
         "send_message_to_thread",
         "send_message_to_puck",
         "slack_read",
@@ -396,7 +201,6 @@ describe("tool contracts", () => {
       ["run_terminal_command", "Ran"],
       ["write_file", "Created"],
       ["finder", "Searched codebase"],
-      ["review", "Reviewed code"],
       ["transfer_to_oracle", "Oracle has spoken"],
       ["transfer_to_librarian", "Librarian researched"],
       ["spawn_child_run", "Subagent finished"],
@@ -404,7 +208,6 @@ describe("tool contracts", () => {
       ["list_agent_modes", "Checked available agent modes"],
       ["load_plugin", "Loaded plugin"],
       ["archive_current_thread", "Archived this thread"],
-      ["create_thread", "Created thread"],
       ["send_message_to_thread", "Sent message to thread"],
       ["send_message_to_puck", "Sent message to Puck"],
       ["slack_read", "Slack"],

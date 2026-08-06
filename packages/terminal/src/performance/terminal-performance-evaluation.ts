@@ -42,7 +42,7 @@ const toolsPerChild = 4
 const streamedUpdates = 100
 const warmupInteractions = 100
 const interactionSamples = 100
-const childTurnId = (child: number) => `child:performance:agent-${child}`
+const childTurnId = (child: number) => `run-performance-${child}`
 
 const sourceEvent = (
   cursor: string,
@@ -59,7 +59,7 @@ const parentProjection = () =>
         data: { tool_call_id: `agent-${child}`, tool_name: "task", input: { prompt: `Task ${child}` } },
       }),
       sourceEvent(`agent-${child}-spawned`, 2 + child * 2, "child_run.spawned", {
-        data: { tool_call_id: `agent-${child}`, child_execution_id: childTurnId(child) },
+        data: { invocation_id: `agent-${child}`, child_execution_id: childTurnId(child) },
       }),
     ]).flat(),
   ])

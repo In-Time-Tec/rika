@@ -178,6 +178,7 @@ export abstract class SurfaceTranscriptRendering extends SurfaceState {
     readonly width: number
     readonly windowEnd: number
     readonly rowWindowEnd: number
+    readonly animationTick: number
   }): boolean {
     const previous = this.transcriptRenderInput
     return (
@@ -189,7 +190,8 @@ export abstract class SurfaceTranscriptRendering extends SurfaceState {
       previous.detailSelection !== input.detailSelection ||
       previous.width !== input.width ||
       previous.windowEnd !== input.windowEnd ||
-      previous.rowWindowEnd !== input.rowWindowEnd
+      previous.rowWindowEnd !== input.rowWindowEnd ||
+      previous.animationTick !== input.animationTick
     )
   }
 }

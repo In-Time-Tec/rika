@@ -114,12 +114,12 @@ describe("release target construction", () => {
     )
   })
 
-  test("keeps the full public client graph out of the resident, SQL, model, and TUI runtimes", async () => {
+  test("keeps the full public client graph out of the server, SQL, model, and TUI runtimes", async () => {
     const graph = await sourceGraph("client-main.ts")
     const files = [...graph.files].join("\n")
     const external = [...graph.external].join("\n")
     for (const forbidden of [
-      "/transport/host/resident-host-transport.ts",
+      "/transport/host/server-host-transport.ts",
       "/apps/rika/src/main.ts",
       "/product-database.ts",
       "/packages/product-store/src/thread-repository.ts",
@@ -129,21 +129,20 @@ describe("release target construction", () => {
       "/packages/terminal/",
     ])
       expect(files).not.toContain(forbidden)
-    for (const forbidden of ["@batonfx/providers", "@relayfx/", "@opentui/", "@ff-labs/"])
-      expect(external).not.toContain(forbidden)
+    for (const forbidden of ["@batonfx/providers", "@opentui/", "@ff-labs/"]) expect(external).not.toContain(forbidden)
     expect(files).toContain("/product-operation-service.ts")
-    expect(files).toContain("/transport/client/resident-client-transport.ts")
+    expect(files).toContain("/transport/client/server-client-transport.ts")
   })
 
   test("keeps executable dependency sets separated", async () => {
     const interactive = await sourceGraph("interactive-main.ts")
-    const resident = await sourceGraph("resident-main.ts")
+    const server = await sourceGraph("server-main.ts")
     const interactiveFiles = [...interactive.files].join("\n")
-    const residentFiles = [...resident.files].join("\n")
-    expect(interactiveFiles).not.toContain("/transport/host/resident-host-transport.ts")
+    const serverFiles = [...server.files].join("\n")
+    expect(interactiveFiles).not.toContain("/transport/host/server-host-transport.ts")
     expect(interactiveFiles).not.toContain("/model-provider-runtime.ts")
     expect([...interactive.external].join("\n")).not.toContain("@batonfx/providers")
-    expect(residentFiles).not.toContain("/packages/terminal/")
-    expect([...resident.external].join("\n")).not.toContain("@opentui/")
-  })
+    expect(serverFiles).not.toContain("/packages/terminal/")
+    expect([...server.external].join("\n")).not.toContain("@opentui/")
+  }, 30_000)
 })

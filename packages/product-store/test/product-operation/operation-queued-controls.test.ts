@@ -4,13 +4,13 @@ import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
-import * as ExecutionBackend from "@rika/product/execution-service"
-import { Deferred, Effect, Fiber, Layer, Ref } from "effect"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
+import { Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect"
 import * as ResolvedContext from "@rika/product/context-resolution-service"
 import { executionRoute } from "../support/product-test-current-state"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { collectEvents, holdSession, openInteractiveSession, settleEvents } from "../support/operation-session-harness"
-import { backend, inspectFromTurns } from "../support/operation-execution-fixtures"
+import { backend, inspectTurnFromTurns } from "../support/operation-execution-fixtures"
 
 import { turnProvenance, selectionThread } from "../support/operation-selection-fixtures"
 
@@ -27,8 +27,12 @@ describe("Operation", () => {
           threadId: thread.id,
           prompt: "active",
           executionRoute: executionRoute(),
+          executionLink: {
+            runId: "edit-preparation-active-run",
+            turnId: String(activeId),
+            threadId: String(thread.id),
+          },
           status: "running",
-          stopIntent: "none",
           createdAt: 1,
           updatedAt: 1,
         },
@@ -39,7 +43,6 @@ describe("Operation", () => {
           prompt: "original prompt",
           executionRoute: executionRoute(),
           status: "queued",
-          stopIntent: "none",
           createdAt: 2,
           updatedAt: 2,
         },
@@ -52,21 +55,21 @@ describe("Operation", () => {
       const starts = yield* Ref.make<ReadonlyArray<{ readonly prompt: string; readonly status: string | undefined }>>(
         [],
       )
-      const preparedBackend = ExecutionBackend.Service.of({
+      const preparedBackend = ExecutionGateway.Service.of({
         ...backend,
-        inspect: inspectFromTurns(turns),
-        cancel: (turnId) => Effect.succeed({ turnId, status: "cancelled", events: [] }),
-        start: (input) =>
+        inspectTurn: inspectTurnFromTurns(turns),
+        cancelTurn: () => Effect.void,
+        startTurn: (input) =>
           Effect.gen(function* () {
             const persisted = yield* turns.get(Turn.TurnId.make(input.turnId)).pipe(Effect.orDie)
             yield* Ref.update(starts, (all) => [...all, { prompt: input.prompt, status: persisted?.status }])
-            return yield* backend.start(input)
+            return yield* backend.startTurn(input)
           }),
       })
       const layer = productLayer({
         repositoryLayer: ThreadRepository.memoryLayer([thread]),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-        backendLayer: Layer.succeed(ExecutionBackend.Service, preparedBackend),
+        backendLayer: Layer.succeed(ExecutionGateway.Service, preparedBackend),
         resolvedContextLayer: ResolvedContext.testLayer({
           resolve: () =>
             Effect.gen(function* () {
@@ -121,8 +124,12 @@ describe("Operation", () => {
           threadId: thread.id,
           prompt: "active",
           executionRoute: executionRoute(),
+          executionLink: {
+            runId: "dequeue-preparation-active-run",
+            turnId: String(activeId),
+            threadId: String(thread.id),
+          },
           status: "running",
-          stopIntent: "none",
           createdAt: 1,
           updatedAt: 1,
         },
@@ -133,7 +140,6 @@ describe("Operation", () => {
           prompt: "head",
           executionRoute: executionRoute(),
           status: "queued",
-          stopIntent: "none",
           createdAt: 2,
           updatedAt: 2,
         },
@@ -144,7 +150,6 @@ describe("Operation", () => {
           prompt: "next",
           executionRoute: executionRoute(),
           status: "queued",
-          stopIntent: "none",
           createdAt: 3,
           updatedAt: 3,
         },
@@ -155,17 +160,17 @@ describe("Operation", () => {
       const releasePreparation = yield* Deferred.make<void>()
       const preparations = yield* Ref.make(0)
       const starts = yield* Ref.make<ReadonlyArray<string>>([])
-      const preparedBackend = ExecutionBackend.Service.of({
+      const preparedBackend = ExecutionGateway.Service.of({
         ...backend,
-        inspect: inspectFromTurns(turns),
-        cancel: (turnId) => Effect.succeed({ turnId, status: "cancelled", events: [] }),
-        start: (input) =>
-          Ref.update(starts, (all) => [...all, String(input.turnId)]).pipe(Effect.andThen(backend.start(input))),
+        inspectTurn: inspectTurnFromTurns(turns),
+        cancelTurn: () => Effect.void,
+        startTurn: (input) =>
+          Ref.update(starts, (all) => [...all, String(input.turnId)]).pipe(Effect.andThen(backend.startTurn(input))),
       })
       const layer = productLayer({
         repositoryLayer: ThreadRepository.memoryLayer([thread]),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-        backendLayer: Layer.succeed(ExecutionBackend.Service, preparedBackend),
+        backendLayer: Layer.succeed(ExecutionGateway.Service, preparedBackend),
         resolvedContextLayer: ResolvedContext.testLayer({
           resolve: () =>
             Effect.gen(function* () {
@@ -218,8 +223,12 @@ describe("Operation", () => {
           threadId: thread.id,
           prompt: "active",
           executionRoute: executionRoute(),
+          executionLink: {
+            runId: "steer-race-run",
+            turnId: "steer-race-active",
+            threadId: String(thread.id),
+          },
           status: "running",
-          stopIntent: "none",
           createdAt: 1,
           updatedAt: 1,
         },
@@ -230,7 +239,6 @@ describe("Operation", () => {
           prompt: "queued prompt",
           executionRoute: executionRoute(),
           status: "queued",
-          stopIntent: "none",
           createdAt: 2,
           updatedAt: 2,
         },
@@ -248,13 +256,11 @@ describe("Operation", () => {
             : turns.takeQueued(id),
       })
       const steers = yield* Ref.make<ReadonlyArray<string>>([])
-      const raceBackend = ExecutionBackend.Service.of({
+      const raceBackend = ExecutionGateway.Service.of({
         ...backend,
-        inspect: (turnId) => Effect.succeed({ turnId, status: "running", waits: [], pendingTools: [], children: [] }),
-        steer: (turnId, text) =>
-          Ref.update(steers, (values) => [...values, text]).pipe(
-            Effect.as({ steeringMessageId: `steering:${turnId}:steering:0`, sequence: 0 }),
-          ),
+        inspectTurn: () => Effect.succeed({ status: "running" }),
+        watchTurn: () => Stream.never,
+        steerTurn: (_link, input) => Ref.update(steers, (values) => [...values, input.text]),
       })
       const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
       yield* Effect.gen(function* () {
@@ -266,7 +272,7 @@ describe("Operation", () => {
         yield* session.selectThread(thread.id, 1)
         const steering = yield* Effect.forkChild(session.steerQueued("steer-race-queued", "fallback"))
         yield* Deferred.await(queuedRead)
-        yield* turns.setStatus(Turn.TurnId.make("steer-race-active"), "completed", undefined, 3)
+        yield* turns.setStatus(Turn.TurnId.make("steer-race-active"), "completed", 3)
         expect((yield* turns.claimNextQueued(thread.id, 4))?.turn.id).toBe("steer-race-queued")
         yield* Deferred.succeed(releaseQueuedRead, undefined)
         yield* Fiber.join(steering)
@@ -275,7 +281,7 @@ describe("Operation", () => {
           productLayer({
             repositoryLayer: ThreadRepository.memoryLayer([thread]),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, delayedTurns),
-            backendLayer: Layer.succeed(ExecutionBackend.Service, raceBackend),
+            backendLayer: Layer.succeed(ExecutionGateway.Service, raceBackend),
             defaultWorkspace: "/work",
             makeThreadId: Effect.die("unused"),
             makeTurnId: Effect.die("unused"),

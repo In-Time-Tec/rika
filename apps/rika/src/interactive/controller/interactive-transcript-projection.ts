@@ -21,22 +21,6 @@ export const cleared = (model: Model): Model => ({
   eventCursor: undefined,
 })
 
-const retainingImpl = (model: Model, previous: Model): Model => ({
-  ...model,
-  entries: previous.entries,
-  blocks: previous.blocks,
-  items: previous.items,
-  seenEventIds: previous.seenEventIds,
-  seenExecutionEventKeys: previous.seenExecutionEventKeys,
-  childExecutionOutcomes: previous.childExecutionOutcomes,
-  eventCursor: previous.eventCursor,
-})
-
-export const retaining: {
-  (previous: Model): (model: Model) => Model
-  (model: Model, previous: Model): Model
-} = Function.dual(2, retainingImpl)
-
 const activeSeedEntriesImpl = (
   activeTurn: Turn.Turn | undefined,
   entries: ReadonlyArray<TranscriptPage.Entry>,

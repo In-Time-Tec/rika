@@ -19,7 +19,8 @@ import { boundedTranscriptModel } from "../rendering/opentui-render-transcript-w
 import { transcriptUnitRevision } from "../rendering/opentui-render-transcript-revision"
 import { transcriptUnitBuilder } from "../rendering/opentui-render-unit"
 import type { TranscriptRangeBundle, TranscriptUnitCacheEntry } from "../rendering/opentui-render-transcript-revision"
-import { welcomeContent, welcomeMarkFrames } from "./opentui-surface-content"
+import { welcomeContent } from "./opentui-surface-content"
+import { welcomeVisible } from "./opentui-welcome-state"
 import { cutoutBackground } from "./opentui-surface-construction"
 import type { TranscriptRenderableDescriptor } from "./opentui-surface-transcript-types"
 import { SurfaceLifecycleToast } from "./opentui-lifecycle-toast"
@@ -50,23 +51,17 @@ export abstract class SurfaceLifecycleTranscript extends SurfaceLifecycleToast {
     const threadSidebarVisible = contentLeft > 0
     const contentWidth = contentColumnWidth(model)
     const modeColor = colors[model.mode]
-    const isWelcome = model.entries.length === 0 && model.blocks.length === 0
+    const isWelcome = welcomeVisible(model)
     this.transcriptScroll.content.justifyContent = isWelcome ? "flex-start" : "flex-end"
-    const animateWelcome =
-      isWelcome &&
-      !model.threadSwitcher.open &&
-      !model.filePicker.open &&
-      !model.modePicker.open &&
-      !model.palette.open &&
-      !model.paletteOpen
     if (isWelcome) {
       this.transcriptRenderInput = undefined
       const welcomeWidth = this.welcomeWidthFor(model)
-      const welcomeKey = `${welcomeWidth}:${model.height}:${this.welcomePhase}:${model.mode}`
+      const welcomePhase = this.options.animate === false ? model.animationTick : this.welcomePhase
+      const welcomeKey = `${welcomeWidth}:${model.height}:${welcomePhase}:${model.mode}`
       const existingWelcome = this.transcriptChildren.length === 1 ? this.welcomeChild : undefined
       if (existingWelcome === undefined) {
         const child = new TextRenderable(this.renderer, {
-          content: welcomeContent(welcomeWidth, model.height, this.welcomePhase, model.mode),
+          content: welcomeContent(welcomeWidth, model.height, welcomePhase, model.mode),
           fg: modeColor,
           wrapMode: "word",
           selectable: true,
@@ -77,7 +72,7 @@ export abstract class SurfaceLifecycleTranscript extends SurfaceLifecycleToast {
       } else if (this.welcomeKey !== welcomeKey) {
         this.welcomeKey = welcomeKey
         existingWelcome.fg = modeColor
-        existingWelcome.content = welcomeContent(welcomeWidth, model.height, this.welcomePhase, model.mode)
+        existingWelcome.content = welcomeContent(welcomeWidth, model.height, welcomePhase, model.mode)
       }
     } else {
       const renderModel = sidebarWidth === 0 && !threadSidebarVisible ? model : { ...model, width: contentWidth }
@@ -90,6 +85,7 @@ export abstract class SurfaceLifecycleTranscript extends SurfaceLifecycleToast {
         width: renderModel.width,
         windowEnd: this.transcriptWindowEnd,
         rowWindowEnd: this.transcriptRowWindow.end,
+        animationTick: model.animationTick,
       }
       if (this.transcriptChanged(transcriptInput)) {
         const previousExpandedRows = this.transcriptRenderInput?.expandedRowKeys
@@ -166,29 +162,6 @@ export abstract class SurfaceLifecycleTranscript extends SurfaceLifecycleToast {
         this.reconcileTranscript(descriptors)
         this.transcriptRenderInput = { ...transcriptInput, rowWindowEnd: this.transcriptRowWindow.end }
       }
-    }
-    if (this.options.animate !== false && animateWelcome && this.welcomeTimer === undefined) {
-      this.welcomeTimer = this.repeated(80, () => {
-        const current = this.model
-        if (current === undefined || current.entries.length > 0 || current.blocks.length > 0) return
-        this.welcomePhase = (this.welcomePhase + 1) % welcomeMarkFrames.length
-        const welcome = this.welcomeChild
-        if (welcome === undefined) return
-        const width = this.welcomeWidthFor(current)
-        this.welcomeKey = `${width}:${current.height}:${this.welcomePhase}:${current.mode}`
-        welcome.content = welcomeContent(width, current.height, this.welcomePhase, current.mode)
-        this.renderer.requestRender()
-      })
-      this.welcomeStopTimer = this.delayed(1600, () => {
-        this.cancelTimer(this.welcomeTimer)
-        this.welcomeTimer = undefined
-        this.welcomeStopTimer = undefined
-      })
-    } else if ((this.options.animate === false || !animateWelcome) && this.welcomeTimer !== undefined) {
-      this.cancelTimer(this.welcomeTimer)
-      this.welcomeTimer = undefined
-      this.cancelTimer(this.welcomeStopTimer)
-      this.welcomeStopTimer = undefined
     }
     return { sidebarWidth, contentLeft, contentWidth, renderedInputHeight, sidebarVisible, threadSidebarVisible }
   }

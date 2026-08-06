@@ -36,7 +36,7 @@ test("dequeue removes the queued turn activity from the materialized summary", (
           prompt: "active",
           now: 2,
         })
-        yield* turns.setStatus(active.id, "running", "active-cursor", 3)
+        yield* turns.setStatus(active.id, "running", 3)
         const queued = yield* create(turns, {
           id: Turn.TurnId.make("queued"),
           threadId: id,
@@ -172,7 +172,6 @@ test("SQLite queue copy, take, and accepted rollback stay atomic", () => {
             author: { _tag: "Human" },
             lineage: { _tag: "Original" },
             status: "queued",
-            stopIntent: "none",
             createdAt: 2,
             updatedAt: 2,
           },
@@ -192,7 +191,6 @@ test("SQLite queue copy, take, and accepted rollback stay atomic", () => {
                 author: { _tag: "Human" },
                 lineage: { _tag: "Original" },
                 status: "queued",
-                stopIntent: "none",
                 createdAt: 3,
                 updatedAt: 3,
               },
@@ -211,7 +209,7 @@ test("SQLite queue copy, take, and accepted rollback stay atomic", () => {
   return Effect.runPromise(Effect.scoped(program.pipe(provideLayer(BunServices.layer))))
 })
 
-test("concurrent queue submissions produce contiguous revisions and one coalesced wake", () => {
+test("concurrent queue submissions preserve contiguous FIFO revisions and one claim", () => {
   const program = Effect.scoped(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -249,10 +247,7 @@ test("concurrent queue submissions produce contiguous revisions and one coalesce
         const queue = yield* turns.readQueue(id)
         expect(queue).toMatchObject({ revision: 4, queuedCount: 4 })
         expect(queue.turns).toHaveLength(4)
-        const wake = yield* turns.requestQueueWake(id)
-        expect(wake).toEqual({ threadId: id, generation: 1, queueRevision: 4 })
-        expect(yield* turns.requestQueueWake(id)).toEqual(wake)
-        yield* turns.setStatus(active.id, "completed", undefined, 200)
+        yield* turns.setStatus(active.id, "completed", 200)
         const claims = yield* Effect.forEach(Array.from({ length: 20 }), () => turns.claimNextQueued(id, 201), {
           concurrency: "unbounded",
         })
@@ -261,10 +256,10 @@ test("concurrent queue submissions produce contiguous revisions and one coalesce
         yield* turns.resetQueueClaims
         const claimed = yield* turns.claimNextQueued(id, 202)
         if (claimed === undefined) return yield* Effect.die("Missing claim after reset")
-        const transitioned = yield* turns.finishQueuedClaim(claimed, "running", "cursor", undefined, 203)
+        const transitioned = yield* turns.finishQueuedClaim(claimed, "running", 203)
         expect(transitioned).toMatchObject({
           _tag: "Transitioned",
-          turn: { status: "running", lastCursor: "cursor" },
+          turn: { status: "running" },
           queue: { revision: 5, queuedCount: 3 },
         })
         const sql = yield* SqlClient

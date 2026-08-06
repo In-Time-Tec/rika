@@ -23,10 +23,13 @@ import { colors } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { formatTokens } from "../../presentation/terminal/terminal-format"
 import * as ContextMeter from "../../state/model/terminal-context-meter"
+import { meterGlyphs } from "../../state/model/terminal-context-meter-glyph"
 import { loaderFrame } from "../rendering/opentui-spinner"
 import { spinnerFrames } from "../rendering/opentui-spinner"
 import { renderSidebar } from "../rendering/opentui-render-block"
-import { panelLoading, formatCost, modeLabelWidth } from "./opentui-surface-content"
+import { panelLoading, formatCost, modeLabelWidth, welcomeContent } from "./opentui-surface-content"
+import { welcomeAnimationActive } from "./opentui-welcome-state"
+import { contentColumnWidth } from "../../state/model/terminal-layout-state"
 
 const mouseSequencePattern = new RegExp(`^(?:${String.fromCharCode(27)}?\\[)?<?\\d+(?:;\\d+)*[Mm]?$`)
 
@@ -65,7 +68,10 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
       if (this.queuePendingTranscriptScroll(-amount)) return
       if (this.transcriptScroll.scrollTop <= 1 && this.shiftTranscriptWindow(-100, true, -amount)) return
       this.applyTranscriptPosition(this.transcriptScroll.scrollTop - amount)
-      this.reportTranscriptScroll()
+      if (this.transcriptScroll.scrollTop <= 1) {
+        this.syncTranscriptScrollbar()
+        this.handlers.scroll?.(0)
+      } else this.reportTranscriptScroll()
     } else if (!mapped.ctrl && !mapped.alt && !mapped.meta && mapped.name === "pagedown") {
       this.cancelWheelReport()
       const amount = Math.max(1, this.transcriptScroll.viewport.height - 1)
@@ -110,82 +116,113 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
   }
 
   protected renderModeLabel(model: Model): void {
-    let usageText = ""
-    if (model.currentThreadId !== undefined && model.contextUsage?._tag === "Available") {
-      const streaming = model.busy || model.activity?._tag === "Streaming"
-      const animatedContext =
-        streaming || model.contextAnimation.compactFromPercent !== undefined || model.contextAnimation.flashTicks > 0
-      const cells = animatedContext ? 8 : 4
-      const value = ContextMeter.meter(model.contextUsage, { cells })
-      const glyphs =
-        streaming || model.contextAnimation.compactFromPercent !== undefined || model.contextAnimation.flashTicks > 0
-          ? ContextMeter.animatedGlyphs(model.contextUsage, {
-              cells,
-              tick: model.contextAnimation.compactTick ?? model.animationTick + this.loaderPhase,
-              streaming,
-              ...(model.contextAnimation.compactFromPercent === undefined
-                ? {}
-                : { compactFromPercent: model.contextAnimation.compactFromPercent }),
-              ...(model.contextAnimation.flashTicks > 0 ? { flashTicks: model.contextAnimation.flashTicks } : {}),
-            })
-          : value.glyphs
-      usageText = `${animatedContext ? "ctx " : ""}${glyphs.join("")} ${value.percent}%`
-    } else if (model.currentThreadId !== undefined && model.contextUsage?._tag === "Loading") {
-      usageText = model.busy
-        ? `ctx ${ContextMeter.loadingMeter(model.animationTick + this.loaderPhase, { cells: 8 }).join("")}`
-        : "▓░░░ —"
-    } else if (model.usageDisplay === "time") {
-      if (model.usageTime?._tag === "Available")
-        usageText = formatActiveTime(activeTimeAt(model.usageTime, this.currentTimeMillis()))
-      else if (model.usageTime?._tag === "Unavailable") usageText = `${activeTimeIcon} —`
-      else usageText = `${activeTimeIcon} ····`
-    } else if (model.usageDisplay === "tokens") {
-      if (model.usageTokens?._tag === "Available")
-        usageText =
-          model.usageTokens.uncountedAttempts > 0
+    const previousRight = this.modeLabel.screenX + this.modeLabel.width
+    const availableWidth = contentColumnWidth(model)
+    const contextVisible = availableWidth >= 24 && (model.currentThreadId !== undefined || model.modePicker.open)
+    const contextCells = availableWidth < 40 ? 4 : 8
+    const contextPrefix = availableWidth < 40 ? " " : " ctx "
+    const border = toOpenColor(colors.text)
+    const compactUsageText = (): string => {
+      if (model.usageDisplay === "time") {
+        if (model.usageTime?._tag === "Available")
+          return formatActiveTime(activeTimeAt(model.usageTime, this.currentTimeMillis()))
+        return model.usageTime?._tag === "Unavailable" ? `${activeTimeIcon} —` : `${activeTimeIcon} ····`
+      }
+      if (model.usageDisplay === "tokens") {
+        if (model.usageTokens?._tag === "Available")
+          return model.usageTokens.uncountedAttempts > 0
             ? formatTokens(model.usageTokens.total).replace(/ tok$/, "+ tok")
             : formatTokens(model.usageTokens.total)
-      else if (model.usageTokens?._tag === "Unavailable") usageText = "— tok"
-      else usageText = "···· tok"
-    } else {
-      if (model.usageCost?._tag === "Available") usageText = formatCost(model.usageCost.usd)
-      else if (model.costUsd !== undefined) usageText = formatCost(model.costUsd)
-      else if (model.usageCost?._tag === "Unavailable") usageText = "$—"
-      else if (model.usageCost?._tag === "Loading" || model.busy) usageText = "$····"
+        return model.usageTokens?._tag === "Unavailable" ? "— tok" : "···· tok"
+      }
+      if (model.usageCost?._tag === "Available") return formatCost(model.usageCost.usd)
+      if (model.costUsd !== undefined) return formatCost(model.costUsd)
+      if (model.usageCost?._tag === "Unavailable") return "$—"
+      return model.usageCost?._tag === "Loading" || model.busy ? "$····" : ""
     }
-    const modeContentKey = `${usageText}\u0000${model.fastMode ? "fast" : "normal"}\u0000${model.mode}\u0000${this.usageLabelHovered ? "usage-hover" : "usage"}\u0000${this.modeLabelHovered ? "mode-hover" : "mode"}`
-    const modeChunks: Array<TextChunk> = []
-    const previousRight = this.modeLabel.screenX + this.modeLabel.width
-    this.usageLabelWidth = usageText.length === 0 ? 0 : modeLabelWidth(` ${usageText} `)
-    if (usageText.length > 0) {
-      const usage = fg(toOpenColor(colors.text))(` ${usageText} `)
-      modeChunks.push(this.usageLabelHovered ? usage : dim(usage))
-      modeChunks.push(fg(toOpenColor(colors.text))("─"))
+    const buildUsageChunks = (): Array<TextChunk> => {
+      if (!contextVisible) {
+        const usageText = compactUsageText()
+        if (usageText.length === 0) return []
+        const usage = fg(model.currentThreadId === undefined ? border : colors[model.mode])(` ${usageText} `)
+        return [this.usageLabelHovered ? bold(usage) : usage]
+      }
+      const chunks: Array<TextChunk> = [fg(colors[model.mode])(contextPrefix)]
+      const context = model.contextUsage
+      if (context?._tag === "Available") {
+        const value = ContextMeter.meter(context, { cells: contextCells })
+        const streaming = model.busy && model.activity?._tag !== "Compacting"
+        const glyphs =
+          streaming || model.contextAnimation.compactFromPercent !== undefined || model.contextAnimation.flashTicks > 0
+            ? ContextMeter.animatedGlyphs(context, {
+                cells: contextCells,
+                tick: model.contextAnimation.compactTick ?? model.animationTick,
+                streaming,
+                ...(model.contextAnimation.compactFromPercent === undefined
+                  ? {}
+                  : { compactFromPercent: model.contextAnimation.compactFromPercent }),
+                ...(model.contextAnimation.flashTicks > 0 ? { flashTicks: model.contextAnimation.flashTicks } : {}),
+              })
+            : value.glyphs
+        const filled = value.glyphs.filter((glyph) => glyph === meterGlyphs.fill).length
+        for (const [index, glyph] of glyphs.entries()) {
+          let glyphColor = colors[model.mode]
+          if (model.modeCommit !== undefined && index < filled)
+            glyphColor =
+              index < Math.min(filled, model.modeCommit.tick)
+                ? colors[model.modeCommit.to]
+                : colors[model.modeCommit.from]
+          chunks.push(fg(glyphColor)(glyph))
+        }
+        chunks.push(bold(fg(colors[model.mode])(` ${value.percent}% `)))
+        return chunks
+      }
+      const glyphs = model.busy
+        ? ContextMeter.loadingMeter(model.animationTick, { cells: contextCells })
+        : Array.from({ length: contextCells }, () => meterGlyphs.track)
+      for (const glyph of glyphs) chunks.push(fg(colors[model.mode])(glyph))
+      chunks.push(fg(border)(" "))
+      return chunks
     }
-    this.modeSegmentStart = usageText.length === 0 ? 0 : this.usageLabelWidth + 1
-    modeChunks.push(fg(toOpenColor(colors.text))(" "))
-    if (model.fastMode) modeChunks.push(fg(toOpenColor(colors.amber))("↯"))
-    const modeText = fg(colors[model.mode])(model.mode)
-    modeChunks.push(this.modeLabelHovered ? bold(modeText) : modeText)
-    modeChunks.push(fg(toOpenColor(colors.text))(" "))
-    const width = modeChunks.reduce((total, chunk) => total + modeLabelWidth(chunk.text), 0)
+    const buildModeChunks = (): Array<TextChunk> => {
+      const usageChunks = buildUsageChunks()
+      const chunks = [...usageChunks]
+      if (usageChunks.length > 0) chunks.push(fg(border)("─"))
+      chunks.push(fg(border)(" "))
+      if (model.fastMode) chunks.push(fg(toOpenColor(colors.amber))("↯"))
+      const commit = model.modeCommit
+      let modeLabel: string = model.mode
+      let cursor = ""
+      if (commit !== undefined) {
+        if (commit.tick < commit.from.length) modeLabel = commit.from.slice(0, commit.from.length - commit.tick - 1)
+        else {
+          const typed = Math.min(commit.to.length, commit.tick - commit.from.length + 1)
+          modeLabel = commit.to.slice(0, typed)
+          if (typed < commit.to.length) cursor = "▮"
+        }
+      }
+      const modeText = fg(colors[model.mode])(`${modeLabel}${cursor}`)
+      chunks.push(this.modeLabelHovered ? bold(modeText) : modeText)
+      chunks.push(fg(border)(" "))
+      return chunks
+    }
+    const initialUsage = buildUsageChunks()
+    this.usageLabelWidth = initialUsage.reduce((total, chunk) => total + modeLabelWidth(chunk.text), 0)
+    this.modeSegmentStart = this.usageLabelWidth === 0 ? 0 : this.usageLabelWidth + 1
+    let modeChunks = buildModeChunks()
+    let width = modeChunks.reduce((total, chunk) => total + modeLabelWidth(chunk.text), 0)
     if (this.usagePointerX !== undefined && this.modeLabel.width > 0) {
       const screenX = previousRight - width
       const hovered = this.usagePointerX >= screenX && this.usagePointerX < screenX + this.usageLabelWidth
       if (hovered !== this.usageLabelHovered) {
         this.usageLabelHovered = hovered
         this.renderer.setMousePointer(hovered ? "pointer" : "default")
-        if (usageText.length > 0) {
-          const usage = fg(toOpenColor(colors.text))(` ${usageText} `)
-          modeChunks[0] = hovered ? usage : dim(usage)
-        }
+        modeChunks = buildModeChunks()
+        width = modeChunks.reduce((total, chunk) => total + modeLabelWidth(chunk.text), 0)
       }
     }
     this.modeLabel.width = width
-    if (this.modeLabelContentKey !== modeContentKey) {
-      this.modeLabelContentKey = modeContentKey
-      this.modeLabel.content = new StyledText(modeChunks)
-    }
+    this.modeLabel.content = new StyledText(modeChunks)
     this.refreshUsageHoverAfterLayout()
   }
 
@@ -208,9 +245,21 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
     this.renderer.on(CliRenderEvents.FRAME, refresh)
   }
 
+  protected tickWelcome(): void {
+    if (this.destroyed || this.welcomeTimer === undefined) return
+    const current = this.model
+    if (current === undefined || !welcomeAnimationActive(current) || this.welcomeChild === undefined) return
+    this.welcomePhase += 1
+    const welcomeWidth = this.welcomeWidthFor(current)
+    this.welcomeKey = `${welcomeWidth}:${current.height}:${this.welcomePhase}:${current.mode}`
+    this.welcomeChild.content = welcomeContent(welcomeWidth, current.height, this.welcomePhase, current.mode)
+    this.renderer.requestRender()
+  }
+
   protected tickLoader(): void {
-    if (this.destroyed) return
+    if (this.destroyed || this.loaderTimer === undefined) return
     this.loaderPhase += 1
+    this.handlers.animationTick?.()
     this.toolSpinner.step()
     const current = this.model
     if (current !== undefined) {

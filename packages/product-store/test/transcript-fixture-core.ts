@@ -20,7 +20,6 @@ export const turn: {
     prompt: `prompt ${index}`,
     executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
     status: "completed",
-    stopIntent: "none",
     author: { _tag: "Human" },
     lineage: { _tag: "Original" },
     createdAt: index,

@@ -19,7 +19,7 @@ describe("package archive contract", () => {
   test.each([
     ["missing performance runtime", names.replace(`${root}/bin/.rika-performance\n`, ""), headers],
     ["missing interactive binary", names.replace(`${root}/bin/.rika-interactive\n`, ""), headers],
-    ["missing resident binary", names.replace(`${root}/bin/.rika-resident\n`, ""), headers],
+    ["missing server binary", names.replace(`${root}/bin/.rika-server\n`, ""), headers],
     [
       "duplicate entry",
       names + `${root}/bin/rika\n`,

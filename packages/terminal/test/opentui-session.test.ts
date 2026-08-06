@@ -50,11 +50,10 @@ test("projects incremental replay by cursor without duplicates", () => {
       cursor: "10",
       block: { _tag: "ChildAgent", id: "child", name: "child", summary: "work", status: "running", activity: [] },
     },
-    { id: "2", cursor: "11", block: { _tag: "Workflow", name: "flow", step: "wait", status: "waiting" } },
   ] as const
-  for (const event of [...events, events[1]]) model = update(model, { _tag: "EventReplayed", event })
-  expect(model.blocks).toHaveLength(2)
-  expect(model.eventCursor).toBe("11")
+  for (const event of [...events, events[0]]) model = update(model, { _tag: "EventReplayed", event })
+  expect(model.blocks).toHaveLength(1)
+  expect(model.eventCursor).toBe("10")
 })
 
 test("restarts through the shared event mapper and preserves transcript across queue updates", () => {
@@ -62,7 +61,6 @@ test("restarts through the shared event mapper and preserves transcript across q
     { cursor: "1", sequence: 1, type: "model.output.delta", text: "hel" },
     { cursor: "2", sequence: 2, type: "reasoning.delta", text: "checking" },
     { cursor: "3", sequence: 3, type: "child.started", content: [{ profile: "Oracle", summary: "reviewing" }] },
-    { cursor: "4", sequence: 4, type: "workflow.waiting", content: [{ workflow: "delivery", step: "verification" }] },
     { cursor: "5", sequence: 5, type: "model.output.completed", text: "hello" },
   ] as const
   const source = events.map((event) => Object.assign({}, event, { createdAt: event.sequence }))

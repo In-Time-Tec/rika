@@ -303,6 +303,20 @@ export class SurfaceConstruction extends SurfaceLifecycleCleanup {
       position: "absolute",
       wrapMode: "none",
     })
+    this.overlayHintOne = new TextRenderable(renderer, {
+      content: "",
+      visible: false,
+      position: "absolute",
+      zIndex: 30,
+      wrapMode: "none",
+    })
+    this.overlayHintTwo = new TextRenderable(renderer, {
+      content: "",
+      visible: false,
+      position: "absolute",
+      zIndex: 30,
+      wrapMode: "none",
+    })
     this.overlayEditor = new ProjectedEditorRenderable(renderer, {
       visible: false,
       position: "absolute",
@@ -421,6 +435,8 @@ export class SurfaceConstruction extends SurfaceLifecycleCleanup {
     renderer.root.add(this.statusLabel)
     renderer.root.add(this.workspaceLabel)
     renderer.root.add(this.paletteBox)
+    renderer.root.add(this.overlayHintOne)
+    renderer.root.add(this.overlayHintTwo)
     renderer.root.add(this.toastBox)
     this.paletteBox.onMouseScroll = (event) => {
       if (this.model?.threadSwitcher.open !== true || event.scroll === undefined) return

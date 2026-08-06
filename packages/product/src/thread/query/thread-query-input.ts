@@ -1,4 +1,3 @@
-import type * as ThreadRelationship from "../model/thread-relationship"
 import type * as TranscriptPage from "../model/transcript-page"
 import type * as TurnQueueState from "../repository/turn-repository-pagination"
 
@@ -6,13 +5,6 @@ export interface FindInput {
   readonly query: string
   readonly includeArchived?: boolean
   readonly limit?: number
-}
-
-export interface LegacyReadInput {
-  readonly threadId: string
-  readonly includeArchived?: boolean
-  readonly maxTurns?: number
-  readonly maxChars?: number
 }
 
 export type Selector =
@@ -30,7 +22,6 @@ export type Selector =
       readonly before?: TranscriptPage.PageCursor
       readonly offset?: number
     }
-  | { readonly _tag: "related"; readonly before?: ThreadRelationship.RelationshipCursor }
 
 export interface ReadInput {
   readonly threadId: string
