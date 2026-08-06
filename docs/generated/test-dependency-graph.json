@@ -3033,8 +3033,28 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/terminal/test/integration/opentui-transcript-prefetch.test.ts",
+      "path": "packages/terminal/test/integration/opentui-transcript-prefetch.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/terminal/test/mode-toggle.test.ts",
       "path": "packages/terminal/test/mode-toggle.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/terminal/test/opentui-focus-controller.test.ts",
+      "path": "packages/terminal/test/opentui-focus-controller.test.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -3123,8 +3143,48 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/terminal/test/terminal-mouse-junk.test.ts",
+      "path": "packages/terminal/test/terminal-mouse-junk.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/terminal/test/terminal-overlay-hints.test.ts",
+      "path": "packages/terminal/test/terminal-overlay-hints.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/terminal/test/terminal-toast-layout.test.ts",
+      "path": "packages/terminal/test/terminal-toast-layout.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/terminal/test/tool-detail-expansion.test.ts",
       "path": "packages/terminal/test/tool-detail-expansion.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/terminal/test/transcript-anchor-geometry.test.ts",
+      "path": "packages/terminal/test/transcript-anchor-geometry.test.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -3153,8 +3213,28 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/terminal/test/transcript-record-order.test.ts",
+      "path": "packages/terminal/test/transcript-record-order.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/terminal/test/transcript-renderers.test.ts",
       "path": "packages/terminal/test/transcript-renderers.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/terminal/test/transcript-tool-body.test.ts",
+      "path": "packages/terminal/test/transcript-tool-body.test.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -3205,6 +3285,16 @@
     {
       "id": "packages/terminal/test/welcome-orb-anchor.test.ts",
       "path": "packages/terminal/test/welcome-orb-anchor.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/terminal/test/welcome-orb-impulse.test.ts",
+      "path": "packages/terminal/test/welcome-orb-impulse.test.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -7810,14 +7900,6 @@
     },
     {
       "from": "packages/terminal/test/integration/opentui-surface-characterization-10.test.ts",
-      "to": "external:@opentui/core",
-      "specifier": "@opentui/core",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/terminal/test/integration/opentui-surface-characterization-10.test.ts",
       "to": "external:@opentui/core/testing",
       "specifier": "@opentui/core/testing",
       "kind": "import",
@@ -7908,14 +7990,6 @@
       "from": "packages/terminal/test/integration/opentui-surface-characterization-11.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/terminal/test/integration/opentui-surface-characterization-12.test.ts",
-      "to": "external:@opentui/core",
-      "specifier": "@opentui/core",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -8034,14 +8108,6 @@
     },
     {
       "from": "packages/terminal/test/integration/opentui-surface-characterization-14.test.ts",
-      "to": "external:@opentui/core",
-      "specifier": "@opentui/core",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/terminal/test/integration/opentui-surface-characterization-14.test.ts",
       "to": "external:@opentui/core/testing",
       "specifier": "@opentui/core/testing",
       "kind": "import",
@@ -8074,14 +8140,6 @@
     },
     {
       "from": "packages/terminal/test/integration/opentui-surface-characterization-15.test.ts",
-      "to": "external:@opentui/core",
-      "specifier": "@opentui/core",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/terminal/test/integration/opentui-surface-characterization-15.test.ts",
       "to": "external:@opentui/core/testing",
       "specifier": "@opentui/core/testing",
       "kind": "import",
@@ -8108,14 +8166,6 @@
       "from": "packages/terminal/test/integration/opentui-surface-characterization-15.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/terminal/test/integration/opentui-surface-characterization-2.test-behavior-2.test.ts",
-      "to": "external:@opentui/core",
-      "specifier": "@opentui/core",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -8210,14 +8260,6 @@
     },
     {
       "from": "packages/terminal/test/integration/opentui-surface-characterization-3.test.ts",
-      "to": "external:@opentui/core",
-      "specifier": "@opentui/core",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/terminal/test/integration/opentui-surface-characterization-3.test.ts",
       "to": "external:@opentui/core/testing",
       "specifier": "@opentui/core/testing",
       "kind": "import",
@@ -8268,14 +8310,6 @@
       "from": "packages/terminal/test/integration/opentui-surface-characterization-4.test-behavior-2.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/terminal/test/integration/opentui-surface-characterization-4.test.ts",
-      "to": "external:@opentui/core",
-      "specifier": "@opentui/core",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -8338,14 +8372,6 @@
     },
     {
       "from": "packages/terminal/test/integration/opentui-surface-characterization-5.test.ts",
-      "to": "external:@opentui/core",
-      "specifier": "@opentui/core",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/terminal/test/integration/opentui-surface-characterization-5.test.ts",
       "to": "external:@opentui/core/testing",
       "specifier": "@opentui/core/testing",
       "kind": "import",
@@ -8396,14 +8422,6 @@
       "from": "packages/terminal/test/integration/opentui-surface-characterization-6.test-behavior-2.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/terminal/test/integration/opentui-surface-characterization-6.test.ts",
-      "to": "external:@opentui/core",
-      "specifier": "@opentui/core",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -8466,14 +8484,6 @@
     },
     {
       "from": "packages/terminal/test/integration/opentui-surface-characterization-7.test.ts",
-      "to": "external:@opentui/core",
-      "specifier": "@opentui/core",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/terminal/test/integration/opentui-surface-characterization-7.test.ts",
       "to": "external:@opentui/core/testing",
       "specifier": "@opentui/core/testing",
       "kind": "import",
@@ -8530,14 +8540,6 @@
     },
     {
       "from": "packages/terminal/test/integration/opentui-surface-characterization-8.test.ts",
-      "to": "external:@opentui/core",
-      "specifier": "@opentui/core",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/terminal/test/integration/opentui-surface-characterization-8.test.ts",
       "to": "external:@opentui/core/testing",
       "specifier": "@opentui/core/testing",
       "kind": "import",
@@ -8564,14 +8566,6 @@
       "from": "packages/terminal/test/integration/opentui-surface-characterization-8.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/terminal/test/integration/opentui-surface-characterization-9.test.ts",
-      "to": "external:@opentui/core",
-      "specifier": "@opentui/core",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -8650,6 +8644,30 @@
     },
     {
       "from": "packages/terminal/test/integration/opentui-transcript-hold-position.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-prefetch.test.ts",
+      "to": "external:@opentui/core/testing",
+      "specifier": "@opentui/core/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-prefetch.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-prefetch.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -8658,6 +8676,14 @@
     },
     {
       "from": "packages/terminal/test/mode-toggle.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/opentui-focus-controller.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -8761,7 +8787,39 @@
       "production": false
     },
     {
+      "from": "packages/terminal/test/terminal-mouse-junk.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/terminal-overlay-hints.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/terminal-toast-layout.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/terminal/test/tool-detail-expansion.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/transcript-anchor-geometry.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -8793,6 +8851,14 @@
       "production": false
     },
     {
+      "from": "packages/terminal/test/transcript-record-order.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/terminal/test/transcript-renderers.test.ts",
       "to": "external:string-width",
       "specifier": "string-width",
@@ -8802,6 +8868,14 @@
     },
     {
       "from": "packages/terminal/test/transcript-renderers.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/transcript-tool-body.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -8866,6 +8940,14 @@
     },
     {
       "from": "packages/terminal/test/welcome-orb-anchor.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/welcome-orb-impulse.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",

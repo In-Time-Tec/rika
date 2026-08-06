@@ -12,14 +12,13 @@ import {
   type TextChunk,
 } from "@opentui/core"
 import { Clock, Effect, Fiber, Schedule } from "effect"
-import { fromOpenTui, type Key } from "../../presentation/terminal/terminal-keymap"
-import { activeTimeAt } from "../../state/model/terminal-activity-time"
+import { classifyMouseJunk, fromOpenTui, type Key } from "../../presentation/terminal/terminal-keymap"
 import { type Model } from "../../state/model/terminal-state"
-import { activeTimeIcon, formatActiveTime } from "../../state/model/terminal-activity-time"
+import { activeTimeAt, activeTimeIcon, formatActiveTime } from "../../state/model/terminal-activity-time"
 import { formatActivity } from "../../state/model/terminal-activity-state"
 import { pastedTextTokenAt } from "../../state/model/terminal-composer-paste"
 import { SurfaceOverlayRegion } from "./opentui-overlay-region"
-import { colors } from "../../presentation/terminal/terminal-theme"
+import { colors, spacing } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { formatTokens } from "../../presentation/terminal/terminal-format"
 import * as ContextMeter from "../../state/model/terminal-context-meter"
@@ -28,10 +27,9 @@ import { loaderFrame } from "../rendering/opentui-spinner"
 import { spinnerFrames } from "../rendering/opentui-spinner"
 import { renderSidebar } from "../rendering/opentui-render-block"
 import { panelLoading, formatCost, modeLabelWidth, welcomeContent } from "./opentui-surface-content"
+import { orbGeometry } from "./opentui-welcome-orb"
 import { welcomeAnimationActive } from "./opentui-welcome-state"
 import { contentColumnWidth } from "../../state/model/terminal-layout-state"
-
-const mouseSequencePattern = new RegExp(`^(?:${String.fromCharCode(27)}?\\[)?<?\\d+(?:;\\d+)*[Mm]?$`)
 
 const readRendererProperty = (renderer: object, property: string): unknown => Reflect.get(renderer, property)
 
@@ -109,9 +107,9 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
   }
 
   protected publishWorkingFrame(frame: string | undefined): void {
-    if (this.workingFramePublished && this.publishedWorkingFrame === frame) return
-    this.workingFramePublished = true
-    this.publishedWorkingFrame = frame
+    if (this.loaderController.published && this.loaderController.publishedFrame === frame) return
+    this.loaderController.published = true
+    this.loaderController.publishedFrame = frame
     this.handlers.workingFrame?.(frame)
   }
 
@@ -246,19 +244,39 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
   }
 
   protected tickWelcome(): void {
-    if (this.destroyed || this.welcomeTimer === undefined) return
+    if (this.destroyed || !this.welcomeController.running) return
     const current = this.model
-    if (current === undefined || !welcomeAnimationActive(current) || this.welcomeChild === undefined) return
-    this.welcomePhase += 1
+    if (current === undefined || !welcomeAnimationActive(current) || this.welcomeController.child === undefined) return
+    this.welcomeController.advance()
     const welcomeWidth = this.welcomeWidthFor(current)
-    this.welcomeKey = `${welcomeWidth}:${current.height}:${this.welcomePhase}:${current.mode}`
-    this.welcomeChild.content = welcomeContent(welcomeWidth, current.height, this.welcomePhase, current.mode)
+    const impulses = this.welcomeController.impulses
+    this.welcomeController.key = `${welcomeWidth}:${current.height}:${this.welcomeController.phase}:${current.mode}:${impulses.length}`
+    this.welcomeController.child.content = welcomeContent(
+      welcomeWidth,
+      current.height,
+      this.welcomeController.phase,
+      current.mode,
+      impulses,
+    )
+    this.renderer.requestRender()
+  }
+
+  protected strikeWelcomeOrb(event: MouseEvent): void {
+    const current = this.model
+    const child = this.welcomeController.child
+    if (this.destroyed || current === undefined || child === undefined) return
+    const welcomeWidth = this.welcomeWidthFor(current)
+    const geometry = orbGeometry(welcomeWidth, current.height)
+    const area = Math.max(1, current.height - spacing.inputHeight)
+    const top = Math.max(0, Math.floor((area - geometry.rows) / 2))
+    const left = Math.max(0, Math.floor(welcomeWidth / 2) - Math.floor(geometry.columns / 2) - 12)
+    this.welcomeController.strike(event.x - child.x - left, event.y - child.y - top)
     this.renderer.requestRender()
   }
 
   protected tickLoader(): void {
-    if (this.destroyed || this.loaderTimer === undefined) return
-    this.loaderPhase += 1
+    if (this.destroyed || !this.loaderController.running) return
+    this.loaderController.advance()
     this.handlers.animationTick?.()
     this.toolSpinner.step()
     const current = this.model
@@ -267,7 +285,7 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
       if (label !== undefined)
         this.statusLabel.content = new StyledText([
           fg(toOpenColor(colors.text))(" "),
-          fg(toOpenColor(colors.blue))(loaderFrame(label, current.animationTick + this.loaderPhase)),
+          fg(toOpenColor(colors.blue))(loaderFrame(label, current.animationTick + this.loaderController.phase)),
           dim(fg(toOpenColor(colors.text))(` ${label} `)),
         ])
       const glyph = this.toolSpinner.toBraille()
@@ -283,7 +301,10 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
         record.renderable.content = new StyledText(chunks)
       }
       if (current.threadSidebar.open)
-        this.sidebar.content = renderSidebar(current, spinnerFrames[this.loaderPhase % spinnerFrames.length]!)
+        this.sidebar.content = renderSidebar(
+          current,
+          spinnerFrames[this.loaderController.phase % spinnerFrames.length]!,
+        )
     }
     this.renderer.requestRender()
   }
@@ -303,31 +324,28 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
   }
 
   protected readonly suppressMouseJunk = (mapped: Key): boolean => {
-    if (mapped.ctrl || mapped.alt || mapped.meta || mapped.eventType === "release") return false
-    if (mapped.sequence.length > 1 && mouseSequencePattern.test(mapped.sequence)) return true
-    if (this.junkBuffer.length > 0) {
-      if (/^[\d;]$/.test(mapped.sequence) && this.junkBuffer.length < 24) {
+    const decision = classifyMouseJunk(mapped, this.junkBuffer.length)
+    switch (decision._tag) {
+      case "Forward":
+        return false
+      case "Buffer":
         this.junkBuffer.push(mapped)
         this.cancelTimer(this.junkTimer)
         this.junkTimer = this.delayed(40, this.flushJunkBuffer)
         return true
-      }
-      if (mapped.sequence === "M" || mapped.sequence === "m") {
-        this.cancelTimer(this.junkTimer)
-        this.junkTimer = undefined
-        this.junkBuffer = []
-        return true
-      }
-      if (mapped.sequence === "<") {
+      case "Arm":
         this.armJunkBuffer(mapped)
         return true
-      }
-      this.flushJunkBuffer()
-      return false
-    }
-    if (mapped.sequence === "<") {
-      this.armJunkBuffer(mapped)
-      return true
+      case "Flush":
+        this.flushJunkBuffer()
+        return false
+      case "Drop":
+        if (this.junkBuffer.length > 0) {
+          this.cancelTimer(this.junkTimer)
+          this.junkTimer = undefined
+          this.junkBuffer = []
+        }
+        return true
     }
     return false
   }
@@ -417,7 +435,7 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
   protected readonly onRootMouseUp = (event: MouseEvent) => {
     if (this.sidebarDrag !== undefined) {
       this.sidebarDrag = undefined
-      this.sidebarRowsWidth = 0
+      this.sidebarController.invalidateWidth()
       if (this.model !== undefined) this.refreshSidebarRows(this.model)
       this.setSidebarResizePointer(event.x === this.changedFilesBox.x)
       event.preventDefault()

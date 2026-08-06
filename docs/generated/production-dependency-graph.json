@@ -3,24 +3,6 @@
   "graphKind": "production",
   "nodes": [
     {
-      "id": "apps/rika/src/application-performance-evaluation.ts",
-      "path": "apps/rika/src/application-performance-evaluation.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "apps/rika/src/application-version.ts",
-      "path": "apps/rika/src/application-version.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
       "id": "apps/rika/src/client-main.ts",
       "path": "apps/rika/src/client-main.ts",
       "workspace": "@rika/cli",
@@ -174,8 +156,8 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/diagnostic-file-logging-contract.ts",
-      "path": "apps/rika/src/diagnostic-file-logging-contract.ts",
+      "id": "apps/rika/src/diagnostics/diagnostic-file-logging-contract.ts",
+      "path": "apps/rika/src/diagnostics/diagnostic-file-logging-contract.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -183,8 +165,8 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/diagnostic-file-logging.ts",
-      "path": "apps/rika/src/diagnostic-file-logging.ts",
+      "id": "apps/rika/src/diagnostics/diagnostic-file-logging.ts",
+      "path": "apps/rika/src/diagnostics/diagnostic-file-logging.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -435,8 +417,26 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/performance-platform.ts",
-      "path": "apps/rika/src/performance-platform.ts",
+      "id": "apps/rika/src/platform/application-performance-evaluation.ts",
+      "path": "apps/rika/src/platform/application-performance-evaluation.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/platform/application-version.ts",
+      "path": "apps/rika/src/platform/application-version.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/platform/performance-platform.ts",
+      "path": "apps/rika/src/platform/performance-platform.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -1712,17 +1712,8 @@
       ]
     },
     {
-      "id": "packages/baton-execution/src/baton-authorization-projection.ts",
-      "path": "packages/baton-execution/src/baton-authorization-projection.ts",
-      "workspace": "@rika/baton-execution",
-      "package": "@rika/baton-execution",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "packages/baton-execution/src/baton-diagnostic-projection.ts",
-      "path": "packages/baton-execution/src/baton-diagnostic-projection.ts",
+      "id": "packages/baton-execution/src/accounting/usage-accounting.ts",
+      "path": "packages/baton-execution/src/accounting/usage-accounting.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1739,8 +1730,8 @@
       "publicExports": ["./baton-execution"]
     },
     {
-      "id": "packages/baton-execution/src/baton-program-bindings.ts",
-      "path": "packages/baton-execution/src/baton-program-bindings.ts",
+      "id": "packages/baton-execution/src/program/baton-program.ts",
+      "path": "packages/baton-execution/src/program/baton-program.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1748,8 +1739,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/baton-program.ts",
-      "path": "packages/baton-execution/src/baton-program.ts",
+      "id": "packages/baton-execution/src/program/baton-registration.ts",
+      "path": "packages/baton-execution/src/program/baton-registration.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1757,8 +1748,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/baton-projector-checkpoint.ts",
-      "path": "packages/baton-execution/src/baton-projector-checkpoint.ts",
+      "id": "packages/baton-execution/src/program/program-bindings.ts",
+      "path": "packages/baton-execution/src/program/program-bindings.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1766,8 +1757,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/baton-projector-decoding.ts",
-      "path": "packages/baton-execution/src/baton-projector-decoding.ts",
+      "id": "packages/baton-execution/src/projection/authorization-projection.ts",
+      "path": "packages/baton-execution/src/projection/authorization-projection.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1775,8 +1766,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/baton-projector-identity.ts",
-      "path": "packages/baton-execution/src/baton-projector-identity.ts",
+      "id": "packages/baton-execution/src/projection/diagnostic-projection.ts",
+      "path": "packages/baton-execution/src/projection/diagnostic-projection.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1784,8 +1775,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/baton-projector-model.ts",
-      "path": "packages/baton-execution/src/baton-projector-model.ts",
+      "id": "packages/baton-execution/src/projection/streamed-text-projection.ts",
+      "path": "packages/baton-execution/src/projection/streamed-text-projection.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1793,8 +1784,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/baton-projector-nodes.ts",
-      "path": "packages/baton-execution/src/baton-projector-nodes.ts",
+      "id": "packages/baton-execution/src/projection/subagent-card-projection.ts",
+      "path": "packages/baton-execution/src/projection/subagent-card-projection.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1802,8 +1793,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/baton-projector-persistence.ts",
-      "path": "packages/baton-execution/src/baton-projector-persistence.ts",
+      "id": "packages/baton-execution/src/projection/tool-projection.ts",
+      "path": "packages/baton-execution/src/projection/tool-projection.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1811,8 +1802,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/baton-projector-values.ts",
-      "path": "packages/baton-execution/src/baton-projector-values.ts",
+      "id": "packages/baton-execution/src/projection/tool-unit-projection.ts",
+      "path": "packages/baton-execution/src/projection/tool-unit-projection.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1820,8 +1811,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/baton-registration.ts",
-      "path": "packages/baton-execution/src/baton-registration.ts",
+      "id": "packages/baton-execution/src/projector/projector-checkpoint.ts",
+      "path": "packages/baton-execution/src/projector/projector-checkpoint.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1829,8 +1820,71 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/baton-route.ts",
-      "path": "packages/baton-execution/src/baton-route.ts",
+      "id": "packages/baton-execution/src/projector/projector-decoding.ts",
+      "path": "packages/baton-execution/src/projector/projector-decoding.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/baton-execution/src/projector/projector-identity.ts",
+      "path": "packages/baton-execution/src/projector/projector-identity.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/baton-execution/src/projector/projector-model.ts",
+      "path": "packages/baton-execution/src/projector/projector-model.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/baton-execution/src/projector/projector-nodes.ts",
+      "path": "packages/baton-execution/src/projector/projector-nodes.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/baton-execution/src/projector/projector-persistence.ts",
+      "path": "packages/baton-execution/src/projector/projector-persistence.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/baton-execution/src/projector/projector-values.ts",
+      "path": "packages/baton-execution/src/projector/projector-values.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/baton-execution/src/projector/tree-projector.ts",
+      "path": "packages/baton-execution/src/projector/tree-projector.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/baton-execution/src/routing/baton-route.ts",
+      "path": "packages/baton-execution/src/routing/baton-route.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1838,8 +1892,8 @@
       "publicExports": ["./baton-route"]
     },
     {
-      "id": "packages/baton-execution/src/baton-sandbox-identity.ts",
-      "path": "packages/baton-execution/src/baton-sandbox-identity.ts",
+      "id": "packages/baton-execution/src/routing/sandbox-identity-route.ts",
+      "path": "packages/baton-execution/src/routing/sandbox-identity-route.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1847,26 +1901,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/baton-streamed-text-projection.ts",
-      "path": "packages/baton-execution/src/baton-streamed-text-projection.ts",
-      "workspace": "@rika/baton-execution",
-      "package": "@rika/baton-execution",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "packages/baton-execution/src/baton-subagent-card-projection.ts",
-      "path": "packages/baton-execution/src/baton-subagent-card-projection.ts",
-      "workspace": "@rika/baton-execution",
-      "package": "@rika/baton-execution",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "packages/baton-execution/src/baton-test-harness.ts",
-      "path": "packages/baton-execution/src/baton-test-harness.ts",
+      "id": "packages/baton-execution/src/testing/baton-test-harness.ts",
+      "path": "packages/baton-execution/src/testing/baton-test-harness.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1874,44 +1910,8 @@
       "publicExports": ["./baton-test-harness"]
     },
     {
-      "id": "packages/baton-execution/src/baton-tool-projection.ts",
-      "path": "packages/baton-execution/src/baton-tool-projection.ts",
-      "workspace": "@rika/baton-execution",
-      "package": "@rika/baton-execution",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "packages/baton-execution/src/baton-tool-unit-projection.ts",
-      "path": "packages/baton-execution/src/baton-tool-unit-projection.ts",
-      "workspace": "@rika/baton-execution",
-      "package": "@rika/baton-execution",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "packages/baton-execution/src/baton-tree-projector.ts",
-      "path": "packages/baton-execution/src/baton-tree-projector.ts",
-      "workspace": "@rika/baton-execution",
-      "package": "@rika/baton-execution",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "packages/baton-execution/src/baton-usage-accounting.ts",
-      "path": "packages/baton-execution/src/baton-usage-accounting.ts",
-      "workspace": "@rika/baton-execution",
-      "package": "@rika/baton-execution",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "packages/baton-execution/src/scripted-model.ts",
-      "path": "packages/baton-execution/src/scripted-model.ts",
+      "id": "packages/baton-execution/src/testing/scripted-model.ts",
+      "path": "packages/baton-execution/src/testing/scripted-model.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -4493,8 +4493,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/terminal/src/opentui/surface/opentui-amp-orb-frames.ts",
-      "path": "packages/terminal/src/opentui/surface/opentui-amp-orb-frames.ts",
+      "id": "packages/terminal/src/opentui/surface/opentui-composer-region.ts",
+      "path": "packages/terminal/src/opentui/surface/opentui-composer-region.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -4502,8 +4502,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/terminal/src/opentui/surface/opentui-composer-region.ts",
-      "path": "packages/terminal/src/opentui/surface/opentui-composer-region.ts",
+      "id": "packages/terminal/src/opentui/surface/opentui-focus-controller.ts",
+      "path": "packages/terminal/src/opentui/surface/opentui-focus-controller.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -4574,6 +4574,15 @@
       "publicExports": []
     },
     {
+      "id": "packages/terminal/src/opentui/surface/opentui-loader-controller.ts",
+      "path": "packages/terminal/src/opentui/surface/opentui-loader-controller.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/terminal/src/opentui/surface/opentui-overlay-content.ts",
       "path": "packages/terminal/src/opentui/surface/opentui-overlay-content.ts",
       "workspace": "@rika/terminal",
@@ -4594,6 +4603,15 @@
     {
       "id": "packages/terminal/src/opentui/surface/opentui-queue-presentation.ts",
       "path": "packages/terminal/src/opentui/surface/opentui-queue-presentation.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/terminal/src/opentui/surface/opentui-sidebar-controller.ts",
+      "path": "packages/terminal/src/opentui/surface/opentui-sidebar-controller.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -4655,6 +4673,15 @@
       "publicExports": ["./opentui-surface"]
     },
     {
+      "id": "packages/terminal/src/opentui/surface/opentui-toast-controller.ts",
+      "path": "packages/terminal/src/opentui/surface/opentui-toast-controller.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/terminal/src/opentui/surface/opentui-transcript-region.ts",
       "path": "packages/terminal/src/opentui/surface/opentui-transcript-region.ts",
       "workspace": "@rika/terminal",
@@ -4666,6 +4693,24 @@
     {
       "id": "packages/terminal/src/opentui/surface/opentui-transcript-rendering.ts",
       "path": "packages/terminal/src/opentui/surface/opentui-transcript-rendering.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/terminal/src/opentui/surface/opentui-welcome-controller.ts",
+      "path": "packages/terminal/src/opentui/surface/opentui-welcome-controller.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/terminal/src/opentui/surface/opentui-welcome-orb.ts",
+      "path": "packages/terminal/src/opentui/surface/opentui-welcome-orb.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -4781,6 +4826,15 @@
       "publicExports": []
     },
     {
+      "id": "packages/terminal/src/presentation/terminal/terminal-overlay-hints.ts",
+      "path": "packages/terminal/src/presentation/terminal/terminal-overlay-hints.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/terminal/src/presentation/terminal/terminal-relative-time.ts",
       "path": "packages/terminal/src/presentation/terminal/terminal-relative-time.ts",
       "workspace": "@rika/terminal",
@@ -4792,6 +4846,15 @@
     {
       "id": "packages/terminal/src/presentation/terminal/terminal-theme.ts",
       "path": "packages/terminal/src/presentation/terminal/terminal-theme.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/terminal/src/presentation/terminal/terminal-toast-layout.ts",
+      "path": "packages/terminal/src/presentation/terminal/terminal-toast-layout.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -4862,6 +4925,15 @@
       "publicExports": []
     },
     {
+      "id": "packages/terminal/src/presentation/transcript/transcript-anchor-geometry.ts",
+      "path": "packages/terminal/src/presentation/transcript/transcript-anchor-geometry.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/terminal/src/presentation/transcript/transcript-content-change.ts",
       "path": "packages/terminal/src/presentation/transcript/transcript-content-change.ts",
       "workspace": "@rika/terminal",
@@ -4880,17 +4952,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/terminal/src/presentation/transcript/transcript-row-window-include.ts",
-      "path": "packages/terminal/src/presentation/transcript/transcript-row-window-include.ts",
-      "workspace": "@rika/terminal",
-      "package": "@rika/terminal",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "packages/terminal/src/presentation/transcript/transcript-row-window-state.ts",
-      "path": "packages/terminal/src/presentation/transcript/transcript-row-window-state.ts",
+      "id": "packages/terminal/src/presentation/transcript/transcript-record-order.ts",
+      "path": "packages/terminal/src/presentation/transcript/transcript-record-order.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -4900,6 +4963,15 @@
     {
       "id": "packages/terminal/src/presentation/transcript/transcript-row.ts",
       "path": "packages/terminal/src/presentation/transcript/transcript-row.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/terminal/src/presentation/transcript/transcript-tool-body.ts",
+      "path": "packages/terminal/src/presentation/transcript/transcript-tool-body.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -4934,35 +5006,17 @@
       "publicExports": []
     },
     {
-      "id": "packages/terminal/src/presentation/transcript/transcript-viewport-decision.ts",
-      "path": "packages/terminal/src/presentation/transcript/transcript-viewport-decision.ts",
-      "workspace": "@rika/terminal",
-      "package": "@rika/terminal",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "packages/terminal/src/presentation/transcript/transcript-viewport-effects.ts",
-      "path": "packages/terminal/src/presentation/transcript/transcript-viewport-effects.ts",
-      "workspace": "@rika/terminal",
-      "package": "@rika/terminal",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "packages/terminal/src/presentation/transcript/transcript-viewport-events.ts",
-      "path": "packages/terminal/src/presentation/transcript/transcript-viewport-events.ts",
-      "workspace": "@rika/terminal",
-      "package": "@rika/terminal",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
       "id": "packages/terminal/src/presentation/transcript/transcript-viewport-metrics.ts",
       "path": "packages/terminal/src/presentation/transcript/transcript-viewport-metrics.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/terminal/src/presentation/transcript/transcript-viewport-protocol.ts",
+      "path": "packages/terminal/src/presentation/transcript/transcript-viewport-protocol.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -6010,30 +6064,6 @@
   ],
   "edges": [
     {
-      "from": "apps/rika/src/application-performance-evaluation.ts",
-      "to": "apps/rika/src/performance-platform.ts",
-      "specifier": "./performance-platform",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/application-performance-evaluation.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/application-performance-evaluation.ts",
-      "to": "packages/terminal/src/performance/terminal-performance-evaluation.ts",
-      "specifier": "@rika/terminal/terminal-performance-evaluation",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
       "from": "apps/rika/src/client-main.ts",
       "to": "apps/rika/src/client/client-process-exit.ts",
       "specifier": "./client/client-process-exit",
@@ -6107,8 +6137,8 @@
     },
     {
       "from": "apps/rika/src/client/client-process.ts",
-      "to": "apps/rika/src/diagnostic-file-logging.ts",
-      "specifier": "../diagnostic-file-logging",
+      "to": "apps/rika/src/diagnostics/diagnostic-file-logging.ts",
+      "specifier": "../diagnostics/diagnostic-file-logging",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -6251,8 +6281,8 @@
     },
     {
       "from": "apps/rika/src/command/product/diagnostics-command.ts",
-      "to": "apps/rika/src/diagnostic-file-logging.ts",
-      "specifier": "../../diagnostic-file-logging",
+      "to": "apps/rika/src/diagnostics/diagnostic-file-logging.ts",
+      "specifier": "../../diagnostics/diagnostic-file-logging",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -6483,14 +6513,6 @@
     },
     {
       "from": "apps/rika/src/command/root/rika-command.ts",
-      "to": "apps/rika/src/application-version.ts",
-      "specifier": "../../application-version",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/command/root/rika-command.ts",
       "to": "apps/rika/src/command/product/auth-command.ts",
       "specifier": "../product/auth-command",
       "kind": "import",
@@ -6579,6 +6601,14 @@
     },
     {
       "from": "apps/rika/src/command/root/rika-command.ts",
+      "to": "apps/rika/src/platform/application-version.ts",
+      "specifier": "../../platform/application-version",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/command/root/rika-command.ts",
       "to": "apps/rika/src/release/release-update.ts",
       "specifier": "../../release/release-update",
       "kind": "import",
@@ -6610,15 +6640,15 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/diagnostic-file-logging.ts",
-      "to": "apps/rika/src/diagnostic-file-logging-contract.ts",
+      "from": "apps/rika/src/diagnostics/diagnostic-file-logging.ts",
+      "to": "apps/rika/src/diagnostics/diagnostic-file-logging-contract.ts",
       "specifier": "./diagnostic-file-logging-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "apps/rika/src/diagnostic-file-logging.ts",
+      "from": "apps/rika/src/diagnostics/diagnostic-file-logging.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -7339,8 +7369,8 @@
     },
     {
       "from": "apps/rika/src/interactive/process/process-runtime.ts",
-      "to": "apps/rika/src/diagnostic-file-logging.ts",
-      "specifier": "../../diagnostic-file-logging",
+      "to": "apps/rika/src/diagnostics/diagnostic-file-logging.ts",
+      "specifier": "../../diagnostics/diagnostic-file-logging",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -7611,8 +7641,8 @@
     },
     {
       "from": "apps/rika/src/interactive/process/process-startup-dispatcher.ts",
-      "to": "apps/rika/src/diagnostic-file-logging.ts",
-      "specifier": "../../diagnostic-file-logging",
+      "to": "apps/rika/src/diagnostics/diagnostic-file-logging.ts",
+      "specifier": "../../diagnostics/diagnostic-file-logging",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -7747,8 +7777,8 @@
     },
     {
       "from": "apps/rika/src/performance-main.ts",
-      "to": "apps/rika/src/application-performance-evaluation.ts",
-      "specifier": "./application-performance-evaluation",
+      "to": "apps/rika/src/platform/application-performance-evaluation.ts",
+      "specifier": "./platform/application-performance-evaluation",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -7778,7 +7808,31 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/performance-platform.ts",
+      "from": "apps/rika/src/platform/application-performance-evaluation.ts",
+      "to": "apps/rika/src/platform/performance-platform.ts",
+      "specifier": "./performance-platform",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/platform/application-performance-evaluation.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/platform/application-performance-evaluation.ts",
+      "to": "packages/terminal/src/performance/terminal-performance-evaluation.ts",
+      "specifier": "@rika/terminal/terminal-performance-evaluation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/platform/performance-platform.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -8227,7 +8281,7 @@
     },
     {
       "from": "apps/rika/src/server/composition/server-execution-layer.ts",
-      "to": "packages/baton-execution/src/scripted-model.ts",
+      "to": "packages/baton-execution/src/testing/scripted-model.ts",
       "specifier": "@rika/baton-execution/scripted-model",
       "kind": "import",
       "relationship": "runtime",
@@ -8611,16 +8665,16 @@
     },
     {
       "from": "apps/rika/src/server/process/server-process-launch.ts",
-      "to": "apps/rika/src/application-version.ts",
-      "specifier": "../../application-version",
+      "to": "apps/rika/src/diagnostics/diagnostic-file-logging.ts",
+      "specifier": "../../diagnostics/diagnostic-file-logging",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
       "from": "apps/rika/src/server/process/server-process-launch.ts",
-      "to": "apps/rika/src/diagnostic-file-logging.ts",
-      "specifier": "../../diagnostic-file-logging",
+      "to": "apps/rika/src/platform/application-version.ts",
+      "specifier": "../../platform/application-version",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10171,7 +10225,7 @@
     },
     {
       "from": "apps/rika/test/tui-app-backend.ts",
-      "to": "packages/baton-execution/src/baton-test-harness.ts",
+      "to": "packages/baton-execution/src/testing/baton-test-harness.ts",
       "specifier": "@rika/baton-execution/baton-test-harness",
       "kind": "import",
       "relationship": "runtime",
@@ -10219,7 +10273,7 @@
     },
     {
       "from": "apps/rika/test/tui-app-model.ts",
-      "to": "packages/baton-execution/src/baton-test-harness.ts",
+      "to": "packages/baton-execution/src/testing/baton-test-harness.ts",
       "specifier": "@rika/baton-execution/baton-test-harness",
       "kind": "import",
       "relationship": "runtime",
@@ -10695,41 +10749,33 @@
       "dependencySection": "dependencies"
     },
     {
-      "from": "packages/baton-execution/src/baton-authorization-projection.ts",
-      "to": "packages/baton-execution/src/baton-projector-model.ts",
-      "specifier": "./baton-projector-model",
+      "from": "packages/baton-execution/src/accounting/usage-accounting.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-authorization-projection.ts",
-      "to": "packages/baton-execution/src/baton-projector-persistence.ts",
-      "specifier": "./baton-projector-persistence",
+      "from": "packages/baton-execution/src/accounting/usage-accounting.ts",
+      "to": "packages/baton-execution/src/projector/projector-decoding.ts",
+      "specifier": "../projector/projector-decoding",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-authorization-projection.ts",
-      "to": "packages/baton-execution/src/baton-projector-values.ts",
-      "specifier": "./baton-projector-values",
+      "from": "packages/baton-execution/src/accounting/usage-accounting.ts",
+      "to": "packages/baton-execution/src/projector/projector-model.ts",
+      "specifier": "../projector/projector-model",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-diagnostic-projection.ts",
-      "to": "packages/baton-execution/src/baton-projector-model.ts",
-      "specifier": "./baton-projector-model",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-diagnostic-projection.ts",
-      "to": "packages/baton-execution/src/baton-projector-values.ts",
-      "specifier": "./baton-projector-values",
+      "from": "packages/baton-execution/src/accounting/usage-accounting.ts",
+      "to": "packages/baton-execution/src/projector/projector-persistence.ts",
+      "specifier": "../projector/projector-persistence",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10760,22 +10806,22 @@
     },
     {
       "from": "packages/baton-execution/src/baton-execution.ts",
-      "to": "packages/baton-execution/src/baton-route.ts",
-      "specifier": "./baton-route",
+      "to": "packages/baton-execution/src/projector/tree-projector.ts",
+      "specifier": "./projector/tree-projector",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
       "from": "packages/baton-execution/src/baton-execution.ts",
-      "to": "packages/baton-execution/src/baton-tree-projector.ts",
-      "specifier": "./baton-tree-projector",
+      "to": "packages/baton-execution/src/routing/baton-route.ts",
+      "specifier": "./routing/baton-route",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-program-bindings.ts",
+      "from": "packages/baton-execution/src/program/baton-program.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
       "kind": "import",
@@ -10783,15 +10829,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-program-bindings.ts",
-      "to": "external:@batonfx/runtime",
-      "specifier": "@batonfx/runtime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-program-bindings.ts",
+      "from": "packages/baton-execution/src/program/baton-program.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -10799,7 +10837,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-program-bindings.ts",
+      "from": "packages/baton-execution/src/program/baton-program.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
       "kind": "import",
@@ -10807,71 +10845,23 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-program-bindings.ts",
-      "to": "packages/baton-execution/src/baton-program.ts",
-      "specifier": "./baton-program",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-program-bindings.ts",
-      "to": "packages/baton-execution/src/baton-registration.ts",
+      "from": "packages/baton-execution/src/program/baton-program.ts",
+      "to": "packages/baton-execution/src/program/baton-registration.ts",
       "specifier": "./baton-registration",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-program-bindings.ts",
-      "to": "packages/baton-execution/src/baton-sandbox-identity.ts",
-      "specifier": "./baton-sandbox-identity",
+      "from": "packages/baton-execution/src/program/baton-program.ts",
+      "to": "packages/baton-execution/src/routing/sandbox-identity-route.ts",
+      "specifier": "../routing/sandbox-identity-route",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-program.ts",
-      "to": "external:@batonfx/core",
-      "specifier": "@batonfx/core",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-program.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-program.ts",
-      "to": "external:effect/unstable/ai",
-      "specifier": "effect/unstable/ai",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-program.ts",
-      "to": "packages/baton-execution/src/baton-registration.ts",
-      "specifier": "./baton-registration",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-program.ts",
-      "to": "packages/baton-execution/src/baton-sandbox-identity.ts",
-      "specifier": "./baton-sandbox-identity",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-program.ts",
+      "from": "packages/baton-execution/src/program/baton-program.ts",
       "to": "packages/coding-tools/src/catalog/agent-role-toolkits.ts",
       "specifier": "@rika/coding-tools/agent-role-toolkits",
       "kind": "import",
@@ -10879,119 +10869,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-projector-checkpoint.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-projector-checkpoint.ts",
-      "to": "packages/baton-execution/src/baton-projector-model.ts",
-      "specifier": "./baton-projector-model",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-projector-checkpoint.ts",
-      "to": "packages/baton-execution/src/baton-projector-nodes.ts",
-      "specifier": "./baton-projector-nodes",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-projector-checkpoint.ts",
-      "to": "packages/baton-execution/src/baton-projector-persistence.ts",
-      "specifier": "./baton-projector-persistence",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-projector-checkpoint.ts",
-      "to": "packages/baton-execution/src/baton-usage-accounting.ts",
-      "specifier": "./baton-usage-accounting",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-projector-decoding.ts",
-      "to": "external:@batonfx/runtime",
-      "specifier": "@batonfx/runtime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-projector-decoding.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-projector-decoding.ts",
-      "to": "packages/baton-execution/src/baton-projector-values.ts",
-      "specifier": "./baton-projector-values",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-projector-model.ts",
-      "to": "external:@batonfx/runtime",
-      "specifier": "@batonfx/runtime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-projector-nodes.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-projector-nodes.ts",
-      "to": "packages/baton-execution/src/baton-projector-model.ts",
-      "specifier": "./baton-projector-model",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-projector-nodes.ts",
-      "to": "packages/baton-execution/src/baton-projector-persistence.ts",
-      "specifier": "./baton-projector-persistence",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-projector-persistence.ts",
-      "to": "packages/baton-execution/src/baton-projector-model.ts",
-      "specifier": "./baton-projector-model",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-projector-values.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-registration.ts",
+      "from": "packages/baton-execution/src/program/baton-registration.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
       "kind": "import",
@@ -10999,7 +10877,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-registration.ts",
+      "from": "packages/baton-execution/src/program/baton-registration.ts",
       "to": "external:@batonfx/runtime",
       "specifier": "@batonfx/runtime",
       "kind": "import",
@@ -11007,7 +10885,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-registration.ts",
+      "from": "packages/baton-execution/src/program/baton-registration.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -11015,7 +10893,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-registration.ts",
+      "from": "packages/baton-execution/src/program/baton-registration.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
       "kind": "import",
@@ -11023,15 +10901,15 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-registration.ts",
-      "to": "packages/baton-execution/src/baton-sandbox-identity.ts",
-      "specifier": "./baton-sandbox-identity",
+      "from": "packages/baton-execution/src/program/baton-registration.ts",
+      "to": "packages/baton-execution/src/routing/sandbox-identity-route.ts",
+      "specifier": "../routing/sandbox-identity-route",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-route.ts",
+      "from": "packages/baton-execution/src/program/program-bindings.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
       "kind": "import",
@@ -11039,7 +10917,439 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-route.ts",
+      "from": "packages/baton-execution/src/program/program-bindings.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/program/program-bindings.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/program/program-bindings.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/program/program-bindings.ts",
+      "to": "packages/baton-execution/src/program/baton-program.ts",
+      "specifier": "./baton-program",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/program/program-bindings.ts",
+      "to": "packages/baton-execution/src/program/baton-registration.ts",
+      "specifier": "./baton-registration",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/program/program-bindings.ts",
+      "to": "packages/baton-execution/src/routing/sandbox-identity-route.ts",
+      "specifier": "../routing/sandbox-identity-route",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projection/authorization-projection.ts",
+      "to": "packages/baton-execution/src/projector/projector-model.ts",
+      "specifier": "../projector/projector-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projection/authorization-projection.ts",
+      "to": "packages/baton-execution/src/projector/projector-persistence.ts",
+      "specifier": "../projector/projector-persistence",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projection/authorization-projection.ts",
+      "to": "packages/baton-execution/src/projector/projector-values.ts",
+      "specifier": "../projector/projector-values",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projection/diagnostic-projection.ts",
+      "to": "packages/baton-execution/src/projector/projector-model.ts",
+      "specifier": "../projector/projector-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projection/diagnostic-projection.ts",
+      "to": "packages/baton-execution/src/projector/projector-values.ts",
+      "specifier": "../projector/projector-values",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projection/streamed-text-projection.ts",
+      "to": "packages/baton-execution/src/projector/projector-model.ts",
+      "specifier": "../projector/projector-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projection/streamed-text-projection.ts",
+      "to": "packages/baton-execution/src/projector/projector-values.ts",
+      "specifier": "../projector/projector-values",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projection/subagent-card-projection.ts",
+      "to": "packages/baton-execution/src/projector/projector-decoding.ts",
+      "specifier": "../projector/projector-decoding",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projection/subagent-card-projection.ts",
+      "to": "packages/baton-execution/src/projector/projector-model.ts",
+      "specifier": "../projector/projector-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projection/subagent-card-projection.ts",
+      "to": "packages/baton-execution/src/projector/projector-persistence.ts",
+      "specifier": "../projector/projector-persistence",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projection/subagent-card-projection.ts",
+      "to": "packages/baton-execution/src/projector/projector-values.ts",
+      "specifier": "../projector/projector-values",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projection/subagent-card-projection.ts",
+      "to": "packages/coding-tools/src/catalog/coding-tool-catalog.ts",
+      "specifier": "@rika/coding-tools/coding-tool-catalog",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projection/tool-projection.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projection/tool-projection.ts",
+      "to": "packages/coding-tools/src/catalog/coding-tool-catalog.ts",
+      "specifier": "@rika/coding-tools/coding-tool-catalog",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projection/tool-unit-projection.ts",
+      "to": "packages/baton-execution/src/projection/tool-projection.ts",
+      "specifier": "./tool-projection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projection/tool-unit-projection.ts",
+      "to": "packages/baton-execution/src/projector/projector-model.ts",
+      "specifier": "../projector/projector-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projection/tool-unit-projection.ts",
+      "to": "packages/baton-execution/src/projector/projector-values.ts",
+      "specifier": "../projector/projector-values",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/projector-checkpoint.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/projector-checkpoint.ts",
+      "to": "packages/baton-execution/src/accounting/usage-accounting.ts",
+      "specifier": "../accounting/usage-accounting",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/projector-checkpoint.ts",
+      "to": "packages/baton-execution/src/projector/projector-model.ts",
+      "specifier": "./projector-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/projector-checkpoint.ts",
+      "to": "packages/baton-execution/src/projector/projector-nodes.ts",
+      "specifier": "./projector-nodes",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/projector-checkpoint.ts",
+      "to": "packages/baton-execution/src/projector/projector-persistence.ts",
+      "specifier": "./projector-persistence",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/projector-decoding.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/projector-decoding.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/projector-decoding.ts",
+      "to": "packages/baton-execution/src/projector/projector-values.ts",
+      "specifier": "./projector-values",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/projector-model.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/projector-nodes.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/projector-nodes.ts",
+      "to": "packages/baton-execution/src/projector/projector-model.ts",
+      "specifier": "./projector-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/projector-nodes.ts",
+      "to": "packages/baton-execution/src/projector/projector-persistence.ts",
+      "specifier": "./projector-persistence",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/projector-persistence.ts",
+      "to": "packages/baton-execution/src/projector/projector-model.ts",
+      "specifier": "./projector-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/projector-values.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/tree-projector.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/tree-projector.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/tree-projector.ts",
+      "to": "packages/baton-execution/src/accounting/usage-accounting.ts",
+      "specifier": "../accounting/usage-accounting",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/tree-projector.ts",
+      "to": "packages/baton-execution/src/projection/authorization-projection.ts",
+      "specifier": "../projection/authorization-projection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/tree-projector.ts",
+      "to": "packages/baton-execution/src/projection/diagnostic-projection.ts",
+      "specifier": "../projection/diagnostic-projection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/tree-projector.ts",
+      "to": "packages/baton-execution/src/projection/streamed-text-projection.ts",
+      "specifier": "../projection/streamed-text-projection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/tree-projector.ts",
+      "to": "packages/baton-execution/src/projection/subagent-card-projection.ts",
+      "specifier": "../projection/subagent-card-projection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/tree-projector.ts",
+      "to": "packages/baton-execution/src/projection/tool-projection.ts",
+      "specifier": "../projection/tool-projection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/tree-projector.ts",
+      "to": "packages/baton-execution/src/projection/tool-unit-projection.ts",
+      "specifier": "../projection/tool-unit-projection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/tree-projector.ts",
+      "to": "packages/baton-execution/src/projector/projector-checkpoint.ts",
+      "specifier": "./projector-checkpoint",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/tree-projector.ts",
+      "to": "packages/baton-execution/src/projector/projector-decoding.ts",
+      "specifier": "./projector-decoding",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/tree-projector.ts",
+      "to": "packages/baton-execution/src/projector/projector-identity.ts",
+      "specifier": "./projector-identity",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/tree-projector.ts",
+      "to": "packages/baton-execution/src/projector/projector-model.ts",
+      "specifier": "./projector-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/tree-projector.ts",
+      "to": "packages/baton-execution/src/projector/projector-nodes.ts",
+      "specifier": "./projector-nodes",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/tree-projector.ts",
+      "to": "packages/baton-execution/src/projector/projector-persistence.ts",
+      "specifier": "./projector-persistence",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/projector/tree-projector.ts",
+      "to": "packages/baton-execution/src/projector/projector-values.ts",
+      "specifier": "./projector-values",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/routing/baton-route.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/routing/baton-route.ts",
       "to": "external:@batonfx/providers",
       "specifier": "@batonfx/providers",
       "kind": "import",
@@ -11047,7 +11357,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-route.ts",
+      "from": "packages/baton-execution/src/routing/baton-route.ts",
       "to": "external:@batonfx/runtime",
       "specifier": "@batonfx/runtime",
       "kind": "import",
@@ -11055,7 +11365,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-route.ts",
+      "from": "packages/baton-execution/src/routing/baton-route.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -11063,7 +11373,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-route.ts",
+      "from": "packages/baton-execution/src/routing/baton-route.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
       "kind": "import",
@@ -11071,7 +11381,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-route.ts",
+      "from": "packages/baton-execution/src/routing/baton-route.ts",
       "to": "external:effect/unstable/http",
       "specifier": "effect/unstable/http",
       "kind": "import",
@@ -11079,39 +11389,39 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-route.ts",
-      "to": "packages/baton-execution/src/baton-program-bindings.ts",
-      "specifier": "./baton-program-bindings",
+      "from": "packages/baton-execution/src/routing/baton-route.ts",
+      "to": "packages/baton-execution/src/program/baton-program.ts",
+      "specifier": "../program/baton-program",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-route.ts",
-      "to": "packages/baton-execution/src/baton-program.ts",
-      "specifier": "./baton-program",
+      "from": "packages/baton-execution/src/routing/baton-route.ts",
+      "to": "packages/baton-execution/src/program/baton-registration.ts",
+      "specifier": "../program/baton-registration",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-route.ts",
-      "to": "packages/baton-execution/src/baton-registration.ts",
-      "specifier": "./baton-registration",
+      "from": "packages/baton-execution/src/routing/baton-route.ts",
+      "to": "packages/baton-execution/src/program/program-bindings.ts",
+      "specifier": "../program/program-bindings",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-route.ts",
-      "to": "packages/baton-execution/src/baton-sandbox-identity.ts",
-      "specifier": "./baton-sandbox-identity",
+      "from": "packages/baton-execution/src/routing/baton-route.ts",
+      "to": "packages/baton-execution/src/routing/sandbox-identity-route.ts",
+      "specifier": "./sandbox-identity-route",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-route.ts",
+      "from": "packages/baton-execution/src/routing/baton-route.ts",
       "to": "packages/coding-tools/src/catalog/agent-role-toolkits.ts",
       "specifier": "@rika/coding-tools/agent-role-toolkits",
       "kind": "import",
@@ -11119,7 +11429,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-sandbox-identity.ts",
+      "from": "packages/baton-execution/src/routing/sandbox-identity-route.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
       "kind": "import",
@@ -11127,7 +11437,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-sandbox-identity.ts",
+      "from": "packages/baton-execution/src/routing/sandbox-identity-route.ts",
       "to": "external:@batonfx/runtime",
       "specifier": "@batonfx/runtime",
       "kind": "import",
@@ -11135,7 +11445,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-sandbox-identity.ts",
+      "from": "packages/baton-execution/src/routing/sandbox-identity-route.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -11143,63 +11453,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-streamed-text-projection.ts",
-      "to": "packages/baton-execution/src/baton-projector-model.ts",
-      "specifier": "./baton-projector-model",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-streamed-text-projection.ts",
-      "to": "packages/baton-execution/src/baton-projector-values.ts",
-      "specifier": "./baton-projector-values",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-subagent-card-projection.ts",
-      "to": "packages/baton-execution/src/baton-projector-decoding.ts",
-      "specifier": "./baton-projector-decoding",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-subagent-card-projection.ts",
-      "to": "packages/baton-execution/src/baton-projector-model.ts",
-      "specifier": "./baton-projector-model",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-subagent-card-projection.ts",
-      "to": "packages/baton-execution/src/baton-projector-persistence.ts",
-      "specifier": "./baton-projector-persistence",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-subagent-card-projection.ts",
-      "to": "packages/baton-execution/src/baton-projector-values.ts",
-      "specifier": "./baton-projector-values",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-subagent-card-projection.ts",
-      "to": "packages/coding-tools/src/catalog/coding-tool-catalog.ts",
-      "specifier": "@rika/coding-tools/coding-tool-catalog",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-test-harness.ts",
+      "from": "packages/baton-execution/src/testing/baton-test-harness.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
       "kind": "import",
@@ -11207,7 +11461,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-test-harness.ts",
+      "from": "packages/baton-execution/src/testing/baton-test-harness.ts",
       "to": "external:@batonfx/runtime",
       "specifier": "@batonfx/runtime",
       "kind": "import",
@@ -11215,7 +11469,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-test-harness.ts",
+      "from": "packages/baton-execution/src/testing/baton-test-harness.ts",
       "to": "external:@batonfx/test",
       "specifier": "@batonfx/test",
       "kind": "import",
@@ -11223,7 +11477,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-test-harness.ts",
+      "from": "packages/baton-execution/src/testing/baton-test-harness.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -11231,7 +11485,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-test-harness.ts",
+      "from": "packages/baton-execution/src/testing/baton-test-harness.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
       "kind": "import",
@@ -11239,207 +11493,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/baton-tool-projection.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-tool-projection.ts",
-      "to": "packages/coding-tools/src/catalog/coding-tool-catalog.ts",
-      "specifier": "@rika/coding-tools/coding-tool-catalog",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-tool-unit-projection.ts",
-      "to": "packages/baton-execution/src/baton-projector-model.ts",
-      "specifier": "./baton-projector-model",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-tool-unit-projection.ts",
-      "to": "packages/baton-execution/src/baton-projector-values.ts",
-      "specifier": "./baton-projector-values",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-tool-unit-projection.ts",
-      "to": "packages/baton-execution/src/baton-tool-projection.ts",
-      "specifier": "./baton-tool-projection",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-tree-projector.ts",
-      "to": "external:@batonfx/runtime",
-      "specifier": "@batonfx/runtime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-tree-projector.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-tree-projector.ts",
-      "to": "packages/baton-execution/src/baton-authorization-projection.ts",
-      "specifier": "./baton-authorization-projection",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-tree-projector.ts",
-      "to": "packages/baton-execution/src/baton-diagnostic-projection.ts",
-      "specifier": "./baton-diagnostic-projection",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-tree-projector.ts",
-      "to": "packages/baton-execution/src/baton-projector-checkpoint.ts",
-      "specifier": "./baton-projector-checkpoint",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-tree-projector.ts",
-      "to": "packages/baton-execution/src/baton-projector-decoding.ts",
-      "specifier": "./baton-projector-decoding",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-tree-projector.ts",
-      "to": "packages/baton-execution/src/baton-projector-identity.ts",
-      "specifier": "./baton-projector-identity",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-tree-projector.ts",
-      "to": "packages/baton-execution/src/baton-projector-model.ts",
-      "specifier": "./baton-projector-model",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-tree-projector.ts",
-      "to": "packages/baton-execution/src/baton-projector-nodes.ts",
-      "specifier": "./baton-projector-nodes",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-tree-projector.ts",
-      "to": "packages/baton-execution/src/baton-projector-persistence.ts",
-      "specifier": "./baton-projector-persistence",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-tree-projector.ts",
-      "to": "packages/baton-execution/src/baton-projector-values.ts",
-      "specifier": "./baton-projector-values",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-tree-projector.ts",
-      "to": "packages/baton-execution/src/baton-streamed-text-projection.ts",
-      "specifier": "./baton-streamed-text-projection",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-tree-projector.ts",
-      "to": "packages/baton-execution/src/baton-subagent-card-projection.ts",
-      "specifier": "./baton-subagent-card-projection",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-tree-projector.ts",
-      "to": "packages/baton-execution/src/baton-tool-projection.ts",
-      "specifier": "./baton-tool-projection",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-tree-projector.ts",
-      "to": "packages/baton-execution/src/baton-tool-unit-projection.ts",
-      "specifier": "./baton-tool-unit-projection",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-tree-projector.ts",
-      "to": "packages/baton-execution/src/baton-usage-accounting.ts",
-      "specifier": "./baton-usage-accounting",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-usage-accounting.ts",
-      "to": "external:@batonfx/runtime",
-      "specifier": "@batonfx/runtime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-usage-accounting.ts",
-      "to": "packages/baton-execution/src/baton-projector-decoding.ts",
-      "specifier": "./baton-projector-decoding",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-usage-accounting.ts",
-      "to": "packages/baton-execution/src/baton-projector-model.ts",
-      "specifier": "./baton-projector-model",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/baton-usage-accounting.ts",
-      "to": "packages/baton-execution/src/baton-projector-persistence.ts",
-      "specifier": "./baton-projector-persistence",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/scripted-model.ts",
+      "from": "packages/baton-execution/src/testing/scripted-model.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
       "kind": "import",
@@ -11447,7 +11501,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/scripted-model.ts",
+      "from": "packages/baton-execution/src/testing/scripted-model.ts",
       "to": "external:@batonfx/test",
       "specifier": "@batonfx/test",
       "kind": "import",
@@ -11455,7 +11509,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/scripted-model.ts",
+      "from": "packages/baton-execution/src/testing/scripted-model.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -11480,8 +11534,8 @@
     },
     {
       "from": "packages/baton-execution/test/baton-projector-event-fixtures.ts",
-      "to": "packages/baton-execution/src/baton-tree-projector.ts",
-      "specifier": "../src/baton-tree-projector",
+      "to": "packages/baton-execution/src/projector/tree-projector.ts",
+      "specifier": "../src/projector/tree-projector",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -21712,6 +21766,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/rendering/opentui-render-tool-bodies.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-tool-body.ts",
+      "specifier": "../../presentation/transcript/transcript-tool-body",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/rendering/opentui-render-tool-bodies.ts",
       "to": "packages/terminal/src/presentation/transcript/transcript-tool-detail.ts",
       "specifier": "../../presentation/transcript/transcript-tool-detail",
       "kind": "import",
@@ -22415,6 +22477,14 @@
       "production": true
     },
     {
+      "from": "packages/terminal/src/opentui/surface/opentui-focus-controller.ts",
+      "to": "external:@opentui/core",
+      "specifier": "@opentui/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/src/opentui/surface/opentui-input.ts",
       "to": "external:@opentui/core",
       "specifier": "@opentui/core",
@@ -22466,6 +22536,14 @@
       "from": "packages/terminal/src/opentui/surface/opentui-input.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-surface-content.ts",
       "specifier": "./opentui-surface-content",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-input.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-welcome-orb.ts",
+      "specifier": "./opentui-welcome-orb",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -22728,22 +22806,6 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-lifecycle-toast.ts",
-      "to": "external:string-width",
-      "specifier": "string-width",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-lifecycle-toast.ts",
-      "to": "packages/terminal/src/opentui/rendering/terminal-text-adapter.ts",
-      "specifier": "../rendering/terminal-text-adapter",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-lifecycle-toast.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-lifecycle-layout.ts",
       "specifier": "./opentui-lifecycle-layout",
       "kind": "import",
@@ -22752,16 +22814,8 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-lifecycle-toast.ts",
-      "to": "packages/terminal/src/presentation/terminal/terminal-format.ts",
-      "specifier": "../../presentation/terminal/terminal-format",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-lifecycle-toast.ts",
-      "to": "packages/terminal/src/presentation/terminal/terminal-theme.ts",
-      "specifier": "../../presentation/terminal/terminal-theme",
+      "to": "packages/terminal/src/opentui/surface/opentui-toast-controller.ts",
+      "specifier": "./opentui-toast-controller",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -22858,14 +22912,6 @@
       "from": "packages/terminal/src/opentui/surface/opentui-lifecycle-transcript-update.ts",
       "to": "packages/terminal/src/presentation/transcript/terminal-transcript-window.ts",
       "specifier": "../../presentation/transcript/terminal-transcript-window",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-lifecycle-transcript-update.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-row-window-include.ts",
-      "specifier": "../../presentation/transcript/transcript-row-window-include",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -22984,14 +23030,6 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-lifecycle.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-row-window-state.ts",
-      "specifier": "../../presentation/transcript/transcript-row-window-state",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-lifecycle.ts",
       "to": "packages/terminal/src/presentation/transcript/transcript-viewport.ts",
       "specifier": "../../presentation/transcript/transcript-viewport",
       "kind": "import",
@@ -23010,6 +23048,14 @@
       "from": "packages/terminal/src/opentui/surface/opentui-lifecycle.ts",
       "to": "packages/terminal/src/state/model/terminal-state.ts",
       "specifier": "../../state/model/terminal-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-loader-controller.ts",
+      "to": "external:@opentui/core",
+      "specifier": "@opentui/core",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -23152,6 +23198,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-overlay-region.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-focus-controller.ts",
+      "specifier": "./opentui-focus-controller",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-overlay-region.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-overlay-content.ts",
       "specifier": "./opentui-overlay-content",
       "kind": "import",
@@ -23192,16 +23246,16 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-overlay-region.ts",
-      "to": "packages/terminal/src/presentation/terminal/terminal-format.ts",
-      "specifier": "../../presentation/terminal/terminal-format",
+      "to": "packages/terminal/src/presentation/terminal/terminal-mode-selector-layout.ts",
+      "specifier": "../../presentation/terminal/terminal-mode-selector-layout",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-overlay-region.ts",
-      "to": "packages/terminal/src/presentation/terminal/terminal-mode-selector-layout.ts",
-      "specifier": "../../presentation/terminal/terminal-mode-selector-layout",
+      "to": "packages/terminal/src/presentation/terminal/terminal-overlay-hints.ts",
+      "specifier": "../../presentation/terminal/terminal-overlay-hints",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -23263,7 +23317,7 @@
       "production": true
     },
     {
-      "from": "packages/terminal/src/opentui/surface/opentui-sidebar-region.ts",
+      "from": "packages/terminal/src/opentui/surface/opentui-sidebar-controller.ts",
       "to": "external:@opentui/core",
       "specifier": "@opentui/core",
       "kind": "import",
@@ -23271,9 +23325,41 @@
       "production": true
     },
     {
-      "from": "packages/terminal/src/opentui/surface/opentui-sidebar-region.ts",
+      "from": "packages/terminal/src/opentui/surface/opentui-sidebar-controller.ts",
       "to": "packages/terminal/src/opentui/rendering/opentui-render-block.ts",
       "specifier": "../rendering/opentui-render-block",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-sidebar-controller.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-surface-transcript-types.ts",
+      "specifier": "./opentui-surface-transcript-types",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-sidebar-controller.ts",
+      "to": "packages/terminal/src/state/model/terminal-state.ts",
+      "specifier": "../../state/model/terminal-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-sidebar-region.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-sidebar-controller.ts",
+      "specifier": "./opentui-sidebar-controller",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-sidebar-region.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-surface-transcript-types.ts",
+      "specifier": "./opentui-surface-transcript-types",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -23352,8 +23438,24 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-surface-construction.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-loader-controller.ts",
+      "specifier": "./opentui-loader-controller",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-surface-construction.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
       "specifier": "./opentui-surface-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-surface-construction.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-welcome-controller.ts",
+      "specifier": "./opentui-welcome-controller",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -23408,8 +23510,8 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-surface-content.ts",
-      "to": "packages/terminal/src/opentui/surface/opentui-amp-orb-frames.ts",
-      "specifier": "./opentui-amp-orb-frames",
+      "to": "packages/terminal/src/opentui/surface/opentui-welcome-orb.ts",
+      "specifier": "./opentui-welcome-orb",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -23488,6 +23590,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-loader-controller.ts",
+      "specifier": "./opentui-loader-controller",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-surface-transcript-types.ts",
       "specifier": "./opentui-surface-transcript-types",
       "kind": "import",
@@ -23496,16 +23606,16 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
-      "to": "packages/terminal/src/presentation/terminal/terminal-keymap.ts",
-      "specifier": "../../presentation/terminal/terminal-keymap",
+      "to": "packages/terminal/src/opentui/surface/opentui-welcome-controller.ts",
+      "specifier": "./opentui-welcome-controller",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-row-window-state.ts",
-      "specifier": "../../presentation/transcript/transcript-row-window-state",
+      "to": "packages/terminal/src/presentation/terminal/terminal-keymap.ts",
+      "specifier": "../../presentation/terminal/terminal-keymap",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -23623,6 +23733,46 @@
       "production": true
     },
     {
+      "from": "packages/terminal/src/opentui/surface/opentui-toast-controller.ts",
+      "to": "external:@opentui/core",
+      "specifier": "@opentui/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-toast-controller.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-toast-controller.ts",
+      "to": "packages/terminal/src/opentui/rendering/terminal-text-adapter.ts",
+      "specifier": "../rendering/terminal-text-adapter",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-toast-controller.ts",
+      "to": "packages/terminal/src/presentation/terminal/terminal-theme.ts",
+      "specifier": "../../presentation/terminal/terminal-theme",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-toast-controller.ts",
+      "to": "packages/terminal/src/presentation/terminal/terminal-toast-layout.ts",
+      "specifier": "../../presentation/terminal/terminal-toast-layout",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/src/opentui/surface/opentui-transcript-region.ts",
       "to": "external:@opentui/core",
       "specifier": "@opentui/core",
@@ -23664,8 +23814,8 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-transcript-region.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-viewport-events.ts",
-      "specifier": "../../presentation/transcript/transcript-viewport-events",
+      "to": "packages/terminal/src/presentation/transcript/transcript-anchor-geometry.ts",
+      "specifier": "../../presentation/transcript/transcript-anchor-geometry",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -23674,6 +23824,14 @@
       "from": "packages/terminal/src/opentui/surface/opentui-transcript-region.ts",
       "to": "packages/terminal/src/presentation/transcript/transcript-viewport-metrics.ts",
       "specifier": "../../presentation/transcript/transcript-viewport-metrics",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-region.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-viewport-protocol.ts",
+      "specifier": "../../presentation/transcript/transcript-viewport-protocol",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -23776,8 +23934,8 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-transcript-rendering.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-row-window-state.ts",
-      "specifier": "../../presentation/transcript/transcript-row-window-state",
+      "to": "packages/terminal/src/presentation/transcript/transcript-record-order.ts",
+      "specifier": "../../presentation/transcript/transcript-record-order",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -23802,6 +23960,22 @@
       "from": "packages/terminal/src/opentui/surface/opentui-transcript-rendering.ts",
       "to": "packages/terminal/src/state/model/terminal-state.ts",
       "specifier": "../../state/model/terminal-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-welcome-controller.ts",
+      "to": "external:@opentui/core",
+      "specifier": "@opentui/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-welcome-controller.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-welcome-orb.ts",
+      "specifier": "./opentui-welcome-orb",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -24239,6 +24413,14 @@
       "production": true
     },
     {
+      "from": "packages/terminal/src/presentation/terminal/terminal-keymap.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/src/presentation/terminal/terminal-mode-selector-layout.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -24263,9 +24445,57 @@
       "production": true
     },
     {
+      "from": "packages/terminal/src/presentation/terminal/terminal-overlay-hints.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/terminal/terminal-overlay-hints.ts",
+      "to": "external:string-width",
+      "specifier": "string-width",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/terminal/terminal-overlay-hints.ts",
+      "to": "packages/terminal/src/presentation/terminal/terminal-format.ts",
+      "specifier": "../terminal/terminal-format",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/src/presentation/terminal/terminal-relative-time.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/terminal/terminal-toast-layout.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/terminal/terminal-toast-layout.ts",
+      "to": "external:string-width",
+      "specifier": "string-width",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/terminal/terminal-toast-layout.ts",
+      "to": "packages/terminal/src/presentation/terminal/terminal-format.ts",
+      "specifier": "./terminal-format",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -24487,22 +24717,6 @@
       "production": true
     },
     {
-      "from": "packages/terminal/src/presentation/transcript/terminal-transcript-window.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/presentation/transcript/terminal-transcript-window.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-row-window-state.ts",
-      "specifier": "./transcript-row-window-state",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
       "from": "packages/terminal/src/presentation/transcript/transcript-agent-response.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -24530,6 +24744,14 @@
       "from": "packages/terminal/src/presentation/transcript/transcript-agent-response.ts",
       "to": "packages/terminal/src/state/model/terminal-transcript-state.ts",
       "specifier": "../../state/model/terminal-transcript-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/transcript/transcript-anchor-geometry.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -24583,17 +24805,9 @@
       "production": true
     },
     {
-      "from": "packages/terminal/src/presentation/transcript/transcript-row-window-include.ts",
+      "from": "packages/terminal/src/presentation/transcript/transcript-record-order.ts",
       "to": "external:effect",
       "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/presentation/transcript/transcript-row-window-include.ts",
-      "to": "packages/terminal/src/presentation/transcript/terminal-transcript-window.ts",
-      "specifier": "./terminal-transcript-window",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -24640,6 +24854,30 @@
     },
     {
       "from": "packages/terminal/src/presentation/transcript/transcript-row.ts",
+      "to": "packages/terminal/src/state/model/terminal-transcript-state.ts",
+      "specifier": "../../state/model/terminal-transcript-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/transcript/transcript-tool-body.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-agent-response.ts",
+      "specifier": "./transcript-agent-response",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/transcript/transcript-tool-body.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-tool-detail.ts",
+      "specifier": "./transcript-tool-detail",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/transcript/transcript-tool-body.ts",
       "to": "packages/terminal/src/state/model/terminal-transcript-state.ts",
       "specifier": "../../state/model/terminal-transcript-state",
       "kind": "import",
@@ -24703,30 +24941,6 @@
       "production": true
     },
     {
-      "from": "packages/terminal/src/presentation/transcript/transcript-viewport-decision.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-viewport-effects.ts",
-      "specifier": "./transcript-viewport-effects",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/presentation/transcript/transcript-viewport-decision.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-viewport-state.ts",
-      "specifier": "./transcript-viewport-state",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/presentation/transcript/transcript-viewport-events.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-viewport-state.ts",
-      "specifier": "./transcript-viewport-state",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
       "from": "packages/terminal/src/presentation/transcript/transcript-viewport-metrics.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -24735,6 +24949,14 @@
       "production": true
     },
     {
+      "from": "packages/terminal/src/presentation/transcript/transcript-viewport-protocol.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-viewport-state.ts",
+      "specifier": "./transcript-viewport-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/src/presentation/transcript/transcript-viewport-reducer.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -24744,24 +24966,8 @@
     },
     {
       "from": "packages/terminal/src/presentation/transcript/transcript-viewport-reducer.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-viewport-decision.ts",
-      "specifier": "./transcript-viewport-decision",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/presentation/transcript/transcript-viewport-reducer.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-viewport-effects.ts",
-      "specifier": "./transcript-viewport-effects",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/presentation/transcript/transcript-viewport-reducer.ts",
-      "to": "packages/terminal/src/presentation/transcript/transcript-viewport-events.ts",
-      "specifier": "./transcript-viewport-events",
+      "to": "packages/terminal/src/presentation/transcript/transcript-viewport-protocol.ts",
+      "specifier": "./transcript-viewport-protocol",
       "kind": "import",
       "relationship": "runtime",
       "production": true

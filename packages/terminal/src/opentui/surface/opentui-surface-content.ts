@@ -7,7 +7,7 @@ import { isLoading } from "../../state/model/terminal-loadable-state"
 import { activeTimeIcon } from "../../state/model/terminal-activity-time"
 import { colors, spacing } from "../../presentation/terminal/terminal-theme"
 import { homeRelativePath } from "../../presentation/terminal/terminal-format"
-import { ampOrbFrames } from "./opentui-amp-orb-frames"
+import { orbGeometry, orbRows, type OrbImpulse } from "./opentui-welcome-orb"
 export const panelLoading = (model: Model): string | undefined => {
   if (model.currentThreadId !== undefined && model.refoldingThreadIds.includes(model.currentThreadId))
     return "Rebuilding thread projection"
@@ -51,220 +51,6 @@ export const formatCost = (usd: number): string =>
 
 export const modeLabelWidth = (text: string): number => stringWidth(text.replaceAll(activeTimeIcon, "x"))
 
-const welcomeMarkFrame = (rows: ReadonlyArray<string>): ReadonlyArray<string> => [
-  "                                        ",
-  "                                        ",
-  "                                        ",
-  ...rows.map(shiftWelcomeMarkRow),
-]
-
-const shiftWelcomeMarkRow = (row: string): string => ` ${row}`.slice(0, 40)
-
-const _unusedWelcomeMarkFrames = [
-  welcomeMarkFrame([
-    "            •••••••••••••               ",
-    "         ••••••••••●●••••••••           ",
-    "      •••••●●●●●●●●•••••••••••••        ",
-    "    •••••●●●•••••••••••••••••••••       ",
-    "   •••••●●•••••••●●●•••••••••••••••     ",
-    "  ••••●●•••••●●●•••●●●●●●●••••••••••    ",
-    " ••••●●••••●●●•••●●●●●●●●●••••••••••    ",
-    " ••••●••••●●•••••••••••••••••••••••••   ",
-    "••••••••••●●•••••••••••••••••••••••••   ",
-    "••••••••••●●•••••••••••••••••••••••••   ",
-    " ••••••••••••••••••••••••••••••••••••   ",
-    " •••••••••••••••••••••••••••••••••••    ",
-    "  ••••••••••••••••••••••••••••••••••    ",
-    "   ••••••••••••••••••••••••••••••••     ",
-    "    •••••••••••••••••••••••••••••       ",
-    "      •••••••••••••••••••••••••         ",
-    "         ••••••••••••••••••••           ",
-    "             ···········•               ",
-  ]),
-  welcomeMarkFrame([
-    "             ••••••••••••               ",
-    "         ••••••••••••••••••••           ",
-    "      ••●●•••••●●●•••••••••••••         ",
-    "     ••••●●•●●•••••••••••••••••••       ",
-    "   ••••●●●●•••••••••••••••••••••••      ",
-    "  •••••••••••●●••••••••••••••••••••     ",
-    " •••••●●•••●●•••••●●●●●●●•••••••••••    ",
-    " ••••●••••●••••••••●●●●•••••••••••••    ",
-    " ••••●••••●••••••••••••••••••••••••••   ",
-    " •••••••••●●•••••••••••••••••••••••••   ",
-    " •••••••••••••••••••••••••••••••••••    ",
-    " •••••••••••••••••••••••••••••••••••    ",
-    "  •••••••••••••••••••••••••••••••••     ",
-    "   •••••••••••••••••••••••••••••••      ",
-    "     ••••••••••••••••••••••••••••       ",
-    "      •••••••••••••••••••••••••         ",
-    "         •••••••••••••••••••            ",
-    "              ·········•                ",
-  ]),
-  welcomeMarkFrame([
-    "              ••••••••••                ",
-    "          ••••••••••••••••••            ",
-    "       ●●••••••●●●•••••••••••••         ",
-    "     ●●•••••●●•••••••••••••••••••       ",
-    "    •••••●●●••••••••••••••••••••••      ",
-    "   ••••●●••••••••••••••••••••••••••     ",
-    "  ••••●●••••••••••••••••••••••••••••    ",
-    " ••••••••••••••••●●●●●●•••••••••••••    ",
-    " •••••••••••••••••••••••••••••••••••    ",
-    " ••••●••••●●••••••••••••••••••••••••    ",
-    " •••••••••••••••••••••••••••••••••••    ",
-    "  ••••••••••••••••••••••••••••••••••    ",
-    "  •••••••••••••••••••••••••••••••••     ",
-    "    ••••••••••••••••••••••••••••••      ",
-    "     •••••••••••••••••••••••••••        ",
-    "       ••••••••••••••••••••••••         ",
-    "          ••••••••••••••••••            ",
-    "               ·······•                 ",
-  ]),
-  welcomeMarkFrame([
-    "               ••••••••                 ",
-    "          ••●●••••••••••••••            ",
-    "       •••••••••••••••••••••••          ",
-    "     ••••••●●•••••••••••••••••••        ",
-    "    •••••●●•••••••••••••••••••••••      ",
-    "   ••••••••••••••••••••••••••••••••     ",
-    "  •••••••••••••••••••••••••••••••••     ",
-    "  ••••••••••••••●●●●••••••••••••••••    ",
-    " •••••••••••••••●●●●••••••••••••••••    ",
-    " •••••••••●•••••••••••••••••••••••••    ",
-    "  ••••••••••••••••••••••••••••••••••    ",
-    "  •••••••••••••••••••••••••••••••••     ",
-    "   ••••••••••••••••••••••••••••••••     ",
-    "    ••••••••••••••••••••••••••••••      ",
-    "     •••••••••••••••••••••••••••        ",
-    "       •••••••••••••••••••••••          ",
-    "          ·················             ",
-    "                ·····•                  ",
-  ]),
-  welcomeMarkFrame([
-    "                ••••••                  ",
-    "          •••••••••••••••••             ",
-    "       •••••••••••••••••••••••          ",
-    "     •••••••••••••••••••••••••••        ",
-    "    •••••••••••••••••••••••••••••       ",
-    "   •••••••••••••••••••••••••••••••      ",
-    "  •●●••••••••••••••••••••••••••••••     ",
-    "  ••••••••••••●●●•••••••••••••••••••    ",
-    " ••••••••••••●●●●●●•••••••••••••••••    ",
-    "  ••••••••••••••••••••••••••••••••••    ",
-    "  ••••••••••••••••••••••••••••••••••    ",
-    "  •••••••••••••••••••••••••••••••••     ",
-    "   •••••••••••••••••••••••••••••••      ",
-    "    •••••••••••••••••••••••••••••       ",
-    "      ••••••••••••••••••••••••••        ",
-    "        ••••••••••••••••••••••          ",
-    "          •···············•             ",
-    "                 ••••                   ",
-  ]),
-  welcomeMarkFrame([
-    "                •••••                   ",
-    "           ••●●••••••••••••             ",
-    "        ••••••••••••••••••••••          ",
-    "      ••••••••••••••••••••••••••        ",
-    "    •●●••••••••••••••••••••••••••       ",
-    "   •••••••••••●●••••••••••••••••••      ",
-    "  ••••••••••●●•••••••••••••••••••••     ",
-    "  ••••••••••●•••••••••••••••••••••••    ",
-    "  ••••••••●●●●●●••••••••••••••••••••    ",
-    "  •••••••••●●●●●••••••••••••••••••••    ",
-    "  ••••••••••••••••••••••••••••••••••    ",
-    "  •••••••••••••••••••••••••••••••••     ",
-    "   •••••••••••••••••••••••••••••••      ",
-    "    •••••••••••••••••••••••••••••       ",
-    "      ••••••••••••••••••••••••••        ",
-    "        ••••••••••••••••••••••          ",
-    "          •···············•             ",
-    "                  ••                    ",
-  ]),
-  welcomeMarkFrame([
-    "                ••••••                  ",
-    "          •••••••••••••••••             ",
-    "        •●●•••••••••••••••••••          ",
-    "      ••••••••••••••••••••••••••        ",
-    "    •••••••••••••••••••••••••••••       ",
-    "   ••••••••••••••●●●●•••••••••••••      ",
-    "  •••••••••••••●●●•••••••••••••••••     ",
-    "  •••••••●••••••••••••••••••••••••••    ",
-    "  •••••••●●●●●●•••••••••••••••••••••    ",
-    "  •••••••●●●●●••••••••••••••••••••••    ",
-    "  ••••••••••••••••••••••••••••••••••    ",
-    "  •••••••••••••••••••••••••••••••••     ",
-    "   •••••••••••••••••••••••••••••••      ",
-    "    •••••••••••••••••••••••••••••       ",
-    "     •••••••••••••••••••••••••••        ",
-    "       •••••••••••••••••••••••          ",
-    "          •···············•             ",
-    "                 •••                    ",
-  ]),
-  welcomeMarkFrame([
-    "               ••••••••                 ",
-    "          ••••••••••••••••••            ",
-    "       •••••••••••••••••••••••          ",
-    "     •••••••••••••••••••••••••••        ",
-    "    •••••••••••●●●••••••••••••••••      ",
-    "   •••••••••●●●••••••••••••••••••••     ",
-    "  •••••••••●●●●••••••••••••••••••••     ",
-    "  •••••●•••●●●••••••••••••••••••••••    ",
-    " ••••••●●●●●●●••••••••••••••••••••••    ",
-    " •••••••●●●●●•••••••••••••••••••••••    ",
-    "  ••••••••••••••••••••••••••••••••••    ",
-    "  •••••••••••••••••••••••••••••••••     ",
-    "   ••••••••••••••••••••••••••••••••     ",
-    "    ••••••••••••••••••••••••••••••      ",
-    "     •••••••••••••••••••••••••••        ",
-    "       •••••••••••••••••••••••          ",
-    "          ·················             ",
-    "                ·····•                  ",
-  ]),
-  welcomeMarkFrame([
-    "              ••••••••••                ",
-    "         •••••••••••••••••••            ",
-    "       ••••••••••••••••••••••••         ",
-    "     ••••••••●●●●••••••••••••••••       ",
-    "   •••••••●●●•••••••••••••••••••••      ",
-    "  ••••••●●●••••••••••••••••••••••••     ",
-    "  ••••••●●●•••••••••••••••••••••••••    ",
-    " ••••●•●●●●•••••••••••••••••••••••••    ",
-    " ••••●●●●●●●●●••••••••••••••••••••••    ",
-    " •••••••●●●•••••••••••••••••••••••••    ",
-    " •••••••••••••••••••••••••••••••••••    ",
-    "  ••••••••••••••••••••••••••••••••••    ",
-    "  •••••••••••••••••••••••••••••••••     ",
-    "   •••••••••••••••••••••••••••••••      ",
-    "     ••••••••••••••••••••••••••••       ",
-    "       ••••••••••••••••••••••••         ",
-    "         •••••••••••••••••••            ",
-    "              •·······•                 ",
-  ]),
-  welcomeMarkFrame([
-    "            •••••••••••••               ",
-    "        •••••●●●●●●••••••••••           ",
-    "      •••●●●●•••••••••••••••••••        ",
-    "    ••●●●●•••••●●••••••••••••••••       ",
-    "   ••●●●••••●●●●●••••••••••••••••••     ",
-    "  •••●●••••●●●●•••••••••••••••••••••    ",
-    " ••●●●•••••●●●●●••••••••••••••••••••    ",
-    " ••●●●●●●●●●●••••●●••••••••••••••••••   ",
-    " ••••●●●●●●●●••••••••••••••••••••••••   ",
-    " •••••••••••●●•••••••••••••••••••••••   ",
-    " ••••••••••••••••••••••••••••••••••••   ",
-    " •••••••••••••••••••••••••••••••••••    ",
-    "  ••••••••••••••••••••••••••••••••••    ",
-    "   ••••••••••••••••••••••••••••••••     ",
-    "    •••••••••••••••••••••••••••••       ",
-    "      •••••••••••••••••••••••••         ",
-    "         ••••••••••••••••••••           ",
-    "             ···········•               ",
-  ]),
-] as const
-
-export const welcomeMarkFrames = ampOrbFrames.small
-
 const modeShade = (mode: Mode, intensity: number): string => {
   const hex = colors[mode].slice(1)
   const red = Number.parseInt(hex.slice(0, 2), 16)
@@ -285,7 +71,13 @@ const welcomeMarkColor = (glyph: string, mode: Mode): string => {
   return modeShade(mode, 0.4)
 }
 
-const welcomeContentImpl = (width: number, height: number, phase: number, mode: Mode): StyledText => {
+const welcomeContentImpl = (
+  width: number,
+  height: number,
+  phase: number,
+  mode: Mode,
+  impulses: ReadonlyArray<OrbImpulse> = [],
+): StyledText => {
   if (height < 20)
     return new StyledText([
       fg(colors.text)("\n"),
@@ -293,31 +85,21 @@ const welcomeContentImpl = (width: number, height: number, phase: number, mode: 
       fg(colors.text)("\n\n"),
       fg(colors.text)(`${" ".repeat(Math.max(0, Math.floor((width - 24) / 2)))}ctrl+o commands   ? help`),
     ])
-  const frames = width >= 140 && height >= 35 ? ampOrbFrames.large : ampOrbFrames.small
-  const pattern = frames[phase % frames.length] ?? frames[0] ?? []
-  const canvasRows = frames.reduce((rows, candidate) => Math.max(rows, candidate.length), 0)
-  const frameTop = Math.floor((canvasRows - pattern.length) / 2)
-  const canvas = Array.from({ length: canvasRows }, (_, row) => pattern[row - frameTop] ?? "")
+  const geometry = orbGeometry(width, height)
+  const canvas = orbRows(geometry, phase, impulses)
   const area = Math.max(1, height - spacing.inputHeight)
-  const top = Math.max(0, Math.floor((area - canvasRows) / 2))
+  const top = Math.max(0, Math.floor((area - geometry.rows) / 2))
   const center = Math.floor(width / 2)
-  const logoLeft = Math.max(0, center - (frames === ampOrbFrames.large ? 43 : 31))
+  const logoLeft = Math.max(0, center - Math.floor(geometry.columns / 2) - 12)
   const copyLeft = Math.max(0, Math.min(width - 1, center + 2))
   const visibleCanvas = canvas.slice(0, Math.max(1, area - top))
   const chunks: TextChunk[] = [fg(colors.text)("\n".repeat(top))]
-  const copyRows: ReadonlyArray<readonly [number, ReadonlyArray<TextChunk>]> =
-    frames === ampOrbFrames.small
-      ? [
-          [0, [bold(fg(colors[mode])("Welcome to Rika"))]],
-          [3, [bold(fg(colors.text)("ctrl+o")), fg(colors.muted)(" for commands")]],
-          [4, [bold(fg(colors.text)("?")), fg(colors.muted)(" for shortcuts")]],
-        ]
-      : [
-          [4, [bold(fg(colors[mode])("Welcome to Rika"))]],
-          [7, [bold(fg(colors.text)("ctrl+o")), fg(colors.muted)(" for commands")]],
-          [8, [bold(fg(colors.text)("?")), fg(colors.muted)(" for shortcuts")]],
-        ]
-  const copy = new Map(copyRows)
+  const copyTop = Math.max(0, Math.floor((geometry.rows - 5) / 2))
+  const copy = new Map<number, ReadonlyArray<TextChunk>>([
+    [copyTop, [bold(fg(colors[mode])("Welcome to Rika"))]],
+    [copyTop + 3, [bold(fg(colors.text)("ctrl+o")), fg(colors.muted)(" for commands")]],
+    [copyTop + 4, [bold(fg(colors.text)("?")), fg(colors.muted)(" for shortcuts")]],
+  ])
   for (let row = 0; row < visibleCanvas.length; row += 1) {
     if (row > 0) chunks.push(fg(colors.text)("\n"))
     chunks.push(fg(colors.text)(" ".repeat(logoLeft)))
@@ -348,5 +130,6 @@ export const welcomeContent: {
     arg1: Parameters<typeof welcomeContentImpl>[1],
     arg2: Parameters<typeof welcomeContentImpl>[2],
     arg3: Parameters<typeof welcomeContentImpl>[3],
+    arg4?: Parameters<typeof welcomeContentImpl>[4],
   ): ReturnType<typeof welcomeContentImpl>
 } = Function.dual(4, welcomeContentImpl)

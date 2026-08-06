@@ -8,12 +8,7 @@ import type { Model } from "../../state/model/terminal-state"
 import { composerHeight } from "../../state/model/terminal-layout-composer"
 import { colors, spacing } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
-import {
-  maxMountedTranscriptRows,
-  relocateRowEnd,
-  rowWindowStart,
-} from "../../presentation/transcript/terminal-transcript-window"
-import { includeRowEnd } from "../../presentation/transcript/transcript-row-window-include"
+import { maxMountedTranscriptRows } from "../../presentation/transcript/terminal-transcript-window"
 import { transcriptUnitId, transcriptUnits } from "../../presentation/transcript/transcript-row"
 import { boundedTranscriptModel } from "../rendering/opentui-render-transcript-window"
 import { transcriptUnitRevision } from "../rendering/opentui-render-transcript-revision"
@@ -55,24 +50,27 @@ export abstract class SurfaceLifecycleTranscript extends SurfaceLifecycleToast {
     this.transcriptScroll.content.justifyContent = isWelcome ? "flex-start" : "flex-end"
     if (isWelcome) {
       this.transcriptRenderInput = undefined
+      this.transcriptRowTotal = 0
       const welcomeWidth = this.welcomeWidthFor(model)
-      const welcomePhase = this.options.animate === false ? model.animationTick : this.welcomePhase
-      const welcomeKey = `${welcomeWidth}:${model.height}:${welcomePhase}:${model.mode}`
-      const existingWelcome = this.transcriptChildren.length === 1 ? this.welcomeChild : undefined
+      const welcomePhase = this.options.animate === false ? model.animationTick : this.welcomeController.phase
+      const impulses = this.welcomeController.impulses
+      const welcomeKey = `${welcomeWidth}:${model.height}:${welcomePhase}:${model.mode}:${impulses.length}`
+      const existingWelcome = this.transcriptChildren.length === 1 ? this.welcomeController.child : undefined
       if (existingWelcome === undefined) {
         const child = new TextRenderable(this.renderer, {
-          content: welcomeContent(welcomeWidth, model.height, welcomePhase, model.mode),
+          content: welcomeContent(welcomeWidth, model.height, welcomePhase, model.mode, impulses),
           fg: modeColor,
           wrapMode: "word",
           selectable: true,
         })
+        child.onMouseDown = (event) => this.strikeWelcomeOrb(event)
         this.setWelcomeChild(child)
-        this.welcomeChild = child
-        this.welcomeKey = welcomeKey
-      } else if (this.welcomeKey !== welcomeKey) {
-        this.welcomeKey = welcomeKey
+        this.welcomeController.child = child
+        this.welcomeController.key = welcomeKey
+      } else if (this.welcomeController.key !== welcomeKey) {
+        this.welcomeController.key = welcomeKey
         existingWelcome.fg = modeColor
-        existingWelcome.content = welcomeContent(welcomeWidth, model.height, welcomePhase, model.mode)
+        existingWelcome.content = welcomeContent(welcomeWidth, model.height, welcomePhase, model.mode, impulses)
       }
     } else {
       const renderModel = sidebarWidth === 0 && !threadSidebarVisible ? model : { ...model, width: contentWidth }
@@ -84,7 +82,6 @@ export abstract class SurfaceLifecycleTranscript extends SurfaceLifecycleToast {
         detailSelection: renderModel.detailSelection,
         width: renderModel.width,
         windowEnd: this.transcriptWindowEnd,
-        rowWindowEnd: this.transcriptRowWindow.end,
         animationTick: model.animationTick,
       }
       if (this.transcriptChanged(transcriptInput)) {
@@ -119,42 +116,8 @@ export abstract class SurfaceLifecycleTranscript extends SurfaceLifecycleToast {
         }
         this.transcriptUnitCache = nextCache
         const totalRows = orderedBundles.length
-        const limit = maxMountedTranscriptRows
-        let rowEnd = totalRows
-        if (this.transcriptRowWindow.end !== 0) {
-          const anchorIndex =
-            this.transcriptRowWindow.anchorKey === undefined
-              ? -1
-              : orderedBundles.findIndex(({ bundle }) => bundle.key === this.transcriptRowWindow.anchorKey)
-          rowEnd = relocateRowEnd(this.transcriptRowWindow, anchorIndex, totalRows, limit)
-        }
-        const previousSelection = this.transcriptRenderInput?.detailSelection
-        if (renderModel.detailSelection !== undefined && renderModel.detailSelection !== previousSelection) {
-          const selectionIndex = orderedBundles.findIndex(({ bundle }) => bundle.key === renderModel.detailSelection)
-          const included = includeRowEnd(rowEnd, selectionIndex, totalRows, limit)
-          if (included !== rowEnd) {
-            rowEnd = included
-            if (this.transcriptRowWindow.end === 0 && rowEnd < totalRows) {
-              const anchor = orderedBundles[rowWindowStart(rowEnd, limit)]?.bundle.key
-              this.transcriptRowWindow = {
-                end: rowEnd,
-                pendingDelta: 0,
-                ...(anchor === undefined ? {} : { anchorKey: anchor }),
-              }
-            }
-          }
-        }
-        const mounted =
-          this.transcriptRowWindow.end === 0
-            ? orderedBundles.slice(-limit)
-            : orderedBundles.slice(rowWindowStart(rowEnd, limit), rowEnd)
+        const mounted = orderedBundles.slice(-maxMountedTranscriptRows)
         this.transcriptRowTotal = totalRows
-        if (this.transcriptRowWindow.end !== 0)
-          this.transcriptRowWindow = {
-            end: rowEnd,
-            pendingDelta: 0,
-            ...(mounted[0] === undefined ? {} : { anchorKey: mounted[0].bundle.key }),
-          }
         const descriptors: Array<TranscriptRenderableDescriptor> = []
         for (const { gapBefore, bundle } of mounted) {
           if (gapBefore)
@@ -166,7 +129,7 @@ export abstract class SurfaceLifecycleTranscript extends SurfaceLifecycleToast {
           descriptors.push(...bundle.descriptors)
         }
         this.reconcileTranscript(descriptors)
-        this.transcriptRenderInput = { ...transcriptInput, rowWindowEnd: this.transcriptRowWindow.end }
+        this.transcriptRenderInput = transcriptInput
       }
     }
     return { sidebarWidth, contentLeft, contentWidth, renderedInputHeight, sidebarVisible, threadSidebarVisible }

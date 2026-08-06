@@ -1,9 +1,11 @@
 import { expect, test } from "vitest"
 import { welcomeContent } from "../src/opentui/surface/opentui-surface-content"
-import { ampOrbFrames } from "../src/opentui/surface/opentui-amp-orb-frames"
+import { orbGeometry, orbRows, orbImpulseExpired, type OrbImpulse } from "../src/opentui/surface/opentui-welcome-orb"
 
-const rowsOf = (width: number, height: number, phase: number) =>
-  welcomeContent(width, height, phase, "medium")
+const phases = Array.from({ length: 24 }, (_, phase) => phase * 3)
+
+const rowsOf = (width: number, height: number, phase: number, impulses: ReadonlyArray<OrbImpulse> = []) =>
+  welcomeContent(width, height, phase, "medium", impulses)
     .chunks.map((chunk) => chunk.text)
     .join("")
     .split("\n")
@@ -11,39 +13,51 @@ const rowsOf = (width: number, height: number, phase: number) =>
 const copyRow = (width: number, height: number, phase: number, copy: string) =>
   rowsOf(width, height, phase).findIndex((row) => row.includes(copy))
 
-const copyColumn = (width: number, height: number, phase: number, copy: string) => {
-  const row = rowsOf(width, height, phase).find((line) => line.includes(copy))
-  return row === undefined ? -1 : row.indexOf(copy)
-}
-
 test.each([["Welcome to Rika"], ["ctrl+o"], ["?"]])(
-  "anchors the large welcome copy %s to a fixed row across every orb phase",
+  "anchors the welcome copy %s to a fixed row across every phase",
   (copy) => {
-    const rows = ampOrbFrames.large.map((_, phase) => copyRow(160, 44, phase, copy))
+    const rows = phases.map((phase) => copyRow(160, 44, phase, copy))
     expect(rows).not.toContain(-1)
     expect(new Set(rows).size).toBe(1)
   },
 )
 
-test.each([["Welcome to Rika"], ["ctrl+o"], ["?"]])(
-  "anchors the small welcome copy %s to a fixed row across every orb phase",
-  (copy) => {
-    const rows = ampOrbFrames.small.map((_, phase) => copyRow(120, 30, phase, copy))
-    expect(rows).not.toContain(-1)
-    expect(new Set(rows).size).toBe(1)
-  },
-)
-
-test("anchors the welcome copy to a fixed column across every orb phase", () => {
-  const large = ampOrbFrames.large.map((_, phase) => copyColumn(160, 44, phase, "Welcome to Rika"))
-  const small = ampOrbFrames.small.map((_, phase) => copyColumn(120, 30, phase, "Welcome to Rika"))
+test("renders a constant row count across every phase", () => {
+  const large = phases.map((phase) => rowsOf(160, 44, phase).length)
+  const small = phases.map((phase) => rowsOf(120, 30, phase).length)
   expect(new Set(large).size).toBe(1)
   expect(new Set(small).size).toBe(1)
 })
 
-test("renders a constant welcome row count across every orb phase", () => {
-  const large = ampOrbFrames.large.map((_, phase) => rowsOf(160, 44, phase).length)
-  const small = ampOrbFrames.small.map((_, phase) => rowsOf(120, 30, phase).length)
-  expect(new Set(large).size).toBe(1)
-  expect(new Set(small).size).toBe(1)
+test("keeps the orb bounding box fixed while an impulse expands", () => {
+  const geometry = orbGeometry(160, 44)
+  const impulse: OrbImpulse = { column: 10, row: 4, startPhase: 0 }
+  const extents = phases.map((phase) => {
+    const rows = orbRows(geometry, phase, [impulse])
+    const filled = rows.flatMap((row, index) => (row.trim().length > 0 ? [index] : []))
+    return `${rows.length}:${Math.min(...filled)}:${Math.max(...filled)}`
+  })
+  expect(new Set(extents).size).toBe(1)
+})
+
+test("brightens cells near the impulse origin when it fires", () => {
+  const geometry = orbGeometry(160, 44)
+  const origin = { column: Math.floor(geometry.columns / 2), row: Math.floor(geometry.rows / 2) }
+  const idle = orbRows(geometry, 0, [])
+  const struck = orbRows(geometry, 0, [{ ...origin, startPhase: 0 }])
+  const brightness = (rows: ReadonlyArray<string>) => rows.join("").split("●").length - 1
+  expect(brightness(struck)).toBeGreaterThan(brightness(idle))
+})
+
+test("reacts at the clicked position rather than a fixed point", () => {
+  const geometry = orbGeometry(160, 44)
+  const left = orbRows(geometry, 2, [{ column: 6, row: 5, startPhase: 0 }]).join("\n")
+  const right = orbRows(geometry, 2, [{ column: geometry.columns - 7, row: 5, startPhase: 0 }]).join("\n")
+  expect(left).not.toEqual(right)
+})
+
+test("expires an impulse once its wave has decayed", () => {
+  const impulse: OrbImpulse = { column: 4, row: 4, startPhase: 0 }
+  expect(orbImpulseExpired(impulse, 5)).toBe(false)
+  expect(orbImpulseExpired(impulse, 400)).toBe(true)
 })
