@@ -1,5 +1,6 @@
 import { createTestRenderer } from "@opentui/core/testing"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import * as TranscriptUnitOrder from "@rika/transcript/transcript-unit-order"
+import type { Unit } from "@rika/transcript/transcript-unit"
 import { Effect, FileSystem, Path, Schema } from "effect"
 import { Surface } from "../src/opentui/surface/opentui-surface"
 import { initial, type Model } from "../src/state/model/terminal-state"
@@ -58,6 +59,25 @@ const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): 
   lastActivityAt: 0,
   ...input,
 })
+const previewUnits = (turnId: string, prompt: string, answers: ReadonlyArray<string>): ReadonlyArray<Unit> => [
+  {
+    key: `turn:${turnId}:user`,
+    turnId,
+    order: TranscriptUnitOrder.unitOrder(`turn:${turnId}:user`, 0),
+    revision: 0,
+    content: { _tag: "Entry", role: "user", text: prompt },
+  },
+  ...answers.map(
+    (text, index): Unit => ({
+      key: `assistant:${turnId}:${index}`,
+      turnId,
+      order: TranscriptUnitOrder.unitOrder(`assistant:${turnId}:${index}`, index + 1),
+      revision: index + 1,
+      content: { _tag: "Entry", role: "assistant", text },
+    }),
+  ),
+]
+
 const threadBrowser = (): Model => ({
   ...base(),
   currentThreadId: "thread-1",
@@ -82,16 +102,9 @@ const threadBrowser = (): Model => ({
     turns: [
       {
         prompt: "Finish the thread UI parity work.",
-        units: TranscriptProjection.Projection.project("preview", "Finish the thread UI parity work.", [
-          {
-            cursor: "preview-output",
-            sequence: 1,
-            type: "model.output.completed",
-            createdAt: 1,
-            text: "Merged all work into main and verified the affected paths.",
-          },
-          { cursor: "preview-complete", sequence: 2, type: "execution.completed", createdAt: 2 },
-        ]).units,
+        units: previewUnits("preview", "Finish the thread UI parity work.", [
+          "Merged all work into main and verified the affected paths.",
+        ]),
       },
     ],
   }),

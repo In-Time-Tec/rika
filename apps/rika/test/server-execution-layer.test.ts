@@ -26,7 +26,9 @@ it.live("builds the composed backend with QuickJS through one composition root",
       const context = yield* Layer.build(configuredBackendLayer({ filename }))
       const gateway = Context.get(context, ExecutionGateway.Service)
       expect(Object.keys(gateway).toSorted()).toEqual([
+        "approveTurn",
         "cancelTurn",
+        "denyTurn",
         "inspectTurn",
         "startTurn",
         "steerTurn",

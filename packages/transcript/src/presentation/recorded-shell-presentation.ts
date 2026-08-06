@@ -1,6 +1,9 @@
 import { Function } from "effect"
 import type { Presentation } from "../schema/transcript-presentation-model"
-import type { Projection } from "../schema/transcript-projection-model"
+export interface RecordedShellProjection {
+  readonly revision: number
+  readonly units: ReadonlyArray<Unit>
+}
 import type { Unit } from "../schema/transcript-unit"
 import { identityKey, scopedIdentity } from "../ordering/transcript-unit-identity"
 import { unitOrder } from "../ordering/transcript-unit-order"
@@ -57,9 +60,8 @@ const runningUnit = (turn: RunningRecordedShell): Unit => {
   }
 }
 
-export const recordedShellProjection = (turn: RunningRecordedShell): Projection => ({
+export const recordedShellProjection = (turn: RunningRecordedShell): RecordedShellProjection => ({
   revision: 0,
-  modelPhase: -1,
   units: [runningUnit(turn)],
 })
 
@@ -67,15 +69,14 @@ const terminalStatus = (status: TerminalRecordedShell["status"]): "complete" | "
   status === "completed" ? "complete" : status
 
 export const settleRecordedShellProjection: {
-  (projection: Projection, turn: TerminalRecordedShell): Projection
-  (turn: TerminalRecordedShell): (projection: Projection) => Projection
-} = Function.dual(2, (projection: Projection, turn: TerminalRecordedShell): Projection => {
+  (projection: RecordedShellProjection, turn: TerminalRecordedShell): RecordedShellProjection
+  (turn: TerminalRecordedShell): (projection: RecordedShellProjection) => RecordedShellProjection
+} = Function.dual(2, (projection: RecordedShellProjection, turn: TerminalRecordedShell): RecordedShellProjection => {
   const expected = runningUnit({ id: turn.id, command: turn.command, status: "running" })
   const current = projection.units.find((unit) => unit.key === expected.key)
   const identity = current?.content._tag === "Block" && current.content.block._tag === "ToolCall" ? current : expected
   return {
     revision: 1,
-    modelPhase: -1,
     units: [
       {
         key: identity.key,

@@ -7,7 +7,6 @@ import { OperationUnavailable } from "../operation/contract/product-operation"
 
 type InteractiveInput = Extract<Input, { readonly _tag: "Interactive" }>
 const PositiveSequence = Schema.Int.check(Schema.isGreaterThan(0))
-const NonNegativeSequence = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 const InteractiveCommandRequest = Schema.Struct({
   _tag: Schema.tag("interactive-command"),
   connectionId: Schema.String,
@@ -33,14 +32,6 @@ const InteractiveFeedAck = Schema.Struct({
   feedGeneration: Schema.String,
   throughSequence: PositiveSequence,
 })
-const InteractiveFeedReplay = Schema.Struct({
-  _tag: Schema.tag("interactive-feed-replay"),
-  connectionId: Schema.String,
-  requestId: Schema.String,
-  sessionId: Schema.String,
-  feedGeneration: Schema.String,
-  afterSequence: NonNegativeSequence,
-})
 const InteractiveEnd = Schema.Struct({
   _tag: Schema.tag("interactive-end"),
   connectionId: Schema.String,
@@ -65,15 +56,6 @@ const InteractiveFeedEvent = Schema.Struct({
   sequence: PositiveSequence,
   event: InteractiveEventSchema,
 })
-const InteractiveFeedResync = Schema.Struct({
-  _tag: Schema.tag("interactive-feed-resync"),
-  connectionId: Schema.String,
-  requestId: Schema.String,
-  sessionId: Schema.String,
-  feedGeneration: Schema.String,
-  sequence: PositiveSequence,
-  events: Schema.Array(InteractiveEventSchema),
-})
 const InteractiveCommandCompleted = Schema.Struct({
   _tag: Schema.tag("interactive-command-completed"),
   connectionId: Schema.String,
@@ -92,17 +74,15 @@ const InteractiveCommandFailed = Schema.Struct({
   error: OperationUnavailable,
 })
 
-export { InteractiveFeedEvent, InteractiveFeedResync }
+export { InteractiveFeedEvent }
 
 export const InteractiveFeedProtocol = {
   InteractiveCommandRequest,
   CancelInteractiveCommand,
   InteractiveFeedAck,
-  InteractiveFeedReplay,
   InteractiveEnd,
   InteractiveStarted,
   InteractiveFeedEvent,
-  InteractiveFeedResync,
   InteractiveCommandCompleted,
   InteractiveCommandFailed,
 } as const

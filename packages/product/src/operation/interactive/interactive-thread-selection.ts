@@ -1,8 +1,6 @@
 import { Function } from "effect"
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as Thread from "@rika/product/thread-record"
-import type { ProjectionWatch } from "../../execution/ingest/execution-ingest-watch"
-import type { Scope } from "effect"
 
 export type SelectionEpochState = {
   readonly epoch: number
@@ -11,11 +9,6 @@ export type SelectionEpochState = {
   transcriptCursor: TranscriptPage.PageCursor | undefined
   newestTranscriptCursor: TranscriptPage.PageCursor | undefined
   hasOlder: boolean
-  projectionFeed?: {
-    readonly watch: ProjectionWatch
-    readonly scope: Scope.Closeable
-    promoted: boolean
-  }
 }
 
 const makeSelectionStateImpl = (thread: Thread.Thread, epoch: number): SelectionEpochState => ({

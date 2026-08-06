@@ -83,4 +83,11 @@ describe("renderPierreDiff", () => {
     const context = lines.find((line) => lineText(line).includes("keep"))!
     expect(context[0]!.text.startsWith("    1")).toBe(true)
   })
+
+  test("a patch without hunk headers cannot render, so completed edits must carry the real unified diff", () => {
+    const synthetic = "--- a/src/a.ts\n+++ b/src/a.ts\n-const a = 1\n+const a = 2"
+    expect(renderPierreDiff(synthetic, { width: 100 })).toBeUndefined()
+    const real = "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,1 +1,1 @@\n-const a = 1\n+const a = 2"
+    expect(renderPierreDiff(real, { width: 100 })).toBeDefined()
+  })
 })

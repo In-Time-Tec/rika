@@ -318,7 +318,7 @@ describe("Rika Server protocol", () => {
     ).toBe(true)
   })
 
-  it("round-trips empty and semantic transcript pages without undefined wire fields", () => {
+  it("round-trips bounded ThreadView snapshots without undefined wire fields", () => {
     const message = Schema.decodeUnknownSync(ServerService.ServerMessage)({
       _tag: "interactive-feed-event",
       connectionId: "connection",
@@ -327,30 +327,54 @@ describe("Rika Server protocol", () => {
       feedGeneration: "feed",
       sequence: 1,
       event: {
-        _tag: "SelectionLoaded",
-        selectionEpoch: 1,
-        activitySequence: 0,
-        thread: {
-          id: "thread",
-          lineage: { _tag: "Original" },
-          workspace: "/work",
-          title: "Thread",
-          labels: [],
-          pinned: false,
-          archived: false,
-          createdAt: 1,
-          updatedAt: 1,
+        _tag: "ThreadViewSnapshot",
+        snapshot: {
+          thread: {
+            id: "thread",
+            lineage: { _tag: "Original" },
+            workspace: "/work",
+            title: "Thread",
+            labels: [],
+            pinned: false,
+            archived: false,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+          revision: 0,
+          source: { projectionVersion: 1 },
+          turns: [],
+          pending: [],
+          hasOlder: false,
+          hasNewer: false,
+          usage: {
+            state: {
+              costNanoUsd: 125_000_000,
+              tokens: {
+                total: 12,
+                input: { total: 8, cacheRead: 2 },
+                output: { total: 4, reasoning: 1 },
+                failedProviderTotal: 2,
+              },
+              pricedAttempts: 1,
+              unpricedAttempts: 1,
+              countedAttempts: 2,
+              uncountedAttempts: 0,
+              sourceComplete: false,
+              context: { requestOrdinal: 1, purpose: "conversation", inputTokens: 8 },
+              contextPending: true,
+              active: { _tag: "Available", accumulatedMillis: 50, activeSince: 100 },
+            },
+            contextCapacity: { contextWindow: 100, reserveTokens: 10 },
+          },
         },
-        entries: [],
-        hasOlder: false,
-        threadCostUsd: 0,
-        queueRevision: 0,
-        queue: [],
       },
     })
     const encoded = Schema.encodeSync(ServerService.ServerMessage)(message)
     const wire = Schema.encodeSync(Schema.UnknownFromJsonString)(encoded)
     expect(wire).not.toContain("oldestCursor")
+    expect(wire).toContain("costNanoUsd")
+    expect(wire).toContain("failedProviderTotal")
+    expect(wire).not.toMatch(/runId|modelCallId|modelAttemptId/)
     expect(
       Schema.decodeUnknownSync(ServerService.ServerMessage)(Schema.decodeSync(Schema.UnknownFromJsonString)(wire)),
     ).toEqual(message)
@@ -364,27 +388,27 @@ describe("Rika Server protocol", () => {
       { _tag: "Dequeue", turnId: "turn" },
       { _tag: "SteerQueued", turnId: "turn", text: "steer" },
       { _tag: "Steer", text: "steer" },
+      { _tag: "ApproveAuthorization", turnId: "turn", authorizationId: "authorization" },
+      { _tag: "DenyAuthorization", turnId: "turn", authorizationId: "authorization" },
       { _tag: "InterruptAndSend", prompt: "replace" },
       { _tag: "Cancel" },
       { _tag: "Quit" },
       { _tag: "NewThread" },
-      { _tag: "SelectThread", threadId: "thread", selectionEpoch: 3 },
+      { _tag: "SelectThread", threadId: "thread" },
       { _tag: "ReadQueue", threadId: "thread" },
       {
         _tag: "LoadOlder",
         threadId: "thread",
-        selectionEpoch: 3,
         before: { createdAt: 1, turnId: "turn", orderKey: "turn:user" },
         loadedKeys: [],
       },
       {
         _tag: "LoadNewer",
         threadId: "thread",
-        selectionEpoch: 3,
         after: { createdAt: 1, turnId: "turn", orderKey: "key" },
       },
       { _tag: "PreviewThread", threadId: "thread" },
-      { _tag: "ReopenThread", selectionEpoch: 4 },
+      { _tag: "ReopenThread" },
     ]
     for (const [index, command] of commands.entries()) {
       const input = {
@@ -455,7 +479,7 @@ describe("Rika Server protocol", () => {
     ).toThrow()
     expect(() =>
       Schema.decodeUnknownSync(ServerService.ClientMessage)({
-        _tag: "interactive-feed-replay",
+        _tag: "UnknownCommand",
         ...client,
         afterSequence: -1,
       }),

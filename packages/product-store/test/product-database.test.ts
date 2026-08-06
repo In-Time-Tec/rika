@@ -26,14 +26,21 @@ it.layer(BunServices.layer)("product database", (test) => {
           ).toEqual(["thread_id", "revision", "queued_count"])
           expect(names).toContain("rika_turns_queue")
           expect(names).toContain("rika_turns_queue_claim")
+          expect(names).toContain("rika_turn_admission_outbox")
+          expect(
+            (yield* sql`PRAGMA table_info(rika_turn_admission_outbox)`).map((row) =>
+              String((row as { readonly name: unknown }).name),
+            ),
+          ).toEqual(["turn_id", "start_input_json", "prepared_at"])
           expect(names).toContain("rika_transcript_units")
           expect(names).toContain("rika_transcript_checkpoints")
-          expect(names).toContain("rika_transcript_execution_checkpoints")
+          expect(names).not.toContain("rika_transcript_execution_checkpoints")
           expect(names).not.toContain("rika_transcript_entries")
           expect(names).toContain("rika_thread_search")
           expect(names).toContain("rika_thread_search_files")
-          expect(names).toContain("rika_turn_usage")
           expect(names).not.toContain("rika_usage_repairs")
+          expect(names).not.toContain("rika_turn_usage")
+          expect(names).not.toContain("rika_turn_usage_thread")
           expect(names).toContain("rika_thread_picker_summary")
           expect(names).toContain("rika_turns_thread_updated")
           expect(names).toContain("rika_turns_thread_nonqueued")
@@ -56,45 +63,18 @@ it.layer(BunServices.layer)("product database", (test) => {
             "checkpoint_generation",
             "revision",
             "projection_version",
-            "model_phase",
-            "usable_completion_sequence",
-            "oldest_cursor",
-            "checkpoint_cursor",
-            "cost_usd",
-            "usage_cursors_json",
-            "pricing_version",
+            "state_json",
+            "projector_version",
+            "projector_cursor",
+            "projector_state",
             "updated_at",
-          ])
-          const executionColumns = yield* sql`PRAGMA table_info(rika_transcript_execution_checkpoints)`
-          expect(executionColumns.map((row) => String((row as { readonly name: unknown }).name))).toEqual([
-            "turn_id",
-            "execution_key",
-            "execution_id",
-            "cursor",
-            "sequence",
-            "status",
-            "revision",
-            "model_phase",
-            "usable_completion_sequence",
-            "oldest_cursor",
-            "checkpoint_cursor",
-            "cost_usd",
-            "usage_cursors_json",
-            "pricing_version",
-            "parent_execution_key",
-            "parent_unit_key",
-            "parent_id",
-            "parent_order_key",
-            "is_root",
           ])
           const unitColumns = yield* sql`PRAGMA table_info(rika_transcript_units)`
           expect(unitColumns.map((row) => String((row as { readonly name: unknown }).name))).toEqual([
             "turn_id",
             "unit_key",
-            "execution_key",
             "thread_id",
             "unit_order_key",
-            "tool_id",
             "parent_id",
             "revision",
             "unit_json",

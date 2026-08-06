@@ -78,6 +78,34 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
     if (item.parentId === undefined) continue
     childItems.set(item.parentId, [...(childItems.get(item.parentId) ?? []), item])
   }
+  const subagentResponseFor = (
+    block: Extract<TranscriptBlock, { _tag: "SubagentCard" }>,
+  ): AgentResponseState | undefined => {
+    const children = childItems.get(block.id) ?? []
+    const answer = children.findLast(
+      (item) =>
+        item._tag === "Entry" &&
+        model.entries[item.index]?.role === "assistant" &&
+        (model.entries[item.index]?.text.trim().length ?? 0) > 0,
+    )
+    if (block.status === "running" || block.status === "waiting" || block.status === "cancelling")
+      return answer?.index === undefined ? undefined : { _tag: "Streaming", answer: answer.index }
+    if (answer?.index !== undefined) return { _tag: "Settled", outcome: { kind: "answer", entry: answer.index } }
+    if (block.status === "failed")
+      return {
+        _tag: "Settled",
+        outcome: { kind: "error", tone: "failed", text: block.summary || "The subagent failed." },
+      }
+    if (block.status === "cancelled")
+      return {
+        _tag: "Settled",
+        outcome: { kind: "error", tone: "cancelled", text: block.summary || "The subagent was cancelled." },
+      }
+    return {
+      _tag: "Settled",
+      outcome: { kind: "error", tone: "info", text: block.summary || "The subagent finished without a final message." },
+    }
+  }
   const agentResponseFor = (block: Extract<TranscriptBlock, { _tag: "ToolCall" }>): AgentResponseState | undefined =>
     block.presentation.family === "agent" ? agentResponseState(model, block, childItems.get(block.id) ?? []) : undefined
   const nestedTools = (parentId: string): ReadonlyArray<ToolTranscriptUnit> =>
@@ -156,8 +184,15 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
     }
     flush()
     if (block._tag === "Reasoning") units.push({ kind: "reasoning", block: item.index })
-    else if (block._tag === "ChildAgent") units.push({ kind: "childAgent", block: item.index })
-    else if (block._tag === "Diff") units.push({ kind: "diff", block: item.index })
+    else if (block._tag === "SubagentCard") {
+      const agentResponse = subagentResponseFor(block)
+      units.push({
+        kind: "subagent",
+        block: item.index,
+        children: nestedTools(block.id),
+        ...(agentResponse === undefined ? {} : { agentResponse }),
+      })
+    } else if (block._tag === "Diff") units.push({ kind: "diff", block: item.index })
     else units.push({ kind: "block", block: item.index })
   }
   flush()
@@ -171,9 +206,12 @@ export const isExpandableUnit: {
   if (unit.kind !== "tool") {
     if (unit.kind === "block") {
       const block = model.blocks[unit.block] as TranscriptBlock
-      return block._tag === "Error" && block.detail.length > 0
+      return (
+        (block._tag === "Error" && block.detail.length > 0) ||
+        (block._tag === "AuthorizationCard" && (block.status === "pending" || block.input.length > 0))
+      )
     }
-    return unit.kind === "reasoning" || unit.kind === "diff" || unit.kind === "childAgent"
+    return unit.kind === "reasoning" || unit.kind === "diff" || unit.kind === "subagent"
   }
   if ((unit.children?.length ?? 0) > 0 || unit.agentResponse !== undefined) return true
   if (unit.group === "explore" || unit.group === "edit" || (unit.group === "shell" && unit.blocks.length > 1))
@@ -181,7 +219,7 @@ export const isExpandableUnit: {
   return unit.blocks.some((index) => {
     const block = model.blocks[index] as Extract<TranscriptBlock, { _tag: "ToolCall" }>
     return (
-      (block.presentation.family === "agent" && block.detail.length > 0) ||
+      (block.presentation.family === "agent" && (block.status === "running" || block.detail.length > 0)) ||
       (block.presentation.outputDisplay !== "inline" &&
         isToolOutputDisplayed(block) &&
         block.output !== undefined &&
@@ -210,7 +248,7 @@ export const expandableRowIds = (model: Model): ReadonlyArray<TranscriptUnitId> 
       if (files.length > 1) for (const file of files) ids.push(`file:${file.key}`)
       return
     }
-    if (unit.group === "shell" && unit.blocks.length > 1)
+    if ((unit.group === "shell" && unit.blocks.length > 1) || unit.group === "explore")
       for (const index of unit.blocks) {
         const block = model.blocks[index] as Extract<TranscriptBlock, { _tag: "ToolCall" }>
         if (isToolOutputDisplayed(block) && block.output !== undefined && block.output.length > 0)
@@ -238,6 +276,10 @@ export const transcriptUnitId: {
             (candidate) => candidate._tag === "Entry" && candidate.index === unit.entry,
           )
     return `entry:${item?.id ?? `${entry?.turnId ?? "missing"}:${entry?.role ?? "entry"}:${unit.entry}`}`
+  }
+  if (unit.kind === "subagent") {
+    const block = model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "SubagentCard" }>
+    return `subagent:${block.id}`
   }
   if (unit.kind === "tool") {
     const block = model.blocks[unit.blocks[0]!] as Extract<TranscriptBlock, { _tag: "ToolCall" }>

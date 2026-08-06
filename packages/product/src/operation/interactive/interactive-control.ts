@@ -2,19 +2,22 @@ import { Clock, Effect } from "effect"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
+import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as TurnQueuePromotion from "../../thread/repository/turn-repository-queue"
-import type { InteractiveEvent } from "./interactive-event"
+import type { InteractiveEvent } from "./interactive-runtime-event"
 import { OperationError, operationFailureDetail } from "../operation-error"
 import type { operationError } from "../operation-error"
 
 export const makeInteractiveControl = (input: {
   readonly turns: TurnRepository.Interface
+  readonly transcripts: TranscriptRepository.Interface
   readonly backend: ExecutionGateway.Interface
   readonly pendingCapacity: number
   readonly active: Effect.Effect<Turn.Turn, OperationError | TurnRepository.RepositoryError, never>
   readonly dispatch: (event: InteractiveEvent) => void
   readonly queueMutation: (change: TurnQueuePromotion.QueueItemChange) => InteractiveEvent
   readonly nextSteeringIdentity: (turnId: string) => string
+  readonly notifyTurnChanged: (turn: Pick<Turn.Turn, "id" | "threadId">) => Effect.Effect<void, never, never>
   readonly fail: typeof operationError
 }) => {
   const editQueued = (id: string, prompt: string) =>
@@ -111,5 +114,52 @@ export const makeInteractiveControl = (input: {
         steeringText,
       })
     })
-  return { editQueued, dequeue, steerQueued, steer }
+  const respondToAuthorization = (decision: "approve" | "deny", id: string, authorizationId: string) =>
+    Effect.gen(function* () {
+      let threadId: Turn.Turn["threadId"] | undefined
+      const turnId = Turn.TurnId.make(id)
+      const outcome = yield* Effect.exit(
+        Effect.gen(function* () {
+          const turn = yield* input.turns.get(turnId)
+          threadId = turn?.threadId
+          if (turn === undefined || turn._tag !== "AgentExecution" || turn.executionLink === undefined)
+            return yield* input.fail(`Turn ${turnId} has no persisted execution link`)
+          const projection = yield* input.transcripts.get(turnId)
+          if (projection?.projectorCheckpoint === undefined)
+            return yield* ExecutionGateway.ApprovalResponseFailure.make({
+              kind: "stale",
+              message: "Authorization is no longer pending",
+            })
+          yield* decision === "approve"
+            ? input.backend.approveTurn(turn.executionLink, {
+                authorizationId,
+                checkpoint: projection.projectorCheckpoint,
+              })
+            : input.backend.denyTurn(turn.executionLink, {
+                authorizationId,
+                checkpoint: projection.projectorCheckpoint,
+              })
+          yield* input.notifyTurnChanged(turn)
+        }),
+      )
+      if (outcome._tag === "Failure")
+        input.dispatch({
+          _tag: "ExecutionControlFailed",
+          selectionEpoch: 0,
+          ...(threadId === undefined ? {} : { threadId }),
+          turnId,
+          action: decision,
+          message: operationFailureDetail(outcome.cause),
+        })
+    })
+  return {
+    editQueued,
+    dequeue,
+    steerQueued,
+    steer,
+    approveAuthorization: (turnId: string, authorizationId: string) =>
+      respondToAuthorization("approve", turnId, authorizationId),
+    denyAuthorization: (turnId: string, authorizationId: string) =>
+      respondToAuthorization("deny", turnId, authorizationId),
+  }
 }

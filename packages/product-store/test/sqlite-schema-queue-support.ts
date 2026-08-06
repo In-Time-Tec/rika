@@ -1,17 +1,14 @@
+import * as ExecutionProjection from "@rika/product/execution-projection"
 import { expect, test } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Effect, FileSystem, Layer } from "effect"
 import * as Database from "@rika/product-store/product-database-layer"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as TurnRepository from "../src/turn/sqlite-turn-repository"
 import * as TranscriptRepository from "../src/transcript/sqlite-transcript-repository"
 import * as Turn from "@rika/product/turn-record"
+import { unitOrder } from "@rika/transcript/transcript-unit-order"
 import { id, create, provideLayer } from "./sqlite-schema-support"
-import { commitAll, executionCheckpoint, projectionVersion } from "./transcript-repository-fixtures"
-import { attachedExecutionCheckpoint } from "./transcript-fixture-checkpoints"
-import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
 
 test("reopens a completed nested transcript through the SQLite page", () => {
   const program = Effect.scoped(
@@ -39,52 +36,53 @@ test("reopens a completed nested transcript through the SQLite page", () => {
             now: 2,
           })
           const completed = yield* turns.setStatus(target.id, "completed", 3)
-          const childId = "nested-turn:child:agent"
-          const parent = TranscriptProjection.Projection.project(target.id, target.prompt, [
+          const subagentId = "subagent:nested-turn:agent"
+          const units = [
             {
-              cursor: "agent",
-              sequence: 0,
-              type: "tool.call.requested",
-              createdAt: 2,
-              data: { tool_call_id: "agent", tool_name: "task", input: { prompt: "inspect" } },
+              key: "subagent:nested-turn:agent",
+              turnId: target.id,
+              order: unitOrder("subagent:nested-turn:agent", 0),
+              revision: 0,
+              content: {
+                _tag: "Block" as const,
+                block: {
+                  _tag: "SubagentCard" as const,
+                  id: subagentId,
+                  name: "inspect",
+                  prompt: "inspect",
+                  promptTruncated: false,
+                  summary: "Checks passed.",
+                  status: "complete" as const,
+                  activity: [],
+                },
+              },
             },
             {
-              cursor: "spawned",
-              sequence: 1,
-              type: "child_run.spawned",
-              createdAt: 2,
-              data: { tool_call_id: "agent", child_execution_id: `execution:${childId}` },
+              key: "assistant:nested-turn:agent",
+              turnId: target.id,
+              parentId: subagentId,
+              order: unitOrder("assistant:nested-turn:agent", 1),
+              revision: 0,
+              content: {
+                _tag: "Entry" as const,
+                role: "assistant" as const,
+                text: "## Complete\n\n**Checks passed.**",
+              },
             },
-            { cursor: "parent-done", sequence: 2, type: "execution.completed", createdAt: 3 },
-          ])
-          const child = TranscriptProjection.Projection.project(childId, "", [
-            {
-              cursor: "answer",
-              sequence: 0,
-              type: "model.output.completed",
-              createdAt: 3,
-              text: "## Complete\n\n**Checks passed.**",
+          ]
+          yield* transcripts.commitProjection(completed, {
+            _tag: "ProjectionSnapshot",
+            revision: 0,
+            checkpoint: { version: 1, cursor: "nested-complete", state: "{}" },
+            units,
+            hasOlder: false,
+            state: {
+              status: "completed",
+              usage: ExecutionProjection.emptyUsageState(),
+              steering: { steeringMessages: 0, followUpMessages: 0 },
             },
-            { cursor: "child-done", sequence: 1, type: "execution.completed", createdAt: 3 },
-          ])
-          const projection = TranscriptNestedProjection.withNestedProjections(parent, [
-            { parentId: `${target.id}:agent`, projection: child },
-          ])
-          const parentTool = parent.units.find(
-            (unit) => unit.content._tag === "Block" && unit.content.block._tag === "ToolCall",
-          )
-          if (parentTool === undefined) return yield* Effect.die("nested transcript had no parent tool")
-          yield* commitAll(transcripts, completed, projection, undefined, projectionVersion, [
-            executionCheckpoint(completed, projection),
-            attachedExecutionCheckpoint(
-              childId,
-              child,
-              TranscriptCorrelation.executionKey(String(target.id)),
-              parentTool,
-              "completed",
-            ),
-          ])
-          return projection.units
+          })
+          return units
         }).pipe(provideLayer(layer)),
       )
       const reopenedDatabase = Database.layer(filename)
@@ -99,7 +97,7 @@ test("reopens a completed nested transcript through the SQLite page", () => {
         }).pipe(provideLayer(reopened)),
       )
       expect(page.entries.map((entry) => entry.unit)).toEqual([...expected])
-      expect(page.entries.filter((entry) => entry.unit.parentId === "nested-turn:agent")).toHaveLength(2)
+      expect(page.entries.filter((entry) => entry.unit.parentId === "subagent:nested-turn:agent")).toHaveLength(1)
     }),
   )
   return Effect.runPromise(Effect.scoped(program.pipe(provideLayer(BunServices.layer))))

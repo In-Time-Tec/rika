@@ -13,20 +13,13 @@ export interface QueueUpdate {
   readonly resync: boolean
 }
 
-const updateQueueImpl = (model: Model, event: QueueEvent): QueueUpdate => {
-  if (event._tag === "QueueUpdated") {
-    if (event.change._tag === "Reset")
-      return { model: resetQueue(model, event.threadId, event.revision, event.change.items), resync: false }
-    return applyQueueDelta(model, event.threadId, event.revision, event.change, event.queuedCount)
-  }
-  const submittedPrompt = model.history.at(-1)
-  const failed = updateModel(model, { _tag: "ExecutionFailed", message: `Queue full: ${event.count} pending prompts` })
-  return {
-    model:
-      submittedPrompt === undefined ? failed : updateModel(failed, { _tag: "ComposerReplaced", text: submittedPrompt }),
-    resync: false,
-  }
-}
+const updateQueueImpl = (model: Model, event: QueueEvent): QueueUpdate => ({
+  model: updateModel(model, {
+    _tag: "SubmissionRejected",
+    message: `Queue full: ${event.count} pending prompts`,
+  }),
+  resync: false,
+})
 
 export const updateQueue: {
   (event: QueueEvent): (model: Model) => QueueUpdate

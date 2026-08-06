@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
 import { ExecutableManifest, ModelRegistry, Pins, SandboxExecutor } from "@batonfx/core"
-import { ExecutableRegistration } from "@batonfx/runtime"
+import { CodeMode, ExecutableRegistration } from "@batonfx/runtime"
 import { TestModel } from "@batonfx/test"
 import { Database } from "bun:sqlite"
 import * as RoleToolkits from "@rika/coding-tools/agent-role-toolkits"
@@ -8,6 +8,7 @@ import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import type { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
 import { Cause, ConfigProvider, Context, Effect, Exit, Layer, Random, Schema, Stream } from "effect"
+import { Tool } from "effect/unstable/ai"
 import { layer } from "../src/baton-execution"
 import { makeResolver } from "../src/baton-route"
 import * as JavaScriptSandbox from "@rika/javascript-sandbox/javascript-sandbox"
@@ -253,7 +254,9 @@ it.live(
           const context = yield* Layer.build(executionLayer(filename, fixture, toolCalls))
           const gateway = Context.get(context, ExecutionGateway.Service)
           expect(Object.keys(gateway).toSorted()).toEqual([
+            "approveTurn",
             "cancelTurn",
+            "denyTurn",
             "inspectTurn",
             "startTurn",
             "steerTurn",
@@ -276,7 +279,7 @@ it.live(
       )
       expect(programChildren[0]?.status).toBe("succeeded")
       expect(result.status.status).toBe("completed")
-      expect(result.events.at(-1)?.type).toBe("execution.completed")
+      expect(result.events.at(-1)?.state.status).toBe("completed")
       expect(toolCalls).toEqual(["read"])
 
       const requests = yield* fixture.requests
@@ -286,6 +289,67 @@ it.live(
       expect(resumedPrompt.match(/"type":"tool-result"/g)).toHaveLength(1)
       expect(resumedPrompt).toContain("read capability result")
       expect(resumedPrompt).toContain("Oracle capability result")
+    }),
+  60_000,
+)
+
+it.live(
+  "advertises exact Code Mode Agent authority, runs Task, and rejects lowercase task",
+  () =>
+    Effect.gen(function* () {
+      const filename = `/tmp/rika-code-mode-task-authority-${yield* Random.nextInt}.db`
+      const identity = "code-mode-task-authority-route"
+      const taskSource = `
+const agent = await capabilities.runAgent({
+  operation: "task-proof",
+  selection: "Task",
+  input: "complete the exact Task selection proof",
+})
+return { summary: "Task program complete", data: { agent: agent.text } }
+`
+      const request = {
+        source: taskSource,
+        input: "execute exact Task",
+        tools: [],
+        agents: ["Task"],
+        steps: [],
+        budget: programBudget,
+      }
+      const fixture = yield* TestModel.make(
+        [
+          TestModel.turn([TestModel.toolCall("code_mode", request, { id: "code-mode-task-proof" })]),
+          TestModel.turn([TestModel.text("Task capability result")]),
+          TestModel.turn([TestModel.text("root completed exact Task")]),
+        ],
+        { provider: "test", model: "test", registrationKey: identity },
+      )
+      const toolCalls: Array<string> = []
+      const result = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const context = yield* Layer.build(executionLayer(filename, fixture, toolCalls))
+          const gateway = Context.get(context, ExecutionGateway.Service)
+          const link = yield* gateway.startTurn(input(identity))
+          const events = yield* gateway.watchTurn(link).pipe(Stream.runCollect)
+          return { events: [...events], link, status: yield* gateway.inspectTurn(link) }
+        }),
+      )
+      expect(result.status.status).toBe("completed")
+      expect(readRuns(filename).find(({ invocation_id }) => invocation_id === "code-mode-task-proof")?.status).toBe(
+        "succeeded",
+      )
+      expect(toolCalls).toEqual([])
+      const requests = yield* fixture.requests
+      expect(requests).toHaveLength(3)
+      expect(promptJson(requests[2]?.prompt)).toContain("Task capability result")
+      const declaration = requests[0]!.tools.find(({ name }) => name === "code_mode")!
+      expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(Tool.getJsonSchema(declaration))).toContain(
+        '"Task"',
+      )
+      const parameters = declaration.parametersSchema as ReturnType<typeof CodeMode.makeParameters>
+      expect(yield* Schema.decodeUnknownEffect(parameters)({ ...request, agents: ["Task"] })).toMatchObject({
+        agents: ["Task"],
+      })
+      expect(() => Schema.decodeUnknownSync(parameters)({ ...request, agents: ["task"] })).toThrow()
     }),
   60_000,
 )
@@ -373,15 +437,16 @@ it.live("cancels a running QuickJS Code Mode Program and preserves its terminal 
     expect(toolCalls).toEqual(["read"])
     expect(yield* fixture.requests).toHaveLength(1)
     expect(
-      cancelled.events.some(
-        (event) => event.childExecutionId === cancelledProgram.run_id && event.type === "execution.cancelled",
+      cancelled.events.some((change) =>
+        (change._tag === "ProjectionSnapshot" ? change.units : change.upsert).some(
+          (unit) =>
+            unit.content._tag === "Block" &&
+            unit.content.block._tag === "SubagentCard" &&
+            unit.content.block.status === "cancelled",
+        ),
       ),
     ).toBe(true)
-    expect(
-      cancelled.events.some(
-        (event) => event.executionId === cancelled.link.runId && event.type === "execution.cancelled",
-      ),
-    ).toBe(true)
+    expect(cancelled.events.at(-1)?.state.status).toBe("cancelled")
 
     const restarted = yield* Effect.scoped(
       Effect.gen(function* () {
@@ -395,11 +460,7 @@ it.live("cancels a running QuickJS Code Mode Program and preserves its terminal 
     )
 
     expect(restarted.status.status).toBe("cancelled")
-    expect(
-      restarted.events.some(
-        (event) => event.executionId === cancelled.link.runId && event.type === "execution.cancelled",
-      ),
-    ).toBe(true)
+    expect(restarted.events.at(-1)?.state.status).toBe("cancelled")
     expect(readRuns(filename).find(({ invocation_id }) => invocation_id === "code-mode-proof")?.status).toBe(
       "cancelled",
     )
@@ -452,7 +513,7 @@ it.live(
       expect(settledProgram.parent_run_id).toBe(admitted.link.runId)
       expect(settledProgram.status).toBe("succeeded")
       expect(result.status.status).toBe("completed")
-      expect(result.events.at(-1)?.type).toBe("execution.completed")
+      expect(result.events.at(-1)?.state.status).toBe("completed")
       expect(toolCalls).toEqual(["read"])
 
       const evidence = persistedRegistrationEvidence(filename)

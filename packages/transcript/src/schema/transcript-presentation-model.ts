@@ -58,7 +58,6 @@ const ToolCall = Schema.TaggedStruct("ToolCall", {
   process: Schema.optionalKey(ToolProcess),
   files: Schema.Array(ToolFile),
   parentId: Schema.optionalKey(Schema.String),
-  childId: Schema.optionalKey(Schema.String),
 })
 const ToolResult = Schema.TaggedStruct("ToolResult", {
   id: Schema.String,
@@ -82,12 +81,22 @@ const ErrorBlock = Schema.TaggedStruct("Error", {
   turnId: Schema.optionalKey(Schema.String),
   recovery: Schema.optionalKey(Schema.String),
 })
-const ChildAgent = Schema.TaggedStruct("ChildAgent", {
+const SubagentCard = Schema.TaggedStruct("SubagentCard", {
   id: Schema.String,
   name: Schema.String,
+  prompt: Schema.String,
+  promptTruncated: Schema.Boolean,
   summary: Schema.String,
-  status: Schema.Literals(["running", "complete", "failed", "cancelled"]),
+  status: Schema.Literals(["running", "waiting", "cancelling", "complete", "failed", "cancelled"]),
   activity: Schema.Array(Schema.String),
+})
+const AuthorizationCard = Schema.TaggedStruct("AuthorizationCard", {
+  id: Schema.String,
+  operation: Schema.String,
+  capability: Schema.String,
+  input: Schema.String.check(Schema.isMaxLength(16_384)),
+  inputTruncated: Schema.Boolean,
+  status: Schema.Literals(["pending", "approved", "denied", "cancelled", "expired"]),
 })
 const ImageAttachment = Schema.TaggedStruct("ImageAttachment", {
   name: Schema.String,
@@ -106,7 +115,8 @@ export const Block = Schema.Union([
   Compaction,
   Notification,
   ErrorBlock,
-  ChildAgent,
+  SubagentCard,
+  AuthorizationCard,
   ImageAttachment,
 ])
 export type Block = typeof Block.Type

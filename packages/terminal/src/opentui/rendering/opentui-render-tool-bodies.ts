@@ -88,11 +88,20 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
             ? unit.block.output?.split("\n").find((value) => value.length > 0)
             : undefined
         if (output !== undefined) append(dim(fg(colors.text)(` ${output}`)))
+        const childOutput = isToolOutputDisplayed(unit.block) ? unit.block.output : undefined
+        const childExpandable = childOutput !== undefined && childOutput.length > 0
+        if (childExpandable) append(marker(rowExpanded(childId)))
+        const headerEnd = context.line()
+        if (childExpandable && rowExpanded(childId)) {
+          append(fg(colors.text)("\n"))
+          append(dim(fg(colors.text)(wrapBodyText(childOutput, transcriptWrapWidth(model.width), "    "))))
+        }
         context.nestedRanges.push({
           start,
           end: context.line(),
+          headerEnd,
           unit: childId,
-          expandable: false,
+          expandable: childExpandable,
           animated: unit.block.status === "running",
           ...(detail?.target === undefined ? {} : { targets: [detail.target] }),
         })
@@ -263,13 +272,7 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
     }
     if ((expanded || inlineOutput) && output !== undefined && output.length > 0) {
       append(fg(colors.text)("\n"))
-      append(
-        dim(
-          fg(colors.text)(
-            wrapBodyText(output.split("\n").slice(0, 12).join("\n"), transcriptWrapWidth(model.width), "  "),
-          ),
-        ),
-      )
+      append(dim(fg(colors.text)(wrapBodyText(output, transcriptWrapWidth(model.width), "  "))))
     }
   }
   const renderShellBody = (units: ReadonlyArray<ToolUnit>, selected: boolean, expanded: boolean) => {
@@ -335,13 +338,7 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
         if (expandable) append(marker(childExpanded))
         if (expandable && childExpanded) {
           append(fg(colors.text)("\n"))
-          append(
-            dim(
-              fg(colors.text)(
-                wrapBodyText(output!.split("\n").slice(0, 12).join("\n"), transcriptWrapWidth(model.width), "     "),
-              ),
-            ),
-          )
+          append(dim(fg(colors.text)(wrapBodyText(output!, transcriptWrapWidth(model.width), "     "))))
         }
         context.nestedRanges.push({ start, end: context.line(), unit: childId, expandable })
       }

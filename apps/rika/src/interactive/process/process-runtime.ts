@@ -22,7 +22,7 @@ import type { InteractiveRuntimeContext } from "./interactive-runtime-context"
 
 type Runtime = InteractiveRuntimeContext
 const provideLayerScoped = ProcessLayer.provideLayerScoped
-const noopSelectionResync = (_threadId: string, _selectionEpoch: number) => undefined
+const noopSelectionResync = (_threadId: string) => undefined
 const mkdir = ProcessFiles.mkdir
 const rm = ProcessFiles.rm
 const childExit = ProcessWorkspace.childExit
@@ -38,7 +38,7 @@ const tuiSignalExitCode = ProcessLifecycle.tuiSignalExitCode
 
 export const makeProcessRuntime = (runtime: Runtime) => {
   const { loop, fork, session, options, recoverSession, resume } = runtime
-  let requestSelectionResync: (threadId: string, selectionEpoch: number) => void = noopSelectionResync
+  let requestSelectionResync: (threadId: string) => void = noopSelectionResync
   const pauseTerminal = () => {
     if (loop.closed) return () => false
     if (loop.terminalPauseCount === 0)
@@ -258,9 +258,9 @@ export const makeProcessRuntime = (runtime: Runtime) => {
     )
       return
     const cursor = loop.transcriptNewestCursor
-    loop.pendingNewer = { threadId, selectionEpoch: loop.activeSelectionEpoch, cursor: JSON.stringify(cursor) }
+    loop.pendingNewer = { threadId, cursor: JSON.stringify(cursor) }
     run(
-      session.loadNewer(threadId, loop.activeSelectionEpoch, cursor).pipe(
+      session.loadNewer(threadId, cursor).pipe(
         Effect.tapError(() =>
           Effect.sync(() => {
             loop.pendingNewer = undefined
@@ -286,13 +286,13 @@ export const makeProcessRuntime = (runtime: Runtime) => {
         ),
       )
     })
-  const startSelection = (select: (epoch: number) => Effect.Effect<void, ProductOperation.OperationUnavailable>) => {
+  const startSelection = (select: () => Effect.Effect<void, ProductOperation.OperationUnavailable>) => {
     const generation = (loop.selectionGeneration += 1)
     const previous = loop.selectionFiber
     let selectedFiber: Fiber.Fiber<void, never>
     selectedFiber = fork(
       (previous === undefined ? Effect.void : Fiber.interrupt(previous)).pipe(
-        Effect.andThen(recoverSession(loadSelected(select(generation), generation))),
+        Effect.andThen(recoverSession(loadSelected(select(), generation))),
         Effect.ensuring(
           Effect.sync(() => {
             loop.fibers.delete(selectedFiber)
@@ -305,13 +305,13 @@ export const makeProcessRuntime = (runtime: Runtime) => {
     loop.fibers.add(selectedFiber)
     return selectedFiber
   }
-  requestSelectionResync = (threadId, selectionEpoch) => {
-    if (selectionEpoch !== loop.activeSelectionEpoch || loop.model.currentThreadId !== threadId) return
-    const key = `${threadId}:${selectionEpoch}`
+  requestSelectionResync = (threadId) => {
+    if (loop.model.currentThreadId !== threadId && loop.requestedThreadId !== threadId) return
+    const key = `${threadId}:${loop.threadView?.revision ?? "missing"}`
     if (loop.selectionResyncs.has(key)) return
     loop.selectionResyncs.add(key)
-    startSelection((epoch) =>
-      session.selectThread(threadId, epoch).pipe(Effect.ensuring(Effect.sync(() => loop.selectionResyncs.delete(key)))),
+    startSelection(() =>
+      session.selectThread(threadId).pipe(Effect.ensuring(Effect.sync(() => loop.selectionResyncs.delete(key)))),
     )
   }
   const loadChangedFiles = readChangedFilesEffect(loop.model.workspace).pipe(
@@ -425,10 +425,13 @@ export const makeProcessRuntime = (runtime: Runtime) => {
     dequeue: (id) => run(session.dequeue(id)),
     steerQueued: (id, prompt) => run(session.steerQueued(id, prompt)),
     steer: (prompt, turnId) => run(session.steer(prompt, turnId)),
+    approveAuthorization: (turnId, authorizationId) => run(session.approveAuthorization(turnId, authorizationId)),
+    denyAuthorization: (turnId, authorizationId) => run(session.denyAuthorization(turnId, authorizationId)),
     interruptAndSend: (prompt) => run(session.interruptAndSend(prompt)),
     cancel: () => run(session.cancel),
     selectThread: (id) => {
-      startSelection((epoch) => session.selectThread(id, epoch))
+      loop.requestedThreadId = id
+      startSelection(() => session.selectThread(id))
     },
   }
   const consumePendingAction = () => {

@@ -151,11 +151,6 @@ test("drives bypassed recorded and incognito shell commands through Operation an
     )
     let controller: InteractiveController.State = {
       model: TerminalReducer.resetQueue(initial(workspace), "shell-thread", 0, []),
-      selectionEpoch: 0,
-      replayTurns: new Map(),
-      entries: [],
-      revisions: new Map(),
-      liveProjections: new Map(),
     }
     let model = controller.model
     const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
@@ -166,32 +161,20 @@ test("drives bypassed recorded and incognito shell commands through Operation an
         if (event.incognito) model = TerminalReducer.update(model, { _tag: "AssistantCompleted", text: event.text })
         model = TerminalReducer.update(model, { _tag: "ExecutionCompleted" })
         Queue.offerUnsafe(completedShells, event.command)
-      } else if (event._tag === "QueueUpdated") {
-        if (event.change._tag === "Reset")
-          model = TerminalReducer.resetQueue(model, event.threadId, event.revision, event.change.items)
-        else model = TerminalReducer.applyQueueDelta(model, event.threadId, event.revision, event.change).model
       } else if (
-        event._tag === "SelectionLoaded" ||
-        event._tag === "TranscriptPagePrepended" ||
-        event._tag === "TranscriptPageAppended" ||
-        event._tag === "TranscriptProjectionStarted" ||
-        event._tag === "TranscriptProjectionPatched" ||
-        event._tag === "TranscriptProjectionStopped" ||
-        event._tag === "TranscriptProjectionFailed" ||
-        event._tag === "TranscriptResyncRequired" ||
-        event._tag === "ThreadUsageUpdated" ||
+        event._tag === "ThreadViewSnapshot" ||
+        event._tag === "ThreadViewPatch" ||
+        event._tag === "ResyncRequired" ||
         event._tag === "ThreadRefolding"
       ) {
         controller = InteractiveController.update({ ...controller, model }, event).state
         model = controller.model
       } else if (
-        event._tag !== "QueueResyncRequired" &&
         event._tag !== "QueueFull" &&
         event._tag !== "ExecutionControlFailed" &&
         event._tag !== "ExecutionControlled" &&
         event._tag !== "ContextDiagnostics" &&
         event._tag !== "ThreadsListed" &&
-        event._tag !== "TitleCostUpdated" &&
         event._tag !== "ThreadTitled" &&
         event._tag !== "ThreadPreviewLoaded" &&
         event._tag !== "TurnStarted"
@@ -218,7 +201,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
     const recordedFrame = yield* run("$ printf recorded-output")
     expect(recordedFrame).not.toContain("Run shell command")
     expect(recordedFrame).toContain("recorded-output")
-    yield* session.reopenThread(1)
+    yield* session.reopenThread
     expect(executionReads).toEqual([])
     expect(model.blocks).toContainEqual(
       expect.objectContaining({
@@ -249,7 +232,6 @@ test("drives bypassed recorded and incognito shell commands through Operation an
     expect(persisted.projection).toMatchObject({
       turn: { _tag: "RecordedShell", status: "completed" },
       units: [{ content: { _tag: "Block", block: { _tag: "ToolCall", output: "recorded-output" } } }],
-      executionCheckpoints: [],
     })
 
     yield* Effect.gen(function* () {

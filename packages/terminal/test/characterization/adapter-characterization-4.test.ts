@@ -411,8 +411,26 @@ test("uses the child profile activity label with a Subagent fallback", () => {
   const rendered = buildTranscript(
     model({
       blocks: [
-        { _tag: "ChildAgent", id: "oracle", name: "oracle", summary: "", status: "running", activity: [] },
-        { _tag: "ChildAgent", id: "task", name: "task", summary: "", status: "running", activity: [] },
+        {
+          _tag: "SubagentCard",
+          id: "oracle",
+          name: "oracle",
+          prompt: "",
+          promptTruncated: false,
+          summary: "",
+          status: "running",
+          activity: [],
+        },
+        {
+          _tag: "SubagentCard",
+          id: "task",
+          name: "task",
+          prompt: "",
+          promptTruncated: false,
+          summary: "",
+          status: "running",
+          activity: [],
+        },
       ],
     }),
   )

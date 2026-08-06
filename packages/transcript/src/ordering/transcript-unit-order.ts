@@ -55,17 +55,13 @@ export const unitOrder: {
 )
 
 export const childOrder: {
-  (parent: UnitOrder, childExecutionId: string, local: UnitOrder): UnitOrder
-  (childExecutionId: string, local: UnitOrder): (parent: UnitOrder) => UnitOrder
-} = Function.dual(3, (parent: UnitOrder, childExecutionId: string, local: UnitOrder): UnitOrder => {
+  (parent: UnitOrder, subagentId: string, local: UnitOrder): UnitOrder
+  (subagentId: string, local: UnitOrder): (parent: UnitOrder) => UnitOrder
+} = Function.dual(3, (parent: UnitOrder, subagentId: string, local: UnitOrder): UnitOrder => {
   assertOrder(parent)
-  assertKey(childExecutionId)
+  assertKey(subagentId)
   assertOrder(local)
-  return immutableOrder([
-    ...parent,
-    { sequence: edgeSequence, part: edgePart, key: `@child:${childExecutionId}` },
-    ...local,
-  ])
+  return immutableOrder([...parent, { sequence: edgeSequence, part: edgePart, key: `@child:${subagentId}` }, ...local])
 })
 
 export const localOrder = (order: UnitOrder): UnitOrder => {

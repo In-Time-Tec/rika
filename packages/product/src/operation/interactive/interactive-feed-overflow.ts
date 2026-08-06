@@ -1,132 +1,103 @@
-import * as Thread from "@rika/product/thread-record"
+import * as ThreadView from "@rika/product/thread-view"
 import { Function } from "effect"
 import type { InteractiveEvent } from "./interactive-event"
 
 export const capacity = 64
 
 export interface State {
-  readonly transcriptThreadIds: Set<string>
-  readonly queueThreadIds: Set<string>
+  readonly snapshots: Map<string, Extract<InteractiveEvent, { readonly _tag: "ThreadViewSnapshot" }>>
+  readonly resync: Map<string, ThreadView.ResyncRequired>
+  readonly latest: Map<string, InteractiveEvent>
   readonly critical: Array<InteractiveEvent>
-  readonly settlements: Map<string, Extract<InteractiveEvent, { readonly _tag: "TurnSettled" }>>
-  readonly usage: Map<string, Extract<InteractiveEvent, { readonly _tag: "ThreadUsageUpdated" }>>
-  readonly refolds: Map<string, Extract<InteractiveEvent, { readonly _tag: "ThreadRefolding" }>>
   criticalOverflowed: boolean
-  activated?: Extract<InteractiveEvent, { readonly _tag: "ThreadActivated" }>
-  summaries?: Extract<InteractiveEvent, { readonly _tag: "ThreadsListed" }>
 }
 
 export const make = (): State => ({
-  transcriptThreadIds: new Set(),
-  queueThreadIds: new Set(),
+  snapshots: new Map(),
+  resync: new Map(),
+  latest: new Map(),
   critical: [],
-  settlements: new Map(),
-  usage: new Map(),
-  refolds: new Map(),
   criticalOverflowed: false,
 })
 
-const threadId = (event: InteractiveEvent): string | undefined => {
-  if (event._tag === "SelectionLoaded") return String(event.thread.id)
-  if ("threadId" in event && event.threadId !== undefined) return String(event.threadId)
-  return undefined
-}
-
-const rememberThread = (state: State, threadIds: Set<string>, id: string) => {
-  if (threadIds.has(id)) return
-  if (threadIds.size >= capacity) {
-    state.criticalOverflowed = true
-    return
-  }
-  threadIds.add(id)
-}
-
-export const isCritical = (event: InteractiveEvent): boolean => {
-  switch (event._tag) {
-    case "AssistantCompleted":
-    case "ContextDiagnostics":
-    case "ExecutionControlFailed":
-    case "ExecutionFailed":
-    case "QueueFull":
-    case "ShellCompleted":
-    case "ExecutionControlled":
-    case "TitleCostUpdated":
-    case "ThreadTitled":
-    case "ThreadPreviewLoaded":
-    case "ThreadPreviewFailed":
-    case "ThreadUsageUpdated":
-    case "TurnSettled":
-      return true
-    case "ThreadsListed":
-    case "ThreadRefolding":
-    case "TranscriptProjectionStarted":
-    case "TranscriptProjectionPatched":
-    case "TranscriptProjectionStopped":
-    case "TranscriptProjectionFailed":
-    case "TranscriptResyncRequired":
-    case "QueueUpdated":
-    case "QueueResyncRequired":
-    case "TurnStarted":
-    case "SubmissionAdmitted":
-    case "SelectionLoaded":
-    case "TranscriptPagePrepended":
-    case "TranscriptPageAppended":
-    case "ThreadActivated":
-      return false
-  }
-}
-
 const rememberImpl = (state: State, event: InteractiveEvent) => {
-  if (event._tag === "TurnSettled") {
-    const key = `${event.threadId}:${event.turnId}`
-    const previous = state.settlements.get(key)
-    if (previous === undefined || previous.activitySequence < event.activitySequence) state.settlements.set(key, event)
+  if (state.criticalOverflowed) return
+  if (event._tag === "ThreadViewSnapshot") {
+    const id = String(event.snapshot.thread.id)
+    if (!state.snapshots.has(id) && state.snapshots.size >= capacity) {
+      state.criticalOverflowed = true
+      return
+    }
+    state.snapshots.set(id, event)
+    state.resync.delete(id)
     return
   }
-  if (state.criticalOverflowed) return
-  const id = threadId(event)
+  if (event._tag === "ThreadViewPatch") {
+    const id = String(event.patch.threadId)
+    if (state.snapshots.has(id)) return
+    if (!state.resync.has(id) && state.resync.size >= capacity) {
+      state.criticalOverflowed = true
+      return
+    }
+    state.resync.set(
+      id,
+      ThreadView.ResyncRequired.make({
+        threadId: event.patch.threadId,
+        expectedRevision: event.patch.revision,
+        receivedBaseRevision: event.patch.baseRevision,
+        currentRevision: event.patch.baseRevision,
+      }),
+    )
+    return
+  }
+  if (event._tag === "ResyncRequired") {
+    const id = String(event.threadId)
+    if (!state.resync.has(id) && state.resync.size >= capacity) {
+      state.criticalOverflowed = true
+      return
+    }
+    state.resync.set(id, event)
+    return
+  }
+  let latestKey: string | undefined
   switch (event._tag) {
-    case "TranscriptProjectionStarted":
-    case "TranscriptProjectionPatched":
-    case "TranscriptProjectionStopped":
-    case "TranscriptProjectionFailed":
-    case "TranscriptResyncRequired":
-    case "TurnStarted":
-    case "SelectionLoaded":
-    case "TranscriptPagePrepended":
-    case "TranscriptPageAppended":
-      if (id !== undefined) rememberThread(state, state.transcriptThreadIds, id)
-      return
-    case "QueueUpdated":
-    case "QueueResyncRequired":
-      if (id !== undefined) rememberThread(state, state.queueThreadIds, id)
-      return
-    case "ThreadActivated":
-      state.activated = event
-      return
     case "ThreadsListed":
-      state.summaries = event
-      return
-    case "ThreadUsageUpdated":
-      if (id !== undefined) state.usage.set(id, event)
-      return
+      latestKey = "threads"
+      break
     case "ThreadRefolding":
-      if (id !== undefined) state.refolds.set(id, event)
-      return
-    case "AssistantCompleted":
-    case "ContextDiagnostics":
-    case "ExecutionControlFailed":
-    case "ExecutionFailed":
+      latestKey = `refolding:${event.threadId}`
+      break
     case "QueueFull":
-    case "ShellCompleted":
-    case "ExecutionControlled":
-    case "TitleCostUpdated":
+      latestKey = `queue-full:${event.threadId}`
+      break
+    case "SubmissionAdmitted":
+      latestKey = `admitted:${event.threadId}:${event.turnId}`
+      break
     case "ThreadTitled":
+      latestKey = `title:${event.threadId}`
+      break
+    case "ThreadActivated":
+      latestKey = "activated"
+      break
     case "ThreadPreviewLoaded":
     case "ThreadPreviewFailed":
-      if (state.critical.length >= capacity) state.criticalOverflowed = true
-      else state.critical.push(event)
+      latestKey = `preview:${event.threadId}`
+      break
+    case "AssistantCompleted":
+    case "ContextDiagnostics":
+    case "ExecutionFailed":
+    case "ExecutionControlFailed":
+    case "ShellCompleted":
+    case "ExecutionControlled":
+      break
   }
+  if (latestKey !== undefined) {
+    if (!state.latest.has(latestKey) && state.latest.size >= capacity) state.criticalOverflowed = true
+    else state.latest.set(latestKey, event)
+    return
+  }
+  if (state.critical.length >= capacity) state.criticalOverflowed = true
+  else state.critical.push(event)
 }
 
 export const remember: {
@@ -134,34 +105,9 @@ export const remember: {
   (state: State, event: InteractiveEvent): void
 } = Function.dual(2, rememberImpl)
 
-const eventsImpl = (state: State, selectionEpoch: number, reason: string): ReadonlyArray<InteractiveEvent> => {
-  const recovered: Array<InteractiveEvent> = []
-  if (state.activated !== undefined) recovered.push(state.activated)
-  if (state.summaries !== undefined) recovered.push(state.summaries)
-  recovered.push(...state.critical)
-  recovered.push(
-    ...[...state.settlements.values()].toSorted((left, right) => left.activitySequence - right.activitySequence),
-  )
-  recovered.push(...state.usage.values())
-  recovered.push(...state.refolds.values())
-  for (const id of state.transcriptThreadIds)
-    recovered.push({
-      _tag: "TranscriptResyncRequired",
-      selectionEpoch,
-      threadId: Thread.ThreadId.make(id),
-      reason,
-    })
-  for (const id of state.queueThreadIds)
-    recovered.push({
-      _tag: "QueueResyncRequired",
-      selectionEpoch,
-      threadId: Thread.ThreadId.make(id),
-      reason,
-    })
-  return recovered
-}
-
-export const events: {
-  (selectionEpoch: number, reason: string): (state: State) => ReadonlyArray<InteractiveEvent>
-  (state: State, selectionEpoch: number, reason: string): ReadonlyArray<InteractiveEvent>
-} = Function.dual(3, eventsImpl)
+export const events = (state: State): ReadonlyArray<InteractiveEvent> => [
+  ...state.snapshots.values(),
+  ...state.resync.values(),
+  ...state.latest.values(),
+  ...state.critical,
+]

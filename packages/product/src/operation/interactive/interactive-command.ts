@@ -31,6 +31,8 @@ export const InteractiveCommand = Schema.Union([
   Schema.Struct({ _tag: Schema.tag("Dequeue"), turnId: Schema.String }),
   Schema.Struct({ _tag: Schema.tag("SteerQueued"), turnId: Schema.String, text: Schema.String }),
   Schema.Struct({ _tag: Schema.tag("Steer"), text: Schema.String, turnId: Schema.optionalKey(Schema.String) }),
+  Schema.Struct({ _tag: Schema.tag("ApproveAuthorization"), turnId: Schema.String, authorizationId: Schema.String }),
+  Schema.Struct({ _tag: Schema.tag("DenyAuthorization"), turnId: Schema.String, authorizationId: Schema.String }),
   Schema.Struct({ _tag: Schema.tag("InterruptAndSend"), prompt: Schema.String }),
   Schema.Struct({ _tag: Schema.tag("Cancel") }),
   Schema.Struct({ _tag: Schema.tag("Quit") }),
@@ -38,24 +40,21 @@ export const InteractiveCommand = Schema.Union([
   Schema.Struct({
     _tag: Schema.tag("SelectThread"),
     threadId: Schema.String,
-    selectionEpoch: Schema.Int,
   }),
   Schema.Struct({ _tag: Schema.tag("ReadQueue"), threadId: Schema.String }),
   Schema.Struct({
     _tag: Schema.tag("LoadOlder"),
     threadId: Schema.String,
-    selectionEpoch: Schema.Int,
     before: TranscriptPage.PageCursor,
     loadedKeys: Schema.Array(Schema.String),
   }),
   Schema.Struct({
     _tag: Schema.tag("LoadNewer"),
     threadId: Schema.String,
-    selectionEpoch: Schema.Int,
     after: TranscriptPage.PageCursor,
   }),
   Schema.Struct({ _tag: Schema.tag("PreviewThread"), threadId: Schema.String }),
-  Schema.Struct({ _tag: Schema.tag("ReopenThread"), selectionEpoch: Schema.Int }),
+  Schema.Struct({ _tag: Schema.tag("ReopenThread") }),
 ])
 export type InteractiveCommand = typeof InteractiveCommand.Type
 
@@ -79,6 +78,10 @@ const executeInteractiveCommandImpl = (session: InteractiveSession, command: Int
       return session.steerQueued(command.turnId, command.text)
     case "Steer":
       return session.steer(command.text, command.turnId)
+    case "ApproveAuthorization":
+      return session.approveAuthorization(command.turnId, command.authorizationId)
+    case "DenyAuthorization":
+      return session.denyAuthorization(command.turnId, command.authorizationId)
     case "InterruptAndSend":
       return session.interruptAndSend(command.prompt)
     case "Cancel":
@@ -88,17 +91,17 @@ const executeInteractiveCommandImpl = (session: InteractiveSession, command: Int
     case "NewThread":
       return session.newThread
     case "SelectThread":
-      return session.selectThread(command.threadId, command.selectionEpoch)
+      return session.selectThread(command.threadId)
     case "ReadQueue":
       return session.readQueue(command.threadId)
     case "LoadOlder":
-      return session.loadOlder(command.threadId, command.selectionEpoch, command.before, command.loadedKeys)
+      return session.loadOlder(command.threadId, command.before, command.loadedKeys)
     case "LoadNewer":
-      return session.loadNewer(command.threadId, command.selectionEpoch, command.after)
+      return session.loadNewer(command.threadId, command.after)
     case "PreviewThread":
       return session.previewThread(command.threadId)
     case "ReopenThread":
-      return session.reopenThread(command.selectionEpoch)
+      return session.reopenThread
   }
 }
 

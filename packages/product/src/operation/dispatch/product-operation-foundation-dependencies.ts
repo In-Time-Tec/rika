@@ -1,6 +1,5 @@
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
-import * as UsageRepository from "@rika/product/usage-repository"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as ResolvedContext from "../../context/context-resolution-service"
@@ -16,7 +15,6 @@ export interface ProductOperationDependencies {
     | TurnRepository.Service
     | ThreadSummaryRepository.Service
     | TranscriptRepository.Service
-    | UsageRepository.Service
     | ResolvedContext.Service
     | ExecutionExtensions.ExecutionExtensionService
   >
@@ -25,12 +23,10 @@ export interface ProductOperationDependencies {
     | TurnRepository.Service
     | ThreadSummaryRepository.Service
     | TranscriptRepository.Service
-    | UsageRepository.Service
     | ResolvedContext.Service
     | ExecutionExtensions.ExecutionExtensionService
   >
   readonly rawBackend: ExecutionGateway.Interface
-  readonly usageRepository: UsageRepository.Interface
   readonly extensionService: ExecutionExtensions.ExecutionExtensionInterface | undefined
 }
 
@@ -40,16 +36,8 @@ type ProductLayerInput<
   BackendError extends Error,
   ThreadSummaryError extends Error,
   TranscriptError extends Error,
-  UsageError extends Error,
 > = {
-  readonly options: ProductLayerOptions<
-    ThreadError,
-    TurnError,
-    BackendError,
-    ThreadSummaryError,
-    TranscriptError,
-    UsageError
-  >
+  readonly options: ProductLayerOptions<ThreadError, TurnError, BackendError, ThreadSummaryError, TranscriptError>
   readonly ownerScope: Scope.Scope
 }
 
@@ -59,12 +47,11 @@ export const buildProductOperationDependencies = <
   BackendError extends Error,
   ThreadSummaryError extends Error,
   TranscriptError extends Error,
-  UsageError extends Error,
 >(
-  input: ProductLayerInput<ThreadError, TurnError, BackendError, ThreadSummaryError, TranscriptError, UsageError>,
+  input: ProductLayerInput<ThreadError, TurnError, BackendError, ThreadSummaryError, TranscriptError>,
 ): Effect.Effect<
   ProductOperationDependencies,
-  ThreadError | TurnError | BackendError | ThreadSummaryError | TranscriptError | UsageError | OperationError,
+  ThreadError | TurnError | BackendError | ThreadSummaryError | TranscriptError | OperationError,
   never
 > =>
   Effect.gen(function* () {
@@ -75,12 +62,10 @@ export const buildProductOperationDependencies = <
     const transcriptRepositoryLayer =
       options.transcriptRepositoryLayer ??
       TranscriptRepository.productMemoryLayerWithTurns.pipe(Layer.provide(repositories))
-    const usageRepositoryLayer = options.usageRepositoryLayer ?? UsageRepository.memoryLayer
     const dependencies = Layer.mergeAll(
       repositories,
       threadSummaryRepositoryLayer,
       transcriptRepositoryLayer,
-      usageRepositoryLayer,
       options.resolvedContextLayer ??
         ResolvedContext.testLayer({ resolve: () => Effect.succeed({ sources: [], diagnostics: [], digest: "" }) }),
       options.executionExtensions?.layer ?? Layer.empty,
@@ -91,7 +76,6 @@ export const buildProductOperationDependencies = <
       dependencyContext,
       acquiredDependencies: Layer.succeedContext(dependencyContext),
       rawBackend: Context.get(backendContext, ExecutionGateway.Service),
-      usageRepository: Context.get(dependencyContext, UsageRepository.Service),
       extensionService:
         options.executionExtensions === undefined
           ? undefined

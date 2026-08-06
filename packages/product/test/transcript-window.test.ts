@@ -1,94 +1,66 @@
+import * as ExecutionProjection from "@rika/product/execution-projection"
 import { expect, it } from "@effect/vitest"
 import { Effect } from "effect"
-import * as ExecutionRouteSnapshot from "../src/execution/contract/execution-route-snapshot"
-import { projectionVersion } from "../src/execution/ingest/execution-ingest-service"
+import * as Thread from "@rika/product/thread-record"
+import * as Turn from "@rika/product/turn-record"
+import { recordedShellProjection } from "@rika/transcript/recorded-shell-presentation"
 import { initialTranscriptWindow } from "../src/operation/interactive/transcript-window"
 import { makeSelectionState } from "../src/operation/interactive/interactive-thread-selection"
-import * as Thread from "../src/thread/model/thread-record"
-import * as TranscriptPage from "../src/thread/model/transcript-page"
-import * as Turn from "../src/thread/model/turn-record"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 
 const thread: Thread.Thread = {
-  id: Thread.ThreadId.make("large-thread"),
+  id: Thread.ThreadId.make("thread-shell-window"),
   workspace: "/work",
-  title: "Large thread",
-  lineage: { _tag: "Original" },
-  labels: [],
+  title: "shell",
   pinned: false,
   archived: false,
+  labels: [],
   createdAt: 1,
-  updatedAt: 58,
+  updatedAt: 1,
 }
-
-const turn = (index: number): Turn.AgentExecutionTurn => ({
-  _tag: "AgentExecution",
-  id: Turn.TurnId.make(`turn-${index}`),
+const turn = {
+  _tag: "RecordedShell" as const,
+  id: Turn.TurnId.make("shell-window"),
   threadId: thread.id,
-  prompt: `prompt ${index}`,
-  author: { _tag: "Human" },
-  lineage: { _tag: "Original" },
-  executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
-  status: "completed",
-  createdAt: index,
-  updatedAt: index,
-})
-
-const projection = (value: Turn.AgentExecutionTurn): TranscriptPage.Projection => {
-  const projected = TranscriptProjection.Projection.empty(value.id, value.prompt)
-  return {
-    turn: value,
-    units: projected.units,
-    checkpointGeneration: 0,
-    revision: projected.revision,
-    modelPhase: projected.modelPhase,
-    usableCompletionSequence: projected.usableCompletionSequence,
-    oldestCursor: undefined,
-    checkpointCursor: undefined,
-    costUsd: undefined,
-    usageCursors: undefined,
-    pricingVersion: undefined,
-    executionCheckpoints: [],
-    projectionVersion,
-  }
+  prompt: "$ echo done",
+  command: "echo done",
+  status: "completed" as const,
+  result: { text: "done", truncated: false, exitCode: 0 },
+  author: { _tag: "Human" as const },
+  lineage: { _tag: "Original" as const },
+  createdAt: 2,
+  updatedAt: 3,
 }
 
-it.effect("hydrates only the bounded recent window of a 58-turn thread", () =>
+it.effect("derives a terminal recorded shell from its authoritative Turn instead of a stale running read model", () =>
   Effect.gen(function* () {
-    const allTurns = Array.from({ length: 58 }, (_, index) => turn(index + 1))
-    const stored = new Map(allTurns.map((value) => [value.id, projection(value)]))
-    const reads: Array<string> = []
-    const pageLimits: Array<number | undefined> = []
-    const result = yield* initialTranscriptWindow({
+    const stale = recordedShellProjection({ id: turn.id, command: turn.command, status: "running" })
+    const window = yield* initialTranscriptWindow({
       state: makeSelectionState(thread, 1),
       turns: {
-        page: (_threadId, options) => {
-          pageLimits.push(options?.limit)
-          return Effect.succeed({
-            turns: allTurns,
-            hasOlder: false,
-            oldestCursor: undefined,
-            newestCursor: undefined,
-          })
-        },
+        page: () =>
+          Effect.succeed({ turns: [turn], hasOlder: false, oldestCursor: undefined, newestCursor: undefined }),
       },
       transcripts: {
-        get: (turnId) => {
-          reads.push(turnId)
-          return Effect.succeed(stored.get(turnId))
-        },
+        get: () =>
+          Effect.succeed({
+            turn,
+            units: stale.units,
+            revision: stale.revision,
+            checkpointGeneration: 0,
+            projectionVersion: 1,
+            state: {
+              status: "running",
+              usage: ExecutionProjection.emptyUsageState(),
+              steering: { steeringMessages: 0, followUpMessages: 0 },
+            },
+          }),
+        usage: () => Effect.succeed({ usage: { ...ExecutionProjection.emptyUsageState(), sourceComplete: true } }),
       },
-      ensureIngest: () => Effect.void,
-      maxTurns: 6,
-      maxEntries: 120,
+      maxTurns: 10,
+      maxEntries: 10,
       fail: (message) => Effect.die(message),
     })
-
-    expect(pageLimits).toEqual([50])
-    expect(reads).toEqual(["turn-58", "turn-57", "turn-56", "turn-55", "turn-54", "turn-53"])
-    expect(new Set(result.entries.map((entry) => entry.turn.id))).toEqual(
-      new Set(["turn-53", "turn-54", "turn-55", "turn-56", "turn-57", "turn-58"]),
-    )
-    expect(result.hasOlder).toBe(true)
+    expect(window.entries).toHaveLength(1)
+    expect(window.entries[0]?.unit.content).toMatchObject({ block: { status: "complete", output: "done" } })
   }),
 )

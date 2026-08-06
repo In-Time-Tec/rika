@@ -14,11 +14,17 @@ export type ToolTranscriptUnit = {
   readonly children?: ReadonlyArray<ToolTranscriptUnit>
   readonly agentResponse?: AgentResponseState
 }
+export type SubagentTranscriptUnit = {
+  readonly kind: "subagent"
+  readonly block: number
+  readonly children: ReadonlyArray<ToolTranscriptUnit>
+  readonly agentResponse?: AgentResponseState
+}
 export type TranscriptUnit =
   | { readonly kind: "entry"; readonly entry: number }
   | ToolTranscriptUnit
   | { readonly kind: "reasoning"; readonly block: number }
   | { readonly kind: "diff"; readonly block: number }
-  | { readonly kind: "childAgent"; readonly block: number }
+  | SubagentTranscriptUnit
   | { readonly kind: "block"; readonly block: number }
 export type TranscriptUnitId = string

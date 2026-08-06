@@ -73,6 +73,8 @@ export const iconChar: {
 
 export const markerText = (expanded: boolean): string => (expanded ? " ▾" : " ▸")
 
+export { subagentPhrase } from "@rika/transcript/subagent-presentation"
+
 export const cancelledAgentLabel = (activeLabel: string): string =>
   `${activeLabel.split(" ")[0] ?? "Subagent"} cancelled`
 export const failedAgentLabel = (activeLabel: string): string => `${activeLabel.split(" ")[0] ?? "Subagent"} failed`

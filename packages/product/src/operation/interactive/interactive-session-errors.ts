@@ -1,7 +1,7 @@
 import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import { Function, Schema } from "effect"
-import type { InteractiveEvent } from "./interactive-event"
+import type { InteractiveEvent } from "./interactive-runtime-event"
 import { operationFailureDetail } from "../operation-error"
 
 const dispatchInteractiveFailureImpl = (

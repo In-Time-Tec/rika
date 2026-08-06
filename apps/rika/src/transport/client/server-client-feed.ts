@@ -6,43 +6,27 @@ import * as ServerService from "@rika/product/server-service"
 import { clientMessageFrames } from "../protocol/server-message-codec"
 import { Deferred, Effect, Function, Queue, Schema } from "effect"
 
-const tracedEventTypes = new Set([
-  "model.reasoning.delta",
-  "model.output.delta",
-  "model.toolcall.delta",
-  "tool.call.requested",
-  "tool.result.received",
-])
-
-const traceInteractiveEventImpl = (name: string, seenDeltas: Set<string>, event: InteractiveEvent.InteractiveEvent) => {
-  if (
-    event._tag !== "TranscriptProjectionPatched" ||
-    event.origin._tag !== "Event" ||
-    !tracedEventTypes.has(event.origin.type)
-  )
-    return Effect.void
-  const delta = event.origin.type.endsWith(".delta")
-  const key = `${event.rootTurnId}:${event.origin.type}`
-  if (delta && seenDeltas.has(key)) return Effect.void
-  if (delta) seenDeltas.add(key)
+const traceInteractiveEventImpl = (name: string, seen: Set<string>, event: InteractiveEvent.InteractiveEvent) => {
+  if (event._tag !== "ThreadViewPatch") return Effect.void
+  const key = `${event.patch.threadId}:${event.patch.revision}`
+  if (seen.has(key)) return Effect.void
+  seen.add(key)
   return Effect.logInfo(name).pipe(
     Effect.annotateLogs({
-      "rika.event.cursor": event.origin.cursor,
-      "rika.event.type": event.origin.type,
-      "rika.thread.id": String(event.threadId),
-      "rika.turn.id": String(event.rootTurnId),
+      "rika.thread.id": String(event.patch.threadId),
+      "rika.thread_view.revision": event.patch.revision,
     }),
   )
 }
 
 export const traceInteractiveEvent: {
   (
-    seenDeltas: Set<string>,
+    seen: Set<string>,
     event: InteractiveEvent.InteractiveEvent,
   ): (name: string) => ReturnType<typeof traceInteractiveEventImpl>
   (
     name: string,
-    seenDeltas: Set<string>,
+    seen: Set<string>,
     event: InteractiveEvent.InteractiveEvent,
   ): ReturnType<typeof traceInteractiveEventImpl>
 } = Function.dual(3, traceInteractiveEventImpl)
@@ -65,17 +49,13 @@ export type ClientRequest = {
   feed?: PhysicalFeed
 }
 
-export type InteractiveFeedFrame = Extract<
-  ServerService.ServerMessage,
-  { readonly _tag: "interactive-feed-event" | "interactive-feed-resync" }
->
+export type InteractiveFeedFrame = Extract<ServerService.ServerMessage, { readonly _tag: "interactive-feed-event" }>
 
 export type PhysicalFeed = {
   readonly sessionId: string
   readonly generation: string
   readonly frames: Queue.Queue<InteractiveFeedFrame>
   expectedSequence: number
-  replayRequestedAfter: number | undefined
   consumerAttached: boolean
 }
 
@@ -104,7 +84,6 @@ const makePhysicalFeedImpl = (sessionId: string, generation: string, capacity: n
       generation,
       frames: yield* Queue.bounded<InteractiveFeedFrame>(capacity),
       expectedSequence: 1,
-      replayRequestedAfter: undefined,
       consumerAttached: false,
     }
   })

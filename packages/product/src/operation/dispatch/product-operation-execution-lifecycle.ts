@@ -3,7 +3,7 @@ import * as TurnRepository from "@rika/product/turn-repository"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { Context, Effect } from "effect"
 import { operationError } from "../operation-error"
-import type { InteractiveEvent } from "../interactive/interactive-event"
+import type { InteractiveEvent } from "../interactive/interactive-runtime-event"
 import type { InteractiveDependencyContext } from "../interactive/interactive-session-runtime"
 
 export const makeExecutionLifecycle = (input: {

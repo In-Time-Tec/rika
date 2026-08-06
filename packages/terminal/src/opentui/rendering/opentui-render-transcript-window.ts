@@ -81,7 +81,7 @@ export const boundedTranscriptModel: {
     for (const [position, item] of allItems.entries()) {
       if (item._tag !== "Block") continue
       const block = model.blocks[item.index] as TranscriptBlock | undefined
-      if (block?._tag === "ToolCall") itemPositionByBlockId.set(block.id, position)
+      if (block?._tag === "ToolCall" || block?._tag === "SubagentCard") itemPositionByBlockId.set(block.id, position)
     }
     const rootPositionOf = (start: number): number => {
       let position = start
@@ -120,7 +120,7 @@ export const boundedTranscriptModel: {
         seen.add(current)
         const parentId = allItems[current]?.parentId
         if (parentId === undefined) break
-        if (!expandedRows.has(`tool:${parentId}`)) {
+        if (!expandedRows.has(`tool:${parentId}`) && !expandedRows.has(`subagent:${parentId}`)) {
           visible = false
           break
         }
@@ -176,7 +176,6 @@ export const boundedTranscriptModel: {
       }
       for (const position of required) selectedPositions.add(position)
       visibleSelected += requiredVisible
-      if (requiredVisible < visibleMembers) break
     }
     const source = [...selectedPositions].toSorted((left, right) => left - right).map((position) => allItems[position]!)
     const entries: Array<Model["entries"][number]> = []

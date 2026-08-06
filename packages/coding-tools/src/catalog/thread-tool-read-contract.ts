@@ -45,7 +45,7 @@ const ReadSelection = Schema.Union([
   }),
   Schema.Struct({
     mode: Schema.tag("subtree"),
-    childExecutionId: NonEmptyString,
+    subagentId: NonEmptyString,
     cursor: Schema.optionalKey(SubtreeCursor),
   }),
 ])

@@ -1,220 +1,141 @@
-import { TurnResult } from "@rika/product/thread-result"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import { Effect } from "effect"
-import { SqlClient } from "effect/unstable/sql/SqlClient"
-import type { RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/thread-result"
-import { RepositoryError } from "@rika/product/transcript-repository"
-import type { Interface } from "@rika/product/transcript-repository"
-import { support } from "./transcript-repository-support"
-import type { makeTranscriptSqliteCheckpoints } from "./transcript-sqlite-checkpoints"
+import type { Projection } from "@rika/product/transcript-page"
+import type { TurnId } from "@rika/product/turn-record"
+import * as ExecutionProjection from "@rika/product/execution-projection"
+import { RepositoryError, type Interface } from "@rika/product/transcript-repository"
+import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
+import { Clock, Effect, Schema } from "effect"
+import type { SqlClient } from "effect/unstable/sql/SqlClient"
 
-const {
-  error,
-  refoldStale,
-  isRefoldStale,
-  refoldTurn,
-  recordedShellProjection,
-  validateRecordedShellProjection,
-  validateUnits,
-  validateCheckpoint,
-  validateAttachmentSet,
-  validateDelta,
-} = support
-
-const makeTranscriptSqliteWrites = (
-  sql: SqlClient,
-  checkpoints: ReturnType<typeof makeTranscriptSqliteCheckpoints>,
-  get: Interface["get"],
-): Pick<
-  Interface,
-  "commitDelta" | "replaceForRefold" | "createRecordedShell" | "copyRecordedShell" | "settleRecordedShell"
-> => {
-  const {
-    commitCheckpoint,
-    replaceCheckpointForRefold,
-    loadExecutionCheckpoints,
-    loadAttachmentUnits,
-    validateDurableUnitRemoval,
-    storeUnit,
-    storeExecutionCheckpoint,
-  } = checkpoints
-  const insertRecordedShell = Effect.fn("TranscriptRepository.insertRecordedShell")(function* (
-    turn: RunningRecordedShellTurn | TerminalRecordedShellTurn,
-    projectionVersion: number,
-  ) {
-    const projection = recordedShellProjection(turn)
-    yield* validateUnits(projection.units)
-    yield* validateRecordedShellProjection(turn, projection, projectionVersion)
-    const result = turn.status === "running" ? undefined : turn.result
-    let resultTruncated: number | null = null
-    if (result !== undefined) resultTruncated = result.truncated ? 1 : 0
-    return yield* sql
-      .withTransaction(
-        Effect.gen(function* () {
-          yield* sql`INSERT INTO rika_turns (
-            id, thread_id, turn_kind, prompt, shell_command, status,
-            shell_result_text, shell_result_truncated, shell_result_exit_code,
-            author_json, lineage_json, created_at, updated_at
-          ) VALUES (
-            ${turn.id}, ${turn.threadId}, 'RecordedShell', ${turn.prompt}, ${turn.command},
-            ${turn.status}, ${result?.text ?? null},
-            ${resultTruncated}, ${result?.exitCode ?? null},
-            '{"_tag":"Human"}', '{"_tag":"Original"}', ${turn.createdAt}, ${turn.updatedAt}
-          )`
-          const committed = yield* commitCheckpoint(turn, TranscriptProjection.Projection.projectionState(projection), {
-            executionCheckpoints: [],
-            projectionVersion,
-            expectedGeneration: undefined,
-          })
-          if (!committed)
-            return yield* RepositoryError.make({ message: `Recorded shell transcript ${turn.id} already exists` })
-          yield* Effect.forEach(projection.units, (unit) => storeUnit(turn, unit), { discard: true })
-          const stored = yield* get(turn.id)
-          if (stored === undefined)
-            return yield* RepositoryError.make({ message: `Recorded shell transcript ${turn.id} was not stored` })
-          return stored
-        }),
+const error = (cause: unknown) =>
+  Schema.is(RepositoryError)(cause) ? cause : RepositoryError.make({ message: String(cause) })
+const encodeState = Schema.encodeSync(Schema.fromJsonString(ExecutionProjection.ProjectionState))
+const encodeUnit = Schema.encodeSync(Schema.fromJsonString(TranscriptUnit.Unit))
+const validateUnits = (turnId: string, units: ReadonlyArray<TranscriptUnit.Unit>) =>
+  Effect.gen(function* () {
+    const keys = new Set<string>()
+    const orders = new Set<string>()
+    for (const unit of units) {
+      const order = TranscriptOrdering.encodeUnitOrder(unit.order)
+      if (
+        unit.turnId !== turnId ||
+        !TranscriptOrdering.hasIntrinsicOrder(unit) ||
+        keys.has(unit.key) ||
+        orders.has(order)
       )
-      .pipe(Effect.mapError(error))
+        return yield* RepositoryError.make({ message: `Transcript unit ${unit.key} is invalid or duplicated` })
+      keys.add(unit.key)
+      orders.add(order)
+    }
   })
-  return {
-    commitDelta: Effect.fn("TranscriptRepository.commitDelta")(function* (turn, state, delta, options) {
-      yield* validateDelta(delta)
-      yield* validateCheckpoint(turn, state, options)
+
+export const transcriptSqliteWrites = {
+  make: (
+    sql: SqlClient,
+    get: (turnId: TurnId) => Effect.Effect<Projection | undefined, RepositoryError>,
+  ): Pick<Interface, "commitProjection" | "replaceUnits"> => ({
+    commitProjection: Effect.fn("TranscriptRepository.commitProjection")(function* (turn, change) {
+      const upserts = change._tag === "ProjectionSnapshot" ? change.units : change.upsert
+      yield* validateUnits(turn.id, upserts)
+      const clock = yield* Clock.Clock
       return yield* sql
         .withTransaction(
           Effect.gen(function* () {
-            if (!(yield* commitCheckpoint(turn, state, options))) return "stale" as const
-            const storedCheckpoints = new Map(
-              (yield* loadExecutionCheckpoints(turn.id)).map((checkpoint) => [checkpoint.executionKey, checkpoint]),
-            )
-            for (const checkpoint of options.executionCheckpoints)
-              storedCheckpoints.set(checkpoint.executionKey, checkpoint)
-            const merged = [...storedCheckpoints.values()]
-            yield* validateCheckpoint(
-              turn,
-              state,
-              { executionCheckpoints: merged, projectionVersion: options.projectionVersion },
-              true,
-            )
-            const attachmentUnits = yield* loadAttachmentUnits(turn, delta, merged)
-            yield* validateAttachmentSet(turn, attachmentUnits, merged)
-            yield* Effect.forEach(
-              delta.remove,
-              (key) =>
-                Effect.gen(function* () {
-                  yield* validateDurableUnitRemoval(turn, key)
-                  yield* sql`DELETE FROM rika_transcript_units WHERE turn_id = ${turn.id} AND unit_key = ${key}`
-                }).pipe(Effect.mapError(error)),
-              { discard: true },
-            )
-            yield* Effect.forEach(delta.upsert, (unit) => storeUnit(turn, unit), { discard: true })
-            yield* Effect.forEach(
-              options.executionCheckpoints,
-              (checkpoint) => storeExecutionCheckpoint(turn, checkpoint),
-              { discard: true },
-            )
+            const checkpoint = change.checkpoint
+            const now = clock.currentTimeMillisUnsafe()
+            const rows =
+              change._tag === "ProjectionSnapshot"
+                ? yield* sql`INSERT INTO rika_transcript_checkpoints (
+              turn_id, thread_id, checkpoint_generation, revision, projection_version, state_json,
+              projector_version, projector_cursor, projector_state, updated_at
+            ) VALUES (
+              ${turn.id}, ${turn.threadId}, 0, ${change.revision}, ${ExecutionProjection.projectionVersion}, ${encodeState(change.state)},
+              ${checkpoint?.version ?? null}, ${checkpoint?.cursor ?? null}, ${checkpoint?.state ?? null}, ${now}
+            ) ON CONFLICT(turn_id) DO UPDATE SET
+              checkpoint_generation = checkpoint_generation + 1,
+              revision = excluded.revision,
+              projection_version = excluded.projection_version,
+              state_json = excluded.state_json,
+              projector_version = excluded.projector_version,
+              projector_cursor = excluded.projector_cursor,
+              projector_state = excluded.projector_state,
+              updated_at = excluded.updated_at
+            WHERE rika_transcript_checkpoints.revision <= excluded.revision
+            RETURNING turn_id`
+                : yield* sql`UPDATE rika_transcript_checkpoints SET
+              checkpoint_generation = checkpoint_generation + 1,
+              revision = ${change.revision}, projection_version = ${ExecutionProjection.projectionVersion},
+              state_json = ${encodeState(change.state)},
+              projector_version = ${change.checkpoint.version}, projector_cursor = ${change.checkpoint.cursor},
+              projector_state = ${change.checkpoint.state}, updated_at = ${now}
+            WHERE turn_id = ${turn.id} AND revision = ${change.baseRevision}
+            RETURNING turn_id`
+            if (rows.length === 0) return "stale" as const
+            if (change._tag === "ProjectionSnapshot" && !change.hasOlder)
+              yield* sql`DELETE FROM rika_transcript_units WHERE turn_id = ${turn.id}`
+            for (const key of change._tag === "ProjectionPatch" ? change.remove : [])
+              yield* sql`DELETE FROM rika_transcript_units WHERE turn_id = ${turn.id} AND unit_key = ${key}`
+            for (const unit of upserts) {
+              const order = TranscriptOrdering.encodeUnitOrder(unit.order)
+              yield* sql`INSERT INTO rika_transcript_units (
+              turn_id, unit_key, thread_id, unit_order_key, parent_id, revision, unit_json, created_at, updated_at
+            ) VALUES (
+              ${turn.id}, ${unit.key}, ${turn.threadId}, ${order}, ${unit.parentId ?? null},
+              ${unit.revision}, ${encodeUnit(unit)}, ${turn.createdAt}, ${now}
+            ) ON CONFLICT(turn_id, unit_key) DO UPDATE SET
+              revision = excluded.revision, unit_json = excluded.unit_json, updated_at = excluded.updated_at
+            WHERE rika_transcript_units.unit_order_key = excluded.unit_order_key
+              AND rika_transcript_units.parent_id IS excluded.parent_id`
+            }
             return "committed" as const
           }),
         )
         .pipe(Effect.mapError(error))
     }),
-    replaceForRefold: Effect.fn("TranscriptRepository.replaceForRefold")(function* (turn, projection, options) {
-      yield* validateUnits(projection.units)
-      yield* validateCheckpoint(turn, TranscriptProjection.Projection.projectionState(projection), options, true)
-      yield* validateAttachmentSet(turn, projection.units, options.executionCheckpoints)
-      const replacementTurn = yield* refoldTurn(turn, projection, options)
-      return yield* sql
+    replaceUnits: Effect.fn("TranscriptRepository.replaceUnits")(function* (turn, units) {
+      yield* validateUnits(turn.id, units)
+      const clock = yield* Clock.Clock
+      const status =
+        turn.status === "queued" || turn.status === "accepted" || turn.status === "cancelling" ? "running" : turn.status
+      const state = {
+        status,
+        usage: {
+          ...ExecutionProjection.emptyUsageState(),
+          sourceComplete: status === "completed" || status === "failed" || status === "cancelled",
+        },
+        steering: { steeringMessages: 0, followUpMessages: 0 },
+      }
+      yield* sql
         .withTransaction(
           Effect.gen(function* () {
-            const adopted = yield* sql`UPDATE rika_turns
-          SET status = ${replacementTurn.status}
-          WHERE id = ${turn.id} AND status = ${turn.status}
-          RETURNING id`
-            if (adopted.length === 0) return yield* refoldStale
-            if (!(yield* replaceCheckpointForRefold(replacementTurn, projection, options))) return yield* refoldStale
-            yield* sql`DELETE FROM rika_transcript_execution_checkpoints WHERE turn_id = ${turn.id}`.pipe(
-              Effect.mapError(error),
-            )
-            yield* sql`DELETE FROM rika_transcript_units WHERE turn_id = ${turn.id}`.pipe(Effect.mapError(error))
-            yield* Effect.forEach(projection.units, (unit) => storeUnit(replacementTurn, unit), { discard: true })
-            yield* Effect.forEach(
-              options.executionCheckpoints,
-              (checkpoint) => storeExecutionCheckpoint(replacementTurn, checkpoint),
-              { discard: true },
-            )
-            const committed = yield* get(turn.id)
-            if (committed === undefined)
-              return yield* RepositoryError.make({ message: `Transcript ${turn.id} disappeared during refold` })
-            if (!TurnResult.isAgentExecution(committed.turn))
-              return yield* RepositoryError.make({ message: `Transcript ${turn.id} changed turn kind during refold` })
-            return { _tag: "Committed", turn: committed.turn } as const
+            const now = clock.currentTimeMillisUnsafe()
+            const revision = units.reduce((maximum, unit) => Math.max(maximum, unit.revision), 0)
+            yield* sql`INSERT INTO rika_transcript_checkpoints (
+            turn_id, thread_id, checkpoint_generation, revision, projection_version, state_json,
+            projector_version, projector_cursor, projector_state, updated_at
+          ) VALUES (
+            ${turn.id}, ${turn.threadId}, 0, ${revision}, ${ExecutionProjection.projectionVersion}, ${encodeState(state)},
+            NULL, NULL, NULL, ${now}
+          ) ON CONFLICT(turn_id) DO UPDATE SET
+            checkpoint_generation = checkpoint_generation + 1, revision = excluded.revision,
+            projection_version = excluded.projection_version, state_json = excluded.state_json,
+            projector_version = NULL, projector_cursor = NULL, projector_state = NULL, updated_at = excluded.updated_at`
+            yield* sql`DELETE FROM rika_transcript_units WHERE turn_id = ${turn.id}`
+            for (const unit of units) {
+              const order = TranscriptOrdering.encodeUnitOrder(unit.order)
+              yield* sql`INSERT INTO rika_transcript_units (
+              turn_id, unit_key, thread_id, unit_order_key, parent_id, revision, unit_json, created_at, updated_at
+            ) VALUES (
+              ${turn.id}, ${unit.key}, ${turn.threadId}, ${order}, ${unit.parentId ?? null},
+              ${unit.revision}, ${encodeUnit(unit)}, ${turn.createdAt}, ${now}
+            )`
+            }
           }),
         )
-        .pipe(
-          Effect.catch((failure) =>
-            isRefoldStale(failure) ? Effect.succeed({ _tag: "Stale" } as const) : Effect.fail(error(failure)),
-          ),
-        )
+        .pipe(Effect.mapError(error))
+      const stored = yield* get(turn.id)
+      if (stored === undefined) return yield* RepositoryError.make({ message: `Transcript ${turn.id} was not stored` })
+      return stored
     }),
-    createRecordedShell: insertRecordedShell,
-    copyRecordedShell: insertRecordedShell,
-    settleRecordedShell: Effect.fn("TranscriptRepository.settleRecordedShell")(
-      function* (expected, turn, expectedGeneration, projectionVersion) {
-        if (
-          turn.id !== expected.id ||
-          turn.threadId !== expected.threadId ||
-          turn.prompt !== expected.prompt ||
-          turn.command !== expected.command ||
-          turn.createdAt !== expected.createdAt ||
-          turn.updatedAt < expected.updatedAt
-        )
-          return yield* RepositoryError.make({
-            message: `Recorded shell turn ${turn.id} changed its intrinsic identity`,
-          })
-        const projection = recordedShellProjection(turn)
-        yield* validateUnits(projection.units)
-        yield* validateRecordedShellProjection(turn, projection, projectionVersion)
-        return yield* sql
-          .withTransaction(
-            Effect.gen(function* () {
-              const updated = yield* sql`UPDATE rika_turns SET
-              status = ${turn.status}, shell_result_text = ${turn.result.text},
-              shell_result_truncated = ${turn.result.truncated ? 1 : 0},
-              shell_result_exit_code = ${turn.result.exitCode ?? null}, updated_at = ${turn.updatedAt}
-            WHERE id = ${expected.id} AND turn_kind = 'RecordedShell' AND status = 'running'
-              AND thread_id = ${expected.threadId} AND prompt = ${expected.prompt}
-              AND shell_command = ${expected.command} AND created_at = ${expected.createdAt}
-              AND updated_at = ${expected.updatedAt}
-            RETURNING id`
-              if (updated.length === 0) return yield* refoldStale
-              const committed = yield* commitCheckpoint(
-                turn,
-                TranscriptProjection.Projection.projectionState(projection),
-                {
-                  executionCheckpoints: [],
-                  projectionVersion,
-                  expectedGeneration,
-                },
-              )
-              if (!committed) return yield* refoldStale
-              yield* Effect.forEach(projection.units, (unit) => storeUnit(turn, unit), { discard: true })
-              const stored = yield* get(turn.id)
-              if (stored === undefined)
-                return yield* RepositoryError.make({
-                  message: `Recorded shell transcript ${turn.id} disappeared`,
-                })
-              return { _tag: "Committed" as const, projection: stored }
-            }),
-          )
-          .pipe(
-            Effect.catch((failure) =>
-              isRefoldStale(failure) ? Effect.succeed({ _tag: "Stale" } as const) : Effect.fail(error(failure)),
-            ),
-          )
-      },
-    ),
-  }
+  }),
 }
-
-export const transcriptSqliteWrites = { make: makeTranscriptSqliteWrites }

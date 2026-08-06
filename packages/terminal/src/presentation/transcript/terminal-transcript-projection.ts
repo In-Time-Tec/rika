@@ -1,15 +1,14 @@
-import { executionKey } from "@rika/transcript/child-parent-correlation"
 import { compareUnitOrder } from "@rika/transcript/transcript-unit-order"
 import type { Block } from "@rika/transcript/transcript-presentation-model"
 import type { Unit } from "@rika/transcript/transcript-unit"
-import type { UnitDelta } from "@rika/transcript/transcript-projection"
-import { isInternalOutcome, nestedChildUnit, reconcileSubagentUnits } from "./transcript-projection-reconciliation"
+export interface UnitDelta {
+  readonly upsert: ReadonlyArray<Unit>
+  readonly remove: ReadonlyArray<string>
+}
 import { outcomeShadow, updateExecutionOutcomes } from "./transcript-projection-outcomes"
 import { Function } from "effect"
 import type { Model } from "../../state/model/terminal-state"
 import type { TranscriptItem } from "../../state/model/terminal-transcript-state"
-
-type ToolCall = Extract<Block, { readonly _tag: "ToolCall" }>
 
 export interface Event {
   readonly turnId?: string
@@ -30,7 +29,7 @@ const isCancellationNotice = (unit: Unit): boolean =>
 const cancelledUnit = (unit: Unit): Unit => {
   if (unit.content._tag !== "Block") return unit
   const block = unit.content.block
-  if ((block._tag !== "ToolCall" && block._tag !== "ChildAgent") || block.status !== "running") return unit
+  if ((block._tag !== "ToolCall" && block._tag !== "SubagentCard") || block.status !== "running") return unit
   return {
     ...unit,
     content: { _tag: "Block", block: { ...block, status: "cancelled" } },
@@ -142,9 +141,7 @@ const projectUnitsImpl = (model: Model, units: ReadonlyArray<Unit>, parentId?: s
     )
   const cancellation = normalizeCancellation(parentCancelled ? units.map(cancelledUnit) : units, parentId)
   const cancellationActive = parentCancelled || cancellation.units !== units || cancellation.parentIds.size > 0
-  const reconciled =
-    parentId === undefined ? reconcileSubagentUnits(model, cancellation.units) : { model, units: cancellation.units }
-  const projectedModel = cancelParentRows(reconciled.model, cancellation.parentIds)
+  const projectedModel = cancelParentRows(model, cancellation.parentIds)
   let entries = projectedModel.entries as ReadonlyArray<Model["entries"][number]>
   let blocks = projectedModel.blocks as ReadonlyArray<Block>
   let items = projectedModel.items as ReadonlyArray<TranscriptItem>
@@ -198,41 +195,12 @@ const projectUnitsImpl = (model: Model, units: ReadonlyArray<Unit>, parentId?: s
     for (const [position, item] of items.entries()) if (item.id !== undefined) known.set(item.id, position)
     knownCloned = true
   }
-  const batchToolChildIds = new Set<string>()
-  const batchAgentToolTokens = new Set<string>()
-  for (const candidate of reconciled.units) {
-    if (candidate.content._tag !== "Block" || candidate.content.block._tag !== "ToolCall") continue
-    const candidateBlock = candidate.content.block
-    if (candidateBlock.childId !== undefined) batchToolChildIds.add(executionKey(candidateBlock.childId))
-    if (candidateBlock.presentation.family === "agent") {
-      const prefix = `${candidate.turnId}:`
-      batchAgentToolTokens.add(
-        candidateBlock.id.startsWith(prefix) ? candidateBlock.id.slice(prefix.length) : candidateBlock.id,
-      )
-    }
-  }
-  const existingAgentTools = new Map<string, { readonly key: string; readonly block: ToolCall }>()
-  if (
-    parentId !== undefined ||
-    reconciled.units.some(
-      (unit) =>
-        unit.parentId !== undefined && unit.content._tag === "Block" && unit.content.block._tag === "ChildAgent",
-    )
-  )
-    for (const item of items) {
-      if (item._tag !== "Block" || item.id === undefined) continue
-      const block = blocks[item.index]
-      if (block?._tag !== "ToolCall" || block.presentation.family !== "agent" || block.childId === undefined) continue
-      existingAgentTools.set(`${item.parentId ?? ""} ${executionKey(block.childId)}`, { key: item.id, block })
-    }
-  for (const rawUnit of reconciled.units) {
-    if (isInternalOutcome(rawUnit)) continue
+  for (const rawUnit of cancellation.units) {
     const nestedParentId = parentId ?? rawUnit.parentId
     const unit =
-      nestedParentId === undefined
+      nestedParentId === undefined || rawUnit.parentId === nestedParentId
         ? rawUnit
-        : nestedChildUnit(rawUnit, batchToolChildIds, batchAgentToolTokens, existingAgentTools, nestedParentId)
-    if (unit === undefined) continue
+        : { ...rawUnit, parentId: nestedParentId }
     const itemIndex = known.get(unit.key)
     const current = itemIndex === undefined ? undefined : items[itemIndex]
     if (current !== undefined) {
@@ -422,7 +390,7 @@ export const projectChildUnits: {
     for (const index of childIndexes) {
       const block = blocks[index]
       if (block === undefined) continue
-      if ((block._tag !== "ToolCall" && block._tag !== "ChildAgent") || block.status !== "running") continue
+      if ((block._tag !== "ToolCall" && block._tag !== "SubagentCard") || block.status !== "running") continue
       blocks[index] = { ...block, status: "cancelled" as const }
     }
     return {

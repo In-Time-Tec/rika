@@ -9,12 +9,14 @@ export interface Codec<A, I> {
   readonly codec: string
   readonly version: string
   readonly payload: Schema.Codec<A, I>
+  readonly identity: { readonly contract: string; readonly version: number }
 }
 
 const codec = <A, I>(name: string, version: string, payload: Schema.Codec<A, I>): Codec<A, I> => ({
   codec: name,
   version,
   payload,
+  identity: { contract: name, version: Number(version) },
 })
 
 const ToolPayload = Schema.Struct({
@@ -30,11 +32,15 @@ const ApplicationContextPayload = Schema.Struct({
   executionRoute: ExecutionRoute.ExecutionRouteSnapshot,
 })
 
+const { role: _role, ...modelRegistryFields } = ExecutionRoute.ExecutionRouteModelSnapshot.fields
+
+const ModelRegistryRoutePayload = Schema.Struct(modelRegistryFields)
+
 export const codecs = {
-  applicationContext: codec("rika-application-context", "2", ApplicationContextPayload),
-  modelRoute: codec("rika-model-route", "2", ExecutionRoute.ExecutionRouteModelSnapshot),
-  modelRegistryRoute: codec("rika-model-registry-route", "2", ExecutionRoute.ExecutionRouteModelSnapshot),
-  compaction: codec("rika-compaction", "2", ExecutableRegistration.CompactionPolicy),
+  applicationContext: codec("rika-application-context", "1", ApplicationContextPayload),
+  modelRoute: codec("rika-model-route", "1", ExecutionRoute.ExecutionRouteModelSnapshot),
+  modelRegistryRoute: codec("rika-model-registry-route", "1", ModelRegistryRoutePayload),
+  compaction: codec("rika-compaction", "1", ExecutableRegistration.CompactionPolicy),
   tool: codec("rika-tool", "1", ToolPayload),
   programSandbox: codec("rika-program-sandbox", "1", Sandbox.Registration),
   programInput: codec("rika-program-input", "1", SchemaPayload),
@@ -49,7 +55,7 @@ export const toolPayload = (value: Tool.Any): typeof ToolPayload.Type => ({
 })
 
 export const toolPin = (value: Tool.Any): Pins.CapabilityPin =>
-  Pins.makeCapability({ contract: codecs.tool.codec, version: 1, ...toolPayload(value) })
+  Pins.makeCapability({ ...codecs.tool.identity, ...toolPayload(value) })
 
 const makeImpl = <A, I>(
   definition: Codec<A, I>,

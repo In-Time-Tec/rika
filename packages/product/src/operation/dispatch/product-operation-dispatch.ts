@@ -13,7 +13,7 @@ import { makeProductOperationSchedule } from "./product-operation-schedule"
 import { makeProductOperationRuntimeState } from "./product-operation-runtime-state"
 import { makeProductOperationService } from "./product-operation-service"
 import type { ProductLayerOptions } from "./product-operation-options"
-import type { InteractiveEvent } from "../interactive/interactive-event"
+import type { InteractiveEvent } from "../interactive/interactive-runtime-event"
 
 const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString)
 const unavailable = (input: Input, message = `${input._tag} is specified but not implemented yet`) =>
@@ -46,14 +46,12 @@ type ProductLayerError<
   BackendError extends Error,
   ThreadSummaryError extends Error,
   TranscriptError extends Error,
-  UsageError extends Error,
 > =
   | ThreadError
   | TurnError
   | BackendError
   | ThreadSummaryError
   | TranscriptError
-  | UsageError
   | OperationError
   | OperationUnavailable
 
@@ -63,26 +61,18 @@ export const productLayer = <
   BackendError extends Error,
   ThreadSummaryError extends Error = never,
   TranscriptError extends Error = never,
-  UsageError extends Error = never,
 >(
-  options: ProductLayerOptions<ThreadError, TurnError, BackendError, ThreadSummaryError, TranscriptError, UsageError>,
+  options: ProductLayerOptions<ThreadError, TurnError, BackendError, ThreadSummaryError, TranscriptError>,
 ): Layer.Layer<
   Service,
-  | ThreadError
-  | TurnError
-  | BackendError
-  | ThreadSummaryError
-  | TranscriptError
-  | UsageError
-  | OperationError
-  | OperationUnavailable,
+  ThreadError | TurnError | BackendError | ThreadSummaryError | TranscriptError | OperationError | OperationUnavailable,
   never
 > =>
   Layer.effect(
     Service,
     Effect.gen(function* (): Effect.gen.Return<
       Interface,
-      ProductLayerError<ThreadError, TurnError, BackendError, ThreadSummaryError, TranscriptError, UsageError>,
+      ProductLayerError<ThreadError, TurnError, BackendError, ThreadSummaryError, TranscriptError>,
       Scope.Scope
     > {
       const ownerScope = yield* Effect.scope

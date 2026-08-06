@@ -3,6 +3,26 @@
   "graphKind": "test",
   "nodes": [
     {
+      "id": "apps/rika/test/app-failure-restoration.tui.test.ts",
+      "path": "apps/rika/test/app-failure-restoration.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
+    },
+    {
+      "id": "apps/rika/test/app-submission.tui.test.ts",
+      "path": "apps/rika/test/app-submission.tui.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "tui-test"
+    },
+    {
       "id": "apps/rika/test/app.tui.test.ts",
       "path": "apps/rika/test/app.tui.test.ts",
       "workspace": "@rika/cli",
@@ -173,26 +193,6 @@
       "testKind": "unit-test"
     },
     {
-      "id": "apps/rika/test/interactive-controller-activity.test.ts",
-      "path": "apps/rika/test/interactive-controller-activity.test.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "apps/rika/test/interactive-controller-child-projection.test.ts",
-      "path": "apps/rika/test/interactive-controller-child-projection.test.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
       "id": "apps/rika/test/interactive-controller-page-order.test.ts",
       "path": "apps/rika/test/interactive-controller-page-order.test.ts",
       "workspace": "@rika/cli",
@@ -203,38 +203,8 @@
       "testKind": "unit-test"
     },
     {
-      "id": "apps/rika/test/interactive-controller-projection-reload.test.ts",
-      "path": "apps/rika/test/interactive-controller-projection-reload.test.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "apps/rika/test/interactive-controller-projection-stream.test.ts",
-      "path": "apps/rika/test/interactive-controller-projection-stream.test.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "apps/rika/test/interactive-controller-queue.test.ts",
-      "path": "apps/rika/test/interactive-controller-queue.test.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "apps/rika/test/interactive-controller-selection.test.ts",
-      "path": "apps/rika/test/interactive-controller-selection.test.ts",
+      "id": "apps/rika/test/interactive-controller-thread-view.test.ts",
+      "path": "apps/rika/test/interactive-controller-thread-view.test.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -305,6 +275,16 @@
     {
       "id": "apps/rika/test/performance-platform.test.ts",
       "path": "apps/rika/test/performance-platform.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "apps/rika/test/process-approval-control-failure.test.ts",
+      "path": "apps/rika/test/process-approval-control-failure.test.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -1033,8 +1013,8 @@
       "package": "vitest"
     },
     {
-      "id": "packages/baton-execution/test/baton-child-tools.test.ts",
-      "path": "packages/baton-execution/test/baton-child-tools.test.ts",
+      "id": "packages/baton-execution/test/baton-approval.test.ts",
+      "path": "packages/baton-execution/test/baton-approval.test.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1063,8 +1043,18 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/baton-execution/test/baton-execution.test.ts",
-      "path": "packages/baton-execution/test/baton-execution.test.ts",
+      "id": "packages/baton-execution/test/baton-model-effort.test.ts",
+      "path": "packages/baton-execution/test/baton-model-effort.test.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/baton-execution/test/baton-native-tools.test.ts",
+      "path": "packages/baton-execution/test/baton-native-tools.test.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1083,8 +1073,78 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/baton-execution/test/baton-projector-usage.test.ts",
+      "path": "packages/baton-execution/test/baton-projector-usage.test.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/baton-execution/test/baton-projector-values.test.ts",
+      "path": "packages/baton-execution/test/baton-projector-values.test.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/baton-execution/test/baton-registration-identity.test.ts",
+      "path": "packages/baton-execution/test/baton-registration-identity.test.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/baton-execution/test/baton-route.test.ts",
       "path": "packages/baton-execution/test/baton-route.test.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/baton-execution/test/baton-subagent-card-projection.test.ts",
+      "path": "packages/baton-execution/test/baton-subagent-card-projection.test.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/baton-execution/test/baton-title-admission.test.ts",
+      "path": "packages/baton-execution/test/baton-title-admission.test.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/baton-execution/test/baton-tree-projector-attribution.test.ts",
+      "path": "packages/baton-execution/test/baton-tree-projector-attribution.test.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/baton-execution/test/baton-tree-projector.test.ts",
+      "path": "packages/baton-execution/test/baton-tree-projector.test.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1393,14 +1453,14 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/product-store/test/contract/transcript-checkpoint-delta.test.ts",
-      "path": "packages/product-store/test/contract/transcript-checkpoint-delta.test.ts",
+      "id": "packages/product-store/test/direct-projection-checkpoint.test.ts",
+      "path": "packages/product-store/test/direct-projection-checkpoint.test.ts",
       "workspace": "@rika/product-store",
       "package": "@rika/product-store",
       "kind": "source",
       "production": false,
       "publicExports": [],
-      "testKind": "contract-test"
+      "testKind": "unit-test"
     },
     {
       "id": "packages/product-store/test/fixtures/product-route-snapshot.fixture.json",
@@ -1415,66 +1475,6 @@
     {
       "id": "packages/product-store/test/product-database.test.ts",
       "path": "packages/product-store/test/product-database.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/product-operation/interactive-session-controls-1.test.ts",
-      "path": "packages/product-store/test/product-operation/interactive-session-controls-1.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/product-operation/interactive-session-controls-2.test.ts",
-      "path": "packages/product-store/test/product-operation/interactive-session-controls-2.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/product-operation/interactive-session-usage-1.test.ts",
-      "path": "packages/product-store/test/product-operation/interactive-session-usage-1.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/product-operation/operation-active-controls.test.ts",
-      "path": "packages/product-store/test/product-operation/operation-active-controls.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/product-operation/operation-churn.test.ts",
-      "path": "packages/product-store/test/product-operation/operation-churn.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/product-operation/operation-durable-submission.test.ts",
-      "path": "packages/product-store/test/product-operation/operation-durable-submission.test.ts",
       "workspace": "@rika/product-store",
       "package": "@rika/product-store",
       "kind": "source",
@@ -1513,48 +1513,8 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/product-store/test/product-operation/operation-queued-controls.test.ts",
-      "path": "packages/product-store/test/product-operation/operation-queued-controls.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
       "id": "packages/product-store/test/product-operation/operation-routing.test.ts",
       "path": "packages/product-store/test/product-operation/operation-routing.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/product-operation/operation-selection-live-feed.test.ts",
-      "path": "packages/product-store/test/product-operation/operation-selection-live-feed.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/product-operation/operation-selection-race.test.ts",
-      "path": "packages/product-store/test/product-operation/operation-selection-race.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/product-operation/operation-session-close.test.ts",
-      "path": "packages/product-store/test/product-operation/operation-session-close.test.ts",
       "workspace": "@rika/product-store",
       "package": "@rika/product-store",
       "kind": "source",
@@ -1623,8 +1583,8 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/product-store/test/recorded-shell-repository.test.ts",
-      "path": "packages/product-store/test/recorded-shell-repository.test.ts",
+      "id": "packages/product-store/test/product-operation/thread-summary-edit-totals.test.ts",
+      "path": "packages/product-store/test/product-operation/thread-summary-edit-totals.test.ts",
       "workspace": "@rika/product-store",
       "package": "@rika/product-store",
       "kind": "source",
@@ -1703,168 +1663,8 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/product-store/test/transcript-memory-contract-1.test.ts",
-      "path": "packages/product-store/test/transcript-memory-contract-1.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/transcript-memory-contract-2.test.ts",
-      "path": "packages/product-store/test/transcript-memory-contract-2.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/transcript-memory-contract-3.test.ts",
-      "path": "packages/product-store/test/transcript-memory-contract-3.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/transcript-memory-direct-1.test.ts",
-      "path": "packages/product-store/test/transcript-memory-direct-1.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/transcript-repository.test.ts",
-      "path": "packages/product-store/test/transcript-repository.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/transcript-sqlite-1.test.ts",
-      "path": "packages/product-store/test/transcript-sqlite-1.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/transcript-sqlite-2.test.ts",
-      "path": "packages/product-store/test/transcript-sqlite-2.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/transcript-sqlite-3.test.ts",
-      "path": "packages/product-store/test/transcript-sqlite-3.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/transcript-sqlite-4.test.ts",
-      "path": "packages/product-store/test/transcript-sqlite-4.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/transcript-sqlite-5.test.ts",
-      "path": "packages/product-store/test/transcript-sqlite-5.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/transcript-sqlite-part-2.test.ts",
-      "path": "packages/product-store/test/transcript-sqlite-part-2.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/transcript-sqlite-part-3.test.ts",
-      "path": "packages/product-store/test/transcript-sqlite-part-3.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/transcript-sqlite-part-4.test.ts",
-      "path": "packages/product-store/test/transcript-sqlite-part-4.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/transcript-sqlite-part-5.test.ts",
-      "path": "packages/product-store/test/transcript-sqlite-part-5.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/transcript-sqlite-part-6.test.ts",
-      "path": "packages/product-store/test/transcript-sqlite-part-6.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/transcript-sqlite-part-7.test.ts",
-      "path": "packages/product-store/test/transcript-sqlite-part-7.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product-store/test/transcript-sqlite-part-8.test.ts",
-      "path": "packages/product-store/test/transcript-sqlite-part-8.test.ts",
+      "id": "packages/product-store/test/turn-admission-outbox.test.ts",
+      "path": "packages/product-store/test/turn-admission-outbox.test.ts",
       "workspace": "@rika/product-store",
       "package": "@rika/product-store",
       "kind": "source",
@@ -1903,16 +1703,6 @@
       "testKind": "integration-test"
     },
     {
-      "id": "packages/product-store/test/usage-repository.test.ts",
-      "path": "packages/product-store/test/usage-repository.test.ts",
-      "workspace": "@rika/product-store",
-      "package": "@rika/product-store",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
       "id": "packages/product/src/execution/contract/execution-compaction-prompt.ts",
       "path": "packages/product/src/execution/contract/execution-compaction-prompt.ts",
       "workspace": "@rika/product",
@@ -1923,18 +1713,18 @@
       "testKind": "contract-test"
     },
     {
-      "id": "packages/product/src/execution/contract/execution-event.ts",
-      "path": "packages/product/src/execution/contract/execution-event.ts",
+      "id": "packages/product/src/execution/contract/execution-gateway-failure.ts",
+      "path": "packages/product/src/execution/contract/execution-gateway-failure.ts",
       "workspace": "@rika/product",
       "package": "@rika/product",
       "kind": "source",
       "production": false,
-      "publicExports": ["./execution-event"],
+      "publicExports": [],
       "testKind": "contract-test"
     },
     {
-      "id": "packages/product/src/execution/contract/execution-gateway-failure.ts",
-      "path": "packages/product/src/execution/contract/execution-gateway-failure.ts",
+      "id": "packages/product/src/execution/contract/execution-gateway-request.ts",
+      "path": "packages/product/src/execution/contract/execution-gateway-request.ts",
       "workspace": "@rika/product",
       "package": "@rika/product",
       "kind": "source",
@@ -1950,6 +1740,46 @@
       "kind": "source",
       "production": false,
       "publicExports": ["./execution-gateway"],
+      "testKind": "contract-test"
+    },
+    {
+      "id": "packages/product/src/execution/contract/execution-projection-change.ts",
+      "path": "packages/product/src/execution/contract/execution-projection-change.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "contract-test"
+    },
+    {
+      "id": "packages/product/src/execution/contract/execution-projection-checkpoint.ts",
+      "path": "packages/product/src/execution/contract/execution-projection-checkpoint.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "contract-test"
+    },
+    {
+      "id": "packages/product/src/execution/contract/execution-projection-state.ts",
+      "path": "packages/product/src/execution/contract/execution-projection-state.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "contract-test"
+    },
+    {
+      "id": "packages/product/src/execution/contract/execution-projection.ts",
+      "path": "packages/product/src/execution/contract/execution-projection.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": ["./execution-projection"],
       "testKind": "contract-test"
     },
     {
@@ -1980,6 +1810,36 @@
       "kind": "source",
       "production": false,
       "publicExports": ["./execution-status"],
+      "testKind": "contract-test"
+    },
+    {
+      "id": "packages/product/src/execution/contract/execution-token-totals.ts",
+      "path": "packages/product/src/execution/contract/execution-token-totals.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "contract-test"
+    },
+    {
+      "id": "packages/product/src/execution/contract/execution-transcript-contract.ts",
+      "path": "packages/product/src/execution/contract/execution-transcript-contract.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": ["./execution-transcript-contract"],
+      "testKind": "contract-test"
+    },
+    {
+      "id": "packages/product/src/execution/contract/execution-usage-state.ts",
+      "path": "packages/product/src/execution/contract/execution-usage-state.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
       "testKind": "contract-test"
     },
     {
@@ -2103,16 +1963,6 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/product/test/context-usage.test.ts",
-      "path": "packages/product/test/context-usage.test.ts",
-      "workspace": "@rika/product",
-      "package": "@rika/product",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
       "id": "packages/product/test/contract/execution-route-snapshot.test.ts",
       "path": "packages/product/test/contract/execution-route-snapshot.test.ts",
       "workspace": "@rika/product",
@@ -2125,6 +1975,16 @@
     {
       "id": "packages/product/test/contract/package-export-contract.test.ts",
       "path": "packages/product/test/contract/package-export-contract.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "contract-test"
+    },
+    {
+      "id": "packages/product/test/contract/thread-view.test.ts",
+      "path": "packages/product/test/contract/thread-view.test.ts",
       "workspace": "@rika/product",
       "package": "@rika/product",
       "kind": "source",
@@ -2163,8 +2023,28 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/product/test/interactive-command.test.ts",
+      "path": "packages/product/test/interactive-command.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/product/test/interactive-feed-overflow.test.ts",
       "path": "packages/product/test/interactive-feed-overflow.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/interactive-thread-view-feed.test.ts",
+      "path": "packages/product/test/interactive-thread-view-feed.test.ts",
       "workspace": "@rika/product",
       "package": "@rika/product",
       "kind": "source",
@@ -2313,46 +2193,6 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/product/test/usage-active-time.test.ts",
-      "path": "packages/product/test/usage-active-time.test.ts",
-      "workspace": "@rika/product",
-      "package": "@rika/product",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product/test/usage-attempt.test.ts",
-      "path": "packages/product/test/usage-attempt.test.ts",
-      "workspace": "@rika/product",
-      "package": "@rika/product",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product/test/usage-fold.test.ts",
-      "path": "packages/product/test/usage-fold.test.ts",
-      "workspace": "@rika/product",
-      "package": "@rika/product",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/product/test/usage-total.test.ts",
-      "path": "packages/product/test/usage-total.test.ts",
-      "workspace": "@rika/product",
-      "package": "@rika/product",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
       "id": "packages/terminal/test/characterization/adapter-characterization-1.test-behavior-2.test.ts",
       "path": "packages/terminal/test/characterization/adapter-characterization-1.test-behavior-2.test.ts",
       "workspace": "@rika/terminal",
@@ -2365,16 +2205,6 @@
     {
       "id": "packages/terminal/test/characterization/adapter-characterization-1.test-behavior-3.test.ts",
       "path": "packages/terminal/test/characterization/adapter-characterization-1.test-behavior-3.test.ts",
-      "workspace": "@rika/terminal",
-      "package": "@rika/terminal",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/terminal/test/characterization/adapter-characterization-1.test.ts",
-      "path": "packages/terminal/test/characterization/adapter-characterization-1.test.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -2473,36 +2303,6 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/terminal/test/characterization/execution-events-characterization-1.test-behavior-2.test.ts",
-      "path": "packages/terminal/test/characterization/execution-events-characterization-1.test-behavior-2.test.ts",
-      "workspace": "@rika/terminal",
-      "package": "@rika/terminal",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/terminal/test/characterization/execution-events-characterization-1.test.ts",
-      "path": "packages/terminal/test/characterization/execution-events-characterization-1.test.ts",
-      "workspace": "@rika/terminal",
-      "package": "@rika/terminal",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/terminal/test/characterization/execution-events-characterization-2.test.ts",
-      "path": "packages/terminal/test/characterization/execution-events-characterization-2.test.ts",
-      "workspace": "@rika/terminal",
-      "package": "@rika/terminal",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
       "id": "packages/terminal/test/characterization/terminal-state-characterization-1.test-behavior-2.test.ts",
       "path": "packages/terminal/test/characterization/terminal-state-characterization-1.test-behavior-2.test.ts",
       "workspace": "@rika/terminal",
@@ -2523,28 +2323,8 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/terminal/test/characterization/terminal-state-characterization-2.test-behavior-2.test.ts",
-      "path": "packages/terminal/test/characterization/terminal-state-characterization-2.test-behavior-2.test.ts",
-      "workspace": "@rika/terminal",
-      "package": "@rika/terminal",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
       "id": "packages/terminal/test/characterization/terminal-state-characterization-2.test.ts",
       "path": "packages/terminal/test/characterization/terminal-state-characterization-2.test.ts",
-      "workspace": "@rika/terminal",
-      "package": "@rika/terminal",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/terminal/test/characterization/terminal-state-characterization-3.test.ts",
-      "path": "packages/terminal/test/characterization/terminal-state-characterization-3.test.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -3233,8 +3013,8 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/terminal/test/mode-toggle.test.ts",
-      "path": "packages/terminal/test/mode-toggle.test.ts",
+      "id": "packages/terminal/test/integration/opentui-transcript-follow-sync.test.ts",
+      "path": "packages/terminal/test/integration/opentui-transcript-follow-sync.test.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -3243,8 +3023,18 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/terminal/test/opentui-session.test.ts",
-      "path": "packages/terminal/test/opentui-session.test.ts",
+      "id": "packages/terminal/test/integration/opentui-transcript-hold-position.test.ts",
+      "path": "packages/terminal/test/integration/opentui-transcript-hold-position.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/terminal/test/mode-toggle.test.ts",
+      "path": "packages/terminal/test/mode-toggle.test.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -3293,6 +3083,26 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/terminal/test/subagent-authorization-transcript.test.ts",
+      "path": "packages/terminal/test/subagent-authorization-transcript.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/terminal/test/subagent-streaming-revision.test.ts",
+      "path": "packages/terminal/test/subagent-streaming-revision.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/terminal/test/syntax-highlight.test.ts",
       "path": "packages/terminal/test/syntax-highlight.test.ts",
       "workspace": "@rika/terminal",
@@ -3313,18 +3123,8 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/terminal/test/tool-presentation.test-behavior-2.test.ts",
-      "path": "packages/terminal/test/tool-presentation.test-behavior-2.test.ts",
-      "workspace": "@rika/terminal",
-      "package": "@rika/terminal",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/terminal/test/tool-presentation.test.ts",
-      "path": "packages/terminal/test/tool-presentation.test.ts",
+      "id": "packages/terminal/test/tool-detail-expansion.test.ts",
+      "path": "packages/terminal/test/tool-detail-expansion.test.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -3343,8 +3143,8 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/terminal/test/transcript-presenter.test.ts",
-      "path": "packages/terminal/test/transcript-presenter.test.ts",
+      "id": "packages/terminal/test/transcript-follow-semantics.test.ts",
+      "path": "packages/terminal/test/transcript-follow-semantics.test.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -3393,30 +3193,10 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/transcript/test/baton-projection.test.ts",
-      "path": "packages/transcript/test/baton-projection.test.ts",
-      "workspace": "@rika/transcript",
-      "package": "@rika/transcript",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/transcript/test/contract/transcript-projection.contract.test.ts",
-      "path": "packages/transcript/test/contract/transcript-projection.contract.test.ts",
-      "workspace": "@rika/transcript",
-      "package": "@rika/transcript",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "contract-test"
-    },
-    {
-      "id": "packages/transcript/test/fold.test.ts",
-      "path": "packages/transcript/test/fold.test.ts",
-      "workspace": "@rika/transcript",
-      "package": "@rika/transcript",
+      "id": "packages/terminal/test/web-page-tool-detail.test.ts",
+      "path": "packages/terminal/test/web-page-tool-detail.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
       "kind": "source",
       "production": false,
       "publicExports": [],
@@ -3443,136 +3223,6 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/transcript/test/projection-01-basics.test.ts",
-      "path": "packages/transcript/test/projection-01-basics.test.ts",
-      "workspace": "@rika/transcript",
-      "package": "@rika/transcript",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/transcript/test/projection-02-children.test.ts",
-      "path": "packages/transcript/test/projection-02-children.test.ts",
-      "workspace": "@rika/transcript",
-      "package": "@rika/transcript",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/transcript/test/projection-03-tools.test.ts",
-      "path": "packages/transcript/test/projection-03-tools.test.ts",
-      "workspace": "@rika/transcript",
-      "package": "@rika/transcript",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/transcript/test/projection-04-process.test.ts",
-      "path": "packages/transcript/test/projection-04-process.test.ts",
-      "workspace": "@rika/transcript",
-      "package": "@rika/transcript",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/transcript/test/projection-05-compaction.test.ts",
-      "path": "packages/transcript/test/projection-05-compaction.test.ts",
-      "workspace": "@rika/transcript",
-      "package": "@rika/transcript",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/transcript/test/projection-06-lifecycle.test.ts",
-      "path": "packages/transcript/test/projection-06-lifecycle.test.ts",
-      "workspace": "@rika/transcript",
-      "package": "@rika/transcript",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/transcript/test/projection-07-usage.test.ts",
-      "path": "packages/transcript/test/projection-07-usage.test.ts",
-      "workspace": "@rika/transcript",
-      "package": "@rika/transcript",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/transcript/test/projection-08-settlement.test.ts",
-      "path": "packages/transcript/test/projection-08-settlement.test.ts",
-      "workspace": "@rika/transcript",
-      "package": "@rika/transcript",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/transcript/test/projection-09-correlation.test.ts",
-      "path": "packages/transcript/test/projection-09-correlation.test.ts",
-      "workspace": "@rika/transcript",
-      "package": "@rika/transcript",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/transcript/test/projection-10-failure.test.ts",
-      "path": "packages/transcript/test/projection-10-failure.test.ts",
-      "workspace": "@rika/transcript",
-      "package": "@rika/transcript",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/transcript/test/projection-11-inputs.test.ts",
-      "path": "packages/transcript/test/projection-11-inputs.test.ts",
-      "workspace": "@rika/transcript",
-      "package": "@rika/transcript",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/transcript/test/projection-12-steering.test.ts",
-      "path": "packages/transcript/test/projection-12-steering.test.ts",
-      "workspace": "@rika/transcript",
-      "package": "@rika/transcript",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/transcript/test/projection-13-retry.test.ts",
-      "path": "packages/transcript/test/projection-13-retry.test.ts",
-      "workspace": "@rika/transcript",
-      "package": "@rika/transcript",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
       "id": "packages/transcript/test/recorded-shell.test.ts",
       "path": "packages/transcript/test/recorded-shell.test.ts",
       "workspace": "@rika/transcript",
@@ -3583,28 +3233,8 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/transcript/test/transient-events.test.ts",
-      "path": "packages/transcript/test/transient-events.test.ts",
-      "workspace": "@rika/transcript",
-      "package": "@rika/transcript",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
       "id": "packages/transcript/test/unit-identity.test.ts",
       "path": "packages/transcript/test/unit-identity.test.ts",
-      "workspace": "@rika/transcript",
-      "package": "@rika/transcript",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/transcript/test/unit-order.test.ts",
-      "path": "packages/transcript/test/unit-order.test.ts",
       "workspace": "@rika/transcript",
       "package": "@rika/transcript",
       "kind": "source",
@@ -3649,6 +3279,15 @@
       "testKind": "process-test"
     },
     {
+      "id": "test/process/upstream-link.proc.test.ts",
+      "path": "test/process/upstream-link.proc.test.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "process-test"
+    },
+    {
       "id": "test/release/archive-contract.test.ts",
       "path": "test/release/archive-contract.test.ts",
       "workspace": "root",
@@ -3660,6 +3299,15 @@
     {
       "id": "test/release/install-contract.test.ts",
       "path": "test/release/install-contract.test.ts",
+      "workspace": "root",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "test/release/local-baton-smoke.test.ts",
+      "path": "test/release/local-baton-smoke.test.ts",
       "workspace": "root",
       "kind": "source",
       "production": false,
@@ -3766,6 +3414,38 @@
     }
   ],
   "edges": [
+    {
+      "from": "apps/rika/test/app-failure-restoration.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-failure-restoration.tui.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-submission.tui.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/app-submission.tui.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
     {
       "from": "apps/rika/test/app.tui.test.ts",
       "to": "external:effect",
@@ -4063,14 +3743,6 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/fixtures/server-client-commands.ts",
-      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
-      "specifier": "@rika/product/execution-route-snapshot",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
       "from": "apps/rika/test/fixtures/server-client.ts",
       "to": "apps/rika/test/fixtures/server-client-commands.ts",
       "specifier": "./server-client-commands",
@@ -4138,6 +3810,14 @@
       "from": "apps/rika/test/fixtures/server-host.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/fixtures/server-host.ts",
+      "to": "packages/product/src/execution/contract/execution-projection.ts",
+      "specifier": "@rika/product/execution-projection",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -4215,22 +3895,6 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/interactive-controller-activity.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/interactive-controller-child-projection.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
       "from": "apps/rika/test/interactive-controller-page-order.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
@@ -4239,7 +3903,15 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/interactive-controller-projection-reload.test.ts",
+      "from": "apps/rika/test/interactive-controller-page-order.test.ts",
+      "to": "packages/product/src/execution/contract/execution-projection.ts",
+      "specifier": "@rika/product/execution-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-thread-view.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -4247,33 +3919,9 @@
       "production": false
     },
     {
-      "from": "apps/rika/test/interactive-controller-projection-stream.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/interactive-controller-projection-stream.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/interactive-controller-queue.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/interactive-controller-selection.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
+      "from": "apps/rika/test/interactive-controller-thread-view.test.ts",
+      "to": "packages/product/src/execution/contract/execution-projection.ts",
+      "specifier": "@rika/product/execution-projection",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -4472,6 +4120,14 @@
     },
     {
       "from": "apps/rika/test/performance-platform.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/process-approval-control-failure.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -4895,7 +4551,7 @@
       "production": false
     },
     {
-      "from": "packages/baton-execution/test/baton-child-tools.test.ts",
+      "from": "packages/baton-execution/test/baton-approval.test.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
       "kind": "import",
@@ -4903,15 +4559,15 @@
       "production": false
     },
     {
-      "from": "packages/baton-execution/test/baton-child-tools.test.ts",
-      "to": "external:@batonfx/runtime",
-      "specifier": "@batonfx/runtime",
+      "from": "packages/baton-execution/test/baton-approval.test.ts",
+      "to": "external:@batonfx/test",
+      "specifier": "@batonfx/test",
       "kind": "import",
       "relationship": "test",
       "production": false
     },
     {
-      "from": "packages/baton-execution/test/baton-child-tools.test.ts",
+      "from": "packages/baton-execution/test/baton-approval.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -4919,7 +4575,15 @@
       "production": false
     },
     {
-      "from": "packages/baton-execution/test/baton-child-tools.test.ts",
+      "from": "packages/baton-execution/test/baton-approval.test.ts",
+      "to": "external:crypto",
+      "specifier": "crypto",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-approval.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4927,9 +4591,33 @@
       "production": false
     },
     {
-      "from": "packages/baton-execution/test/baton-child-tools.test.ts",
+      "from": "packages/baton-execution/test/baton-approval.test.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-approval.test.ts",
+      "to": "packages/product/src/execution/contract/execution-gateway.ts",
+      "specifier": "@rika/product/execution-gateway",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-approval.test.ts",
+      "to": "packages/product/src/execution/contract/execution-projection.ts",
+      "specifier": "@rika/product/execution-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-approval.test.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -4984,6 +4672,14 @@
     },
     {
       "from": "packages/baton-execution/test/baton-code-mode.test.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-code-mode.test.ts",
       "to": "packages/product/src/execution/contract/execution-gateway.ts",
       "specifier": "@rika/product/execution-gateway",
       "kind": "import",
@@ -5047,7 +4743,23 @@
       "production": false
     },
     {
-      "from": "packages/baton-execution/test/baton-execution.test.ts",
+      "from": "packages/baton-execution/test/baton-model-effort.test.ts",
+      "to": "external:@batonfx/providers",
+      "specifier": "@batonfx/providers",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-model-effort.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-native-tools.test.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
       "kind": "import",
@@ -5055,15 +4767,7 @@
       "production": false
     },
     {
-      "from": "packages/baton-execution/test/baton-execution.test.ts",
-      "to": "external:@batonfx/runtime",
-      "specifier": "@batonfx/runtime",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/baton-execution/test/baton-execution.test.ts",
+      "from": "packages/baton-execution/test/baton-native-tools.test.ts",
       "to": "external:@batonfx/test",
       "specifier": "@batonfx/test",
       "kind": "import",
@@ -5071,7 +4775,7 @@
       "production": false
     },
     {
-      "from": "packages/baton-execution/test/baton-execution.test.ts",
+      "from": "packages/baton-execution/test/baton-native-tools.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -5079,7 +4783,7 @@
       "production": false
     },
     {
-      "from": "packages/baton-execution/test/baton-execution.test.ts",
+      "from": "packages/baton-execution/test/baton-native-tools.test.ts",
       "to": "external:bun:sqlite",
       "specifier": "bun:sqlite",
       "kind": "import",
@@ -5087,7 +4791,7 @@
       "production": false
     },
     {
-      "from": "packages/baton-execution/test/baton-execution.test.ts",
+      "from": "packages/baton-execution/test/baton-native-tools.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5095,7 +4799,7 @@
       "production": false
     },
     {
-      "from": "packages/baton-execution/test/baton-execution.test.ts",
+      "from": "packages/baton-execution/test/baton-native-tools.test.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
       "kind": "import",
@@ -5103,7 +4807,7 @@
       "production": false
     },
     {
-      "from": "packages/baton-execution/test/baton-execution.test.ts",
+      "from": "packages/baton-execution/test/baton-native-tools.test.ts",
       "to": "packages/product/src/execution/contract/execution-gateway.ts",
       "specifier": "@rika/product/execution-gateway",
       "kind": "import",
@@ -5111,7 +4815,7 @@
       "production": false
     },
     {
-      "from": "packages/baton-execution/test/baton-execution.test.ts",
+      "from": "packages/baton-execution/test/baton-native-tools.test.ts",
       "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
       "specifier": "@rika/product/execution-route-snapshot",
       "kind": "import",
@@ -5167,6 +4871,70 @@
       "production": false
     },
     {
+      "from": "packages/baton-execution/test/baton-projector-usage.test.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-projector-usage.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-projector-usage.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-projector-values.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-registration-identity.test.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-registration-identity.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-registration-identity.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-registration-identity.test.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/baton-execution/test/baton-route.test.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
@@ -5202,6 +4970,102 @@
       "from": "packages/baton-execution/test/baton-route.test.ts",
       "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
       "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-subagent-card-projection.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-title-admission.test.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-title-admission.test.ts",
+      "to": "external:@batonfx/test",
+      "specifier": "@batonfx/test",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-title-admission.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-title-admission.test.ts",
+      "to": "external:bun:sqlite",
+      "specifier": "bun:sqlite",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-title-admission.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-title-admission.test.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-title-admission.test.ts",
+      "to": "packages/product/src/execution/contract/execution-gateway.ts",
+      "specifier": "@rika/product/execution-gateway",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-title-admission.test.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-tree-projector-attribution.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-tree-projector.test.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-tree-projector.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -5911,7 +5775,7 @@
       "production": false
     },
     {
-      "from": "packages/product-store/test/contract/transcript-checkpoint-delta.test.ts",
+      "from": "packages/product-store/test/direct-projection-checkpoint.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -5919,7 +5783,7 @@
       "production": false
     },
     {
-      "from": "packages/product-store/test/contract/transcript-checkpoint-delta.test.ts",
+      "from": "packages/product-store/test/direct-projection-checkpoint.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -5927,7 +5791,7 @@
       "production": false
     },
     {
-      "from": "packages/product-store/test/contract/transcript-checkpoint-delta.test.ts",
+      "from": "packages/product-store/test/direct-projection-checkpoint.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -5935,7 +5799,15 @@
       "production": false
     },
     {
-      "from": "packages/product-store/test/contract/transcript-checkpoint-delta.test.ts",
+      "from": "packages/product-store/test/direct-projection-checkpoint.test.ts",
+      "to": "packages/product/src/execution/contract/execution-projection.ts",
+      "specifier": "@rika/product/execution-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/direct-projection-checkpoint.test.ts",
       "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
       "specifier": "@rika/product/execution-route-snapshot",
       "kind": "import",
@@ -5983,182 +5855,6 @@
       "production": false
     },
     {
-      "from": "packages/product-store/test/product-operation/interactive-session-controls-1.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/interactive-session-controls-1.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/interactive-session-controls-1.test.ts",
-      "to": "external:effect/testing",
-      "specifier": "effect/testing",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/interactive-session-controls-1.test.ts",
-      "to": "packages/product/src/operation/contract/product-operation-service.ts",
-      "specifier": "@rika/product/product-operation-service",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/interactive-session-controls-2.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/interactive-session-controls-2.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/interactive-session-controls-2.test.ts",
-      "to": "packages/product/src/operation/contract/product-operation-service.ts",
-      "specifier": "@rika/product/product-operation-service",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/interactive-session-usage-1.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/interactive-session-usage-1.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/interactive-session-usage-1.test.ts",
-      "to": "external:effect/testing",
-      "specifier": "effect/testing",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-active-controls.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-active-controls.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-active-controls.test.ts",
-      "to": "packages/product/src/execution/contract/execution-gateway.ts",
-      "specifier": "@rika/product/execution-gateway",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-churn.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-churn.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-churn.test.ts",
-      "to": "packages/product/src/execution/contract/execution-event.ts",
-      "specifier": "@rika/product/execution-event",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-churn.test.ts",
-      "to": "packages/product/src/execution/contract/execution-gateway.ts",
-      "specifier": "@rika/product/execution-gateway",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-churn.test.ts",
-      "to": "packages/product/src/operation/contract/product-operation-service.ts",
-      "specifier": "@rika/product/product-operation-service",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-churn.test.ts",
-      "to": "packages/product/src/operation/contract/product-operation.ts",
-      "specifier": "@rika/product/product-operation",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-durable-submission.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-durable-submission.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-durable-submission.test.ts",
-      "to": "packages/product/src/execution/contract/execution-gateway.ts",
-      "specifier": "@rika/product/execution-gateway",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
       "from": "packages/product-store/test/product-operation/operation-mentions-routing.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -6271,30 +5967,6 @@
       "production": false
     },
     {
-      "from": "packages/product-store/test/product-operation/operation-queued-controls.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-queued-controls.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-queued-controls.test.ts",
-      "to": "packages/product/src/execution/contract/execution-gateway.ts",
-      "specifier": "@rika/product/execution-gateway",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
       "from": "packages/product-store/test/product-operation/operation-routing.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -6328,128 +6000,16 @@
     },
     {
       "from": "packages/product-store/test/product-operation/operation-routing.test.ts",
+      "to": "packages/product/src/execution/contract/execution-projection.ts",
+      "specifier": "@rika/product/execution-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-routing.test.ts",
       "to": "packages/product/src/operation/contract/product-operation-service.ts",
       "specifier": "@rika/product/product-operation-service",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-selection-live-feed.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-selection-live-feed.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-selection-live-feed.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-selection-live-feed.test.ts",
-      "to": "packages/product/src/execution/contract/execution-event.ts",
-      "specifier": "@rika/product/execution-event",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-selection-live-feed.test.ts",
-      "to": "packages/product/src/execution/contract/execution-gateway.ts",
-      "specifier": "@rika/product/execution-gateway",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-selection-race.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-selection-race.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-selection-race.test.ts",
-      "to": "packages/product/src/execution/contract/execution-gateway.ts",
-      "specifier": "@rika/product/execution-gateway",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-selection-race.test.ts",
-      "to": "packages/product/src/operation/contract/product-operation.ts",
-      "specifier": "@rika/product/product-operation",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-session-close.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-session-close.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-session-close.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-session-close.test.ts",
-      "to": "packages/product/src/execution/contract/execution-gateway.ts",
-      "specifier": "@rika/product/execution-gateway",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-session-close.test.ts",
-      "to": "packages/product/src/operation/contract/product-operation-service.ts",
-      "specifier": "@rika/product/product-operation-service",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/product-operation/operation-session-close.test.ts",
-      "to": "packages/product/src/operation/contract/product-operation.ts",
-      "specifier": "@rika/product/product-operation",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -6647,15 +6207,7 @@
       "production": false
     },
     {
-      "from": "packages/product-store/test/recorded-shell-repository.test.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/recorded-shell-repository.test.ts",
+      "from": "packages/product-store/test/product-operation/thread-summary-edit-totals.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -6663,7 +6215,7 @@
       "production": false
     },
     {
-      "from": "packages/product-store/test/recorded-shell-repository.test.ts",
+      "from": "packages/product-store/test/product-operation/thread-summary-edit-totals.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -6671,9 +6223,25 @@
       "production": false
     },
     {
-      "from": "packages/product-store/test/recorded-shell-repository.test.ts",
-      "to": "external:effect/unstable/sql/SqlClient",
-      "specifier": "effect/unstable/sql/SqlClient",
+      "from": "packages/product-store/test/product-operation/thread-summary-edit-totals.test.ts",
+      "to": "packages/product/src/execution/contract/execution-gateway.ts",
+      "specifier": "@rika/product/execution-gateway",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/thread-summary-edit-totals.test.ts",
+      "to": "packages/product/src/execution/contract/execution-projection.ts",
+      "specifier": "@rika/product/execution-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/thread-summary-edit-totals.test.ts",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -6831,23 +6399,7 @@
       "production": false
     },
     {
-      "from": "packages/product-store/test/transcript-repository.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-repository.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-1.test.ts",
+      "from": "packages/product-store/test/turn-admission-outbox.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -6855,7 +6407,7 @@
       "production": false
     },
     {
-      "from": "packages/product-store/test/transcript-sqlite-1.test.ts",
+      "from": "packages/product-store/test/turn-admission-outbox.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -6863,7 +6415,7 @@
       "production": false
     },
     {
-      "from": "packages/product-store/test/transcript-sqlite-1.test.ts",
+      "from": "packages/product-store/test/turn-admission-outbox.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -6871,31 +6423,7 @@
       "production": false
     },
     {
-      "from": "packages/product-store/test/transcript-sqlite-2.test.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-2.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-2.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-2.test.ts",
+      "from": "packages/product-store/test/turn-admission-outbox.test.ts",
       "to": "external:effect/unstable/sql/SqlClient",
       "specifier": "effect/unstable/sql/SqlClient",
       "kind": "import",
@@ -6903,265 +6431,17 @@
       "production": false
     },
     {
-      "from": "packages/product-store/test/transcript-sqlite-3.test.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
+      "from": "packages/product-store/test/turn-admission-outbox.test.ts",
+      "to": "packages/product/src/execution/contract/execution-gateway.ts",
+      "specifier": "@rika/product/execution-gateway",
       "kind": "import",
       "relationship": "test",
       "production": false
     },
     {
-      "from": "packages/product-store/test/transcript-sqlite-3.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-3.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-3.test.ts",
-      "to": "external:effect/unstable/sql/SqlClient",
-      "specifier": "effect/unstable/sql/SqlClient",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-4.test.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-4.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-4.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-5.test.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-5.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-5.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-2.test.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-2.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-2.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-3.test.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-3.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-3.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-4.test.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-4.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-4.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-5.test.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-5.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-5.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-6.test.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-6.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-6.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-7.test.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-7.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-7.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-7.test.ts",
-      "to": "external:effect/unstable/sql/SqlClient",
-      "specifier": "effect/unstable/sql/SqlClient",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-8.test.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-8.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-8.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/transcript-sqlite-part-8.test.ts",
-      "to": "external:effect/unstable/sql/SqlClient",
-      "specifier": "effect/unstable/sql/SqlClient",
+      "from": "packages/product-store/test/turn-admission-outbox.test.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -7231,54 +6511,6 @@
       "production": false
     },
     {
-      "from": "packages/product-store/test/usage-repository.test.ts",
-      "to": "external:@effect/platform-bun/BunServices",
-      "specifier": "@effect/platform-bun/BunServices",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/usage-repository.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/usage-repository.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product-store/test/usage-repository.test.ts",
-      "to": "external:effect/unstable/sql/SqlClient",
-      "specifier": "effect/unstable/sql/SqlClient",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product/src/execution/contract/execution-event.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product/src/execution/contract/execution-event.ts",
-      "to": "packages/product/src/execution/contract/execution-status.ts",
-      "specifier": "./execution-status",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
       "from": "packages/product/src/execution/contract/execution-gateway-failure.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -7287,7 +6519,7 @@
       "production": false
     },
     {
-      "from": "packages/product/src/execution/contract/execution-gateway.ts",
+      "from": "packages/product/src/execution/contract/execution-gateway-request.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -7295,9 +6527,41 @@
       "production": false
     },
     {
+      "from": "packages/product/src/execution/contract/execution-gateway-request.ts",
+      "to": "packages/product/src/execution/contract/execution-projection.ts",
+      "specifier": "./execution-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-gateway-request.ts",
+      "to": "packages/product/src/execution/contract/execution-request.ts",
+      "specifier": "./execution-request",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-gateway-request.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "./execution-route-snapshot",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-gateway-request.ts",
+      "to": "packages/product/src/execution/contract/review-intent.ts",
+      "specifier": "./review-intent",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/product/src/execution/contract/execution-gateway.ts",
-      "to": "packages/product/src/execution/contract/execution-event.ts",
-      "specifier": "./execution-event",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -7312,16 +6576,16 @@
     },
     {
       "from": "packages/product/src/execution/contract/execution-gateway.ts",
-      "to": "packages/product/src/execution/contract/execution-request.ts",
-      "specifier": "./execution-request",
+      "to": "packages/product/src/execution/contract/execution-gateway-request.ts",
+      "specifier": "./execution-gateway-request",
       "kind": "import",
       "relationship": "test",
       "production": false
     },
     {
       "from": "packages/product/src/execution/contract/execution-gateway.ts",
-      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
-      "specifier": "./execution-route-snapshot",
+      "to": "packages/product/src/execution/contract/execution-projection.ts",
+      "specifier": "./execution-projection",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -7335,9 +6599,89 @@
       "production": false
     },
     {
-      "from": "packages/product/src/execution/contract/execution-gateway.ts",
-      "to": "packages/product/src/execution/contract/review-intent.ts",
-      "specifier": "./review-intent",
+      "from": "packages/product/src/execution/contract/execution-projection-change.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-projection-change.ts",
+      "to": "packages/product/src/execution/contract/execution-projection-checkpoint.ts",
+      "specifier": "./execution-projection-checkpoint",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-projection-change.ts",
+      "to": "packages/product/src/execution/contract/execution-projection-state.ts",
+      "specifier": "./execution-projection-state",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-projection-checkpoint.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-projection-state.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-projection-state.ts",
+      "to": "packages/product/src/execution/contract/execution-usage-state.ts",
+      "specifier": "./execution-usage-state",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-projection.ts",
+      "to": "packages/product/src/execution/contract/execution-projection-change.ts",
+      "specifier": "./execution-projection-change",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-projection.ts",
+      "to": "packages/product/src/execution/contract/execution-projection-checkpoint.ts",
+      "specifier": "./execution-projection-checkpoint",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-projection.ts",
+      "to": "packages/product/src/execution/contract/execution-projection-state.ts",
+      "specifier": "./execution-projection-state",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-projection.ts",
+      "to": "packages/product/src/execution/contract/execution-token-totals.ts",
+      "specifier": "./execution-token-totals",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-projection.ts",
+      "to": "packages/product/src/execution/contract/execution-usage-state.ts",
+      "specifier": "./execution-usage-state",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -7346,14 +6690,6 @@
       "from": "packages/product/src/execution/contract/execution-request.ts",
       "to": "external:effect",
       "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product/src/execution/contract/execution-request.ts",
-      "to": "packages/product/src/execution/contract/execution-event.ts",
-      "specifier": "./execution-event",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -7407,6 +6743,30 @@
       "production": false
     },
     {
+      "from": "packages/product/src/execution/contract/execution-token-totals.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-usage-state.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/execution-usage-state.ts",
+      "to": "packages/product/src/execution/contract/execution-token-totals.ts",
+      "specifier": "./execution-token-totals",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/product/src/execution/contract/model-registration-identity.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -7416,6 +6776,14 @@
     },
     {
       "from": "packages/product/src/execution/contract/provider-connection-snapshot.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/src/execution/contract/review-intent.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -7559,14 +6927,6 @@
       "production": false
     },
     {
-      "from": "packages/product/test/context-usage.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
       "from": "packages/product/test/contract/execution-route-snapshot.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
@@ -7602,6 +6962,30 @@
       "from": "packages/product/test/contract/package-export-contract.test.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/contract/thread-view.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/contract/thread-view.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/contract/thread-view.test.ts",
+      "to": "packages/product/src/execution/contract/execution-projection.ts",
+      "specifier": "@rika/product/execution-projection",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -7687,6 +7071,22 @@
       "production": false
     },
     {
+      "from": "packages/product/test/interactive-command.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/interactive-command.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/product/test/interactive-feed-overflow.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -7695,7 +7095,23 @@
       "production": false
     },
     {
-      "from": "packages/product/test/interactive-feed-overflow.test.ts",
+      "from": "packages/product/test/interactive-thread-view-feed.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/interactive-thread-view-feed.test.ts",
+      "to": "packages/product/src/execution/contract/execution-projection.ts",
+      "specifier": "@rika/product/execution-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/interactive-thread-view-feed.test.ts",
       "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
       "specifier": "@rika/product/execution-route-snapshot",
       "kind": "import",
@@ -7864,16 +7280,16 @@
     },
     {
       "from": "packages/product/test/root-turn-owner.test.ts",
-      "to": "packages/product/src/execution/contract/execution-event.ts",
-      "specifier": "@rika/product/execution-event",
+      "to": "packages/product/src/execution/contract/execution-gateway.ts",
+      "specifier": "@rika/product/execution-gateway",
       "kind": "import",
       "relationship": "test",
       "production": false
     },
     {
       "from": "packages/product/test/root-turn-owner.test.ts",
-      "to": "packages/product/src/execution/contract/execution-gateway.ts",
-      "specifier": "@rika/product/execution-gateway",
+      "to": "packages/product/src/execution/contract/execution-projection.ts",
+      "specifier": "@rika/product/execution-projection",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -7952,72 +7368,8 @@
     },
     {
       "from": "packages/product/test/transcript-window.test.ts",
-      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
-      "specifier": "../src/execution/contract/execution-route-snapshot",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product/test/usage-active-time.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product/test/usage-active-time.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product/test/usage-attempt.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product/test/usage-attempt.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product/test/usage-fold.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product/test/usage-fold.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product/test/usage-total.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/product/test/usage-total.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
+      "to": "packages/product/src/execution/contract/execution-projection.ts",
+      "specifier": "@rika/product/execution-projection",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -8072,30 +7424,6 @@
     },
     {
       "from": "packages/terminal/test/characterization/adapter-characterization-1.test-behavior-3.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/terminal/test/characterization/adapter-characterization-1.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/terminal/test/characterization/adapter-characterization-1.test.ts",
-      "to": "external:string-width",
-      "specifier": "string-width",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/terminal/test/characterization/adapter-characterization-1.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -8280,30 +7608,6 @@
     },
     {
       "from": "packages/terminal/test/characterization/adapter-characterization-5.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/terminal/test/characterization/execution-events-characterization-1.test-behavior-2.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/terminal/test/characterization/execution-events-characterization-1.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/terminal/test/characterization/execution-events-characterization-2.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -8343,31 +7647,7 @@
       "production": false
     },
     {
-      "from": "packages/terminal/test/characterization/terminal-state-characterization-2.test-behavior-2.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
       "from": "packages/terminal/test/characterization/terminal-state-characterization-2.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/terminal/test/characterization/terminal-state-characterization-3.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/terminal/test/characterization/terminal-state-characterization-3.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -9319,7 +8599,23 @@
       "production": false
     },
     {
-      "from": "packages/terminal/test/mode-toggle.test.ts",
+      "from": "packages/terminal/test/integration/opentui-transcript-follow-sync.test.ts",
+      "to": "external:@opentui/core/testing",
+      "specifier": "@opentui/core/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-follow-sync.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-follow-sync.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -9327,7 +8623,31 @@
       "production": false
     },
     {
-      "from": "packages/terminal/test/opentui-session.test.ts",
+      "from": "packages/terminal/test/integration/opentui-transcript-hold-position.test.ts",
+      "to": "external:@opentui/core/testing",
+      "specifier": "@opentui/core/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-hold-position.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-hold-position.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/mode-toggle.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -9399,6 +8719,22 @@
       "production": false
     },
     {
+      "from": "packages/terminal/test/subagent-authorization-transcript.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/subagent-streaming-revision.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/terminal/test/syntax-highlight.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
@@ -9415,15 +8751,7 @@
       "production": false
     },
     {
-      "from": "packages/terminal/test/tool-presentation.test-behavior-2.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/terminal/test/tool-presentation.test.ts",
+      "from": "packages/terminal/test/tool-detail-expansion.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -9447,7 +8775,7 @@
       "production": false
     },
     {
-      "from": "packages/terminal/test/transcript-presenter.test.ts",
+      "from": "packages/terminal/test/transcript-follow-semantics.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -9519,25 +8847,9 @@
       "production": false
     },
     {
-      "from": "packages/transcript/test/baton-projection.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/transcript/test/contract/transcript-projection.contract.test.ts",
+      "from": "packages/terminal/test/web-page-tool-detail.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/transcript/test/fold.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -9559,110 +8871,6 @@
       "production": false
     },
     {
-      "from": "packages/transcript/test/projection-01-basics.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/transcript/test/projection-02-children.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/transcript/test/projection-03-tools.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/transcript/test/projection-04-process.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/transcript/test/projection-05-compaction.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/transcript/test/projection-06-lifecycle.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/transcript/test/projection-07-usage.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/transcript/test/projection-08-settlement.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/transcript/test/projection-09-correlation.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/transcript/test/projection-10-failure.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/transcript/test/projection-11-inputs.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/transcript/test/projection-12-steering.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/transcript/test/projection-13-retry.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
       "from": "packages/transcript/test/recorded-shell.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -9671,23 +8879,7 @@
       "production": false
     },
     {
-      "from": "packages/transcript/test/transient-events.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
       "from": "packages/transcript/test/unit-identity.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/transcript/test/unit-order.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -9791,6 +8983,54 @@
       "production": false
     },
     {
+      "from": "test/process/upstream-link.proc.test.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/process/upstream-link.proc.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/process/upstream-link.proc.test.ts",
+      "to": "external:fs/promises",
+      "specifier": "fs/promises",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/process/upstream-link.proc.test.ts",
+      "to": "external:os",
+      "specifier": "os",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/process/upstream-link.proc.test.ts",
+      "to": "external:path",
+      "specifier": "path",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/process/upstream-link.proc.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "test/release/archive-contract.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
@@ -9800,6 +9040,14 @@
     },
     {
       "from": "test/release/install-contract.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "test/release/local-baton-smoke.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",

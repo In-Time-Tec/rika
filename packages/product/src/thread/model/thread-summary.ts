@@ -29,6 +29,15 @@ export type ThreadSummary = typeof ThreadSummary.Type
 export const RepairCandidate = Schema.Struct({
   turnId: TurnId,
   threadId: ThreadId,
-  status: Schema.Literals(["accepted", "queued", "running", "waiting", "completed", "failed", "cancelled"]),
+  status: Schema.Literals([
+    "accepted",
+    "queued",
+    "running",
+    "waiting",
+    "cancelling",
+    "completed",
+    "failed",
+    "cancelled",
+  ]),
 })
 export type RepairCandidate = typeof RepairCandidate.Type

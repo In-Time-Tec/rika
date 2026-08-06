@@ -188,8 +188,6 @@ const resolvePresentation = (rawName: string): ToolPolicy.Presentation => {
   const name = rawName.toLowerCase()
   const defined = get(name)?.presentation
   if (defined !== undefined) return defined
-  const agent = agentPresentations[name]
-  if (agent !== undefined) return agent
   if (name === "read" || name === "view_file" || name === "get_diagnostics")
     return { family: "explore", action: "read", activeLabel: "Exploring", completeLabel: "Explored", counter: "file" }
   if (name === "grep" || name === "glob" || name === "ripgrep")
@@ -204,21 +202,8 @@ const resolvePresentation = (rawName: string): ToolPolicy.Presentation => {
     return { family: "shell", action: "command", activeLabel: "Running", completeLabel: "Ran" }
   if (name === "write_file")
     return { family: "edit", action: "create", activeLabel: "Creating", completeLabel: "Created" }
-  if (name === "painter")
-    return { family: "direct", action: "painter", activeLabel: "Painter", completeLabel: "Painter" }
   if (name === "finder" || name === "search" || name.includes("codebase"))
     return agentPresentation("finder", "Searching codebase", "Searched codebase")
-  if (name.startsWith("transfer_to_")) return resolveAgentPresentation(name.slice("transfer_to_".length))
-  if (name === "spawn_child_run") return resolveAgentPresentation("task")
-  if (name === "await_subagents")
-    return {
-      family: "direct",
-      action: "await-subagents",
-      activeLabel: "Waiting for subagents",
-      completeLabel: "Collected subagents",
-      failedLabel: "Subagent wait failed",
-      rowDisplay: "continuation",
-    }
   if (name === "skill")
     return { family: "explore", action: "skill", activeLabel: "Exploring", completeLabel: "Explored", counter: "skill" }
   if (name === "list_agent_modes")

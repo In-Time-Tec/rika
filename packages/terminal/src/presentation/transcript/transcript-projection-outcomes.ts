@@ -22,9 +22,16 @@ const outcomeSources = new WeakMap<object, ReadonlyMap<string, ExecutionOutcomeS
 const applyExecutionOutcome = (model: Model, parentId: string, outcome: ExecutionOutcome): Model => {
   const blocks = [...(model.blocks as ReadonlyArray<Block>)]
   const index = blocks.findIndex(
-    (block) => block._tag === "ToolCall" && block.id === parentId && block.presentation.family === "agent",
+    (block) =>
+      (block._tag === "ToolCall" && block.id === parentId && block.presentation.family === "agent") ||
+      (block._tag === "SubagentCard" && block.id === parentId),
   )
   const block = blocks[index]
+  if (block?._tag === "SubagentCard") {
+    if (block.status !== "running") return model
+    blocks[index] = { ...block, status: outcome.status }
+    return { ...model, blocks }
+  }
   if (block?._tag !== "ToolCall") return model
   const base = outcomeBase.get(block) ?? block
   if (base._tag !== "ToolCall") return model

@@ -134,8 +134,14 @@ export abstract class SurfaceLifecycleTranscript extends SurfaceLifecycleToast {
           const included = includeRowEnd(rowEnd, selectionIndex, totalRows, limit)
           if (included !== rowEnd) {
             rowEnd = included
-            if (this.transcriptRowWindow.end === 0 && rowEnd < totalRows)
-              this.transcriptRowWindow = { end: rowEnd, pendingDelta: 0 }
+            if (this.transcriptRowWindow.end === 0 && rowEnd < totalRows) {
+              const anchor = orderedBundles[rowWindowStart(rowEnd, limit)]?.bundle.key
+              this.transcriptRowWindow = {
+                end: rowEnd,
+                pendingDelta: 0,
+                ...(anchor === undefined ? {} : { anchorKey: anchor }),
+              }
+            }
           }
         }
         const mounted =

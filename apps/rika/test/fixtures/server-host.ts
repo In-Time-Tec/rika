@@ -7,8 +7,9 @@ import { Service } from "@rika/product/product-operation-service"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
+import * as ThreadView from "@rika/product/thread-view"
+import * as ExecutionProjection from "@rika/product/execution-projection"
+import type * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Config, Console, Effect, Exit, FileSystem, Layer, Logger, Path, Ref, Schema, Scope } from "effect"
 import { serve } from "../../src/transport/host/server-host-transport"
 import * as ServerProcessStartup from "../../src/server/process/server-process-launch"
@@ -28,68 +29,112 @@ const fixtureTurn = (threadId: Thread.ThreadId, turnId: Turn.TurnId, prompt: str
   updatedAt: 0,
 })
 
-const visibleProjectionState = (fold: TranscriptProjection.ProjectionFold) => {
-  const state = TranscriptProjection.Fold.snapshotFoldState(fold)
-  return {
-    revision: state.revision,
-    modelPhase: state.modelPhase,
-    ...(state.usableCompletionSequence === undefined
-      ? {}
-      : { usableCompletionSequence: state.usableCompletionSequence }),
-  }
-}
+const fixtureThread = (threadId: Thread.ThreadId): Thread.Thread => ({
+  id: threadId,
+  workspace: "/fixture",
+  title: "Fixture thread",
+  labels: [],
+  pinned: false,
+  archived: false,
+  lineage: { _tag: "Original" },
+  createdAt: 0,
+  updatedAt: 0,
+})
 
-const makeFixtureProjection = (
+const makeFixtureView = (
   dispatch: (event: InteractiveEvent) => void,
   threadId: Thread.ThreadId,
   turnId: Turn.TurnId,
   prompt: string,
 ) => {
   const turn = fixtureTurn(threadId, turnId, prompt)
-  const fold = TranscriptProjection.Fold.restoreProjectionFold(TranscriptProjection.Projection.empty(turnId, prompt))
-  const streamId = `fixture:${turnId}`
-  let patchRevision = 0
+  let viewRevision = 0
+  let projectionRevision = 0
   dispatch({
-    _tag: "TranscriptProjectionStarted",
-    selectionEpoch: 0,
-    threadId,
-    rootTurnId: turnId,
-    turn,
-    streamId,
-    patchRevision,
-    state: visibleProjectionState(fold),
-    units: TranscriptProjection.Fold.foldUnits(fold),
-  })
-  return {
-    emit: (event: TranscriptSourceEvent.SourceEvent, executionId = `execution:${turnId}`) => {
-      const mutation = TranscriptProjection.Fold.applyFoldEvent(fold, event)
-      const baseRevision = patchRevision
-      patchRevision += 1
-      const blockId = event.data?.tool_call_id ?? event.data?.call_id ?? event.data?.id
-      dispatch({
-        _tag: "TranscriptProjectionPatched",
-        selectionEpoch: 0,
-        threadId,
-        rootTurnId: turnId,
-        streamId,
-        baseRevision,
-        patchRevision,
-        origin: {
-          _tag: "Event",
-          executionId,
-          cursor: event.cursor,
-          sequence: event.sequence,
-          type: event.type,
-          createdAt: event.createdAt,
-          transient: TranscriptProjection.Fold.isTransientEvent(event),
-          ...(event.text === undefined ? {} : { text: event.text }),
-          ...(typeof blockId === "string" ? { blockId } : {}),
+    _tag: "ThreadViewSnapshot",
+    snapshot: {
+      thread: fixtureThread(threadId),
+      source: { projectionVersion: 1 },
+      turns: [
+        {
+          turn: ThreadView.turnRecord(turn),
+          units: [],
+          projectionRevision,
+          usage: ExecutionProjection.emptyUsageState(),
         },
-        state: visibleProjectionState(fold),
-        delta: mutation.units,
-      })
+      ],
+      pending: [],
+      hasOlder: false,
+      hasNewer: false,
+      usage: { state: ExecutionProjection.emptyUsageState() },
+      revision: viewRevision,
     },
+  })
+  const emit = (upsert: ReadonlyArray<TranscriptUnit.Unit>, remove: ReadonlyArray<string> = []) => {
+    const baseRevision = viewRevision
+    viewRevision += 1
+    projectionRevision += 1
+    dispatch({
+      _tag: "ThreadViewPatch",
+      patch: {
+        threadId,
+        baseRevision,
+        revision: viewRevision,
+        upsert,
+        remove,
+        turnChanges: [
+          {
+            _tag: "UpsertTurn",
+            turn: ThreadView.turnRecord(turn),
+            projectionRevision,
+            usage: ExecutionProjection.emptyUsageState(),
+          },
+        ],
+        header: {
+          thread: fixtureThread(threadId),
+          source: { projectionVersion: 1 },
+          pending: [],
+          hasOlder: false,
+          hasNewer: false,
+          usage: { state: ExecutionProjection.emptyUsageState() },
+        },
+      },
+    })
   }
+  const entry = (text: string): TranscriptUnit.Unit => ({
+    key: `fixture-entry:${turnId}`,
+    turnId: String(turnId),
+    order: [{ sequence: 1, part: 0, key: `fixture-entry:${turnId}` }],
+    revision: projectionRevision + 1,
+    content: { _tag: "Entry", role: "assistant", text },
+  })
+  const tool = (id: string, status: "running" | "complete"): TranscriptUnit.Unit => ({
+    key: `fixture-tool:${turnId}:${id}`,
+    turnId: String(turnId),
+    order: [{ sequence: id === "first" ? 1 : 2, part: 0, key: `fixture-tool:${turnId}:${id}` }],
+    revision: projectionRevision + 1,
+    content: {
+      _tag: "Block",
+      block: {
+        _tag: "ToolCall",
+        id: `fixture-tool-${id}`,
+        name: "read",
+        input: JSON.stringify({ path: `${id}.ts` }),
+        status,
+        presentation: {
+          family: "explore",
+          action: "read",
+          activeLabel: "Reading",
+          completeLabel: "Read",
+          outputDisplay: "inline",
+        },
+        detail: `${id}.ts`,
+        ...(status === "complete" ? { output: id } : {}),
+        files: [],
+      },
+    },
+  })
+  return { emit, entry, tool }
 }
 
 const program = Effect.gen(function* () {
@@ -194,7 +239,6 @@ const program = Effect.gen(function* () {
                   return Effect.sync(() =>
                     dispatch({
                       _tag: "ExecutionFailed",
-                      selectionEpoch: 0,
                       message: "x".repeat(20_000_000),
                     }),
                   ).pipe(Effect.andThen(Effect.never))
@@ -202,28 +246,18 @@ const program = Effect.gen(function* () {
                   return Effect.sync(() =>
                     dispatch({
                       _tag: "ExecutionFailed",
-                      selectionEpoch: 0,
                       message: kind.at(-1)!.repeat(8_000_000),
                     }),
                   ).pipe(Effect.andThen(Effect.never))
                 if (kind === "slow-consumer-events")
                   return Effect.gen(function* () {
-                    const projection = makeFixtureProjection(
+                    const view = makeFixtureView(
                       dispatch,
                       Thread.ThreadId.make("slow-consumer-thread"),
                       Turn.TurnId.make("slow-consumer-turn"),
                       "slow consumer",
                     )
-                    const emitPatch = (index: number) =>
-                      Effect.sync(() =>
-                        projection.emit({
-                          cursor: `slow-consumer-${index}`,
-                          sequence: index,
-                          type: "model.output.delta",
-                          createdAt: index,
-                          text: String(index),
-                        }),
-                      )
+                    const emitPatch = (index: number) => Effect.sync(() => view.emit([view.entry(String(index))]))
                     yield* Effect.forEach(
                       Array.from({ length: outboundCapacity }, (_, index) => index),
                       emitPatch,
@@ -231,48 +265,22 @@ const program = Effect.gen(function* () {
                     )
                     yield* Effect.sleep("250 millis")
                     yield* emitPatch(outboundCapacity)
-                    yield* Effect.sync(() =>
-                      projection.emit({
-                        cursor: "slow-consumer-completed",
-                        sequence: outboundCapacity + 1,
-                        type: "execution.completed",
-                        createdAt: outboundCapacity + 1,
-                      }),
-                    )
+                    yield* Effect.sync(() => view.emit([view.entry("completed")]))
                     return yield* Effect.never
                   })
                 if (kind === "timed-tool-events")
                   return Effect.gen(function* () {
                     const threadId = Thread.ThreadId.make("timed-tool-thread")
                     const turnId = Turn.TurnId.make("timed-tool-turn")
-                    const projection = makeFixtureProjection(dispatch, threadId, turnId, "timed tools")
-                    const patch = (
-                      sequence: number,
-                      type: "tool.call.requested" | "tool.result.received",
-                      callId: string,
-                    ) =>
-                      Effect.sync(() =>
-                        projection.emit({
-                          cursor: `timed-tool-${sequence}`,
-                          sequence,
-                          type,
-                          createdAt: sequence * 200,
-                          data:
-                            type === "tool.call.requested"
-                              ? {
-                                  tool_call_id: callId,
-                                  tool_name: "read",
-                                  input: { path: `${callId}.ts` },
-                                }
-                              : { tool_call_id: callId, output: callId },
-                        }),
-                      )
-                    yield* patch(0, "tool.call.requested", "first")
-                    yield* patch(1, "tool.call.requested", "second")
+                    const view = makeFixtureView(dispatch, threadId, turnId, "timed tools")
+                    const patch = (callId: string, status: "running" | "complete") =>
+                      Effect.sync(() => view.emit([view.tool(callId, status)]))
+                    yield* patch("first", "running")
+                    yield* patch("second", "running")
                     yield* Effect.sleep("200 millis")
-                    yield* patch(2, "tool.result.received", "first")
+                    yield* patch("first", "complete")
                     yield* Effect.sleep("200 millis")
-                    yield* patch(3, "tool.result.received", "second")
+                    yield* patch("second", "complete")
                     return yield* Effect.never
                   })
                 return Effect.sync(() => {
@@ -283,80 +291,37 @@ const program = Effect.gen(function* () {
                   if (kind === "child-execution-events") {
                     const threadId = Thread.ThreadId.make("child-feed-thread")
                     const parentTurnId = Turn.TurnId.make("parent-turn")
-                    const childTurnId = Turn.TurnId.make("parent-turn:child:oracle")
-                    const projection = makeFixtureProjection(dispatch, threadId, parentTurnId, "parent turn")
-                    projection.emit({
-                      cursor: "child-spawned",
-                      sequence: 1,
-                      type: "child_run.spawned",
-                      createdAt: 1,
-                      data: {
-                        tool_call_id: "oracle",
-                        child_execution_id: "execution:parent-turn:child:oracle",
-                      },
-                    })
-                    projection.emit(
-                      {
-                        cursor: "child-tool",
-                        sequence: 0,
-                        type: "tool.call.requested",
-                        createdAt: 2,
-                        data: { tool_call_id: "read", tool_name: "read", input: { path: "src/a.ts" } },
-                      },
-                      `execution:${childTurnId}`,
-                    )
-                    projection.emit(
-                      {
-                        cursor: "child-response",
-                        sequence: 1,
-                        type: "model.output.completed",
-                        createdAt: 3,
-                        text: "## Review complete",
-                      },
-                      `execution:${childTurnId}`,
-                    )
+                    const view = makeFixtureView(dispatch, threadId, parentTurnId, "parent turn")
+                    view.emit([view.entry("Child started")])
+                    view.emit([view.entry("Child read src/a.ts")])
+                    view.emit([view.entry("Child review complete")])
                     return true
                   }
                   if (kind === "overflow-events") {
-                    const projection = makeFixtureProjection(
+                    const view = makeFixtureView(
                       dispatch,
                       Thread.ThreadId.make("overflow-thread"),
                       Turn.TurnId.make("overflow-turn"),
                       "overflow",
                     )
-                    for (let index = 0; index < 10; index += 1)
-                      projection.emit({
-                        cursor: `overflow-${index}`,
-                        sequence: index,
-                        type: "model.output.delta",
-                        createdAt: index,
-                        text: String(index),
-                      })
+                    for (let index = 0; index < 10; index += 1) view.emit([view.entry(String(index))])
                     return true
                   }
-                  let count = 1
-                  if (kind === "burst-events") count = 1_000
-                  else if (kind === "queue-overflow-events") count = 10
+                  if (kind === "queue-overflow-events") {
+                    const view = makeFixtureView(
+                      dispatch,
+                      Thread.ThreadId.make("queue-overflow-thread"),
+                      Turn.TurnId.make("queue-overflow-turn"),
+                      "queue overflow",
+                    )
+                    for (let index = 0; index < 10; index += 1) view.emit([view.entry(String(index))])
+                    return true
+                  }
+                  const count = kind === "burst-events" ? 1_000 : 1
                   for (let index = 0; index < count; index += 1) {
-                    if (kind === "queue-overflow-events")
-                      dispatch({
-                        _tag: "QueueUpdated",
-                        selectionEpoch: 0,
-                        threadId: Thread.ThreadId.make("queue-overflow-thread"),
-                        revision: index + 1,
-                        queuedCount: index + 1,
-                        change: {
-                          _tag: "Added",
-                          item: {
-                            id: Turn.TurnId.make(`queue-overflow-turn-${index}`),
-                            prompt: `queued ${index}`,
-                          },
-                        },
-                      })
-                    else if (kind === "oversized-event")
+                    if (kind === "oversized-event")
                       dispatch({
                         _tag: "ExecutionFailed",
-                        selectionEpoch: 0,
                         message: "x".repeat(1_100_000),
                       })
                     else dispatch({ _tag: "ThreadsListed", threads: [] })
@@ -372,20 +337,13 @@ const program = Effect.gen(function* () {
                       )
                     if (input.prompt[0] !== "overflow-watch") return Effect.never
                     return Effect.sync(() => {
-                      const projection = makeFixtureProjection(
+                      const view = makeFixtureView(
                         dispatch,
                         Thread.ThreadId.make("overflow-thread"),
                         Turn.TurnId.make("overflow-turn"),
                         "overflow watch",
                       )
-                      for (let index = 0; index < 10; index += 1)
-                        projection.emit({
-                          cursor: `watch-overflow-${index}`,
-                          sequence: index,
-                          type: "model.output.delta",
-                          createdAt: index,
-                          text: String(index),
-                        })
+                      for (let index = 0; index < 10; index += 1) view.emit([view.entry(String(index))])
                     }).pipe(
                       Effect.andThen(Effect.sleep("50 millis")),
                       Effect.andThen(Effect.sync(() => dispatch({ _tag: "ThreadsListed", threads: [] }))),

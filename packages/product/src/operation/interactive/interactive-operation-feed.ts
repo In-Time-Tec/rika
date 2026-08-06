@@ -1,20 +1,17 @@
-import { Effect, Queue, Ref, Semaphore } from "effect"
-import * as InteractiveFeedOverflow from "./interactive-feed-overflow"
-import type { InteractiveEvent } from "./interactive-event"
+import { Clock, Effect, Queue, Ref, Semaphore } from "effect"
+import * as InteractiveFeedOverflow from "./interactive-runtime-feed-overflow"
+import type { InteractiveEvent as RuntimeEvent } from "./interactive-runtime-event"
+import type { InteractiveEvent as ClientEvent } from "./interactive-event"
+import { makeThreadViewFeed } from "./interactive-thread-view-feed"
 import { OperationUnavailable } from "../contract/product-operation"
 
-const withEpoch = (event: InteractiveEvent, epoch: number): InteractiveEvent => {
+const withEpoch = (event: RuntimeEvent, epoch: number): RuntimeEvent => {
   switch (event._tag) {
     case "SelectionLoaded":
     case "TranscriptPagePrepended":
     case "TranscriptPageAppended":
-    case "TranscriptProjectionStarted":
-    case "TranscriptProjectionPatched":
-    case "TranscriptProjectionStopped":
-    case "TranscriptProjectionFailed":
-    case "TranscriptResyncRequired":
     case "QueueUpdated":
-    case "QueueResyncRequired":
+    case "ThreadViewResyncRequired":
     case "QueueFull":
     case "TurnStarted":
     case "TurnSettled":
@@ -22,7 +19,6 @@ const withEpoch = (event: InteractiveEvent, epoch: number): InteractiveEvent => 
     case "ExecutionFailed":
     case "ExecutionControlFailed":
     case "ExecutionControlled":
-    case "ThreadUsageUpdated":
       return { ...event, selectionEpoch: epoch }
     default:
       return event
@@ -30,7 +26,7 @@ const withEpoch = (event: InteractiveEvent, epoch: number): InteractiveEvent => 
 }
 
 interface SessionEnvelope {
-  readonly event: InteractiveEvent
+  readonly event: RuntimeEvent
   readonly selectionRequest?: number
   readonly selectedThreadOnly?: boolean
 }
@@ -40,14 +36,14 @@ export interface SelectionLoad {
   readonly threadId: string
   readonly previousEpoch: number
   readonly previousThreadId: string | undefined
-  readonly events: Array<InteractiveEvent>
+  readonly events: Array<RuntimeEvent>
   committed: boolean
   overflow?: InteractiveFeedOverflow.State
 }
 
 export interface InteractiveOperationFeed {
-  readonly sessionDispatch: (event: InteractiveEvent) => void
-  readonly selectionDispatch: (request: number) => (event: InteractiveEvent) => void
+  readonly sessionDispatch: (event: RuntimeEvent) => void
+  readonly selectionDispatch: (request: number) => (event: RuntimeEvent) => void
   readonly beginSelection: (
     epoch: number,
     threadId: string,
@@ -59,21 +55,21 @@ export interface InteractiveOperationFeed {
   readonly finishSelection: (epoch: number) => Effect.Effect<void>
   readonly releaseSelectionEvents: (epoch: number, reason: string) => void
   readonly events: (
-    dispatch: (event: InteractiveEvent) => void,
+    dispatch: (event: ClientEvent) => void,
     currentEpoch: () => number,
     selectedThread: () => string | undefined,
   ) => Effect.Effect<void, OperationUnavailable>
-  readonly emit: (dispatch: (event: InteractiveEvent) => void, event: InteractiveEvent) => void
+  readonly emit: (dispatch: (event: RuntimeEvent) => void, event: RuntimeEvent) => void
   readonly close: Effect.Effect<void>
-  readonly eventThreadId: (event: InteractiveEvent) => string | undefined
-  readonly bufferSelectionEvent: (event: InteractiveEvent) => boolean
+  readonly eventThreadId: (event: RuntimeEvent) => string | undefined
+  readonly bufferSelectionEvent: (event: RuntimeEvent) => boolean
   readonly deliver: (
-    event: InteractiveEvent,
+    event: RuntimeEvent,
     options?: { readonly selectionRequest?: number; readonly selectedThreadOnly?: boolean },
   ) => boolean
 }
 
-const eventThreadId = (event: InteractiveEvent): string | undefined => {
+const eventThreadId = (event: RuntimeEvent): string | undefined => {
   if (event._tag === "SelectionLoaded") return String(event.thread.id)
   if ("threadId" in event && event.threadId !== undefined) return String(event.threadId)
   return undefined
@@ -82,7 +78,7 @@ const eventThreadId = (event: InteractiveEvent): string | undefined => {
 export const makeInteractiveOperationFeed = (input: {
   readonly sessionId: number
   readonly sessionScope: import("effect").Scope.Scope
-  readonly publishActivity: (origin: number, event: InteractiveEvent) => InteractiveEvent
+  readonly publishActivity: (origin: number, event: RuntimeEvent) => RuntimeEvent
   readonly selectionAdmission: Semaphore.Semaphore
   readonly selectionRequest: import("effect").Ref.Ref<number>
   readonly selectionLoad: {
@@ -92,11 +88,13 @@ export const makeInteractiveOperationFeed = (input: {
   readonly currentEpoch: () => number
 }): Effect.Effect<InteractiveOperationFeed> =>
   Effect.gen(function* () {
-    const queue = yield* Queue.bounded<SessionEnvelope>(8192)
+    const queue = yield* Queue.bounded<SessionEnvelope>(64)
+    const clock = yield* Clock.Clock
+    const threadViews = makeThreadViewFeed(() => clock.currentTimeMillisUnsafe())
     let overflow: InteractiveFeedOverflow.State | undefined
 
     const deliver = (
-      event: InteractiveEvent,
+      event: RuntimeEvent,
       options?: { readonly selectionRequest?: number; readonly selectedThreadOnly?: boolean },
     ): boolean => {
       const selected = withEpoch(event, options?.selectionRequest ?? input.currentEpoch())
@@ -115,7 +113,7 @@ export const makeInteractiveOperationFeed = (input: {
       return false
     }
 
-    const bufferSelectionEvent = (event: InteractiveEvent): boolean => {
+    const bufferSelectionEvent = (event: RuntimeEvent): boolean => {
       const loading = input.selectionLoad.get()
       if (loading === undefined || eventThreadId(event) !== loading.threadId) return false
       const selected = withEpoch(event, loading.epoch)
@@ -123,7 +121,7 @@ export const makeInteractiveOperationFeed = (input: {
         InteractiveFeedOverflow.remember(loading.overflow, selected)
         return true
       }
-      if (loading.events.length < 8192) {
+      if (loading.events.length < 64) {
         loading.events.push(selected)
         return true
       }
@@ -134,10 +132,10 @@ export const makeInteractiveOperationFeed = (input: {
       return true
     }
 
-    const sessionDispatch = (event: InteractiveEvent) => {
+    const sessionDispatch = (event: RuntimeEvent) => {
       if (!bufferSelectionEvent(event)) deliver(event)
     }
-    const selectionDispatch = (request: number) => (event: InteractiveEvent) =>
+    const selectionDispatch = (request: number) => (event: RuntimeEvent) =>
       deliver(event, { selectionRequest: request })
     const releaseSelectionEvents = (epoch: number, reason: string) => {
       const loading = input.selectionLoad.get()
@@ -185,16 +183,19 @@ export const makeInteractiveOperationFeed = (input: {
       if (loading?.epoch !== 0 || loading.threadId !== threadId) return false
       return true
     }
-    const emit = (dispatch: (event: InteractiveEvent) => void, event: InteractiveEvent) => {
+    const emit = (dispatch: (event: RuntimeEvent) => void, event: RuntimeEvent) => {
       const published = input.publishActivity(input.sessionId, event)
       dispatch(published)
     }
     const events = (
-      dispatch: (event: InteractiveEvent) => void,
+      dispatch: (event: ClientEvent) => void,
       readEpoch: () => number,
       readThread: () => string | undefined,
-    ) =>
-      Effect.gen(function* () {
+    ) => {
+      const publish = (event: RuntimeEvent) => {
+        for (const value of threadViews.publish(event)) dispatch(value)
+      }
+      return Effect.gen(function* () {
         while (true) {
           if (overflow !== undefined) {
             const state = overflow
@@ -211,7 +212,7 @@ export const makeInteractiveOperationFeed = (input: {
               readEpoch(),
               "Interactive event feed exceeded its bounded live window",
             ))
-              dispatch(event)
+              publish(event)
             continue
           }
           const envelope = yield* Queue.take(queue)
@@ -224,9 +225,10 @@ export const makeInteractiveOperationFeed = (input: {
             const threadId = eventThreadId(envelope.event)
             if (threadId !== undefined && threadId !== readThread()) continue
           }
-          dispatch(envelope.event)
+          publish(envelope.event)
         }
       })
+    }
     return {
       sessionDispatch,
       selectionDispatch,

@@ -6,6 +6,8 @@ export type LogLevel = "debug" | "info" | "warning" | "error"
 
 const activeSettlers = new Set<() => void>()
 
+const settlingSignals = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"] as const
+
 type DiagnosticAnnotation = string | number | boolean
 
 type AnnotationSchema = (value: unknown) => DiagnosticAnnotation | undefined
@@ -120,17 +122,18 @@ const annotationSchemas: Readonly<Record<string, AnnotationSchema>> = {
   "rika.tool.deadline.ms": boundedNumber,
   "rika.tool.dependency": oneOf("parallel", "sequential"),
   "rika.tool.name": oneOf(
-    "await_subagents",
+    "await_child_group",
     "bash",
+    "code_mode",
     "edit",
     "grep",
     "read",
-    "read_thread",
     "read_thread_transcript",
     "read_web_page",
+    "run_child",
     "search_threads",
     "shell_command_status",
-    "task",
+    "start_child_group",
     "view_media",
     "web_search",
     "write",
@@ -266,6 +269,17 @@ export const layer = (options: {
       } catch {}
     }
     activeSettlers.add(settle)
+    const signalSettlers = settlingSignals.map((signal) => {
+      const onSignal = () => {
+        settle()
+        if (process.listenerCount(signal) === 1) {
+          process.removeListener(signal, onSignal)
+          process.kill(process.pid, signal)
+        }
+      }
+      process.on(signal, onSignal)
+      return [signal, onSignal] as const
+    })
     process.once("exit", settle)
     process.once("beforeExit", settle)
     yield* Effect.addFinalizer(() =>
@@ -275,6 +289,7 @@ export const layer = (options: {
           Effect.sync(() => {
             process.removeListener("exit", settle)
             process.removeListener("beforeExit", settle)
+            for (const [signal, onSignal] of signalSettlers) process.removeListener(signal, onSignal)
             activeSettlers.delete(settle)
           }),
         ),

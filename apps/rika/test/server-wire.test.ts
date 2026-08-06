@@ -83,6 +83,28 @@ describe("server client message frames", () => {
     expect(makeClientMessageFrameDecoder()(frames[0]!)).toEqual(message)
   })
 
+  it("round-trips typed authorization decisions without raw Baton identities", () => {
+    for (const command of [
+      { _tag: "ApproveAuthorization" as const, turnId: "turn", authorizationId: "authorization" },
+      { _tag: "DenyAuthorization" as const, turnId: "turn", authorizationId: "authorization" },
+    ]) {
+      const message = Schema.decodeUnknownSync(ServerService.ClientMessage)({
+        _tag: "interactive-command",
+        connectionId: "connection",
+        requestId: "request",
+        sessionId: "session",
+        feedGeneration: "generation",
+        commandSequence: 1,
+        command,
+      })
+      const frames = clientMessageFrames("message", message)
+      expect(frames).toHaveLength(1)
+      expect(makeClientMessageFrameDecoder()(frames[0]!)).toEqual(message)
+      expect(frames[0]).not.toContain("runId")
+      expect(frames[0]).not.toContain("approvalId")
+    }
+  })
+
   it("fails a message beyond the chunk ceiling with a typed message-too-large error", () => {
     expect(maxClientMessageBytes).toBe(16 * maxFrameBytes)
     try {
@@ -275,7 +297,8 @@ describe("server message frames", () => {
     })
   })
 
-  it("keeps a transcript resync target when an oversized patch is omitted", () => {
+  it("keeps a ThreadView resync target when an oversized patch is omitted", () => {
+    const hugeKey = "answer"
     const message = Schema.decodeUnknownSync(ServerService.ServerMessage)({
       _tag: "interactive-feed-event",
       connectionId: "connection",
@@ -284,25 +307,23 @@ describe("server message frames", () => {
       feedGeneration: "generation",
       sequence: 1,
       event: {
-        _tag: "TranscriptProjectionPatched",
-        selectionEpoch: 3,
-        threadId: "thread",
-        rootTurnId: "turn",
-        streamId: "stream:turn",
-        baseRevision: 0,
-        patchRevision: 1,
-        origin: {
-          _tag: "Event",
-          executionId: "execution:turn",
-          cursor: "cursor",
-          sequence: 1,
-          type: "model.output.delta",
-          createdAt: 1,
-          transient: true,
-          text: "x".repeat(20_000_000),
+        _tag: "ThreadViewPatch",
+        patch: {
+          threadId: "thread",
+          baseRevision: 0,
+          revision: 1,
+          upsert: [
+            {
+              key: hugeKey,
+              turnId: "turn",
+              order: [{ sequence: 1, part: 0, key: hugeKey }],
+              revision: 1,
+              content: { _tag: "Entry", role: "assistant", text: "x".repeat(20_000_000) },
+            },
+          ],
+          remove: [],
+          turnChanges: [],
         },
-        state: { revision: 1, modelPhase: 1 },
-        delta: { upsert: [], remove: [] },
       },
     })
     const decodeFrame = makeServerMessageFrameDecoder()
@@ -310,50 +331,21 @@ describe("server message frames", () => {
       .map(decodeFrame)
       .filter((value) => value !== undefined)
 
-    expect(decoded).toEqual([
-      {
-        _tag: "interactive-feed-event",
-        connectionId: "connection",
-        requestId: "request",
-        sessionId: "session",
-        feedGeneration: "generation",
-        sequence: 1,
-        event: {
-          _tag: "TranscriptResyncRequired",
-          selectionEpoch: 3,
-          threadId: "thread",
-          reason:
-            "Server live delivery omitted an event larger than 16 MiB; reload the durable transcript for the full content",
-        },
-      },
-    ])
-  })
-
-  it("terminates oversized resync degradation with a bounded decodable marker", () => {
-    const events = Array.from({ length: 18 }, (_, index) => ({
-      _tag: "TranscriptResyncRequired",
-      selectionEpoch: 1,
-      threadId: `thread-${index}-${"x".repeat(950_000)}`,
-      reason: "reload",
-    }))
-    const message = Schema.decodeUnknownSync(ServerService.ServerMessage)({
-      _tag: "interactive-feed-resync",
+    expect(decoded).toHaveLength(1)
+    expect(decoded[0]).toMatchObject({
+      _tag: "interactive-feed-event",
       connectionId: "connection",
       requestId: "request",
       sessionId: "session",
       feedGeneration: "generation",
       sequence: 1,
-      events,
+      event: {
+        _tag: "ResyncRequired",
+        threadId: "thread",
+        expectedRevision: 1,
+        receivedBaseRevision: 0,
+        currentRevision: 0,
+      },
     })
-    const frames = serverMessageFrames("oversized-resync", message)
-    const decodeFrame = makeServerMessageFrameDecoder()
-    const decoded = frames.map(decodeFrame).filter((value) => value !== undefined)
-
-    expect(frames.length).toBeLessThanOrEqual(16)
-    expect(decoded).toHaveLength(1)
-    expect(decoded[0]).toMatchObject({
-      _tag: "interactive-feed-resync",
-      events: [{ _tag: "ExecutionFailed", message: expect.stringContaining("omitted an event larger than 16 MiB") }],
-    })
-  }, 30_000)
+  })
 })

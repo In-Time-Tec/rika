@@ -9,7 +9,6 @@ describe("recorded shell transcript projection", () => {
 
     expect(projection).toEqual({
       revision: 0,
-      modelPhase: -1,
       units: [
         {
           key,
@@ -58,7 +57,6 @@ describe("recorded shell transcript projection", () => {
 
     expect(settled).toEqual({
       revision: 1,
-      modelPhase: -1,
       units: [
         {
           key: runningUnit.key,

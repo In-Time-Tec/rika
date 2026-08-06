@@ -1,5 +1,5 @@
 import * as TurnQueuePromotion from "../../thread/repository/turn-repository-queue"
-import type { InteractiveEvent } from "../interactive/interactive-event"
+import type { InteractiveEvent } from "../interactive/interactive-runtime-event"
 import { queueItem } from "../interactive/interactive-session-queue"
 
 export const queueMutationEvent = (queue: TurnQueuePromotion.QueueItemChange): InteractiveEvent => ({

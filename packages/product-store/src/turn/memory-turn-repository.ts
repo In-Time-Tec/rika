@@ -6,19 +6,44 @@ import * as ExecutionStatus from "@rika/product/execution-status"
 import { AgentExecutionTurn, Turn } from "@rika/product/turn-record"
 import { clone, cursorFor, pageSize } from "./turn-memory-state"
 import { makeTurnMemoryLifecycle } from "./turn-memory-lifecycle"
+import { makeTurnMemoryAdmission } from "./turn-memory-admission"
 import { makeTurnMemoryQueue } from "./turn-memory-queue"
 import { makeTurnMemoryState } from "./turn-memory-state-operations"
 import { makeTurnMemorySubmission } from "./turn-memory-submission"
+import { repositoryError } from "./turn-memory-errors"
+import { MemoryCoordinatorTypeId } from "./turn-memory-coordination"
 
 export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
   Effect.gen(function* () {
     const { context, coordinator, get } = yield* makeTurnMemoryState(initial)
     const { readState } = context
+    const shellCoordinator = coordinator[MemoryCoordinatorTypeId]
     return Service.of({
       ...coordinator,
       ...makeTurnMemorySubmission(context),
       ...makeTurnMemoryQueue(context),
+      ...makeTurnMemoryAdmission(context),
       ...makeTurnMemoryLifecycle(context),
+      createRecordedShell: Effect.fn("TurnRepository.createRecordedShell")(function* (turn) {
+        const result = yield* shellCoordinator.writeRecordedShell(undefined, turn, () =>
+          Effect.succeed({ _tag: "Commit" as const, value: undefined }),
+        )
+        if (result._tag === "Stale") return yield* repositoryError(`Turn ${turn.id} already exists`)
+        return result.value.turn as typeof turn
+      }),
+      settleRecordedShell: Effect.fn("TurnRepository.settleRecordedShell")(function* (expected, turn) {
+        const result = yield* shellCoordinator.writeRecordedShell(expected, turn, () =>
+          Effect.succeed({ _tag: "Commit" as const, value: undefined }),
+        )
+        return result._tag === "Stale" ? undefined : (result.value.turn as typeof turn)
+      }),
+      copyRecordedShell: Effect.fn("TurnRepository.copyRecordedShell")(function* (turn) {
+        const result = yield* shellCoordinator.writeRecordedShell(undefined, turn, () =>
+          Effect.succeed({ _tag: "Commit" as const, value: undefined }),
+        )
+        if (result._tag === "Stale") return yield* repositoryError(`Turn ${turn.id} already exists`)
+        return result.value.turn as typeof turn
+      }),
       get,
       list: Effect.fn("TurnRepository.list")(function* (threadId) {
         return [...(yield* readState).turns.values()]

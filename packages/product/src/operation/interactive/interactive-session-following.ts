@@ -5,24 +5,17 @@ import * as ThreadSummaryRepository from "@rika/product/thread-summary-repositor
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as ResolvedContext from "../../context/context-resolution-service"
 import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"
-import * as ExecutionEvent from "@rika/product/execution-event"
 import * as ExecutionStatus from "@rika/product/execution-status"
 import { observeRootTurn, watchRootTurn } from "./root-turn-watcher"
 import { Effect, Clock } from "effect"
 import { OperationError } from "../operation-error"
 import type * as RootTurnOwner from "../../thread/queue/root-turn-owner"
-import type { InteractiveEvent } from "./interactive-event"
+import type { InteractiveEvent } from "./interactive-runtime-event"
 
 export const ignoreInteractiveEvent = (_event: InteractiveEvent) => {}
 
 export interface InteractiveFollowingInput {
   readonly rootTurnOwner: RootTurnOwner.Interface
-  readonly ensureIngest: (threadId: Thread.ThreadId, turnId: Turn.TurnId) => Effect.Effect<void, OperationError, never>
-  readonly deliverResultEvents: (
-    turnId: Turn.TurnId,
-    events: ReadonlyArray<ExecutionEvent.Event>,
-    delivered?: ReadonlySet<string>,
-  ) => void
   readonly setTurnStatus: (
     id: Turn.TurnId,
     status: ExecutionStatus.Status,
@@ -33,10 +26,6 @@ export interface InteractiveFollowingInput {
     OperationError | ThreadSummaryRepository.RepositoryError | TurnRepository.RepositoryError,
     ThreadSummaryRepository.Service | TurnRepository.Service
   >
-  readonly projectExecutionResult: (
-    threadId: Thread.ThreadId,
-    result: ExecutionEvent.Result,
-  ) => Effect.Effect<void, OperationError | ThreadSummaryRepository.RepositoryError, ThreadSummaryRepository.Service>
   readonly settleThread: (
     thread: Thread.Thread,
     dispatch: (event: InteractiveEvent) => void,
@@ -60,17 +49,7 @@ export interface InteractiveFollowingInput {
 }
 
 export const makeInteractiveFollowing = (input: InteractiveFollowingInput) => {
-  const {
-    rootTurnOwner,
-    ensureIngest,
-    deliverResultEvents,
-    setTurnStatus,
-    projectExecutionResult,
-    settleThread,
-    threadForTurn,
-    claimTurnObserver,
-    releaseTurnObserver,
-  } = input
+  const { rootTurnOwner, setTurnStatus, settleThread, threadForTurn, claimTurnObserver, releaseTurnObserver } = input
   const watchClaimedTurn = Effect.fn("ProductOperation.interactive.watchClaimedTurn")(function* (
     turnId: Turn.TurnId,
     dispatch: (event: InteractiveEvent) => void,
@@ -80,10 +59,7 @@ export const makeInteractiveFollowing = (input: InteractiveFollowingInput) => {
       turnId,
       turns,
       owner: rootTurnOwner,
-      ensureIngest,
-      deliverResultEvents,
       setTurnStatus,
-      projectExecutionResult,
       settleThread,
       threadForTurn,
       dispatch,

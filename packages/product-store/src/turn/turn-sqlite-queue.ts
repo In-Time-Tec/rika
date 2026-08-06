@@ -58,7 +58,7 @@ export const makeTurnSqliteQueue = (
           const rows = yield* sql`UPDATE rika_turns SET queue_claim_token = hex(randomblob(16))
           WHERE id = (SELECT id FROM rika_turns WHERE thread_id = ${threadId} AND turn_kind = 'AgentExecution' AND status = 'queued' AND queue_claim_token IS NULL ORDER BY created_at ASC, rowid ASC LIMIT 1)
           AND turn_kind = 'AgentExecution'
-          AND NOT EXISTS (SELECT 1 FROM rika_turns WHERE thread_id = ${threadId} AND turn_kind = 'AgentExecution' AND status IN ('accepted', 'running', 'waiting'))
+          AND NOT EXISTS (SELECT 1 FROM rika_turns WHERE thread_id = ${threadId} AND turn_kind = 'AgentExecution' AND status IN ('accepted', 'running', 'waiting', 'cancelling'))
           AND NOT EXISTS (SELECT 1 FROM rika_turns WHERE thread_id = ${threadId} AND turn_kind = 'AgentExecution' AND queue_claim_token IS NOT NULL)
           RETURNING *`
           if (rows[0] === undefined) return undefined
@@ -215,7 +215,7 @@ export const makeTurnSqliteQueue = (
             return yield* RepositoryError.make({ message: `Turn ${id} is not an unowned accepted turn` })
           const current = yield* decodeAgent(currentRows[0])
           const otherActive = yield* sql`SELECT id FROM rika_turns
-          WHERE thread_id = ${current.threadId} AND turn_kind = 'AgentExecution' AND id != ${id} AND status IN ('accepted', 'running', 'waiting') LIMIT 1`
+          WHERE thread_id = ${current.threadId} AND turn_kind = 'AgentExecution' AND id != ${id} AND status IN ('accepted', 'running', 'waiting', 'cancelling') LIMIT 1`
           if (otherActive[0] !== undefined)
             return yield* RepositoryError.make({ message: `Turn ${id} is not an unowned accepted turn` })
           yield* sql`INSERT INTO rika_thread_queue_state (thread_id) VALUES (${current.threadId}) ON CONFLICT (thread_id) DO NOTHING`

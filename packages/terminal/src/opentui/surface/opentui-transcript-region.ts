@@ -167,14 +167,17 @@ export abstract class SurfaceTranscriptRegion extends SurfaceTranscriptRendering
   }
   protected syncTranscriptScrollbar(): void {
     if (this.destroyed) return
-    const viewportHeight = this.transcriptViewportRows
+    const viewportHeight = this.transcriptScroll.viewport.height
     const scrollHeight = this.transcriptScroll.scrollHeight
-    const overflowing = viewportHeight > 0 && scrollHeight > viewportHeight
-    this.transcriptScrollbar.scrollSize = scrollHeight
-    this.transcriptScrollbar.viewportSize = Math.max(1, viewportHeight)
+    const overflowing = viewportHeight > 0 && scrollHeight > Math.max(viewportHeight, this.transcriptViewportRows)
     this.scrollbarSyncing = true
-    this.transcriptScrollbar.scrollPosition = this.transcriptScroll.scrollTop
-    this.scrollbarSyncing = false
+    try {
+      this.transcriptScrollbar.scrollSize = scrollHeight
+      this.transcriptScrollbar.viewportSize = Math.max(1, viewportHeight)
+      this.transcriptScrollbar.scrollPosition = this.transcriptScroll.scrollTop
+    } finally {
+      this.scrollbarSyncing = false
+    }
     if (this.transcriptScrollbar.visible !== overflowing) this.transcriptScrollbar.visible = overflowing
   }
   protected queueTranscriptScroll(action: () => void): void {
@@ -203,9 +206,7 @@ export abstract class SurfaceTranscriptRegion extends SurfaceTranscriptRendering
         const anchored = current.anchor === undefined ? undefined : this.transcriptRecords.get(current.anchor.key)
         const anchorScreenY = current.anchor?.screenY
         const offset =
-          anchored === undefined || anchorScreenY === undefined
-            ? this.transcriptScroll.scrollHeight - current.scrollHeight
-            : anchored.renderable.screenY - anchorScreenY
+          anchored === undefined || anchorScreenY === undefined ? 0 : anchored.renderable.screenY - anchorScreenY
         this.applyTranscriptPosition(this.transcriptScroll.scrollTop + offset + current.scrollBy)
         if (current.scrollBy === 0) this.handlers.scrollGeometry?.(this.transcriptScroll.scrollTop)
         else this.reportTranscriptScroll(current.nearBottom)
@@ -215,8 +216,6 @@ export abstract class SurfaceTranscriptRegion extends SurfaceTranscriptRendering
     }
     this.transcriptPositionFrame = apply
     this.renderer.once(CliRenderEvents.FRAME, apply)
-    this.clock.setTimeout(() => {
-      if (this.transcriptPositionFrame === apply && !this.destroyed) apply()
-    }, 16)
+    this.renderer.requestRender()
   }
 }

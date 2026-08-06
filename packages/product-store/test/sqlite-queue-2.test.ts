@@ -1,7 +1,5 @@
 import { expect, test } from "vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import { Effect, FileSystem, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import * as Database from "@rika/product-store/product-database-layer"
@@ -10,8 +8,8 @@ import * as ThreadSummaryRepository from "@rika/product-store/sqlite-thread-summ
 import * as TurnRepository from "../src/turn/sqlite-turn-repository"
 import * as TranscriptRepository from "../src/transcript/sqlite-transcript-repository"
 import * as Turn from "@rika/product/turn-record"
+import { unitOrder } from "@rika/transcript/transcript-unit-order"
 import { id, create, provideLayer } from "./sqlite-queue-support"
-import { commitAll } from "./transcript-repository-fixtures"
 
 test("thread creation rolls back its workspace when the thread insert fails", () => {
   const program = Effect.scoped(
@@ -61,15 +59,23 @@ test("malformed SQLite product rows fail through typed repositories", () => {
           prompt: "persist",
           now: 2,
         })
-        yield* commitAll(transcripts, turn, TranscriptProjection.Projection.empty(turn.id, turn.prompt), undefined)
+        yield* transcripts.replaceUnits(turn, [
+          {
+            key: "user:malformed-turn",
+            turnId: turn.id,
+            order: unitOrder("user:malformed-turn", 0),
+            revision: 0,
+            content: { _tag: "Entry", role: "user", text: turn.prompt },
+          },
+        ])
         yield* sql`UPDATE rika_threads SET labels_json = 'not-json' WHERE id = ${id}`
         expect(yield* Effect.result(threads.get(id))).toMatchObject({
           _tag: "Failure",
           failure: { _tag: "ThreadRepositoryError" },
         })
         yield* sql`INSERT INTO rika_transcript_units
-          (turn_id, unit_key, execution_key, thread_id, unit_order_key, revision, unit_json, created_at, updated_at)
-          VALUES (${turn.id}, 'malformed-unit', ${TranscriptCorrelation.executionKey(turn.id)}, ${id}, 'malformed-order', 1, 'not-json', 2, 2)`
+          (turn_id, unit_key, thread_id, unit_order_key, revision, unit_json, created_at, updated_at)
+          VALUES (${turn.id}, 'malformed-unit', ${id}, 'malformed-order', 1, 'not-json', 2, 2)`
         expect(yield* Effect.result(transcripts.get(turn.id))).toMatchObject({
           _tag: "Failure",
           failure: { _tag: "TranscriptRepositoryError" },

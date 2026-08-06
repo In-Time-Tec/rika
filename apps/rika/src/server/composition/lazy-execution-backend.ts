@@ -1,5 +1,7 @@
 import * as ExecutionGateway from "@rika/product/execution-gateway"
-import { Context, Effect, Fiber, Layer, Stream } from "effect"
+import { Context, Effect, Fiber, Layer, Schema, Stream } from "effect"
+
+const isApprovalResponseFailure = Schema.is(ExecutionGateway.ApprovalResponseFailure)
 
 export const lazyBackendLayer = <E, R>(backendLayer: Layer.Layer<ExecutionGateway.Service, E, R>) =>
   Layer.effect(
@@ -31,6 +33,30 @@ export const lazyBackendLayer = <E, R>(backendLayer: Layer.Layer<ExecutionGatewa
           load.pipe(
             Effect.flatMap((backend) => backend.steerTurn(link, input)),
             Effect.mapError((cause) => ExecutionGateway.SteeringFailure.make({ message: String(cause) })),
+          ),
+        approveTurn: (link, input) =>
+          load.pipe(
+            Effect.flatMap((backend) => backend.approveTurn(link, input)),
+            Effect.mapError((cause) =>
+              isApprovalResponseFailure(cause)
+                ? cause
+                : ExecutionGateway.ApprovalResponseFailure.make({
+                    kind: "unavailable",
+                    message: String(cause),
+                  }),
+            ),
+          ),
+        denyTurn: (link, input) =>
+          load.pipe(
+            Effect.flatMap((backend) => backend.denyTurn(link, input)),
+            Effect.mapError((cause) =>
+              isApprovalResponseFailure(cause)
+                ? cause
+                : ExecutionGateway.ApprovalResponseFailure.make({
+                    kind: "unavailable",
+                    message: String(cause),
+                  }),
+            ),
           ),
         watchTurn: (link, cursor) =>
           Stream.unwrap(

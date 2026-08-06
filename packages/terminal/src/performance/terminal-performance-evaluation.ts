@@ -1,11 +1,10 @@
 import { createTestRenderer } from "@opentui/core/testing"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
+import type { Unit } from "@rika/transcript/transcript-unit"
+import { unitOrder } from "@rika/transcript/transcript-unit-order"
 import { Effect } from "effect"
 import { Surface } from "../opentui/surface/opentui-surface"
 import type { Key } from "../presentation/terminal/terminal-keymap"
 import { projectUnits as applyTurnUnits } from "../presentation/transcript/terminal-transcript-projection"
-import { attachChildProjections } from "../presentation/transcript/transcript-attachment"
 import { expandableRowIds } from "../presentation/transcript/transcript-row"
 import { maxMountedTranscriptRows } from "../presentation/transcript/terminal-transcript-window"
 import { initial, type Model } from "../state/model/terminal-state"
@@ -42,42 +41,78 @@ const toolsPerChild = 4
 const streamedUpdates = 100
 const warmupInteractions = 100
 const interactionSamples = 100
-const childTurnId = (child: number) => `run-performance-${child}`
-
-const sourceEvent = (
-  cursor: string,
-  sequence: number,
-  type: string,
-  fields: Partial<TranscriptSourceEvent.SourceEvent> = {},
-): TranscriptSourceEvent.SourceEvent => ({ cursor, sequence, type, createdAt: sequence, ...fields })
-
-const parentProjection = () =>
-  TranscriptProjection.Projection.project("performance", "exercise a large thread", [
-    sourceEvent("assistant-0", 0, "model.output.completed", { text: "Running the standard performance workload." }),
-    ...Array.from({ length: childRuns }, (_, child) => [
-      sourceEvent(`agent-${child}`, 1 + child * 2, "tool.call.requested", {
-        data: { tool_call_id: `agent-${child}`, tool_name: "task", input: { prompt: `Task ${child}` } },
-      }),
-      sourceEvent(`agent-${child}-spawned`, 2 + child * 2, "child_run.spawned", {
-        data: { invocation_id: `agent-${child}`, child_execution_id: childTurnId(child) },
-      }),
-    ]).flat(),
-  ])
-
-const childProjection = (child: number) =>
-  TranscriptProjection.Projection.project(childTurnId(child), "", [
-    ...Array.from({ length: toolsPerChild }, (_, tool) => [
-      sourceEvent(`tool-${child}-${tool}`, tool * 2, "tool.call.requested", {
-        data: { tool_call_id: `tool-${child}-${tool}`, tool_name: "read", input: { path: `src/${child}/${tool}.ts` } },
-      }),
-      sourceEvent(`tool-${child}-${tool}-result`, tool * 2 + 1, "tool.result.received", {
-        data: { tool_call_id: `tool-${child}-${tool}`, output: `contents ${child} ${tool}` },
-      }),
-    ]).flat(),
-    sourceEvent(`answer-${child}`, toolsPerChild * 2, "model.output.completed", {
-      text: `Child ${child} verified the target module.`,
+const childTurnId = (child: number) => `subagent-performance-${child}`
+const toolPresentation = {
+  family: "explore" as const,
+  action: "read",
+  activeLabel: "Reading",
+  completeLabel: "Read",
+  outputDisplay: "expandable" as const,
+}
+const semanticUnit = (key: string, index: number, content: Unit["content"], parentId?: string, revision = 0): Unit => ({
+  key,
+  turnId: "performance",
+  order: unitOrder(key, index),
+  revision,
+  ...(parentId === undefined ? {} : { parentId }),
+  content,
+})
+const childUnits = (child: number): ReadonlyArray<Unit> => {
+  const id = childTurnId(child)
+  const cardKey = `subagent:performance:${child}`
+  return [
+    semanticUnit(cardKey, child * (toolsPerChild + 2) + 1, {
+      _tag: "Block",
+      block: {
+        _tag: "SubagentCard",
+        id,
+        name: `Task ${child}`,
+        prompt: `Task ${child}`,
+        promptTruncated: false,
+        summary: `Child ${child} verified the target module.`,
+        status: "complete",
+        activity: [],
+      },
     }),
-  ])
+    ...Array.from({ length: toolsPerChild }, (_, tool) =>
+      semanticUnit(
+        `tool:performance:${child}:${tool}`,
+        child * (toolsPerChild + 2) + tool + 2,
+        {
+          _tag: "Block",
+          block: {
+            _tag: "ToolCall",
+            id: `performance:${child}:${tool}`,
+            name: "read",
+            input: JSON.stringify({ path: `src/${child}/${tool}.ts` }),
+            status: "complete",
+            presentation: toolPresentation,
+            detail: `src/${child}/${tool}.ts`,
+            output: `contents ${child} ${tool}`,
+            files: [],
+          },
+        },
+        id,
+      ),
+    ),
+    semanticUnit(
+      `assistant:performance:${child}`,
+      child * (toolsPerChild + 2) + toolsPerChild + 2,
+      { _tag: "Entry", role: "assistant", text: `Child ${child} verified the target module.` },
+      id,
+    ),
+  ]
+}
+const parentProjection = () => ({
+  units: [
+    semanticUnit("assistant:performance:intro", 0, {
+      _tag: "Entry",
+      role: "assistant",
+      text: "Running the standard performance workload.",
+    }),
+    ...Array.from({ length: childRuns }, (_, child) => childUnits(child)).flat(),
+  ],
+})
 
 const key = (name: string, options: Partial<Key> = {}): Key => ({
   name,
@@ -115,14 +150,9 @@ const evaluate = Effect.fn("TuiPerformance.evaluate")(function* (options: {
 }) {
   options.observe?.("started")
   const setup = yield* Effect.promise(() => createTestRenderer({ width: 120, height: 36 }))
-  let projections = new Map(
-    Array.from({ length: childRuns }, (_, child) => [childTurnId(child), childProjection(child)] as const),
-  )
   const base = applyTurnUnits({ ...initial("/work", "high"), width: 120, height: 36 }, parentProjection().units)
-  const attached = attachChildProjections(base, new Set<string>(), projections)
-  let attachments = attached.attachments
   let model: Model = {
-    ...attached.model,
+    ...base,
     currentThreadId: "performance",
     currentThreadTitle: "Performance",
     threads: Array.from(
@@ -138,7 +168,7 @@ const evaluate = Effect.fn("TuiPerformance.evaluate")(function* (options: {
         lastActivityAt: 100 - index,
       }),
     ),
-    expandedRowKeys: [...expandableRowIds(attached.model)],
+    expandedRowKeys: [...expandableRowIds(base)],
   }
   const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
   return yield* Effect.gen(function* () {
@@ -187,18 +217,17 @@ const evaluate = Effect.fn("TuiPerformance.evaluate")(function* (options: {
     for (let step = 0; step < streamedUpdates; step += 1) {
       const startedAt = performance.now()
       const child = step % childRuns
-      const turnId = childTurnId(child)
-      const bumped = TranscriptProjection.Projection.applyEvent(
-        projections.get(turnId)!,
-        sourceEvent(`stream-${child}-${step}`, toolsPerChild * 2 + 1 + step, "model.output.delta", {
-          text: ` delta ${step}`,
-        }),
-      )
-      projections = new Map(projections)
-      projections.set(turnId, bumped)
-      const next = attachChildProjections(model, new Set<string>(), projections, attachments)
-      attachments = next.attachments
-      model = next.model as Model
+      const id = childTurnId(child)
+      const unitKey = `assistant:performance:${child}`
+      model = applyTurnUnits(model, [
+        semanticUnit(
+          unitKey,
+          child * (toolsPerChild + 2) + toolsPerChild + 2,
+          { _tag: "Entry", role: "assistant", text: `Child ${child} verified the target module. delta ${step}` },
+          id,
+          step + 1,
+        ),
+      ])
       surface.update(model)
       const renderStartedAt = performance.now()
       yield* Effect.promise(() => setup.renderOnce())

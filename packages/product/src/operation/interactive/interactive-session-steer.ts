@@ -4,7 +4,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import { Effect } from "effect"
 import { OperationError, operationError, operationFailureDetail } from "../operation-error"
-import type { InteractiveEvent } from "./interactive-event"
+import type { InteractiveEvent } from "./interactive-runtime-event"
 import type { InteractiveImplementationInput } from "./interactive-session-interface"
 
 export interface InteractiveSteerInput {

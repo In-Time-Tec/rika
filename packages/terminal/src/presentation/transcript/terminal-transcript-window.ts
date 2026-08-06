@@ -32,6 +32,7 @@ export const relocateRowEnd: {
   (window: RowWindowState, anchorIndex: number, total: number, limit: number): number
   (anchorIndex: number, total: number, limit: number): (window: RowWindowState) => number
 } = Function.dual(4, (window: RowWindowState, anchorIndex: number, total: number, limit: number): number => {
+  if (anchorIndex < 0 && window.anchorKey !== undefined) return total
   const located =
     anchorIndex >= 0 ? anchorIndex + minimumRowEnd(total, limit) : Math.min(total, Math.max(1, window.end))
   return Math.min(total, Math.max(minimumRowEnd(total, limit), located + window.pendingDelta))

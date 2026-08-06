@@ -3,8 +3,7 @@ import * as TurnRepository from "@rika/product/turn-repository"
 import { Effect, Fiber, Ref, Scope, Semaphore } from "effect"
 import { OperationUnavailable } from "../contract/product-operation"
 import { OperationError } from "../operation-error"
-import type * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
-import type { InteractiveEvent } from "./interactive-event"
+import type { InteractiveEvent } from "./interactive-runtime-event"
 import {
   makeInteractiveOperationFeed,
   type InteractiveOperationFeed,
@@ -64,13 +63,11 @@ export interface InteractiveSessionState {
 
 export interface InteractiveSessionStateInput {
   readonly sessionId: number
-  readonly executionIngest: ExecutionIngest.Interface
   readonly publishInteractiveActivity: (origin: number, event: InteractiveEvent) => InteractiveEvent
   readonly activitySequence: number
   readonly initialThreadId: string | undefined
   readonly serverOwner: boolean
   readonly options: import("../dispatch/product-operation-options").ProductLayerOptions<
-    Error,
     Error,
     Error,
     Error,
@@ -83,7 +80,7 @@ export const makeInteractiveSessionState = (
   input: InteractiveSessionStateInput,
 ): Effect.Effect<InteractiveSessionState, never, never> =>
   Effect.gen(function* () {
-    const { sessionId, executionIngest, publishInteractiveActivity, activitySequence, initialThreadId } = input
+    const { sessionId, publishInteractiveActivity, activitySequence, initialThreadId } = input
     let selectedThreadId = initialThreadId
     let currentSelectionEpoch = 0
     let selectionLoad: import("./interactive-operation-feed").SelectionLoad | undefined =
@@ -152,10 +149,6 @@ export const makeInteractiveSessionState = (
       return fiber === undefined ? Effect.void : Fiber.interrupt(fiber)
     })
     const projection = makeInteractiveSelectionProjection({
-      executionIngest,
-      sessionScope,
-      selectionBackground,
-      operationFeed,
       activitySequence,
       interactiveThread,
       setActiveSelectionState: (value: SelectionEpochState) => (activeSelectionState = value),

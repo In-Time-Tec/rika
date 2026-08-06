@@ -2,6 +2,7 @@ import { AgentManifest, Pins, ProgramManifest } from "@batonfx/core"
 import * as RoleToolkits from "@rika/coding-tools/agent-role-toolkits"
 import { Schema, SchemaRepresentation, SchemaTransformation } from "effect"
 import { Prompt } from "effect/unstable/ai"
+import * as Registration from "./baton-registration"
 import * as Sandbox from "./baton-sandbox-identity"
 
 export const budget: ProgramManifest.ProgramBudget = {
@@ -55,15 +56,19 @@ export const schemas = {
 export const pins = {
   sandbox: (identity: Sandbox.Identity, workspace: string) =>
     Pins.makeCapability({
-      contract: "rika-program-sandbox",
-      version: 1,
+      ...Registration.codecs.programSandbox.identity,
       sandbox: Sandbox.payload(identity, workspace),
     }),
-  input: Pins.makeCapability({ contract: "rika-program-input", version: 1, schema: schemas.inputDocument }),
-  output: Pins.makeCapability({ contract: "rika-program-output", version: 1, schema: schemas.outputDocument }),
+  input: Pins.makeCapability({
+    ...Registration.codecs.programInput.identity,
+    schema: schemas.inputDocument,
+  }),
+  output: Pins.makeCapability({
+    ...Registration.codecs.programOutput.identity,
+    schema: schemas.outputDocument,
+  }),
   agentInput: Pins.makeCapability({
-    contract: "rika-program-agent-input",
-    version: 1,
+    ...Registration.codecs.programAgentInput.identity,
     schema: schemas.agentInputDocument,
   }),
 }

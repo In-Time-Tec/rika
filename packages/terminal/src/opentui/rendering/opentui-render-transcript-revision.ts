@@ -49,13 +49,34 @@ const transcriptUnitRevisionImpl = (
     if (response?.kind === "answer") ids.push(identityRevision(model.entries[response.entry]))
     else if (response?.kind === "error") bits.push(`${response.tone}:${response.text}`)
   }
-  if (unit.kind === "entry") ids.push(identityRevision(model.entries[unit.entry]))
-  else if (unit.kind === "tool") walkTool(unit)
-  else {
-    const block = model.blocks[unit.block] as TranscriptBlock
+  const walkBlock = (index: number) => {
+    const block = model.blocks[index] as TranscriptBlock
     ids.push(identityRevision(block))
     if (block._tag === "Compaction" && block.status === "complete")
       bits.push(`rainbow:${model.compactionShimmer?.tick ?? 0}`)
+  }
+  const walkAgentResponse = (state: AgentResponseState | undefined) => {
+    const response = state === undefined ? undefined : agentResponseOutcome(state)
+    if (response?.kind === "answer") ids.push(identityRevision(model.entries[response.entry]))
+    else if (response?.kind === "error") bits.push(`${response.tone}:${response.text}`)
+  }
+  switch (unit.kind) {
+    case "entry":
+      ids.push(identityRevision(model.entries[unit.entry]))
+      break
+    case "tool":
+      walkTool(unit)
+      break
+    case "subagent":
+      walkBlock(unit.block)
+      for (const child of unit.children) walkTool(child)
+      walkAgentResponse(unit.agentResponse)
+      break
+    case "reasoning":
+    case "diff":
+    case "block":
+      walkBlock(unit.block)
+      break
   }
   pushExpanded(unitKey)
   const selected = model.detailSelection === unitKey ? "1" : "0"

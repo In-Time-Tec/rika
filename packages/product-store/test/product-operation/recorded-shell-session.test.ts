@@ -13,12 +13,13 @@ import * as Turn from "@rika/product/turn-record"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import { Context, Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect"
-import { projectionVersion } from "./interactive-session-base-support"
 
 const backend = ExecutionGateway.Service.of({
   startTurn: () => Effect.die("unused"),
   cancelTurn: () => Effect.die("unused"),
   steerTurn: () => Effect.die("unused"),
+  approveTurn: () => Effect.void,
+  denyTurn: () => Effect.void,
   watchTurn: () => Stream.die("unused"),
   inspectTurn: () => Effect.succeed({ status: "unavailable" }),
 })
@@ -26,6 +27,9 @@ const backend = ExecutionGateway.Service.of({
 interface HarnessOptions {
   readonly runTool: ToolRuntime.Interface["run"]
   readonly transcriptService?: (base: TranscriptRepository.Interface) => TranscriptRepository.Interface
+  readonly turnService?: (
+    base: import("@rika/product/turn-repository").Interface,
+  ) => import("@rika/product/turn-repository").Interface
   readonly ensureSummary?: ThreadSummaryRepository.Interface["ensureTurn"]
   readonly makeTurnId?: Effect.Effect<Turn.TurnId>
 }
@@ -34,7 +38,8 @@ const makeHarness = Effect.fn("RecordedShellSessionTest.makeHarness")(function* 
   const threadId = Thread.ThreadId.make("recorded-shell-thread")
   const turnId = Turn.TurnId.make("recorded-shell-turn")
   const threads = yield* ThreadRepository.makeMemory()
-  const turns = yield* TurnRepository.makeMemory()
+  const baseTurns = yield* TurnRepository.makeMemory()
+  const turns = TurnRepository.Service.of(options.turnService?.(baseTurns) ?? baseTurns)
   const transcripts = yield* TranscriptRepository.makeMemory({ turns })
   const sessionReady = yield* Deferred.make<InteractiveSession>()
   const releaseSession = yield* Deferred.make<void>()
@@ -120,7 +125,7 @@ describe("recorded shell session", () => {
         }),
       ])
 
-      yield* harness.session.selectThread(otherThread, 1)
+      yield* harness.session.selectThread(otherThread)
       yield* Deferred.succeed(finishProcess, undefined)
       yield* harness.waitForEvent(
         (event) => event._tag === "ShellCompleted" && event.command === "stay with launch thread",
@@ -146,7 +151,7 @@ describe("recorded shell session", () => {
       expect(yield* harness.transcripts.get(launchTurns[0]!.id)).toMatchObject({
         turn: { threadId: launchThread, command: "stay with launch thread", status: "completed" },
       })
-      yield* harness.session.selectThread(launchThread, 2)
+      yield* harness.session.selectThread(launchThread)
       yield* harness.close
     }),
   )
@@ -159,10 +164,10 @@ describe("recorded shell session", () => {
           Ref.update(launches, (count) => count + 1).pipe(
             Effect.as({ text: "unreachable", truncated: false, running: false, exitCode: 0 }),
           ),
-        transcriptService: (base) => ({
+        turnService: (base) => ({
           ...base,
           createRecordedShell: () =>
-            Effect.fail(TranscriptRepository.RepositoryError.make({ message: "forced running write failure" })),
+            Effect.fail(TurnRepository.RepositoryError.make({ message: "forced running write failure" })),
         }),
       })
 
@@ -172,15 +177,7 @@ describe("recorded shell session", () => {
       expect(yield* Ref.get(launches)).toBe(0)
       expect(yield* harness.turns.get(harness.turnId)).toBeUndefined()
       expect(yield* harness.transcripts.get(harness.turnId)).toBeUndefined()
-      expect(
-        harness.events.some(
-          (event) =>
-            event._tag === "TranscriptProjectionStarted" ||
-            event._tag === "TranscriptProjectionPatched" ||
-            event._tag === "TranscriptProjectionStopped" ||
-            event._tag === "ShellCompleted",
-        ),
-      ).toBe(false)
+      expect(harness.events.some((event) => event._tag === "ShellCompleted")).toBe(false)
       yield* harness.close
     }),
   )
@@ -193,10 +190,10 @@ describe("recorded shell session", () => {
           Ref.update(launches, (count) => count + 1).pipe(
             Effect.as({ text: "finished", truncated: false, running: false, exitCode: 0 }),
           ),
-        transcriptService: (base) => ({
+        turnService: (base) => ({
           ...base,
           settleRecordedShell: () =>
-            Effect.fail(TranscriptRepository.RepositoryError.make({ message: "forced settlement failure" })),
+            Effect.fail(TurnRepository.RepositoryError.make({ message: "forced settlement failure" })),
         }),
       })
 
@@ -212,17 +209,8 @@ describe("recorded shell session", () => {
         turn: { _tag: "RecordedShell", status: "running" },
         revision: 0,
         checkpointGeneration: 0,
-        executionCheckpoints: [],
       })
-      expect(harness.events.filter((event) => event._tag === "TranscriptProjectionStarted")).toHaveLength(1)
-      expect(
-        harness.events.some(
-          (event) =>
-            event._tag === "TranscriptProjectionPatched" ||
-            event._tag === "TranscriptProjectionStopped" ||
-            event._tag === "ShellCompleted",
-        ),
-      ).toBe(false)
+      expect(harness.events.some((event) => event._tag === "ShellCompleted")).toBe(false)
       yield* harness.close
     }),
   )
@@ -278,7 +266,6 @@ describe("recorded shell session", () => {
             },
           },
         ],
-        executionCheckpoints: [],
       })
     }),
   )
@@ -405,8 +392,7 @@ describe("recorded shell session", () => {
             },
           },
         ],
-        executionCheckpoints: [],
-        projectionVersion: projectionVersion,
+        projectionVersion: 1,
       })
       expect(harness.events.find((event) => event._tag === "ShellCompleted")).toMatchObject({
         command: "exit 7",

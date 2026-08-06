@@ -18,36 +18,30 @@ type TurnRepositoryInterface = import("@rika/product/turn-repository").Interface
 type TurnRepositoryError = import("@rika/product/turn-repository").RepositoryError
 type ExecutionGatewayInterface = import("@rika/product/execution-gateway").Interface
 type ExecutionRouteSnapshot = import("@rika/product/execution-route-snapshot").ExecutionRouteSnapshot
-type ExecutionEventEvent = import("@rika/product/execution-event").Event
-type ExecutionEventResult = import("@rika/product/execution-event").Result
 type ExecutionStatusStatus = import("@rika/product/execution-status").Status
 type PromptPart = import("@rika/product/execution-request").PromptPart
 type CreateInput = import("../../thread/repository/turn-repository-contract").CreateInput
 type QueueSubmission = import("../../thread/repository/turn-repository-queue").Submission
 type QueueClaim = import("../../thread/repository/turn-repository-queue").QueueClaim
-type ExecutionIngestInterface = import("../../execution/ingest/execution-ingest-service").Interface
 type RootTurnOwnerInterface = import("../../thread/queue/root-turn-owner").Interface
 type ModeId = import("@rika/configuration/behavior-mode").ModeId
 type InteractiveSession = import("./interactive-session").InteractiveSession
-type InteractiveEvent = import("./interactive-event").InteractiveEvent
+type InteractiveEvent = import("./interactive-runtime-event").InteractiveEvent
 type ProductLayerOptions<
   ThreadError extends Error,
   TurnError extends Error,
   BackendError extends Error,
   ThreadSummaryError extends Error = never,
   TranscriptError extends Error = never,
-  UsageError extends Error = never,
 > = import("../dispatch/product-operation-options").ProductLayerOptions<
   ThreadError,
   TurnError,
   BackendError,
   ThreadSummaryError,
-  TranscriptError,
-  UsageError
+  TranscriptError
 >
 type InteractiveOperationFeed = import("./interactive-operation-feed").InteractiveOperationFeed
 type SelectionEpochState = import("./interactive-thread-selection").SelectionEpochState
-type ThreadContext = import("./interactive-thread-context").ThreadContext
 type OperationError = import("../operation-error").OperationError
 type operationError = typeof import("../operation-error").operationError
 type queueMutationEvent = typeof import("../dispatch/product-operation-runtime-support").queueMutationEvent
@@ -62,7 +56,6 @@ export type InteractiveExecutionContextServices =
   | import("@rika/product/turn-repository").Service
   | import("@rika/product/thread-summary-repository").Service
   | import("@rika/product/transcript-repository").Service
-  | import("@rika/product/usage-repository").Service
   | import("../../context/context-resolution-service").Service
   | import("@rika/extensions/execution-extension-service").ExecutionExtensionService
   | import("@rika/product/execution-gateway").Service
@@ -72,7 +65,6 @@ export type InteractiveDependencyContext = Context.Context<
   | import("@rika/product/turn-repository").Service
   | import("@rika/product/thread-summary-repository").Service
   | import("@rika/product/transcript-repository").Service
-  | import("@rika/product/usage-repository").Service
   | import("../../context/context-resolution-service").Service
   | import("@rika/extensions/execution-extension-service").ExecutionExtensionService
 >
@@ -86,8 +78,7 @@ export type PreparedTurn = {
 }
 
 export interface InteractiveSessionInput {
-  readonly options: ProductLayerOptions<Error, Error, Error, Error, Error, Error>
-  readonly executionIngest: ExecutionIngestInterface
+  readonly options: ProductLayerOptions<Error, Error, Error, Error, Error>
   readonly pendingTurnCapacity: number
   readonly rootTurnOwner: RootTurnOwnerInterface
   readonly turnMutationAdmission: Semaphore.Semaphore
@@ -101,7 +92,6 @@ export interface InteractiveSessionInput {
     import("@rika/product/thread-summary-repository").RepositoryError,
     import("@rika/product/thread-summary-repository").Service
   >
-  readonly ensureIngest: (threadId: ThreadId, turnId: TurnId) => Effect.Effect<void, OperationError, never>
   readonly prepareExecution: (
     turn: AgentExecutionTurn,
     workspace: string,
@@ -128,19 +118,6 @@ export interface InteractiveSessionInput {
     OperationError | import("@rika/product/thread-summary-repository").RepositoryError | TurnRepositoryError,
     import("@rika/product/thread-summary-repository").Service | import("@rika/product/turn-repository").Service
   >
-  readonly projectExecutionResult: (
-    threadId: ThreadId,
-    result: ExecutionEventResult,
-  ) => Effect.Effect<
-    void,
-    OperationError | import("@rika/product/thread-summary-repository").RepositoryError,
-    import("@rika/product/thread-summary-repository").Service
-  >
-  readonly deliverResultEvents: (
-    turnId: TurnId,
-    events: ReadonlyArray<ExecutionEventEvent>,
-    delivered?: ReadonlySet<string>,
-  ) => void
   readonly executionDependencies: InteractiveExecutionContext
   readonly claimTurnObserver: (
     turnId: TurnId,
@@ -150,7 +127,6 @@ export interface InteractiveSessionInput {
   readonly acquiredBackend: ExecutionGatewayInterface
   readonly turnChanges: PubSub.PubSub<void>
   readonly dirtyTurnObservers: Set<TurnId>
-  readonly usageRepository: import("@rika/product/usage-repository").Interface
   readonly createForSubmission: (
     turns: TurnRepositoryInterface,
     submission: CreateInput,
@@ -196,7 +172,6 @@ export interface InteractiveSessionInput {
   readonly nextSessionId: () => number
   readonly activitySequence: number
   readonly operationError: operationError
-  readonly readThreadContext: (threadId: string) => Effect.Effect<ThreadContext, Error>
   readonly publishTurnSettled: (turn: TurnTurn, responseArrived?: boolean) => Effect.Effect<void, never, never>
 }
 
@@ -217,6 +192,7 @@ export interface InteractiveSessionRuntimeResult {
   readonly supervise: Effect.Effect<
     void,
     | OperationError
+    | import("@rika/product/execution-gateway").StartTurnFailure
     | import("@rika/product/execution-gateway").WatchTurnFailure
     | import("@rika/product/execution-gateway").InspectTurnFailure
     | TurnRepositoryError
@@ -251,7 +227,6 @@ export const makeInteractiveSession = (
     const sessionId = input.nextSessionId()
     const state: InteractiveSessionState = yield* makeInteractiveSessionState({
       sessionId,
-      executionIngest: input.executionIngest,
       publishInteractiveActivity: input.publishInteractiveActivity,
       activitySequence: input.activitySequence,
       options: input.options,
@@ -304,17 +279,20 @@ export const makeInteractiveSession = (
       dequeue: (turnId) => state.composition.admitLocal(implementation.dequeue(turnId)),
       steerQueued: (turnId, text) => state.composition.admitLocal(implementation.steerQueued(turnId, text)),
       steer: (text, targetTurnId) => state.composition.admitLocal(implementation.steer(text, targetTurnId)),
+      approveAuthorization: (turnId, authorizationId) =>
+        state.composition.admitLocal(implementation.approveAuthorization(turnId, authorizationId)),
+      denyAuthorization: (turnId, authorizationId) =>
+        state.composition.admitLocal(implementation.denyAuthorization(turnId, authorizationId)),
       interruptAndSend: (prompt) => state.composition.admitLocal(implementation.interruptAndSend(prompt)),
       cancel: state.composition.admitLocal(implementation.cancel),
       quit: implementation.quit,
-      selectThread: (threadId, epoch) => state.composition.admitLocal(implementation.selectThread(threadId, epoch)),
+      selectThread: (threadId) => state.composition.admitLocal(implementation.selectThread(threadId)),
       readQueue: (threadId) => state.composition.admitLocal(implementation.readQueue(threadId)),
-      loadOlder: (threadId, epoch, before, loadedKeys) =>
-        state.composition.admitLocal(implementation.loadOlder(threadId, epoch, before, loadedKeys)),
-      loadNewer: (threadId, epoch, after) =>
-        state.composition.admitLocal(implementation.loadNewer(threadId, epoch, after)),
+      loadOlder: (threadId, before, loadedKeys) =>
+        state.composition.admitLocal(implementation.loadOlder(threadId, before, loadedKeys)),
+      loadNewer: (threadId, after) => state.composition.admitLocal(implementation.loadNewer(threadId, after)),
       previewThread: (threadId) => state.composition.admitLocal(implementation.previewThread(threadId)),
-      reopenThread: (epoch) => state.composition.admitLocal(implementation.reopenThread(epoch)),
+      reopenThread: state.composition.admitLocal(implementation.reopenThread),
     }
     return {
       session,

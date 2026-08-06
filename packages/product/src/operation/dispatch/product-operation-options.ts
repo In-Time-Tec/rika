@@ -6,7 +6,6 @@ export interface ProductLayerOptions<
   BackendError extends Error,
   ThreadSummaryError extends Error = never,
   TranscriptError extends Error = never,
-  UsageError extends Error = never,
 > {
   readonly repositoryLayer: import("effect").Layer.Layer<import("@rika/product/thread-repository").Service, ThreadError>
   readonly turnRepositoryLayer: import("effect").Layer.Layer<import("@rika/product/turn-repository").Service, TurnError>
@@ -17,10 +16,6 @@ export interface ProductLayerOptions<
   readonly transcriptRepositoryLayer?: import("effect").Layer.Layer<
     import("@rika/product/transcript-repository").Service,
     TranscriptError
-  >
-  readonly usageRepositoryLayer?: import("effect").Layer.Layer<
-    import("@rika/product/usage-repository").Service,
-    UsageError
   >
   readonly backendLayer: import("effect").Layer.Layer<import("@rika/product/execution-gateway").Service, BackendError>
   readonly resolveExecutionRoute?: (

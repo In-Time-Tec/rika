@@ -3,15 +3,21 @@ import * as ThreadRepository from "../../thread/repository/thread-repository"
 import * as ThreadResult from "@rika/product/thread-result"
 import * as TurnRepository from "../../thread/repository/turn-repository"
 import { clampThreadTitle } from "../../thread/query/thread-title-policy"
-import { agentResponseArrived } from "../interactive/interactive-session-interface-support"
 import { isReviewRouteMode, reviewIntent, reviewRouteMode } from "../review/review-policy"
 import { Cause, Clock, Console, Effect } from "effect"
+import type * as ExecutionProjection from "../../execution/contract/execution-projection"
+import { compareUnitOrder } from "@rika/transcript/transcript-unit-order"
 import type {
   AgentExecutionTurn,
   Dependencies,
   NoninteractiveInput,
   PreparedExecutionTurn,
 } from "./noninteractive-operation-contract"
+
+const turnFailureReason = (units: ReadonlyArray<import("@rika/transcript/transcript-unit").Unit>) =>
+  units
+    .toSorted((left, right) => compareUnitOrder(left.order, right.order))
+    .findLast((unit) => unit.executionOutcome?.status === "failed")?.executionOutcome?.reason
 
 export const run = Effect.fn("NoninteractiveOperation.run")(function* (
   input: NoninteractiveInput,
@@ -42,8 +48,35 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
       turn: AgentExecutionTurn,
       preparedInput?: PreparedExecutionTurn,
     ) {
-      const startedAt = yield* Clock.currentTimeMillis
-      const deliveredCursors = new Set<string>()
+      const clock = yield* Clock.Clock
+      const startedAt = clock.currentTimeMillisUnsafe()
+      const changes = new Array<ExecutionProjection.Change>()
+      const delivered = new Set<string>()
+      const units = new Map<string, import("@rika/transcript/transcript-unit").Unit>()
+      let projectionRevision: number | undefined
+      let projectionInvalid = false
+      const applyChange = (change: ExecutionProjection.Change) => {
+        const key = `${change._tag}:${change.revision}`
+        if (delivered.has(key)) return
+        delivered.add(key)
+        changes.push(change)
+        if (change._tag === "ProjectionSnapshot") {
+          units.clear()
+          for (const unit of change.units) units.set(unit.key, unit)
+          projectionRevision = change.revision
+        } else if (projectionRevision !== change.baseRevision) projectionInvalid = true
+        else {
+          for (const removedKey of change.remove) units.delete(removedKey)
+          for (const unit of change.upsert) units.set(unit.key, unit)
+          projectionRevision = change.revision
+        }
+        dependencies.publishInteractiveActivity(0, {
+          _tag: "ExecutionProjectionChanged",
+          threadId: turn.threadId,
+          turn: { ...turn, status: change.state.status, updatedAt: clock.currentTimeMillisUnsafe() },
+          change,
+        })
+      }
       yield* Effect.logInfo("turn.started").pipe(
         Effect.annotateLogs({
           "rika.thread.id": String(thread.id),
@@ -75,12 +108,11 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
           ...(titleIntent === undefined ? {} : { titleIntent }),
           ...(isReviewRouteMode(turn.executionRoute.mode) ? { reviewIntent: reviewIntent(turn.prompt) } : {}),
         })
-        yield* dependencies.ensureIngest(turn.threadId, turn.id)
-        const result = yield* dependencies.rootTurnOwner.watchTurn(turn.id, (event) => {
-          deliveredCursors.add(event.cursor)
-          dependencies.executionIngest.deliver(turn.id, event)
-        })
-        return { result, followed: false }
+        const result = yield* dependencies.rootTurnOwner.watchTurn(turn.id, applyChange)
+        for (const change of result.changes) applyChange(change)
+        if (projectionInvalid)
+          return yield* dependencies.operationError(`Turn ${turn.id} produced a non-contiguous projection`)
+        return result
       }).pipe(
         Effect.catch((error) =>
           Effect.gen(function* () {
@@ -98,29 +130,30 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
           }),
         ),
       )
-      const { result, followed } = execution
+      const result = execution
       const completedAt = yield* Clock.currentTimeMillis
-      yield* Effect.logInfo("turn.finished").pipe(
-        Effect.annotateLogs({
-          "rika.duration.ms": completedAt - startedAt,
-          "rika.thread.id": String(thread.id),
-          "rika.turn.id": String(turn.id),
-          "rika.turn.status": result.status,
-        }),
-      )
-      if (!followed) {
-        dependencies.deliverResultEvents(turn.id, result.events, deliveredCursors)
-        const updated = yield* dependencies.setTurnStatus(
-          turn.id,
-          result.status,
-          completedAt,
-          result.status === "cancelled" ? agentResponseArrived(result.events) : undefined,
-        )
-        yield* dependencies.projectExecutionResult(thread.id, result)
-        yield* dependencies.ensureIngest(updated.threadId, updated.id)
-        yield* dependencies.awaitIngestSettled(updated.id)
-      }
-      return result
+      const settledFailure = turnFailureReason([...units.values()])
+      yield* result.status === "failed"
+        ? Effect.logError("turn.failed").pipe(
+            Effect.annotateLogs({
+              "rika.duration.ms": completedAt - startedAt,
+              "rika.failure.kind": "OperationError",
+              ...(settledFailure === undefined ? {} : { "rika.failure.message": settledFailure }),
+              "rika.thread.id": String(thread.id),
+              "rika.turn.id": String(turn.id),
+              "rika.turn.status": result.status,
+            }),
+          )
+        : Effect.logInfo("turn.finished").pipe(
+            Effect.annotateLogs({
+              "rika.duration.ms": completedAt - startedAt,
+              "rika.thread.id": String(thread.id),
+              "rika.turn.id": String(turn.id),
+              "rika.turn.status": result.status,
+            }),
+          )
+      yield* dependencies.setTurnStatus(turn.id, result.status, completedAt)
+      return { result, changes, units: [...units.values()] }
     })
     const drainRunQueue = Effect.fn("ProductOperation.drainRunQueue")(function* () {
       while (true) {
@@ -194,26 +227,27 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
       return yield* dependencies.operationError(`Turn ${submitted.id} already has an execution observer`)
     if (!ThreadResult.TurnResult.isAgentExecution(submitted))
       return yield* dependencies.operationError(`Turn ${submitted.id} is not an executable turn`)
-    const result = yield* runTurn(submitted).pipe(Effect.ensuring(dependencies.releaseTurnObserver(submitted.id)))
+    const completed = yield* runTurn(submitted).pipe(Effect.ensuring(dependencies.releaseTurnObserver(submitted.id)))
     yield* drainRunQueue()
     if (input._tag === "Run" && input.streamJson) {
-      yield* Effect.forEach(result.events, (event) => Console.log(JSON.stringify(event)), { discard: true })
+      yield* Effect.forEach(completed.changes, (change) => Console.log(JSON.stringify(change)), { discard: true })
       return
     }
-    const text = result.events
-      .filter((event) => event.type === "model.output.completed")
-      .map((event) => event.text ?? "")
+    const ordered = completed.units.toSorted((left, right) => compareUnitOrder(left.order, right.order))
+    const text = ordered
+      .filter((unit) => unit.content._tag === "Entry" && unit.content.role === "assistant")
+      .map((unit) => (unit.content._tag === "Entry" ? unit.content.text : ""))
       .join("")
     if (text.length > 0) yield* Console.log(text)
-    if (result.status === "cancelled")
+    if (completed.result.status === "cancelled")
       return yield* dependencies.operationError(`Turn ${submitted.id} was cancelled before it completed`)
-    if (result.status === "failed") {
-      const failure = result.events.findLast((event) => event.type === "execution.failed")?.text
+    if (completed.result.status === "failed") {
+      const failure = turnFailureReason(ordered)
       return yield* dependencies.operationError(
         failure === undefined ? `Turn ${submitted.id} failed` : `Turn ${submitted.id} failed: ${failure}`,
       )
     }
-    if (result.status === "completed" && text.length === 0)
+    if (completed.result.status === "completed" && text.length === 0)
       return yield* dependencies.operationError(`Turn ${submitted.id} completed without output`)
   })
   yield* program.pipe(

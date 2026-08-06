@@ -14,7 +14,7 @@ const ReadResult = Read.Result
 const ReadToolError = Read.ToolError
 const ReadToolFailure = Read.ToolFailure
 const ReadThreadInput = Read.ReadThreadInput
-const threadToolContractVersion = 2
+const threadToolContractVersion = 1
 
 const make = <Name extends string, Parameters extends Schema.Top, Success extends Schema.Top>(
   name: Name,

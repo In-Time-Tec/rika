@@ -1,15 +1,15 @@
+import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as Database from "@rika/product-store/product-database-layer"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
+import * as ThreadSearchRepository from "@rika/product-store/sqlite-thread-search-repository"
+import * as ThreadSummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
-import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
-import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Effect, Layer } from "effect"
 
@@ -24,11 +24,18 @@ export const makeTuiAppRepositoryLayers = (filename: string) => {
   return {
     repositoryLayer: ThreadRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer)),
     turnRepositoryLayer: TurnRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer)),
+    threadSearchRepositoryLayer: ThreadSearchRepository.layer.pipe(
+      Layer.provide(database),
+      Layer.provide(BunServices.layer),
+    ),
+    threadSummaryRepositoryLayer: ThreadSummaryRepository.layer.pipe(
+      Layer.provide(database),
+      Layer.provide(BunServices.layer),
+    ),
     transcriptRepositoryLayer: TranscriptRepository.layer.pipe(
       Layer.provide(database),
       Layer.provide(BunServices.layer),
     ),
-    usageRepositoryLayer: UsageRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer)),
   }
 }
 
@@ -86,30 +93,28 @@ export const seedHistoricalTranscript = Effect.fn("TuiApp.seedHistoricalTranscri
     executionOutcome: { status: "complete" },
     content: { _tag: "Entry", role: "assistant", text: "Historical transcript complete" },
   }
-  const units = [...TranscriptProjection.Projection.empty(turnId, turn.prompt).units, ...notifications, finalUnit]
-  const state = {
-    revision: fixture.entryCount,
-    modelPhase: 0,
-    usableCompletionSequence: fixture.entryCount - 1,
-    checkpointCursor: cursor,
-  }
-  yield* transcripts.commitDelta(
-    turn,
-    state,
-    { remove: [], upsert: units },
+  const userKey = `turn:${turnId}:user`
+  const units: ReadonlyArray<TranscriptUnit.Unit> = [
     {
-      expectedGeneration: undefined,
-      projectionVersion: 4,
-      executionCheckpoints: [
-        {
-          executionKey: TranscriptCorrelation.executionKey(String(turnId)),
-          executionId: String(turnId),
-          cursor,
-          sequence: state.revision,
-          status: "completed",
-          state,
-        },
-      ],
+      key: userKey,
+      turnId,
+      order: TranscriptOrdering.unitOrder(userKey, -1),
+      revision: 0,
+      content: { _tag: "Entry", role: "user", text: turn.prompt },
     },
-  )
+    ...notifications,
+    finalUnit,
+  ]
+  yield* transcripts.commitProjection(turn, {
+    _tag: "ProjectionSnapshot",
+    revision: fixture.entryCount,
+    checkpoint: { version: 1, cursor, state: "{}" },
+    units,
+    hasOlder: false,
+    state: {
+      status: "completed",
+      usage: ExecutionProjection.emptyUsageState(),
+      steering: { steeringMessages: 0, followUpMessages: 0 },
+    },
+  })
 })

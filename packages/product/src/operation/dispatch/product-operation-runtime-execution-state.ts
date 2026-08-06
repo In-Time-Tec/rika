@@ -2,11 +2,7 @@ import { Effect, PubSub, Scope, Semaphore, Ref, Layer } from "effect"
 import { makeProductOperationFoundation } from "./product-operation-foundation"
 import { operationError } from "../operation-error"
 import { makeProductOperationExecution, type ProductOperationExecution } from "./product-operation-execution"
-import {
-  executionStartFailureMessage,
-  ingestFailureMessage,
-  temporaryThreadTitle,
-} from "../interactive/interactive-operation-leaves"
+import { executionStartFailureMessage, temporaryThreadTitle } from "../interactive/interactive-operation-leaves"
 import { queueMutationEvent as queueMutationEventValue } from "./product-operation-runtime-support"
 
 type ThreadId = import("@rika/product/thread-record").ThreadId
@@ -16,12 +12,10 @@ type CreateInput = import("../../thread/repository/turn-repository-contract").Cr
 type QueueSubmission = import("../../thread/repository/turn-repository-queue").Submission
 type QueueClaim = import("../../thread/repository/turn-repository-queue").QueueClaim
 type Status = import("@rika/product/execution-status").Status
-type ExecutionEventEvent = import("@rika/product/execution-event").Event
 type ExecutionGatewayInterface = import("@rika/product/execution-gateway").Interface
 type TurnRepositoryInterface = import("@rika/product/turn-repository").Interface
 type TurnRepositoryError = import("@rika/product/turn-repository").RepositoryError
 type TurnRepositoryQueueFull = import("@rika/product/turn-repository").QueueFull
-type UsageSnapshotTurnUsage = import("../../usage/usage-snapshot").TurnUsage
 type ExecutionExtensionsExecutionExtensionInterface =
   import("@rika/extensions/execution-extension-service").ExecutionExtensionInterface
 type RootTurnOwnerInterface = import("../../thread/queue/root-turn-owner").Interface
@@ -31,21 +25,18 @@ type ProductLayerOptions<
   BackendError extends Error,
   ThreadSummaryError extends Error = never,
   TranscriptError extends Error = never,
-  UsageError extends Error = never,
 > = import("./product-operation-options").ProductLayerOptions<
   ThreadError,
   TurnError,
   BackendError,
   ThreadSummaryError,
-  TranscriptError,
-  UsageError
+  TranscriptError
 >
 type queueMutationEvent = typeof import("./product-operation-runtime-support").queueMutationEvent
 type staleQueuedTurnsError = typeof import("../../thread/queue/pending-turn-policy").staleQueuedTurnsError
 type OperationUnavailable = import("../contract/product-operation").OperationUnavailable
 type Input = import("../contract/product-operation").Input
-type InteractiveEvent = import("../interactive/interactive-event").InteractiveEvent
-type ThreadContext = import("../interactive/interactive-thread-context").ThreadContext
+type InteractiveEvent = import("../interactive/interactive-runtime-event").InteractiveEvent
 type OperationError = import("../operation-error").OperationError
 type InteractiveDependencyContext = import("../interactive/interactive-session-runtime").InteractiveDependencyContext
 type InteractiveExecutionContext = import("../interactive/interactive-session-runtime").InteractiveExecutionContext
@@ -59,7 +50,7 @@ const watchedThreadIds = (sessionThreadViews: Map<number, () => string | undefin
   )
 
 export interface ProductOperationExecutionStateInput {
-  readonly options: ProductLayerOptions<Error, Error, Error, Error, Error, Error>
+  readonly options: ProductLayerOptions<Error, Error, Error, Error, Error>
   readonly ownerScope: Scope.Scope
   readonly publishInteractiveActivity: (origin: number, event: InteractiveEvent) => InteractiveEvent
   readonly publishTurnSettled: (turn: TurnTurn, responseArrived?: boolean) => Effect.Effect<void, never, never>
@@ -89,20 +80,10 @@ export interface ProductOperationExecutionState extends ProductOperationExecutio
     | import("@rika/product/turn-repository").Service
     | import("@rika/product/thread-summary-repository").Service
     | import("@rika/product/transcript-repository").Service
-    | import("@rika/product/usage-repository").Service
     | import("../../context/context-resolution-service").Service
     | import("@rika/extensions/execution-extension-service").ExecutionExtensionService
   >
   readonly withExecutionAdmission: <A, E, R>(effect: Effect.Effect<A, E, R>, closed: E) => Effect.Effect<A, E, R>
-  readonly commitUsageSource: (
-    sourceId: string,
-    threadId: string,
-    turnId: string,
-    events: ReadonlyArray<ExecutionEventEvent>,
-    terminal: boolean,
-  ) => Effect.Effect<unknown, Error>
-  readonly publishThreadUsage: (value: UsageSnapshotTurnUsage | undefined) => Effect.Effect<void, Error>
-  readonly readThreadContext: (threadId: string) => Effect.Effect<ThreadContext, Error>
   readonly replacementAdmission: Semaphore.Semaphore
   readonly replacementState: Ref.Ref<{ closed: boolean; active: number }>
   readonly rawBackend: ExecutionGatewayInterface
@@ -110,16 +91,6 @@ export interface ProductOperationExecutionState extends ProductOperationExecutio
   readonly backendLayer: Layer.Layer<import("@rika/product/execution-gateway").Service>
   readonly dependencyContext: InteractiveDependencyContext
   readonly executionDependencies: InteractiveExecutionContext
-  readonly usageRepository: import("@rika/product/usage-repository").Interface
-  readonly executionIngest: import("../../execution/ingest/execution-ingest-service").Interface
-  readonly ensureIngest: (threadId: ThreadId, turnId: TurnId) => Effect.Effect<void, OperationError, never>
-  readonly awaitIngestSettled: (turnId: TurnId) => Effect.Effect<void, OperationError, never>
-  readonly flushIngest: (turnId: TurnId) => Effect.Effect<void, OperationError, never>
-  readonly deliverResultEvents: (
-    turnId: TurnId,
-    events: ReadonlyArray<ExecutionEventEvent>,
-    delivered?: ReadonlySet<string>,
-  ) => void
   readonly createForSubmission: (
     turns: TurnRepositoryInterface,
     submission: CreateInput,
@@ -164,12 +135,7 @@ export const buildProductOperationExecutionState = (
     const turnChanges = yield* PubSub.sliding<void>(1)
     const dirtyTurnObservers = new Set<TurnId>()
     const watched = () => watchedThreadIds(sessionThreadViews)
-    const foundation = yield* makeProductOperationFoundation({
-      options,
-      ownerScope,
-      publishInteractiveActivity,
-      publishTurnSettled,
-    }).pipe(
+    const foundation = yield* makeProductOperationFoundation({ options, ownerScope }).pipe(
       Effect.provideService(Scope.Scope, ownerScope),
       Effect.mapError((error) => operationError(String(error), error)),
     )
@@ -178,9 +144,6 @@ export const buildProductOperationExecutionState = (
       extensionService,
       acquiredDependencies,
       withExecutionAdmission,
-      commitUsageSource,
-      publishThreadUsage,
-      readThreadContext,
       replacementAdmission,
       replacementState,
       rawBackend,
@@ -188,12 +151,6 @@ export const buildProductOperationExecutionState = (
       backendLayer,
       dependencyContext,
       executionDependencies,
-      usageRepository,
-      executionIngest,
-      ensureIngest,
-      awaitIngestSettled,
-      flushIngest,
-      deliverResultEvents,
     } = foundation
     const claimTurnObserver = (turnId: TurnId, expectedStatus?: Status) => rootTurnOwner.claim(turnId, expectedStatus)
     const releaseTurnObserver = (turnId: TurnId, notify = true) =>
@@ -231,15 +188,7 @@ export const buildProductOperationExecutionState = (
       dependencyContext,
       executionDependencies,
       withExecutionAdmission,
-      commitUsageSource,
-      publishThreadUsage,
       extensionService,
-      usageRepository,
-      executionIngest,
-      ensureIngest,
-      awaitIngestSettled,
-      flushIngest,
-      deliverResultEvents,
       publishInteractiveActivity,
       publishTurnSettled,
       createObservedSubmission,
@@ -249,7 +198,6 @@ export const buildProductOperationExecutionState = (
       backendLayer,
       acquiredDependencies,
       executionStartFailureMessage,
-      ingestFailureMessage,
       unavailable: input.unavailable,
       temporaryThreadTitle,
       encodeJson: input.encodeJson,
@@ -266,9 +214,6 @@ export const buildProductOperationExecutionState = (
       extensionService,
       acquiredDependencies,
       withExecutionAdmission,
-      commitUsageSource,
-      publishThreadUsage,
-      readThreadContext,
       replacementAdmission,
       replacementState,
       rawBackend,
@@ -276,12 +221,6 @@ export const buildProductOperationExecutionState = (
       backendLayer,
       dependencyContext,
       executionDependencies,
-      usageRepository,
-      executionIngest,
-      ensureIngest,
-      awaitIngestSettled,
-      flushIngest,
-      deliverResultEvents,
       createForSubmission,
       claimTurnObserver,
       releaseTurnObserver,

@@ -41,6 +41,22 @@ export const makeProductOperationAdmission = (input: ProductOperationAdmissionIn
         rawBackend.steerTurn(link, steering),
         ExecutionGateway.SteeringFailure.make({ message: "Server replacement has closed execution admission" }),
       ),
+    approveTurn: (link, approval) =>
+      withExecutionAdmission(
+        rawBackend.approveTurn(link, approval),
+        ExecutionGateway.ApprovalResponseFailure.make({
+          kind: "unavailable",
+          message: "Server replacement has closed execution admission",
+        }),
+      ),
+    denyTurn: (link, approval) =>
+      withExecutionAdmission(
+        rawBackend.denyTurn(link, approval),
+        ExecutionGateway.ApprovalResponseFailure.make({
+          kind: "unavailable",
+          message: "Server replacement has closed execution admission",
+        }),
+      ),
     watchTurn: (link, cursor) => rawBackend.watchTurn(link, cursor),
     inspectTurn: (link) => rawBackend.inspectTurn(link),
   })

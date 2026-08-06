@@ -7,6 +7,7 @@ import { expandPastedText } from "../model/terminal-composer-paste"
 import { bindSubmittedDraft, validQueueSelection } from "../model/terminal-queue-state"
 import { composerHeightLimit, clampSidebarWidth } from "../model/terminal-layout-state"
 import { runningToolsActivity, type Activity } from "../model/terminal-activity-state"
+import { appendProvisionalUserEntry, reconcileUserEntry } from "../model/terminal-submission-state"
 
 const reduceExecutionImpl = (
   model: Model,
@@ -54,7 +55,7 @@ const reduceExecutionImpl = (
         historySearch: "",
       }
       const queuesBehindActiveTurn = model.busy && message.submissionId !== undefined
-      return {
+      const submitted: Model = {
         ...model,
         input: "",
         cursor: 0,
@@ -80,6 +81,9 @@ const reduceExecutionImpl = (
         busy: true,
         activity: model.busy ? model.activity : { _tag: "Sending" },
       }
+      return submission._tag === "Prompt" && !model.busy
+        ? appendProvisionalUserEntry(submitted, submittedPrompt, message.submissionId)
+        : submitted
     }
     case "SubmissionAdmitted": {
       const admitProvisional = (item: QueueItem): ReadonlyArray<QueueItem> => {
@@ -88,12 +92,20 @@ const reduceExecutionImpl = (
         return []
       }
       const queue = message.submissionId === undefined ? model.queue : model.queue.flatMap(admitProvisional)
-      return {
-        ...model,
-        queue,
-        queueSelection: validQueueSelection(model.queueSelection, queue),
-        submittedDrafts: bindSubmittedDraft(model.submittedDrafts, message.turnId, message.submissionId),
-      }
+      const admitted = reconcileUserEntry(
+        {
+          ...model,
+          queue,
+          queueSelection: validQueueSelection(model.queueSelection, queue),
+          submittedDrafts: bindSubmittedDraft(model.submittedDrafts, message.turnId, message.submissionId),
+        },
+        {
+          turnId: message.turnId,
+          ...(message.submissionId === undefined ? {} : { submissionId: message.submissionId }),
+          started: false,
+        },
+      )
+      return admitted.model
     }
     case "SteeringAccepted": {
       const index = model.pendingSteering.findIndex(
@@ -162,25 +174,32 @@ const reduceExecutionImpl = (
     }
     case "TurnStarted": {
       const boundDrafts = bindSubmittedDraft(model.submittedDrafts, message.turnId, message.submissionId)
-      if (model.entries.some((entry) => entry.role === "user" && entry.turnId === message.turnId))
-        return {
-          ...model,
-          submittedDrafts: boundDrafts,
-          cancelPending: false,
-          activeTurnId: message.turnId,
-          busy: true,
-          activity: { _tag: "Waiting" },
-          contextAnimation: { flashTicks: 0, flashed75: false, flashed90: false },
-        }
+      const boundModel = { ...model, submittedDrafts: boundDrafts }
+      const reconciled = reconcileUserEntry(boundModel, {
+        turnId: message.turnId,
+        ...(message.submissionId === undefined ? {} : { submissionId: message.submissionId }),
+        prompt: message.prompt,
+        started: true,
+      })
+      const started =
+        reconciled.found || model.entries.some((entry) => entry.role === "user" && entry.turnId === message.turnId)
+          ? reconciled.model
+          : {
+              ...boundModel,
+              entries: [...model.entries, { role: "user" as const, text: message.prompt, turnId: message.turnId }],
+              items: [
+                ...model.items,
+                {
+                  _tag: "Entry" as const,
+                  index: model.entries.length,
+                  id: `turn:${message.turnId}:user`,
+                  turnId: message.turnId,
+                },
+              ],
+            }
       return {
-        ...model,
-        submittedDrafts: boundDrafts,
+        ...started,
         cancelPending: false,
-        entries: [...model.entries, { role: "user", text: message.prompt, turnId: message.turnId }],
-        items: [
-          ...model.items,
-          { _tag: "Entry", index: model.entries.length, id: `turn:${message.turnId}:user`, turnId: message.turnId },
-        ],
         activeTurnId: message.turnId,
         busy: true,
         activity: { _tag: "Waiting" },

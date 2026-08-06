@@ -1,499 +1,214 @@
-import type { Projection } from "@rika/product/transcript-page"
-import { TurnResult } from "@rika/product/thread-result"
-import { Service } from "@rika/product/transcript-repository"
-import type { Interface } from "@rika/product/transcript-repository"
-export { Service }
-import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import * as ExecutionProjection from "@rika/product/execution-projection"
+import type { Projection, PageCursor, UsageSummary } from "@rika/product/transcript-page"
+import { Service, RepositoryError, type Interface } from "@rika/product/transcript-repository"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import { Effect, Layer, Ref } from "effect"
-type WriteResult = Effect.Success<ReturnType<Interface["commitDelta"]>>
-import * as TurnRepository from "../turn/memory-turn-repository"
-import type { Interface as TurnRepositoryInterface } from "@rika/product/turn-repository"
-import { Turn, TurnId } from "@rika/product/turn-record"
-import type { RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/thread-result"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
+import type { Unit } from "@rika/transcript/transcript-unit"
+import { Effect, Layer, Ref, Schema } from "effect"
+import type { TurnId } from "@rika/product/turn-record"
+import {
+  Service as TurnRepositoryService,
+  type Interface as TurnRepositoryInterface,
+} from "@rika/product/turn-repository"
 
-import { invalidatedProjectionVersion, RepositoryError } from "@rika/product/transcript-repository"
-import { support } from "./transcript-repository-support"
-import { materializeMemory, memoryEntry, sameAttachment } from "./transcript-memory-state"
-import type { MemoryEntry } from "./transcript-memory-state"
-const {
-  clone,
-  sameTurn,
-  refoldTurn,
-  storedProjection,
-  pageSize,
-  cursorFor,
-  withUnits,
-  recordedShellProjection,
-  validateRecordedShellProjection,
-  before,
-  after,
-  compareDescending,
-  validateUnits,
-  validateStateScalars,
-  validateProjectionVersion,
-  validateCurrentProjectionVersion,
-  validateCheckpoint,
-  validateAttachmentSet,
-  validatePageOptions,
-  validateMemoryUnits,
-  validateMemoryCheckpoint,
-  validateDelta,
-} = support
-type MemoryWrite =
-  | { readonly _tag: "Success"; readonly result: WriteResult }
-  | { readonly _tag: "Failure"; readonly error: RepositoryError }
-type MemoryRefoldProjectionWrite = { readonly _tag: "Commit"; readonly value: void } | { readonly _tag: "Stale" }
-const memoryWriteResult = (write: MemoryWrite): Effect.Effect<WriteResult, RepositoryError> =>
-  write._tag === "Success" ? Effect.succeed(write.result) : Effect.fail(write.error)
-export interface MemoryOptions {
-  readonly initial?: ReadonlyArray<Projection>
-  readonly turns?: TurnRepositoryInterface
-}
-export const makeMemory = (memoryOptions: MemoryOptions = {}) =>
+const clone = <A>(value: A): A => structuredClone(value)
+const cursorFor = (projection: Projection, unit: Unit): PageCursor => ({
+  createdAt: projection.turn.createdAt,
+  turnId: projection.turn.id,
+  orderKey: TranscriptOrdering.encodeUnitOrder(unit.order),
+})
+const compareCursor = (left: PageCursor, right: PageCursor) =>
+  left.createdAt - right.createdAt ||
+  String(left.turnId).localeCompare(String(right.turnId)) ||
+  left.orderKey.localeCompare(right.orderKey)
+const validateUnits = (turnId: TurnId, units: ReadonlyArray<Unit>) =>
   Effect.gen(function* () {
-    const initial = memoryOptions.initial ?? []
-    const turns = memoryOptions.turns
-    const coordinator = turns === undefined ? undefined : TurnRepository.memoryCoordinator(turns)
-    if (turns !== undefined && coordinator === undefined)
-      return yield* RepositoryError.make({ message: "Memory transcript repository requires a memory Turn repository" })
-    const withLock = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-      coordinator === undefined ? effect : coordinator.withLock(effect)
-    const initialEntries = new Map<TurnId, MemoryEntry>()
-    for (const projection of initial) {
-      if (initialEntries.has(projection.turn.id))
-        return yield* RepositoryError.make({ message: `Transcript ${projection.turn.id} is duplicated` })
-      if (!Number.isSafeInteger(projection.checkpointGeneration) || projection.checkpointGeneration < 0)
-        return yield* RepositoryError.make({
-          message: `Transcript ${projection.turn.id} has an invalid checkpoint generation`,
-        })
-      yield* validateUnits(projection.units)
-      yield* validateMemoryUnits(projection.units)
-      const options = {
-        executionCheckpoints: projection.executionCheckpoints,
-        projectionVersion: projection.projectionVersion,
-        expectedGeneration: undefined,
-      }
-      yield* validateProjectionVersion(projection.turn.id, projection.projectionVersion)
-      yield* validateStateScalars(
-        projection.turn.id,
-        "root projection",
-        TranscriptProjection.Projection.projectionState(projection),
+    const orders = new Set<string>()
+    const keys = new Set<string>()
+    for (const unit of units) {
+      if (
+        !Schema.is(TranscriptUnit.Unit)(unit) ||
+        unit.turnId !== turnId ||
+        !TranscriptOrdering.hasIntrinsicOrder(unit)
       )
-      const invalidatedEmpty =
-        projection.projectionVersion === invalidatedProjectionVersion &&
-        projection.units.length === 0 &&
-        projection.executionCheckpoints.length === 0
-      if (TurnResult.isRecordedShell(projection.turn)) {
-        if (projection.executionCheckpoints.length !== 0)
-          return yield* RepositoryError.make({
-            message: `Recorded shell turn ${projection.turn.id} has execution checkpoints`,
-          })
-        yield* validateRecordedShellProjection(
-          projection.turn,
-          withUnits(TranscriptProjection.Projection.projectionState(projection), projection.units),
-          projection.projectionVersion,
-        )
-      } else if (!invalidatedEmpty) {
-        yield* validateCheckpoint(
-          projection.turn,
-          TranscriptProjection.Projection.projectionState(projection),
-          options,
-          true,
-        )
-        yield* validateMemoryCheckpoint(options)
-        yield* validateAttachmentSet(projection.turn, projection.units, projection.executionCheckpoints)
-      }
-      initialEntries.set(
-        projection.turn.id,
-        memoryEntry(
-          projection.turn,
-          withUnits(TranscriptProjection.Projection.projectionState(projection), projection.units),
-          options,
-          projection.checkpointGeneration,
-        ),
-      )
+        return yield* RepositoryError.make({ message: `Transcript unit ${unit.key} is invalid` })
+      const order = TranscriptOrdering.encodeUnitOrder(unit.order)
+      if (keys.has(unit.key) || orders.has(order))
+        return yield* RepositoryError.make({ message: `Transcript unit ${unit.key} duplicates a durable identity` })
+      keys.add(unit.key)
+      orders.add(order)
     }
-    const state = yield* Ref.make(initialEntries)
-    const get = Effect.fn("TranscriptRepository.get")(function* (turnId: TurnId) {
-      const found = (yield* withLock(Ref.get(state))).get(turnId)
-      return found === undefined ? undefined : materializeMemory(found)
-    })
-    const listProjectionRecoveryCandidates = Effect.fn("TranscriptRepository.listProjectionRecoveryCandidates")(
-      function* (projectionVersion: number) {
-        yield* validateCurrentProjectionVersion(projectionVersion)
-        if (coordinator === undefined)
-          return yield* RepositoryError.make({
-            message: "Projection recovery requires paired memory Turn and Transcript repositories",
-          })
-        return yield* withLock(
-          Effect.gen(function* () {
-            const [entries, agentTurns] = yield* Effect.all([Ref.get(state), coordinator.agentExecutions])
-            return agentTurns
-              .filter((turn) => turn.status !== "queued")
-              .filter((turn) => {
-                const entry = entries.get(turn.id)
-                return (
-                  entry === undefined ||
-                  entry.projection.projectionVersion < projectionVersion ||
-                  [...entry.checkpointsByKey.values()].some((checkpoint) => checkpoint.status === undefined)
-                )
-              })
-              .toSorted((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id))
-              .map((turn) => ({ threadId: turn.threadId, turnId: turn.id }))
-          }),
-        )
-      },
+  })
+const materialize = (projection: Projection): Projection => ({
+  ...clone(projection),
+  units: projection.units.toSorted((a, b) => TranscriptOrdering.compareUnitOrder(a.order, b.order)),
+})
+
+export const makeMemory = Effect.fn("TranscriptRepository.makeMemory")(function* (
+  initialOptions: {
+    readonly initial?: ReadonlyArray<Projection>
+    readonly turns?: TurnRepositoryInterface
+  } = {},
+) {
+  const initial = new Map<TurnId, Projection>()
+  for (const projection of initialOptions.initial ?? []) {
+    yield* validateUnits(projection.turn.id, projection.units)
+    initial.set(projection.turn.id, materialize(projection))
+  }
+  const state = yield* Ref.make(initial)
+  const get: Interface["get"] = (turnId) =>
+    Ref.get(state).pipe(
+      Effect.map((entries) => {
+        const projection = entries.get(turnId)
+        return projection === undefined ? undefined : clone(projection)
+      }),
     )
-    const insertRecordedShell = Effect.fn("TranscriptRepository.insertRecordedShell")(function* (
-      turn: RunningRecordedShellTurn | TerminalRecordedShellTurn,
-      projectionVersion: number,
-    ) {
-      if (coordinator === undefined)
-        return yield* RepositoryError.make({
-          message: "Recorded shell writes require paired memory Turn and Transcript repositories",
-        })
-      const projection = recordedShellProjection(turn)
-      yield* validateUnits(projection.units)
-      yield* validateMemoryUnits(projection.units)
-      yield* validateRecordedShellProjection(turn, projection, projectionVersion)
-      const written = yield* coordinator.writeRecordedShell(undefined, turn, (storedTurn) =>
-        Ref.modify(
-          state,
-          (entries): readonly [TurnRepository.MemoryRefoldWrite<Projection>, Map<TurnId, MemoryEntry>] => {
-            if (entries.has(storedTurn.id)) return [{ _tag: "Stale" as const }, entries] as const
-            const entry = memoryEntry(
-              storedTurn,
-              projection,
-              { executionCheckpoints: [], projectionVersion, expectedGeneration: undefined },
-              0,
-            )
-            entries.set(storedTurn.id, entry)
-            return [{ _tag: "Commit" as const, value: materializeMemory(entry) }, entries] as const
-          },
-        ),
-      )
-      if (written._tag === "Stale")
-        return yield* RepositoryError.make({ message: `Recorded shell turn ${turn.id} already exists` })
-      return written.value.value
-    })
-    return Service.of({
-      get,
-      listProjectionRecoveryCandidates,
-      commitDelta: Effect.fn("TranscriptRepository.commitDelta")(function* (turn, projectionState, delta, options) {
-        yield* validateDelta(delta)
-        yield* validateCheckpoint(turn, projectionState, options)
-        yield* validateMemoryUnits(delta.upsert)
-        yield* validateMemoryCheckpoint(options)
-        const write = yield* withLock(
-          Ref.modify(state, (entries): readonly [MemoryWrite, Map<TurnId, MemoryEntry>] => {
-            const current = entries.get(turn.id)
-            if (
-              current?.projection.checkpointGeneration !== options.expectedGeneration ||
-              (current !== undefined && current.projection.projectionVersion !== options.projectionVersion) ||
-              (current !== undefined && current.projection.revision > projectionState.revision)
-            )
-              return [{ _tag: "Success", result: "stale" }, entries]
-            const supplied = new Map(
-              options.executionCheckpoints.map((checkpoint) => [checkpoint.executionKey, checkpoint]),
-            )
-            const checkpointFor = (key: string) => supplied.get(key) ?? current?.checkpointsByKey.get(key)
-            const removals = new Set(delta.remove)
-            const upserts = new Map(delta.upsert.map((unit) => [unit.key, unit]))
-            const unitFor = (key: string) =>
-              removals.has(key) ? undefined : (upserts.get(key) ?? current?.unitsByKey.get(key))
-            for (const checkpoint of options.executionCheckpoints) {
-              const previous = current?.checkpointsByKey.get(checkpoint.executionKey)
-              if (previous !== undefined && !sameAttachment(previous, checkpoint))
-                return [
-                  {
-                    _tag: "Failure",
-                    error: RepositoryError.make({
-                      message: `Execution checkpoint ${checkpoint.executionKey} changed its intrinsic identity`,
-                    }),
-                  },
-                  entries,
-                ]
-              const attachment = checkpoint.attachment
-              if (attachment !== undefined) {
-                const parent = unitFor(attachment.parentUnitKey)
-                if (
-                  parent === undefined ||
-                  checkpointFor(attachment.parentExecutionKey) === undefined ||
-                  TranscriptCorrelation.executionKey(parent.turnId) !== attachment.parentExecutionKey ||
-                  parent.content._tag !== "Block" ||
-                  parent.content.block._tag !== "ToolCall" ||
-                  parent.content.block.id !== attachment.parentId ||
-                  TranscriptOrdering.encodeUnitOrder(parent.order) !== attachment.parentOrderKey
-                )
-                  return [
-                    {
-                      _tag: "Failure",
-                      error: RepositoryError.make({
-                        message: `Transcript ${turn.id} has a contradictory attachment for ${checkpoint.executionKey}`,
-                      }),
-                    },
-                    entries,
-                  ]
-              }
-            }
-            const rootKey = TranscriptCorrelation.executionKey(turn.executionLink?.runId ?? String(turn.id))
-            const root = checkpointFor(rootKey)
-            if (
-              root === undefined ||
-              root.attachment !== undefined ||
-              !TranscriptProjection.Projection.sameProjectionState(projectionState, root.state)
-            )
-              return [
-                {
-                  _tag: "Failure",
-                  error: RepositoryError.make({ message: `Transcript ${turn.id} has contradictory root fold state` }),
-                },
-                entries,
-              ]
-            for (const key of removals)
-              if (current !== undefined && current.attachmentsByUnit.has(key))
-                return [
-                  {
-                    _tag: "Failure",
-                    error: RepositoryError.make({ message: `Transcript unit ${key} has an attached execution` }),
-                  },
-                  entries,
-                ]
-            for (const unit of delta.upsert) {
-              const previous = current?.unitsByKey.get(unit.key)
-              const orderKey = TranscriptOrdering.encodeUnitOrder(unit.order)
-              const previousToolId =
-                previous?.content._tag === "Block" && previous.content.block._tag === "ToolCall"
-                  ? previous.content.block.id
-                  : undefined
-              const toolId =
-                unit.content._tag === "Block" && unit.content.block._tag === "ToolCall"
-                  ? unit.content.block.id
-                  : undefined
-              if (
-                previous !== undefined &&
-                (previous.turnId !== unit.turnId ||
-                  TranscriptOrdering.encodeUnitOrder(previous.order) !== orderKey ||
-                  previousToolId !== toolId ||
-                  previous.parentId !== unit.parentId)
-              )
-                return [
-                  {
-                    _tag: "Failure",
-                    error: RepositoryError.make({
-                      message: `Transcript unit ${unit.key} changed its intrinsic identity`,
-                    }),
-                  },
-                  entries,
-                ]
-              const owner = current?.orderOwners.get(orderKey)
-              if (owner !== undefined && owner !== unit.key && !removals.has(owner))
-                return [
-                  {
-                    _tag: "Failure",
-                    error: RepositoryError.make({ message: `Transcript unit order ${orderKey} is duplicated` }),
-                  },
-                  entries,
-                ]
-              const executionKey = TranscriptCorrelation.executionKey(unit.turnId)
-              const checkpoint = checkpointFor(executionKey)
-              if (checkpoint === undefined)
-                return [
-                  {
-                    _tag: "Failure",
-                    error: RepositoryError.make({ message: `Transcript unit ${unit.key} has no execution checkpoint` }),
-                  },
-                  entries,
-                ]
-              if (executionKey === rootKey) {
-                if (unit.parentId !== undefined)
-                  return [
-                    {
-                      _tag: "Failure",
-                      error: RepositoryError.make({ message: `Transcript ${turn.id} attaches a root unit` }),
-                    },
-                    entries,
-                  ]
-              } else {
-                const attachment = checkpoint.attachment
-                const parent = attachment === undefined ? undefined : unitFor(attachment.parentUnitKey)
-                if (
-                  attachment === undefined ||
-                  parent === undefined ||
-                  unit.parentId !== attachment.parentId ||
-                  TranscriptOrdering.encodeUnitOrder(unit.order) !==
-                    TranscriptOrdering.encodeUnitOrder(
-                      TranscriptOrdering.childOrder(
-                        parent.order,
-                        checkpoint.executionId,
-                        TranscriptOrdering.localOrder(unit.order),
-                      ),
-                    )
-                )
-                  return [
-                    {
-                      _tag: "Failure",
-                      error: RepositoryError.make({
-                        message: `Transcript ${turn.id} has a contradictory unit path for ${executionKey}`,
-                      }),
-                    },
-                    entries,
-                  ]
-              }
-            }
-            const next = current ?? memoryEntry(turn, withUnits(projectionState, []), options, -1)
-            for (const key of delta.remove) {
-              const previous = next.unitsByKey.get(key)
-              if (previous !== undefined) next.orderOwners.delete(TranscriptOrdering.encodeUnitOrder(previous.order))
-              next.unitsByKey.delete(key)
-            }
-            for (const unit of delta.upsert) {
-              const copy = clone(unit)
-              next.unitsByKey.set(unit.key, copy)
-              next.orderOwners.set(TranscriptOrdering.encodeUnitOrder(unit.order), unit.key)
-            }
-            for (const checkpoint of options.executionCheckpoints) {
-              const copy = clone(checkpoint)
-              next.checkpointsByKey.set(checkpoint.executionKey, copy)
-              if (copy.attachment !== undefined)
-                next.attachmentsByUnit.set(copy.attachment.parentUnitKey, copy.executionKey)
-            }
-            next.projection = storedProjection(
-              turn,
-              withUnits(projectionState, []),
-              { executionCheckpoints: [], projectionVersion: options.projectionVersion },
-              (current?.projection.checkpointGeneration ?? -1) + 1,
-            )
-            entries.set(turn.id, next)
-            return [{ _tag: "Success", result: "committed" }, entries]
-          }),
-        )
-        return yield* memoryWriteResult(write)
-      }),
-      replaceForRefold: Effect.fn("TranscriptRepository.replaceForRefold")(function* (turn, projection, options) {
-        yield* validateUnits(projection.units)
-        yield* validateCheckpoint(turn, TranscriptProjection.Projection.projectionState(projection), options, true)
-        yield* validateMemoryUnits(projection.units)
-        yield* validateMemoryCheckpoint(options)
-        yield* validateAttachmentSet(turn, projection.units, options.executionCheckpoints)
-        const replacementTurn = yield* refoldTurn(turn, projection, options)
-        const writeProjection = (adopted: Turn) =>
-          Ref.modify(state, (entries): readonly [MemoryRefoldProjectionWrite, Map<TurnId, MemoryEntry>] => {
-            const current = entries.get(turn.id)
-            if (
-              current === undefined ||
-              current.projection.projectionVersion !== options.expectedProjectionVersion ||
-              current.projection.checkpointGeneration !== options.expectedGeneration ||
-              options.projectionVersion <= current.projection.projectionVersion ||
-              !TurnResult.isAgentExecution(current.projection.turn) ||
-              current.projection.turn.status !== turn.status
-            )
-              return [{ _tag: "Stale" as const }, entries] as const
-            entries.set(turn.id, memoryEntry(adopted, projection, options, current.projection.checkpointGeneration + 1))
-            return [{ _tag: "Commit", value: undefined }, entries]
-          })
-        if (coordinator === undefined) {
-          const written = yield* withLock(writeProjection(replacementTurn))
-          return written._tag === "Stale"
-            ? { _tag: "Stale" as const }
-            : { _tag: "Committed" as const, turn: replacementTurn }
-        }
-        const written = yield* coordinator.adoptRefold(turn, replacementTurn.status, writeProjection)
-        return written._tag === "Stale"
-          ? { _tag: "Stale" as const }
-          : { _tag: "Committed" as const, turn: written.turn }
-      }),
-      createRecordedShell: insertRecordedShell,
-      copyRecordedShell: insertRecordedShell,
-      settleRecordedShell: Effect.fn("TranscriptRepository.settleRecordedShell")(
-        function* (expected, turn, expectedGeneration, projectionVersion) {
-          if (coordinator === undefined)
-            return yield* RepositoryError.make({
-              message: "Recorded shell writes require paired memory Turn and Transcript repositories",
-            })
-          const projection = recordedShellProjection(turn)
-          yield* validateUnits(projection.units)
-          yield* validateMemoryUnits(projection.units)
-          yield* validateRecordedShellProjection(turn, projection, projectionVersion)
-          const written = yield* coordinator.writeRecordedShell(expected, turn, (storedTurn) =>
-            Ref.modify(
-              state,
-              (entries): readonly [TurnRepository.MemoryRefoldWrite<Projection>, Map<TurnId, MemoryEntry>] => {
-                const current = entries.get(storedTurn.id)
-                if (
-                  current === undefined ||
-                  current.projection.checkpointGeneration !== expectedGeneration ||
-                  current.projection.projectionVersion !== projectionVersion ||
-                  !TurnResult.isRecordedShell(current.projection.turn) ||
-                  !sameTurn(current.projection.turn, expected)
-                )
-                  return [{ _tag: "Stale" as const }, entries] as const
-                const entry = memoryEntry(
-                  storedTurn,
-                  projection,
-                  { executionCheckpoints: [], projectionVersion, expectedGeneration: undefined },
-                  current.projection.checkpointGeneration + 1,
-                )
-                entries.set(storedTurn.id, entry)
-                return [{ _tag: "Commit" as const, value: materializeMemory(entry) }, entries] as const
-              },
-            ),
-          )
-          return written._tag === "Stale"
-            ? { _tag: "Stale" as const }
-            : { _tag: "Committed" as const, projection: written.value.value }
-        },
-      ),
-      page: Effect.fn("TranscriptRepository.page")(function* (threadId, options = {}) {
-        yield* validatePageOptions(options)
-        const limit = pageSize(options.limit)
-        const projections = [...(yield* withLock(Ref.get(state))).values()].map(materializeMemory)
-        const descending = projections
+  const usage = (threadId: import("@rika/product/thread-record").ThreadId): Effect.Effect<UsageSummary> =>
+    Ref.get(state).pipe(
+      Effect.map((entries) => {
+        const projections = [...entries.values()]
           .filter(
             (projection) =>
               projection.turn.threadId === threadId &&
               projection.turn.status !== "queued" &&
-              (options.projectionVersion === undefined || projection.projectionVersion === options.projectionVersion),
+              projection.projectionVersion === ExecutionProjection.projectionVersion,
           )
-          .flatMap((projection) =>
-            projection.units.map((unit) => ({
-              turn: projection.turn,
-              unit,
-              projectionRevision: projection.revision,
-              projectionModelPhase: projection.modelPhase,
-              ...(projection.costUsd === undefined ? {} : { projectionCostUsd: projection.costUsd }),
-            })),
+          .toSorted(
+            (left, right) =>
+              left.turn.createdAt - right.turn.createdAt || String(left.turn.id).localeCompare(String(right.turn.id)),
           )
-          .filter((entry) => options.before === undefined || before(entry, options.before))
-          .filter((entry) => options.after === undefined || after(entry, options.after))
-          .toSorted(compareDescending)
-        const selected = options.after === undefined ? descending.slice(0, limit) : descending.slice(-limit)
-        const pageEntries = selected.toReversed().map(clone)
-        const threadCostUsd = projections
-          .filter((projection) => projection.turn.threadId === threadId)
-          .reduce((total, projection) => total + (projection.costUsd ?? 0), 0)
+        const contextProjection = projections
+          .toReversed()
+          .find((projection) => projection.state.usage.context !== undefined)
         return {
-          entries: pageEntries,
-          hasOlder: options.after === undefined ? descending.length > limit : false,
-          hasNewer: options.after !== undefined && descending.length > limit,
-          oldestCursor: cursorFor(pageEntries[0]),
-          newestCursor: cursorFor(pageEntries.at(-1)),
-          threadCostUsd,
+          usage: ExecutionProjection.aggregateUsage(projections.map((projection) => projection.state.usage)),
+          ...(contextProjection?.turn._tag !== "AgentExecution"
+            ? {}
+            : {
+                contextCapacity: {
+                  contextWindow: contextProjection.turn.executionRoute.main.compaction.contextWindow,
+                  reserveTokens: contextProjection.turn.executionRoute.main.compaction.reserveTokens,
+                },
+              }),
         }
       }),
-      globalCostUsd: withLock(Ref.get(state)).pipe(
+    )
+  const service = Service.of({
+    get,
+    listProjectionRecoveryCandidates: (projectionVersion) =>
+      Ref.get(state).pipe(
         Effect.map((entries) =>
-          [...entries.values()].reduce((total, entry) => total + (entry.projection.costUsd ?? 0), 0),
+          [...entries.values()]
+            .filter(
+              (projection) =>
+                projection.projectionVersion !== projectionVersion ||
+                (projection.turn._tag === "AgentExecution" &&
+                  projection.turn.status !== "queued" &&
+                  projection.turn.status !== "completed" &&
+                  projection.turn.status !== "failed" &&
+                  projection.turn.status !== "cancelled" &&
+                  projection.projectorCheckpoint === undefined),
+            )
+            .map((projection) => ({ threadId: projection.turn.threadId, turnId: projection.turn.id })),
         ),
       ),
-    })
+    commitProjection: Effect.fn("TranscriptRepository.commitProjection")(function* (turn, change) {
+      const upsert = change._tag === "ProjectionSnapshot" ? change.units : change.upsert
+      yield* validateUnits(turn.id, upsert)
+      return yield* Ref.modify(state, (entries) => {
+        const current = entries.get(turn.id)
+        if (change._tag === "ProjectionPatch" && current?.revision !== change.baseRevision)
+          return ["stale" as const, entries]
+        if (change._tag === "ProjectionSnapshot" && current !== undefined && current.revision > change.revision)
+          return ["stale" as const, entries]
+        const units = new Map((current?.units ?? []).map((unit) => [unit.key, unit]))
+        if (change._tag === "ProjectionSnapshot" && !change.hasOlder) units.clear()
+        for (const key of change._tag === "ProjectionPatch" ? change.remove : []) units.delete(key)
+        for (const unit of upsert) units.set(unit.key, clone(unit))
+        const candidate: Projection = {
+          turn: clone(turn),
+          units: [...units.values()],
+          checkpointGeneration: (current?.checkpointGeneration ?? -1) + 1,
+          revision: change.revision,
+          state: clone(change.state),
+          ...(change.checkpoint === undefined ? {} : { projectorCheckpoint: clone(change.checkpoint) }),
+          projectionVersion: ExecutionProjection.projectionVersion,
+        }
+        const next = new Map(entries)
+        next.set(turn.id, materialize(candidate))
+        return ["committed" as const, next]
+      })
+    }),
+    replaceUnits: Effect.fn("TranscriptRepository.replaceUnits")(function* (turn, units) {
+      yield* validateUnits(turn.id, units)
+      const status =
+        turn.status === "queued" || turn.status === "accepted" || turn.status === "cancelling" ? "running" : turn.status
+      const projection: Projection = {
+        turn: clone(turn),
+        units: units.map(clone),
+        checkpointGeneration: ((yield* Ref.get(state)).get(turn.id)?.checkpointGeneration ?? -1) + 1,
+        revision: units.reduce((maximum, unit) => Math.max(maximum, unit.revision), 0),
+        state: {
+          status,
+          usage: {
+            ...ExecutionProjection.emptyUsageState(),
+            sourceComplete: status === "completed" || status === "failed" || status === "cancelled",
+          },
+          steering: { steeringMessages: 0, followUpMessages: 0 },
+        },
+        projectionVersion: ExecutionProjection.projectionVersion,
+      }
+      yield* Ref.update(state, (entries) => new Map(entries).set(turn.id, materialize(projection)))
+      return materialize(projection)
+    }),
+    page: Effect.fn("TranscriptRepository.page")(function* (threadId, options = {}) {
+      if (options.before !== undefined && options.after !== undefined)
+        return yield* RepositoryError.make({ message: "Transcript page cannot use before and after together" })
+      const limit = options.limit ?? 200
+      if (!Number.isInteger(limit) || limit < 1 || limit > 500)
+        return yield* RepositoryError.make({ message: "Transcript page limit must be from 1 to 500" })
+      const entries = [...(yield* Ref.get(state)).values()]
+        .flatMap((projection) =>
+          projection.turn.threadId !== threadId ||
+          projection.turn.status === "queued" ||
+          (options.projectionVersion !== undefined && projection.projectionVersion !== options.projectionVersion)
+            ? []
+            : projection.units.map((unit) => ({ projection, unit, cursor: cursorFor(projection, unit) })),
+        )
+        .filter(({ cursor }) =>
+          options.before === undefined
+            ? options.after === undefined || compareCursor(cursor, options.after) > 0
+            : compareCursor(cursor, options.before) < 0,
+        )
+        .toSorted((a, b) => -compareCursor(a.cursor, b.cursor))
+      const selected = entries.slice(0, limit)
+      const materialized = selected.toReversed().map(({ projection, unit }) => ({
+        turn: clone(projection.turn),
+        unit: clone(unit),
+        projectionRevision: projection.revision,
+        projectionModelPhase: -1,
+        projectionState: clone(projection.state),
+      }))
+      return {
+        entries: materialized,
+        hasOlder: entries.length > limit,
+        ...(options.after === undefined ? {} : { hasNewer: entries.length > limit }),
+        oldestCursor: selected.at(-1)?.cursor,
+        ...(options.after === undefined ? {} : { newestCursor: selected.at(0)?.cursor }),
+        usage: yield* usage(threadId),
+      }
+    }),
+    usage,
   })
-export const memoryLayer = Layer.effect(Service, makeMemory())
+  return service
+})
+
+export const memoryLayer = (initial?: ReadonlyArray<Projection>) =>
+  Layer.effect(Service, makeMemory(initial === undefined ? {} : { initial }))
 export const memoryLayerWithTurns = Layer.effect(
   Service,
   Effect.gen(function* () {
-    return yield* makeMemory({ turns: yield* TurnRepository.Service })
+    const turns = yield* TurnRepositoryService
+    return yield* makeMemory({ turns })
   }),
 )

@@ -136,21 +136,15 @@ describe("tool contracts", () => {
       rowDisplay: "continuation",
       failedLabel: "Command wait failed",
     })
-    expect(Catalog.resolvePresentation("await_subagents")).toMatchObject({
-      family: "direct",
-      action: "await-subagents",
-      rowDisplay: "continuation",
-      failedLabel: "Subagent wait failed",
-    })
     expect(Catalog.get("web_search")?.presentation).toMatchObject({
       family: "direct",
       action: "web-search",
-      outputDisplay: "hidden",
+      outputDisplay: "expandable",
     })
     expect(Catalog.get("read_web_page")?.presentation).toMatchObject({
       family: "direct",
       action: "read-web-page",
-      outputDisplay: "hidden",
+      outputDisplay: "expandable",
     })
     expect(Catalog.get("search_threads")?.presentation).toMatchObject({
       family: "explore",
@@ -162,7 +156,7 @@ describe("tool contracts", () => {
       activeLabel: "Reading Thread",
       completeLabel: "Read Thread",
     })
-    expect(Catalog.resolvePresentation("oracle")).toMatchObject({
+    expect(Catalog.resolveAgentPresentation("Oracle")).toMatchObject({
       family: "agent",
       activeLabel: "Oracle exploring",
       completeLabel: "Oracle has spoken",
@@ -180,9 +174,6 @@ describe("tool contracts", () => {
         "run_terminal_command",
         "write_file",
         "finder",
-        "transfer_to_oracle",
-        "transfer_to_librarian",
-        "spawn_child_run",
         "skill",
         "list_agent_modes",
         "load_plugin",
@@ -201,9 +192,6 @@ describe("tool contracts", () => {
       ["run_terminal_command", "Ran"],
       ["write_file", "Created"],
       ["finder", "Searched codebase"],
-      ["transfer_to_oracle", "Oracle has spoken"],
-      ["transfer_to_librarian", "Librarian researched"],
-      ["spawn_child_run", "Subagent finished"],
       ["skill", "Explored"],
       ["list_agent_modes", "Checked available agent modes"],
       ["load_plugin", "Loaded plugin"],
@@ -213,17 +201,6 @@ describe("tool contracts", () => {
       ["slack_read", "Slack"],
       ["slack_write", "Slack"],
     ])
-  })
-
-  it("labels handoff spawns without a parenthesized profile from the first resolution", () => {
-    const task = Catalog.resolvePresentation("transfer_to_task")
-    expect(task.activeLabel).toBe("Subagent working")
-    expect(task.completeLabel).toBe("Subagent finished")
-    const planner = Catalog.resolvePresentation("transfer_to_planner")
-    expect(planner.activeLabel).toBe("Planner working")
-    expect(planner.completeLabel).toBe("Planner finished")
-    for (const label of [task.activeLabel, task.completeLabel, planner.activeLabel, planner.completeLabel])
-      expect(label).not.toContain("(")
   })
 
   it.effect("substitutes the runtime through its test layer", () =>

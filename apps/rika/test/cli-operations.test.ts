@@ -52,6 +52,8 @@ const backend = ExecutionGateway.Service.of({
     Effect.succeed({ runId: `opaque-run:${input.turnId}`, turnId: input.turnId, threadId: input.threadId }),
   cancelTurn: () => Effect.void,
   steerTurn: () => Effect.void,
+  approveTurn: () => Effect.void,
+  denyTurn: () => Effect.void,
   watchTurn: () => Stream.empty,
   inspectTurn: () => Effect.succeed({ status: "unavailable" }),
 })

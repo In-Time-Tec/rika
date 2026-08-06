@@ -2,21 +2,17 @@ import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
 import { Clock, Effect, Fiber, Ref } from "effect"
-import { makeSelectionState, type SelectionEpochState } from "./interactive-thread-selection"
-import type { InteractiveEvent } from "./interactive-event"
+import { makeSelectionState } from "./interactive-thread-selection"
+import type { InteractiveEvent } from "./interactive-runtime-event"
 import type { InteractiveRuntimeContext } from "./interactive-session-runtime"
-import type { persistedThreadUsage } from "./interactive-session-transcript-runtime"
 import type { InteractiveTranscriptPageLoader } from "./interactive-transcript-page"
 
 export interface InteractiveTranscriptLifecycleInput extends InteractiveRuntimeContext {
-  readonly persistedThreadUsage: typeof persistedThreadUsage
   loadTranscriptPage: InteractiveTranscriptPageLoader
 }
 
 export const makeInteractiveTranscriptLifecycle = (input: InteractiveTranscriptLifecycleInput) => {
   const {
-    selectionBackground,
-    usageRepository,
     executionDependencies,
     sessionScope,
     getActiveSelectionState,
@@ -36,36 +32,6 @@ export const makeInteractiveTranscriptLifecycle = (input: InteractiveTranscriptL
     sessionDispatch,
     interruptSelectionBackground,
   } = input
-  const startSelectionUsage = (state: SelectionEpochState, dispatch: (event: InteractiveEvent) => void) =>
-    Effect.gen(function* () {
-      selectionBackground.push(
-        yield* Effect.forkIn(
-          Effect.gen(function* () {
-            const totals = yield* usageRepository.readThread(String(state.thread.id))
-            if (getActiveSelectionState() !== state) return
-            dispatch({
-              _tag: "ThreadUsageUpdated",
-              selectionEpoch: state.epoch,
-              threadId: state.thread.id,
-              revision: totals.revision,
-              ...input.persistedThreadUsage(totals, { _tag: "Unavailable" }),
-            })
-            const context = yield* input
-              .readThreadContext(String(state.thread.id))
-              .pipe(Effect.orElseSucceed(() => ({ _tag: "Unavailable" }) as const))
-            if (getActiveSelectionState() !== state || context._tag === "Unavailable") return
-            dispatch({
-              _tag: "ThreadUsageUpdated",
-              selectionEpoch: state.epoch,
-              threadId: state.thread.id,
-              revision: totals.revision,
-              ...input.persistedThreadUsage(totals, context),
-            })
-          }).pipe(Effect.provide(executionDependencies)),
-          sessionScope,
-        ),
-      )
-    })
   const loadThread = Effect.fn("ProductOperation.interactive.loadThread")(function* (
     thread: Thread.Thread,
     request: number,
@@ -121,5 +87,5 @@ export const makeInteractiveTranscriptLifecycle = (input: InteractiveTranscriptL
     yield* activateCreatedThread(thread, epoch, sessionDispatch)
     yield* notifyThreadSummaries
   })
-  return { startSelectionUsage, loadThread, runThreadLoad, createAndSelectThread }
+  return { loadThread, runThreadLoad, createAndSelectThread }
 }

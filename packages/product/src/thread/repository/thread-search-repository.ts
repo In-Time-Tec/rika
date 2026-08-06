@@ -24,7 +24,7 @@ const Snippet = Schema.Struct({ source: MatchSource, text: Schema.String })
 type Snippet = typeof Snippet.Type
 
 const Result = Schema.Struct({
-  schemaVersion: Schema.Literal(2),
+  schemaVersion: Schema.Literal(1),
   threadId: ThreadId,
   title: Schema.String,
   workspace: Schema.String,
@@ -49,7 +49,7 @@ interface SearchInput {
 }
 
 interface SearchPage {
-  readonly schemaVersion: 2
+  readonly schemaVersion: 1
   readonly results: ReadonlyArray<Result>
   readonly nextCursor: Cursor | undefined
 }

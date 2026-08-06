@@ -9,14 +9,9 @@ import { clone } from "./turn-memory-state"
 import type { MemoryState } from "./turn-memory-state"
 import type { TurnMemoryContext } from "./turn-memory-state-operations"
 
-type ExecutionLinkUpdate =
-  | { readonly _tag: "Missing" }
-  | { readonly _tag: "Conflict" }
-  | { readonly _tag: "Ok"; readonly turn: AgentExecutionTurn }
-
 export const makeTurnMemoryLifecycle = ({
   modifyState,
-}: TurnMemoryContext): Pick<Interface, "setStatus" | "attachExecutionLink" | "startAccepted" | "cancelAccepted"> => ({
+}: TurnMemoryContext): Pick<Interface, "setStatus" | "startAccepted" | "cancelAccepted"> => ({
   setStatus: Effect.fn("TurnRepository.setStatus")(function* (id, status, now) {
     const updated = yield* modifyState(
       (
@@ -51,32 +46,6 @@ export const makeTurnMemoryLifecycle = ({
       return yield* RepositoryError.make({
         message: `Turn ${id} cannot transition into or out of 'queued' via setStatus`,
       })
-    return updated.turn
-  }),
-  attachExecutionLink: Effect.fn("TurnRepository.attachExecutionLink")(function* (id, link, now) {
-    const updated = yield* modifyState((currentState): readonly [ExecutionLinkUpdate, MemoryState] => {
-      const current = currentState.turns.get(id)
-      if (current === undefined || !TurnResult.isAgentExecution(current))
-        return [{ _tag: "Missing" as const }, currentState] as const
-      if (current.executionLink !== undefined) {
-        const matches =
-          current.executionLink.runId === link.runId &&
-          current.executionLink.turnId === link.turnId &&
-          current.executionLink.threadId === link.threadId
-        return [
-          matches ? { _tag: "Ok" as const, turn: clone(current) } : { _tag: "Conflict" as const },
-          currentState,
-        ] as const
-      }
-      const next: AgentExecutionTurn = { ...current, executionLink: structuredClone(link), updatedAt: now }
-      return [
-        { _tag: "Ok" as const, turn: clone(next) },
-        { ...currentState, turns: new Map(currentState.turns).set(id, next) },
-      ] as const
-    })
-    if (updated._tag === "Missing") return yield* missing(id)
-    if (updated._tag === "Conflict")
-      return yield* RepositoryError.make({ message: `Turn ${id} already has a different execution link` })
     return updated.turn
   }),
   startAccepted: Effect.fn("TurnRepository.startAccepted")(function* (id, now) {

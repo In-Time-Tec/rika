@@ -26,7 +26,7 @@ type StartupContext = InteractiveInputContext & {
   readonly watchChangedFiles: InteractiveInputContext["loadChangedFiles"]
   readonly suspend: () => void
   readonly startSelection: (
-    select: (epoch: number) => Effect.Effect<void, ProductOperation.OperationUnavailable>,
+    select: () => Effect.Effect<void, ProductOperation.OperationUnavailable>,
   ) => Fiber.Fiber<void, never>
 }
 
@@ -129,7 +129,7 @@ export const initializeRenderer = (context: StartupContext): Fiber.Fiber<void, n
           )
           const startInitialSelection = () => {
             if (input.threadId === undefined) return Effect.void
-            return Effect.sync(() => startSelection((epoch) => session.selectThread(input.threadId!, epoch))).pipe(
+            return Effect.sync(() => startSelection(() => session.selectThread(input.threadId!))).pipe(
               Effect.flatMap(Fiber.join),
             )
           }

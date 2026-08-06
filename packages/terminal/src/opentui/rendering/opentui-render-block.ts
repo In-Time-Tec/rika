@@ -1,5 +1,6 @@
 import type { ColorInput, TextChunk } from "@opentui/core"
 import { Function } from "effect"
+import { subagentPhrase } from "@rika/transcript/subagent-presentation"
 import stringWidth from "string-width"
 import type { TranscriptBlock } from "../../state/model/terminal-transcript-state"
 import type { ChangedFile } from "../../state/model/terminal-changed-file"
@@ -90,15 +91,19 @@ export const renderBlock: {
         return `${head(`! ${block.title}`)}\n${body(block.detail)}`
       case "Error":
         return `${head(`✖ ERROR: ${block.title}${block.turnId === undefined ? "" : ` · Turn ${block.turnId}`}`)}\n${body(block.detail)}${block.recovery === undefined ? "" : `\n${body(`Next: ${block.recovery}`)}`}`
-      case "ChildAgent": {
+      case "SubagentCard": {
         let icon = "✗"
-        if (block.status === "running") icon = "⠿"
+        if (block.status === "running" || block.status === "waiting" || block.status === "cancelling") icon = "⠿"
         else if (block.status === "complete") icon = "✓"
         else if (block.status === "cancelled") icon = "⊘"
-        let status = "finished"
-        if (block.status === "running") status = "working"
-        else if (block.status === "cancelled") status = "cancelled"
-        return `${icon} Subagent ${status} ▸\n${body(`${block.name} · ${block.summary}`)}`
+        const detail = block.summary.length === 0 ? block.prompt : block.summary
+        return `${icon} ${subagentPhrase(block.name, block.status)} ▸${detail.length === 0 ? "" : `\n${body(detail)}`}`
+      }
+      case "AuthorizationCard": {
+        let icon = "✕"
+        if (block.status === "pending") icon = "?"
+        else if (block.status === "approved") icon = "✓"
+        return `${icon} Authorization ${block.status}: ${block.operation} · ${block.capability}`
       }
       case "ImageAttachment": {
         const dimensions =

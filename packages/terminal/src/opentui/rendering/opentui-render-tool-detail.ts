@@ -1,12 +1,10 @@
-import { Function, Option, Schema } from "effect"
+import { Function } from "effect"
 import type { Model } from "../../state/model/terminal-state"
 import type { TranscriptBlock } from "../../state/model/terminal-transcript-state"
-import { toolKind } from "../../presentation/transcript/transcript-tool-detail"
+import { inputValue, toolKind } from "../../presentation/transcript/transcript-tool-detail"
 import type { ToolKind } from "../../presentation/transcript/transcript-tool-types"
 
-const ToolInputJson = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
-export const toolInputValue = (input: string): Record<string, unknown> =>
-  Option.getOrElse(Schema.decodeUnknownOption(ToolInputJson)(input), () => ({}))
+export const toolInputValue = inputValue
 const inputStringImpl = (value: Record<string, unknown>, keys: ReadonlyArray<string>): string | undefined => {
   for (const key of keys) {
     const candidate = value[key]

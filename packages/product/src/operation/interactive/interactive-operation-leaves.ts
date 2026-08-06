@@ -1,10 +1,9 @@
 import { Function } from "effect"
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as ExecutionStatus from "../../execution/contract/execution-status"
-import type * as IngestProjectionContract from "../../execution/ingest/execution-projection-contract"
-import * as Turn from "@rika/product/turn-record"
+import * as ExecutionProjection from "../../execution/contract/execution-projection"
 import * as ThreadResult from "@rika/product/thread-result"
-import type { InteractiveEvent } from "./interactive-event"
+import type { InteractiveEvent } from "./interactive-runtime-event"
 import { Effect } from "effect"
 import { operationError } from "../operation-error"
 import { clampThreadTitle } from "../../thread/query/thread-title-policy"
@@ -36,31 +35,32 @@ const appendRecordedShellOutput = (output: RecordedShellOutput, text: string): R
   }
 }
 
-const projectionVisibleState = (
-  projection: Pick<TranscriptPage.Projection, "revision" | "modelPhase" | "usableCompletionSequence">,
-): IngestProjectionContract.Snapshot["state"] => ({
+const recordedShellChange = (
+  turn: ThreadResult.RunningRecordedShellTurn | ThreadResult.TerminalRecordedShellTurn,
+  projection: TranscriptPage.Projection,
+): ExecutionProjection.Snapshot => ({
+  _tag: "ProjectionSnapshot",
   revision: projection.revision,
-  modelPhase: projection.modelPhase,
-  ...(projection.usableCompletionSequence === undefined
-    ? {}
-    : { usableCompletionSequence: projection.usableCompletionSequence }),
+  units: projection.units,
+  hasOlder: false,
+  state: {
+    status: turn.status,
+    usage: {
+      ...ExecutionProjection.emptyUsageState(),
+      sourceComplete: turn.status === "completed" || turn.status === "failed" || turn.status === "cancelled",
+    },
+    steering: { steeringMessages: 0, followUpMessages: 0 },
+  },
 })
-
-const recordedShellStreamId = (turnId: Turn.TurnId): string => `recorded-shell:${turnId}`
 
 const recordedShellStartedEventImpl = (
   turn: ThreadResult.RunningRecordedShellTurn,
   projection: TranscriptPage.Projection,
 ): InteractiveEvent => ({
-  _tag: "TranscriptProjectionStarted",
-  selectionEpoch: 0,
+  _tag: "ExecutionProjectionChanged",
   threadId: turn.threadId,
-  rootTurnId: turn.id,
   turn,
-  streamId: recordedShellStreamId(turn.id),
-  patchRevision: 0,
-  state: projectionVisibleState(projection),
-  units: projection.units,
+  change: recordedShellChange(turn, projection),
 })
 
 export const recordedShellStartedEvent: {
@@ -76,34 +76,14 @@ export const recordedShellStartedEvent: {
 const recordedShellSettledEventsImpl = (
   turn: ThreadResult.TerminalRecordedShellTurn,
   projection: TranscriptPage.Projection,
-): readonly [InteractiveEvent, InteractiveEvent] => {
-  const streamId = recordedShellStreamId(turn.id)
-  return [
-    {
-      _tag: "TranscriptProjectionPatched",
-      selectionEpoch: 0,
-      threadId: turn.threadId,
-      rootTurnId: turn.id,
-      turn,
-      streamId,
-      baseRevision: 0,
-      patchRevision: 1,
-      origin: { _tag: "RecordedShell", phase: "settled" },
-      state: projectionVisibleState(projection),
-      delta: { upsert: projection.units, remove: [] },
-      rootStatus: turn.status,
-    },
-    {
-      _tag: "TranscriptProjectionStopped",
-      selectionEpoch: 0,
-      threadId: turn.threadId,
-      rootTurnId: turn.id,
-      streamId,
-      patchRevision: 1,
-      status: turn.status,
-    },
-  ]
-}
+): readonly [InteractiveEvent] => [
+  {
+    _tag: "ExecutionProjectionChanged",
+    threadId: turn.threadId,
+    turn,
+    change: recordedShellChange(turn, projection),
+  },
+]
 
 export const recordedShellSettledEvents: {
   (

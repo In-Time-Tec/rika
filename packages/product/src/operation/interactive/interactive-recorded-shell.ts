@@ -3,12 +3,13 @@ import * as ThreadSummaryRepository from "@rika/product/thread-summary-repositor
 import * as Thread from "@rika/product/thread-record"
 import * as ThreadResult from "@rika/product/thread-result"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
+import * as TurnRepository from "@rika/product/turn-repository"
+import { recordedShellProjection, settleRecordedShellProjection } from "@rika/transcript/recorded-shell-presentation"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
-import * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
 import { Cause, Clock, Effect } from "effect"
 import type { Exit } from "effect"
 import { OperationError, operationError, failureKind } from "../operation-error"
-import type { InteractiveEvent } from "./interactive-event"
+import type { InteractiveEvent } from "./interactive-runtime-event"
 import type { InteractiveExecutionContext, InteractiveSessionInput } from "./interactive-session-runtime"
 
 const appendRecordedShellOutput = (output: { readonly text: string; readonly truncated: boolean }, text: string) => {
@@ -39,7 +40,7 @@ const runRecordedShellImpl = (
 ): Effect.Effect<
   void,
   OperationError,
-  ThreadSummaryRepository.Service | TranscriptRepository.Service | ToolRuntime.Service
+  ThreadSummaryRepository.Service | TranscriptRepository.Service | TurnRepository.Service | ToolRuntime.Service
 > => {
   const {
     options,
@@ -69,6 +70,7 @@ const runRecordedShellImpl = (
       return
     }
     const transcripts = yield* TranscriptRepository.Service
+    const turns = yield* TurnRepository.Service
     const now = yield* Clock.currentTimeMillis
     const runningTurn: ThreadResult.RunningRecordedShellTurn = {
       _tag: "RecordedShell",
@@ -84,7 +86,11 @@ const runRecordedShellImpl = (
     }
     yield* Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
-        const runningProjection = yield* transcripts.createRecordedShell(runningTurn, ExecutionIngest.projectionVersion)
+        yield* turns.createRecordedShell(runningTurn)
+        const runningProjection = yield* transcripts.replaceUnits(
+          runningTurn,
+          recordedShellProjection(runningTurn).units,
+        )
         emit(dispatch, recordedShellStartedEvent(runningTurn, runningProjection))
         const processExit = (yield* Effect.exit(
           restore(
@@ -123,15 +129,14 @@ const runRecordedShellImpl = (
                 ),
                 updatedAt: completedAt,
               }
-        const settled = yield* transcripts.settleRecordedShell(
-          runningTurn,
-          terminalTurn,
-          runningProjection.checkpointGeneration,
-          ExecutionIngest.projectionVersion,
+        const settledTurn = yield* turns.settleRecordedShell(runningTurn, terminalTurn)
+        if (settledTurn === undefined)
+          return yield* operationError(`Recorded shell turn ${runningTurn.id} lost write authority`)
+        const settledProjection = yield* transcripts.replaceUnits(
+          settledTurn,
+          settleRecordedShellProjection(recordedShellProjection(runningTurn), settledTurn).units,
         )
-        if (settled._tag === "Stale")
-          return yield* operationError(`Recorded shell turn ${runningTurn.id} lost projection write authority`)
-        const terminalEvents = recordedShellSettledEvents(terminalTurn, settled.projection)
+        const terminalEvents = recordedShellSettledEvents(settledTurn, settledProjection)
         if (interrupted) {
           for (const event of terminalEvents) publishInteractiveActivity(sessionId, event)
         } else {

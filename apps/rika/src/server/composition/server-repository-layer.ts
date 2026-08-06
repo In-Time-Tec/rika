@@ -5,7 +5,6 @@ import * as ThreadSummaryRepository from "@rika/product-store/sqlite-thread-summ
 import * as ThreadSearchRepository from "@rika/product-store/sqlite-thread-search-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
-import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import { Cause, Crypto, Duration, Effect, FileSystem, Layer } from "effect"
@@ -51,10 +50,6 @@ export const makeServerRepositoryLayers = (database: string) => {
     Layer.provide(productDatabase),
     Layer.provide(BunServices.layer),
   )
-  const usageRepositoryLayer = UsageRepository.layer.pipe(
-    Layer.provide(productDatabase),
-    Layer.provide(BunServices.layer),
-  )
   const threadSearchRepositoryLayer = ThreadSearchRepository.layer.pipe(
     Layer.provide(productDatabase),
     Layer.provide(BunServices.layer),
@@ -68,7 +63,6 @@ export const makeServerRepositoryLayers = (database: string) => {
     turnRepositoryLayer,
     threadSummaryRepositoryLayer,
     transcriptRepositoryLayer,
-    usageRepositoryLayer,
     threadSearchRepositoryLayer,
   }
 }

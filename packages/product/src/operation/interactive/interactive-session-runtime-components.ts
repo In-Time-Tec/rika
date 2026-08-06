@@ -1,5 +1,6 @@
 import { Function } from "effect"
 import * as TurnRepository from "@rika/product/turn-repository"
+import * as TranscriptRepository from "@rika/product/transcript-repository"
 import { Context } from "effect"
 import { makeInteractiveExecution } from "./interactive-session-execution"
 import { makeInteractiveFollowing } from "./interactive-session-following"
@@ -64,10 +65,7 @@ const makeInteractiveFollowingComponentsImpl = (
 ) =>
   makeInteractiveFollowing({
     rootTurnOwner: input.rootTurnOwner,
-    ensureIngest: input.ensureIngest,
-    deliverResultEvents: input.deliverResultEvents,
     setTurnStatus: input.setTurnStatus,
-    projectExecutionResult: input.projectExecutionResult,
     settleThread: execution.settleThread,
     threadForTurn: execution.threadForTurn,
     claimTurnObserver: input.claimTurnObserver,
@@ -114,12 +112,11 @@ const makeInteractiveSupervisionComponentsImpl = (
 ) => {
   const supervise = makeInteractiveSupervision({
     acquiredBackend: input.acquiredBackend,
+    rootTurnOwner: input.rootTurnOwner,
     executionDependencies: input.executionDependencies,
     turnChanges: input.turnChanges,
     dirtyTurnObservers: input.dirtyTurnObservers,
-    ensureIngest: input.ensureIngest,
     isTerminalStatus: input.isTerminalStatus,
-    executionIngest: input.executionIngest,
     notifyTurnChanged: input.notifyTurnChanged,
     claimTurnObserver: input.claimTurnObserver,
     observeTurn: following.observeTurn,
@@ -134,12 +131,14 @@ const makeInteractiveSupervisionComponentsImpl = (
   const nextSteeringIdentity = (turnId: string) => `rika:interactive-steer:${turnId}:${steeringIdentitySequence++}`
   const control = makeInteractiveControl({
     turns: Context.get(input.dependencyContext, TurnRepository.Service),
+    transcripts: Context.get(input.dependencyContext, TranscriptRepository.Service),
     backend: input.acquiredBackend,
     pendingCapacity: input.pendingTurnCapacity,
     active: execution.active,
     dispatch: state.sessionDispatch,
     queueMutation: input.queueMutationEvent,
     nextSteeringIdentity,
+    notifyTurnChanged: input.notifyTurnChanged,
     fail: input.operationError,
   })
   return { supervise, nextSteeringIdentity, control }

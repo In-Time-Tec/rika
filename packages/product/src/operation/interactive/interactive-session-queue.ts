@@ -8,10 +8,10 @@ import * as ThreadSummaryRepository from "@rika/product/thread-summary-repositor
 import * as ResolvedContext from "../../context/context-resolution-service"
 import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"
 import { Context, Effect, Ref } from "effect"
-import type { QueueItem } from "./interactive-event"
+import type { QueueItem } from "./interactive-runtime-event"
 import { promotePendingTurns } from "./pending-turn-promotion"
 import { operationError, operationFailureDetail } from "../operation-error"
-import type { InteractiveEvent } from "./interactive-event"
+import type { InteractiveEvent } from "./interactive-runtime-event"
 import type { InteractiveRuntimeContext } from "./interactive-session-runtime"
 
 export const queueItem = (turn: Turn.AgentExecutionTurn): QueueItem => {
@@ -19,8 +19,8 @@ export const queueItem = (turn: Turn.AgentExecutionTurn): QueueItem => {
     ?.filter((part) => part.type === "image")
     .flatMap((part) => (part.filename === undefined ? [] : [part.filename]))
   return attachments === undefined || attachments.length === 0
-    ? { id: turn.id, prompt: turn.prompt }
-    : { id: turn.id, prompt: turn.prompt, attachments }
+    ? { id: turn.id, prompt: turn.prompt, createdAt: turn.createdAt }
+    : { id: turn.id, prompt: turn.prompt, createdAt: turn.createdAt, attachments }
 }
 
 export type InteractiveQueueInput = Pick<
@@ -28,12 +28,9 @@ export type InteractiveQueueInput = Pick<
   | "pendingTurnCapacity"
   | "rootTurnOwner"
   | "prepareExecution"
-  | "ensureIngest"
   | "notifyThreadSummaries"
   | "notifyTurnChanged"
   | "setTurnStatus"
-  | "projectExecutionResult"
-  | "deliverResultEvents"
   | "claimQueuedTurn"
   | "emit"
   | "releaseTurnObserver"
@@ -50,12 +47,9 @@ export const makeInteractiveQueue = (input: InteractiveQueueInput) => {
     pendingTurnCapacity,
     rootTurnOwner,
     prepareExecution,
-    ensureIngest,
     notifyThreadSummaries,
     notifyTurnChanged,
     setTurnStatus,
-    projectExecutionResult,
-    deliverResultEvents,
     claimQueuedTurn,
     emit,
     releaseTurnObserver,
@@ -106,7 +100,6 @@ export const makeInteractiveQueue = (input: InteractiveQueueInput) => {
             Effect.provide(input.executionDependencies),
             Effect.mapError((error) => operationError(operationFailureDetail(error), error)),
           ),
-        ensureIngest,
         owner: rootTurnOwner,
         notifyThreadSummaries: notifyThreadSummaries.pipe(
           Effect.provide(input.executionDependencies),
@@ -118,12 +111,6 @@ export const makeInteractiveQueue = (input: InteractiveQueueInput) => {
             Effect.provide(input.executionDependencies),
             Effect.mapError((error) => operationError(operationFailureDetail(error), error)),
           ),
-        projectExecutionResult: (threadId, result) =>
-          projectExecutionResult(threadId, result).pipe(
-            Effect.provide(input.executionDependencies),
-            Effect.mapError((error) => operationError(operationFailureDetail(error), error)),
-          ),
-        deliverResultEvents,
         queueMutationEvent: input.queueMutationEvent,
         claimQueuedTurn: (threadId, now) =>
           claimQueuedTurn(threadId, now).pipe(

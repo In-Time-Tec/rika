@@ -1,13 +1,9 @@
 import { Function } from "effect"
-import * as TranscriptPage from "@rika/product/transcript-page"
 import * as InteractiveController from "../src/interactive/controller/interactive-controller"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
-import * as ThreadResult from "@rika/product/thread-result"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
 import * as ViewState from "@rika/terminal/terminal-state"
 
 export const thread: Thread.Thread = {
@@ -22,59 +18,52 @@ export const thread: Thread.Thread = {
   updatedAt: 1,
 }
 
-const entriesImpl = (
-  id: string,
-  createdAt: number,
-  events: ReadonlyArray<{
-    readonly cursor: string
-    readonly sequence: number
-    readonly type: string
-    readonly createdAt: number
-    readonly text?: string
-    readonly data?: Readonly<Record<string, unknown>>
-  }> = [],
-) => {
-  const turn = {
-    _tag: "AgentExecution" as const,
+type SemanticFixture = {
+  readonly cursor: string
+  readonly sequence: number
+  readonly type: string
+  readonly createdAt: number
+  readonly text?: string
+  readonly data?: Readonly<Record<string, unknown>>
+}
+const entriesImpl = (id: string, createdAt: number, events: ReadonlyArray<SemanticFixture> = []) => {
+  const turn: Turn.AgentExecutionTurn = {
+    _tag: "AgentExecution",
     id: Turn.TurnId.make(id),
     threadId: thread.id,
     prompt: id,
-    author: { _tag: "Human" } as const,
-    lineage: { _tag: "Original" } as const,
+    author: { _tag: "Human" },
+    lineage: { _tag: "Original" },
     executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
-    status: "completed" as const,
+    status: "completed",
     createdAt,
     updatedAt: createdAt,
   }
-  const projection = TranscriptProjection.Projection.project(id, id, events)
-  return projection.units.map((unit) =>
-    Object.assign(
-      {
-        turn,
-        unit,
-        projectionRevision: projection.revision,
-        projectionModelPhase: projection.modelPhase,
-      },
-      projection.costUsd === undefined ? {} : { projectionCostUsd: projection.costUsd },
+  const units = [
+    {
+      key: `turn:${id}:user`,
+      turnId: turn.id,
+      order: TranscriptOrdering.unitOrder(`turn:${id}:user`, 0),
+      revision: 0,
+      content: { _tag: "Entry" as const, role: "user" as const, text: id },
+    },
+    ...events.flatMap((event) =>
+      event.type === "model.output.completed" || event.type === "model.output.delta"
+        ? [
+            {
+              key: `assistant:${id}:${event.sequence}`,
+              turnId: turn.id,
+              order: TranscriptOrdering.unitOrder(`assistant:${id}:${event.sequence}`, event.sequence + 1),
+              revision: event.sequence + 1,
+              content: { _tag: "Entry" as const, role: "assistant" as const, text: event.text ?? "" },
+            },
+          ]
+        : [],
     ),
-  )
+  ]
+  const revision = units.reduce((maximum, unit) => Math.max(maximum, unit.revision), 0)
+  return units.map((unit) => ({ turn, unit, projectionRevision: revision, projectionModelPhase: -1 }))
 }
-
-type AgentTranscriptEntry = Omit<TranscriptPage.Entry, "turn"> & {
-  readonly turn: Turn.AgentExecutionTurn
-}
-
-export const asRunningEntry = (entry: TranscriptPage.Entry): AgentTranscriptEntry => {
-  if (!ThreadResult.TurnResult.isAgentExecution(entry.turn))
-    throw new TypeError("Running transcript fixture requires an agent turn")
-  return { ...entry, turn: { ...entry.turn, status: "running" } }
-}
-
-export const cursor = (entry: TranscriptPage.Entry): TranscriptPage.PageCursor => ({
-  createdAt: entry.turn.createdAt,
-  turnId: entry.turn.id,
-  orderKey: TranscriptOrdering.encodeUnitOrder(entry.unit.order),
-})
 
 export const initialState = (): InteractiveController.State => ({
   model: ViewState.initial("/work", "medium"),
@@ -82,62 +71,10 @@ export const initialState = (): InteractiveController.State => ({
   entries: [],
   revisions: new Map(),
   liveProjections: new Map(),
-  threadCostUsd: 0,
   selectionEpoch: 0,
 })
 
-export const visibleState = (projection: TranscriptProjectionModel.Projection) => ({
-  revision: projection.revision,
-  modelPhase: projection.modelPhase,
-  ...(projection.usableCompletionSequence === undefined
-    ? {}
-    : { usableCompletionSequence: projection.usableCompletionSequence }),
-})
-
-const unitDeltaImpl = (
-  previous: TranscriptProjectionModel.Projection,
-  next: TranscriptProjectionModel.Projection,
-): TranscriptProjection.UnitDelta => {
-  const previousUnits = new Map(previous.units.map((unit) => [unit.key, unit] as const))
-  const nextUnits = new Map(next.units.map((unit) => [unit.key, unit] as const))
-  return {
-    upsert: next.units.filter((unit) => JSON.stringify(previousUnits.get(unit.key)) !== JSON.stringify(unit)),
-    remove: previous.units.flatMap((unit) => (nextUnits.has(unit.key) ? [] : [unit.key])),
-  }
-}
-
 export const entries: {
-  (
-    id: string,
-    createdAt: number,
-    events?: ReadonlyArray<{
-      readonly cursor: string
-      readonly sequence: number
-      readonly type: string
-      readonly createdAt: number
-      readonly text?: string
-      readonly data?: Readonly<Record<string, unknown>>
-    }>,
-  ): ReturnType<typeof entriesImpl>
-  (
-    createdAt: number,
-    events?: ReadonlyArray<{
-      readonly cursor: string
-      readonly sequence: number
-      readonly type: string
-      readonly createdAt: number
-      readonly text?: string
-      readonly data?: Readonly<Record<string, unknown>>
-    }>,
-  ): (id: string) => ReturnType<typeof entriesImpl>
+  (id: string, createdAt: number, events?: ReadonlyArray<SemanticFixture>): ReturnType<typeof entriesImpl>
+  (createdAt: number, events?: ReadonlyArray<SemanticFixture>): (id: string) => ReturnType<typeof entriesImpl>
 } = Function.dual((args) => typeof args[0] === "string", entriesImpl)
-
-export const unitDelta: {
-  (
-    previous: TranscriptProjectionModel.Projection,
-    next: TranscriptProjectionModel.Projection,
-  ): ReturnType<typeof unitDeltaImpl>
-  (
-    next: TranscriptProjectionModel.Projection,
-  ): (previous: TranscriptProjectionModel.Projection) => ReturnType<typeof unitDeltaImpl>
-} = Function.dual(2, unitDeltaImpl)

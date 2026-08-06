@@ -1,6 +1,15 @@
 import { Schema } from "effect"
 
-export const statuses = ["accepted", "queued", "running", "waiting", "completed", "failed", "cancelled"] as const
+export const statuses = [
+  "accepted",
+  "queued",
+  "running",
+  "waiting",
+  "cancelling",
+  "completed",
+  "failed",
+  "cancelled",
+] as const
 
 export const Status = Schema.Literals(statuses)
 export type Status = typeof Status.Type
@@ -18,6 +27,7 @@ export const isTerminalStatus = (status: Status): status is TerminalStatus => {
     case "queued":
     case "running":
     case "waiting":
+    case "cancelling":
       return false
   }
 }

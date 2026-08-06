@@ -15,6 +15,8 @@ it.effect("delegates the five execution operations through the deferred backend"
           startTurn: () => Effect.sync(() => (calls.push("start"), link)),
           cancelTurn: () => Effect.sync(() => calls.push("cancel")),
           steerTurn: () => Effect.sync(() => calls.push("steer")),
+          approveTurn: () => Effect.sync(() => calls.push("approve")),
+          denyTurn: () => Effect.sync(() => calls.push("deny")),
           watchTurn: () => Stream.fromEffect(Effect.sync(() => calls.push("watch"))).pipe(Stream.drain),
           inspectTurn: () => Effect.sync(() => (calls.push("inspect"), { status: "running" as const })),
         }),
@@ -33,9 +35,15 @@ it.effect("delegates the five execution operations through the deferred backend"
       ).toEqual(link)
       yield* backend.cancelTurn(link)
       yield* backend.steerTurn(link, { text: "continue", idempotencyKey: "steer-1" })
+      const authorization = {
+        authorizationId: "authorization",
+        checkpoint: { version: 1, cursor: "cursor", state: "{}" },
+      }
+      yield* backend.approveTurn(link, authorization)
+      yield* backend.denyTurn(link, authorization)
       yield* Stream.runDrain(backend.watchTurn(link))
       expect(yield* backend.inspectTurn(link)).toEqual({ status: "running" })
-      expect(calls).toEqual(["start", "cancel", "steer", "watch", "inspect"])
+      expect(calls).toEqual(["start", "cancel", "steer", "approve", "deny", "watch", "inspect"])
     }),
   ),
 )

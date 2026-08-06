@@ -1,6 +1,6 @@
 import { Function } from "effect"
 import type { TranscriptItem } from "../../state/model/terminal-transcript-state"
-import { classifyTranscriptContent } from "../../presentation/transcript/transcript-viewport-window"
+import { classifyTranscriptContent } from "../../presentation/transcript/transcript-content-change"
 
 const prependedTranscriptItemsImpl = (
   previousItems: ReadonlyArray<unknown>,

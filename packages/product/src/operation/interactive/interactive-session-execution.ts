@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import type { InteractiveEvent } from "./interactive-event"
+import type { InteractiveEvent } from "./interactive-runtime-event"
 import { makeInteractiveQueue } from "./interactive-session-queue"
 import { makeInteractiveSubmission } from "./interactive-session-submission"
 import type { InteractiveRuntimeContext } from "./interactive-session-runtime"

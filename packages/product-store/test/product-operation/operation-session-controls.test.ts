@@ -11,7 +11,12 @@ import { Deferred, Effect, Layer, Ref, Stream } from "effect"
 import { executionRoute } from "../support/product-test-current-state"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
 import { holdSession, openInteractiveSession, settleEvents } from "../support/operation-session-harness"
-import { backend, inspectTurnFromTurns } from "../support/operation-execution-fixtures"
+import {
+  backend,
+  inspectTurnFromTurns,
+  projectionPatch,
+  projectionSnapshot,
+} from "../support/operation-execution-fixtures"
 import { turnProvenance, threadLineage } from "../support/operation-selection-fixtures"
 
 describe("Operation", () => {
@@ -55,8 +60,8 @@ describe("Operation", () => {
         yield* session.steer("direction")
         yield* session.interruptAndSend("next")
         yield* session.cancel
-        yield* session.selectThread("missing", 1)
-        yield* session.reopenThread(2)
+        yield* session.selectThread("missing")
+        yield* session.reopenThread
         yield* Effect.yieldNow
       }).pipe(provideLayer(layer))
       expect((yield* Ref.get(events)).filter((event) => event._tag === "ExecutionFailed").length).toBeGreaterThan(0)
@@ -130,7 +135,7 @@ describe("Operation", () => {
         })
         yield* Effect.forkChild(session.events(dispatch))
         yield* Effect.yieldNow
-        yield* session.selectThread("hosted", 1)
+        yield* session.selectThread("hosted")
         yield* Effect.forEach(
           Array.from({ length: 100 }, (_, index) => index),
           (index) => session.submit(`while busy ${index}`),
@@ -139,7 +144,6 @@ describe("Operation", () => {
         yield* settleEvents
       }).pipe(provideLayer(layer))
       expect(yield* Ref.get(started)).toEqual([])
-      expect((yield* Ref.get(events)).filter((event) => event._tag === "QueueUpdated")).toHaveLength(100)
       expect(yield* turns.readQueue(thread.id)).toMatchObject({ revision: 100, queuedCount: 100 })
     }),
   )
@@ -206,23 +210,9 @@ describe("Operation", () => {
         watchTurn: (link, cursor) =>
           link.turnId === "active-control"
             ? Stream.concat(
-                Stream.make({
-                  executionId: link.runId,
-                  cursor: "active-control-started",
-                  sequence: 0,
-                  type: "execution.started" as const,
-                  timestampSource: "baton" as const,
-                  createdAt: 1,
-                }),
+                Stream.make(projectionSnapshot(link.turnId, "running", "active-control-started")),
                 Stream.fromEffect(Deferred.await(activeCancelled)).pipe(
-                  Stream.map(() => ({
-                    executionId: link.runId,
-                    cursor: "active-control-cancelled",
-                    sequence: 1,
-                    type: "execution.cancelled" as const,
-                    timestampSource: "baton" as const,
-                    createdAt: 4,
-                  })),
+                  Stream.map(() => projectionPatch(0, 1, "cancelled", "active-control-cancelled")),
                 ),
               )
             : backend.watchTurn(link, cursor),
@@ -236,14 +226,14 @@ describe("Operation", () => {
         })
         yield* Effect.forkChild(session.events(dispatch))
         yield* Effect.yieldNow
-        yield* session.selectThread(thread.id, 1)
+        yield* session.selectThread(thread.id)
         yield* session.editQueued("queued-control", "edited")
         yield* session.dequeue("queued-control")
         yield* session.submit("later")
         yield* session.steerQueued("queued-control-2", "redirect")
         yield* session.cancel
         while ((yield* turns.get(Turn.TurnId.make("submitted-control")))?.status !== "completed") yield* Effect.yieldNow
-        yield* session.reopenThread(2)
+        yield* session.reopenThread
         yield* settleEvents
       }).pipe(
         provideLayer(
@@ -259,13 +249,12 @@ describe("Operation", () => {
         ),
       )
       const dispatched = yield* Ref.get(events)
-      expect(dispatched.some((event) => event._tag === "SelectionLoaded")).toBe(true)
+      expect(dispatched.some((event) => event._tag === "ThreadViewSnapshot")).toBe(true)
       expect(
         dispatched
           .filter((event) => event._tag === "ExecutionControlled")
           .map((event) => (event._tag === "ExecutionControlled" ? event.action : undefined)),
       ).toEqual(["steered", "cancelled"])
-      expect(dispatched.some((event) => event._tag === "TranscriptProjectionPatched")).toBe(true)
       expect(yield* turns.get(Turn.TurnId.make("active-control"))).toMatchObject({
         status: "cancelled",
       })

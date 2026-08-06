@@ -1,11 +1,15 @@
-export type ReviewLane =
-  | { readonly key: "correctness"; readonly prompt: string }
-  | { readonly key: "security"; readonly prompt: string }
-  | { readonly key: "quality"; readonly prompt: string }
+import { Schema } from "effect"
 
-export interface ReviewIntent {
-  readonly _tag: "Review"
-  readonly lanes: readonly [ReviewLane, ReviewLane, ReviewLane]
-  readonly concurrency: 3
-  readonly completion: "wait-for-all"
-}
+export const ReviewLane = Schema.Union([
+  Schema.Struct({ key: Schema.Literal("correctness"), prompt: Schema.String }),
+  Schema.Struct({ key: Schema.Literal("security"), prompt: Schema.String }),
+  Schema.Struct({ key: Schema.Literal("quality"), prompt: Schema.String }),
+])
+export type ReviewLane = typeof ReviewLane.Type
+
+export const ReviewIntent = Schema.TaggedStruct("Review", {
+  lanes: Schema.Tuple([ReviewLane, ReviewLane, ReviewLane]),
+  concurrency: Schema.Literal(3),
+  completion: Schema.Literal("wait-for-all"),
+})
+export type ReviewIntent = typeof ReviewIntent.Type

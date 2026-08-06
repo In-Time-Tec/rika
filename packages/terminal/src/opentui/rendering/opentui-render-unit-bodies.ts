@@ -1,13 +1,10 @@
 import { Function } from "effect"
-import { bold, dim, fg, type StyledText, type TextChunk } from "@opentui/core"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
+import { bold, fg, type StyledText, type TextChunk } from "@opentui/core"
 import type { TranscriptBlock } from "../../state/model/terminal-transcript-state"
 import type { Model } from "../../state/model/terminal-state"
 import { colors } from "../../presentation/terminal/terminal-theme"
-import { renderDiffStyled, renderPierreDiff, renderToolSummary } from "./terminal-diff-text-adapter"
+import { renderDiffStyled, renderPierreDiff } from "./terminal-diff-text-adapter"
 import { isToolOutputDisplayed } from "../../presentation/transcript/transcript-agent-response"
-import { agentToolSummary } from "../../presentation/transcript/transcript-tool-detail"
-import { wrapBodyText } from "./opentui-render-window"
 import { diffCounts } from "./opentui-render-tool-detail"
 import { completedCompactionIcon, renderBlock } from "./opentui-render-block"
 import type { TerminalTextChunk } from "../../presentation/markdown/styled-text"
@@ -60,43 +57,6 @@ export const renderDiffBody: {
     arg5: Parameters<typeof renderDiffBodyImpl>[5],
   ): ReturnType<typeof renderDiffBodyImpl>
 } = Function.dual(6, renderDiffBodyImpl)
-
-const renderChildAgentBodyImpl = (
-  block: Extract<TranscriptBlock, { _tag: "ChildAgent" }>,
-  expanded: boolean,
-  width: number,
-  statusIcon: (failed: boolean, running: boolean, cancelled?: boolean) => TextChunk,
-  marker: (expanded: boolean) => TextChunk,
-  append: Append,
-): void => {
-  const running = block.status === "running"
-  const phrase = TranscriptProjection.Presentation.agentPhrase({ name: block.name, status: block.status })
-  append(statusIcon(block.status === "failed", running, block.status === "cancelled"))
-  for (const chunk of renderToolSummary(agentToolSummary(phrase), { leading: " " })[0]!) append(chunk)
-  append(marker(expanded))
-  if (expanded) {
-    if (block.summary.length > 0) append(dim(fg(colors.text)(`\n${wrapBodyText(block.summary, width, "  ")}`)))
-    for (const activity of block.activity) append(dim(fg(colors.text)(`\n${wrapBodyText(activity, width, "  ")}`)))
-  }
-}
-
-export const renderChildAgentBody: {
-  (
-    arg1: Parameters<typeof renderChildAgentBodyImpl>[1],
-    arg2: Parameters<typeof renderChildAgentBodyImpl>[2],
-    arg3: Parameters<typeof renderChildAgentBodyImpl>[3],
-    arg4: Parameters<typeof renderChildAgentBodyImpl>[4],
-    arg5: Parameters<typeof renderChildAgentBodyImpl>[5],
-  ): (arg0: Parameters<typeof renderChildAgentBodyImpl>[0]) => ReturnType<typeof renderChildAgentBodyImpl>
-  (
-    arg0: Parameters<typeof renderChildAgentBodyImpl>[0],
-    arg1: Parameters<typeof renderChildAgentBodyImpl>[1],
-    arg2: Parameters<typeof renderChildAgentBodyImpl>[2],
-    arg3: Parameters<typeof renderChildAgentBodyImpl>[3],
-    arg4: Parameters<typeof renderChildAgentBodyImpl>[4],
-    arg5: Parameters<typeof renderChildAgentBodyImpl>[5],
-  ): ReturnType<typeof renderChildAgentBodyImpl>
-} = Function.dual(6, renderChildAgentBodyImpl)
 
 const compactionRainbow = ["#ff5f6d", "#ff9f43", "#ffd166", "#7bd389", "#5bc0eb", "#8c7ae6", "#d980fa"] as const
 

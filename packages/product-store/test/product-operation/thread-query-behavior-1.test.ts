@@ -12,7 +12,7 @@ describe("ThreadQuery", () => {
       const query = yield* ThreadQuery.Service
       const metadata = yield* query.find({ query: "auth" })
       const file = yield* query.find({ query: "file:src/auth.ts" })
-      expect(metadata).toMatchObject({ schemaVersion: 2, threads: [{ threadId: "one", title: "Fix auth" }] })
+      expect(metadata).toMatchObject({ schemaVersion: 1, threads: [{ threadId: "one", title: "Fix auth" }] })
       expect(file.threads[0]?.summary).toBe("src/auth.ts")
     }).pipe(provideLayer(queryLayer)),
   )
@@ -43,7 +43,7 @@ describe("ThreadQuery", () => {
       const threadRepository = yield* Fixtures.ThreadRepository.makeMemory([local, foreign])
       const turns = yield* Fixtures.TurnRepository.makeMemory([localTurn])
       const transcripts = Context.get(
-        yield* Layer.build(Fixtures.TranscriptRepository.memoryLayer),
+        yield* Layer.build(Fixtures.TranscriptRepository.memoryLayer()),
         Fixtures.TranscriptRepository.Service,
       )
       const searches = yield* Fixtures.ThreadSearchRepository.makeMemory
@@ -93,7 +93,7 @@ describe("ThreadQuery", () => {
     Effect.gen(function* () {
       const query = yield* ThreadQuery.Service
       const recent = yield* query.read({ threadId: "one", selector: { _tag: "recent" } })
-      expect(recent).toMatchObject({ schemaVersion: 2, selector: { _tag: "recent" }, items: [{ author: "human" }] })
+      expect(recent).toMatchObject({ schemaVersion: 1, selector: { _tag: "recent" }, items: [{ author: "human" }] })
     }).pipe(provideLayer(queryLayer)),
   )
 
@@ -102,9 +102,9 @@ describe("ThreadQuery", () => {
       const query = yield* ThreadQuery.Service
       const child = yield* query.read({
         threadId: "one",
-        selector: { _tag: "subtree", childExecutionId: "missing" },
+        selector: { _tag: "subtree", subagentId: "missing" },
       })
-      expect(child.omissions[0]).toMatchObject({ reason: "unavailableChild", continuation: { _tag: "subtree" } })
+      expect(child.omissions[0]).toMatchObject({ reason: "unavailableSubagent", continuation: { _tag: "subtree" } })
     }).pipe(provideLayer(queryLayer)),
   )
 })

@@ -40,7 +40,7 @@ describe("thread state", () => {
 
   it("builds the SQL ladder from the same table", () => {
     const sql = rankCase("turn.status")
-    expect(sql).toContain("WHEN turn.status IN ('accepted', 'running', 'waiting') THEN 2")
+    expect(sql).toContain("WHEN turn.status IN ('accepted', 'running', 'waiting', 'cancelling') THEN 2")
     expect(sql).toContain("WHEN turn.status IN ('queued') THEN 1")
     expect(sql.endsWith("ELSE 0 END")).toBe(true)
   })

@@ -1,5 +1,4 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as TranscriptPage from "@rika/product/transcript-page"
 import * as Database from "@rika/product-store/product-database-layer"
 import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
@@ -7,10 +6,8 @@ import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-rep
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
-import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
-import * as TranscriptSourceEvent from "@rika/transcript/transcript-source-event"
+import * as ExecutionProjection from "@rika/product/execution-projection"
+import * as TranscriptUnitOrder from "@rika/transcript/transcript-unit-order"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Context, Effect, FileSystem, Layer, Scope, pipe } from "effect"
 import type { BenchMeasurement } from "./benchmark-measurement"
@@ -31,7 +28,6 @@ const monotonicMillis = (start: bigint, end: bigint): number => Number(end - sta
 
 export const defaultEventCount = 50_000
 export const defaultCommitBatch = 64
-const projectionVersion = 4
 const debounceWindowMs = 1
 const debounceBurst = 32
 
@@ -49,50 +45,33 @@ const sqliteLayer = (filename: string): Layer.Layer<RepositoryServices, never, B
   )
 }
 
-const preparedEvent = (): TranscriptSourceEvent.SourceEvent => ({
-  cursor: "bench-0",
-  sequence: 0,
-  type: "model.input.prepared",
-  createdAt: 0,
+const projectionState = (
+  status: ExecutionProjection.ProjectionState["status"] = "running",
+): ExecutionProjection.ProjectionState => ({
+  status,
+  usage: ExecutionProjection.emptyUsageState(),
+  steering: { steeringMessages: 0, followUpMessages: 0 },
 })
 
-const deltaEvent = (sequence: number): TranscriptSourceEvent.SourceEvent => ({
-  cursor: `bench-${sequence}`,
-  sequence,
-  type: "model.output.delta",
-  createdAt: sequence,
-  data: { model_call_id: "bench-call", model_attempt_id: "bench-attempt", transient_index: sequence, delta: "x" },
-  text: "x",
+const checkpoint = (revision: number): ExecutionProjection.Checkpoint => ({
+  version: ExecutionProjection.projectionVersion,
+  cursor: `bench-${revision}`,
+  state: "{}",
 })
 
-const completeEvent = (sequence: number): TranscriptSourceEvent.SourceEvent => ({
-  cursor: `bench-${sequence}`,
-  sequence,
-  type: "model.output.completed",
-  createdAt: sequence,
-  text: "x",
-})
-
-const executionCheckpoint = (
-  turn: Turn.AgentExecutionTurn,
-  state: TranscriptProjectionModel.ProjectionState,
-): TranscriptPage.ExecutionCheckpoint => ({
-  executionKey: TranscriptCorrelation.executionKey(String(turn.id)),
-  executionId: String(turn.id),
-  cursor: state.checkpointCursor ?? "",
-  sequence: state.revision,
-  state,
+const answerUnit = (turnId: string, sequence: number): TranscriptUnit.Unit => ({
+  key: `assistant:bench:${sequence}`,
+  turnId,
+  order: TranscriptUnitOrder.unitOrder(`assistant:bench:${sequence}`, sequence),
+  revision: sequence,
+  content: { _tag: "Entry", role: "assistant", text: "x".repeat(16) },
 })
 
 const prepareTurn = (
   threadId: Thread.ThreadId,
   turnId: Turn.TurnId,
   prompt: string,
-): Effect.Effect<
-  { readonly turn: Turn.AgentExecutionTurn; readonly generation: number | undefined },
-  never,
-  RepositoryServices
-> =>
+): Effect.Effect<Turn.AgentExecutionTurn, never, RepositoryServices> =>
   Effect.gen(function* () {
     const threads = yield* ThreadRepository.Service
     const turns = yield* TurnRepository.Service
@@ -108,99 +87,61 @@ const prepareTurn = (
       now: 2,
     })
     const turn = yield* turns.setStatus(turnId, "running", undefined, 3)
-    const empty = TranscriptProjection.Projection.empty(turnId, prompt)
-    const committed = yield* transcripts.commitDelta(
-      turn,
-      TranscriptProjection.Projection.projectionState(empty),
-      { upsert: empty.units, remove: [] },
-      {
-        executionCheckpoints: [executionCheckpoint(turn, TranscriptProjection.Projection.projectionState(empty))],
-        projectionVersion,
-        expectedGeneration: undefined,
-      },
-    )
+    if (turn._tag !== "AgentExecution") return yield* Effect.die("bench seed turn is not an Agent execution")
+    const committed = yield* transcripts.commitProjection(turn, {
+      _tag: "ProjectionSnapshot",
+      revision: 0,
+      checkpoint: checkpoint(0),
+      units: [],
+      hasOlder: false,
+      state: projectionState(),
+    })
     if (committed !== "committed") return yield* Effect.die("bench seed projection was not committed")
-    const stored = yield* transcripts.get(turnId)
-    return { turn, generation: stored?.checkpointGeneration }
+    return turn
   }).pipe(Effect.orDie)
 
-const commitBatch = (
+const commitPatch = (
   turn: Turn.AgentExecutionTurn,
-  fold: TranscriptProjection.ProjectionFold,
+  baseRevision: number,
+  revision: number,
   upsert: ReadonlyArray<TranscriptUnit.Unit>,
-  remove: ReadonlyArray<string>,
-  expectedGeneration: number | undefined,
-): Effect.Effect<number, never, TranscriptRepository.Service> =>
+): Effect.Effect<void, never, TranscriptRepository.Service> =>
   Effect.gen(function* () {
     const transcripts = yield* TranscriptRepository.Service
-    const state = TranscriptProjection.Fold.snapshotFoldState(fold)
-    const result = yield* transcripts.commitDelta(
-      turn,
-      state,
-      { upsert, remove },
-      {
-        executionCheckpoints: [executionCheckpoint(turn, state)],
-        projectionVersion,
-        expectedGeneration,
-      },
-    )
+    const result = yield* transcripts.commitProjection(turn, {
+      _tag: "ProjectionPatch",
+      baseRevision,
+      revision,
+      checkpoint: checkpoint(revision),
+      upsert,
+      remove: [],
+      state: projectionState(),
+    })
     if (result !== "committed") return yield* Effect.die("bench commit returned stale")
-    return expectedGeneration === undefined ? 0 : expectedGeneration + 1
   }).pipe(Effect.orDie)
 
 const measureDebounceCommits = (
   turn: Turn.AgentExecutionTurn,
-  fold: TranscriptProjection.ProjectionFold,
-  startSequence: number,
-  generation: number | undefined,
-): Effect.Effect<
-  { readonly latencies: ReadonlyArray<number>; readonly nextSequence: number; readonly generation: number | undefined },
-  never,
-  BenchServices
-> =>
+  startRevision: number,
+): Effect.Effect<{ readonly latencies: ReadonlyArray<number>; readonly nextRevision: number }, never, BenchServices> =>
   Effect.gen(function* () {
-    let sequence = startSequence
-    let expectedGeneration = generation
+    let revision = startRevision
     const clock = yield* MonotonicClock
     const latencies: Array<number> = []
     for (let burst = 0; burst < 8; burst += 1) {
       const upsert = new Map<string, TranscriptUnit.Unit>()
-      const remove = new Set<string>()
       for (let index = 0; index < debounceBurst; index += 1) {
-        sequence += 1
-        const mutation = TranscriptProjection.Fold.applyFoldEvent(fold, deltaEvent(sequence))
-        for (const unit of mutation.units.upsert) {
-          upsert.set(unit.key, unit)
-          remove.delete(unit.key)
-        }
-        for (const key of mutation.units.remove) {
-          remove.add(key)
-          upsert.delete(key)
-        }
-      }
-      sequence += 1
-      const completion = TranscriptProjection.Fold.applyFoldEvent(fold, completeEvent(sequence))
-      for (const unit of completion.units.upsert) {
+        const unit = answerUnit(String(turn.id), revision + index + 1)
         upsert.set(unit.key, unit)
-        remove.delete(unit.key)
       }
-      for (const key of completion.units.remove) remove.add(key)
+      const baseRevision = revision
+      revision += debounceBurst
       yield* Effect.sleep(`${debounceWindowMs} millis`)
       const commitStart = clock.now()
-      expectedGeneration = yield* pipe(
-        { turn, fold, upsert: [...upsert.values()], remove: [...remove], expectedGeneration },
-        ({
-          turn: currentTurn,
-          fold: currentFold,
-          upsert: upsertUnits,
-          remove: removeKeys,
-          expectedGeneration: currentGeneration,
-        }) => commitBatch(currentTurn, currentFold, upsertUnits, removeKeys, currentGeneration),
-        Effect.orDie,
-      )
+      yield* commitPatch(turn, baseRevision, revision, [...upsert.values()])
       latencies.push(monotonicMillis(commitStart, clock.now()))
     }
-    return { latencies, nextSequence: sequence, generation: expectedGeneration }
+    return { latencies, nextRevision: revision }
   }).pipe(Effect.orDie)
 
 export const runFoldPersistenceBench = (options: {
@@ -215,76 +156,46 @@ export const runFoldPersistenceBench = (options: {
     const clock = yield* MonotonicClock
     const eventCount = options.eventCount ?? defaultEventCount
     const batchSize = options.commitBatch ?? defaultCommitBatch
-    const streamEvent = (sequence: number): TranscriptSourceEvent.SourceEvent =>
-      sequence % batchSize === 0 || sequence === eventCount ? completeEvent(sequence) : deltaEvent(sequence)
     const fileSystem = yield* FileSystem.FileSystem
     const directory = yield* fileSystem.makeTempDirectory({ prefix: "rika-bench-" })
     const filename = `${directory}/rika.db`
     const scope = yield* Effect.scope
-    const context: Context.Context<ThreadRepository.Service | TurnRepository.Service | TranscriptRepository.Service> =
-      yield* pipe(sqliteLayer(filename), (layer) => Layer.buildWithScope(layer, scope), Effect.orDie)
+    const context: Context.Context<RepositoryServices> = yield* pipe(
+      sqliteLayer(filename),
+      (layer) => Layer.buildWithScope(layer, scope),
+      Effect.orDie,
+    )
     return yield* Effect.gen(function* () {
       const threadId = Thread.ThreadId.make("bench-thread")
       const turnId = Turn.TurnId.make("bench-turn")
-      const seeded = yield* pipe(
-        { threadId, turnId, prompt: "bench prompt" },
-        ({ threadId: currentThreadId, turnId: currentTurnId, prompt }) =>
-          prepareTurn(currentThreadId, currentTurnId, prompt),
-        Effect.orDie,
-      )
-      const turn = seeded.turn
-      let expectedGeneration = seeded.generation
-      const fold = TranscriptProjection.Fold.makeProjectionFold(String(turnId), turn.prompt)
-      TranscriptProjection.Fold.applyFoldEvent(fold, preparedEvent())
+      const turn = yield* prepareTurn(threadId, turnId, "bench prompt")
       const commitLatencies: Array<number> = []
       let foldCpuSeconds = 0
       let persistCpuSeconds = 0
       let pendingUpsert = new Map<string, TranscriptUnit.Unit>()
-      let pendingRemove = new Set<string>()
+      let committedRevision = 0
       const foldWallStart = clock.now()
       const wallStart = clock.now()
       const totalCpuStart = cpuSample()
       for (let sequence = 1; sequence <= eventCount; sequence += 1) {
         const foldStart = cpuSample()
-        const mutation = TranscriptProjection.Fold.applyFoldEvent(fold, streamEvent(sequence))
+        const unit = answerUnit(String(turnId), sequence)
         foldCpuSeconds += cpuElapsedSeconds(foldStart, cpuSample())
-        for (const unit of mutation.units.upsert) {
-          pendingUpsert.set(unit.key, unit)
-          pendingRemove.delete(unit.key)
-        }
-        for (const key of mutation.units.remove) {
-          pendingRemove.add(key)
-          pendingUpsert.delete(key)
-        }
+        pendingUpsert.set(unit.key, unit)
         if (sequence % batchSize !== 0 && sequence !== eventCount) continue
         const persistStart = cpuSample()
         const commitStart = clock.now()
-        expectedGeneration = yield* pipe(
-          { turn, fold, upsert: [...pendingUpsert.values()], remove: [...pendingRemove], expectedGeneration },
-          ({
-            turn: currentTurn,
-            fold: currentFold,
-            upsert: upsertUnits,
-            remove: removeKeys,
-            expectedGeneration: currentGeneration,
-          }) => commitBatch(currentTurn, currentFold, upsertUnits, removeKeys, currentGeneration),
-          Effect.orDie,
-        )
+        yield* commitPatch(turn, committedRevision, sequence, [...pendingUpsert.values()])
+        committedRevision = sequence
         commitLatencies.push(monotonicMillis(commitStart, clock.now()))
         persistCpuSeconds += cpuElapsedSeconds(persistStart, cpuSample())
         pendingUpsert = new Map()
-        pendingRemove = new Set()
       }
       const foldWallSeconds = monotonicMillis(foldWallStart, clock.now()) / 1000
       const stored = yield* TranscriptRepository.Service.pipe(Effect.flatMap((repository) => repository.get(turnId)))
       if (stored === undefined || stored.revision !== eventCount)
         return yield* Effect.die(`bench projection revision mismatch: ${stored?.revision ?? "missing"}`)
-      const debounce = yield* pipe(
-        { turn, fold, eventCount, generation: stored.checkpointGeneration },
-        ({ turn: currentTurn, fold: currentFold, eventCount: currentEventCount, generation }) =>
-          measureDebounceCommits(currentTurn, currentFold, currentEventCount, generation),
-        Effect.orDie,
-      )
+      const debounce = yield* measureDebounceCommits(turn, eventCount)
       const debounceSummary = summarizeLatencies(debounce.latencies)
       const wallEnd = clock.now()
       const totalCpuEnd = cpuSample()

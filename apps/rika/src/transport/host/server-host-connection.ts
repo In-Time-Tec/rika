@@ -269,18 +269,6 @@ export const makeConnectionHandler = (context: ConnectionContext) => {
                   Effect.annotateLogs("rika.server.feed.sequence", message.throughSequence),
                 )
             }
-            if (message._tag === "interactive-feed-replay") {
-              const active = (yield* Ref.get(routesRef))
-                .get(routeKey(message.requestId))
-                ?.sessions.get(message.sessionId)
-              if (
-                message.connectionId !== connectionId ||
-                active === undefined ||
-                active.feedGeneration !== message.feedGeneration
-              )
-                return yield* close(4400)
-              yield* active.replay(message.afterSequence)
-            }
             if (message._tag === "interactive-command") {
               const active = (yield* Ref.get(routesRef))
                 .get(routeKey(message.requestId))

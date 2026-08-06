@@ -10,7 +10,7 @@ export const search = Fixtures.ThreadSearchRepository.Service.of({
       let results: Effect.Success<ReturnType<ThreadSearchRepository.Interface["search"]>>["results"] = []
       if (input.workspace === workspace && input.query === "states") {
         results = stateThreads.map(({ thread }) => ({
-          schemaVersion: 2,
+          schemaVersion: 1,
           threadId: thread.id,
           title: thread.title,
           workspace,
@@ -24,7 +24,7 @@ export const search = Fixtures.ThreadSearchRepository.Service.of({
       } else if (input.workspace === workspace && input.query.includes("auth")) {
         results = [
           {
-            schemaVersion: 2,
+            schemaVersion: 1,
             threadId: storedThread.id,
             title: storedThread.title,
             workspace,
@@ -43,7 +43,7 @@ export const search = Fixtures.ThreadSearchRepository.Service.of({
         ]
       }
       return {
-        schemaVersion: 2,
+        schemaVersion: 1,
         results,
         nextCursor: undefined,
       }
@@ -54,7 +54,7 @@ export const search = Fixtures.ThreadSearchRepository.Service.of({
 export const repositories = Layer.mergeAll(
   Fixtures.ThreadRepository.memoryLayer([storedThread, relatedThread, ...stateThreads.map(({ thread }) => thread)]),
   Fixtures.TurnRepository.memoryLayer([storedTurn, ...stateThreads.map(({ turn }) => turn)]),
-  Fixtures.TranscriptRepository.memoryLayer,
+  Fixtures.TranscriptRepository.memoryLayer(),
   Layer.succeed(Fixtures.ThreadSearchRepository.Service, search),
 )
 export const queryLayer = Layer.merge(

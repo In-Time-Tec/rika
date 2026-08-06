@@ -29,7 +29,6 @@ const ClientMessage = Schema.Union([
   Feed.InteractiveFeedProtocol.InteractiveCommandRequest,
   Feed.InteractiveFeedProtocol.CancelInteractiveCommand,
   Feed.InteractiveFeedProtocol.InteractiveFeedAck,
-  Feed.InteractiveFeedProtocol.InteractiveFeedReplay,
   Feed.InteractiveFeedProtocol.InteractiveEnd,
   Request.OperationRequestProtocol.CancelRequest,
 ])
@@ -41,7 +40,6 @@ const ServerMessage = Schema.Union([
   Request.OperationRequestProtocol.Output,
   Feed.InteractiveFeedProtocol.InteractiveStarted,
   Feed.InteractiveFeedProtocol.InteractiveFeedEvent,
-  Feed.InteractiveFeedProtocol.InteractiveFeedResync,
   Feed.InteractiveFeedProtocol.InteractiveCommandCompleted,
   Feed.InteractiveFeedProtocol.InteractiveCommandFailed,
   Request.OperationRequestProtocol.OperationCompleted,

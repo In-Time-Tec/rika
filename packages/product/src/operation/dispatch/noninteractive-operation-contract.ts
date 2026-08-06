@@ -1,5 +1,3 @@
-import type * as ExecutionEvent from "@rika/product/execution-event"
-import type * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
 import type * as RootTurnOwner from "../../thread/queue/root-turn-owner"
 import type * as Thread from "../../thread/model/thread-record"
 import type * as Turn from "../../thread/model/turn-record"
@@ -8,7 +6,7 @@ import type * as TurnQueuePromotion from "../../thread/repository/turn-repositor
 import type { staleQueuedTurnsError } from "../../thread/queue/pending-turn-policy"
 import type { Input, OperationUnavailable } from "../contract/product-operation"
 import type { OperationError } from "../operation-error"
-import type { InteractiveEvent } from "../interactive/interactive-event"
+import type { InteractiveEvent } from "../interactive/interactive-runtime-event"
 import type { PreparedTurn } from "../interactive/interactive-session-runtime"
 import type { ModeId } from "@rika/configuration/behavior-mode"
 import type { CreateInput } from "../../thread/repository/turn-repository-contract"
@@ -61,7 +59,6 @@ export interface Dependencies {
   >
   readonly publishInteractiveActivity: (origin: number, event: InteractiveEvent) => InteractiveEvent
   readonly rootTurnOwner: RootTurnOwner.Interface
-  readonly executionIngest: ExecutionIngest.Interface
   readonly prepareExecution: (
     turn: Turn.AgentExecutionTurn,
     workspace: string,
@@ -72,17 +69,6 @@ export interface Dependencies {
   ) => Effect.Effect<TurnQueuePromotion.QueueClaim | undefined, TurnRepository.RepositoryError, never>
   readonly releaseTurnObserver: (turnId: Turn.TurnId) => Effect.Effect<void, never, never>
   readonly queueMutationEvent: (queue: TurnQueuePromotion.QueueItemChange) => InteractiveEvent
-  readonly deliverResultEvents: (
-    turnId: Turn.TurnId,
-    events: ReadonlyArray<ExecutionEvent.Event>,
-    delivered?: ReadonlySet<string>,
-  ) => void
-  readonly projectExecutionResult: (
-    threadId: Thread.ThreadId,
-    result: ExecutionEvent.Result,
-  ) => Effect.Effect<void, OperationError | import("@rika/product/thread-summary-repository").RepositoryError, never>
-  readonly ensureIngest: (threadId: Thread.ThreadId, turnId: Turn.TurnId) => Effect.Effect<void, OperationError, never>
-  readonly awaitIngestSettled: (turnId: Turn.TurnId) => Effect.Effect<void, OperationError, never>
   readonly executionDependencies: import("../interactive/interactive-session-runtime").InteractiveExecutionContext
   readonly staleQueuedTurnsError: typeof staleQueuedTurnsError
   readonly queuedTurnPromoteMaxAgeMs: number

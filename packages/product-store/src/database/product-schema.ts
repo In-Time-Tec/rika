@@ -38,7 +38,7 @@ export const create = Effect.gen(function* () {
     id TEXT PRIMARY KEY NOT NULL,
     thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
     prompt TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('accepted', 'queued', 'running', 'waiting', 'completed', 'failed', 'cancelled')),
+    status TEXT NOT NULL CHECK (status IN ('accepted', 'queued', 'running', 'waiting', 'cancelling', 'completed', 'failed', 'cancelled')),
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     prompt_parts_json TEXT,
@@ -88,6 +88,11 @@ export const create = Effect.gen(function* () {
   yield* sql`CREATE INDEX rika_turns_thread_updated ON rika_turns (thread_id, updated_at DESC)`
   yield* sql`CREATE INDEX rika_turns_thread_nonqueued ON rika_turns (thread_id, created_at DESC, id DESC)
     WHERE status <> 'queued'`
+  yield* sql`CREATE TABLE rika_turn_admission_outbox (
+    turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    start_input_json TEXT NOT NULL,
+    prepared_at INTEGER NOT NULL
+  )`
   yield* sql`CREATE TABLE rika_thread_queue_state (
     thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
     revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
@@ -132,93 +137,34 @@ export const create = Effect.gen(function* () {
     checkpoint_generation INTEGER NOT NULL DEFAULT 0 CHECK (checkpoint_generation >= 0),
     revision INTEGER NOT NULL DEFAULT -1 CHECK (revision >= -1),
     projection_version INTEGER NOT NULL DEFAULT 1 CHECK (projection_version >= 1),
-    model_phase INTEGER NOT NULL DEFAULT -1 CHECK (model_phase >= -1),
-    usable_completion_sequence INTEGER CHECK (usable_completion_sequence IS NULL OR usable_completion_sequence >= 0),
-    oldest_cursor TEXT,
-    checkpoint_cursor TEXT,
-    cost_usd REAL CHECK (cost_usd IS NULL OR cost_usd >= 0),
-    usage_cursors_json TEXT,
-    pricing_version TEXT,
-    updated_at INTEGER NOT NULL
-  )`
-  yield* sql`CREATE TABLE rika_transcript_execution_checkpoints (
-    turn_id TEXT NOT NULL REFERENCES rika_transcript_checkpoints(turn_id) ON DELETE CASCADE,
-    execution_key TEXT COLLATE BINARY NOT NULL CHECK (length(execution_key) > 0),
-    execution_id TEXT NOT NULL CHECK (length(execution_id) > 0),
-    cursor TEXT NOT NULL,
-    sequence INTEGER NOT NULL CHECK (sequence >= -1),
-    status TEXT CHECK (status IS NULL OR status IN ('completed', 'failed', 'cancelled')),
-    revision INTEGER NOT NULL CHECK (revision >= -1),
-    model_phase INTEGER NOT NULL CHECK (model_phase >= -1),
-    usable_completion_sequence INTEGER CHECK (usable_completion_sequence IS NULL OR usable_completion_sequence >= 0),
-    oldest_cursor TEXT,
-    checkpoint_cursor TEXT,
-    cost_usd REAL CHECK (cost_usd IS NULL OR cost_usd >= 0),
-    usage_cursors_json TEXT,
-    pricing_version TEXT,
-    parent_execution_key TEXT COLLATE BINARY,
-    parent_unit_key TEXT,
-    parent_id TEXT,
-    parent_order_key TEXT COLLATE BINARY,
-    is_root INTEGER NOT NULL CHECK (is_root IN (0, 1)),
-    CHECK (revision = sequence),
-    CHECK (coalesce(checkpoint_cursor, '') = cursor),
+    state_json TEXT NOT NULL,
+    projector_version INTEGER CHECK (projector_version IS NULL OR projector_version >= 1),
+    projector_cursor TEXT,
+    projector_state TEXT,
+    updated_at INTEGER NOT NULL,
     CHECK (
-      (is_root = 1 AND parent_execution_key IS NULL AND parent_unit_key IS NULL AND parent_id IS NULL AND parent_order_key IS NULL)
+      (projector_version IS NULL AND projector_cursor IS NULL AND projector_state IS NULL)
       OR
-      (is_root = 0 AND parent_execution_key IS NOT NULL AND parent_unit_key IS NOT NULL AND parent_id IS NOT NULL AND parent_order_key IS NOT NULL)
-    ),
-    PRIMARY KEY (turn_id, execution_key),
-    FOREIGN KEY (turn_id, parent_execution_key)
-      REFERENCES rika_transcript_execution_checkpoints(turn_id, execution_key)
-      DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (turn_id, parent_unit_key, parent_execution_key, parent_order_key, parent_id)
-      REFERENCES rika_transcript_units(turn_id, unit_key, execution_key, unit_order_key, tool_id)
-      DEFERRABLE INITIALLY DEFERRED
+      (projector_version IS NOT NULL AND projector_cursor IS NOT NULL AND projector_state IS NOT NULL)
+    )
   )`
   yield* sql`CREATE TABLE rika_transcript_units (
     turn_id TEXT NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
     unit_key TEXT NOT NULL,
-    execution_key TEXT COLLATE BINARY CHECK (execution_key IS NULL OR length(execution_key) > 0),
     thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
     unit_order_key TEXT COLLATE BINARY NOT NULL,
-    tool_id TEXT,
     parent_id TEXT,
     revision INTEGER NOT NULL,
     unit_json TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (turn_id, unit_key),
-    UNIQUE (turn_id, unit_order_key),
-    UNIQUE (turn_id, unit_key, execution_key, unit_order_key, tool_id),
-    FOREIGN KEY (turn_id, execution_key)
-      REFERENCES rika_transcript_execution_checkpoints(turn_id, execution_key)
-      ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
+    UNIQUE (turn_id, unit_order_key)
   )`
   yield* sql`CREATE INDEX rika_transcript_units_page ON rika_transcript_units (
     thread_id, created_at DESC, turn_id DESC, unit_order_key DESC
   )`
   yield* sql`CREATE INDEX rika_transcript_units_turn ON rika_transcript_units (turn_id, unit_order_key ASC)`
-  yield* sql`CREATE TABLE rika_turn_usage (
-    source_id TEXT NOT NULL,
-    turn_id TEXT NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
-    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
-    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
-    projection_version INTEGER NOT NULL DEFAULT 2,
-    fold_json TEXT,
-    cost_nano_usd INTEGER CHECK (cost_nano_usd IS NULL OR cost_nano_usd >= 0),
-    tokens INTEGER CHECK (tokens IS NULL OR tokens >= 0),
-    active_millis INTEGER CHECK (active_millis IS NULL OR active_millis >= 0),
-    active_intervals_json TEXT,
-    priced_attempts INTEGER NOT NULL DEFAULT 0 CHECK (priced_attempts >= 0),
-    unpriced_attempts INTEGER NOT NULL DEFAULT 0 CHECK (unpriced_attempts >= 0),
-    counted_attempts INTEGER NOT NULL DEFAULT 0 CHECK (counted_attempts >= 0),
-    uncounted_attempts INTEGER NOT NULL DEFAULT 0 CHECK (uncounted_attempts >= 0),
-    source_complete INTEGER NOT NULL DEFAULT 0 CHECK (source_complete IN (0, 1)),
-    updated_at INTEGER NOT NULL,
-    PRIMARY KEY (turn_id, source_id)
-  )`
-  yield* sql`CREATE INDEX rika_turn_usage_thread ON rika_turn_usage (thread_id, turn_id, source_id)`
   yield* sql`CREATE TABLE rika_thread_picker_summary (
     thread_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
     workspace TEXT NOT NULL,
@@ -259,10 +205,10 @@ export const create = Effect.gen(function* () {
     AFTER INSERT ON rika_turns BEGIN
       UPDATE rika_thread_picker_summary SET
         waiting_count = waiting_count + (NEW.status = 'waiting'),
-        running_count = running_count + (NEW.status IN ('accepted', 'running')),
+        running_count = running_count + (NEW.status IN ('accepted', 'running', 'waiting', 'cancelling')),
         queued_count = queued_count + (NEW.status = 'queued'),
         status_rank = MAX(status_rank, CASE WHEN NEW.status = 'waiting' THEN 3
-          WHEN NEW.status IN ('accepted', 'running') THEN 2 WHEN NEW.status = 'queued' THEN 1 ELSE 0 END),
+          WHEN NEW.status IN ('accepted', 'running', 'waiting', 'cancelling') THEN 2 WHEN NEW.status = 'queued' THEN 1 ELSE 0 END),
         last_status = CASE WHEN last_turn_created_at IS NULL OR (NEW.created_at, NEW.id) >
           (last_turn_created_at, last_turn_id) THEN NEW.status ELSE last_status END,
         last_turn_created_at = CASE WHEN last_turn_created_at IS NULL OR (NEW.created_at, NEW.id) >
@@ -277,11 +223,11 @@ export const create = Effect.gen(function* () {
     AFTER UPDATE OF status, updated_at ON rika_turns BEGIN
       UPDATE rika_thread_picker_summary SET
         waiting_count = waiting_count - (OLD.status = 'waiting') + (NEW.status = 'waiting'),
-        running_count = running_count - (OLD.status IN ('accepted', 'running')) + (NEW.status IN ('accepted', 'running')),
+        running_count = running_count - (OLD.status IN ('accepted', 'running', 'waiting', 'cancelling')) + (NEW.status IN ('accepted', 'running', 'waiting', 'cancelling')),
         queued_count = queued_count - (OLD.status = 'queued') + (NEW.status = 'queued'),
         status_rank = CASE
           WHEN waiting_count - (OLD.status = 'waiting') + (NEW.status = 'waiting') > 0 THEN 3
-          WHEN running_count - (OLD.status IN ('accepted', 'running')) + (NEW.status IN ('accepted', 'running')) > 0 THEN 2
+          WHEN running_count - (OLD.status IN ('accepted', 'running', 'waiting', 'cancelling')) + (NEW.status IN ('accepted', 'running', 'waiting', 'cancelling')) > 0 THEN 2
           WHEN queued_count - (OLD.status = 'queued') + (NEW.status = 'queued') > 0 THEN 1 ELSE 0 END,
         last_status = CASE WHEN last_turn_id = NEW.id THEN NEW.status ELSE last_status END,
         last_activity_at = MAX(last_activity_at, NEW.updated_at),
@@ -306,10 +252,10 @@ export const create = Effect.gen(function* () {
     AFTER DELETE ON rika_turns BEGIN
       UPDATE rika_thread_picker_summary SET
         waiting_count = waiting_count - (OLD.status = 'waiting'),
-        running_count = running_count - (OLD.status IN ('accepted', 'running')),
+        running_count = running_count - (OLD.status IN ('accepted', 'running', 'waiting', 'cancelling')),
         queued_count = queued_count - (OLD.status = 'queued'),
         status_rank = CASE WHEN waiting_count - (OLD.status = 'waiting') > 0 THEN 3
-          WHEN running_count - (OLD.status IN ('accepted', 'running')) > 0 THEN 2
+          WHEN running_count - (OLD.status IN ('accepted', 'running', 'waiting', 'cancelling')) > 0 THEN 2
           WHEN queued_count - (OLD.status = 'queued') > 0 THEN 1 ELSE 0 END,
         turn_count = turn_count - 1,
         last_status = CASE WHEN last_turn_id = OLD.id THEN (SELECT status FROM rika_turns WHERE thread_id = OLD.thread_id ORDER BY created_at DESC, id DESC LIMIT 1) ELSE last_status END,
@@ -386,6 +332,7 @@ export const schemaObjects: ReadonlyArray<string> = [
   "index:rika_turns_queue_claim",
   "index:rika_turns_thread_updated",
   "index:rika_turns_thread_nonqueued",
+  "table:rika_turn_admission_outbox",
   "table:rika_thread_queue_state",
   "table:rika_thread_turn_activity",
   "index:rika_thread_turn_activity_summary",
@@ -399,12 +346,9 @@ export const schemaObjects: ReadonlyArray<string> = [
   "table:rika_thread_search_files",
   "index:rika_thread_search_files_path",
   "table:rika_transcript_checkpoints",
-  "table:rika_transcript_execution_checkpoints",
   "table:rika_transcript_units",
   "index:rika_transcript_units_page",
   "index:rika_transcript_units_turn",
-  "table:rika_turn_usage",
-  "index:rika_turn_usage_thread",
   "table:rika_thread_picker_summary",
   "index:rika_thread_picker_summary_listing",
   "trigger:rika_thread_picker_summary_thread_insert",

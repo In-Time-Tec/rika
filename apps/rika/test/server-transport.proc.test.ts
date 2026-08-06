@@ -113,7 +113,7 @@ describe("server WebSocket process transport", () => {
   )
 
   test(
-    "forwards parent and child execution patches through the server feed unchanged",
+    "forwards sanitized child visual patches through the server feed",
     () =>
       run(
         Effect.gen(function* () {
@@ -125,11 +125,7 @@ describe("server WebSocket process transport", () => {
             yield* client.send("child-execution-interactive")
             expect(yield* client.nextEffect).toEqual({
               type: "child-execution-events-completed",
-              tags: [
-                "execution:parent-turn:child_run.spawned",
-                "execution:parent-turn:child:oracle:tool.call.requested",
-                "execution:parent-turn:child:oracle:model.output.completed",
-              ],
+              tags: ["Child started", "Child read src/a.ts", "Child review complete"],
             })
             yield* client.closeEffect
           } finally {
@@ -154,12 +150,7 @@ describe("server WebSocket process transport", () => {
             const event = yield* client.nextEffect
             expect(event.type).toBe("timed-tool-events-completed")
             const tags = event.tags ?? []
-            expect(tags.map((tag) => tag.split(":")[0])).toEqual([
-              "tool.call.requested",
-              "tool.call.requested",
-              "tool.result.received",
-              "tool.result.received",
-            ])
+            expect(tags.map((tag) => tag.split(":")[0])).toEqual(["running", "running", "complete", "complete"])
             const times = tags.map((tag) => Number(tag.split(":")[1]))
             expect(times[1]! - times[0]!).toBeLessThan(100)
             expect(times[2]! - times[0]!).toBeGreaterThanOrEqual(100)

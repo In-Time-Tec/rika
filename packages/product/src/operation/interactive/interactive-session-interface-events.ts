@@ -9,7 +9,18 @@ import type { InteractiveImplementationInput } from "./interactive-session-inter
 
 export const makeInteractiveSessionEvents = (
   input: InteractiveImplementationInput,
-): Pick<InteractiveSession, "events" | "submit" | "newThread" | "shell" | "editQueued" | "dequeue" | "steerQueued"> => {
+): Pick<
+  InteractiveSession,
+  | "events"
+  | "submit"
+  | "newThread"
+  | "shell"
+  | "editQueued"
+  | "dequeue"
+  | "steerQueued"
+  | "approveAuthorization"
+  | "denyAuthorization"
+> => {
   const operationFeed: InteractiveOperationFeed = input.operationFeed
   const submissionAdmission: Semaphore.Semaphore = input.submissionAdmission
   const events = (dispatch: Parameters<InteractiveSession["events"]>[0]) =>
@@ -48,5 +59,9 @@ export const makeInteractiveSessionEvents = (
     editQueued: (id, prompt) => input.safe(input.sessionDispatch, input.control.editQueued(id, prompt)),
     dequeue: (id) => input.safe(input.sessionDispatch, input.control.dequeue(id)),
     steerQueued: (id, text) => input.safe(input.sessionDispatch, input.control.steerQueued(id, text)),
+    approveAuthorization: (turnId, authorizationId) =>
+      input.safe(input.sessionDispatch, input.control.approveAuthorization(turnId, authorizationId)),
+    denyAuthorization: (turnId, authorizationId) =>
+      input.safe(input.sessionDispatch, input.control.denyAuthorization(turnId, authorizationId)),
   }
 }

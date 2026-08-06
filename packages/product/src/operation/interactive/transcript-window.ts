@@ -1,23 +1,19 @@
 import * as TranscriptPage from "@rika/product/transcript-page"
 import { OperationError } from "../operation-error"
 import { Effect } from "effect"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import * as Turn from "@rika/product/turn-record"
 import * as ThreadResult from "@rika/product/thread-result"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
-import * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
+import * as ExecutionProjection from "../../execution/contract/execution-projection"
+import { promptUnit } from "./interactive-prompt-unit"
+import { recordedShellProjection, settleRecordedShellProjection } from "@rika/transcript/recorded-shell-presentation"
 import { boundTurnEntries, transcriptCursorFor } from "../../transcript/transcript-bounds"
 import type { SelectionEpochState } from "./interactive-thread-selection"
 
 export const initialTranscriptWindow = (input: {
   readonly state: SelectionEpochState
   readonly turns: Pick<TurnRepository.Interface, "page">
-  readonly transcripts: Pick<TranscriptRepository.Interface, "get">
-  readonly ensureIngest: (
-    threadId: Turn.Turn["threadId"],
-    turnId: Turn.Turn["id"],
-  ) => Effect.Effect<void, OperationError, never>
+  readonly transcripts: Pick<TranscriptRepository.Interface, "get" | "usage">
   readonly maxTurns: number
   readonly maxEntries: number
   readonly fail: (message: string) => Effect.Effect<never, OperationError, never>
@@ -38,34 +34,48 @@ export const initialTranscriptWindow = (input: {
       if (turn.status === "queued") continue
       const projection = yield* input.transcripts.get(turn.id)
       let entries: ReadonlyArray<TranscriptPage.Entry>
-      if (projection === undefined || projection.projectionVersion < ExecutionIngest.projectionVersion) {
-        if (ThreadResult.TurnResult.isRecordedShell(turn))
-          return yield* input.fail(`Recorded shell turn ${turn.id} has no current durable transcript`)
-        yield* input.ensureIngest(turn.threadId, turn.id)
-        if (!ThreadResult.TurnResult.isAgentExecution(turn)) continue
-        const seed = TranscriptProjection.Projection.empty(turn.id, turn.prompt)
-        entries = seed.units.map((unit) => ({
+      if (ThreadResult.TurnResult.isRecordedShell(turn)) {
+        const running = recordedShellProjection({ id: turn.id, command: turn.command, status: "running" })
+        const shell = ThreadResult.TurnResult.isRunningRecordedShell(turn)
+          ? running
+          : settleRecordedShellProjection(running, turn)
+        entries = shell.units.map((unit) => ({
           turn,
           unit,
-          projectionRevision: seed.revision,
-          projectionModelPhase: seed.modelPhase,
+          projectionRevision: shell.revision,
+          projectionModelPhase: -1,
+          projectionState: {
+            status: turn.status,
+            usage: { ...ExecutionProjection.emptyUsageState(), sourceComplete: turn.status !== "running" },
+            steering: { steeringMessages: 0, followUpMessages: 0 },
+          },
         }))
-      } else {
-        if (projection.projectionVersion !== ExecutionIngest.projectionVersion)
-          return yield* input.fail(`Turn ${turn.id} has unsupported projection version ${projection.projectionVersion}`)
-        if (projection.units.length === 0)
-          return yield* input.fail(`Turn ${turn.id} has an empty current-version transcript`)
-        entries = projection.units.map((unit) =>
-          Object.assign(
-            {
-              turn: projection.turn,
-              unit,
-              projectionRevision: projection.revision,
-              projectionModelPhase: projection.modelPhase,
+      } else if (projection === undefined || projection.projectionVersion < ExecutionProjection.projectionVersion) {
+        if (!ThreadResult.TurnResult.isAgentExecution(turn)) continue
+        entries = [
+          {
+            turn,
+            unit: promptUnit(turn),
+            projectionRevision: 0,
+            projectionModelPhase: -1,
+            projectionState: {
+              status: turn.status === "accepted" ? "running" : turn.status,
+              usage: ExecutionProjection.emptyUsageState(),
+              steering: { steeringMessages: 0, followUpMessages: 0 },
             },
-            projection.costUsd === undefined ? {} : { projectionCostUsd: projection.costUsd },
-          ),
-        )
+          },
+        ]
+      } else {
+        if (projection.projectionVersion !== ExecutionProjection.projectionVersion)
+          return yield* input.fail(`Turn ${turn.id} has unsupported projection version ${projection.projectionVersion}`)
+        const units = projection.units.length === 0 ? [promptUnit(projection.turn)] : projection.units
+        entries = units.map((unit) => ({
+          turn: projection.turn,
+          unit,
+          projectionRevision: projection.revision,
+          projectionModelPhase: -1,
+          projectionState: projection.state,
+        }))
       }
       projectedTurns += 1
       if (!reduced && entryCount + entries.length <= input.maxEntries) {
@@ -82,5 +92,10 @@ export const initialTranscriptWindow = (input: {
       entryCount += bounded.entries.length
       if (detail > 0) oldestCursor = transcriptCursorFor(entries[bounded.contiguousFrom]) ?? oldestCursor
     }
-    return { entries: window.flat(), hasOlder, oldestCursor }
+    return {
+      entries: window.flat(),
+      hasOlder,
+      oldestCursor,
+      usage: yield* input.transcripts.usage(input.state.thread.id),
+    }
   })

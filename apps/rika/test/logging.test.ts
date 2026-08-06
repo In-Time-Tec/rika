@@ -273,7 +273,7 @@ describe("Logging", () => {
             (logging) =>
               Effect.logInfo("execution.follow.started").pipe(
                 Effect.annotateLogs({
-                  "rika.failure.cause": "UsageRepositoryError",
+                  "rika.failure.cause": "TranscriptRepositoryError",
                   "rika.failure.kind": "WatchTurnFailure",
                   "rika.failure.message": "ExecutionNotFound",
                   "rika.follow.cursor": "cursor-42",

@@ -19,7 +19,6 @@ export abstract class SurfaceLifecycle extends SurfaceLifecycleTranscript {
   }
 
   update(model: Model, preserveTranscriptAnchor = false): void {
-    const previousScrollHeight = this.transcriptScroll.scrollHeight
     const previousModel = this.model
     if (previousModel?.currentThreadId !== model.currentThreadId) {
       this.cancelWheelReport()
@@ -88,7 +87,6 @@ export abstract class SurfaceLifecycle extends SurfaceLifecycleTranscript {
               _tag: "Anchor" as const,
               anchor: pending.anchor,
               threadId: pending.threadId,
-              scrollHeight: pending.scrollHeight,
               scrollBy: pending.scrollBy + this.transcriptAnchorScrollBy,
               nearBottom: this.transcriptAnchorScrollBy === 0 ? pending.nearBottom : this.transcriptAnchorNearBottom,
             }
@@ -96,7 +94,6 @@ export abstract class SurfaceLifecycle extends SurfaceLifecycleTranscript {
               _tag: "Anchor" as const,
               anchor: transcriptAnchor,
               threadId: model.currentThreadId,
-              scrollHeight: previousScrollHeight,
               scrollBy: this.transcriptAnchorScrollBy,
               nearBottom: this.transcriptAnchorNearBottom,
             }

@@ -116,7 +116,16 @@ const blocks: ReadonlyArray<TranscriptBlock> = [
     input: JSON.stringify({ command: nestedCommand }),
     detail: nestedCommand,
   }),
-  { _tag: "ChildAgent", id: "child", name: "oracle", summary: longText, status: "complete", activity: [longText] },
+  {
+    _tag: "SubagentCard",
+    id: "child",
+    name: "oracle",
+    prompt: "",
+    promptTruncated: false,
+    summary: longText,
+    status: "complete",
+    activity: [longText],
+  },
 ]
 
 const boundedModel = (width: number): Model => {

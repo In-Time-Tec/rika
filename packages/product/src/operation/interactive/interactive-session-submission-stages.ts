@@ -4,13 +4,12 @@ import * as ThreadRepository from "@rika/product/thread-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionRequest from "@rika/product/execution-request"
-import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionProjection from "@rika/product/execution-projection"
 import { Cause, Clock, Effect, Exit, Ref } from "effect"
 import { admitInteractiveTurn } from "./interactive-turn-submission"
 import { failureKind, operationError } from "../operation-error"
 import type { ModeId } from "@rika/configuration/behavior-mode"
-import type { InteractiveEvent } from "./interactive-event"
-import { agentResponseArrived } from "./interactive-session-interface-support"
+import type { InteractiveEvent } from "./interactive-runtime-event"
 import type { InteractiveRuntimeContext } from "./interactive-session-runtime"
 import type { makeInteractiveQueue } from "./interactive-session-queue"
 
@@ -99,8 +98,8 @@ export const admitInteractiveSubmission: {
 interface SettleInteractiveSubmissionState {
   readonly thread: Thread.Thread
   readonly turn: Turn.AgentExecutionTurn
-  readonly outcome: Exit.Exit<ExecutionEvent.Result | undefined, unknown>
-  readonly deliveredCursors: Set<string>
+  readonly outcome: Exit.Exit<ExecutionProjection.Result | undefined, unknown>
+  readonly publish: (change: ExecutionProjection.Change) => void
   readonly dispatch: (event: InteractiveEvent) => void
 }
 
@@ -108,15 +107,8 @@ const settleInteractiveSubmissionImpl = (
   input: InteractiveSubmissionContext,
   state: SettleInteractiveSubmissionState,
 ) => {
-  const {
-    setTurnStatus,
-    deliverResultEvents,
-    projectExecutionResult,
-    ensureIngest,
-    settleThread,
-    executionStartFailureMessage,
-  } = input
-  const { thread, turn, outcome, deliveredCursors, dispatch } = state
+  const { setTurnStatus, settleThread, executionStartFailureMessage } = input
+  const { thread, turn, outcome, publish, dispatch } = state
   return Effect.uninterruptible(
     Effect.gen(function* () {
       if (outcome._tag === "Failure") {
@@ -133,24 +125,14 @@ const settleInteractiveSubmissionImpl = (
       }
       const result = outcome.value
       if (result === undefined) return yield* settleThread(thread, dispatch)
-      deliverResultEvents(turn.id, result.events, deliveredCursors)
-      const updated = yield* setTurnStatus(
-        turn.id,
-        result.status,
-        yield* Clock.currentTimeMillis,
-        result.status === "cancelled" ? agentResponseArrived(result.events) : undefined,
-      )
-      yield* projectExecutionResult(thread.id, result)
-      yield* ensureIngest(updated.threadId, updated.id)
+      for (const change of result.changes) publish(change)
+      yield* setTurnStatus(turn.id, result.status, yield* Clock.currentTimeMillis)
       if (result.status === "completed") {
         yield* settleThread(thread, dispatch)
         return
       }
-      if (result.status === "waiting" || result.status === "running" || result.status === "queued") return
-      if (
-        result.status === "failed" &&
-        result.events.some((event: ExecutionEvent.Event) => event.type === "execution.failed") === false
-      )
+      if (result.status === "waiting" || result.status === "running" || result.status === "cancelling") return
+      if (result.status === "failed")
         emitEvent(input, dispatch, {
           _tag: "ExecutionFailed",
           selectionEpoch: 0,
@@ -181,18 +163,23 @@ const executeInteractiveSubmissionImpl = (
   dispatch: (event: InteractiveEvent) => void,
   submissionId?: string,
 ) => {
-  const {
-    prepareExecution,
-    setTurnStatus,
-    ensureIngest,
-    rootTurnOwner,
-    dispatchFailure,
-    releaseTurnObserver,
-    notifyTurnChanged,
-  } = input
+  const { prepareExecution, setTurnStatus, rootTurnOwner, dispatchFailure, releaseTurnObserver, notifyTurnChanged } =
+    input
   return Effect.gen(function* () {
-    const startedAt = yield* Clock.currentTimeMillis
-    const deliveredCursors = new Set<string>()
+    const clock = yield* Clock.Clock
+    const startedAt = clock.currentTimeMillisUnsafe()
+    const delivered = new Set<string>()
+    const publish = (change: ExecutionProjection.Change) => {
+      const key = `${change._tag}:${change.revision}`
+      if (delivered.has(key)) return
+      delivered.add(key)
+      emitEvent(input, dispatch, {
+        _tag: "ExecutionProjectionChanged",
+        threadId: thread.id,
+        turn: { ...turn, status: change.state.status, updatedAt: clock.currentTimeMillisUnsafe() },
+        change,
+      })
+    }
     const outcome = yield* Effect.exit(
       Effect.gen(function* () {
         const prepared = yield* prepareExecution(turn, thread.workspace)
@@ -228,14 +215,10 @@ const executeInteractiveSubmissionImpl = (
           executionRoute: turn.executionRoute,
           ...(titleIntent === undefined ? {} : { titleIntent }),
         })
-        yield* ensureIngest(thread.id, turn.id)
-        return yield* rootTurnOwner.watchTurn(turn.id, (event: ExecutionEvent.Event) => {
-          deliveredCursors.add(event.cursor)
-          input.executionIngest.deliver(turn.id, event)
-        })
+        return yield* rootTurnOwner.watchTurn(turn.id, publish)
       }),
     )
-    yield* settleInteractiveSubmission(input, { thread, turn, outcome, deliveredCursors, dispatch })
+    yield* settleInteractiveSubmission(input, { thread, turn, outcome, publish, dispatch })
   }).pipe(
     Effect.provide(input.executionDependencies),
     Effect.scoped,

@@ -497,7 +497,16 @@ test("navigates threads and deduplicates replay", () => {
   const event = {
     id: "stable",
     cursor: "42",
-    block: { _tag: "ChildAgent", id: "review", name: "review", summary: "checking", status: "running", activity: [] },
+    block: {
+      _tag: "SubagentCard",
+      id: "review",
+      name: "review",
+      prompt: "",
+      promptTruncated: false,
+      summary: "checking",
+      status: "running",
+      activity: [],
+    },
   } as const
   model = update(model, { _tag: "EventReplayed", event })
   const replayed = update(model, { _tag: "EventReplayed", event })

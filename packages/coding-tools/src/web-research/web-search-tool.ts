@@ -32,7 +32,7 @@ export const registration = Policy.register(
     action: "web-search",
     activeLabel: "Web Search",
     completeLabel: "Web Search",
-    outputDisplay: "hidden",
+    outputDisplay: "expandable",
     counter: "web search",
   }),
 )

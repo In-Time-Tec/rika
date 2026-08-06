@@ -26,12 +26,9 @@ export const storedTurn: Fixtures.Turn.AgentExecutionTurn = {
   updatedAt: 2,
 }
 export const storedRunId = "turn-1-run"
-export const projection = (
-  units: ReadonlyArray<Fixtures.TranscriptUnit.Unit>,
-): Fixtures.TranscriptProjectionModel.Projection => ({
+export const projection = (units: ReadonlyArray<Fixtures.TranscriptUnit.Unit>) => ({
   units,
-  revision: units.reduce((maximum, unit) => Math.max(maximum, unit.revision), -1),
-  modelPhase: 0,
+  revision: units.reduce((maximum, unit) => Math.max(maximum, unit.revision), 0),
 })
 export const relatedThread: Fixtures.Thread.Thread = {
   ...storedThread,

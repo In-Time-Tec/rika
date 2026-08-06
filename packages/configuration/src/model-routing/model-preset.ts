@@ -3,20 +3,42 @@ import { catalog, supportedEfforts } from "./model-catalog"
 
 type CatalogModel = (typeof catalog)[keyof typeof catalog]
 
+const openAiEfforts: Readonly<Record<ModelRoute.Effort, string>> = {
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "xhigh",
+  max: "xhigh",
+}
+
+const claudeEfforts: Readonly<Record<ModelRoute.Effort, string>> = {
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "max",
+  max: "max",
+}
+
 const gptVariants = (efforts: ReadonlyArray<string>) =>
   Object.fromEntries(
-    efforts.map((effort) => [
-      effort,
-      {
-        normal: { options: { reasoning: { effort, summary: "auto" } } },
-        fast: { options: { reasoning: { effort, summary: "auto" }, service_tier: "priority" } },
-      },
-    ]),
+    efforts.map((effort) => {
+      const reasoning = { effort: openAiEfforts[effort as ModelRoute.Effort], summary: "auto" }
+      return [
+        effort,
+        {
+          normal: { options: { reasoning } },
+          fast: { options: { reasoning, service_tier: "priority" } },
+        },
+      ]
+    }),
   ) as ModelRoute.ModelAlias["variants"]
 
 const claudeVariants = (efforts: ReadonlyArray<string>) =>
   Object.fromEntries(
-    efforts.map((effort) => [effort, { normal: { options: { output_config: { effort } } } }]),
+    efforts.map((effort) => [
+      effort,
+      { normal: { options: { output_config: { effort: claudeEfforts[effort as ModelRoute.Effort] } } } },
+    ]),
   ) as ModelRoute.ModelAlias["variants"]
 
 export const presetIds = ["openai", "claude"] as const

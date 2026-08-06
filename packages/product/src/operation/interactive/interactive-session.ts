@@ -24,23 +24,20 @@ export interface InteractiveSession {
   readonly dequeue: (turnId: string) => Effect.Effect<void, OperationUnavailable>
   readonly steerQueued: (turnId: string, text: string) => Effect.Effect<void, OperationUnavailable>
   readonly steer: (text: string, targetTurnId?: string) => Effect.Effect<void, OperationUnavailable>
+  readonly approveAuthorization: (turnId: string, authorizationId: string) => Effect.Effect<void, OperationUnavailable>
+  readonly denyAuthorization: (turnId: string, authorizationId: string) => Effect.Effect<void, OperationUnavailable>
   readonly interruptAndSend: (prompt: string) => Effect.Effect<void, OperationUnavailable>
   readonly cancel: Effect.Effect<void, OperationUnavailable>
   readonly quit: Effect.Effect<void, OperationUnavailable>
   readonly newThread: Effect.Effect<void, OperationUnavailable>
-  readonly selectThread: (threadId: string, selectionEpoch: number) => Effect.Effect<void, OperationUnavailable>
+  readonly selectThread: (threadId: string) => Effect.Effect<void, OperationUnavailable>
   readonly readQueue: (threadId: string) => Effect.Effect<void, OperationUnavailable>
   readonly loadOlder: (
     threadId: string,
-    selectionEpoch: number,
     before: TranscriptPage.PageCursor,
     loadedKeys: ReadonlyArray<string>,
   ) => Effect.Effect<void, OperationUnavailable>
-  readonly loadNewer: (
-    threadId: string,
-    selectionEpoch: number,
-    after: TranscriptPage.PageCursor,
-  ) => Effect.Effect<void, OperationUnavailable>
+  readonly loadNewer: (threadId: string, after: TranscriptPage.PageCursor) => Effect.Effect<void, OperationUnavailable>
   readonly previewThread: (threadId: string) => Effect.Effect<void, OperationUnavailable>
-  readonly reopenThread: (selectionEpoch: number) => Effect.Effect<void, OperationUnavailable>
+  readonly reopenThread: Effect.Effect<void, OperationUnavailable>
 }

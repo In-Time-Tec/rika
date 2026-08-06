@@ -8,7 +8,7 @@ import { splitStyledLines } from "./opentui-overlay-content"
 import type { Model } from "../../state/model/terminal-state"
 import { SurfaceState } from "./opentui-surface-state"
 import type { TranscriptRangeBundle, TranscriptUnitCacheEntry } from "../rendering/opentui-render-transcript-revision"
-import type { TranscriptRenderableDescriptor } from "./opentui-surface-transcript-types"
+import type { TranscriptRenderableDescriptor, TranscriptRenderableRecord } from "./opentui-surface-transcript-types"
 import { pinnedRowWindow } from "../../presentation/transcript/transcript-row-window-state"
 
 export abstract class SurfaceTranscriptRendering extends SurfaceState {
@@ -157,7 +157,14 @@ export abstract class SurfaceTranscriptRendering extends SurfaceState {
       this.transcriptRecords.set(record.key, record)
       return record
     })
-    const records = [...pinned, ...desired]
+    const previousOrder = new Map(this.transcriptChildren.map((child, index) => [child, index]))
+    const positionOf = (record: TranscriptRenderableRecord) => previousOrder.get(record.renderable) ?? -1
+    const records = [...desired]
+    for (const record of pinned) {
+      const previous = positionOf(record)
+      const insertion = records.findIndex((candidate) => positionOf(candidate) > previous)
+      records.splice(insertion === -1 ? records.length : insertion, 0, record)
+    }
     const children = records.map((record) => record.renderable)
     const current = [...this.transcriptScroll.content.getChildren()]
     children.forEach((child, index) => {

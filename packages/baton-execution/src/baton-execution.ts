@@ -1,12 +1,11 @@
 import { ModelRegistry, SandboxExecutor } from "@batonfx/core"
-import { Run, RunTree, Runtime } from "@batonfx/runtime"
+import { Approval, Run, RunTree, Runtime } from "@batonfx/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import type { Status } from "@rika/product/execution-status"
-import { Cause, Context, Effect, Layer, Stream } from "effect"
+import { Cause, Context, Effect, Layer, Schedule, Schema, Stream } from "effect"
 import type { AgentToolHandlers } from "./baton-route"
 import { configure, makeResolver } from "./baton-route"
-export { projectEvent } from "./baton-event-projection"
-import { projectEvent, titleInvocationId } from "./baton-event-projection"
+import { TreeProjector, titleInvocationId } from "./baton-tree-projector"
 
 export type AgentToolServices = AgentToolHandlers
 
@@ -23,6 +22,19 @@ const message = (cause: unknown) => {
   if (cause instanceof Error && cause.message.length > 0) return cause.message
   const encoded = JSON.stringify(cause)
   return encoded === undefined || encoded === "{}" ? String(cause) : encoded
+}
+const isApprovalResponseFailure = Schema.is(ExecutionGateway.ApprovalResponseFailure)
+
+const approvalFailure = (cause: unknown): ExecutionGateway.ApprovalResponseFailure => {
+  if (isApprovalResponseFailure(cause)) return cause
+  const tag = typeof cause === "object" && cause !== null && "_tag" in cause ? String(cause._tag) : ""
+  let kind: ExecutionGateway.ApprovalResponseFailure["kind"] = "unavailable"
+  if (tag.endsWith("/ApprovalStale")) kind = "stale"
+  else if (tag.endsWith("/ApprovalMismatch")) kind = "mismatch"
+  let failureMessage = "Approval service is unavailable"
+  if (kind === "stale") failureMessage = "Authorization is no longer pending"
+  else if (kind === "mismatch") failureMessage = "Authorization response conflicts with its current state"
+  return ExecutionGateway.ApprovalResponseFailure.make({ kind, message: failureMessage })
 }
 const prompt = (input: ExecutionGateway.StartTurn) =>
   input.promptParts === undefined
@@ -55,9 +67,11 @@ const status = (value: Run.RunStatus): Status => {
       return "failed"
     case "cancelled":
       return "cancelled"
-    case "running":
     case "needs-resolution":
+      return "waiting"
     case "cancelling":
+      return "cancelling"
+    case "running":
       return "running"
   }
 }
@@ -65,6 +79,79 @@ const status = (value: Run.RunStatus): Status => {
 const make = (options: Options, sandbox: SandboxExecutor.Interface) =>
   Effect.gen(function* () {
     const runtime = yield* Runtime.Runtime
+    // A replayPolicy:"never" operation interrupted by cancellation parks the Run in
+    // `needs-resolution` until it is explicitly resolved. Baton cannot decide the outcome of a
+    // side-effecting operation on its own, so the product settles it as Failed and lets the Run
+    // reach its terminal state. Idempotent and restart-safe: resolving an already-resolved
+    // operation is a no-op, and the operation id is recovered from durable history.
+    const resolveParkedOperations = (runId: string) =>
+      Effect.gen(function* () {
+        const inspection = yield* RunTree.inspect(runId).pipe(Effect.provideService(Runtime.Runtime, runtime))
+        const parked = inspection.runs.filter(({ run }) => run.status === "needs-resolution")
+        if (parked.length === 0) return
+        yield* Effect.forEach(
+          parked,
+          ({ run }) =>
+            runtime.history({ runId: run.runId, limit: 512 }).pipe(
+              Effect.map((events) =>
+                events.flatMap((event) => (event._tag === "OperationUnknown" ? [event.operationId] : [])),
+              ),
+              Effect.flatMap((operationIds) =>
+                Effect.forEach(
+                  [...new Set(operationIds)],
+                  (operationId) =>
+                    runtime.resolveOperation({
+                      runId: run.runId,
+                      operationId,
+                      idempotencyKey: `${operationId}:cancelled`,
+                      resolution: {
+                        _tag: "Failed",
+                        error: { _tag: "OperationInterrupted", message: "Cancelled by Rika" },
+                      },
+                    }),
+                  { discard: true },
+                ),
+              ),
+            ),
+          { discard: true },
+        )
+      }).pipe(Effect.ignore)
+
+    // Cancellation is only complete once the Run is terminal. A parked Run is resolved and then
+    // re-checked, because the park may be recorded after `cancel` returns.
+    const awaitSettledCancellation = (runId: string) =>
+      resolveParkedOperations(runId).pipe(
+        Effect.andThen(RunTree.inspect(runId).pipe(Effect.provideService(Runtime.Runtime, runtime))),
+        Effect.map((inspection) =>
+          inspection.runs.some(({ run }) => run.status === "needs-resolution" || run.status === "cancelling"),
+        ),
+        Effect.flatMap((pending) => (pending ? Effect.fail("pending" as const) : Effect.void)),
+        Effect.retry({ times: 40, schedule: Schedule.spaced("100 millis") }),
+        Effect.ignore,
+      )
+
+    const respondToApproval = (
+      decision: "approve" | "deny",
+      link: ExecutionGateway.ExecutionLink,
+      input: ExecutionGateway.AuthorizationResponse,
+    ) =>
+      Effect.gen(function* () {
+        const target = TreeProjector.authorizationTarget(input.checkpoint, input.authorizationId)
+        if (target === undefined)
+          return yield* ExecutionGateway.ApprovalResponseFailure.make({
+            kind: "stale",
+            message: "Authorization is no longer pending",
+          })
+        const inspection = yield* RunTree.inspect(link.runId).pipe(Effect.provideService(Runtime.Runtime, runtime))
+        if (!inspection.runs.some(({ run }) => run.runId === target.runId))
+          return yield* ExecutionGateway.ApprovalResponseFailure.make({
+            kind: "mismatch",
+            message: "Authorization does not belong to this turn",
+          })
+        yield* (decision === "approve" ? Approval.approve(target) : Approval.deny(target)).pipe(
+          Effect.provideService(Runtime.Runtime, runtime),
+        )
+      }).pipe(Effect.mapError(approvalFailure))
 
     return ExecutionGateway.Service.of({
       startTurn: (input) =>
@@ -83,25 +170,6 @@ const make = (options: Options, sandbox: SandboxExecutor.Interface) =>
             idempotencyKey: input.turnId,
             prompt: prompt(input),
             metadata: { threadId: input.threadId, turnId: input.turnId },
-            ...(input.titleIntent === undefined
-              ? {}
-              : {
-                  initialChildren: [
-                    {
-                      invocationId: titleInvocationId,
-                      selection: "Title",
-                      prompt: `Generate a title for this request:\n\n${input.prompt}`,
-                      idempotencyKey: `${input.turnId}:title`,
-                      sessionId: input.threadId,
-                      metadata: {
-                        threadId: input.threadId,
-                        turnId: input.turnId,
-                        productIntent: "thread-title",
-                        expectedTitle: input.titleIntent.expectedTitle,
-                      },
-                    },
-                  ],
-                }),
             ...(input.reviewIntent === undefined
               ? {}
               : {
@@ -127,28 +195,56 @@ const make = (options: Options, sandbox: SandboxExecutor.Interface) =>
                   ],
                 }),
           })
+          if (input.titleIntent !== undefined)
+            yield* runtime.spawn({
+              parentRunId: receipt.runId,
+              invocationId: titleInvocationId,
+              selection: "Title",
+              prompt: `Generate a title for this request:\n\n${input.prompt}`,
+              idempotencyKey: `${input.turnId}:title`,
+              sessionId: input.threadId,
+              metadata: {
+                threadId: input.threadId,
+                turnId: input.turnId,
+                productIntent: "thread-title",
+                expectedTitle: input.titleIntent.expectedTitle,
+              },
+            })
           return { runId: receipt.runId, turnId: input.turnId, threadId: input.threadId }
         }).pipe(Effect.mapError((cause) => ExecutionGateway.StartTurnFailure.make({ message: message(cause) }))),
       cancelTurn: (link, reason) =>
-        runtime
-          .cancel({ runId: link.runId, reason: reason ?? "Cancelled by Rika" })
-          .pipe(Effect.mapError((cause) => ExecutionGateway.CancelTurnFailure.make({ message: message(cause) }))),
+        runtime.cancel({ runId: link.runId, reason: reason ?? "Cancelled by Rika" }).pipe(
+          // Interrupting a replayPolicy:"never" operation parks the Run in `needs-resolution`,
+          // where it can make no further progress on its own. Resolve it so the Run reaches its
+          // terminal state instead of stranding the turn. Retried until the Run settles because
+          // the park is recorded asynchronously by the worker that owned the interrupted operation.
+          Effect.andThen(awaitSettledCancellation(link.runId)),
+          Effect.mapError((cause) => ExecutionGateway.CancelTurnFailure.make({ message: message(cause) })),
+        ),
       steerTurn: (link, input) =>
         runtime
           .steer({ runId: link.runId, idempotencyKey: input.idempotencyKey, prompt: input.text })
           .pipe(Effect.mapError((cause) => ExecutionGateway.SteeringFailure.make({ message: message(cause) }))),
-      watchTurn: (link, cursor) =>
-        RunTree.watch({
+      approveTurn: (link, input) => respondToApproval("approve", link, input),
+      denyTurn: (link, input) => respondToApproval("deny", link, input),
+      watchTurn: (link, input) => {
+        let projector: ReturnType<typeof TreeProjector.make>
+        try {
+          projector = TreeProjector.make(link.turnId, input?.prompt ?? "", input?.checkpoint, input?.units ?? [])
+        } catch (cause) {
+          return Stream.fail(ExecutionGateway.WatchTurnFailure.make({ message: message(cause) }))
+        }
+        const events = RunTree.watch({
           rootRunId: link.runId,
           settlement: "root-blocked",
-          ...(cursor === undefined ? {} : { cursor: RunTree.TreeCursor.make(cursor) }),
+          ...(input?.checkpoint === undefined ? {} : { cursor: RunTree.TreeCursor.make(input.checkpoint.cursor) }),
         }).pipe(
           Stream.provideService(Runtime.Runtime, runtime),
-          Stream.flatMap(({ event, cursor: eventCursor, invocationId, parentRunId }) =>
-            Stream.fromIterable(projectEvent({ source: event, cursor: eventCursor, invocationId, parentRunId })),
-          ),
+          Stream.map(projector.apply),
           Stream.mapError((cause) => ExecutionGateway.WatchTurnFailure.make({ message: message(cause) })),
-        ),
+        )
+        return input?.checkpoint === undefined ? Stream.concat(Stream.succeed(projector.snapshot()), events) : events
+      },
       inspectTurn: (link) =>
         RunTree.inspect(link.runId).pipe(
           Effect.provideService(Runtime.Runtime, runtime),

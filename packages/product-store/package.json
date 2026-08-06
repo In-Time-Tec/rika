@@ -10,8 +10,7 @@
     "./sqlite-thread-summary-repository": "./src/summary/sqlite-thread-summary-repository.ts",
     "./sqlite-thread-repository": "./src/thread/sqlite-thread-repository.ts",
     "./sqlite-transcript-repository": "./src/transcript/sqlite-transcript-repository.ts",
-    "./sqlite-turn-repository": "./src/turn/sqlite-turn-repository.ts",
-    "./sqlite-usage-repository": "./src/usage/sqlite-usage-repository.ts"
+    "./sqlite-turn-repository": "./src/turn/sqlite-turn-repository.ts"
   },
   "dependencies": {
     "@effect/sql-sqlite-bun": "catalog:",

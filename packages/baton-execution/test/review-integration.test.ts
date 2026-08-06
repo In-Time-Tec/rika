@@ -103,18 +103,23 @@ it.live(
         { ordinal: 2, member_key: "quality", status: "succeeded" },
       ])
       expect(new Set(members.map(({ child_run_id }) => child_run_id)).size).toBe(3)
-      expect(first.events.filter(({ type }) => type === "fan_out.admitted")).toHaveLength(1)
-      expect(first.events.filter(({ type }) => type === "fan_out.joined")).toEqual([
-        expect.objectContaining({
-          data: expect.objectContaining({
-            status: "succeeded",
-            succeeded: 3,
-            failed: 0,
-            cancelled: 0,
-            abandoned: 0,
-          }),
-        }),
-      ])
+      const reviewCards = first.events.flatMap((change) =>
+        (change._tag === "ProjectionSnapshot" ? change.units : change.upsert).filter(
+          (unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard",
+        ),
+      )
+      expect(new Set(reviewCards.map((unit) => unit.key)).size).toBe(3)
+      expect(
+        new Set(
+          reviewCards.flatMap((unit) =>
+            unit.content._tag === "Block" &&
+            unit.content.block._tag === "SubagentCard" &&
+            unit.content.block.status === "complete"
+              ? [unit.key]
+              : [],
+          ),
+        ).size,
+      ).toBe(3)
       expect(reviewTables).toEqual([])
       expect(yield* fixture.requests).toHaveLength(4)
     }),

@@ -1,6 +1,7 @@
 import { Context, Effect, Schema } from "effect"
 import { ThreadId } from "@rika/product/thread-record"
 import { AgentExecutionTurn, Turn, TurnId } from "@rika/product/turn-record"
+import type { RunningRecordedShellTurn, TerminalRecordedShellTurn } from "@rika/product/thread-result"
 import type { CreateInput } from "./turn-repository-contract"
 import type { PageOptions, PageResult } from "./turn-repository-pagination"
 import type {
@@ -33,6 +34,16 @@ export interface Interface {
     turn: AgentExecutionTurn,
     queueCapacity: number,
   ) => Effect.Effect<Submission, RepositoryError | QueueFull>
+  readonly createRecordedShell: (
+    turn: RunningRecordedShellTurn,
+  ) => Effect.Effect<RunningRecordedShellTurn, RepositoryError>
+  readonly settleRecordedShell: (
+    expected: RunningRecordedShellTurn,
+    turn: TerminalRecordedShellTurn,
+  ) => Effect.Effect<TerminalRecordedShellTurn | undefined, RepositoryError>
+  readonly copyRecordedShell: (
+    turn: TerminalRecordedShellTurn,
+  ) => Effect.Effect<TerminalRecordedShellTurn, RepositoryError>
   readonly get: (id: TurnId) => Effect.Effect<Turn | undefined, RepositoryError>
   readonly list: (threadId: ThreadId) => Effect.Effect<ReadonlyArray<Turn>, RepositoryError>
   readonly listRecentNonqueued: (
@@ -43,6 +54,14 @@ export interface Interface {
   readonly findActive: (threadId: ThreadId) => Effect.Effect<AgentExecutionTurn | undefined, RepositoryError>
   readonly readQueue: (threadId: ThreadId) => Effect.Effect<QueueSnapshot, RepositoryError>
   readonly listNonterminal: Effect.Effect<ReadonlyArray<AgentExecutionTurn>, RepositoryError>
+  readonly prepareExecutionAdmission: (
+    input: import("@rika/product/execution-gateway").StartTurn,
+    now: number,
+  ) => Effect.Effect<import("@rika/product/execution-gateway").StartTurn, RepositoryError>
+  readonly listUnlinkedExecutionAdmissions: Effect.Effect<
+    ReadonlyArray<import("@rika/product/execution-gateway").StartTurn>,
+    RepositoryError
+  >
   readonly claimNextQueued: (threadId: ThreadId, now: number) => Effect.Effect<QueueClaim | undefined, RepositoryError>
   readonly finishQueuedClaim: (
     claim: QueueClaim,

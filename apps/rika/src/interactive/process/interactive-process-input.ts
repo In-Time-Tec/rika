@@ -44,7 +44,6 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
           session
             .loadOlder(
               threadId,
-              loop.activeSelectionEpoch,
               before,
               loop.loadedTranscriptEntries.map((entry: { readonly unit: { readonly key: string } }) => entry.unit.key),
             )

@@ -60,19 +60,13 @@ export const makeInteractiveRouter = (context: RouterContext): InteractiveRouter
     )
     const ended = yield* Deferred.make<void>()
     const feed = yield* Queue.bounded<
-      | { readonly _tag: "Event"; readonly event: InteractiveEvent.InteractiveEvent }
-      | { readonly _tag: "Replay"; readonly afterSequence: number }
-      | { readonly _tag: "Overflow" }
+      { readonly _tag: "Event"; readonly event: InteractiveEvent.InteractiveEvent } | { readonly _tag: "Overflow" }
     >(options.outboundCapacity)
     const inFlightCapacity = Math.min(options.outboundCapacity, interactiveFeedInFlightCapacity)
     const sendPermits = yield* Queue.bounded<void>(inFlightCapacity)
     for (let index = 0; index < inFlightCapacity; index += 1) yield* Queue.offer(sendPermits, undefined)
     const feedAdmission = yield* Semaphore.make(1)
-    const replayWindow = new Map<
-      number,
-      { readonly frames: ReadonlyArray<string>; readonly detail: boolean; readonly barrier: boolean }
-    >()
-    const barrierAcknowledgements = new Map<number, Deferred.Deferred<void>>()
+    const inFlight = new Map<number, boolean>()
     const commands = new Map<number, Deferred.Deferred<void>>()
     const commandReleases = new Map<number, Effect.Effect<void>>()
     const commandQueue = yield* Queue.bounded<{
@@ -84,53 +78,23 @@ export const makeInteractiveRouter = (context: RouterContext): InteractiveRouter
     let nextSequence = 1
     let acknowledgedThrough = 0
     let highestSent = 0
-    let replayFloor = 1
     let outstandingDetails = 0
-    let selectedThreadId: string | undefined
-    let selectionEpoch = 0
     let overflow: InteractiveFeedOverflow.State | undefined
     let sentDetails = 0
-    const rememberSelection = (event: InteractiveEvent.InteractiveEvent) => {
-      let threadId: string | undefined
-      if (event._tag === "SelectionLoaded") threadId = String(event.thread.id)
-      else if ("threadId" in event && event.threadId !== undefined) threadId = String(event.threadId)
-      if (threadId !== undefined) selectedThreadId = threadId
-      if ("selectionEpoch" in event) selectionEpoch = event.selectionEpoch
-      return threadId
-    }
-    const remember = (state: InteractiveFeedOverflow.State, event: InteractiveEvent.InteractiveEvent) => {
-      rememberSelection(event)
-      InteractiveFeedOverflow.remember(state, event)
-    }
     const dispatch = (event: InteractiveEvent.InteractiveEvent) => {
       if (overflow !== undefined) {
-        remember(overflow, event)
+        InteractiveFeedOverflow.remember(overflow, event)
         return
       }
       if (outstandingDetails >= options.outboundCapacity || !Queue.offerUnsafe(feed, { _tag: "Event", event })) {
         overflow = InteractiveFeedOverflow.make()
-        remember(overflow, event)
+        InteractiveFeedOverflow.remember(overflow, event)
         Queue.offerUnsafe(feed, { _tag: "Overflow" })
         return
       }
       outstandingDetails += 1
-      rememberSelection(event)
     }
-    const recoveryEvents = (state: InteractiveFeedOverflow.State, reason: string) =>
-      InteractiveFeedOverflow.events(state, selectionEpoch, reason)
-    const genericRecovery = (reason: string) => {
-      const state = InteractiveFeedOverflow.make()
-      if (selectedThreadId !== undefined) {
-        state.transcriptThreadIds.add(selectedThreadId)
-        state.queueThreadIds.add(selectedThreadId)
-      }
-      return recoveryEvents(state, reason)
-    }
-    const sendNew = (
-      makeMessage: (sequence: number) => ServerService.ServerMessage,
-      detail: boolean,
-      barrier: boolean,
-    ) =>
+    const sendNew = (event: InteractiveEvent.InteractiveEvent, detail: boolean) =>
       Effect.gen(function* () {
         yield* Queue.take(sendPermits)
         const sequence = yield* feedAdmission.withPermits(1)(
@@ -138,10 +102,19 @@ export const makeInteractiveRouter = (context: RouterContext): InteractiveRouter
             const current = nextSequence
             nextSequence += 1
             highestSent = current
+            inFlight.set(current, detail)
             return current
           }),
         )
-        const message = makeMessage(sequence)
+        const message: ServerService.ServerMessage = {
+          _tag: "interactive-feed-event",
+          connectionId: route.connectionId,
+          requestId,
+          sessionId,
+          feedGeneration,
+          sequence,
+          event,
+        }
         const frames = yield* Effect.try({
           try: () => serverMessageFrames(`${feedGeneration}:${sequence}`, message),
           catch: (error) =>
@@ -150,8 +123,6 @@ export const makeInteractiveRouter = (context: RouterContext): InteractiveRouter
               message: String(error),
             }),
         })
-        replayWindow.set(sequence, { frames, detail, barrier })
-        if (barrier) replayFloor = sequence
         if (frames.length > 1)
           yield* Effect.logInfo("server.feed.message_fragmented").pipe(
             Effect.annotateLogs({
@@ -160,66 +131,12 @@ export const makeInteractiveRouter = (context: RouterContext): InteractiveRouter
             }),
           )
         yield* route.sendFrames(frames)
-        return sequence
-      })
-    const sendBarrier = (events: ReadonlyArray<InteractiveEvent.InteractiveEvent>) =>
-      Effect.gen(function* () {
-        const sequence = yield* sendNew(
-          (messageSequence) => ({
-            _tag: "interactive-feed-resync",
-            connectionId: route.connectionId,
-            requestId,
-            sessionId,
-            feedGeneration,
-            sequence: messageSequence,
-            events,
-          }),
-          false,
-          true,
-        )
-        yield* Effect.logInfo("server.feed.barrier_sent")
-        const acknowledged = yield* Deferred.make<void>()
-        const alreadyAcknowledged = yield* feedAdmission.withPermits(1)(
-          Effect.sync(() => {
-            if (acknowledgedThrough >= sequence) return true
-            barrierAcknowledgements.set(sequence, acknowledged)
-            return false
-          }),
-        )
-        if (!alreadyAcknowledged) yield* Deferred.await(acknowledged)
       })
     const sender = Effect.gen(function* () {
       while (true) {
         const item = yield* Queue.take(feed)
-        if (item._tag === "Event")
-          yield* sendNew(
-            (sequence) => ({
-              _tag: "interactive-feed-event",
-              connectionId: route.connectionId,
-              requestId,
-              sessionId,
-              feedGeneration,
-              sequence,
-              event: item.event,
-            }),
-            true,
-            false,
-          )
-        else if (item._tag === "Replay") {
-          const outsideWindow = item.afterSequence < replayFloor - 1
-          if (outsideWindow) {
-            const retainedBarrier = replayWindow.get(replayFloor)
-            if (retainedBarrier !== undefined && retainedBarrier.barrier)
-              yield* route.sendFrames(retainedBarrier.frames)
-            else
-              yield* sendBarrier(
-                genericRecovery("Server replay request fell outside its bounded current-session window"),
-              )
-          } else
-            for (const [sequence, frame] of replayWindow)
-              if (sequence > item.afterSequence && sequence >= replayFloor) yield* route.sendFrames(frame.frames)
-        }
         if (item._tag === "Event") {
+          yield* sendNew(item.event, true)
           sentDetails += 1
           if (sentDetails % 1_024 === 0)
             yield* Effect.logInfo("server.feed.detail_sent").pipe(
@@ -232,22 +149,16 @@ export const makeInteractiveRouter = (context: RouterContext): InteractiveRouter
         }
         if ((yield* Queue.size(feed)) === 0 && overflow !== undefined) {
           const state = overflow
+          overflow = undefined
           const reason = state.criticalOverflowed
             ? "Server event feed exceeded its bounded non-recoverable event capacity"
             : "Server event feed exceeded its bounded current-session window"
-          const events = recoveryEvents(state, reason)
-          const barrierWindow = InteractiveFeedOverflow.make()
-          overflow = barrierWindow
-          yield* sendBarrier(state.criticalOverflowed ? [...events, ...genericRecovery(reason)] : events)
+          for (const event of InteractiveFeedOverflow.events(state)) yield* sendNew(event, false)
           if (state.criticalOverflowed)
             return yield* ProductOperation.OperationUnavailable.make({
               operation: "InteractiveSession.events",
               message: reason,
             })
-          if (overflow === barrierWindow) {
-            overflow = undefined
-            for (const event of recoveryEvents(barrierWindow, reason)) dispatch(event)
-          }
         }
       }
     })
@@ -257,18 +168,13 @@ export const makeInteractiveRouter = (context: RouterContext): InteractiveRouter
           if (throughSequence <= acknowledgedThrough) return true
           if (throughSequence > highestSent) return false
           let released = 0
-          for (const [sequence, frame] of replayWindow) {
+          for (const [sequence, detail] of inFlight) {
             if (sequence > throughSequence) break
-            replayWindow.delete(sequence)
+            inFlight.delete(sequence)
             released += 1
-            if (frame.detail) outstandingDetails -= 1
+            if (detail) outstandingDetails -= 1
           }
           acknowledgedThrough = throughSequence
-          for (const [sequence, acknowledged] of barrierAcknowledgements) {
-            if (sequence > throughSequence) break
-            barrierAcknowledgements.delete(sequence)
-            yield* Deferred.succeed(acknowledged, undefined)
-          }
           for (let index = 0; index < released; index += 1) yield* Queue.offer(sendPermits, undefined)
           return true
         }),
@@ -286,7 +192,6 @@ export const makeInteractiveRouter = (context: RouterContext): InteractiveRouter
         return true
       },
       acknowledge,
-      replay: (afterSequence) => Queue.offer(feed, { _tag: "Replay", afterSequence }).pipe(Effect.asVoid),
     }
     route.sessions.set(sessionId, serverSession)
     yield* route.send(

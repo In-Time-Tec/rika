@@ -5,8 +5,11 @@ import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
-import { Effect, Layer, Ref } from "effect"
+import { Effect, Layer, Ref, Schema } from "effect"
 import { TestConsole } from "effect/testing"
+import * as ExecutionProjection from "@rika/product/execution-projection"
+
+const encodeChanges = Schema.encodeSync(Schema.fromJsonString(Schema.Array(ExecutionProjection.Change)))
 
 import { executionRoute } from "../support/product-test-current-state"
 import { productLayer, provideLayer } from "../support/operation-layer-harness"
@@ -58,11 +61,20 @@ describe("Operation", () => {
       const turn = yield* turns.get(Turn.TurnId.make("turn-existing"))
       expect(persisted).toEqual([thread])
       expect(turn).toMatchObject({ threadId: "thread-existing", prompt: "existing prompt", status: "completed" })
-      expect(output.filter((line): line is string => typeof line === "string" && line.startsWith("{"))).toEqual([
-        '{"executionId":"turn-existing-run","cursor":"cursor-started","sequence":0,"type":"execution.started","timestampSource":"baton","createdAt":0}',
-        '{"executionId":"turn-existing-run","cursor":"cursor-a","sequence":1,"type":"model.output.completed","createdAt":1,"text":"answer"}',
-        '{"executionId":"turn-existing-run","cursor":"cursor-b","sequence":2,"type":"execution.completed","timestampSource":"baton","createdAt":2}',
+      const streamed = output
+        .filter((line): line is string => typeof line === "string" && line.startsWith("{"))
+        .map((line) => JSON.parse(line))
+      expect(streamed).toMatchObject([
+        {
+          _tag: "ProjectionSnapshot",
+          revision: 0,
+          state: { status: "completed" },
+          units: [{ content: { _tag: "Entry", role: "assistant", text: "answer" } }],
+        },
       ])
+      const encodedChanges = encodeChanges(streamed)
+      expect(encodedChanges).not.toContain("executionId")
+      expect(encodedChanges).not.toContain("turn-existing-run")
     }),
   )
 

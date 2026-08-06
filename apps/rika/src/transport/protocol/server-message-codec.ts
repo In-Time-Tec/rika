@@ -18,18 +18,30 @@ const degradedReason =
 
 const serverMessageTooLarge = { _tag: "ServerMessageTooLarge" } as const
 
-const resyncTarget = (event: object) => {
-  if ("threadId" in event && event.threadId !== undefined) return event.threadId
-  if (
-    "_tag" in event &&
-    event._tag === "SelectionLoaded" &&
-    "thread" in event &&
-    event.thread !== null &&
-    typeof event.thread === "object" &&
-    "id" in event.thread
-  )
-    return event.thread.id
-  return undefined
+const degradedEvent = (event: ServerService.ServerMessage extends infer _ ? object : never) => {
+  if ("_tag" in event && event._tag === "ThreadViewSnapshot" && "snapshot" in event) {
+    const snapshot = event.snapshot as { readonly thread: { readonly id: string }; readonly revision: number }
+    return {
+      _tag: "ResyncRequired" as const,
+      threadId: snapshot.thread.id,
+      expectedRevision: snapshot.revision,
+      receivedBaseRevision: snapshot.revision,
+      currentRevision: snapshot.revision,
+    }
+  }
+  if ("_tag" in event && event._tag === "ThreadViewPatch" && "patch" in event) {
+    const patch = event.patch as { readonly threadId: string; readonly baseRevision: number; readonly revision: number }
+    return {
+      _tag: "ResyncRequired" as const,
+      threadId: patch.threadId,
+      expectedRevision: patch.revision,
+      receivedBaseRevision: patch.baseRevision,
+      currentRevision: patch.baseRevision,
+    }
+  }
+  if ("threadId" in event && typeof event.threadId === "string")
+    return { _tag: "ExecutionFailed" as const, threadId: event.threadId, message: degradedReason }
+  return { _tag: "ExecutionFailed" as const, message: degradedReason }
 }
 
 const messageChunkFields = {
@@ -97,67 +109,15 @@ const splitServerMessage = (messageId: string, text: string) =>
     text,
   )
 
-const serverMessageFramesImpl = (
-  messageId: string,
-  message: ServerService.ServerMessage,
-  allowTargetedDegradation = true,
-): ReadonlyArray<string> => {
+const serverMessageFramesImpl = (messageId: string, message: ServerService.ServerMessage): ReadonlyArray<string> => {
   const complete = json(message)
   if (encoder.encode(complete).byteLength <= maxFrameBytes) return [complete]
   try {
     return splitServerMessage(messageId, complete)
   } catch (error) {
     if (error !== serverMessageTooLarge) throw error
-    if (message._tag === "interactive-feed-event") {
-      const selectionEpoch = "selectionEpoch" in message.event ? message.event.selectionEpoch : 0
-      const threadId = resyncTarget(message.event)
-      const degraded = decodeServer({
-        ...message,
-        event:
-          threadId !== undefined
-            ? {
-                _tag: "TranscriptResyncRequired",
-                selectionEpoch,
-                threadId,
-                reason: degradedReason,
-              }
-            : { _tag: "ExecutionFailed", selectionEpoch, message: degradedReason },
-      })
-      return serverMessageFramesImpl(messageId, degraded, false)
-    }
-    if (message._tag === "interactive-feed-resync" && allowTargetedDegradation) {
-      const selectionEpoch = message.events.find((event) => "selectionEpoch" in event)?.selectionEpoch ?? 0
-      const threadIds = new Map<string, unknown>()
-      for (const event of message.events) {
-        const threadId = resyncTarget(event)
-        if (threadId !== undefined) threadIds.set(String(threadId), threadId)
-      }
-      const degraded = decodeServer({
-        ...message,
-        events:
-          threadIds.size === 0
-            ? [{ _tag: "ExecutionFailed", selectionEpoch, message: degradedReason }]
-            : [...threadIds.values()].map((threadId) => ({
-                _tag: "TranscriptResyncRequired",
-                selectionEpoch,
-                threadId,
-                reason: degradedReason,
-              })),
-      })
-      return serverMessageFramesImpl(messageId, degraded, false)
-    }
-    if (message._tag === "interactive-feed-resync") {
-      const selectionEpoch = message.events.find((event) => "selectionEpoch" in event)?.selectionEpoch ?? 0
-      return serverMessageFramesImpl(
-        messageId,
-        decodeServer({
-          ...message,
-          events: [{ _tag: "ExecutionFailed", selectionEpoch, message: degradedReason }],
-        }),
-        false,
-      )
-    }
-    throw error
+    if (message._tag !== "interactive-feed-event") throw error
+    return serverMessageFramesImpl(messageId, decodeServer({ ...message, event: degradedEvent(message.event) }))
   }
 }
 export const serverMessageFrames: {

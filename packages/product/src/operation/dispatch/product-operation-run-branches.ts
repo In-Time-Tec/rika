@@ -16,10 +16,9 @@ import { OperationError } from "../operation-error"
 import type { ProductOperationRuntimeState } from "./product-operation-runtime-state"
 import type { ProductLayerOptions } from "./product-operation-options"
 import type { FileSystem, Path } from "effect"
-import type { ProductOperationIngest } from "./product-operation-ingest"
 
-export interface ProductOperationRunFactory extends ProductOperationRuntimeState, ProductOperationIngest {
-  readonly options: ProductLayerOptions<Error, Error, Error, Error, Error, Error>
+export interface ProductOperationRunFactory extends ProductOperationRuntimeState {
+  readonly options: ProductLayerOptions<Error, Error, Error, Error, Error>
   readonly console: Console.Console
   readonly fileSystem: FileSystem.FileSystem | undefined
   readonly path: Path.Path | undefined
@@ -41,8 +40,8 @@ export interface ProductOperationRunFactory extends ProductOperationRuntimeState
   readonly configOperations: typeof import("../contract/configuration-operation")
   readonly publishInteractiveActivity: (
     origin: number,
-    event: import("../interactive/interactive-event").InteractiveEvent,
-  ) => import("../interactive/interactive-event").InteractiveEvent
+    event: import("../interactive/interactive-runtime-event").InteractiveEvent,
+  ) => import("../interactive/interactive-runtime-event").InteractiveEvent
   readonly staleQueuedTurnsError: typeof import("../../thread/queue/pending-turn-policy").staleQueuedTurnsError
   readonly queuedTurnPromoteMaxAgeMs: number
   readonly repairSummariesOnce: Effect.Effect<void, never, never>
@@ -122,18 +121,12 @@ const runNoninteractiveOperationImpl = (
       factory.setTurnStatus(id, status, now).pipe(Effect.provide(typedExecutionDependencies)),
     publishInteractiveActivity: factory.publishInteractiveActivity,
     rootTurnOwner: factory.rootTurnOwner,
-    executionIngest: factory.executionIngest,
     prepareExecution: (turn, workspace) =>
       factory.prepareExecution(turn, workspace).pipe(Effect.provide(typedExecutionDependencies)),
     claimQueuedTurn: (threadId, now) =>
       factory.claimQueuedTurn(threadId, now).pipe(Effect.provide(typedExecutionDependencies)),
     releaseTurnObserver: factory.releaseTurnObserver,
     queueMutationEvent: factory.queueMutationEvent,
-    deliverResultEvents: factory.deliverResultEvents,
-    projectExecutionResult: (threadId, result) =>
-      factory.projectExecutionResult(threadId, result).pipe(Effect.provide(typedExecutionDependencies)),
-    ensureIngest: factory.ensureIngest,
-    awaitIngestSettled: factory.awaitIngestSettled,
     executionDependencies: typedExecutionDependencies,
     staleQueuedTurnsError: factory.staleQueuedTurnsError,
     queuedTurnPromoteMaxAgeMs: factory.queuedTurnPromoteMaxAgeMs,
@@ -223,7 +216,6 @@ const runSystemOperationImpl = (
       makeTurnId: factory.options.makeTurnId,
       turnMutationAdmission: factory.turnMutationAdmission,
       backend: factory.backend,
-      usageRepository: factory.usageRepository,
       notifyThreadSummaries: typedNotifyThreadSummaries,
       writeThread: factory.writeThread,
       requireThread: factory.requireThread,

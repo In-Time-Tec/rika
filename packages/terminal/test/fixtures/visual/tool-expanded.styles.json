@@ -627,7 +627,7 @@
           "width": 5
         },
         {
-          "text": " src/main.ts",
+          "text": " src/main.ts ▸",
           "fg": {
             "buffer": {
               "0": 2176,
@@ -645,10 +645,10 @@
             }
           },
           "attributes": 0,
-          "width": 12
+          "width": 14
         },
         {
-          "text": "                                                            ",
+          "text": "                                                          ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -666,7 +666,7 @@
             }
           },
           "attributes": 0,
-          "width": 60
+          "width": 58
         }
       ]
     },

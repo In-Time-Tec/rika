@@ -44,6 +44,7 @@ type Message =
       readonly status?: "active" | "queued"
       readonly submissionId?: string
     }
+  | { readonly _tag: "SubmissionRejected"; readonly message: string; readonly submissionId?: string }
   | { readonly _tag: "TurnStarted"; readonly turnId: string; readonly prompt: string; readonly submissionId?: string }
   | {
       readonly _tag: "SteeringAccepted"

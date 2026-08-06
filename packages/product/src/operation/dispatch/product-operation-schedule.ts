@@ -6,7 +6,7 @@ import type { ProductOperationInteractiveSessionFactory } from "./product-operat
 import type { InteractiveSessionRuntimeResult } from "../interactive/interactive-session-runtime"
 
 export interface ProductOperationScheduleInput {
-  readonly options: ProductLayerOptions<Error, Error, Error, Error, Error, Error>
+  readonly options: ProductLayerOptions<Error, Error, Error, Error, Error>
   readonly ownerScope: import("effect").Scope.Scope
   readonly makeInteractiveSession: ProductOperationRuntimeState["makeInteractiveSession"]
   readonly repairThreadSummaries: ProductOperationRuntimeState["repairThreadSummaries"]

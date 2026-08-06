@@ -4,9 +4,31 @@ import type { Model } from "../model/terminal-state"
 import type { TranscriptBlock, TranscriptItem } from "../model/terminal-transcript-state"
 import { ready, loading } from "../model/terminal-loadable-state"
 import { streamActivity } from "../model/terminal-activity-state"
-import { dropSubmittedDrafts, settleSteering, takeSubmittedDraft } from "../model/terminal-queue-state"
+import {
+  dropSubmittedDrafts,
+  settleSteering,
+  takeSubmittedDraftFor,
+  validQueueSelection,
+} from "../model/terminal-queue-state"
+import { hasProvisionalUserEntry, settleProvisionalUserEntry } from "../model/terminal-submission-state"
 import { expandableRowIds, transcriptUnits, transcriptUnitId } from "../../presentation/transcript/transcript-row"
 import { context } from "./terminal-state-reducer"
+
+const dropProvisionalQueueItem = (model: Model, submissionId: string | undefined) => {
+  if (submissionId === undefined) return { queue: model.queue, queueSelection: model.queueSelection }
+  const queue = model.queue.filter((item) => item.id !== submissionId || item.provisional !== true)
+  return { queue, queueSelection: validQueueSelection(model.queueSelection, queue) }
+}
+
+const settledActivity = (
+  activeTurnId: string | undefined,
+  activity: Model["activity"],
+  pendingDrafts: number,
+): Model["activity"] => {
+  if (activeTurnId !== undefined) return activity
+  if (pendingDrafts > 0) return { _tag: "Sending" }
+  return undefined
+}
 
 const reduceOverlayImpl = (
   model: Model,
@@ -139,20 +161,76 @@ const reduceOverlayImpl = (
         activeTurnId: undefined,
       }
     }
+    case "SubmissionRejected": {
+      const taken = takeSubmittedDraftFor(
+        model.submittedDrafts,
+        message.submissionId === undefined ? {} : { submissionId: message.submissionId },
+      )
+      const reference = {
+        ...(taken.draft?.submissionId === undefined ? {} : { submissionId: taken.draft.submissionId }),
+        ...(taken.draft?.turnId === undefined ? {} : { turnId: taken.draft.turnId }),
+      }
+      const restore = taken.draft !== undefined && model.input.length === 0
+      const settled = settleProvisionalUserEntry(model, reference, restore)
+      const queue = dropProvisionalQueueItem(settled, taken.draft?.submissionId ?? message.submissionId)
+      const remainsBusy = model.activeTurnId !== undefined || taken.rest.length > 0
+      return {
+        ...settled,
+        ...queue,
+        ...(restore
+          ? {
+              input: taken.draft!.input,
+              cursor: taken.draft!.cursor,
+              pastedText: taken.draft!.attachments,
+            }
+          : {}),
+        submittedDrafts: taken.rest,
+        blocks: [
+          ...settled.blocks,
+          { _tag: "Error", title: "Message failed", detail: message.message, recovery: "Press Enter to try again." },
+        ],
+        items: [...settled.items, { _tag: "Block", index: settled.blocks.length }],
+        cancelPending: model.activeTurnId === undefined ? false : model.cancelPending,
+        busy: remainsBusy,
+        activity: settledActivity(model.activeTurnId, model.activity, taken.rest.length),
+      }
+    }
     case "ExecutionFailed": {
-      if (message.turnId !== undefined && model.activeTurnId !== message.turnId) return model
-      const alreadyPresented = (model.items as ReadonlyArray<TranscriptItem>).some(
+      const turnId = message.turnId ?? model.activeTurnId
+      const taken = takeSubmittedDraftFor(model.submittedDrafts, turnId === undefined ? {} : { turnId })
+      if (message.turnId !== undefined && model.activeTurnId !== message.turnId && taken.draft === undefined)
+        return model
+      const reference = {
+        ...(taken.draft?.submissionId === undefined ? {} : { submissionId: taken.draft.submissionId }),
+        ...(turnId === undefined ? {} : { turnId }),
+      }
+      const beforeStart = taken.draft !== undefined && hasProvisionalUserEntry(model, reference)
+      const restore = beforeStart && model.input.length === 0
+      const settled = beforeStart ? settleProvisionalUserEntry(model, reference, restore) : model
+      const queue = dropProvisionalQueueItem(settled, taken.draft?.submissionId)
+      const alreadyPresented = (settled.items as ReadonlyArray<TranscriptItem>).some(
         (item) =>
           item._tag === "Block" &&
-          (message.turnId === undefined || item.turnId === message.turnId) &&
-          (model.blocks[item.index] as TranscriptBlock | undefined)?._tag === "Error",
+          (turnId === undefined || item.turnId === turnId) &&
+          (settled.blocks[item.index] as TranscriptBlock | undefined)?._tag === "Error",
       )
+      const settlesActive = message.turnId === undefined || model.activeTurnId === message.turnId
+      const activeTurnId = settlesActive ? undefined : model.activeTurnId
+      const remainsBusy = activeTurnId !== undefined || taken.rest.length > 0
       return {
-        ...model,
+        ...settled,
+        ...queue,
+        ...(restore
+          ? {
+              input: taken.draft!.input,
+              cursor: taken.draft!.cursor,
+              pastedText: taken.draft!.attachments,
+            }
+          : {}),
         blocks: alreadyPresented
-          ? model.blocks
+          ? settled.blocks
           : [
-              ...model.blocks,
+              ...settled.blocks,
               {
                 _tag: "Error",
                 title: "Message failed",
@@ -160,32 +238,43 @@ const reduceOverlayImpl = (
                 recovery: "Press Enter to try again.",
               },
             ],
-        items: alreadyPresented ? model.items : [...model.items, { _tag: "Block", index: model.blocks.length }],
-        submittedDrafts: dropSubmittedDrafts(model.submittedDrafts, message.turnId),
-        pendingSteering: settleSteering(model, message.turnId ?? model.activeTurnId).pendingSteering,
-        cancelPending: false,
-        busy: false,
-        activity: undefined,
-        activeTurnId: undefined,
+        items: alreadyPresented ? settled.items : [...settled.items, { _tag: "Block", index: settled.blocks.length }],
+        submittedDrafts: taken.draft === undefined ? dropSubmittedDrafts(model.submittedDrafts, turnId) : taken.rest,
+        pendingSteering: settleSteering(model, turnId).pendingSteering,
+        cancelPending: settlesActive ? false : model.cancelPending,
+        busy: remainsBusy,
+        activity: settledActivity(activeTurnId, model.activity, taken.rest.length),
+        activeTurnId,
       }
     }
     case "ExecutionCancelled": {
       const turnId = message.turnId ?? model.activeTurnId
-      const taken = takeSubmittedDraft(model.submittedDrafts, turnId)
-      if (message.agentResponseArrived === false && taken.draft !== undefined) {
+      const taken = takeSubmittedDraftFor(model.submittedDrafts, turnId === undefined ? {} : { turnId })
+      const reversibleBeforeAdmission =
+        message.agentResponseArrived === false || (message.turnId === undefined && model.activeTurnId === undefined)
+      if (reversibleBeforeAdmission && taken.draft !== undefined) {
         const draft = taken.draft
+        const reference = {
+          ...(draft.submissionId === undefined ? {} : { submissionId: draft.submissionId }),
+          ...(turnId === undefined ? {} : { turnId }),
+        }
+        const restore = model.input.length === 0
+        const settled = settleProvisionalUserEntry(model, reference, restore)
+        const queue = dropProvisionalQueueItem(settled, draft.submissionId)
+        const cancelsActive = model.activeTurnId === turnId
+        const activeTurnId = cancelsActive ? undefined : model.activeTurnId
+        const remainsBusy = activeTurnId !== undefined || taken.rest.length > 0
         return {
-          ...model,
-          ...(model.input.length === 0
-            ? { input: draft.input, cursor: draft.cursor, pastedText: draft.attachments }
-            : {}),
+          ...settled,
+          ...queue,
+          ...(restore ? { input: draft.input, cursor: draft.cursor, pastedText: draft.attachments } : {}),
           submittedDrafts: taken.rest,
           pendingSteering: settleSteering(model, turnId).pendingSteering,
-          blocks: cancelTranscriptBlocks(model.blocks as ReadonlyArray<TranscriptBlock>),
-          cancelPending: model.activeTurnId === turnId ? false : model.cancelPending,
-          busy: model.activeTurnId === turnId ? false : model.busy,
-          activity: model.activeTurnId === turnId ? undefined : model.activity,
-          activeTurnId: model.activeTurnId === turnId ? undefined : model.activeTurnId,
+          blocks: cancelTranscriptBlocks(settled.blocks as ReadonlyArray<TranscriptBlock>),
+          cancelPending: cancelsActive ? false : model.cancelPending,
+          busy: remainsBusy,
+          activity: settledActivity(activeTurnId, model.activity, taken.rest.length),
+          activeTurnId,
         }
       }
       if (message.turnId !== undefined && model.activeTurnId !== message.turnId) return model

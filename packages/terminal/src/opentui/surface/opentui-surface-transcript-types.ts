@@ -31,7 +31,6 @@ export type PendingTranscriptPosition =
       readonly token: number
       readonly anchor: TranscriptAnchor | undefined
       readonly threadId: string | undefined
-      readonly scrollHeight: number
       readonly scrollBy: number
       readonly nearBottom: boolean
     }

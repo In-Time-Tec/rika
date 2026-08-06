@@ -306,7 +306,7 @@ describe("Operation", () => {
           Effect.result(operation.run({ _tag: "Thread", action: "fork", threadId: source.id })),
         )
         yield* Deferred.await(copyEntered)
-        yield* session.selectThread(forkId, 1)
+        yield* session.selectThread(forkId)
         const submissions = yield* Effect.forEach(["racing one", "racing two"], (prompt) =>
           Effect.forkChild(session.submit(prompt)),
         )

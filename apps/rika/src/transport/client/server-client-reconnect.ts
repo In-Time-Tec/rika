@@ -76,14 +76,8 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
     const selected = yield* Ref.make<
       { readonly _tag: "thread"; readonly threadId: string } | { readonly _tag: "latest" } | undefined
     >(undefined)
-    const wireEpoch = yield* Ref.make(0)
     let eventDispatch = ignoreInteractiveEvent
     let feedAttached = false
-    const nextWireEpoch = (requested?: number) =>
-      Ref.modify(wireEpoch, (current) => {
-        const next = Math.max(current + 1, requested ?? current + 1)
-        return [next, next]
-      })
     const awaitSession: Effect.Effect<InteractiveSession.InteractiveSession> = Effect.suspend(() =>
       Ref.get(sessions).pipe(
         Effect.flatMap((state) =>
@@ -118,7 +112,6 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
                 return Effect.sync(() =>
                   report({
                     _tag: "ExecutionFailed",
-                    selectionEpoch: 0,
                     message: String(Cause.squash(cause)),
                   }),
                 )
@@ -143,7 +136,6 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
                     Effect.sync(() =>
                       report({
                         _tag: "ExecutionFailed",
-                        selectionEpoch: 0,
                         message: "Server transport disconnected; the action outcome is unknown and was not retried",
                       }),
                     ),
@@ -152,7 +144,6 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
               return Effect.sync(() =>
                 report({
                   _tag: "ExecutionFailed",
-                  selectionEpoch: 0,
                   message: String(Cause.squash(cause)),
                 }),
               )
@@ -181,7 +172,8 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
             ),
           )
         }),
-      submit: (prompt, mode, parts, tuning) => mutation((session) => session.submit(prompt, mode, parts, tuning)),
+      submit: (prompt, mode, parts, tuning, submissionId) =>
+        mutation((session) => session.submit(prompt, mode, parts, tuning, submissionId)),
       shell: (threadId, command, incognito) =>
         Effect.gen(function* () {
           const launchSelection = yield* Ref.get(selected)
@@ -195,40 +187,38 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
       editQueued: (turnId, prompt) => mutation((session) => session.editQueued(turnId, prompt)),
       dequeue: (turnId) => mutation((session) => session.dequeue(turnId)),
       steerQueued: (turnId, text) => mutation((session) => session.steerQueued(turnId, text)),
-      steer: (text) => mutation((session) => session.steer(text)),
+      steer: (text, turnId) => mutation((session) => session.steer(text, turnId)),
+      approveAuthorization: (turnId, authorizationId) =>
+        mutation((session) => session.approveAuthorization(turnId, authorizationId)),
+      denyAuthorization: (turnId, authorizationId) =>
+        mutation((session) => session.denyAuthorization(turnId, authorizationId)),
       interruptAndSend: (prompt) => mutation((session) => session.interruptAndSend(prompt)),
       cancel: mutation((session) => session.cancel),
       quit: mutation((session) => session.quit),
-      newThread: nextWireEpoch().pipe(
-        Effect.andThen(Ref.set(selected, { _tag: "latest" as const })),
+      newThread: Ref.set(selected, { _tag: "latest" as const }).pipe(
         Effect.andThen(mutation((session) => session.newThread)),
       ),
-      selectThread: (threadId, selectionEpoch) =>
+      selectThread: (threadId) =>
         Effect.gen(function* () {
-          const epoch = yield* nextWireEpoch(selectionEpoch)
           yield* Ref.set(selected, { _tag: "thread" as const, threadId })
-          yield* retryRead((session) => session.selectThread(threadId, epoch))
+          yield* retryRead((session) => session.selectThread(threadId))
         }),
       readQueue: (threadId) => retryRead((session) => session.readQueue(threadId)),
-      loadOlder: (threadId, selectionEpoch, before, loadedKeys) =>
-        retryRead((session) => session.loadOlder(threadId, selectionEpoch, before, loadedKeys)),
-      loadNewer: (threadId, selectionEpoch, after) =>
-        retryRead((session) => session.loadNewer(threadId, selectionEpoch, after)),
+      loadOlder: (threadId, before, loadedKeys) =>
+        retryRead((session) => session.loadOlder(threadId, before, loadedKeys)),
+      loadNewer: (threadId, after) => retryRead((session) => session.loadNewer(threadId, after)),
       previewThread: (threadId) => retryRead((session) => session.previewThread(threadId)),
-      reopenThread: (selectionEpoch) =>
-        Effect.gen(function* () {
-          const epoch = yield* nextWireEpoch(selectionEpoch)
-          yield* Ref.set(selected, { _tag: "latest" as const })
-          yield* retryRead((session) => session.reopenThread(epoch))
-        }),
+      reopenThread: Effect.gen(function* () {
+        yield* Ref.set(selected, { _tag: "latest" as const })
+        yield* retryRead((session) => session.reopenThread)
+      }),
     }
     const publish = (session: InteractiveSession.InteractiveSession, first: boolean) =>
       Effect.gen(function* () {
         if (!first) {
           const selection = yield* Ref.get(selected)
-          const epoch = yield* nextWireEpoch()
-          if (selection?._tag === "thread") yield* session.selectThread(selection.threadId, epoch)
-          else if (selection?._tag === "latest") yield* session.reopenThread(epoch)
+          if (selection?._tag === "thread") yield* session.selectThread(selection.threadId)
+          else if (selection?._tag === "latest") yield* session.reopenThread
         }
         const changed = yield* Ref.modify(sessions, (state) => [state.changed, { ...state, session }])
         yield* Deferred.succeed(changed, undefined)

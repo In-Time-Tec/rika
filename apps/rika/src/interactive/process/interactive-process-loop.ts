@@ -3,16 +3,13 @@ import * as ProductOperation from "@rika/product/product-operation"
 import * as InteractiveSession from "@rika/product/interactive-session"
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as InteractiveFeed from "@rika/product/server-interactive-feed"
-import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
-import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
 import { create as createTui } from "@rika/terminal/opentui-surface"
 import { Model, initial, withModeRouteMap } from "@rika/terminal/terminal-state"
 import type { ThreadItem } from "@rika/terminal/terminal-state"
 type ModeRoutes = Model["modeRoutes"]
 import { Effect, Fiber } from "effect"
-import * as InteractiveController from "../controller/interactive-controller"
-import { terminalTitleSequence, traceTuiModelEvent } from "./interactive-process"
+import { terminalTitleSequence } from "./interactive-process"
 import { makeEventRouter } from "./process-events"
 import { makeProcessRuntime } from "./process-runtime"
 import { initializeRenderer } from "./interactive-process-setup"
@@ -40,6 +37,8 @@ export const interactiveTui =
         return yield* Effect.callback<void, ProductOperation.OperationUnavailable>((resume) => {
           const loop: InteractiveLoop = {
             model: initial(input.workspace ?? process.cwd(), input.mode ?? "medium"),
+            threadView: undefined,
+            requestedThreadId: input.threadId,
             workingFrame: undefined as string | undefined,
             renderer: undefined as Effect.Success<ReturnType<typeof createTui>> | undefined,
             initialization: undefined as Fiber.Fiber<void, never> | undefined,
@@ -52,18 +51,11 @@ export const interactiveTui =
             replayTurns: new Map<string, Turn.Turn>(),
             loadedTranscriptEntries: [] as ReadonlyArray<TranscriptPage.Entry>,
             projectionRevisions: new Map<string, number>(),
-            liveTranscriptProjections: new Map<string, TranscriptProjectionModel.Projection>(),
-            projectionStreams: new Map<string, InteractiveController.ProjectionStream>(),
-            threadCostUsd: undefined as number | undefined,
-            lastAvailableUsageCost: undefined as
-              | Extract<Model["usageCost"], { readonly _tag: "Available" }>
-              | undefined,
             transcriptHasOlder: false,
             transcriptHasNewer: false,
             transcriptOldestCursor: undefined as TranscriptPage.PageCursor | undefined,
             transcriptNewestCursor: undefined as TranscriptPage.PageCursor | undefined,
             appliedDeltas: new Set<string>(),
-            activeSelectionEpoch: 0,
             activitySequence: 0,
             submissionSequence: 0,
             fibers: new Set<Fiber.Fiber<void, never>>(),
@@ -71,9 +63,7 @@ export const interactiveTui =
             selectionGeneration: 0,
             renderSuppressed: false,
             loadingOlder: false,
-            pendingNewer: undefined as
-              | { readonly threadId: string; readonly selectionEpoch: number; readonly cursor: string }
-              | undefined,
+            pendingNewer: undefined as { readonly threadId: string; readonly cursor: string } | undefined,
             selectionResyncs: new Set<string>(),
             queueResyncs: new Set<string>(),
             closing: false,
@@ -106,12 +96,6 @@ export const interactiveTui =
                 loop.closed ? Effect.void : Effect.logError(error.message),
               ),
             )
-          const requestQueueResync = (threadId: Thread.ThreadId) => {
-            const key = String(threadId)
-            if (loop.queueResyncs.has(key)) return
-            loop.queueResyncs.add(key)
-            fork(session.readQueue(threadId).pipe(Effect.ensuring(Effect.sync(() => loop.queueResyncs.delete(key)))))
-          }
           const render = (immediate = false) => {
             if (loop.applyingFeedBatch) return
             if (loop.renderer === undefined || loop.renderSuppressed) return
@@ -154,10 +138,8 @@ export const interactiveTui =
             fork,
             session,
             refreshTerminalTitle,
-            traceTuiModelEvent,
             render,
             requestSelectionResync,
-            requestQueueResync,
           })
           loop.initialization = initializeRenderer({
             loop,

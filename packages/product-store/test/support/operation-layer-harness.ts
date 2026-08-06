@@ -1,6 +1,5 @@
 import { productLayer as makeProductLayer } from "@rika/product/product-operation-service"
 import * as ProductStoreSummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
-import * as ProductStoreUsageRepository from "@rika/product-store/sqlite-usage-repository"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 
 import { Effect, Layer } from "effect"
@@ -19,7 +18,6 @@ export const productLayer = (options: ProductLayerOptions): ReturnType<typeof ma
     transcriptRepositoryLayer:
       options.transcriptRepositoryLayer ??
       TranscriptRepository.memoryLayerWithTurns.pipe(Layer.provide(options.turnRepositoryLayer), Layer.orDie),
-    usageRepositoryLayer: options.usageRepositoryLayer ?? ProductStoreUsageRepository.memoryLayer.pipe(Layer.orDie),
   })
 
 export const provideLayer =

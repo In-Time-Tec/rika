@@ -2,10 +2,8 @@ import { Function } from "effect"
 import type { ViewportEvent } from "./transcript-viewport-events"
 import type { ViewportEffect } from "./transcript-viewport-effects"
 import type { ViewportDecision } from "./transcript-viewport-decision"
-import type { ViewportAnchor, ViewportState, TranscriptViewport } from "./transcript-viewport-state"
-import type { ViewportMetrics } from "./transcript-viewport-metrics"
+import type { TranscriptViewport } from "./transcript-viewport-state"
 import { anchored, isAnchored, isFollowing } from "./transcript-viewport"
-import { atBottom } from "./transcript-viewport-metrics"
 import { following, wheelIdle } from "./transcript-viewport-state"
 
 const reduceWheelObserved = (
@@ -103,28 +101,4 @@ export const reduceViewport: {
             effects: [{ _tag: "ProjectState" }, { _tag: "NotifyFollowed" }],
           }
   }
-})
-
-export const reanchor: {
-  (anchor: ViewportAnchor | undefined): (state: ViewportState) => ViewportState
-  (state: ViewportState, anchor: ViewportAnchor | undefined): ViewportState
-} = Function.dual(
-  2,
-  (state: ViewportState, anchor: ViewportAnchor | undefined): ViewportState =>
-    state._tag === "Anchored" && anchor !== undefined ? anchored(anchor) : state,
-)
-
-export const contentChanged = (state: ViewportState): ViewportState => state
-
-export const resized = (state: ViewportState): ViewportState => state
-
-export const toggled = (anchor: ViewportAnchor | undefined): ViewportState =>
-  anchor === undefined ? following : anchored(anchor)
-
-export const settle: {
-  (anchor: ViewportAnchor | undefined): (metrics: ViewportMetrics) => ViewportState
-  (metrics: ViewportMetrics, anchor: ViewportAnchor | undefined): ViewportState
-} = Function.dual(2, (metrics: ViewportMetrics, anchor: ViewportAnchor | undefined): ViewportState => {
-  if (atBottom(metrics) || anchor === undefined) return following
-  return anchored(anchor)
 })

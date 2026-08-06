@@ -21,6 +21,8 @@ export type Action =
   | { readonly _tag: "Dequeue"; readonly id: string }
   | { readonly _tag: "SteerQueued"; readonly id: string; readonly prompt: string }
   | { readonly _tag: "Steer"; readonly prompt: string; readonly turnId?: string }
+  | { readonly _tag: "ApproveAuthorization"; readonly turnId: string; readonly authorizationId: string }
+  | { readonly _tag: "DenyAuthorization"; readonly turnId: string; readonly authorizationId: string }
   | { readonly _tag: "InterruptAndSend"; readonly prompt: string }
   | { readonly _tag: "Cancel" }
   | { readonly _tag: "Quit" }
@@ -39,6 +41,8 @@ export interface Adapter {
   readonly dequeue?: (id: string) => void
   readonly steerQueued?: (id: string, prompt: string) => void
   readonly steer?: (prompt: string, turnId?: string) => void
+  readonly approveAuthorization?: (turnId: string, authorizationId: string) => void
+  readonly denyAuthorization?: (turnId: string, authorizationId: string) => void
   readonly interruptAndSend?: (prompt: string) => void
   readonly cancel?: () => void
   readonly selectThread?: (id: string) => void
@@ -69,6 +73,12 @@ export const execute: {
     case "Steer":
       adapter.steer?.(action.prompt, action.turnId)
       return adapter.steer !== undefined
+    case "ApproveAuthorization":
+      adapter.approveAuthorization?.(action.turnId, action.authorizationId)
+      return adapter.approveAuthorization !== undefined
+    case "DenyAuthorization":
+      adapter.denyAuthorization?.(action.turnId, action.authorizationId)
+      return adapter.denyAuthorization !== undefined
     case "InterruptAndSend":
       adapter.interruptAndSend?.(action.prompt)
       return adapter.interruptAndSend !== undefined

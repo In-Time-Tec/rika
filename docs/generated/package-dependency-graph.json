@@ -8,7 +8,7 @@
       "workspace": "@rika/baton-execution",
       "kind": "package",
       "production": true,
-      "publicExports": ["./baton-execution", "./baton-route", "./scripted-model"]
+      "publicExports": ["./baton-execution", "./baton-route", "./baton-test-harness", "./scripted-model"]
     },
     {
       "id": "package:@rika/cli",
@@ -105,17 +105,19 @@
         "./configuration-operation",
         "./context-file-system",
         "./context-resolution-service",
-        "./execution-event",
         "./execution-gateway",
+        "./execution-projection",
         "./execution-request",
         "./execution-route-resolution",
         "./execution-route-snapshot",
         "./execution-status",
+        "./execution-transcript-contract",
         "./extension-operation",
         "./interactive-command",
         "./interactive-event",
         "./interactive-operation",
         "./interactive-session",
+        "./interactive-thread-view-feed",
         "./model-registration-identity",
         "./openai-auth-contract",
         "./openai-auth-service",
@@ -141,14 +143,11 @@
         "./thread-summary",
         "./thread-summary-repository",
         "./thread-tool-action",
+        "./thread-view",
         "./transcript-page",
         "./transcript-repository",
         "./turn-record",
         "./turn-repository",
-        "./usage-projection",
-        "./usage-repository",
-        "./usage-snapshot",
-        "./usage-snapshot-codec",
         "./workspace-record"
       ]
     },
@@ -164,8 +163,7 @@
         "./sqlite-thread-search-repository",
         "./sqlite-thread-summary-repository",
         "./sqlite-transcript-repository",
-        "./sqlite-turn-repository",
-        "./sqlite-usage-repository"
+        "./sqlite-turn-repository"
       ]
     },
     {
@@ -208,16 +206,10 @@
       "kind": "package",
       "production": true,
       "publicExports": [
-        "./child-parent-correlation",
-        "./model-attempt-usage",
-        "./nested-transcript-projection",
         "./partial-tool-input",
         "./recorded-shell-presentation",
+        "./subagent-presentation",
         "./transcript-presentation-model",
-        "./transcript-projection",
-        "./transcript-projection-model",
-        "./transcript-settlement",
-        "./transcript-source-event",
         "./transcript-unit",
         "./transcript-unit-identity",
         "./transcript-unit-order"

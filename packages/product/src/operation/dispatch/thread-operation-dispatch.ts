@@ -1,15 +1,14 @@
 import * as ExecutionGateway from "../../execution/contract/execution-gateway"
-import * as UsageSnapshot from "@rika/product/usage-snapshot"
-import * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
+import * as ExecutionProjection from "../../execution/contract/execution-projection"
 import * as Thread from "../../thread/model/thread-record"
 import * as ThreadRepository from "../../thread/repository/thread-repository"
 import * as ThreadSummaryRepository from "../../thread/repository/thread-summary-repository"
 import * as TranscriptRepository from "../../thread/repository/transcript-repository"
+import { recordedShellProjection, settleRecordedShellProjection } from "@rika/transcript/recorded-shell-presentation"
 import * as Turn from "../../thread/model/turn-record"
 import * as ThreadResult from "@rika/product/thread-result"
 import * as ExecutionStatus from "@rika/product/execution-status"
 import * as TurnRepository from "../../thread/repository/turn-repository"
-import * as UsageRepository from "../../thread/repository/usage-repository"
 import { clampThreadTitle } from "../../thread/query/thread-title-policy"
 import { Input } from "../contract/product-operation"
 import { OperationUnavailable } from "../contract/product-operation"
@@ -23,7 +22,6 @@ export interface Dependencies {
   readonly makeTurnId: Effect.Effect<Turn.TurnId>
   readonly turnMutationAdmission: Semaphore.Semaphore
   readonly backend: ExecutionGateway.Interface
-  readonly usageRepository: UsageRepository.Interface
   readonly notifyThreadSummaries: Effect.Effect<void, OperationError, ThreadSummaryRepository.Service>
   readonly writeThread: (thread: Thread.Thread) => Effect.Effect<void>
   readonly requireThread: (
@@ -159,7 +157,10 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
       case "usage": {
         const thread = yield* dependencies.requireThread(repository, input.threadId)
         const threadTurns = yield* turns.list(thread.id)
-        const usage = yield* dependencies.usageRepository.readThread(String(thread.id))
+        const usageSummary = yield* TranscriptRepository.Service.pipe(
+          Effect.flatMap((transcripts) => transcripts.usage(thread.id)),
+        )
+        const usage = usageSummary.usage
         const statusNames: ReadonlyArray<ExecutionStatus.Status> = [
           "accepted",
           "queued",
@@ -179,7 +180,15 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
             statuses,
             costUsd: usage.costNanoUsd === undefined ? null : usage.costNanoUsd / 1_000_000_000,
             tokens: usage.tokens ?? null,
-            activeMillis: usage.activeMillis ?? null,
+            activeMillis: usage.active._tag === "Available" ? usage.active.accumulatedMillis : null,
+            context:
+              usage.context === undefined
+                ? null
+                : {
+                    inputTokens: usage.context.inputTokens,
+                    ...(usageSummary.contextCapacity === undefined ? {} : usageSummary.contextCapacity),
+                    pending: usage.contextPending,
+                  },
             attempts: {
               priced: usage.pricedAttempts,
               unpriced: usage.unpricedAttempts,
@@ -187,7 +196,7 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
               uncounted: usage.uncountedAttempts,
             },
             sourceComplete: usage.sourceComplete,
-            projectionVersion: UsageSnapshot.projectionVersion,
+            projectionVersion: ExecutionProjection.projectionVersion,
           }),
         )
         return
@@ -235,11 +244,15 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
                 if (ThreadResult.TurnResult.isRecordedShell(sourceTurn)) {
                   if (!ThreadResult.TurnResult.isTerminalRecordedShell(sourceTurn))
                     return yield* operationError(`Cannot fork running recorded shell turn ${sourceTurn.id}`)
-                  const copied = yield* transcripts.copyRecordedShell(
-                    { ...sourceTurn, id, threadId: fork.id },
-                    ExecutionIngest.projectionVersion,
+                  const copied = yield* turns.copyRecordedShell({ ...sourceTurn, id, threadId: fork.id })
+                  yield* transcripts.replaceUnits(
+                    copied,
+                    settleRecordedShellProjection(
+                      recordedShellProjection({ id: copied.id, command: copied.command, status: "running" }),
+                      copied,
+                    ).units,
                   )
-                  yield* summaries.ensureTurn(copied.turn.id, copied.turn.threadId, copied.turn.updatedAt)
+                  yield* summaries.ensureTurn(copied.id, copied.threadId, copied.updatedAt)
                   continue
                 }
                 const copied = yield* turns.copy(

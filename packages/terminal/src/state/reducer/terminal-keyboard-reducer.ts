@@ -2,10 +2,29 @@ import { Function } from "effect"
 import type { Message } from "../model/terminal-message"
 import type { Model } from "../model/terminal-state"
 import type { QueueItem } from "../model/terminal-queue-item"
+import type { TranscriptBlock, TranscriptItem } from "../model/terminal-transcript-state"
 import { isPrintable } from "../../presentation/terminal/terminal-keymap"
+import { transcriptUnitId, transcriptUnits } from "../../presentation/transcript/transcript-row"
 import { context } from "./terminal-state-reducer"
 import { reduceKeyboardPrelude } from "./terminal-keyboard-prelude"
 import { reduceKeyboardPicker } from "./terminal-keyboard-picker"
+
+const selectedAuthorization = (
+  model: Model,
+): { readonly turnId: string; readonly authorizationId: string } | undefined => {
+  if (model.detailSelection === undefined) return undefined
+  const unit = transcriptUnits(model).find(
+    (candidate) => candidate.kind === "block" && transcriptUnitId(model, candidate) === model.detailSelection,
+  )
+  if (unit?.kind !== "block") return undefined
+  const block = model.blocks[unit.block] as TranscriptBlock
+  if (block._tag !== "AuthorizationCard" || block.status !== "pending") return undefined
+  const item = (model.items as ReadonlyArray<TranscriptItem>).find(
+    (candidate) => candidate._tag === "Block" && candidate.index === unit.block,
+  )
+  const turnId = item?.rootTurnId ?? item?.turnId
+  return turnId === undefined ? undefined : { turnId, authorizationId: block.id }
+}
 
 const reduceKeyboardImpl = (
   model: Model,
@@ -42,6 +61,25 @@ const reduceKeyboardImpl = (
         continueShortcutsAfterEdit,
       })
       if (picker !== undefined) return picker
+
+      if (
+        model.input.length === 0 &&
+        !key.ctrl &&
+        !key.alt &&
+        !key.meta &&
+        !key.shift &&
+        (key.name === "a" || key.name === "d")
+      ) {
+        const authorization = selectedAuthorization(model)
+        if (authorization !== undefined)
+          return {
+            ...model,
+            pendingAction: {
+              _tag: key.name === "a" ? "ApproveAuthorization" : "DenyAuthorization",
+              ...authorization,
+            },
+          }
+      }
 
       if (questionKey(key) && model.input.length === 0) {
         const trigger = model.cursor

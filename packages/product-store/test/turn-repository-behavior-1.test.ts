@@ -81,7 +81,17 @@ it.effect("memory turns attach one canonical execution link without allowing rep
       executionRoute: ExecutionRouteSnapshot.testExecutionRoute("medium"),
       now: 1,
     })
-    const link = { runId: "run-1", turnId: "baton-turn-1", threadId: "baton-thread-1" }
+    const link = { runId: "run-1", turnId: created.id, threadId: created.threadId }
+    yield* repository.prepareExecutionAdmission(
+      {
+        threadId: created.threadId,
+        turnId: created.id,
+        workspace: "/workspace",
+        prompt: created.prompt,
+        executionRoute: created.executionRoute,
+      },
+      2,
+    )
     yield* repository.attachExecutionLink(created.id, link, 2)
     yield* repository.attachExecutionLink(created.id, link, 3)
     expect(yield* repository.get(created.id)).toMatchObject({
@@ -92,11 +102,46 @@ it.effect("memory turns attach one canonical execution link without allowing rep
       yield* Effect.result(
         repository.attachExecutionLink(
           created.id,
-          { runId: "run-2", turnId: "baton-turn-2", threadId: "baton-thread-2" },
+          { runId: "run-2", turnId: created.id, threadId: created.threadId },
           4,
         ),
       ),
     ).toMatchObject({ _tag: "Failure", failure: { _tag: "TurnRepositoryError" } })
+  }).pipe(provideLayer(TurnRepository.memoryLayer())),
+)
+
+it.effect("memory admission outbox snapshots exact input and exposes only unlinked preparations", () =>
+  Effect.gen(function* () {
+    const repository = yield* TurnRepository.Service
+    const created = yield* create(repository, {
+      id: Turn.TurnId.make("prepared-turn"),
+      threadId: Thread.ThreadId.make("prepared-thread"),
+      prompt: "request",
+      now: 1,
+    })
+    const input = {
+      threadId: created.threadId,
+      turnId: created.id,
+      workspace: "/prepared/workspace",
+      prompt: "resolved request",
+      promptParts: [{ type: "text" as const, text: "resolved request" }],
+      executionRoute: created.executionRoute,
+      titleIntent: { _tag: "GenerateThreadTitle" as const, expectedTitle: "Request" },
+    }
+    expect(yield* repository.prepareExecutionAdmission(input, 2)).toEqual(input)
+    input.promptParts[0] = { type: "text", text: "mutated" }
+    expect(yield* repository.listUnlinkedExecutionAdmissions).toMatchObject([
+      { prompt: "resolved request", promptParts: [{ text: "resolved request" }] },
+    ])
+    expect(
+      yield* Effect.result(repository.prepareExecutionAdmission({ ...input, prompt: "changed" }, 3)),
+    ).toMatchObject({ _tag: "Failure", failure: { _tag: "TurnRepositoryError" } })
+    yield* repository.attachExecutionLink(
+      created.id,
+      { runId: "opaque-run", turnId: created.id, threadId: created.threadId },
+      4,
+    )
+    expect(yield* repository.listUnlinkedExecutionAdmissions).toEqual([])
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 

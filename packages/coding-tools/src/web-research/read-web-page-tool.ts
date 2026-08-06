@@ -28,7 +28,7 @@ export const registration = Policy.register(
     action: "read-web-page",
     activeLabel: "Read",
     completeLabel: "Read",
-    outputDisplay: "hidden",
+    outputDisplay: "expandable",
     counter: "web page",
   }),
 )

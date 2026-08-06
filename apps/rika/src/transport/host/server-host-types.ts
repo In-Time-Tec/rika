@@ -18,7 +18,6 @@ export type ServerSession = {
   readonly commandQueue: Queue.Queue<CommandQueueItem>
   readonly acceptCommand: (sequence: number) => boolean
   readonly acknowledge: (throughSequence: number) => Effect.Effect<boolean>
-  readonly replay: (afterSequence: number) => Effect.Effect<void>
 }
 
 export type ServerRoute = {

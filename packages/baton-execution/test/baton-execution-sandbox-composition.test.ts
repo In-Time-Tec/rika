@@ -56,7 +56,9 @@ it.live("captures the provided SandboxExecutor without invoking it during build"
         const context = yield* Layer.build(layer({ filename }).pipe(Layer.provide(sandbox)))
         const gateway = Context.get(context, ExecutionGateway.Service)
         expect(Object.keys(gateway).toSorted()).toEqual([
+          "approveTurn",
           "cancelTurn",
+          "denyTurn",
           "inspectTurn",
           "startTurn",
           "steerTurn",
@@ -103,7 +105,14 @@ it.live(
         }),
       )
       expect(
-        result.events.some((event) => event.type === "model.output.completed" && event.text === "sandboxed response"),
+        result.events.some((change) =>
+          (change._tag === "ProjectionSnapshot" ? change.units : change.upsert).some(
+            (unit) =>
+              unit.content._tag === "Entry" &&
+              unit.content.role === "assistant" &&
+              unit.content.text === "sandboxed response",
+          ),
+        ),
       ).toBe(true)
       expect(result.view.status).toBe("completed")
       expect(calls).toBe(0)

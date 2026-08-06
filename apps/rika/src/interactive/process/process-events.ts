@@ -1,8 +1,6 @@
 import * as InteractiveEvent from "@rika/product/interactive-event"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Effect, Schema } from "effect"
-import * as Thread from "@rika/product/thread-record"
 import { selectedThreadMetadata, update } from "@rika/terminal/terminal-state-reducer"
 import * as InteractiveController from "../controller/interactive-controller"
 import * as ThreadSelection from "../controller/terminal-thread-selection"
@@ -11,183 +9,62 @@ import type { InteractiveRuntimeContext } from "./interactive-runtime-context"
 
 type Runtime = Pick<InteractiveRuntimeContext, "loop" | "fork" | "session" | "render"> & {
   readonly refreshTerminalTitle: () => void
-  readonly traceTuiModelEvent: (
-    seenDeltas: Set<string>,
-    event: InteractiveEvent.InteractiveEvent,
-  ) => Effect.Effect<void>
-  readonly requestSelectionResync: (threadId: string, selectionEpoch: number) => void
-  readonly requestQueueResync: (threadId: Thread.ThreadId) => void
+  readonly requestSelectionResync: (threadId: string) => void
 }
 
 export const makeEventRouter = (runtime: Runtime) => {
-  const {
-    loop,
-    fork,
-    session,
-    refreshTerminalTitle,
-    traceTuiModelEvent,
-    render,
-    requestSelectionResync,
-    requestQueueResync,
-  } = runtime
+  const { loop, fork, refreshTerminalTitle, render, requestSelectionResync } = runtime
   const dispatch = (event: InteractiveEvent.InteractiveEvent) => {
     if (loop.closed) return
     if (
-      event._tag === "SelectionLoaded" ||
-      event._tag === "TranscriptPagePrepended" ||
-      event._tag === "TranscriptPageAppended" ||
-      event._tag === "TranscriptProjectionStarted" ||
-      event._tag === "TranscriptProjectionPatched" ||
-      event._tag === "TranscriptProjectionStopped" ||
-      event._tag === "TranscriptProjectionFailed" ||
-      event._tag === "TranscriptResyncRequired" ||
-      event._tag === "TurnSettled" ||
-      event._tag === "ThreadUsageUpdated" ||
+      event._tag === "ThreadViewSnapshot" ||
+      event._tag === "ThreadViewPatch" ||
+      event._tag === "ResyncRequired" ||
       event._tag === "ThreadRefolding"
     ) {
-      const selectionStartedAt = event._tag === "SelectionLoaded" ? performance.now() : undefined
+      if (
+        event._tag === "ThreadViewSnapshot" &&
+        loop.requestedThreadId !== undefined &&
+        loop.requestedThreadId !== String(event.snapshot.thread.id)
+      )
+        return
       const previousThreadId = loop.model.currentThreadId
       const previousThreadTitle = loop.model.currentThreadTitle
       const controlled = InteractiveController.update(
         {
           model: loop.model,
-          selectionEpoch: loop.activeSelectionEpoch,
-          activitySequence: loop.activitySequence,
-          replayTurns: loop.replayTurns,
-          entries: loop.loadedTranscriptEntries,
-          revisions: loop.projectionRevisions,
-          liveProjections: loop.liveTranscriptProjections,
-          projectionStreams: loop.projectionStreams,
-          ...(loop.threadCostUsd === undefined ? {} : { threadCostUsd: loop.threadCostUsd }),
-          ...(loop.lastAvailableUsageCost === undefined ? {} : { lastAvailableUsageCost: loop.lastAvailableUsageCost }),
-          hasOlder: loop.transcriptHasOlder,
-          hasNewer: loop.transcriptHasNewer,
-          ...(loop.transcriptOldestCursor === undefined ? {} : { oldestCursor: loop.transcriptOldestCursor }),
-          ...(loop.transcriptNewestCursor === undefined ? {} : { newestCursor: loop.transcriptNewestCursor }),
+          ...(loop.threadView === undefined ? {} : { view: loop.threadView }),
         },
         event,
       )
       loop.model = controlled.state.model
-      loop.activeSelectionEpoch = controlled.state.selectionEpoch
-      loop.activitySequence = controlled.state.activitySequence ?? loop.activitySequence
-      loop.replayTurns = new Map(controlled.state.replayTurns)
-      loop.loadedTranscriptEntries = controlled.state.entries
-      loop.projectionRevisions = new Map(controlled.state.revisions)
-      loop.liveTranscriptProjections = new Map(controlled.state.liveProjections)
-      loop.projectionStreams = new Map(controlled.state.projectionStreams)
-      loop.threadCostUsd = controlled.state.threadCostUsd
-      loop.lastAvailableUsageCost = controlled.state.lastAvailableUsageCost
-      loop.transcriptHasOlder = controlled.state.hasOlder ?? false
-      loop.transcriptHasNewer = controlled.state.hasNewer ?? false
-      loop.transcriptOldestCursor = controlled.state.oldestCursor
-      loop.transcriptNewestCursor = controlled.state.newestCursor
-      if (event._tag === "SelectionLoaded") {
+      loop.threadView = controlled.state.view
+      if (event._tag === "ThreadViewSnapshot") {
+        loop.requestedThreadId = String(event.snapshot.thread.id)
+        loop.transcriptHasOlder = event.snapshot.hasOlder
+        loop.transcriptHasNewer = event.snapshot.hasNewer
+        loop.transcriptOldestCursor = event.snapshot.source.oldestCursor
+        loop.transcriptNewestCursor = event.snapshot.source.newestCursor
         loop.loadingOlder = false
         loop.pendingNewer = undefined
-        if (loop.model.currentThreadId === event.thread.id)
-          loop.model = update(loop.model, { _tag: "ThreadOpenCompleted" })
-      } else if (
-        event._tag === "TranscriptPageAppended" &&
-        loop.pendingNewer?.threadId === event.threadId &&
-        loop.pendingNewer.selectionEpoch === event.selectionEpoch &&
-        loop.pendingNewer.cursor === JSON.stringify(event.requestedAfter)
-      )
-        loop.pendingNewer = undefined
-      if (
-        event._tag === "SelectionLoaded" &&
-        loop.model.currentThreadId === event.thread.id &&
-        (loop.model.currentThreadId !== previousThreadId || loop.model.currentThreadTitle !== previousThreadTitle)
-      )
-        refreshTerminalTitle()
-      if (event._tag === "TranscriptProjectionPatched") fork(traceTuiModelEvent(loop.appliedDeltas, event))
-      if (
-        (event._tag === "TranscriptResyncRequired" || controlled.resync === true) &&
-        loop.model.currentThreadId !== undefined
-      )
-        requestSelectionResync(loop.model.currentThreadId, event.selectionEpoch)
+        loop.model = update(loop.model, { _tag: "ThreadOpenCompleted" })
+        if (loop.model.currentThreadId !== previousThreadId || loop.model.currentThreadTitle !== previousThreadTitle)
+          refreshTerminalTitle()
+      }
+      if (controlled.resync === true) {
+        const threadId = event._tag === "ResyncRequired" ? String(event.threadId) : loop.model.currentThreadId
+        if (threadId !== undefined) requestSelectionResync(threadId)
+      }
       if (controlled.preserveAnchor) {
         if (loop.applyingFeedBatch) loop.feedPreserveAnchor = true
         else loop.renderer?.surface.update(loop.model, true)
-      } else
-        render(
-          event._tag === "TranscriptResyncRequired" ||
-            event._tag === "TranscriptProjectionStopped" ||
-            event._tag === "TranscriptProjectionFailed",
-        )
-      if (selectionStartedAt !== undefined && event._tag === "SelectionLoaded")
-        fork(
-          (controlled.discarded === true
-            ? Effect.logWarning("tui.selection.discarded")
-            : Effect.logInfo("tui.selection.applied")
-          ).pipe(
-            Effect.annotateLogs({
-              "rika.thread.id": String(event.thread.id),
-              "rika.transcript.page.units": event.entries.length,
-              "rika.duration.ms": Math.round(performance.now() - selectionStartedAt),
-            }),
-          ),
-        )
+      } else render(event._tag === "ResyncRequired")
       if (!loop.model.busy && loop.model.activeTurnId === undefined && loop.model.activity === undefined)
         loop.submittedSinceIdle = false
       return
     }
-    if (event._tag === "QueueUpdated") {
-      if (
-        event.selectionEpoch === loop.activeSelectionEpoch &&
-        (loop.model.currentThreadId === undefined || loop.model.currentThreadId === event.threadId)
-      ) {
-        const updated = ThreadSelection.updateQueue(loop.model, event)
-        loop.model = updated.model
-        if (updated.resync) requestQueueResync(event.threadId)
-      }
-    } else if (event._tag === "QueueResyncRequired") {
-      if (
-        event.selectionEpoch === loop.activeSelectionEpoch &&
-        (loop.model.currentThreadId === undefined || loop.model.currentThreadId === event.threadId)
-      )
-        requestQueueResync(event.threadId)
-    } else if (event._tag === "TurnStarted") {
-      if (
-        event.activitySequence > loop.activitySequence &&
-        event.selectionEpoch === loop.activeSelectionEpoch &&
-        (loop.model.currentThreadId === undefined || loop.model.currentThreadId === event.threadId)
-      ) {
-        loop.activitySequence = event.activitySequence
-        const known = loop.replayTurns.get(event.turn.id)
-        if (
-          known?.status === "completed" ||
-          known?.status === "failed" ||
-          known?.status === "cancelled" ||
-          loop.model.activeTurnId === event.turn.id
-        )
-          return
-        if (loop.model.queue.some((item) => item.id === event.turn.id)) {
-          loop.model = ThreadSelection.removePromotedTurn(loop.model, event.threadId, event.turn.id)
-          fork(session.readQueue(event.threadId))
-        }
-        loop.replayTurns.set(event.turn.id, event.turn)
-        const seed = TranscriptProjection.Projection.empty(event.turn.id, event.turn.prompt)
-        loop.loadedTranscriptEntries = [
-          ...loop.loadedTranscriptEntries,
-          ...seed.units.map((unit) => ({
-            turn: event.turn,
-            unit,
-            projectionRevision: seed.revision,
-            projectionModelPhase: seed.modelPhase,
-          })),
-        ]
-        loop.model = update(loop.model, {
-          _tag: "TurnStarted",
-          turnId: event.turn.id,
-          prompt: event.turn.prompt,
-          ...(event.submissionId === undefined ? {} : { submissionId: event.submissionId }),
-        })
-      }
-    } else if (event._tag === "SubmissionAdmitted") {
-      if (
-        event.selectionEpoch === loop.activeSelectionEpoch &&
-        (loop.model.currentThreadId === undefined || loop.model.currentThreadId === event.threadId)
-      )
+    if (event._tag === "SubmissionAdmitted") {
+      if (loop.model.currentThreadId === undefined || loop.model.currentThreadId === event.threadId)
         loop.model = update(loop.model, {
           _tag: "SubmissionAdmitted",
           turnId: event.turnId,
@@ -210,7 +87,6 @@ export const makeEventRouter = (runtime: Runtime) => {
         })),
       })
     } else if (event._tag === "ExecutionControlled") {
-      if (event.threadId !== undefined && event.selectionEpoch !== loop.activeSelectionEpoch) return
       if (event.threadId !== undefined && loop.model.currentThreadId !== event.threadId) return
       if (event.action === "cancelled")
         loop.model = update(loop.model, {
@@ -231,7 +107,6 @@ export const makeEventRouter = (runtime: Runtime) => {
           text: event.steeringText,
         })
     } else if (event._tag === "ExecutionControlFailed") {
-      if (event.threadId !== undefined && event.selectionEpoch !== loop.activeSelectionEpoch) return
       if (event.threadId !== undefined && loop.model.currentThreadId !== event.threadId) return
       if (event.action === "steer" && event.turnId !== undefined && event.steeringText !== undefined)
         loop.model = update(loop.model, {
@@ -246,19 +121,18 @@ export const makeEventRouter = (runtime: Runtime) => {
           ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
           message: event.message,
         })
+      if (event.action === "approve" || event.action === "deny")
+        loop.renderer?.surface.showToast(
+          `${event.action === "approve" ? "Approval" : "Denial"} failed: ${event.message}`,
+          "#e06c75",
+        )
     } else if (event._tag === "ContextDiagnostics") {
-      if (event.selectionEpoch !== loop.activeSelectionEpoch) return
       if (loop.model.currentThreadId !== event.threadId) return
       loop.model = update(loop.model, {
         _tag: "BlockAdded",
-        block: {
-          _tag: "Notification",
-          title: "Context resolution",
-          detail: event.messages.join("\n"),
-        },
+        block: { _tag: "Notification", title: "Context resolution", detail: event.messages.join("\n") },
       })
     } else if (event._tag === "ExecutionFailed") {
-      if (event.threadId !== undefined && event.selectionEpoch !== loop.activeSelectionEpoch) return
       if (event.threadId !== undefined && loop.model.currentThreadId !== event.threadId) return
       loop.model = update(loop.model, {
         _tag: "ExecutionFailed",
@@ -266,31 +140,18 @@ export const makeEventRouter = (runtime: Runtime) => {
         message: event.message,
       })
     } else if (event._tag === "QueueFull") {
-      if (event.selectionEpoch !== loop.activeSelectionEpoch) return
       if (loop.model.currentThreadId !== undefined && loop.model.currentThreadId !== event.threadId) return
       loop.model = ThreadSelection.updateQueue(loop.model, event).model
     } else if (event._tag === "ShellCompleted") {
       if (loop.model.currentThreadId !== event.threadId) return
       if (event.incognito) loop.model = update(loop.model, { _tag: "AssistantCompleted", text: event.text })
       loop.model = update(loop.model, { _tag: "ExecutionCompleted" })
-    } else if (event._tag === "TitleCostUpdated") {
-      if (loop.model.currentThreadId === event.threadId) {
-        loop.threadCostUsd = event.threadCostUsd
-        loop.model = { ...loop.model, costUsd: event.threadCostUsd }
-      }
     } else if (event._tag === "ThreadTitled") {
-      loop.model = update(loop.model, {
-        _tag: "ThreadTitleChanged",
-        threadId: event.threadId,
-        title: event.title,
-      })
+      loop.model = update(loop.model, { _tag: "ThreadTitleChanged", threadId: event.threadId, title: event.title })
       if (loop.model.currentThreadId === event.threadId) refreshTerminalTitle()
     } else if (event._tag === "ThreadActivated") {
-      loop.model = update(loop.model, {
-        _tag: "ThreadActivated",
-        threadId: event.threadId,
-        title: event.title,
-      })
+      loop.requestedThreadId = event.threadId
+      loop.model = update(loop.model, { _tag: "ThreadActivated", threadId: event.threadId, title: event.title })
       if (loop.model.currentThreadId === event.threadId) refreshTerminalTitle()
     } else if (event._tag === "ThreadPreviewLoaded") {
       if (loop.model.threadSwitcher.open && selectedThreadMetadata(loop.model)?.id === event.threadId)
@@ -305,9 +166,7 @@ export const makeEventRouter = (runtime: Runtime) => {
     } else if (event._tag === "ThreadPreviewFailed") {
       if (loop.model.threadSwitcher.open && selectedThreadMetadata(loop.model)?.id === event.threadId)
         loop.model = update(loop.model, event)
-    } else {
-      loop.model = update(loop.model, event)
-    }
+    } else if (event._tag === "AssistantCompleted") loop.model = update(loop.model, event)
     if (!loop.model.busy && loop.model.activeTurnId === undefined && loop.model.activity === undefined)
       loop.submittedSinceIdle = false
     render(
@@ -344,6 +203,5 @@ export const makeEventRouter = (runtime: Runtime) => {
       loop.feedPreserveAnchor = false
     },
   })
-
   return { dispatch, feedBatcher }
 }

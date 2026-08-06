@@ -46,7 +46,7 @@ const publicSelection = (selector: Selector) => {
     })()
     return {
       mode: "subtree" as const,
-      childExecutionId: selector.childExecutionId,
+      subagentId: selector.subagentId,
       ...cursor,
     }
   }
@@ -85,7 +85,7 @@ export const handlerLayerForWorkspace = (workspace: string) =>
                     if (selection.mode === "subtree")
                       return {
                         _tag: "subtree" as const,
-                        childExecutionId: selection.childExecutionId,
+                        subagentId: selection.subagentId,
                         ...(selection.cursor?.before === undefined
                           ? {}
                           : {

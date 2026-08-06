@@ -15,3 +15,10 @@ export class WatchTurnFailure extends Schema.TaggedErrorClass<WatchTurnFailure>(
 export class InspectTurnFailure extends Schema.TaggedErrorClass<InspectTurnFailure>()("InspectTurnFailure", {
   message: Schema.String,
 }) {}
+export class ApprovalResponseFailure extends Schema.TaggedErrorClass<ApprovalResponseFailure>()(
+  "ApprovalResponseFailure",
+  {
+    kind: Schema.Literals(["stale", "mismatch", "unavailable"]),
+    message: Schema.String,
+  },
+) {}

@@ -7,10 +7,7 @@ import * as TurnRepositoryModule from "@rika/product-store/sqlite-turn-repositor
 import * as TranscriptRepositoryModule from "@rika/product-store/sqlite-transcript-repository"
 import * as TurnModule from "@rika/product/turn-record"
 import * as ExecutionRouteSnapshotModule from "@rika/product/execution-route-snapshot"
-import * as TranscriptNestedProjectionModule from "@rika/transcript/nested-transcript-projection"
 import * as TranscriptOrderingModule from "@rika/transcript/transcript-unit-order"
-import * as TranscriptProjectionModule from "@rika/transcript/transcript-projection"
-import * as TranscriptProjectionModelModule from "@rika/transcript/transcript-projection-model"
 import * as TranscriptUnitModule from "@rika/transcript/transcript-unit"
 
 export namespace Fixtures {
@@ -23,9 +20,6 @@ export namespace Fixtures {
   export import TranscriptRepository = TranscriptRepositoryModule
   export import Turn = TurnModule
   export import ExecutionRouteSnapshot = ExecutionRouteSnapshotModule
-  export import TranscriptNestedProjection = TranscriptNestedProjectionModule
   export import TranscriptOrdering = TranscriptOrderingModule
-  export import TranscriptProjection = TranscriptProjectionModule
-  export import TranscriptProjectionModel = TranscriptProjectionModelModule
   export import TranscriptUnit = TranscriptUnitModule
 }

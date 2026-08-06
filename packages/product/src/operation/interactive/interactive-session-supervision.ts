@@ -5,9 +5,8 @@ import type { InteractiveOperationFeed } from "./interactive-operation-feed"
 import * as ThreadResult from "@rika/product/thread-result"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
-import * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
 import { Effect, PubSub } from "effect"
-import type { InteractiveEvent } from "./interactive-event"
+import type { InteractiveEvent } from "./interactive-runtime-event"
 import type {
   InteractiveExecutionContext,
   InteractiveExecutionContextServices,
@@ -23,12 +22,11 @@ const interactiveEventThreadId = (event: InteractiveEvent): string | undefined =
 
 export interface InteractiveSupervisionInput {
   readonly acquiredBackend: ExecutionGateway.Interface
+  readonly rootTurnOwner: InteractiveSessionInput["rootTurnOwner"]
   readonly executionDependencies: InteractiveExecutionContext
   readonly turnChanges: PubSub.PubSub<void>
   readonly dirtyTurnObservers: Set<Turn.TurnId>
-  readonly ensureIngest: InteractiveSessionInput["ensureIngest"]
   readonly isTerminalStatus: InteractiveSessionInput["isTerminalStatus"]
-  readonly executionIngest: ExecutionIngest.Interface
   readonly notifyTurnChanged: InteractiveSessionInput["notifyTurnChanged"]
   readonly claimTurnObserver: InteractiveSessionInput["claimTurnObserver"]
   readonly observeTurn: ReturnType<typeof makeInteractiveFollowing>["observeTurn"]
@@ -45,6 +43,7 @@ export const makeInteractiveSupervision = (
 ): Effect.Effect<
   void,
   | OperationError
+  | ExecutionGateway.StartTurnFailure
   | ExecutionGateway.WatchTurnFailure
   | ExecutionGateway.InspectTurnFailure
   | TurnRepository.RepositoryError
@@ -53,10 +52,10 @@ export const makeInteractiveSupervision = (
 > => {
   const {
     acquiredBackend,
+    rootTurnOwner,
     executionDependencies,
     turnChanges,
     dirtyTurnObservers,
-    ensureIngest,
     isTerminalStatus,
     notifyTurnChanged,
     observeTurn,
@@ -67,6 +66,10 @@ export const makeInteractiveSupervision = (
     interactiveSinks,
     operationFeed,
   } = input
+  // A restarted observer is the live owner after a durable wait; the server owner broadcasts without filling its
+  // internal session queue, while an interactive claimant also delivers to its own feed.
+  const observedDispatch = serverOwner ? (_event: InteractiveEvent) => {} : operationFeed.sessionDispatch
+  const publishObserved = (event: InteractiveEvent) => operationFeed.emit(observedDispatch, event)
   const supervise = Effect.scoped(
     Effect.gen(function* () {
       const changes = yield* PubSub.subscribe(turnChanges)
@@ -82,7 +85,7 @@ export const makeInteractiveSupervision = (
         InteractiveExecutionContextServices
       > =>
         Effect.forkChild(
-          observeTurn(turn, () => undefined).pipe(
+          observeTurn(turn, publishObserved).pipe(
             Effect.flatMap((observed) => {
               if (observed !== true) return Effect.void
               return turns
@@ -92,7 +95,8 @@ export const makeInteractiveSupervision = (
                     current !== undefined &&
                     ThreadResult.TurnResult.isAgentExecution(current) &&
                     isTerminalStatus(current.status) !== true &&
-                    current.status !== "queued"
+                    current.status !== "queued" &&
+                    current.status !== "waiting"
                       ? Effect.sleep("50 millis").pipe(Effect.andThen(notifyTurnChanged(current)))
                       : Effect.void,
                   ),
@@ -112,21 +116,13 @@ export const makeInteractiveSupervision = (
           ),
         )
       const recover = Effect.gen(function* () {
-        const transcripts = yield* TranscriptRepository.Service
+        if (serverOwner) yield* rootTurnOwner.recoverExecutionAdmissions
         const nonterminal = yield* turns.listNonterminal
-        const projectionCandidates = yield* transcripts.listProjectionRecoveryCandidates(
-          ExecutionIngest.projectionVersion,
-        )
-        const ensured = new Set<string>()
         for (const turn of nonterminal)
           if (turn.status !== "queued" && turn.executionLink !== undefined) {
-            yield* ensureIngest(turn.threadId, turn.id)
-            ensured.add(String(turn.id))
             const view = yield* acquiredBackend.inspectTurn(turn.executionLink)
             if (view.status !== "unavailable") yield* launch(turn)
           }
-        for (const candidate of projectionCandidates)
-          if (!ensured.has(String(candidate.turnId))) yield* ensureIngest(candidate.threadId, candidate.turnId)
       })
       const scanDirty = Effect.gen(function* () {
         const dirty = [...dirtyTurnObservers]
@@ -154,15 +150,8 @@ export const makeInteractiveSupervision = (
     interactiveSinks.set(sessionId, (_origin: number, event: InteractiveEvent) => {
       const threadId = interactiveEventThreadId(event)
       if (threadId !== undefined && operationFeed.bufferSelectionEvent(event) === true) return
-      if (
-        threadId === undefined ||
-        threadId === getSelectedThreadId() ||
-        event._tag === "TitleCostUpdated" ||
-        event._tag === "ThreadUsageUpdated"
-      )
-        operationFeed.deliver(event, {
-          selectedThreadOnly: threadId !== undefined && event._tag !== "TitleCostUpdated",
-        })
+      if (threadId === undefined || threadId === getSelectedThreadId())
+        operationFeed.deliver(event, { selectedThreadOnly: threadId !== undefined })
     })
   return supervise
 }

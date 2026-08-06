@@ -41,7 +41,7 @@ export const ExecutionRouteModelSnapshot = Schema.Struct({
 export type ExecutionRouteModelSnapshot = typeof ExecutionRouteModelSnapshot.Type
 
 export const ExecutionRouteSnapshot = Schema.Struct({
-  version: Schema.Literal(2),
+  version: Schema.Literal(1),
   mode: Schema.String,
   tokenBudget: Schema.optionalKey(Schema.Finite),
   compaction: Schema.Struct({
@@ -83,7 +83,7 @@ export const testExecutionRoute = (mode = "test"): ExecutionRouteSnapshot => {
     compaction: { contextWindow: 372_000, reserveTokens: 128_000, keepRecentTokens: 32_000 },
   }
   return {
-    version: 2,
+    version: 1,
     mode,
     compaction: { strategy: "default", summaryPrompt: defaultCompactionSummaryPrompt },
     title: { ...route, role: "title", effort: "low" },
@@ -158,7 +158,7 @@ export const toExecutionRouteSnapshot = (routeValue: unknown): ExecutionRouteSna
     "Unsupported execution route field",
   )
   if (route.version === undefined) throw new Error("Malformed execution route version")
-  if (route.version !== 2) throw new Error("Unsupported execution route version")
+  if (route.version !== 1) throw new Error("Unsupported execution route version")
   validateModel(route.main, "main")
   validateModel(route.oracle, "oracle")
   validateModel(route.title, "title")

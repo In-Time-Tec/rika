@@ -7,7 +7,8 @@
   "exports": {
     "./baton-execution": "./src/baton-execution.ts",
     "./baton-route": "./src/baton-route.ts",
-    "./scripted-model": "./src/scripted-model.ts"
+    "./scripted-model": "./src/scripted-model.ts",
+    "./baton-test-harness": "./src/baton-test-harness.ts"
   },
   "dependencies": {
     "@batonfx/core": "catalog:",

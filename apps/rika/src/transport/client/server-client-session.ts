@@ -37,13 +37,8 @@ export const makeInteractiveSession = (options: SessionOptions): InteractiveSess
             const batchTails = new Map<string, (typeof frames)[number]>()
             for (const queued of frames) {
               yield* Effect.uninterruptible(
-                Effect.sync(() => {
-                  if (queued._tag === "interactive-feed-event") dispatch(queued.event)
-                  else for (const event of queued.events) dispatch(event)
-                }).pipe(
-                  Effect.andThen(
-                    queued._tag === "interactive-feed-event" ? traceEvent(queued.event, dispatchedDeltas) : Effect.void,
-                  ),
+                Effect.sync(() => dispatch(queued.event)).pipe(
+                  Effect.andThen(traceEvent(queued.event, dispatchedDeltas)),
                 ),
               )
               batchTails.set(
@@ -82,13 +77,14 @@ export const makeInteractiveSession = (options: SessionOptions): InteractiveSess
           Deferred.await(closed).pipe(Effect.andThen(Effect.fail(unavailable("Server connection closed")))),
         )
       }),
-    submit: (prompt, mode, promptParts, modelTuning) =>
+    submit: (prompt, mode, promptParts, modelTuning, submissionId) =>
       invoke({
         _tag: "Submit",
         prompt,
         ...(mode === undefined ? {} : { mode }),
         ...(promptParts === undefined ? {} : { promptParts }),
         ...(modelTuning === undefined ? {} : { modelTuning }),
+        ...(submissionId === undefined ? {} : { submissionId }),
       }),
     shell: (threadId, command, incognito) =>
       invoke({
@@ -100,17 +96,19 @@ export const makeInteractiveSession = (options: SessionOptions): InteractiveSess
     editQueued: (turnId, prompt) => invoke({ _tag: "EditQueued", turnId, prompt }),
     dequeue: (turnId) => invoke({ _tag: "Dequeue", turnId }),
     steerQueued: (turnId, text) => invoke({ _tag: "SteerQueued", turnId, text }),
-    steer: (text) => invoke({ _tag: "Steer", text }),
+    steer: (text, turnId) => invoke({ _tag: "Steer", text, ...(turnId === undefined ? {} : { turnId }) }),
+    approveAuthorization: (turnId, authorizationId) =>
+      invoke({ _tag: "ApproveAuthorization", turnId, authorizationId }),
+    denyAuthorization: (turnId, authorizationId) => invoke({ _tag: "DenyAuthorization", turnId, authorizationId }),
     interruptAndSend: (prompt) => invoke({ _tag: "InterruptAndSend", prompt }),
     cancel: invoke({ _tag: "Cancel" }),
     quit: invoke({ _tag: "Quit" }),
     newThread: invoke({ _tag: "NewThread" }),
-    selectThread: (threadId, selectionEpoch) => invoke({ _tag: "SelectThread", threadId, selectionEpoch }),
+    selectThread: (threadId) => invoke({ _tag: "SelectThread", threadId }),
     readQueue: (threadId) => invoke({ _tag: "ReadQueue", threadId }),
-    loadOlder: (threadId, selectionEpoch, before, loadedKeys) =>
-      invoke({ _tag: "LoadOlder", threadId, selectionEpoch, before, loadedKeys }),
-    loadNewer: (threadId, selectionEpoch, after) => invoke({ _tag: "LoadNewer", threadId, selectionEpoch, after }),
+    loadOlder: (threadId, before, loadedKeys) => invoke({ _tag: "LoadOlder", threadId, before, loadedKeys }),
+    loadNewer: (threadId, after) => invoke({ _tag: "LoadNewer", threadId, after }),
     previewThread: (threadId) => invoke({ _tag: "PreviewThread", threadId }),
-    reopenThread: (selectionEpoch) => invoke({ _tag: "ReopenThread", selectionEpoch }),
+    reopenThread: invoke({ _tag: "ReopenThread" }),
   }
 }

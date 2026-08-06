@@ -1,21 +1,26 @@
-import * as ExecutionEvent from "@rika/product/execution-event"
 import * as ExecutionStatus from "../../execution/contract/execution-status"
 import * as ThreadSummary from "../model/thread-summary"
-import * as ThreadSummaryRepository from "../repository/thread-summary-repository"
-import type * as Thread from "@rika/product/thread-record"
-import * as Turn from "@rika/product/turn-record"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import { Function } from "effect"
+import type * as ThreadSummaryRepository from "../repository/thread-summary-repository"
+import type * as Turn from "../model/turn-record"
+import type { Unit } from "@rika/transcript/transcript-unit"
+import { Function, Option, Schema } from "effect"
 
 const record = (value: unknown): Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null ? (value as Readonly<Record<string, unknown>>) : {}
 
-const patchFromToolResult = (event: ExecutionEvent.Event): string | undefined => {
-  if (event.type !== "tool.result.received") return undefined
-  const data = event.data ?? record(event.content?.[0])
-  const diff = record(data.output).diff
+const resultDiff = (output: string | undefined): string | undefined => {
+  if (output === undefined) return undefined
+  const decoded = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(output)
+  const diff = Option.isSome(decoded) ? record(decoded.value).diff : undefined
   return typeof diff === "string" && diff.length > 0 ? diff : undefined
 }
+
+export const toolResultDiffs = (units: ReadonlyArray<Unit>): ReadonlyArray<string> =>
+  units.flatMap((unit) => {
+    if (unit.content._tag !== "Block" || unit.content.block._tag !== "ToolCall") return []
+    const diff = resultDiff(unit.content.block.output)
+    return diff === undefined ? [] : [diff]
+  })
 
 const addChangeBlock = (totals: ThreadSummary.EditTotals, added: number, removed: number): ThreadSummary.EditTotals => {
   const modified = Math.min(added, removed)
@@ -50,13 +55,8 @@ export const editTotalsForPatch = (patch: string): ThreadSummary.EditTotals => {
   return totals
 }
 
-export const editTotals = (events: ReadonlyArray<ExecutionEvent.Event>): ThreadSummary.EditTotals => {
-  const ordered = events.toSorted((left, right) => left.sequence - right.sequence)
-  const patches = ordered.flatMap((event) => {
-    const patch = patchFromToolResult(event)
-    return patch === undefined ? [] : [patch]
-  })
-  return patches.reduce(
+export const editTotals = (units: ReadonlyArray<Unit>): ThreadSummary.EditTotals =>
+  toolResultDiffs(units).reduce(
     (total, patch) => {
       const next = editTotalsForPatch(patch)
       return {
@@ -67,65 +67,28 @@ export const editTotals = (events: ReadonlyArray<ExecutionEvent.Event>): ThreadS
     },
     { added: 0, modified: 0, removed: 0 },
   )
-}
 
-export const latestCursor: {
-  (runId: string, events: ReadonlyArray<ExecutionEvent.Event>): string | undefined
-  (events: ReadonlyArray<ExecutionEvent.Event>): (runId: string) => string | undefined
-} = Function.dual(
-  2,
-  (runId: string, events: ReadonlyArray<ExecutionEvent.Event>): string | undefined =>
-    events
-      .filter((event) => event.executionId === runId && !TranscriptProjection.Fold.isTransientEvent(event))
-      .reduce<
-        ExecutionEvent.Event | undefined
-      >((current, event) => (current === undefined || event.sequence >= current.sequence ? event : current), undefined)
-      ?.cursor,
-)
-
-export const finalAssistantOutput = (events: ReadonlyArray<ExecutionEvent.Event>): string | undefined => {
-  const latestToolSequence = events.reduce(
-    (latest, event) => (event.type === "tool.call.requested" ? Math.max(latest, event.sequence) : latest),
-    -1,
-  )
-  return events
-    .flatMap((event) => {
-      if (event.type !== "model.output.completed" || event.sequence <= latestToolSequence) return []
-      const text =
-        event.text ??
-        event.content
-          ?.flatMap((part) => {
-            const value = record(part)
-            return value.type === "text" && typeof value.text === "string" ? [value.text] : []
-          })
-          .join("")
-      return text === undefined || text.trim().length === 0 ? [] : [{ sequence: event.sequence, text }]
-    })
-    .toSorted((left, right) => left.sequence - right.sequence)
-    .at(-1)?.text
-}
+const projectionInputImpl = (
+  turn: Pick<Turn.Turn, "id" | "threadId" | "status" | "updatedAt">,
+  units: ReadonlyArray<Unit>,
+  now: number,
+): ThreadSummaryRepository.TurnActivityInput => ({
+  turnId: turn.id,
+  threadId: turn.threadId,
+  complete: ExecutionStatus.isTerminalStatus(turn.status),
+  editTotals: editTotals(units),
+  lastEventAt: turn.updatedAt,
+  now,
+})
 
 export const projectionInput: {
-  (result: ExecutionEvent.Result, now: number): (threadId: Thread.ThreadId) => ThreadSummaryRepository.TurnActivityInput
-  (threadId: Thread.ThreadId, result: ExecutionEvent.Result, now: number): ThreadSummaryRepository.TurnActivityInput
-} = Function.dual(
-  3,
   (
-    threadId: Thread.ThreadId,
-    result: ExecutionEvent.Result,
-    now: number,
-  ): ThreadSummaryRepository.TurnActivityInput => {
-    const projectedCursor = latestCursor(result.turnId, result.events)
-    return {
-      turnId: Turn.TurnId.make(result.turnId),
-      threadId,
-      ...(projectedCursor === undefined ? {} : { projectedCursor }),
-      complete: ExecutionStatus.isTerminalStatus(result.status),
-      editTotals: editTotals(result.events),
-      ...(result.events.length === 0
-        ? {}
-        : { lastEventAt: Math.max(...result.events.map((event) => event.createdAt)) }),
-      now,
-    }
-  },
-)
+    arg1: Parameters<typeof projectionInputImpl>[1],
+    arg2: Parameters<typeof projectionInputImpl>[2],
+  ): (arg0: Parameters<typeof projectionInputImpl>[0]) => ReturnType<typeof projectionInputImpl>
+  (
+    arg0: Parameters<typeof projectionInputImpl>[0],
+    arg1: Parameters<typeof projectionInputImpl>[1],
+    arg2: Parameters<typeof projectionInputImpl>[2],
+  ): ReturnType<typeof projectionInputImpl>
+} = Function.dual(3, projectionInputImpl)

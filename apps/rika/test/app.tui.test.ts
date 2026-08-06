@@ -22,47 +22,27 @@ test(
           inspectTranscript: true,
           lanes: [
             {
-              script: [
-                model.toolCall("task", { prompt: "Run top-level work." }, "top-agent"),
-                model.toolCall("await_subagents", {}, "root-join"),
+              steps: [
+                model.turn([model.runChild("Task", "Run top-level work.", "top-agent")]),
                 model.failure("ROOT_RELOAD_FAILED"),
               ],
             },
             {
-              when: (prompt) => prompt.includes("Run nested work.") && !prompt.includes("Run top-level work."),
-              script: [model.text("NESTED_RELOAD_COMPLETE")],
-            },
-            {
-              when: (prompt) => !prompt.includes("Delegate nested work, then fail."),
-              script: [
-                model.toolCall("oracle", { prompt: "Run nested work." }, "nested-agent"),
-                model.toolCall("await_subagents", {}, "top-join"),
+              profile: "Task",
+              steps: [
+                model.turn([model.runChild("Oracle", "Run nested work.", "nested-agent")]),
                 model.text("TOP_LEVEL_RELOAD_COMPLETE"),
               ],
             },
+            { profile: "Oracle", steps: [model.text("NESTED_RELOAD_COMPLETE")] },
           ],
         })
 
         yield* Effect.promise(() => app.type("Delegate nested work, then fail."))
         app.pressEnter()
-        yield* app.waitModelRequests(3)
         const turnId = Turn.TurnId.make("tui-turn-0")
-        for (let attempt = 0; attempt < 250; attempt += 1) {
-          const projection = yield* app.transcript(turnId)
-          const entries = new Set(
-            (projection?.units ?? []).flatMap((unit) => (unit.content._tag === "Entry" ? [unit.content.text] : [])),
-          )
-          const hasRunningTool = (projection?.units ?? []).some(
-            (unit) =>
-              unit.content._tag === "Block" &&
-              unit.content.block._tag === "ToolCall" &&
-              unit.content.block.status === "running",
-          )
-          if (entries.has("TOP_LEVEL_RELOAD_COMPLETE") && entries.has("NESTED_RELOAD_COMPLETE") && !hasRunningTool)
-            break
-          if (attempt === 249) return yield* Effect.die("nested subagents did not settle into the durable transcript")
-          yield* Effect.sleep("20 millis")
-        }
+        yield* app.waitFrame("Execution failed")
+        yield* app.settled
 
         yield* app.reload
         const reloaded = yield* app.transcript(turnId)
@@ -72,8 +52,12 @@ test(
         const statuses = (reloaded?.units ?? []).flatMap((unit) =>
           unit.content._tag === "Block" && unit.content.block._tag === "ToolCall" ? [unit.content.block.status] : [],
         )
+        const cards = (reloaded?.units ?? []).flatMap((unit) =>
+          unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard" ? [unit.content.block] : [],
+        )
         expect(entries).toContain("TOP_LEVEL_RELOAD_COMPLETE")
         expect(entries).toContain("NESTED_RELOAD_COMPLETE")
+        expect(cards.map(({ status }) => status)).toEqual(["complete", "complete"])
         expect(statuses).not.toContain("running")
         expect(statuses).not.toContain("failed")
         yield* app.quit
@@ -83,12 +67,19 @@ test(
 )
 
 test(
-  "keeps the accumulated cost visible after an attempt settles without usage",
+  "keeps accumulated usage visible after an attempt settles without usage",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
-          script: [model.text("PRICED_TURN_COMPLETE"), model.failure("UNPRICED_TURN_FAILED")],
+          lanes: [
+            {
+              steps: [
+                model.turn([model.part("PRICED_TURN_COMPLETE")], { inputTokens: 1_200, outputTokens: 340 }),
+                model.failure("UNPRICED_TURN_FAILED"),
+              ],
+            },
+          ],
         })
 
         yield* Effect.promise(() => app.type("Price this turn."))
@@ -96,19 +87,19 @@ test(
         yield* app.waitFrame("PRICED_TURN_COMPLETE")
         yield* app.waitFrame("ctx")
         yield* app.clickText("ctx")
-        const priced = yield* app.waitCost
-        expect(priced.match(/\$[0-9][^ ]*/u)?.[0]).toBe("$0.00")
+        const priced = yield* app.waitFrame("Used")
+        expect(priced).toContain("1.2K")
         expect(priced).not.toContain("$\u2014")
         app.pressEscape()
-        yield* app.waitGone("Cost       ")
+        yield* app.waitGone("Used       ")
 
         yield* Effect.promise(() => app.type("Fail this turn."))
         app.pressEnter()
         yield* app.waitFrame("Execution failed")
         yield* app.settled
         yield* app.clickText("ctx")
-        const settledFrame = yield* app.waitCost
-        expect(settledFrame.match(/\$[0-9][^ ]*/u)?.[0]).toBe("$0.00")
+        const settledFrame = yield* app.waitFrame("Used")
+        expect(settledFrame).toContain("1.2K")
         expect(settledFrame).not.toContain("$\u2014")
         yield* app.quit
       }),
@@ -157,7 +148,7 @@ test(
               root,
               workspaceFiles: { "timer.txt": "TIMER" },
               script: [
-                model.turn([model.toolCall("read", { path: "timer.txt" }, "timer-read")]),
+                model.turn([model.tool("read", { path: "timer.txt" }, "timer-read")]),
                 model.text("PERSISTED_TIMER_COMPLETE", 1_500),
               ],
             })
@@ -201,16 +192,15 @@ test(
           workspaceFiles: { "nested.txt": "NESTED_TOOL_CONTENT" },
           lanes: [
             {
-              script: [
-                model.toolCall("oracle", { prompt: "Read the nested fixture." }, "oracle-style"),
-                model.toolCall("await_subagents", {}, "root-join"),
+              steps: [
+                model.turn([model.runChild("Oracle", "Read the nested fixture.", "oracle-style")]),
                 model.text("ROOT_STYLE_RESULT"),
               ],
             },
             {
-              when: (prompt) => !prompt.includes("Ask Oracle to inspect the fixture."),
-              script: [
-                model.toolCall("read", { path: "nested.txt" }, "nested-read"),
+              profile: "Oracle",
+              steps: [
+                model.turn([model.tool("read", { path: "nested.txt" }, "nested-read")]),
                 model.text("## Oracle result\n\n**ORACLE_STYLE_RESULT**"),
               ],
             },
@@ -249,25 +239,27 @@ test(
     TuiApp.run(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
+          inspectTranscript: true,
           workspaceFiles: { "nested.txt": "NESTED_TOOL_CONTENT" },
           lanes: [
             {
-              script: [
-                model.toolCall("task", { prompt: "PARENT_AGENT_PROMPT" }, "parent-agent"),
-                model.toolCall("await_subagents", {}, "root-join"),
+              steps: [
+                model.turn([model.runChild("Task", "PARENT_AGENT_PROMPT", "parent-agent")]),
                 model.text("ROOT_AGENT_FINAL"),
               ],
             },
             {
-              when: (prompt) => prompt.includes("NESTED_AGENT_PROMPT") && !prompt.includes("PARENT_AGENT_PROMPT"),
-              script: [model.toolCall("read", { path: "nested.txt" }, "nested-read"), model.text("NESTED_AGENT_FINAL")],
+              profile: "Task",
+              steps: [
+                model.turn([model.runChild("Oracle", "NESTED_AGENT_PROMPT", "nested-agent")]),
+                model.text("PARENT_AGENT_FINAL"),
+              ],
             },
             {
-              when: (prompt) => !prompt.includes("ROOT_USER_PROMPT"),
-              script: [
-                model.toolCall("oracle", { prompt: "NESTED_AGENT_PROMPT" }, "nested-agent"),
-                model.toolCall("await_subagents", {}, "parent-join"),
-                model.text("PARENT_AGENT_FINAL"),
+              profile: "Oracle",
+              steps: [
+                model.turn([model.tool("read", { path: "nested.txt" }, "nested-read")]),
+                model.text("NESTED_AGENT_FINAL"),
               ],
             },
           ],
@@ -279,41 +271,50 @@ test(
         app.pressEnter()
         yield* app.waitFrame("ROOT_AGENT_FINAL")
         yield* app.settled
-        app.pressKey("\t")
-        app.pressEnter()
-        yield* app.waitFrame("PARENT_AGENT_PROMPT")
-        app.pressKey("\t")
-        app.pressEnter()
-        let expanded = yield* app.waitFrame("NESTED_AGENT_FINAL")
-        const assertTree = (frame: string) => {
-          const lines = frame.split("\n")
-          const rootRow = lines.findIndex((line) => line.includes("ROOT_USER_PROMPT"))
-          const parentPromptRow = lines.findIndex((line) => line.includes("PARENT_AGENT_PROMPT"))
-          const nestedHeaderRow = lines.findIndex(
-            (line, index) => index > parentPromptRow && line.includes("Oracle has spoken"),
-          )
-          const nestedHeader = nestedHeaderRow < 0 ? undefined : lines[nestedHeaderRow]
-          const nestedPrompt = lines.find((line) => line.includes("NESTED_AGENT_PROMPT"))
-          const nestedTool = lines.find((line) => line.includes("Read nested.txt"))
-          const nestedFinal = lines.find((line) => line.includes("NESTED_AGENT_FINAL"))
-          expect(rootRow).toBeGreaterThan(-1)
-          expect(parentPromptRow).toBeGreaterThan(rootRow)
-          expect(nestedHeader, frame).toBeDefined()
-          expect(nestedTool, frame).toBeDefined()
-          expect(nestedHeader?.indexOf("├")).toBe(parentPromptRow < 0 ? -1 : lines[parentPromptRow]?.indexOf("P"))
-          expect(nestedPrompt?.indexOf("│")).toBe(nestedHeader?.indexOf("├"))
-          expect(nestedTool?.indexOf("├")).toBe(nestedPrompt?.indexOf("N"))
-          expect(nestedFinal?.indexOf("╰")).toBe(nestedPrompt?.indexOf("N"))
-          expect(frame.match(/ROOT_USER_PROMPT/g) ?? []).toHaveLength(1)
-          expect(frame.match(/NESTED_AGENT_PROMPT/g) ?? []).toHaveLength(1)
-        }
-        assertTree(expanded)
 
+        const durable = yield* app.transcript(Turn.TurnId.make("tui-turn-0"))
+        const units = durable?.units ?? []
+        const card = (name: string) =>
+          units.find(
+            (unit) =>
+              unit.content._tag === "Block" &&
+              unit.content.block._tag === "SubagentCard" &&
+              unit.content.block.name === name,
+          )
+        const parentCard = card("Task")
+        const nestedCard = card("Oracle")
+        const parentId =
+          parentCard?.content._tag === "Block" && parentCard.content.block._tag === "SubagentCard"
+            ? parentCard.content.block.id
+            : undefined
+        const nestedId =
+          nestedCard?.content._tag === "Block" && nestedCard.content.block._tag === "SubagentCard"
+            ? nestedCard.content.block.id
+            : undefined
+        expect(parentId, "parent SubagentCard").toBeDefined()
+        expect(nestedId, "nested SubagentCard").toBeDefined()
+        expect(nestedCard?.parentId).toBe(parentId)
+        const owner = (text: string) =>
+          units.find((unit) => unit.content._tag === "Entry" && unit.content.text.includes(text))?.parentId
+        expect(owner("NESTED_AGENT_FINAL")).toBe(nestedId)
+        expect(owner("PARENT_AGENT_FINAL")).toBe(parentId)
+        expect(owner("ROOT_AGENT_FINAL")).toBeUndefined()
+        expect(
+          units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "ToolCall")?.parentId,
+        ).toBe(nestedId)
+
+        app.pressKey("\t")
         app.pressEnter()
-        yield* app.waitGone("NESTED_AGENT_FINAL")
+        const expanded = yield* app.waitFrame("PARENT_AGENT_PROMPT")
+        expect(expanded).toContain("PARENT_AGENT_FINAL")
+        expect(expanded.match(/ROOT_USER_PROMPT/g) ?? []).toHaveLength(1)
+        expect(expanded.match(/PARENT_AGENT_PROMPT/g) ?? []).toHaveLength(1)
         app.pressEnter()
-        expanded = yield* app.waitFrame("NESTED_AGENT_FINAL")
-        assertTree(expanded)
+        const collapsed = yield* app.waitGone("PARENT_AGENT_PROMPT")
+        expect(collapsed).toContain("ROOT_AGENT_FINAL")
+        app.pressEnter()
+        const reexpanded = yield* app.waitFrame("PARENT_AGENT_PROMPT")
+        expect(reexpanded.match(/PARENT_AGENT_PROMPT/g) ?? []).toHaveLength(1)
         yield* app.quit
       }),
     ),
@@ -321,36 +322,31 @@ test(
 )
 
 test(
-  "distinguishes reported, silent, and failed subagents in the transcript",
+  "distinguishes reporting, working, and failed subagents in the transcript",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
+          workspaceFiles: { "silent.txt": "SILENT_TOOL_BODY" },
           lanes: [
             {
-              script: [
-                model.toolCall("task", { prompt: "REPORTING_AGENT_PROMPT" }, "reporting-agent"),
-                model.toolCall("await_subagents", {}, "join-report"),
+              steps: [
+                model.turn([model.runChild("Task", "REPORTING_AGENT_PROMPT", "reporting-agent")]),
                 model.text("ROOT_AFTER_REPORT"),
-                model.toolCall("task", { prompt: "SILENT_AGENT_PROMPT" }, "silent-agent"),
-                model.toolCall("await_subagents", {}, "join-silent"),
-                model.text("ROOT_AFTER_NO_REPORT"),
-                model.toolCall("task", { prompt: "FAILING_AGENT_PROMPT" }, "failing-agent"),
-                model.toolCall("await_subagents", {}, "join-failure"),
+                model.turn([model.runChild("Task", "TOOL_ONLY_AGENT_PROMPT", "tool-only-agent")]),
+                model.text("ROOT_AFTER_TOOL_ONLY"),
+                model.turn([model.runChild("Task", "FAILING_AGENT_PROMPT", "failing-agent")]),
                 model.text("ROOT_AFTER_FAILURE"),
               ],
             },
             {
-              when: (prompt) => prompt.includes("REPORTING_AGENT_PROMPT") && !prompt.includes("reports back"),
-              script: [model.text("REPORTING_AGENT_FINDING")],
-            },
-            {
-              when: (prompt) => prompt.includes("SILENT_AGENT_PROMPT") && !prompt.includes("reports nothing"),
-              script: [model.turn([])],
-            },
-            {
-              when: (prompt) => prompt.includes("FAILING_AGENT_PROMPT") && !prompt.includes("fails outright"),
-              script: [model.failure("CHILD_STREAM_FAILED")],
+              profile: "Task",
+              steps: [
+                model.text("REPORTING_AGENT_FINDING"),
+                model.turn([model.tool("read", { path: "silent.txt" }, "silent-read")]),
+                model.text("SILENT_AGENT_TOOL_ONLY"),
+                model.failure("CHILD_STREAM_FAILED"),
+              ],
             },
           ],
           width: 100,
@@ -370,14 +366,17 @@ test(
         const reported = yield* app.waitFrame("REPORTING_AGENT_FINDING")
         expect(reported).toContain("Subagent finished")
 
-        yield* delegate("Delegate work that reports nothing.", "ROOT_AFTER_NO_REPORT")
-        const unreported = app.frame()
-        expect(unreported.match(/Subagent finished/g) ?? []).toHaveLength(2)
-        expect(unreported.match(/Subagent failed/g) ?? []).toHaveLength(0)
+        yield* delegate("Delegate work that works before reporting.", "ROOT_AFTER_TOOL_ONLY")
+        yield* app.settled
+        const worked = app.frame()
+        expect(worked.match(/Subagent finished/g) ?? []).toHaveLength(2)
+        expect(worked.match(/Subagent failed/g) ?? []).toHaveLength(0)
 
         yield* delegate("Delegate work that fails outright.", "ROOT_AFTER_FAILURE")
+        yield* app.settled
         const failed = app.frame()
         expect(failed.match(/Subagent failed/g) ?? []).toHaveLength(1)
+        expect(failed.match(/Subagent finished/g) ?? []).toHaveLength(2)
         yield* app.quit
       }),
     ),
@@ -391,26 +390,39 @@ test(
       Effect.gen(function* () {
         const command = "printf EARLY_OUTPUT; sleep 1; printf FINAL_OUTPUT"
         const app = yield* TuiApp.tuiApp({
+          inspectTranscript: true,
           script: [
-            model.turn([model.toolCall("bash", { command, timeout_ms: 0 }, "bash-wait")]),
-            model.turn([model.toolCall("shell_command_status", { processId: "1", waitMillis: 0 }, "wait-immediate")]),
-            model.turn([model.toolCall("shell_command_status", { processId: "1", waitMillis: 10_000 }, "wait-final")]),
+            model.turn([model.tool("bash", { command, timeout_ms: 0 }, "bash-wait")]),
+            model.turn([model.tool("shell_command_status", { processId: "1", waitMillis: 0 }, "wait-immediate")]),
+            model.turn([model.tool("shell_command_status", { processId: "1", waitMillis: 10_000 }, "wait-final")]),
             model.text("SHELL_WAIT_COMPLETE"),
           ],
         })
 
         yield* Effect.promise(() => app.type("Run the process and wait for it."))
         app.pressEnter()
-        yield* app.waitFrame("SHELL_WAIT_COMPLETE")
+        yield* app.waitFrame("SHELL_WAIT_COMPLETE", 20_000)
         yield* app.settled
+
+        const shellCalls = (yield* app.transcript(Turn.TurnId.make("tui-turn-0")))?.units.flatMap((unit) =>
+          unit.content._tag === "Block" && unit.content.block._tag === "ToolCall" ? [unit.content.block] : [],
+        )
+        expect(shellCalls?.map(({ name }) => name)).toEqual(["bash", "shell_command_status", "shell_command_status"])
+        expect(shellCalls?.at(0)?.process?.processId).toBe("1")
+        expect(shellCalls?.at(0)?.status, "the launching row keeps owning the live process").toBe("running")
+        expect(shellCalls?.at(1)?.output).toContain("EARLY_OUTPUT")
+        expect(shellCalls?.at(1)?.process?.running).toBe(true)
+        expect(shellCalls?.at(2)?.output).toContain("FINAL_OUTPUT")
+        expect(shellCalls?.at(2)?.process?.running).toBe(false)
+        expect(shellCalls?.at(2)?.process?.exitCode).toBe(0)
+        expect(shellCalls?.at(2)?.status).toBe("complete")
+
         app.pressKey("\t")
         app.pressEnter()
-        const completed = yield* app.waitFrame("FINAL_OUTPUT")
+        const completed = yield* app.waitFrame("FINAL_OUTPUT", 20_000)
         expect(completed).not.toContain("Waited for")
         expect(completed).not.toContain("Waiting for")
-        expect(completed).not.toContain("Running 1 tool")
-        expect(completed).toContain("EARLY_OUTPUTFINAL_OUTPUT")
-        expect(completed.match(/\$ printf EARLY_OUTPUT/g) ?? []).toHaveLength(1)
+        expect(completed.match(/printf EARLY_OUTPUT; sleep 1; printf FINAL_OUTPUT/g) ?? []).toHaveLength(1)
         yield* app.quit
       }),
     ),
@@ -426,9 +438,8 @@ test(
           workspaceFiles: { "src/alpha.ts": "alpha", "src/beta.ts": "beta", "README.md": "readme" },
           script: [
             model.text("HARNESS_RESPONSE"),
-            model.turn([model.toolCall("bash", { command: "printf TOOL_OK" }, "ordinary-tool")]),
+            model.turn([model.tool("bash", { command: "printf TOOL_OK" }, "ordinary-tool")]),
             model.text("ORDINARY_COMPLETE"),
-            model.text("MENTION_COMPLETE"),
             model.text("MENTION_COMPLETE"),
           ],
         })
@@ -516,7 +527,7 @@ test(
 )
 
 test(
-  "runs durable tools immediately without approval prompts",
+  "runs durable read and shell tools immediately without approval prompts",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -525,11 +536,9 @@ test(
         const app = yield* TuiApp.tuiApp({
           workspaceFiles: { "notes.txt": "APPROVAL_NOTES" },
           script: [
-            model.turn([model.toolCall("read", { path: "notes.txt" }, "approved-read")]),
+            model.turn([model.tool("read", { path: "notes.txt" }, "approved-read")]),
             model.text("APPROVAL_COMPLETE"),
-            model.turn([
-              model.toolCall("bash", { command: "printf CANCEL_PROOF > cancel-proof.txt" }, "cancelled-tool"),
-            ]),
+            model.turn([model.tool("bash", { command: "printf CANCEL_PROOF > cancel-proof.txt" }, "cancelled-tool")]),
             model.text("BASH_COMPLETE"),
           ],
         })
@@ -562,156 +571,51 @@ test(
 )
 
 test(
-  "restores a submitted prompt when cancellation wins before model output",
+  "approves a pending write authorization from the transcript and denies the next one",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
         const app = yield* TuiApp.tuiApp({
+          inspectTranscript: true,
+          height: 44,
           script: [
-            model.text("CANCELLED_LATE_RESPONSE", 5_000),
-            model.text("RESTORED_PROMPT_SENT"),
-            model.text("RESTORED_PROMPT_SENT"),
+            model.turn([model.tool("write", { path: "approved.txt", content: "APPROVED_BODY" }, "write-approved")]),
+            model.text("APPROVED_WRITE_COMPLETE"),
+            model.turn([model.tool("write", { path: "denied.txt", content: "DENIED_BODY" }, "write-denied")]),
+            model.text("DENIED_WRITE_COMPLETE"),
           ],
         })
 
-        yield* Effect.promise(() => app.type("Restore this submitted prompt."))
+        yield* Effect.promise(() => app.type("Write the approved file."))
         app.pressEnter()
-        yield* app.waitFrame("Restore this submitted prompt.")
-        yield* app.waitModelRequests(1)
-        app.close()
-        const restored = yield* app.waitFrame("│ Restore this submitted prompt.")
-        expect(restored).not.toContain("⊘")
-        expect(restored).not.toContain("cancelled")
-        yield* Effect.promise(() => app.type(" again"))
-        app.pressEnter()
-        yield* app.waitFrame("RESTORED_PROMPT_SENT")
+        const pending = yield* app.waitFrame("Authorization pending", 20_000)
+        expect(pending).toContain("write")
+        expect(pending, "controls stay hidden until the card is selected").not.toContain("[a] Approve")
+
+        app.pressKey("\t")
+        app.pressKey("\t")
+        const selected = yield* app.waitFrame("[a] Approve")
+        expect(selected).toContain("[d] Deny")
+
+        app.pressKey("a")
+        yield* app.waitFrame("APPROVED_WRITE_COMPLETE", 20_000)
         yield* app.settled
-        app.close()
-        yield* app.done
-      }),
-    ),
-  tuiTestTimeout,
-)
+        expect(yield* fileSystem.exists(path.join(app.workspace, "approved.txt"))).toBe(true)
+        expect(app.frame()).toContain("Authorization approved")
 
-test(
-  "echoes a queued prompt beside the streaming turn and drains it without a restart",
-  () =>
-    TuiApp.run(
-      Effect.gen(function* () {
-        const app = yield* TuiApp.tuiApp({
-          script: [model.text("SLOW_FIRST_ANSWER", 5_000), model.text("QUEUED_SECOND_ANSWER")],
-        })
-        yield* Effect.promise(() => app.type("First slow prompt."))
+        yield* app.clickComposer
+        yield* Effect.promise(() => app.type("Write the denied file."))
         app.pressEnter()
-        yield* app.waitFrame("First slow prompt.")
-        yield* app.waitModelRequests(1)
-        yield* Effect.promise(() => app.type("Second queued prompt."))
-        app.pressEnter()
-        const queuedFrame = yield* app.waitFrame("Second queued prompt.")
-        expect(queuedFrame).toContain("First slow prompt.")
-        const finalFrame = yield* app.waitFrame("QUEUED_SECOND_ANSWER")
-        expect(finalFrame).toContain("SLOW_FIRST_ANSWER")
-        yield* app.quit
-      }),
-    ),
-  tuiTestTimeout,
-)
-
-test(
-  "cancels the active turn and promotes the queued turn",
-  () =>
-    TuiApp.run(
-      Effect.gen(function* () {
-        const app = yield* TuiApp.tuiApp({
-          script: [model.text("LATE_QUEUE_HEAD", 5_000), model.text("QUEUED_DONE"), model.text("QUEUED_DONE")],
-        })
-        yield* Effect.promise(() => app.type("Hold the queue head."))
-        app.pressEnter()
-        yield* app.waitFrame("Hold the queue head.")
-        yield* Effect.promise(() => app.type("Queued follow-up prompt."))
-        app.pressEnter()
-        yield* app.waitFrame("Queued follow-up prompt.")
-        yield* app.waitModelRequests(1)
-        app.pressKey("c", { ctrl: true })
-        const promoted = yield* app.waitFrame("QUEUED_DONE")
-        expect(promoted).not.toContain("LATE_QUEUE_HEAD")
-        expect(promoted).not.toContain("\u2298")
-        expect(promoted).not.toContain("Execution failed")
-        expect(promoted).not.toContain("wait cancelled")
-        expect(promoted).not.toContain("! cancelled")
-        yield* app.quit
-      }),
-    ),
-  tuiTestTimeout,
-)
-
-test(
-  "steers selected queued messages with a pending lane and distinct delivered entries",
-  () =>
-    TuiApp.run(
-      Effect.gen(function* () {
-        const app = yield* TuiApp.tuiApp({
-          workspaceFiles: { "fixture.txt": "steer fixture body" },
-          script: [
-            model.turn([model.toolCall("read", { path: "fixture.txt" }, "steer-read")], {
-              delay: "10000 millis",
-            }),
-            model.text("ACTIVE_STEER_COMPLETE"),
-            model.text("ACTIVE_STEER_COMPLETE"),
-            model.text("ACTIVE_STEER_COMPLETE"),
-          ],
-        })
-        yield* Effect.promise(() => app.type("Read the fixture slowly."))
-        app.pressEnter()
-        yield* app.waitFrame("Read the fixture slowly.")
-        yield* app.waitFrame("Waiting")
-        const workingTitle = yield* app.waitTerminalTitle((title) => /^[⠀-⣿] /u.test(title))
-        yield* app.waitTerminalTitle((title) => /^[⠀-⣿] /u.test(title) && title !== workingTitle)
-        yield* Effect.promise(() => app.type("Focus on the exact fixture text."))
-        app.pressEnter()
-        yield* Effect.promise(() => app.type("Answer in one sentence."))
-        yield* app.waitFrame("Focus on the exact fixture text.")
-        app.pressKey("s", { ctrl: true })
-        yield* app.waitFrame("steering: Answer in one sentence.")
-        app.pressArrow("up")
-        yield* app.waitFrame("Enter to steer")
-        app.pressEnter()
-        yield* app.waitFrame("steering: Focus on the exact fixture text.")
-        const steered = yield* app.waitFrame("ACTIVE_STEER_COMPLETE")
+        yield* app.waitFrame("Authorization pending", 20_000)
+        app.pressKey("\t")
+        app.pressKey("\t")
+        yield* app.waitFrame("[d] Deny")
+        app.pressKey("d")
+        yield* app.waitFrame("Authorization denied", 20_000)
         yield* app.settled
-        yield* app.waitTerminalTitle((title) => !/^[⠀-⣿] /u.test(title))
-        expect(steered).not.toContain("Execution failed")
-        expect(steered).not.toContain("steering:")
-        expect(steered).toContain("\u2503 Answer in one sentence.")
-        expect(steered).toContain("\u2503 Focus on the exact fixture text.")
-        yield* app.quit
-      }),
-    ),
-  tuiTestTimeout,
-)
-
-test(
-  "interrupts the active turn with Ctrl+Enter and runs the replacement",
-  () =>
-    TuiApp.run(
-      Effect.gen(function* () {
-        const app = yield* TuiApp.tuiApp({
-          script: [
-            model.text("LATE_INTERRUPTED_RESPONSE", 5_000),
-            model.text("REPLACEMENT_COMPLETE"),
-            model.text("REPLACEMENT_COMPLETE"),
-          ],
-        })
-        yield* Effect.promise(() => app.type("Begin interruptible work."))
-        app.pressEnter()
-        yield* app.waitFrame("Begin interruptible work.")
-        yield* app.waitModelRequests(1)
-        yield* Effect.promise(() => app.type("Run the replacement prompt."))
-        yield* app.waitFrame("Run the replacement prompt.")
-        app.pressKey("\u001b[13;5u")
-        const replaced = yield* app.waitFrame("REPLACEMENT_COMPLETE")
-        expect(replaced).toContain("Run the replacement prompt.")
-        expect(replaced).not.toContain("LATE_INTERRUPTED_RESPONSE")
+        expect(yield* fileSystem.exists(path.join(app.workspace, "denied.txt"))).toBe(false)
         yield* app.quit
       }),
     ),

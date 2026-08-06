@@ -9,10 +9,10 @@ import type { ProductOperationSchedule } from "./product-operation-schedule"
 import type { ProductLayerOptions } from "./product-operation-options"
 import type { ProductOperationRunFactory } from "./product-operation-run-branches"
 import type { Input } from "../contract/product-operation"
-import type { InteractiveEvent } from "../interactive/interactive-event"
+import type { InteractiveEvent } from "../interactive/interactive-runtime-event"
 
 export interface ProductOperationServiceInput {
-  readonly options: ProductLayerOptions<Error, Error, Error, Error, Error, Error>
+  readonly options: ProductLayerOptions<Error, Error, Error, Error, Error>
   readonly state: ProductOperationRuntimeState
   readonly schedule: ProductOperationSchedule
   readonly console: Console.Console

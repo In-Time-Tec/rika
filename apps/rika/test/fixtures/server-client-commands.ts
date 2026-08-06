@@ -1,8 +1,3 @@
-import * as Thread from "@rika/product/thread-record"
-import * as Turn from "@rika/product/turn-record"
-import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
-import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
 import * as ViewState from "@rika/terminal/terminal-state"
 import * as TerminalMessage from "@rika/terminal/terminal-message"
 import * as ServerService from "@rika/product/server-service"
@@ -147,11 +142,9 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                   const events = yield* Queue.unbounded<string>()
                   const feed = yield* Effect.forkChild(
                     session.events((event) => {
-                      if (event._tag !== "TranscriptProjectionPatched" || event.origin._tag !== "Event") return
-                      Queue.offerUnsafe(
-                        events,
-                        `${TranscriptCorrelation.executionKey(event.origin.executionId)}:${event.origin.type}`,
-                      )
+                      if (event._tag !== "ThreadViewPatch") return
+                      const unit = event.patch.upsert[0]
+                      if (unit?.content._tag === "Entry") Queue.offerUnsafe(events, unit.content.text)
                     }),
                   )
                   const tags = [yield* Queue.take(events), yield* Queue.take(events), yield* Queue.take(events)]
@@ -169,49 +162,27 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                   const events = yield* Queue.unbounded<string>()
                   const eventClock = yield* Clock.Clock
                   const startedAt = eventClock.currentTimeMillisUnsafe()
-                  const threadId = Thread.ThreadId.make("timed-tool-thread")
-                  const turn = {
-                    _tag: "AgentExecution" as const,
-                    id: Turn.TurnId.make("timed-tool-turn"),
-                    threadId,
-                    prompt: "timed tools",
-                    author: { _tag: "Human" } as const,
-                    lineage: { _tag: "Original" } as const,
-                    executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
-                    status: "running" as const,
-                    createdAt: startedAt,
-                    updatedAt: startedAt,
-                  }
-                  const seed = TranscriptProjection.Projection.empty(turn.id, turn.prompt)
                   let state: InteractiveController.State = {
                     model: {
                       ...ViewState.initial(workspace, "medium"),
-                      currentThreadId: String(threadId),
-                      activeTurnId: turn.id,
-                      busy: true,
-                      activity: { _tag: "Waiting" },
+                      currentThreadId: "timed-tool-thread",
                     },
-                    selectionEpoch: 0,
-                    replayTurns: new Map([[turn.id, turn]]),
-                    entries: seed.units.map((unit) => ({
-                      turn,
-                      unit,
-                      projectionRevision: seed.revision,
-                      projectionModelPhase: seed.modelPhase,
-                    })),
-                    revisions: new Map(),
-                    liveProjections: new Map(),
-                    threadCostUsd: 0,
                   }
                   const feed = yield* Effect.forkChild(
                     session.events((event) => {
-                      if (event._tag !== "TranscriptProjectionStarted" && event._tag !== "TranscriptProjectionPatched")
+                      if (
+                        event._tag !== "ThreadViewSnapshot" &&
+                        event._tag !== "ThreadViewPatch" &&
+                        event._tag !== "ResyncRequired"
+                      )
                         return
                       state = InteractiveController.update(state, event).state
-                      if (event._tag !== "TranscriptProjectionPatched" || event.origin._tag !== "Event") return
+                      if (event._tag !== "ThreadViewPatch") return
+                      const unit = event.patch.upsert[0]
+                      if (unit?.content._tag !== "Block" || unit.content.block._tag !== "ToolCall") return
                       Queue.offerUnsafe(
                         events,
-                        `${event.origin.type}:${eventClock.currentTimeMillisUnsafe() - startedAt}:${TerminalMessage.formatActivity(state.model.activity)}`,
+                        `${unit.content.block.status}:${eventClock.currentTimeMillisUnsafe() - startedAt}:${TerminalMessage.formatActivity(state.model.activity)}`,
                       )
                     }),
                   )
@@ -455,7 +426,7 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                       const feed = yield* Effect.forkChild(
                         session.events((event) => {
                           tags.push(event._tag)
-                          if (event._tag === "TranscriptResyncRequired") Queue.offerUnsafe(completed, undefined)
+                          if (event._tag === "ResyncRequired") Queue.offerUnsafe(completed, undefined)
                         }),
                       )
                       yield* Queue.take(completed)
@@ -485,12 +456,8 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                       yield* Effect.sleep("350 millis")
                       const feed = yield* Effect.forkChild(
                         session.events((event) => {
-                          tags.push(
-                            event._tag === "TranscriptProjectionPatched" && event.origin._tag === "Event"
-                              ? event.origin.type
-                              : event._tag,
-                          )
-                          if (event._tag === "TranscriptResyncRequired") Queue.offerUnsafe(completed, undefined)
+                          tags.push(event._tag)
+                          if (event._tag === "ResyncRequired") Queue.offerUnsafe(completed, undefined)
                         }),
                       )
                       yield* Queue.take(completed)
@@ -519,7 +486,7 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                       const feed = yield* Effect.forkChild(
                         session.events((event) => {
                           tags.push(event._tag)
-                          if (event._tag === "QueueResyncRequired") Queue.offerUnsafe(completed, undefined)
+                          if (event._tag === "ResyncRequired") Queue.offerUnsafe(completed, undefined)
                         }),
                       )
                       yield* Queue.take(completed)
@@ -549,7 +516,7 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                       const feed = yield* Effect.forkChild(
                         session.events((event) => {
                           tags.push(event._tag)
-                          if (event._tag === "ThreadsListed" && tags.includes("TranscriptResyncRequired"))
+                          if (event._tag === "ThreadsListed" && tags.includes("ResyncRequired"))
                             Queue.offerUnsafe(completed, undefined)
                         }),
                       )

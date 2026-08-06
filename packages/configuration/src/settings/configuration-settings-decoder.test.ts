@@ -227,7 +227,7 @@ describe("ConfigContract", () => {
       if (entry.provider !== "openai") continue
       for (const [effort, variant] of Object.entries(entry.variants)) {
         expect(variant.normal.options, `${alias}/${effort}`).toMatchObject({
-          reasoning: { effort, summary: "auto" },
+          reasoning: { effort: effort === "max" ? "xhigh" : effort, summary: "auto" },
         })
       }
     }

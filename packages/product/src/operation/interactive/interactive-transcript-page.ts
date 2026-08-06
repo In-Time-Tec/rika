@@ -1,7 +1,7 @@
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
-import * as ExecutionIngest from "../../execution/ingest/execution-ingest-service"
+import * as ExecutionProjection from "../../execution/contract/execution-projection"
 import {
   boundTranscriptEntries,
   maximumTranscriptPayloadBytes,
@@ -18,7 +18,7 @@ import { Effect, Clock, Ref } from "effect"
 import { queueItem } from "./interactive-session-queue"
 import type { SelectionEpochState } from "./interactive-thread-selection"
 import { OperationError, operationError } from "../operation-error"
-import type { InteractiveEvent } from "./interactive-event"
+import type { InteractiveEvent } from "./interactive-runtime-event"
 import type { InteractiveRuntimeContext } from "./interactive-session-runtime"
 import type { makeInteractiveTranscriptLifecycle } from "./interactive-transcript-lifecycle"
 
@@ -39,17 +39,16 @@ export type InteractiveTranscriptPageInput = InteractiveRuntimeContext &
   }
 
 export const makeInitialTranscriptWindow = (
-  input: Pick<InteractiveRuntimeContext, "ensureIngest" | "selectionInitialTurnWindow" | "selectionInitialEntryWindow">,
+  input: Pick<InteractiveRuntimeContext, "selectionInitialTurnWindow" | "selectionInitialEntryWindow">,
 ) =>
   Effect.fn("ProductOperation.interactive.initialTranscriptWindow")(function* (state: SelectionEpochState) {
-    const { ensureIngest, selectionInitialTurnWindow, selectionInitialEntryWindow } = input
+    const { selectionInitialTurnWindow, selectionInitialEntryWindow } = input
     const turns = yield* TurnRepository.Service
     const transcripts = yield* TranscriptRepository.Service
     return yield* buildInitialTranscriptWindow({
       state,
       turns,
       transcripts,
-      ensureIngest,
       maxTurns: selectionInitialTurnWindow,
       maxEntries: selectionInitialEntryWindow,
       fail: operationError,
@@ -74,7 +73,6 @@ export const makeInteractiveTranscriptPage = (input: InteractiveTranscriptPageIn
     selectionAdmission,
     activitySequence,
     encodeJson,
-    startSelectionUsage,
     initialTranscriptWindow,
   } = input
   const loadTranscriptPage = Effect.fn("ProductOperation.interactive.loadTranscriptPage")(function* (
@@ -95,7 +93,7 @@ export const makeInteractiveTranscriptPage = (input: InteractiveTranscriptPageIn
         : yield* transcripts.page(thread.id, {
             before,
             limit: 50,
-            projectionVersion: ExecutionIngest.projectionVersion,
+            projectionVersion: ExecutionProjection.projectionVersion,
           })
     if (
       page.hasOlder === true &&
@@ -138,8 +136,6 @@ export const makeInteractiveTranscriptPage = (input: InteractiveTranscriptPageIn
         "newestCursor" in page ? page.newestCursor : transcriptCursorFor(page.entries.at(-1))
     state.hasOlder = hasOlder
     if (before !== undefined) for (const entry of deliveredEntries) state.loadedKeys.add(entry.unit.key)
-    const threadCostUsd = undefined
-    const globalCostUsd = undefined
     if (before === undefined) {
       const queue = yield* turns.readQueue(thread.id)
       const activeTurn = yield* turns.findActive(thread.id)
@@ -166,8 +162,7 @@ export const makeInteractiveTranscriptPage = (input: InteractiveTranscriptPageIn
               entries,
               hasOlder,
               hasNewer: false,
-              ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
-              ...(globalCostUsd === undefined ? {} : { globalCostUsd }),
+              usage: page.usage,
               ...(oldestCursor === undefined ? {} : { oldestCursor }),
               ...("newestCursor" in page && page.newestCursor !== undefined ? { newestCursor: page.newestCursor } : {}),
               queueRevision: queue.revision,
@@ -178,7 +173,6 @@ export const makeInteractiveTranscriptPage = (input: InteractiveTranscriptPageIn
             yield* startSelectionProjectionFeed(state, dispatch)
             operationFeed.releaseSelectionEvents(request, "Selection activity exceeded its bounded live window")
             setSelectionLoad(undefined)
-            yield* startSelectionUsage(state, dispatch)
           }),
         ),
       )
@@ -190,8 +184,6 @@ export const makeInteractiveTranscriptPage = (input: InteractiveTranscriptPageIn
         threadId: thread.id,
         entries: deliveredEntries,
         hasOlder,
-        ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
-        ...(globalCostUsd === undefined ? {} : { globalCostUsd }),
         ...(oldestCursor === undefined ? {} : { oldestCursor }),
       })
     }

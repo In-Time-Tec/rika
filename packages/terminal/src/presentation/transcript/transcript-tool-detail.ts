@@ -43,7 +43,7 @@ export const agentToolSummary = (label: string): ToolSummary => {
 
 export const escapePathTarget = escapeControlCharacters
 
-const inputValue = (input: string): Record<string, unknown> =>
+export const inputValue = (input: string): Record<string, unknown> =>
   Option.getOrElse(Schema.decodeUnknownOption(ToolInputJson)(input), () => partialInputRecord(input))
 
 const stringValue = (value: Record<string, unknown>, keys: ReadonlyArray<string>): string | undefined => {

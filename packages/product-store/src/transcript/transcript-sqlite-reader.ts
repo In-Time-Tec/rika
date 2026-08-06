@@ -1,145 +1,69 @@
-import type { ExecutionCheckpoint } from "@rika/product/transcript-page"
+import * as ExecutionProjection from "@rika/product/execution-projection"
 import type { Projection } from "@rika/product/transcript-page"
-import { TurnResult } from "@rika/product/thread-result"
-import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
+import { RepositoryError } from "@rika/product/transcript-repository"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
-import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
+import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Effect, Schema } from "effect"
-import type { SqlClient as SqlClientType } from "effect/unstable/sql/SqlClient"
-import { TurnId } from "@rika/product/turn-record"
-
-import { invalidatedProjectionVersion, RepositoryError } from "@rika/product/transcript-repository"
+import type { SqlClient } from "effect/unstable/sql/SqlClient"
+import type { TurnId } from "@rika/product/turn-record"
 import { decode } from "../turn/turn-row-codec"
-import { TranscriptCheckpointRow } from "./transcript-checkpoint-codec"
-import { TranscriptStoredUnitRow } from "./transcript-unit-row-codec"
-import { support } from "./transcript-repository-support"
 
-const {
-  error,
-  validateUnits,
-  validateRecordedShellProjection,
-  withUnits,
-  validateProjectionVersion,
-  validateStateScalars,
-  validateCheckpoint,
-  validateAttachmentSet,
-  UnitJson,
-  UsageCursorsJson,
-} = support
+const UnitJson = Schema.fromJsonString(TranscriptUnit.Unit)
+const error = (cause: unknown) =>
+  Schema.is(RepositoryError)(cause) ? cause : RepositoryError.make({ message: String(cause) })
 
-export function readTranscriptProjection(
-  sql: SqlClientType,
+export const readTranscriptProjection = Effect.fn("TranscriptRepository.read")(function* (
+  sql: SqlClient,
   turnId: TurnId,
-): (
-  loadExecutionCheckpoints: (turnId: TurnId) => Effect.Effect<ReadonlyArray<ExecutionCheckpoint>, RepositoryError>,
-) => Effect.Effect<Projection | undefined, RepositoryError>
-export function readTranscriptProjection(
-  sql: SqlClientType,
-  turnId: TurnId,
-  loadExecutionCheckpoints: (turnId: TurnId) => Effect.Effect<ReadonlyArray<ExecutionCheckpoint>, RepositoryError>,
-): Effect.Effect<Projection | undefined, RepositoryError>
-export function readTranscriptProjection(
-  sql: SqlClientType,
-  turnId: TurnId,
-  loadExecutionCheckpoints?: (turnId: TurnId) => Effect.Effect<ReadonlyArray<ExecutionCheckpoint>, RepositoryError>,
-):
-  | Effect.Effect<Projection | undefined, RepositoryError>
-  | ((
-      loadExecutionCheckpoints: (turnId: TurnId) => Effect.Effect<ReadonlyArray<ExecutionCheckpoint>, RepositoryError>,
-    ) => Effect.Effect<Projection | undefined, RepositoryError>) {
-  if (loadExecutionCheckpoints === undefined)
-    return (nextLoadExecutionCheckpoints) => readTranscriptProjection(sql, turnId, nextLoadExecutionCheckpoints)
-  return Effect.gen(function* () {
-    const checkpointRows = yield* sql`
-      SELECT c.checkpoint_generation, c.model_phase, c.revision, c.usable_completion_sequence,
-        c.oldest_cursor, c.checkpoint_cursor, c.cost_usd, c.usage_cursors_json,
-        c.pricing_version, c.projection_version, t.*
-      FROM rika_transcript_checkpoints c
-      JOIN rika_turns t ON t.id = c.turn_id
-      WHERE c.turn_id = ${turnId}
-    `.pipe(Effect.mapError(error))
-    if (checkpointRows[0] === undefined) return undefined
-    const row = yield* Schema.decodeUnknownEffect(TranscriptCheckpointRow)(checkpointRows[0]).pipe(
-      Effect.mapError(error),
-    )
-    const turn = yield* decode(checkpointRows[0]).pipe(Effect.mapError(error))
-    const unitRows = yield* sql`
-      SELECT unit_key, execution_key, turn_id, parent_id, tool_id, unit_json, unit_order_key
-      FROM rika_transcript_units
-      WHERE turn_id = ${turnId}
-      ORDER BY unit_order_key ASC
-    `.pipe(Effect.mapError(error))
-    const units = yield* Effect.all(
-      unitRows.map((value) =>
-        Schema.decodeUnknownEffect(TranscriptStoredUnitRow)(value).pipe(
-          Effect.flatMap((unitRow) =>
-            Schema.decodeUnknownEffect(UnitJson)(unitRow.unit_json).pipe(
-              Effect.filterOrFail(
-                (unit) => {
-                  const toolId =
-                    unit.content._tag === "Block" && unit.content.block._tag === "ToolCall"
-                      ? unit.content.block.id
-                      : null
-                  return (
-                    unit.key === unitRow.unit_key &&
-                    (TurnResult.isRecordedShell(turn) ? null : TranscriptCorrelation.executionKey(unit.turnId)) ===
-                      unitRow.execution_key &&
-                    TranscriptOrdering.hasIntrinsicOrder(unit) &&
-                    TranscriptOrdering.encodeUnitOrder(unit.order) === unitRow.unit_order_key &&
-                    (unit.parentId ?? null) === unitRow.parent_id &&
-                    toolId === unitRow.tool_id
-                  )
-                },
-                () => RepositoryError.make({ message: "Transcript unit identity does not match its durable key" }),
-              ),
-            ),
-          ),
-          Effect.mapError(error),
-        ),
-      ),
-    )
-    yield* validateUnits(units)
-    const executionCheckpoints = yield* loadExecutionCheckpoints(turnId)
-    const usageCursors =
-      row.usage_cursors_json === null
-        ? undefined
-        : yield* Schema.decodeUnknownEffect(UsageCursorsJson)(row.usage_cursors_json).pipe(Effect.mapError(error))
-    const state: TranscriptProjectionModel.ProjectionState = {
-      revision: row.revision,
-      modelPhase: row.model_phase,
-      ...(row.usable_completion_sequence === null ? {} : { usableCompletionSequence: row.usable_completion_sequence }),
-      ...(row.oldest_cursor === null ? {} : { oldestCursor: row.oldest_cursor }),
-      ...(row.checkpoint_cursor === null ? {} : { checkpointCursor: row.checkpoint_cursor }),
-      ...(row.cost_usd === null ? {} : { costUsd: row.cost_usd }),
-      ...(usageCursors === undefined ? {} : { usageCursors }),
-      ...(row.pricing_version === null ? {} : { pricingVersion: row.pricing_version }),
-    }
-    yield* validateProjectionVersion(turn.id, row.projection_version)
-    yield* validateStateScalars(turn.id, "root projection", state)
-    const invalidatedEmpty =
-      row.projection_version === invalidatedProjectionVersion && units.length === 0 && executionCheckpoints.length === 0
-    if (TurnResult.isRecordedShell(turn)) {
-      if (executionCheckpoints.length !== 0)
-        return yield* RepositoryError.make({ message: `Recorded shell turn ${turn.id} has execution checkpoints` })
-      yield* validateRecordedShellProjection(turn, withUnits(state, units), row.projection_version)
-    } else if (!invalidatedEmpty) {
-      yield* validateCheckpoint(turn, state, { executionCheckpoints, projectionVersion: row.projection_version }, true)
-      yield* validateAttachmentSet(turn, units, executionCheckpoints)
-    }
-    return {
-      turn,
-      units,
-      checkpointGeneration: row.checkpoint_generation,
-      revision: state.revision,
-      modelPhase: state.modelPhase,
-      usableCompletionSequence: state.usableCompletionSequence,
-      oldestCursor: state.oldestCursor,
-      checkpointCursor: state.checkpointCursor,
-      costUsd: state.costUsd,
-      usageCursors: state.usageCursors,
-      pricingVersion: state.pricingVersion,
-      executionCheckpoints,
-      projectionVersion: row.projection_version,
-    } satisfies Projection
-  })
-}
+): Effect.fn.Return<Projection | undefined, RepositoryError> {
+  const rows = yield* sql`SELECT c.checkpoint_generation, c.revision, c.projection_version,
+      c.state_json, c.projector_version, c.projector_cursor, c.projector_state, t.*
+    FROM rika_transcript_checkpoints c
+    JOIN rika_turns t ON t.id = c.turn_id
+    WHERE c.turn_id = ${turnId}`.pipe(Effect.mapError(error))
+  const row = rows[0] as Record<string, unknown> | undefined
+  if (row === undefined) return undefined
+  const turn = yield* decode(row).pipe(Effect.mapError(error))
+  const unitRows = yield* sql`SELECT unit_key, unit_order_key, parent_id, unit_json
+    FROM rika_transcript_units WHERE turn_id = ${turnId} ORDER BY unit_order_key ASC`.pipe(Effect.mapError(error))
+  const units = yield* Effect.forEach(unitRows, (raw) =>
+    Effect.gen(function* () {
+      const unitRow = raw as Record<string, unknown>
+      const unit = yield* Schema.decodeUnknownEffect(UnitJson)(unitRow.unit_json).pipe(Effect.mapError(error))
+      if (
+        unit.key !== unitRow.unit_key ||
+        unit.turnId !== turnId ||
+        TranscriptOrdering.encodeUnitOrder(unit.order) !== unitRow.unit_order_key ||
+        (unit.parentId ?? null) !== unitRow.parent_id ||
+        !TranscriptOrdering.hasIntrinsicOrder(unit)
+      )
+        return yield* RepositoryError.make({
+          message: `Transcript unit ${unit.key} does not match its durable identity`,
+        })
+      return unit
+    }),
+  )
+  const state = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ExecutionProjection.ProjectionState))(
+    row.state_json,
+  ).pipe(Effect.mapError(error))
+  const projectorValues = [row.projector_version, row.projector_cursor, row.projector_state]
+  if (projectorValues.some((value) => value !== null) && projectorValues.some((value) => value === null))
+    return yield* RepositoryError.make({ message: `Transcript ${turnId} has a partial projector checkpoint` })
+  const projectorCheckpoint =
+    row.projector_version === null
+      ? undefined
+      : {
+          version: row.projector_version as 1,
+          cursor: String(row.projector_cursor),
+          state: String(row.projector_state),
+        }
+  return {
+    turn,
+    units,
+    checkpointGeneration: Number(row.checkpoint_generation),
+    revision: Number(row.revision),
+    state,
+    ...(projectorCheckpoint === undefined ? {} : { projectorCheckpoint }),
+    projectionVersion: Number(row.projection_version),
+  }
+})

@@ -1,6 +1,6 @@
-import { Effect } from "effect"
+import { Clock, Effect } from "effect"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
-import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as ExecutionStatus from "@rika/product/execution-status"
 import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "@rika/product/thread-repository"
@@ -14,18 +14,12 @@ import * as ExecutionExtensions from "@rika/extensions/execution-extension-servi
 import type * as RootTurnOwner from "../../thread/queue/root-turn-owner"
 import { isTerminalStatus } from "../../execution/contract/execution-status"
 import { OperationError, operationError } from "../operation-error"
-import type { InteractiveEvent } from "./interactive-event"
+import type { InteractiveEvent } from "./interactive-runtime-event"
 
 export const watchRootTurn = (input: {
   readonly turnId: Turn.TurnId
   readonly turns: TurnRepository.Interface
   readonly owner: RootTurnOwner.Interface
-  readonly ensureIngest: (threadId: Thread.ThreadId, turnId: Turn.TurnId) => Effect.Effect<void, OperationError, never>
-  readonly deliverResultEvents: (
-    turnId: Turn.TurnId,
-    events: ReadonlyArray<ExecutionEvent.Event>,
-    delivered?: ReadonlySet<string>,
-  ) => void
   readonly setTurnStatus: (
     id: Turn.TurnId,
     status: ExecutionStatus.Status,
@@ -36,10 +30,6 @@ export const watchRootTurn = (input: {
     OperationError | ThreadSummaryRepository.RepositoryError | TurnRepository.RepositoryError,
     ThreadSummaryRepository.Service | TurnRepository.Service
   >
-  readonly projectExecutionResult: (
-    threadId: Thread.ThreadId,
-    result: ExecutionEvent.Result,
-  ) => Effect.Effect<void, OperationError | ThreadSummaryRepository.RepositoryError, ThreadSummaryRepository.Service>
   readonly settleThread: (
     thread: Thread.Thread,
     dispatch: (event: InteractiveEvent) => void,
@@ -64,16 +54,22 @@ export const watchRootTurn = (input: {
     if (!ThreadResult.TurnResult.isAgentExecution(turn))
       return yield* operationError(`Recorded shell turn ${input.turnId} cannot be watched as an execution`)
     const thread = yield* input.threadForTurn(turn)
-    yield* input.ensureIngest(turn.threadId, turn.id)
     const delivered = new Set<string>()
-    const result = yield* input.owner.watchTurn(turn.id, (event) => {
-      delivered.add(event.cursor)
-      input.deliverResultEvents(turn.id, [event])
-    })
-    input.deliverResultEvents(turn.id, result.events, delivered)
-    const updated = yield* input.setTurnStatus(turn.id, result.status, yield* input.now)
-    yield* input.projectExecutionResult(turn.threadId, result)
-    yield* input.ensureIngest(updated.threadId, updated.id)
+    const clock = yield* Clock.Clock
+    const publish = (change: ExecutionProjection.Change) => {
+      const key = `${change._tag}:${change.revision}`
+      if (delivered.has(key)) return
+      delivered.add(key)
+      input.dispatch({
+        _tag: "ExecutionProjectionChanged",
+        threadId: turn.threadId,
+        turn: { ...turn, status: change.state.status, updatedAt: clock.currentTimeMillisUnsafe() },
+        change,
+      })
+    }
+    const result = yield* input.owner.watchTurn(turn.id, publish)
+    for (const change of result.changes) publish(change)
+    if (turn.status !== result.status) yield* input.setTurnStatus(turn.id, result.status, yield* input.now)
     if (isTerminalStatus(result.status)) yield* input.settleThread(thread, input.dispatch)
   })
 

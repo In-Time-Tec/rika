@@ -4,6 +4,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
+import { recordedShellProjection, settleRecordedShellProjection } from "@rika/transcript/recorded-shell-presentation"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionStatus from "@rika/product/execution-status"
@@ -11,7 +12,7 @@ import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { Console, Effect, Layer, Ref, Stream } from "effect"
 import { TestConsole } from "effect/testing"
-import { projectionVersion } from "./interactive-session-base-support"
+const projectionVersion = 1
 
 import { provideLayer } from "../support/product-test-layer"
 
@@ -19,6 +20,8 @@ const backend = ExecutionGateway.Service.of({
   startTurn: () => Effect.die("unused"),
   cancelTurn: () => Effect.die("unused"),
   steerTurn: () => Effect.die("unused"),
+  approveTurn: () => Effect.void,
+  denyTurn: () => Effect.void,
   watchTurn: () => Stream.die("unused"),
   inspectTurn: () => Effect.succeed({ status: "unavailable" }),
 })
@@ -227,21 +230,25 @@ describe("Operation thread actions", () => {
         },
       ])
       const transcripts = yield* TranscriptRepository.makeMemory({ turns })
-      yield* transcripts.copyRecordedShell(
-        {
-          _tag: "RecordedShell",
-          id: Turn.TurnId.make("source-shell"),
-          threadId: source.id,
-          prompt: "$ printf copied",
-          command: "printf copied",
-          author: { _tag: "Human" },
-          lineage: { _tag: "Original" },
-          status: "completed",
-          createdAt: 3,
-          updatedAt: 4,
-          result: { text: "copied", truncated: false, exitCode: 0 },
-        },
-        projectionVersion,
+      const sourceShell = yield* turns.copyRecordedShell({
+        _tag: "RecordedShell",
+        id: Turn.TurnId.make("source-shell"),
+        threadId: source.id,
+        prompt: "$ printf copied",
+        command: "printf copied",
+        author: { _tag: "Human" },
+        lineage: { _tag: "Original" },
+        status: "completed",
+        createdAt: 3,
+        updatedAt: 4,
+        result: { text: "copied", truncated: false, exitCode: 0 },
+      })
+      yield* transcripts.replaceUnits(
+        sourceShell,
+        settleRecordedShellProjection(
+          recordedShellProjection({ id: sourceShell.id, command: sourceShell.command, status: "running" }),
+          sourceShell,
+        ).units,
       )
       const inspected = yield* Ref.make<ReadonlyArray<string>>([])
       const forkBackend = ExecutionGateway.Service.of({
@@ -290,7 +297,6 @@ describe("Operation thread actions", () => {
             },
           },
         ],
-        executionCheckpoints: [],
         projectionVersion: projectionVersion,
       })
       expect(yield* Ref.get(inspected)).toEqual([])
@@ -303,21 +309,19 @@ describe("Operation thread actions", () => {
       const repository = yield* ThreadRepository.makeMemory([source])
       const turns = yield* TurnRepository.makeMemory()
       const transcripts = yield* TranscriptRepository.makeMemory({ turns })
-      yield* transcripts.createRecordedShell(
-        {
-          _tag: "RecordedShell",
-          id: Turn.TurnId.make("running-shell"),
-          threadId: source.id,
-          prompt: "$ sleep 10",
-          command: "sleep 10",
-          author: { _tag: "Human" },
-          lineage: { _tag: "Original" },
-          status: "running",
-          createdAt: 1,
-          updatedAt: 1,
-        },
-        projectionVersion,
-      )
+      const runningShell = yield* turns.createRecordedShell({
+        _tag: "RecordedShell",
+        id: Turn.TurnId.make("running-shell"),
+        threadId: source.id,
+        prompt: "$ sleep 10",
+        command: "sleep 10",
+        author: { _tag: "Human" },
+        lineage: { _tag: "Original" },
+        status: "running",
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      yield* transcripts.replaceUnits(runningShell, recordedShellProjection(runningShell).units)
       const layer = productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
         turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),

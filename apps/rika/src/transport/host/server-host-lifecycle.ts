@@ -105,7 +105,6 @@ export const host = Effect.fn("ServerTransport.host")(function* (options: {
     }>
     readonly acceptCommand: (sequence: number) => boolean
     readonly acknowledge: (throughSequence: number) => Effect.Effect<boolean>
-    readonly replay: (afterSequence: number) => Effect.Effect<void>
   }
   const routes = yield* Ref.make(
     new Map<

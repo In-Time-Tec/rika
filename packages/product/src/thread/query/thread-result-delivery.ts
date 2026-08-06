@@ -8,7 +8,7 @@ export interface Result {
 }
 
 export interface Omission {
-  readonly reason: "olderTurns" | "responseBudget" | "unavailableChild"
+  readonly reason: "olderTurns" | "responseBudget" | "unavailableSubagent"
   readonly continuation: Selector
 }
 
@@ -23,12 +23,12 @@ export interface ReadItem {
 export interface Message {
   readonly role: "user" | "assistant" | "notice" | "child"
   readonly text: string
-  readonly childExecutionId?: string
+  readonly subagentId?: string
   readonly children?: ReadonlyArray<Message>
 }
 
 export interface ReadSuccess {
-  readonly schemaVersion: 2
+  readonly schemaVersion: 1
   readonly threadId: string
   readonly title: string
   readonly selector: Selector
@@ -39,7 +39,7 @@ export interface ReadSuccess {
 }
 
 export interface FindSuccess {
-  readonly schemaVersion: 2
+  readonly schemaVersion: 1
   readonly threads: ReadonlyArray<{
     readonly threadId: string
     readonly state: "idle" | "queued" | "running" | "error"

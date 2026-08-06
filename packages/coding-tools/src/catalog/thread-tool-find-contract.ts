@@ -17,7 +17,7 @@ export const FindThreadInput = Schema.Struct({
   limit: Schema.optionalKey(FindLimit),
 })
 export const FindThreadSuccess = Schema.Struct({
-  schemaVersion: Schema.Literal(2),
+  schemaVersion: Schema.Literal(1),
   threads: Schema.Array(
     Schema.Struct({
       threadId: NonEmptyString,

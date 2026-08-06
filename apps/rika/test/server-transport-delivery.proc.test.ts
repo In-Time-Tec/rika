@@ -190,7 +190,7 @@ describe("server WebSocket process transport", () => {
   )
 
   test(
-    "degrades a 20 MB event and survives replay after server replacement",
+    "degrades a 20 MB event and survives reattachment after server replacement",
     () =>
       run(
         Effect.gen(function* () {
@@ -211,7 +211,7 @@ describe("server WebSocket process transport", () => {
   )
 
   test(
-    "resyncs transcript delivery without failing the current physical feed",
+    "resyncs ThreadView delivery without failing the current physical feed",
     () =>
       run(
         Effect.gen(function* () {
@@ -224,10 +224,10 @@ describe("server WebSocket process transport", () => {
             const event = yield* client.nextEffect
             expect(event).toMatchObject({
               type: "overflow-completed",
-              tag: "TranscriptResyncRequired",
+              tag: "ResyncRequired",
             })
             expect(event.callbacks).toBeLessThan(12)
-            expect(event.tags).toContain("TranscriptResyncRequired")
+            expect(event.tags).toContain("ResyncRequired")
             expect((event.tags ?? []).includes("ExecutionFailed")).toBe(false)
             yield* client.closeEffect
           } finally {
@@ -239,7 +239,7 @@ describe("server WebSocket process transport", () => {
   )
 
   test(
-    "holds feed acknowledgements until a slow consumer releases capacity",
+    "holds ThreadView acknowledgements until a slow consumer releases capacity",
     () =>
       run(
         Effect.gen(function* () {
@@ -250,7 +250,7 @@ describe("server WebSocket process transport", () => {
             yield* client.send("slow-consumer")
             const event = yield* client.nextEffect
             expect(event.type).toBe("slow-consumer-completed")
-            expect(event.tags).toContain("TranscriptResyncRequired")
+            expect(event.tags).toContain("ResyncRequired")
             expect(event.tags).not.toContain("execution.completed")
             expect(event.callbacks).toBeLessThan(10)
             yield* client.closeEffect
@@ -263,7 +263,7 @@ describe("server WebSocket process transport", () => {
   )
 
   test(
-    "keeps an interactive subscription alive after transcript delivery resyncs",
+    "keeps an interactive subscription alive after ThreadView delivery resyncs",
     () =>
       run(
         Effect.gen(function* () {
@@ -278,7 +278,7 @@ describe("server WebSocket process transport", () => {
             expect(event).toMatchObject({
               type: "overflow-watch-finished",
               outcome: "Success",
-              tags: expect.arrayContaining(["TranscriptResyncRequired", "ThreadsListed"]),
+              tags: expect.arrayContaining(["ResyncRequired", "ThreadsListed"]),
             })
             yield* client.closeEffect
           } finally {
@@ -290,7 +290,7 @@ describe("server WebSocket process transport", () => {
   )
 
   test(
-    "resyncs queue delivery without failing the current physical feed",
+    "resyncs a second ThreadView delivery without failing the current physical feed",
     () =>
       run(
         Effect.gen(function* () {
@@ -303,11 +303,10 @@ describe("server WebSocket process transport", () => {
             const event = yield* client.nextEffect
             expect(event).toMatchObject({
               type: "queue-overflow-completed",
-              tag: "QueueResyncRequired",
+              tag: "ResyncRequired",
             })
             expect(event.callbacks).toBeLessThan(12)
-            expect(event.tags).toContain("QueueResyncRequired")
-            expect((event.tags ?? []).includes("TranscriptResyncRequired")).toBe(false)
+            expect(event.tags).toContain("ResyncRequired")
             expect((event.tags ?? []).includes("ExecutionFailed")).toBe(false)
             yield* client.closeEffect
           } finally {

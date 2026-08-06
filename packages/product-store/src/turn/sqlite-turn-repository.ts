@@ -11,8 +11,10 @@ import { decode, decodeAgent } from "./turn-row-codec"
 import { readTurn } from "./turn-sqlite-reader"
 import { listAgentTurns } from "./turn-sqlite-queries"
 import { makeTurnSqliteQueue } from "./turn-sqlite-queue"
+import { makeTurnSqliteAdmission } from "./turn-sqlite-admission"
 import { makeTurnSqliteState } from "./turn-sqlite-state"
 import { makeTurnSqliteSubmission } from "./turn-sqlite-submission"
+import { makeTurnSqliteRecordedShell } from "./turn-sqlite-recorded-shell"
 
 export const layer = Layer.effect(
   Service,
@@ -21,7 +23,9 @@ export const layer = Layer.effect(
     const get = Effect.fn("TurnRepository.get")((id: TurnId) => readTurn(sql, id))
     return Service.of({
       ...makeTurnSqliteSubmission(sql),
+      ...makeTurnSqliteRecordedShell(sql),
       ...makeTurnSqliteQueue(sql),
+      ...makeTurnSqliteAdmission(sql),
       ...makeTurnSqliteState(sql),
       get,
       list: Effect.fn("TurnRepository.list")(function* (threadId): Effect.fn.Return<
@@ -76,7 +80,7 @@ export const layer = Layer.effect(
         import("@rika/product/turn-repository").RepositoryError
       > {
         const rows =
-          yield* sql`SELECT * FROM rika_turns WHERE thread_id = ${threadId} AND turn_kind = 'AgentExecution' AND status IN ('accepted', 'running', 'waiting') ORDER BY created_at ASC, rowid ASC LIMIT 1`.pipe(
+          yield* sql`SELECT * FROM rika_turns WHERE thread_id = ${threadId} AND turn_kind = 'AgentExecution' AND status IN ('accepted', 'running', 'waiting', 'cancelling') ORDER BY created_at ASC, rowid ASC LIMIT 1`.pipe(
             Effect.mapError(repositoryError),
           )
         return rows[0] === undefined ? undefined : yield* decodeAgent(rows[0])

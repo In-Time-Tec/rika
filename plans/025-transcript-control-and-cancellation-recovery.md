@@ -161,14 +161,14 @@ The full rebuild path may call projection `replace` only after complete forward 
 
 - **Result:** Ctrl+C produces one authoritative cancelled outcome, cancelled row icons, and no interrupt-only red diagnostics.
 - **Changes:** In `packages/app/src/operation.ts`, use root cancellation once and replay/backfill descendant terminal events after it settles. Remove the broad child cancel fan-out if Slice 1 confirms Relay cascade. Narrow `active()` handling so an absent active Turn is a no-op but repository failure becomes control failure. At interactive submit/observer boundaries and in `packages/app/src/root-turn-owner.ts`, preserve interrupt-only causes without error logging or failed Turn mutation; keep non-interrupt failures observable.
-- **Tests:** Prove cancellation of a running root with an open tool, Child Run, and `await_subagents` wait settles every visible row as cancelled; emits no `ExecutionFailed`; performs one root cancel; and produces no `turn.failed`, `interactive.submit.failed`, or `root-turn-owner.run.failed` record for interrupt-only shutdown. Prove a genuine backend or owner defect still logs/surfaces. Prove failed cancel leaves the Turn running.
+- **Tests:** Prove cancellation of a running root with an open tool, Child Run, and `await_child_group` wait settles every visible row as cancelled; emits no `ExecutionFailed`; performs one root cancel; and produces no `turn.failed`, `interactive.submit.failed`, or `root-turn-owner.run.failed` record for interrupt-only shutdown. Prove a genuine backend or owner defect still logs/surfaces. Prove failed cancel leaves the Turn running.
 - **Checks:** Run focused app owner/operation tests and the real in-process TUI cancellation case.
 - **Depends on:** Slices 1 and 2.
 - **Cleanup:** Delete redundant per-child cancellation code and any tests that require duplicate cancel calls.
 
 ### 5. Suppress only internal wait cancellation text
 
-- **Result:** Cancelling while `await_subagents` is waiting shows cancellation icons but no `! wait cancelled`; explicit cancellation reasons remain visible.
+- **Result:** Cancelling while `await_child_group` is waiting shows cancellation icons but no `! wait cancelled`; explicit cancellation reasons remain visible.
 - **Changes:** After the upstream contract from Slice 1 exposes provenance, carry it through `packages/runtime/src/execution-backend.ts` source events as needed and handle it explicitly in `packages/transcript/src/index.ts`. Keep `wait.cancelled` non-rendering. Set execution outcomes and block statuses regardless of notice suppression. Leave `packages/tui/src/adapter.ts` generic notice rendering unchanged.
 - **Tests:** In `packages/transcript/test/projection.test.ts`, prove internal wait cancellation creates no notice, explicit caller cancellation creates exactly one notice, no-reason cancellation creates no fabricated text, and all cases settle running rows. In `packages/tui/test/tool-presentation.test.ts` or the existing cancellation visual fixture, prove no `wait cancelled` text and correct cancelled icons. Cover the complete path in `apps/rika/test/app.tui.test.ts`.
 - **Checks:** Run focused transcript/TUI tests and the cancellation TUI app case.

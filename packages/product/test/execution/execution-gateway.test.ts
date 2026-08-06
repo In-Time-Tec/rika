@@ -19,7 +19,7 @@ it.layer(
   )
 })
 
-it.effect("passes one opaque execution link through the five gateway operations", () =>
+it.effect("passes one opaque execution link through all gateway operations", () =>
   Effect.gen(function* () {
     const observed = new Array<unknown>()
     const gateway = ExecutionGateway.Service.of({
@@ -30,6 +30,8 @@ it.effect("passes one opaque execution link through the five gateway operations"
       },
       cancelTurn: (received) => Effect.sync(() => void observed.push(["cancel", received])),
       steerTurn: (received, input) => Effect.sync(() => void observed.push(["steer", received, input])),
+      approveTurn: (received, input) => Effect.sync(() => void observed.push(["approve", received, input])),
+      denyTurn: (received, input) => Effect.sync(() => void observed.push(["deny", received, input])),
       inspectTurn: (received) => Effect.sync(() => (observed.push(["inspect", received]), { status: "running" })),
     })
     const started = yield* gateway.startTurn({
@@ -39,14 +41,24 @@ it.effect("passes one opaque execution link through the five gateway operations"
       prompt: "work",
       executionRoute: {} as never,
     })
-    yield* gateway.watchTurn(started, "opaque-cursor").pipe(Stream.runDrain)
+    yield* gateway
+      .watchTurn(started, { checkpoint: { version: 1, cursor: "opaque-cursor", state: "{}" } })
+      .pipe(Stream.runDrain)
     yield* gateway.steerTurn(started, { text: "adjust", idempotencyKey: "steer-1" })
+    const authorization = {
+      authorizationId: "authorization",
+      checkpoint: { version: 1, cursor: "opaque-cursor", state: "{}" },
+    }
+    yield* gateway.approveTurn(started, authorization)
+    yield* gateway.denyTurn(started, authorization)
     yield* gateway.cancelTurn(started)
     yield* gateway.inspectTurn(started)
     expect(observed).toEqual([
       ["start", "turn-1"],
-      ["watch", link, "opaque-cursor"],
+      ["watch", link, { checkpoint: { version: 1, cursor: "opaque-cursor", state: "{}" } }],
       ["steer", link, { text: "adjust", idempotencyKey: "steer-1" }],
+      ["approve", link, authorization],
+      ["deny", link, authorization],
       ["cancel", link],
       ["inspect", link],
     ])

@@ -2,7 +2,7 @@ import { OperationError } from "../operation-error"
 import { Clock, Effect } from "effect"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { isReviewRouteMode, reviewIntent } from "../review/review-policy"
-import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionStatus from "@rika/product/execution-status"
@@ -10,7 +10,7 @@ import * as TurnRepository from "@rika/product/turn-repository"
 import * as TurnQueuePromotion from "../../thread/repository/turn-repository-queue"
 import { queuedTurnPromoteMaxAgeMs, staleQueuedTurnsError } from "../../thread/queue/pending-turn-policy"
 import type * as RootTurnOwner from "../../thread/queue/root-turn-owner"
-import type { InteractiveEvent } from "./interactive-event"
+import type { InteractiveEvent } from "./interactive-runtime-event"
 import type { PreparedTurn } from "./interactive-session-runtime"
 
 export const promotePendingTurns = (input: {
@@ -24,7 +24,6 @@ export const promotePendingTurns = (input: {
     workspace: string,
     persist?: boolean,
   ) => Effect.Effect<PreparedTurn, OperationError, never>
-  readonly ensureIngest: (threadId: Thread.ThreadId, turnId: Turn.TurnId) => Effect.Effect<void, OperationError, never>
   readonly owner: RootTurnOwner.Interface
   readonly notifyThreadSummaries: Effect.Effect<void, OperationError, never>
   readonly notifyTurnChanged: (turn: Pick<Turn.Turn, "id" | "threadId">) => Effect.Effect<void, never, never>
@@ -33,15 +32,6 @@ export const promotePendingTurns = (input: {
     status: ExecutionStatus.Status,
     now: number,
   ) => Effect.Effect<Turn.Turn, OperationError, never>
-  readonly projectExecutionResult: (
-    threadId: Thread.ThreadId,
-    result: ExecutionEvent.Result,
-  ) => Effect.Effect<void, OperationError, never>
-  readonly deliverResultEvents: (
-    turnId: Turn.TurnId,
-    events: ReadonlyArray<ExecutionEvent.Event>,
-    delivered?: ReadonlySet<string>,
-  ) => void
   readonly queueMutationEvent: (change: TurnQueuePromotion.QueueItemChange) => InteractiveEvent
   readonly claimQueuedTurn: (
     threadId: Thread.ThreadId,
@@ -111,11 +101,21 @@ export const promotePendingTurns = (input: {
             executionRoute: promoted.executionRoute,
             ...(isReviewRouteMode(promoted.executionRoute.mode) ? { reviewIntent: reviewIntent(promoted.prompt) } : {}),
           })
-          yield* input.ensureIngest(input.thread.id, promoted.id)
-          return yield* input.owner.watchTurn(promoted.id, (event) => {
-            delivered.add(event.cursor)
-            input.deliverResultEvents(promoted.id, [event])
-          })
+          const clock = yield* Clock.Clock
+          const publish = (change: ExecutionProjection.Change) => {
+            const key = `${change._tag}:${change.revision}`
+            if (delivered.has(key)) return
+            delivered.add(key)
+            input.emit(input.dispatch, {
+              _tag: "ExecutionProjectionChanged",
+              threadId: input.thread.id,
+              turn: { ...transition.turn, status: change.state.status, updatedAt: clock.currentTimeMillisUnsafe() },
+              change,
+            })
+          }
+          const result = yield* input.owner.watchTurn(promoted.id, publish)
+          for (const change of result.changes) publish(change)
+          return result
         }).pipe(
           Effect.map((value) => ({ _tag: "Success" as const, value })),
           Effect.catch((error) => Effect.succeed({ _tag: "Failure" as const, error })),
@@ -143,10 +143,7 @@ export const promotePendingTurns = (input: {
         }
         const result = outcome.value
         if (result === undefined) return true
-        input.deliverResultEvents(promoted.id, result.events, delivered)
-        const updated = yield* input.setTurnStatus(promoted.id, result.status, yield* Clock.currentTimeMillis)
-        yield* input.projectExecutionResult(input.thread.id, result)
-        yield* input.ensureIngest(updated.threadId, updated.id)
+        yield* input.setTurnStatus(promoted.id, result.status, yield* Clock.currentTimeMillis)
         return result.status !== "failed" && ["completed", "cancelled"].includes(result.status)
       })
     while (true) {

@@ -1,13 +1,12 @@
-import { Effect, Schema } from "effect"
+import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { RepositoryError } from "@rika/product/turn-repository"
 import type { Interface } from "@rika/product/turn-repository"
 import { decodeAgent } from "./turn-row-codec"
 import { missing, repositoryError } from "./turn-memory-errors"
-import { turnRowJson } from "./turn-row-json-codec"
 export const makeTurnSqliteState = (
   sql: SqlClient,
-): Pick<Interface, "setStatus" | "attachExecutionLink" | "startAccepted" | "cancelAccepted"> => ({
+): Pick<Interface, "setStatus" | "startAccepted" | "cancelAccepted"> => ({
   setStatus: Effect.fn("TurnRepository.setStatus")(function* (id, status, now) {
     if (status === "queued")
       return yield* RepositoryError.make({
@@ -28,29 +27,6 @@ export const makeTurnSqliteState = (
             RETURNING *`
           if (rows[0] === undefined) return yield* decodeAgent(before[0])
           const turn = yield* decodeAgent(rows[0])
-          return turn
-        }),
-      )
-      .pipe(Effect.mapError(repositoryError))
-  }),
-  attachExecutionLink: Effect.fn("TurnRepository.attachExecutionLink")(function* (id, link, now) {
-    return yield* sql
-      .withTransaction(
-        Effect.gen(function* () {
-          const encoded = yield* Schema.encodeEffect(turnRowJson.executionLink)(link)
-          const rows = yield* sql`UPDATE rika_turns SET execution_link_json = ${encoded}, updated_at = ${now}
-          WHERE id = ${id} AND turn_kind = 'AgentExecution' AND execution_link_json IS NULL RETURNING *`
-          if (rows[0] !== undefined) return yield* decodeAgent(rows[0])
-          const existing = yield* sql`SELECT * FROM rika_turns WHERE id = ${id} AND turn_kind = 'AgentExecution'`
-          if (existing[0] === undefined) return yield* missing(id)
-          const turn = yield* decodeAgent(existing[0])
-          if (
-            turn.executionLink === undefined ||
-            turn.executionLink.runId !== link.runId ||
-            turn.executionLink.turnId !== link.turnId ||
-            turn.executionLink.threadId !== link.threadId
-          )
-            return yield* RepositoryError.make({ message: `Turn ${id} already has a different execution link` })
           return turn
         }),
       )

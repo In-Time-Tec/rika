@@ -10,7 +10,7 @@ import * as ThreadState from "@rika/product/thread-state"
 import type { FindInput, ReadInput } from "./thread-query-input"
 import type { FindSuccess, Message, Omission, ReadItem, ReadSuccess, Result } from "./thread-result-delivery"
 
-export const QueryPolicy = { schemaVersion: 2 as const, transcriptBudget: 36_000 }
+export const QueryPolicy = { schemaVersion: 1 as const, transcriptBudget: 36_000 }
 
 export interface Interface {
   readonly find: (input: FindInput) => Effect.Effect<FindSuccess, QueryError>
@@ -50,7 +50,7 @@ const threadState = (
 ): FindSuccess["threads"][number]["state"] => ThreadState.threadState(threadTurns.map((turn) => turn.status))
 
 interface ChildLink {
-  readonly executionId: string
+  readonly subagentId: string
   readonly parentId: string
   readonly text: string
 }
@@ -58,9 +58,8 @@ interface ChildLink {
 const childLink = (unit: TranscriptUnit.Unit): ChildLink | undefined => {
   if (unit.content._tag !== "Block") return undefined
   const block = unit.content.block
-  if (block._tag === "ChildAgent") return { executionId: block.id, parentId: block.id, text: block.summary }
-  if (block._tag === "ToolCall" && block.childId !== undefined)
-    return { executionId: block.childId, parentId: block.id, text: block.output ?? block.detail }
+  if (block._tag === "SubagentCard")
+    return { subagentId: block.id, parentId: block.id, text: block.summary || block.prompt }
   return undefined
 }
 
@@ -81,7 +80,7 @@ const message = (
   return {
     role: "child",
     text: safeText(link.text, textLimit),
-    childExecutionId: link.executionId,
+    subagentId: link.subagentId,
     ...(children.length === 0 ? {} : { children }),
   }
 }
@@ -232,23 +231,27 @@ const makeForWorkspace = (workspace: string) =>
       }
       if (input.selector._tag === "overview") return encodeBounded(base, [], [])
       if (input.selector._tag === "subtree") {
-        const childExecutionId = input.selector.childExecutionId
+        const subagentId = input.selector.subagentId
         const page = yield* transcripts
           .page(threadId, { before: input.selector.before, limit: 200 })
           .pipe(Effect.mapError(mapError))
-        const root = page.entries.find((entry) => childLink(entry.unit)?.executionId === childExecutionId)
+        const root = page.entries.find((entry) => childLink(entry.unit)?.subagentId === subagentId)
         if (root === undefined) {
           const continuation =
             page.hasOlder && page.oldestCursor !== undefined
               ? { ...input.selector, before: page.oldestCursor }
               : input.selector
-          return encodeBounded(base, [], [{ reason: page.hasOlder ? "olderTurns" : "unavailableChild", continuation }])
+          return encodeBounded(
+            base,
+            [],
+            [{ reason: page.hasOlder ? "olderTurns" : "unavailableSubagent", continuation }],
+          )
         }
         const projection = yield* transcripts.get(root.turn.id).pipe(Effect.mapError(mapError))
         const units = projection?.units ?? [root.unit]
         const rootLink = childLink(root.unit)
         if (rootLink === undefined)
-          return yield* QueryError.make({ message: `Child execution ${childExecutionId} has no parent block` })
+          return yield* QueryError.make({ message: `Child execution ${subagentId} has no parent block` })
         const rootParentId = rootLink.parentId
         const descendants: Array<TranscriptUnit.Unit> = []
         const parentIds = new Set([rootParentId])

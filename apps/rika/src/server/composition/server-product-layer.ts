@@ -51,7 +51,6 @@ const createOperationLayerImpl = (
     threadSummaryRepositoryLayer,
     threadSearchRepositoryLayer,
     transcriptRepositoryLayer,
-    usageRepositoryLayer,
   } = ServerRepository.makeServerRepositoryLayers(database)
   const resolvedContextLayer = ServerProductContext.layer(workspaceGlob)
   return Layer.unwrap(
@@ -136,7 +135,6 @@ const createOperationLayerImpl = (
         turnRepositoryLayer: repositories,
         threadSummaryRepositoryLayer: repositories,
         transcriptRepositoryLayer: repositories,
-        usageRepositoryLayer,
         resolvedContextLayer,
         backendLayer: lazyBackendLayer(backendLayer).pipe(
           Layer.catchCause((cause) =>

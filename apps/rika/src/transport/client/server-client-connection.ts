@@ -1,10 +1,13 @@
 import * as ProductOperation from "@rika/product/product-operation"
 import * as InteractiveSession from "@rika/product/interactive-session"
+import * as InteractiveEvent from "@rika/product/interactive-event"
 import type { InteractiveCommand } from "@rika/product/interactive-command"
 import * as BunSocket from "@effect/platform-bun/BunSocket"
 import * as ServerHandshake from "@rika/product/server-service-handshake"
 import * as ServerFeed from "@rika/product/server-interactive-feed"
 import * as ServerService from "@rika/product/server-service"
+import * as ThreadView from "@rika/product/thread-view"
+import * as Thread from "@rika/product/thread-record"
 import { Context, Crypto, Deferred, Effect, Exit, Layer, Queue, Ref, Schema, Scope, Semaphore } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
 import { makeClientMessageWriter, makePhysicalFeed, traceInteractiveEvent } from "./server-client-feed"
@@ -14,6 +17,32 @@ import { serverSocketFailure } from "./server-client-reconnect"
 import { clientMessageFrames, makeServerMessageFrameDecoder, transportError } from "../protocol/server-message-codec"
 import { defaultOutboundCapacity, json, maxFrameBytes } from "../protocol/server-protocol"
 import { makeClientHandshakePair, verifyServerHandshake } from "../protocol/server-protocol-handshake"
+
+const gapEvent = (event: InteractiveEvent.InteractiveEvent): InteractiveEvent.InteractiveEvent | undefined => {
+  if (event._tag === "ResyncRequired") return event
+  if (event._tag === "ThreadViewSnapshot")
+    return ThreadView.ResyncRequired.make({
+      threadId: event.snapshot.thread.id,
+      expectedRevision: event.snapshot.revision,
+      receivedBaseRevision: event.snapshot.revision,
+      currentRevision: event.snapshot.revision,
+    })
+  if (event._tag === "ThreadViewPatch")
+    return ThreadView.ResyncRequired.make({
+      threadId: event.patch.threadId,
+      expectedRevision: event.patch.revision,
+      receivedBaseRevision: event.patch.baseRevision,
+      currentRevision: event.patch.baseRevision,
+    })
+  if ("threadId" in event && event.threadId !== undefined)
+    return ThreadView.ResyncRequired.make({
+      threadId: Thread.ThreadId.make(String(event.threadId)),
+      expectedRevision: 0,
+      receivedBaseRevision: 0,
+      currentRevision: 0,
+    })
+  return undefined
+}
 
 export const connect = Effect.fn("ServerTransport.connect")(function* (options: {
   readonly url: string
@@ -151,7 +180,7 @@ export const connect = Effect.fn("ServerTransport.connect")(function* (options: 
                   yield* (message.channel === "stdout"
                     ? request.stdout?.(message.text)
                     : request.stderr?.(message.text)) ?? Effect.void
-                if (message._tag === "interactive-feed-event" || message._tag === "interactive-feed-resync") {
+                if (message._tag === "interactive-feed-event") {
                   const feed = request.feed
                   if (
                     acceptedConnectionId !== message.connectionId ||
@@ -161,28 +190,18 @@ export const connect = Effect.fn("ServerTransport.connect")(function* (options: 
                   )
                     return yield* transportError("Server sent an event for a stale interactive feed")
                   if (message.sequence < feed.expectedSequence) return
-                  if (message._tag === "interactive-feed-event" && message.sequence > feed.expectedSequence) {
-                    const afterSequence = feed.expectedSequence - 1
-                    if (feed.replayRequestedAfter !== afterSequence) {
-                      feed.replayRequestedAfter = afterSequence
-                      yield* write(
-                        json({
-                          _tag: "interactive-feed-replay",
-                          connectionId: message.connectionId,
-                          requestId: message.requestId,
-                          sessionId: message.sessionId,
-                          feedGeneration: message.feedGeneration,
-                          afterSequence,
-                        } satisfies ServerService.ClientMessage),
+                  if (message.sequence > feed.expectedSequence) {
+                    const event = gapEvent(message.event)
+                    if (event === undefined)
+                      return yield* transportError(
+                        `Server interactive feed sequence gap: expected ${feed.expectedSequence}, received ${message.sequence}`,
                       )
-                    }
+                    feed.expectedSequence = message.sequence + 1
+                    yield* Queue.offer(feed.frames, { ...message, event })
                     return
                   }
                   feed.expectedSequence = message.sequence + 1
-                  feed.replayRequestedAfter = undefined
-                  if (message._tag === "interactive-feed-resync") yield* Effect.logInfo("server.feed.barrier_received")
-                  if (message._tag === "interactive-feed-event")
-                    yield* traceInteractiveEvent("client.feed.event_received", receivedDeltas, message.event)
+                  yield* traceInteractiveEvent("client.feed.event_received", receivedDeltas, message.event)
                   yield* Queue.offer(feed.frames, message)
                 }
                 if (message._tag === "interactive-command-completed" || message._tag === "interactive-command-failed") {

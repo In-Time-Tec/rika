@@ -53,7 +53,6 @@ export const populatedSelection = (turn: Turn.Turn) =>
       { cursor: "history-answer", sequence: 1, type: "model.output.completed", createdAt: 1, text: "history answer" },
     ]),
     hasOlder: false,
-    threadCostUsd: 0,
     activeTurn: turn,
   })
 

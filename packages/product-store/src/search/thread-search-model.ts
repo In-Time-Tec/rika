@@ -4,7 +4,7 @@ import { Thread, ThreadId } from "@rika/product/thread-record"
 import { Turn } from "@rika/product/turn-record"
 
 export namespace SearchModel {
-  export const schemaVersion = 2 as const
+  export const schemaVersion = 1 as const
   export const defaultPageSize = 50
   export const maximumPageSize = 200
   export const maximumSnippetLength = 240
@@ -31,7 +31,7 @@ export namespace SearchModel {
   export type Snippet = typeof Snippet.Type
 
   export const Result = Schema.Struct({
-    schemaVersion: Schema.Literal(2),
+    schemaVersion: Schema.Literal(1),
     threadId: ThreadId,
     title: Schema.String,
     workspace: Schema.String,
@@ -56,7 +56,7 @@ export namespace SearchModel {
   }
 
   export interface SearchPage {
-    readonly schemaVersion: 2
+    readonly schemaVersion: 1
     readonly results: ReadonlyArray<Result>
     readonly nextCursor: Cursor | undefined
   }

@@ -9,6 +9,7 @@ export const tool = Tool.make("write", {
   success: Result,
   failure: ToolFailure,
   failureMode: "return",
+  needsApproval: true,
 })
 export const registration = Policy.register(
   tool,

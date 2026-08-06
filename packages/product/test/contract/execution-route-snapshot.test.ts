@@ -27,7 +27,7 @@ const model = (role: string) => ({
 
 test("canonical route conversion preserves every branch and field", () => {
   const route = {
-    version: 2 as const,
+    version: 1 as const,
     mode: "default",
     compaction: { strategy: "default" as const, summaryPrompt: "Pinned summary prompt" },
     main: model("main"),
@@ -46,10 +46,10 @@ test("canonical route conversion preserves every branch and field", () => {
 
 test("malformed, adapter-shaped, and future route branches are rejected", () => {
   expect(() => toExecutionRouteSnapshot({ mode: "default", main: model("main") })).toThrow("Malformed execution route")
-  expect(() => toExecutionRouteSnapshot({ version: 2, mode: "default", main: {}, oracle: model("oracle") })).toThrow(
+  expect(() => toExecutionRouteSnapshot({ version: 1, mode: "default", main: {}, oracle: model("oracle") })).toThrow(
     "Malformed execution route",
   )
-  expect(() => toExecutionRouteSnapshot({ ...routeWithModels(), version: 1 })).toThrow(
+  expect(() => toExecutionRouteSnapshot({ ...routeWithModels(), version: 2 })).toThrow(
     "Unsupported execution route version",
   )
   expect(() => toExecutionRouteSnapshot({ ...routeWithModels(), version: 99 })).toThrow(
@@ -64,7 +64,7 @@ test("malformed, adapter-shaped, and future route branches are rejected", () => 
 })
 
 const routeWithModels = () => ({
-  version: 2 as const,
+  version: 1 as const,
   mode: "default",
   compaction: { strategy: "default" as const, summaryPrompt: "Pinned summary prompt" },
   main: model("main"),

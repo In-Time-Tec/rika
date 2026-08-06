@@ -12,13 +12,12 @@ import {
   TurnPolicy,
 } from "@batonfx/core"
 import { AmazonBedrock, Anthropic, Deterministic, ModelRoute, OpenAi } from "@batonfx/providers"
-import { Errors, ExecutableRegistration, ExecutableResolver } from "@batonfx/runtime"
+import { ChildRuns, Errors, ExecutableRegistration, ExecutableResolver } from "@batonfx/runtime"
 import * as RoleToolkits from "@rika/coding-tools/agent-role-toolkits"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
-import { Config, Context, Effect, Layer, Redacted, Scope } from "effect"
+import { Config, Context, Effect, Layer, Option, Redacted, Scope } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import { FetchHttpClient } from "effect/unstable/http"
-import * as ChildTools from "./baton-child-tools"
 import * as Program from "./baton-program"
 import * as ProgramBindings from "./baton-program-bindings"
 import * as Registration from "./baton-registration"
@@ -76,21 +75,19 @@ const instructions = {
 } as const
 
 const applicationPin = (route: RouteSnapshot, workspace: string) =>
-  Pins.makeCapability({ contract: "rika-application-context", version: 2, route, workspace })
+  Pins.makeCapability({ ...Registration.codecs.applicationContext.identity, route, workspace })
 
 const modelRegistryPin = (route: ModelSnapshot) =>
   Pins.makeCapability({
-    contract: "baton-model-registry-route",
-    version: 2,
+    ...Registration.codecs.modelRegistryRoute.identity,
     registrationIdentity: route.registrationIdentity,
   })
 
-const modelPin = (route: ModelSnapshot) => Pins.makeModel({ contract: "rika-model-route", version: 2, route })
+const modelPin = (route: ModelSnapshot) => Pins.makeModel({ ...Registration.codecs.modelRoute.identity, route })
 
 const compactionPin = (route: RouteSnapshot) =>
   Pins.makeCapability({
-    contract: "rika-compaction",
-    version: 2,
+    ...Registration.codecs.compaction.identity,
     intent: route.compaction,
     limits: route.main.compaction,
     summaryModel: route.compactionSummary.registrationIdentity,
@@ -232,6 +229,10 @@ const agentDefinition = (
       instructions: agentInstructions,
       model: routed.selection,
       policy: TurnPolicy.both(TurnPolicy.recurs(80), TurnPolicy.forever),
+      toolScheduling: {
+        maxConcurrency: 4,
+        parallelSafe: tools.map((tool) => tool.name).filter((toolName) => parallelSafeToolNames.has(toolName)),
+      },
       metadata: { productProfile: name },
       ...(tokenBudget === undefined ? {} : { budget: { totalTokens: tokenBudget } }),
     }),
@@ -255,8 +256,32 @@ const agentDefinition = (
   return { agent: Agent.close(agent, environment), pinned }
 }
 
-const rootToolkit = ChildTools.toolkit(RoleToolkits.root, ChildTools.rootSelections)
-const taskToolkit = ChildTools.toolkit(RoleToolkits.task, ChildTools.taskSelections)
+const parallelSafeToolNames = new Set([
+  "grep",
+  "read",
+  "web_search",
+  "read_web_page",
+  "view_media",
+  "search_threads",
+  "read_thread_transcript",
+  "find_thread",
+])
+
+const rootChildNames = ["Title", "Oracle", "Librarian", "Painter", "ReadThread", "Review", "Surgeon", "Task"] as const
+const taskChildNames = ["Oracle", "Librarian", "Painter", "ReadThread", "Surgeon"] as const
+
+const childTools = {
+  Root: ChildRuns.makeTools({ children: rootChildNames.map((selection) => ({ selection })) }),
+  Task: ChildRuns.makeTools({ children: taskChildNames.map((selection) => ({ selection })) }),
+} as const
+
+const withChildTools = <Tools extends Record<string, Tool.Any>>(
+  base: Toolkit.Toolkit<Tools>,
+  children: ReturnType<typeof ChildRuns.makeTools>,
+) => Toolkit.make(...Object.values(base.tools), children.runChild, children.startChildGroup, children.awaitChildGroup)
+
+const rootToolkit = withChildTools(RoleToolkits.root, childTools.Root)
+const taskToolkit = withChildTools(RoleToolkits.task, childTools.Task)
 
 const roleTools: Readonly<Record<RoleName, ReadonlyArray<Tool.Any>>> = {
   Root: Object.values(rootToolkit.tools),
@@ -276,15 +301,49 @@ type ExecutorRole = Exclude<RoleName, "Title">
 
 type RoleExecutor = (handlers: Layer.Layer<AgentToolHandlers>) => Layer.Layer<ToolExecutor.ToolExecutor>
 
+const missingChildHost = (tool: string) =>
+  ToolExecutor.FrameworkFailure.make({
+    stage: "handler",
+    tool,
+    message: "child Agent tools require the Baton execution host",
+  })
+
+const roleExecutor = <Tools extends Record<string, Tool.Any>>(
+  codingTools: Toolkit.Toolkit<Tools>,
+  includeChildTools: boolean,
+  handlers: Layer.Layer<Tool.HandlersFor<Tools>>,
+): Layer.Layer<ToolExecutor.ToolExecutor> =>
+  Layer.effect(
+    ToolExecutor.ToolExecutor,
+    ToolExecutor.routeToolkit(codingTools).pipe(
+      Effect.map((codingRoute) =>
+        ToolExecutor.ToolExecutor.of({
+          execute: (request) => {
+            if (!includeChildTools || !ChildRuns.route.matches(request)) return codingRoute.execute(request)
+            return Effect.serviceOption(ChildRuns.ChildRuns).pipe(
+              Effect.flatMap(
+                Option.match({
+                  onNone: () => missingChildHost(request.call.name),
+                  onSome: (children) =>
+                    ChildRuns.route.execute(request).pipe(Effect.provideService(ChildRuns.ChildRuns, children)),
+                }),
+              ),
+            )
+          },
+        }),
+      ),
+    ),
+  ).pipe(Layer.provide(handlers))
+
 const roleExecutors: Readonly<Record<ExecutorRole, RoleExecutor>> = {
-  Root: (handlers) => ChildTools.handlerLayer(RoleToolkits.root, ChildTools.rootSelections, handlers),
-  Oracle: (handlers) => ChildTools.handlerLayer(RoleToolkits.oracle, [], handlers),
-  Librarian: (handlers) => ChildTools.handlerLayer(RoleToolkits.librarian, [], handlers),
-  Painter: (handlers) => ChildTools.handlerLayer(RoleToolkits.painter, [], handlers),
-  ReadThread: (handlers) => ChildTools.handlerLayer(RoleToolkits.readThread, [], handlers),
-  Review: (handlers) => ChildTools.handlerLayer(RoleToolkits.oracle, [], handlers),
-  Surgeon: (handlers) => ChildTools.handlerLayer(RoleToolkits.surgeon, [], handlers),
-  Task: (handlers) => ChildTools.handlerLayer(RoleToolkits.task, ChildTools.taskSelections, handlers),
+  Root: (handlers) => roleExecutor(RoleToolkits.root, true, handlers),
+  Oracle: (handlers) => roleExecutor(RoleToolkits.oracle, false, handlers),
+  Librarian: (handlers) => roleExecutor(RoleToolkits.librarian, false, handlers),
+  Painter: (handlers) => roleExecutor(RoleToolkits.painter, false, handlers),
+  ReadThread: (handlers) => roleExecutor(RoleToolkits.readThread, false, handlers),
+  Review: (handlers) => roleExecutor(RoleToolkits.oracle, false, handlers),
+  Surgeon: (handlers) => roleExecutor(RoleToolkits.surgeon, false, handlers),
+  Task: (handlers) => roleExecutor(RoleToolkits.task, true, handlers),
 }
 
 export const configure = (
@@ -378,7 +437,6 @@ export const configure = (
       Review: leaf("Review"),
       Surgeon: leaf("Surgeon"),
     }
-    const taskChildNames = ["Oracle", "Librarian", "Painter", "ReadThread", "Surgeon"] as const
     const task = agentDefinition(
       routes.Task,
       routed.Task,
@@ -395,9 +453,8 @@ export const configure = (
       ...leafProfiles,
       Task: task,
     }
-    const childNames = ["Title", "Oracle", "Librarian", "Painter", "ReadThread", "Review", "Surgeon", "Task"] as const
     const profileNames = ["Title", "Oracle", "Librarian", "Painter", "ReadThread", "Review", "Surgeon", "Task"] as const
-    const nestedNames = new Set<string>(childNames)
+    const nestedNames = new Set<string>(rootChildNames)
     const programAuthority = Program.authority({
       workspace: options.workspace,
       sandbox: sandboxIdentity,
@@ -414,13 +471,13 @@ export const configure = (
       instructions.root,
       roleTools.Root,
       environment("Root"),
-      childNames.map((selection) => ({ selection, agent: profiles[selection].pinned.pin })),
+      rootChildNames.map((selection) => ({ selection, agent: profiles[selection].pinned.pin })),
       contextPin,
       compactionIdentity,
       route.tokenBudget,
       programAuthority,
     )
-    const childEntries = childNames.map((name) => agentEntry(profiles[name].pinned))
+    const childEntries = rootChildNames.map((name) => agentEntry(profiles[name].pinned))
     const entries = [agentEntry(root.pinned), ...childEntries]
     const executable = ExecutableManifest.make({ root: root.pinned.pin, entries })
     const registrationMap = new Map<string, ExecutableRegistration.ExecutableRegistration>()
@@ -435,10 +492,11 @@ export const configure = (
       routes.Surgeon,
       routes.Task,
     ]) {
+      const { role: _role, ...registryPayload } = model
       registrationMap.set(modelPin(model), Registration.make(Registration.codecs.modelRoute, modelPin(model), model))
       registrationMap.set(
         modelRegistryPin(model),
-        Registration.make(Registration.codecs.modelRegistryRoute, modelRegistryPin(model), model),
+        Registration.make(Registration.codecs.modelRegistryRoute, modelRegistryPin(model), registryPayload),
       )
     }
     registrationMap.set(

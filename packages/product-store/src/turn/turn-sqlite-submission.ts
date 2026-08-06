@@ -25,7 +25,7 @@ export const makeTurnSqliteSubmission = (sql: SqlClient): Pick<Interface, "creat
         Effect.gen(function* () {
           yield* sql`INSERT INTO rika_turns (id, thread_id, turn_kind, prompt, prompt_parts_json, execution_route_json, author_json, lineage_json, status, created_at, updated_at)
             VALUES (${input.id}, ${input.threadId}, 'AgentExecution', ${input.prompt}, ${promptParts}, ${executionRoute}, ${author}, ${lineage},
-              CASE WHEN EXISTS (SELECT 1 FROM rika_turns WHERE thread_id = ${input.threadId} AND turn_kind = 'AgentExecution' AND status IN ('queued', 'accepted', 'running', 'waiting')) THEN 'queued' ELSE 'accepted' END,
+              CASE WHEN EXISTS (SELECT 1 FROM rika_turns WHERE thread_id = ${input.threadId} AND turn_kind = 'AgentExecution' AND status IN ('queued', 'accepted', 'running', 'waiting', 'cancelling')) THEN 'queued' ELSE 'accepted' END,
               ${input.now}, ${input.now})`
           const rows = yield* sql`SELECT * FROM rika_turns WHERE id = ${input.id}`
           if (rows[0] === undefined) return yield* missing(input.id)

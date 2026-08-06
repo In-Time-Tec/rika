@@ -18,7 +18,7 @@ export type Selector =
     }
   | {
       readonly _tag: "subtree"
-      readonly childExecutionId: string
+      readonly subagentId: string
       readonly before?: TranscriptPage.PageCursor
       readonly offset?: number
     }

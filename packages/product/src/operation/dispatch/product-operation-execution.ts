@@ -14,20 +14,16 @@ type TurnRepositoryError = import("@rika/product/turn-repository").RepositoryErr
 type TurnRepositoryQueueFull = import("@rika/product/turn-repository").QueueFull
 type ExecutionGatewayInterface = import("@rika/product/execution-gateway").Interface
 type ExecutionRouteSnapshot = import("@rika/product/execution-route-snapshot").ExecutionRouteSnapshot
-type ExecutionEventEvent = import("@rika/product/execution-event").Event
-type ExecutionEventResult = import("@rika/product/execution-event").Result
 type ExecutionStatusStatus = import("@rika/product/execution-status").Status
 type PromptPart = import("@rika/product/execution-request").PromptPart
 type CreateInput = import("../../thread/repository/turn-repository-contract").CreateInput
 type QueueClaim = import("../../thread/repository/turn-repository-queue").QueueClaim
-type UsageSnapshotTurnUsage = import("../../usage/usage-snapshot").TurnUsage
 type RootTurnOwnerInterface = import("../../thread/queue/root-turn-owner").Interface
-type ExecutionIngestInterface = import("../../execution/ingest/execution-ingest-service").Interface
 type OperationError = import("../operation-error").OperationError
 type OperationUnavailable = import("../contract/product-operation").OperationUnavailable
 type Input = import("../contract/product-operation").Input
 type ModeId = import("@rika/configuration/behavior-mode").ModeId
-type InteractiveEvent = import("../interactive/interactive-event").InteractiveEvent
+type InteractiveEvent = import("../interactive/interactive-runtime-event").InteractiveEvent
 type InteractiveDependencyContext = import("../interactive/interactive-session-runtime").InteractiveDependencyContext
 type InteractiveExecutionContext = import("../interactive/interactive-session-runtime").InteractiveExecutionContext
 type PreparedTurn = import("../interactive/interactive-session-runtime").PreparedTurn
@@ -54,14 +50,6 @@ export interface ProductOperationExecution {
   >
   readonly ensureTurnSummary: (
     turn: TurnTurn,
-  ) => Effect.Effect<
-    void,
-    OperationError | import("@rika/product/thread-summary-repository").RepositoryError,
-    import("@rika/product/thread-summary-repository").Service
-  >
-  readonly projectExecutionResult: (
-    threadId: TurnTurn["threadId"],
-    result: ExecutionEventResult,
   ) => Effect.Effect<
     void,
     OperationError | import("@rika/product/thread-summary-repository").RepositoryError,
@@ -117,7 +105,7 @@ export interface ProductOperationExecution {
 }
 
 export interface ProductOperationExecutionInput {
-  readonly options: import("./product-operation-options").ProductLayerOptions<Error, Error, Error, Error, Error, Error>
+  readonly options: import("./product-operation-options").ProductLayerOptions<Error, Error, Error, Error, Error>
   readonly ownerScope: Scope.Scope
   readonly pendingTurnCapacity: number
   readonly turnMutationAdmission: Semaphore.Semaphore
@@ -129,27 +117,9 @@ export interface ProductOperationExecutionInput {
   readonly dependencyContext: InteractiveDependencyContext
   readonly executionDependencies: InteractiveExecutionContext
   readonly withExecutionAdmission: <A, E, R>(effect: Effect.Effect<A, E, R>, closed: E) => Effect.Effect<A, E, R>
-  readonly commitUsageSource: (
-    sourceId: string,
-    threadId: string,
-    turnId: string,
-    events: ReadonlyArray<ExecutionEventEvent>,
-    terminal: boolean,
-  ) => Effect.Effect<unknown, Error>
-  readonly publishThreadUsage: (value: UsageSnapshotTurnUsage | undefined) => Effect.Effect<void, Error>
   readonly extensionService:
     | import("@rika/extensions/execution-extension-service").ExecutionExtensionInterface
     | undefined
-  readonly usageRepository: import("@rika/product/usage-repository").Interface
-  readonly executionIngest: ExecutionIngestInterface
-  readonly ensureIngest: (threadId: ThreadId, turnId: TurnId) => Effect.Effect<void, OperationError>
-  readonly awaitIngestSettled: (turnId: TurnId) => Effect.Effect<void, OperationError>
-  readonly flushIngest: (turnId: TurnId) => Effect.Effect<void, OperationError>
-  readonly deliverResultEvents: (
-    turnId: TurnId,
-    events: ReadonlyArray<ExecutionEventEvent>,
-    delivered?: ReadonlySet<string>,
-  ) => void
   readonly publishInteractiveActivity: (origin: number, event: InteractiveEvent) => InteractiveEvent
   readonly publishTurnSettled?: (turn: TurnTurn, responseArrived?: boolean) => Effect.Effect<void, never, never>
   readonly createObservedSubmission: (
@@ -175,12 +145,10 @@ export interface ProductOperationExecutionInput {
     | TurnRepository.Service
     | import("@rika/product/thread-summary-repository").Service
     | import("@rika/product/transcript-repository").Service
-    | import("@rika/product/usage-repository").Service
     | import("../../context/context-resolution-service").Service
     | import("@rika/extensions/execution-extension-service").ExecutionExtensionService
   >
   readonly executionStartFailureMessage: string
-  readonly ingestFailureMessage: string
   readonly unavailable: (input: Input, message?: string) => OperationUnavailable
   readonly temporaryThreadTitle: temporaryThreadTitle
   readonly encodeJson: (value: unknown) => string

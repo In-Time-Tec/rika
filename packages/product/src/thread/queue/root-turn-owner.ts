@@ -4,9 +4,8 @@ import * as ExecutionStatus from "@rika/product/execution-status"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TurnQueuePromotion from "../repository/turn-repository-queue"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
-import * as ExecutionEvent from "@rika/product/execution-event"
+import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
-import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import { Cause, Clock, Effect, Fiber, Scope, Semaphore, Stream } from "effect"
 
 export interface Lifecycle {
@@ -26,11 +25,15 @@ export interface Interface {
   readonly startTurn: (
     input: ExecutionGateway.StartTurn,
   ) => Effect.Effect<ExecutionGateway.ExecutionLink, ExecutionGateway.StartTurnFailure | TurnRepository.RepositoryError>
+  readonly recoverExecutionAdmissions: Effect.Effect<
+    void,
+    ExecutionGateway.StartTurnFailure | TurnRepository.RepositoryError
+  >
   readonly watchTurn: (
     turnId: Turn.TurnId,
-    onEvent?: (event: ExecutionEvent.Event) => void,
+    onChange?: (change: ExecutionProjection.Change) => void,
   ) => Effect.Effect<
-    ExecutionEvent.Result,
+    ExecutionProjection.Result,
     ExecutionGateway.WatchTurnFailure | TurnRepository.RepositoryError | TranscriptRepository.RepositoryError
   >
   readonly install: (lifecycle: Lifecycle) => Effect.Effect<void>
@@ -100,6 +103,11 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
         return queueClaim
       }),
     )
+  const admitPrepared = Effect.fn("RootTurnOwner.admitPrepared")(function* (input: ExecutionGateway.StartTurn) {
+    const link = yield* backend.startTurn(input)
+    yield* turns.attachExecutionLink(Turn.TurnId.make(input.turnId), link, yield* Clock.currentTimeMillis)
+    return link
+  })
   return {
     claim,
     release,
@@ -107,12 +115,18 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
     startTurn: (input) =>
       Effect.uninterruptible(
         Effect.gen(function* () {
-          const link = yield* backend.startTurn(input)
-          yield* turns.attachExecutionLink(Turn.TurnId.make(input.turnId), link, yield* Clock.currentTimeMillis)
-          return link
+          const prepared = yield* turns.prepareExecutionAdmission(input, yield* Clock.currentTimeMillis)
+          return yield* admitPrepared(prepared)
         }),
       ),
-    watchTurn: (turnId, onEvent) =>
+    recoverExecutionAdmissions: Effect.uninterruptible(
+      Effect.suspend(() =>
+        turns.listUnlinkedExecutionAdmissions.pipe(
+          Effect.flatMap((admissions) => Effect.forEach(admissions, admitPrepared, { discard: true })),
+        ),
+      ),
+    ),
+    watchTurn: (turnId, onChange) =>
       Effect.gen(function* () {
         const turn = yield* turns.get(turnId)
         if (turn === undefined || turn._tag !== "AgentExecution" || turn.executionLink === undefined)
@@ -121,42 +135,51 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
           })
         const executionLink = turn.executionLink
         const projection = yield* transcripts.get(turnId)
-        const rootKey = TranscriptCorrelation.executionKey(executionLink.runId)
-        const rootCheckpoint = projection?.executionCheckpoints.find(
-          (checkpoint) => checkpoint.executionKey === rootKey,
-        )
-        const cursor =
-          rootCheckpoint === undefined || rootCheckpoint.cursor.length === 0 ? undefined : rootCheckpoint.cursor
-        const events: Array<ExecutionEvent.Event> = []
-        yield* backend.watchTurn(executionLink, cursor).pipe(
-          Stream.runForEach((event) =>
-            Effect.sync(() => {
-              events.push(event)
-              onEvent?.(event)
-            }),
-          ),
-        )
-        const last = events.at(-1)
-        const terminal = events.findLast(
-          (event) =>
-            event.executionId === executionLink.runId &&
-            (event.type === "execution.completed" ||
-              event.type === "execution.failed" ||
-              event.type === "execution.cancelled" ||
-              event.type === "wait.created" ||
-              event.type === "execution.resolution.required"),
-        )
-        let status: ExecutionStatus.Status = "running"
-        if (terminal?.type === "execution.completed") status = "completed"
-        else if (terminal?.type === "execution.failed") status = "failed"
-        else if (terminal?.type === "execution.cancelled") status = "cancelled"
-        else if (terminal?.type === "wait.created" || terminal?.type === "execution.resolution.required")
-          status = "waiting"
+        const changes: Array<ExecutionProjection.Change> = []
+        yield* backend
+          .watchTurn(executionLink, {
+            prompt: turn.prompt,
+            ...(projection === undefined ? {} : { units: projection.units }),
+            ...(projection?.projectorCheckpoint === undefined ? {} : { checkpoint: projection.projectorCheckpoint }),
+          })
+          .pipe(
+            Stream.runForEach((change) =>
+              Effect.gen(function* () {
+                const committed = yield* transcripts.commitProjection(turn, change)
+                if (committed === "stale")
+                  return yield* TranscriptRepository.RepositoryError.make({
+                    message: `Turn ${turnId} projection revision is stale`,
+                  })
+                changes.push(change)
+                onChange?.(change)
+              }),
+            ),
+          )
+        const last = changes.at(-1)
+        const stored = yield* transcripts.get(turnId)
+        const checkpoint =
+          last?._tag === "ProjectionPatch" ? last.checkpoint : (last?.checkpoint ?? stored?.projectorCheckpoint)
+        const fallbackStatus =
+          turn.status === "completed" ||
+          turn.status === "failed" ||
+          turn.status === "cancelled" ||
+          turn.status === "waiting" ||
+          turn.status === "cancelling"
+            ? turn.status
+            : "running"
+        const state = last?.state ??
+          stored?.state ?? {
+            status: fallbackStatus,
+            usage: ExecutionProjection.emptyUsageState(),
+            steering: { steeringMessages: 0, followUpMessages: 0 },
+          }
         return {
           turnId: String(turnId),
-          status,
-          events,
-          ...(last === undefined ? {} : { checkpoint: { cursor: last.cursor, sequence: last.sequence } }),
+          status: state.status,
+          state,
+          units: stored?.units ?? [],
+          changes,
+          ...(checkpoint === undefined ? {} : { checkpoint }),
         }
       }),
     install: (installed) =>

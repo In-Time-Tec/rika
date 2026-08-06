@@ -26,7 +26,7 @@ export interface ToolCall {
   readonly sessionId: string
 }
 
-const replayPolicies: Readonly<Record<string, ProgramBindings.ReplayPolicy>> = {
+const replayPolicies: Readonly<Record<string, ProgramBindings.ProgramReplayPolicy>> = {
   bash: "non-idempotent",
   edit: "non-idempotent",
   grep: "idempotent",
@@ -40,7 +40,7 @@ const replayPolicies: Readonly<Record<string, ProgramBindings.ReplayPolicy>> = {
   write: "non-idempotent",
 }
 
-const replayPolicy = (name: string): ProgramBindings.ReplayPolicy => {
+const replayPolicy = (name: string): ProgramBindings.ProgramReplayPolicy => {
   const policy = replayPolicies[name]
   if (policy === undefined) throw new TypeError(`Rika Program tool has no replay policy: ${name}`)
   return policy
