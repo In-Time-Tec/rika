@@ -294,17 +294,19 @@ const welcomeContentImpl = (width: number, height: number, phase: number, mode: 
       fg(colors.text)(`${" ".repeat(Math.max(0, Math.floor((width - 24) / 2)))}ctrl+o commands   ? help`),
     ])
   const frames = width >= 140 && height >= 35 ? ampOrbFrames.large : ampOrbFrames.small
-  const frame = frames[phase % frames.length] ?? frames[0]
-  const pattern = frame ?? []
+  const pattern = frames[phase % frames.length] ?? frames[0] ?? []
+  const canvasRows = frames.reduce((rows, candidate) => Math.max(rows, candidate.length), 0)
+  const frameTop = Math.floor((canvasRows - pattern.length) / 2)
+  const canvas = Array.from({ length: canvasRows }, (_, row) => pattern[row - frameTop] ?? "")
   const area = Math.max(1, height - spacing.inputHeight)
-  const top = Math.max(0, Math.floor((area - pattern.length) / 2))
+  const top = Math.max(0, Math.floor((area - canvasRows) / 2))
   const center = Math.floor(width / 2)
   const logoLeft = Math.max(0, center - (frames === ampOrbFrames.large ? 43 : 31))
   const copyLeft = Math.max(0, Math.min(width - 1, center + 2))
-  const visiblePattern = pattern.slice(0, Math.max(1, area - top))
+  const visibleCanvas = canvas.slice(0, Math.max(1, area - top))
   const chunks: TextChunk[] = [fg(colors.text)("\n".repeat(top))]
   const copyRows: ReadonlyArray<readonly [number, ReadonlyArray<TextChunk>]> =
-    pattern === ampOrbFrames.small[phase % ampOrbFrames.small.length]
+    frames === ampOrbFrames.small
       ? [
           [0, [bold(fg(colors[mode])("Welcome to Rika"))]],
           [3, [bold(fg(colors.text)("ctrl+o")), fg(colors.muted)(" for commands")]],
@@ -316,10 +318,11 @@ const welcomeContentImpl = (width: number, height: number, phase: number, mode: 
           [8, [bold(fg(colors.text)("?")), fg(colors.muted)(" for shortcuts")]],
         ]
   const copy = new Map(copyRows)
-  for (let row = 0; row < visiblePattern.length; row += 1) {
+  for (let row = 0; row < visibleCanvas.length; row += 1) {
     if (row > 0) chunks.push(fg(colors.text)("\n"))
     chunks.push(fg(colors.text)(" ".repeat(logoLeft)))
-    for (const glyph of visiblePattern[row] ?? "") {
+    const line = visibleCanvas[row] ?? ""
+    for (const glyph of line) {
       if (glyph === " ") chunks.push(fg(colors.text)(glyph))
       else {
         chunks.push(fg(welcomeMarkColor(glyph, mode))(glyph))
@@ -327,7 +330,7 @@ const welcomeContentImpl = (width: number, height: number, phase: number, mode: 
     }
     const suffix = copy.get(row)
     if (suffix !== undefined) {
-      chunks.push(fg(colors.text)(" ".repeat(Math.max(1, copyLeft - logoLeft - stringWidth(pattern[row] ?? "")))))
+      chunks.push(fg(colors.text)(" ".repeat(Math.max(1, copyLeft - logoLeft - stringWidth(line)))))
       chunks.push(...suffix)
     }
   }
