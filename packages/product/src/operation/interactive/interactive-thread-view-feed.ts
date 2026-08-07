@@ -563,7 +563,6 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
       case "ThreadPreviewLoaded":
       case "ThreadPreviewFailed":
         return [event]
-        return []
     }
   }
   return { publish, current: () => current }

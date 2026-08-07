@@ -44,8 +44,8 @@
       "cli-spinners": "3.4.0",
       "effect": "4.0.0-beta.98",
       "marked": "17.0.1",
-      "oxlint": "1.60.0",
-      "oxlint-tsgolint": "0.21.0",
+      "oxlint": "1.77.0",
+      "oxlint-tsgolint": "7.0.2001",
       "parallel-web": "1.1.0",
       "prettier": "3.6.2",
       "prismjs": "1.30.0",
@@ -78,7 +78,8 @@
     "typecheck": "bun turbo run typecheck",
     "uninstall-local": "bun run scripts/installation/uninstall-local.ts",
     "repository-policy": "bun --cwd tooling/repository-policy check",
-    "repository-graph-check": "bun --cwd tooling/repository-graph check"
+    "repository-graph-check": "bun --cwd tooling/repository-graph check",
+    "prepare": "effect-tsgo patch --no-typescript --oxlint"
   },
   "prettier": {
     "printWidth": 120,
