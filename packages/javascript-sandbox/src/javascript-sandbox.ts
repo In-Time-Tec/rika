@@ -251,7 +251,7 @@ const runCapability = (
 ): Effect.Effect<unknown, ProgramCapabilities.CapabilityFailure> => {
   switch (operation) {
     case "discoverTools":
-      return capabilities.discoverTools()
+      return capabilities.discoverTools
     case "describeTool":
       return capabilities.describeTool(input as string)
     case "callTool":

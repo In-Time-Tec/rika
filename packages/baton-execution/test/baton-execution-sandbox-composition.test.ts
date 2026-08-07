@@ -37,7 +37,7 @@ it.live("requires the SandboxExecutor service before initializing any Baton stor
     )
     expect(Exit.isFailure(exit)).toBe(true)
     expect(Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "").toContain(
-      "Service not found: @batonfx/core/SandboxExecutor",
+      "Service not found: @batonfx/core/program/sandbox-executor/SandboxExecutor",
     )
     expect(yield* storeExists(filename)).toBe(false)
   }),

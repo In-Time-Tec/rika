@@ -13,7 +13,7 @@ interface ExecuteOptions {
 }
 
 const defaultCapabilities = ProgramCapabilities.ProgramCapabilities.of({
-  discoverTools: () => Effect.succeed([]),
+  discoverTools: Effect.succeed([]),
   describeTool: (name) => Effect.fail(ProgramCapabilities.ProgramCapabilityMissing.make({ capability: name })),
   callTool: (input) => Effect.fail(ProgramCapabilities.ProgramCapabilityMissing.make({ capability: input.tool })),
   callStep: (input) => Effect.fail(ProgramCapabilities.ProgramCapabilityMissing.make({ capability: input.step })),

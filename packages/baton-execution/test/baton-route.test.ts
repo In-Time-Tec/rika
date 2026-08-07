@@ -108,6 +108,10 @@ it.effect("builds one exact closed executable with role-specific tool and servic
     expect(rootToolNames).toContain("read")
     expect(rootToolNames).not.toEqual(expect.arrayContaining(["title", "oracle", "librarian", "task"]))
     expect(configured.profiles.Title!.manifest.tools).toEqual([])
+    for (const profile of Object.values(configured.profiles)) {
+      expect(profile.manifest.budget.totalTokens).toBe(10_000_000)
+      expect(profile.manifest.budget.modelCalls).toBeGreaterThan(0)
+    }
     expect(configured.profiles.Librarian!.manifest.tools.map(({ name }) => name)).toEqual([
       "read_web_page",
       "web_search",

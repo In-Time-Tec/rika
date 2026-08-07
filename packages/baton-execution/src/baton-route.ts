@@ -210,6 +210,22 @@ interface AgentDefinition {
 
 type AgentEnvironment = Layer.Layer<ModelRegistry.ModelRegistry>
 
+/**
+ * Every conversational agent (root and children alike) carries the same explicit budget, so a long
+ * subagent is governed by its pinned Compaction policy exactly like the main agent instead of dying
+ * from the runtime fallback's 1,000,000 cumulative token cap after ~17 turns. The shared cap is
+ * generous (10x the fallback) and symmetric for root and children; a route-configured tokenBudget
+ * still narrows totalTokens explicitly.
+ */
+const agentBudget = {
+  modelCalls: 64,
+  toolCalls: 256,
+  totalTokens: 10_000_000,
+  childRuns: 32,
+  handoffs: 32,
+  depth: 8,
+} as const
+
 const agentDefinition = (
   route: ModelSnapshot,
   routed: RoutedModel,
@@ -234,7 +250,7 @@ const agentDefinition = (
         parallelSafe: tools.map((tool) => tool.name).filter((toolName) => parallelSafeToolNames.has(toolName)),
       },
       metadata: { productProfile: name },
-      ...(tokenBudget === undefined ? {} : { budget: { totalTokens: tokenBudget } }),
+      budget: { ...agentBudget, ...(tokenBudget === undefined ? {} : { totalTokens: tokenBudget }) },
     }),
     tools,
   )
