@@ -96,15 +96,18 @@ const project = (model: Model, snapshot: ThreadView.ThreadViewSnapshot): Model =
       next = updateModel(next, { _tag: "ExecutionCancelled", turnId: settled.id, agentResponseArrived: false })
   }
   const usage = snapshot.usage.state
-  const contextUsage =
-    usage.context === undefined || snapshot.usage.contextCapacity === undefined
-      ? { _tag: "Unavailable" as const }
-      : {
-          _tag: "Available" as const,
-          inputTokens: usage.context.inputTokens,
-          contextWindow: snapshot.usage.contextCapacity.contextWindow,
-          reserveTokens: snapshot.usage.contextCapacity.reserveTokens,
-        }
+  const contextUsage = ((): NonNullable<Model["contextUsage"]> => {
+    if (usage.context !== undefined && snapshot.usage.contextCapacity !== undefined)
+      return {
+        _tag: "Available" as const,
+        inputTokens: usage.context.inputTokens,
+        contextWindow: snapshot.usage.contextCapacity.contextWindow,
+        reserveTokens: snapshot.usage.contextCapacity.reserveTokens,
+      }
+    if (usage.contextPending) return { _tag: "Loading" as const }
+    if (snapshot.turns.length === 0 && snapshot.pending.length === 0) return { _tag: "NotStarted" as const }
+    return { _tag: "Unavailable" as const }
+  })()
   next = updateModel(next, { _tag: "ContextUsageReplaced", contextUsage })
   const costUsd = usage.costNanoUsd === undefined ? undefined : usage.costNanoUsd / 1_000_000_000
   return {

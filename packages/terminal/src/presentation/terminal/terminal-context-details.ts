@@ -11,7 +11,8 @@ import { truncateToWidth } from "./terminal-format"
 const cost = (model: Model): string => {
   if (model.usageCost?._tag === "Available") return `$${model.usageCost.usd.toFixed(2)}`
   if (model.costUsd !== undefined) return `$${model.costUsd.toFixed(2)}`
-  return "Unknown"
+  if (model.usageCost?._tag === "Loading" || model.busy) return "····"
+  return "—"
 }
 const time = (model: Model, now: number): string =>
   model.usageTime?._tag === "Available" ? formatActiveTime(activeTimeAt(model.usageTime, now)) : `${activeTimeIcon} —`
@@ -26,13 +27,17 @@ const contextDetailsImpl = (model: Model, width: number, height: number, now: nu
   const context = model.contextUsage
   const availableContext = context?._tag === "Available" ? context : undefined
   const usable = availableContext === undefined ? undefined : ContextMeter.usableTokens(availableContext)
-  const used = availableContext === undefined ? "Unknown" : formatContextTokens(availableContext.inputTokens)
+  const placeholder = context?._tag === "Loading" ? "····" : "—"
+  let emptyReason: string | undefined
+  if (context?._tag === "NotStarted") emptyReason = "No usage yet — send a message to see context usage"
+  else if (context?._tag === "Unavailable") emptyReason = "Context usage is not reported by this model"
+  const used = availableContext === undefined ? placeholder : formatContextTokens(availableContext.inputTokens)
   const available =
     availableContext === undefined
-      ? "Unknown"
+      ? placeholder
       : formatContextTokens(Math.max(0, usable! - availableContext.inputTokens))
-  const full = availableContext === undefined ? "Unknown" : formatContextTokens(availableContext.contextWindow)
-  const usableText = usable === undefined ? "Unknown" : formatContextTokens(usable)
+  const full = availableContext === undefined ? placeholder : formatContextTokens(availableContext.contextWindow)
+  const usableText = usable === undefined ? placeholder : formatContextTokens(usable)
   const cells = Math.max(4, Math.min(width < 40 ? 12 : 20, width - 5))
   const meter = availableContext === undefined ? undefined : ContextMeter.meter(availableContext, { cells })
 
@@ -76,6 +81,7 @@ const contextDetailsImpl = (model: Model, width: number, height: number, now: nu
   line(`Cost       ${cost(model)}`)
   line(`Active     ${time(model, now)}`)
   if (!compact) line("")
+  if (!compact && emptyReason !== undefined) line(emptyReason, (value) => dim(fg(colors.text)(value)))
   return new StyledText(chunks)
 }
 
