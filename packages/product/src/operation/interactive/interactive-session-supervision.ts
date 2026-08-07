@@ -7,6 +7,7 @@ import * as ThreadResult from "@rika/product/thread-result"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
+import * as ExecutionAuthorityReconciliation from "../../execution/lifecycle/execution-authority-reconciliation"
 import { Cause, Clock, Effect, Option, PubSub } from "effect"
 import type { InteractiveEvent } from "./interactive-runtime-event"
 import type {
@@ -140,19 +141,14 @@ export const makeInteractiveSupervision = (
         )
       const recover = Effect.gen(function* () {
         if (serverOwner) yield* rootTurnOwner.recoverExecutionAdmissions
-        const nonterminal = yield* turns.listNonterminal
-        for (const turn of nonterminal)
-          if (turn.status !== "queued" && turn.executionLink !== undefined) {
-            const inspected = yield* Effect.option(acquiredBackend.inspectTurn(turn.executionLink))
-            if (Option.isNone(inspected)) continue
-            const view = inspected.value
-            if (view.status === "unavailable") continue
-            if (isTerminalStatus(view.status)) {
-              yield* settleTurnFromBackend(turn, view.status)
-              continue
-            }
-            yield* launch(turn)
-          }
+        const transcripts = yield* TranscriptRepository.Service
+        const reconciled = yield* ExecutionAuthorityReconciliation.make({
+          turns,
+          transcripts,
+          backend: acquiredBackend,
+          setTurnStatus,
+        })
+        for (const turn of reconciled.active) yield* launch(turn)
       })
       const scanDirty = Effect.gen(function* () {
         const dirty = [...dirtyTurnObservers]

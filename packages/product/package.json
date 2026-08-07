@@ -15,6 +15,7 @@
     "./execution-route-snapshot": "./src/execution/contract/execution-route-snapshot.ts",
     "./execution-route-resolution": "./src/execution/service/execution-route-resolution.ts",
     "./execution-gateway": "./src/execution/contract/execution-gateway.ts",
+    "./execution-authority-reconciliation": "./src/execution/lifecycle/execution-authority-reconciliation.ts",
     "./execution-transcript-contract": "./src/execution/contract/execution-transcript-contract.ts",
     "./execution-status": "./src/execution/contract/execution-status.ts",
     "./model-registration-identity": "./src/execution/contract/model-registration-identity.ts",
