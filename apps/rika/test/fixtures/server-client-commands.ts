@@ -262,7 +262,7 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                         session.events((event) =>
                           Queue.offerUnsafe(events, {
                             tag: event._tag,
-                            message: event._tag === "ExecutionFailed" ? event.message : "",
+                            message: event._tag === "ExecutionFailed" ? event.failure.message : "",
                           }),
                         ),
                       )
@@ -337,7 +337,7 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                     Effect.gen(function* () {
                       const feed = yield* Effect.forkChild(
                         session.events((event) => {
-                          if (event._tag === "ExecutionFailed") Queue.offerUnsafe(events, event.message)
+                          if (event._tag === "ExecutionFailed") Queue.offerUnsafe(events, event.failure.message)
                         }),
                       )
                       const message = yield* Queue.take(events)
@@ -363,9 +363,9 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                         session.events((event) => {
                           if (
                             event._tag === "ExecutionFailed" &&
-                            event.message.includes("omitted an event larger than 16 MiB")
+                            event.failure.message.includes("omitted an event larger than 16 MiB")
                           )
-                            Queue.offerUnsafe(messages, event.message)
+                            Queue.offerUnsafe(messages, event.failure.message)
                         }),
                       )
                       yield* Queue.take(messages)
@@ -398,7 +398,7 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                         Effect.gen(function* () {
                           const feed = yield* Effect.forkChild(
                             session.events((event) => {
-                              if (event._tag === "ExecutionFailed") Queue.offerUnsafe(messages, event.message)
+                              if (event._tag === "ExecutionFailed") Queue.offerUnsafe(messages, event.failure.message)
                             }),
                           )
                           const message = yield* Queue.take(messages)

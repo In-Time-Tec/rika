@@ -68,7 +68,7 @@ describe("Operation", () => {
       expect(yield* Ref.get(events)).toContainEqual(
         expect.objectContaining({
           _tag: "ExecutionFailed",
-          message: expect.stringContaining("Thread missing does not exist"),
+          failure: expect.objectContaining({ message: expect.stringContaining("Thread missing does not exist") }),
         }),
       )
     }),

@@ -1,7 +1,8 @@
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { Clock, Effect, Ref } from "effect"
-import { OperationError, operationError, operationFailureDetail } from "../operation-error"
+import { OperationError, operationError } from "../operation-error"
+import { makeFailure } from "../operation-failure"
 import { steerInteractiveTurn } from "./interactive-session-steer"
 import type { InteractiveSession } from "./interactive-session"
 import { OperationUnavailable } from "../contract/product-operation"
@@ -99,7 +100,7 @@ export const makeInteractiveSessionControls = (
           threadId: turn.threadId,
           turnId: turn.id,
           action: "cancel",
-          message: operationFailureDetail(outcome.cause),
+          failure: makeFailure(outcome.cause),
         })
       if (beforeStart) {
         const cancelled = yield* turns.get(turn.id)

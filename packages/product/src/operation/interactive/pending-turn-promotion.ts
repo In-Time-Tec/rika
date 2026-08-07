@@ -9,6 +9,7 @@ import * as ExecutionStatus from "@rika/product/execution-status"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TurnQueuePromotion from "../../thread/repository/turn-repository-queue"
 import { queuedTurnPromoteMaxAgeMs, staleQueuedTurnsError } from "../../thread/queue/pending-turn-policy"
+import { makeFailure } from "../operation-failure"
 import type * as RootTurnOwner from "../../thread/queue/root-turn-owner"
 import type { InteractiveEvent } from "./interactive-runtime-event"
 import type { PreparedTurn } from "./interactive-session-runtime"
@@ -61,7 +62,7 @@ export const promotePendingTurns = (input: {
         _tag: "ExecutionFailed",
         selectionEpoch: 0,
         threadId: input.thread.id,
-        message: staleError.message,
+        failure: makeFailure(staleError),
       })
       return yield* staleError
     })
@@ -137,7 +138,7 @@ export const promotePendingTurns = (input: {
             selectionEpoch: 0,
             threadId: input.thread.id,
             turnId: promoted.id,
-            message: input.failureMessage,
+            failure: makeFailure(input.failureMessage),
           })
           return true
         }

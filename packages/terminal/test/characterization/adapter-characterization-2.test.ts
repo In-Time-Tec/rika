@@ -362,7 +362,7 @@ test("renders hidden tool output as inline presentation status in plain transcri
   expect(transcript).toContain("Web Search")
   expect(transcript).not.toContain("HIDDEN SEARCH RESULT")
 })
-test("progressively discloses error detail while keeping recovery visible", () => {
+test("shows error cause and recovery on the first lines", () => {
   const block = {
     _tag: "Error" as const,
     title: "Execution failed",
@@ -370,21 +370,20 @@ test("progressively discloses error detail while keeping recovery visible", () =
     turnId: "turn-4",
     recovery: "Press Enter to retry.",
   }
-  const collapsed = buildTranscript(model({ blocks: [block] }))
-  const collapsedText = collapsed.styled.chunks.map((chunk) => chunk.text).join("")
-
-  expect(collapsed.ranges).toMatchObject([{ unit: "block:Error:0", expandable: true }])
-  expect(collapsedText).toContain("✖ ERROR: Execution failed · Turn turn-4 ▸")
-  expect(collapsedText).toContain("Next: Press Enter to retry.")
-  expect(collapsedText).not.toContain("Model unavailable")
-  expect(collapsed.styled.chunks.find((chunk) => chunk.text.includes("ERROR: Execution failed"))?.fg).toBe(colors.red)
-
-  const expandedText = buildTranscript(model({ blocks: [block], expandedRowKeys: ["block:Error:0"] }))
+  const text = buildTranscript(model({ blocks: [block] }))
     .styled.chunks.map((chunk) => chunk.text)
     .join("")
-  expect(expandedText).toContain("✖ ERROR: Execution failed · Turn turn-4 ▾")
-  expect(expandedText).toContain("Model unavailable")
-  expect(expandedText).toContain("Next: Press Enter to retry.")
+
+  expect(text).toContain("✖ ERROR: Execution failed · Turn turn-4")
+  expect(text).toContain("Model unavailable")
+  expect(text).toContain("Next: Press Enter to retry.")
+  expect(text).not.toContain("▸")
+  expect(text).not.toContain("▾")
+  expect(
+    buildTranscript(model({ blocks: [block] })).styled.chunks.find((chunk) =>
+      chunk.text.includes("ERROR: Execution failed"),
+    )?.fg,
+  ).toBe(colors.red)
 })
 test("keeps tool cards generic without removed activity assumptions", () => {
   const rendered = renderBlock({

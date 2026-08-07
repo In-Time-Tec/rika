@@ -5,6 +5,7 @@ import { OperationError } from "../operation-error"
 import { Clock, Context, Effect, Layer, Ref } from "effect"
 import { clampThreadTitle } from "../../thread/query/thread-title-policy"
 import { runRecordedShell } from "./interactive-recorded-shell"
+import { makeFailure } from "../operation-failure"
 import { operationError } from "../operation-error"
 import type { InteractiveRuntimeContext } from "./interactive-session-runtime"
 
@@ -93,7 +94,7 @@ export const makeInteractiveShell = (
           _tag: "ExecutionFailed",
           selectionEpoch: 0,
           threadId: thread.id,
-          message: "Shell runtime is unavailable",
+          failure: makeFailure("Shell runtime is unavailable"),
         })
         return
       }

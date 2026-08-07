@@ -227,17 +227,7 @@ const reduceOverlayImpl = (
               pastedText: taken.draft!.attachments,
             }
           : {}),
-        blocks: alreadyPresented
-          ? settled.blocks
-          : [
-              ...settled.blocks,
-              {
-                _tag: "Error",
-                title: "Message failed",
-                detail: message.message,
-                recovery: "Press Enter to try again.",
-              },
-            ],
+        blocks: alreadyPresented ? settled.blocks : [...settled.blocks, errorBlock(message.failure)],
         items: alreadyPresented ? settled.items : [...settled.items, { _tag: "Block", index: settled.blocks.length }],
         submittedDrafts: taken.draft === undefined ? dropSubmittedDrafts(model.submittedDrafts, turnId) : taken.rest,
         pendingSteering: settleSteering(model, turnId).pendingSteering,
@@ -376,6 +366,45 @@ const reduceOverlayImpl = (
   }
   return undefined
 }
+const errorTitle = (failure: { readonly tag: string }): string => {
+  switch (failure.tag) {
+    case "StartTurnFailure":
+      return "Could not start the turn"
+    case "SteeringFailure":
+      return "Steering not delivered"
+    case "CancelTurnFailure":
+      return "Cancellation not completed"
+    case "QueueFull":
+      return "Queue is full"
+    case "TransportDisconnected":
+      return "Connection to the server was lost"
+    default:
+      return failure.tag
+  }
+}
+
+const errorRecovery = (failure: {
+  readonly retry: "user" | "automatic" | "never"
+  readonly actor: "user" | "environment" | "rika"
+}): string | undefined => {
+  if (failure.retry === "automatic") return "Rika will retry automatically."
+  if (failure.retry === "user") return "Press Enter to try again."
+  if (failure.actor === "environment") return "Fix the issue above, then resend."
+  if (failure.actor === "rika") return "This is a Rika defect. Restart Rika if it keeps happening."
+  return undefined
+}
+
+const errorBlock = (failure: {
+  readonly tag: string
+  readonly message: string
+  readonly retry: "user" | "automatic" | "never"
+  readonly actor: "user" | "environment" | "rika"
+}) => ({
+  _tag: "Error" as const,
+  title: errorTitle(failure),
+  detail: failure.message,
+  recovery: errorRecovery(failure),
+})
 
 export const reduceOverlay: {
   (

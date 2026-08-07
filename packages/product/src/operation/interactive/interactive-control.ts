@@ -5,7 +5,8 @@ import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as TurnQueuePromotion from "../../thread/repository/turn-repository-queue"
 import type { InteractiveEvent } from "./interactive-runtime-event"
-import { OperationError, operationFailureDetail } from "../operation-error"
+import { OperationError } from "../operation-error"
+import { makeFailure } from "../operation-failure"
 import type { operationError } from "../operation-error"
 
 export const makeInteractiveControl = (input: {
@@ -52,7 +53,7 @@ export const makeInteractiveControl = (input: {
           threadId: turn.threadId,
           turnId: turn.id,
           action: "steer",
-          message: operationFailureDetail(outcome.cause),
+          failure: makeFailure(outcome.cause),
           steeringText: text,
         })
         return
@@ -100,7 +101,7 @@ export const makeInteractiveControl = (input: {
           threadId: turn.threadId,
           turnId: turn.id,
           action: "steer",
-          message: operationFailureDetail(outcome.cause),
+          failure: makeFailure(outcome.cause),
           steeringText,
         })
         return
@@ -149,7 +150,7 @@ export const makeInteractiveControl = (input: {
           ...(threadId === undefined ? {} : { threadId }),
           turnId,
           action: decision,
-          message: operationFailureDetail(outcome.cause),
+          failure: makeFailure(outcome.cause),
         })
     })
   return {

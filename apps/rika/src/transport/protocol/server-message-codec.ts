@@ -39,9 +39,15 @@ const degradedEvent = (event: ServerService.ServerMessage extends infer _ ? obje
       currentRevision: patch.baseRevision,
     }
   }
+  const degraded = {
+    tag: "TransportDegraded" as const,
+    message: degradedReason,
+    retry: "user" as const,
+    actor: "environment" as const,
+  }
   if ("threadId" in event && typeof event.threadId === "string")
-    return { _tag: "ExecutionFailed" as const, threadId: event.threadId, message: degradedReason }
-  return { _tag: "ExecutionFailed" as const, message: degradedReason }
+    return { _tag: "ExecutionFailed" as const, threadId: event.threadId, failure: degraded }
+  return { _tag: "ExecutionFailed" as const, failure: degraded }
 }
 
 const messageChunkFields = {

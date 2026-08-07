@@ -112,7 +112,12 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
                 return Effect.sync(() =>
                   report({
                     _tag: "ExecutionFailed",
-                    message: String(Cause.squash(cause)),
+                    failure: {
+                      tag: "TransportOperationFailed",
+                      message: String(Cause.squash(cause)),
+                      retry: "user",
+                      actor: "environment",
+                    },
                   }),
                 )
               }),
@@ -136,7 +141,12 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
                     Effect.sync(() =>
                       report({
                         _tag: "ExecutionFailed",
-                        message: "Server transport disconnected; the action outcome is unknown and was not retried",
+                        failure: {
+                          tag: "TransportDisconnected",
+                          message: "Server transport disconnected; the action outcome is unknown and was not retried",
+                          retry: "user",
+                          actor: "environment",
+                        },
                       }),
                     ),
                   ),
@@ -144,7 +154,12 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
               return Effect.sync(() =>
                 report({
                   _tag: "ExecutionFailed",
-                  message: String(Cause.squash(cause)),
+                  failure: {
+                    tag: "TransportOperationFailed",
+                    message: String(Cause.squash(cause)),
+                    retry: "user",
+                    actor: "environment",
+                  },
                 }),
               )
             }),

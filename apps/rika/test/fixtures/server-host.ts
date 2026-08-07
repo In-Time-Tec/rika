@@ -239,14 +239,24 @@ const program = Effect.gen(function* () {
                   return Effect.sync(() =>
                     dispatch({
                       _tag: "ExecutionFailed",
-                      message: "x".repeat(20_000_000),
+                      failure: {
+                        tag: "TestFailure",
+                        message: "x".repeat(20_000_000),
+                        retry: "user",
+                        actor: "environment",
+                      },
                     }),
                   ).pipe(Effect.andThen(Effect.never))
                 if (kind === "large-event-a" || kind === "large-event-b")
                   return Effect.sync(() =>
                     dispatch({
                       _tag: "ExecutionFailed",
-                      message: kind.at(-1)!.repeat(8_000_000),
+                      failure: {
+                        tag: "TestFailure",
+                        message: kind.at(-1)!.repeat(8_000_000),
+                        retry: "user",
+                        actor: "environment",
+                      },
                     }),
                   ).pipe(Effect.andThen(Effect.never))
                 if (kind === "slow-consumer-events")
@@ -322,7 +332,12 @@ const program = Effect.gen(function* () {
                     if (kind === "oversized-event")
                       dispatch({
                         _tag: "ExecutionFailed",
-                        message: "x".repeat(1_100_000),
+                        failure: {
+                          tag: "TestFailure",
+                          message: "x".repeat(1_100_000),
+                          retry: "user",
+                          actor: "environment",
+                        },
                       })
                     else dispatch({ _tag: "ThreadsListed", threads: [] })
                   }

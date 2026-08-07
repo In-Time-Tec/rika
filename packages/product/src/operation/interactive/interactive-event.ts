@@ -3,6 +3,7 @@ import * as ThreadSummary from "@rika/product/thread-summary"
 import * as ThreadView from "@rika/product/thread-view"
 import * as Turn from "@rika/product/turn-record"
 import { Schema } from "effect"
+import { Failure } from "../operation-failure"
 
 export const InteractiveEventSchema = Schema.Union([
   Schema.Struct({ _tag: Schema.tag("ThreadViewSnapshot"), snapshot: ThreadView.ThreadViewSnapshot }),
@@ -25,14 +26,14 @@ export const InteractiveEventSchema = Schema.Union([
     _tag: Schema.tag("ExecutionFailed"),
     threadId: Schema.optionalKey(Thread.ThreadId),
     turnId: Schema.optionalKey(Turn.TurnId),
-    message: Schema.String,
+    failure: Failure,
   }),
   Schema.Struct({
     _tag: Schema.tag("ExecutionControlFailed"),
     threadId: Schema.optionalKey(Thread.ThreadId),
     turnId: Schema.optionalKey(Turn.TurnId),
     action: Schema.Literals(["steer", "cancel", "approve", "deny"]),
-    message: Schema.String,
+    failure: Failure,
     steeringText: Schema.optionalKey(Schema.String),
   }),
   Schema.Struct({
