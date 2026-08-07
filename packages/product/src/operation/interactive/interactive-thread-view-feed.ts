@@ -2,7 +2,6 @@ import * as ExecutionProjection from "../../execution/contract/execution-project
 import { promptUnit } from "./interactive-prompt-unit"
 import * as ThreadView from "@rika/product/thread-view"
 import { compareUnitOrder, encodeUnitOrder } from "@rika/transcript/transcript-unit-order"
-import { selectTranscriptWindow } from "../../transcript/transcript-window-selection"
 import { Result } from "effect"
 import type { InteractiveEvent as ClientEvent } from "./interactive-event"
 import type { InteractiveEvent as RuntimeEvent, QueueItem } from "./interactive-runtime-event"
@@ -29,28 +28,6 @@ const orderedTurns = (turns: ReadonlyArray<ThreadView.ThreadViewTurn>): Readonly
     const createdAt = left.turn.createdAt - right.turn.createdAt
     return createdAt === 0 ? String(left.turn.id).localeCompare(String(right.turn.id)) : createdAt
   })
-
-const boundedTurns = (
-  turns: ReadonlyArray<ThreadView.ThreadViewTurn>,
-  focus: "oldest" | "newest",
-): ReadonlyArray<ThreadView.ThreadViewTurn> => {
-  const ordered = orderedTurns(turns)
-  const flat = ordered.flatMap((entry) => entry.units.map((unit) => ({ entry, unit })))
-  const selection = selectTranscriptWindow({
-    values: flat,
-    unit: (value) => value.unit,
-    maximum: ThreadView.limits.timelineItems,
-    focus,
-  })
-  const grouped = new Map<string, ThreadView.ThreadViewTurn>()
-  for (const value of selection.values) {
-    const key = String(value.entry.turn.id)
-    const current = grouped.get(key)
-    if (current === undefined) grouped.set(key, { ...value.entry, units: [value.unit] })
-    else grouped.set(key, { ...current, units: [...current.units, value.unit] })
-  }
-  return [...grouped.values()]
-}
 
 const sourceFor = (
   turns: ReadonlyArray<ThreadView.ThreadViewTurn>,
@@ -85,9 +62,6 @@ const sourceFor = (
     ...(newestCursor === undefined ? {} : { newestCursor }),
   }
 }
-
-const unitCount = (turns: ReadonlyArray<ThreadView.ThreadViewTurn>): number =>
-  turns.reduce((total, entry) => total + entry.units.length, 0)
 
 const trackedProjectionLimit = 64
 
@@ -229,7 +203,7 @@ const snapshotFromSelection = (
     })
   }
   const groupedTurns = [...grouped.values()]
-  const turns = boundedTurns(groupedTurns, "newest")
+  const turns = orderedTurns(groupedTurns)
   return {
     thread: event.thread,
     revision,
@@ -239,7 +213,7 @@ const snapshotFromSelection = (
     }),
     turns,
     pending: pending(event.queue),
-    hasOlder: event.hasOlder || unitCount(turns) < unitCount(groupedTurns),
+    hasOlder: event.hasOlder,
     hasNewer: event.hasNewer ?? false,
     usage: {
       state: event.usage.usage,
@@ -498,45 +472,6 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
           hasNewer: current.hasNewer,
           usage: current.usage,
         },
-      })
-    }
-    if (event._tag === "TranscriptPagePrepended" || event._tag === "TranscriptPageAppended") {
-      if (current === undefined || event.threadId !== current.thread.id) return []
-      const byTurn = new Map(
-        current.turns.map((entry) => [String(entry.turn.id), { ...entry, units: [...entry.units] }]),
-      )
-      for (const entry of event.entries) {
-        const id = String(entry.turn.id)
-        const value = byTurn.get(id)
-        if (value === undefined)
-          byTurn.set(id, {
-            turn: ThreadView.turnRecord(entry.turn),
-            units: [entry.unit],
-            projectionRevision: entry.projectionRevision,
-            usage: entry.projectionState.usage,
-          })
-        else {
-          const index = value.units.findIndex((unit) => unit.key === entry.unit.key)
-          if (index === -1) value.units.push(entry.unit)
-          else value.units[index] = entry.unit
-          if (entry.projectionRevision >= value.projectionRevision) value.usage = entry.projectionState.usage
-          value.projectionRevision = Math.max(value.projectionRevision, entry.projectionRevision)
-        }
-      }
-      const combined = [...byTurn.values()]
-      const prepended = event._tag === "TranscriptPagePrepended"
-      const turns = boundedTurns(combined, prepended ? "oldest" : "newest")
-      const truncated = unitCount(turns) < unitCount(combined)
-      return replace({
-        ...current,
-        revision: current.revision + 1,
-        source: sourceFor(turns, current.source.projectionVersion, {
-          ...(prepended && event.oldestCursor !== undefined ? { oldestCursor: event.oldestCursor } : {}),
-          ...(!prepended && event.newestCursor !== undefined ? { newestCursor: event.newestCursor } : {}),
-        }),
-        turns,
-        hasOlder: prepended ? event.hasOlder : current.hasOlder || truncated,
-        hasNewer: prepended ? current.hasNewer || truncated : event.hasNewer,
       })
     }
     if (event._tag === "ExecutionProjectionResyncRequired" || event._tag === "ThreadViewResyncRequired") {

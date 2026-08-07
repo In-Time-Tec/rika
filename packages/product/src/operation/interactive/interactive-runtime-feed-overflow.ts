@@ -62,8 +62,6 @@ export const isCritical = (event: InteractiveEvent): boolean => {
     case "TurnStarted":
     case "SubmissionAdmitted":
     case "SelectionLoaded":
-    case "TranscriptPagePrepended":
-    case "TranscriptPageAppended":
     case "ThreadActivated":
       return false
   }
@@ -83,8 +81,6 @@ const rememberImpl = (state: State, event: InteractiveEvent) => {
     case "ExecutionProjectionResyncRequired":
     case "TurnStarted":
     case "SelectionLoaded":
-    case "TranscriptPagePrepended":
-    case "TranscriptPageAppended":
       if (id !== undefined) rememberThread(state, state.transcriptThreadIds, id)
       return
     case "QueueUpdated":

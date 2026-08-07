@@ -8,8 +8,6 @@ import { OperationUnavailable } from "../contract/product-operation"
 const withEpoch = (event: RuntimeEvent, epoch: number): RuntimeEvent => {
   switch (event._tag) {
     case "SelectionLoaded":
-    case "TranscriptPagePrepended":
-    case "TranscriptPageAppended":
     case "QueueUpdated":
     case "ThreadViewResyncRequired":
     case "QueueFull":

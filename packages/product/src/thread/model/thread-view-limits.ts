@@ -4,8 +4,6 @@ import { PageCursor } from "./transcript-page"
 const PositiveProjectionVersion = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 
 export const limits = {
-  turns: 6,
-  timelineItems: 120,
   pending: 64,
   patchItems: 120,
   turnChanges: 6,

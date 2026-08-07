@@ -2214,6 +2214,7 @@
         "./terminal-session",
         "./terminal-state",
         "./terminal-state-reducer",
+        "./terminal-timeline-bounds",
         "./terminal-transcript-presentation",
         "./transcript-viewport"
       ]
@@ -6888,6 +6889,15 @@
       "publicExports": ["./transcript-viewport"]
     },
     {
+      "id": "packages/terminal/src/presentation/transcript/transcript-virtual-index.ts",
+      "path": "packages/terminal/src/presentation/transcript/transcript-virtual-index.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/terminal/src/state/model/terminal-activity-state.ts",
       "path": "packages/terminal/src/state/model/terminal-activity-state.ts",
       "workspace": "@rika/terminal",
@@ -7102,6 +7112,15 @@
       "kind": "source",
       "production": true,
       "publicExports": []
+    },
+    {
+      "id": "packages/terminal/src/state/model/terminal-timeline-bounds.ts",
+      "path": "packages/terminal/src/state/model/terminal-timeline-bounds.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./terminal-timeline-bounds"]
     },
     {
       "id": "packages/terminal/src/state/model/terminal-transcript-state.ts",
@@ -8367,6 +8386,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/terminal/test/integration/opentui-transcript-instant-scroll.test.ts",
+      "path": "packages/terminal/test/integration/opentui-transcript-instant-scroll.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/terminal/test/integration/opentui-transcript-prefetch.test.ts",
       "path": "packages/terminal/test/integration/opentui-transcript-prefetch.test.ts",
       "workspace": "@rika/terminal",
@@ -8579,6 +8608,16 @@
     {
       "id": "packages/terminal/test/transcript-viewport.test.ts",
       "path": "packages/terminal/test/transcript-viewport.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/terminal/test/transcript-virtual-and-bounds.test.ts",
+      "path": "packages/terminal/test/transcript-virtual-and-bounds.test.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -9990,6 +10029,14 @@
     },
     {
       "from": "apps/rika/src/interactive/controller/terminal-interactive-feed.ts",
+      "to": "packages/terminal/src/state/model/terminal-timeline-bounds.ts",
+      "specifier": "@rika/terminal/terminal-timeline-bounds",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/controller/terminal-interactive-feed.ts",
       "to": "packages/terminal/src/state/reducer/terminal-state-reducer.ts",
       "specifier": "@rika/terminal/terminal-state-reducer",
       "kind": "import",
@@ -10214,14 +10261,6 @@
     },
     {
       "from": "apps/rika/src/interactive/process/interactive-process-loop.ts",
-      "to": "packages/product/src/thread/model/transcript-page.ts",
-      "specifier": "@rika/product/transcript-page",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/interactive/process/interactive-process-loop.ts",
       "to": "packages/product/src/thread/model/turn-record.ts",
       "specifier": "@rika/product/turn-record",
       "kind": "import",
@@ -10424,14 +10463,6 @@
       "from": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
       "to": "packages/product/src/thread/model/thread-view.ts",
       "specifier": "@rika/product/thread-view",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
-      "to": "packages/product/src/thread/model/transcript-page.ts",
-      "specifier": "@rika/product/transcript-page",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -14424,6 +14455,14 @@
       "from": "apps/rika/test/interactive-controller-page-order.test.ts",
       "to": "packages/product/src/operation/interactive/interactive-thread-view-feed.ts",
       "specifier": "@rika/product/interactive-thread-view-feed",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/interactive-controller-page-order.test.ts",
+      "to": "packages/terminal/src/state/model/terminal-timeline-bounds.ts",
+      "specifier": "@rika/terminal/terminal-timeline-bounds",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -29703,14 +29742,6 @@
     },
     {
       "from": "packages/product/src/operation/dispatch/product-operation-runtime-session.ts",
-      "to": "packages/product/src/operation/interactive/interactive-session-constants.ts",
-      "specifier": "../interactive/interactive-session-constants",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/src/operation/dispatch/product-operation-runtime-session.ts",
       "to": "packages/product/src/operation/interactive/interactive-session-runtime.ts",
       "specifier": "../interactive/interactive-session-runtime",
       "kind": "import",
@@ -30169,14 +30200,6 @@
       "from": "packages/product/src/operation/interactive/interactive-command.ts",
       "to": "packages/product/src/thread/model/thread-record.ts",
       "specifier": "@rika/product/thread-record",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/src/operation/interactive/interactive-command.ts",
-      "to": "packages/product/src/thread/model/transcript-page.ts",
-      "specifier": "@rika/product/transcript-page",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -31089,14 +31112,6 @@
       "from": "packages/product/src/operation/interactive/interactive-session-interface-selection.ts",
       "to": "packages/product/src/thread/model/thread-record.ts",
       "specifier": "@rika/product/thread-record",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/src/operation/interactive/interactive-session-interface-selection.ts",
-      "to": "packages/product/src/thread/model/transcript-page.ts",
-      "specifier": "@rika/product/transcript-page",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -32126,14 +32141,6 @@
       "production": true
     },
     {
-      "from": "packages/product/src/operation/interactive/interactive-session.ts",
-      "to": "packages/product/src/thread/model/transcript-page.ts",
-      "specifier": "@rika/product/transcript-page",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
       "from": "packages/product/src/operation/interactive/interactive-shell-session.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -32287,14 +32294,6 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-thread-view-feed.ts",
-      "to": "packages/product/src/transcript/transcript-window-selection.ts",
-      "specifier": "../../transcript/transcript-window-selection",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/src/operation/interactive/interactive-thread-view-feed.ts",
       "to": "packages/transcript/src/ordering/transcript-unit-order.ts",
       "specifier": "@rika/transcript/transcript-unit-order",
       "kind": "import",
@@ -32383,14 +32382,6 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-transcript-page.ts",
-      "to": "packages/product/src/execution/contract/execution-projection.ts",
-      "specifier": "../../execution/contract/execution-projection",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/src/operation/interactive/interactive-transcript-page.ts",
       "to": "packages/product/src/operation/interactive/interactive-runtime-event.ts",
       "specifier": "./interactive-runtime-event",
       "kind": "import",
@@ -32441,14 +32432,6 @@
       "from": "packages/product/src/operation/interactive/interactive-transcript-page.ts",
       "to": "packages/product/src/operation/operation-error.ts",
       "specifier": "../operation-error",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/src/operation/interactive/interactive-transcript-page.ts",
-      "to": "packages/product/src/thread/model/transcript-page.ts",
-      "specifier": "@rika/product/transcript-page",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -32871,8 +32854,24 @@
     },
     {
       "from": "packages/product/src/operation/interactive/transcript-window.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/transcript-window.ts",
       "to": "packages/product/src/thread/repository/transcript-repository.ts",
       "specifier": "@rika/product/transcript-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/transcript-window.ts",
+      "to": "packages/product/src/thread/repository/turn-repository-pagination.ts",
+      "specifier": "../../thread/repository/turn-repository-pagination",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -33377,14 +33376,6 @@
       "from": "packages/product/src/thread/model/thread-view-turn-usage.ts",
       "to": "packages/product/src/execution/contract/execution-projection.ts",
       "specifier": "@rika/product/execution-projection",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/src/thread/model/thread-view-turn-usage.ts",
-      "to": "packages/product/src/thread/model/thread-view-limits.ts",
-      "specifier": "./thread-view-limits",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -37367,6 +37358,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-surface-pointer.ts",
+      "to": "packages/terminal/src/opentui/rendering/opentui-render-transcript-window.ts",
+      "specifier": "../rendering/opentui-render-transcript-window",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-surface-pointer.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-sidebar-controller.ts",
       "specifier": "./opentui-sidebar-controller",
       "kind": "import",
@@ -37439,6 +37438,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
+      "to": "packages/terminal/src/opentui/rendering/opentui-render-transcript-window.ts",
+      "specifier": "../rendering/opentui-render-transcript-window",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-hover-controller.ts",
       "specifier": "./opentui-hover-controller",
       "kind": "import",
@@ -37497,6 +37504,14 @@
       "from": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
       "to": "packages/terminal/src/presentation/transcript/transcript-viewport-state.ts",
       "specifier": "../../presentation/transcript/transcript-viewport-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-virtual-index.ts",
+      "specifier": "../../presentation/transcript/transcript-virtual-index",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -38017,6 +38032,14 @@
       "from": "packages/terminal/src/opentui/surface/opentui-transcript-scroll.ts",
       "to": "packages/terminal/src/presentation/transcript/transcript-viewport.ts",
       "specifier": "../../presentation/transcript/transcript-viewport",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-transcript-scroll.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-virtual-index.ts",
+      "specifier": "../../presentation/transcript/transcript-virtual-index",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -39094,6 +39117,46 @@
       "production": true
     },
     {
+      "from": "packages/terminal/src/presentation/transcript/transcript-virtual-index.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/transcript/transcript-virtual-index.ts",
+      "to": "packages/terminal/src/presentation/terminal/terminal-theme.ts",
+      "specifier": "../terminal/terminal-theme",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/transcript/transcript-virtual-index.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-row.ts",
+      "specifier": "./transcript-row",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/transcript/transcript-virtual-index.ts",
+      "to": "packages/terminal/src/state/model/terminal-state.ts",
+      "specifier": "../../state/model/terminal-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/presentation/transcript/transcript-virtual-index.ts",
+      "to": "packages/terminal/src/state/model/terminal-transcript-state.ts",
+      "specifier": "../../state/model/terminal-transcript-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/src/state/model/terminal-activity-state.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -39649,6 +39712,30 @@
       "from": "packages/terminal/src/state/model/terminal-thread-predicate.ts",
       "to": "packages/terminal/src/state/model/terminal-thread-state.ts",
       "specifier": "./terminal-thread-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/model/terminal-timeline-bounds.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/model/terminal-timeline-bounds.ts",
+      "to": "packages/terminal/src/state/model/terminal-state.ts",
+      "specifier": "./terminal-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/state/model/terminal-timeline-bounds.ts",
+      "to": "packages/terminal/src/state/model/terminal-transcript-state.ts",
+      "specifier": "./terminal-transcript-state",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -44366,6 +44453,62 @@
       "production": false
     },
     {
+      "from": "packages/terminal/test/integration/opentui-transcript-instant-scroll.test.ts",
+      "to": "external:@opentui/core/testing",
+      "specifier": "@opentui/core/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-instant-scroll.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-instant-scroll.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-instant-scroll.test.ts",
+      "to": "packages/terminal/src/opentui/rendering/opentui-render-transcript-window.ts",
+      "specifier": "../../src/opentui/rendering/opentui-render-transcript-window",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-instant-scroll.test.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-surface.ts",
+      "specifier": "../../src/opentui/surface/opentui-surface",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-instant-scroll.test.ts",
+      "to": "packages/terminal/src/state/model/terminal-state.ts",
+      "specifier": "../../src/state/model/terminal-state",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-instant-scroll.test.ts",
+      "to": "packages/terminal/test/integration/opentui-surface-characterization-5-support.ts",
+      "specifier": "./opentui-surface-characterization-5-support",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/terminal/test/integration/opentui-transcript-prefetch.test.ts",
       "to": "external:@opentui/core/testing",
       "specifier": "@opentui/core/testing",
@@ -45129,6 +45272,46 @@
       "from": "packages/terminal/test/transcript-viewport.test.ts",
       "to": "packages/terminal/src/presentation/transcript/transcript-viewport.ts",
       "specifier": "../src/presentation/transcript/transcript-viewport",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/transcript-virtual-and-bounds.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/transcript-virtual-and-bounds.test.ts",
+      "to": "packages/terminal/src/presentation/transcript/transcript-virtual-index.ts",
+      "specifier": "../src/presentation/transcript/transcript-virtual-index",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/transcript-virtual-and-bounds.test.ts",
+      "to": "packages/terminal/src/state/model/terminal-state.ts",
+      "specifier": "../src/state/model/terminal-state",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/transcript-virtual-and-bounds.test.ts",
+      "to": "packages/terminal/src/state/model/terminal-timeline-bounds.ts",
+      "specifier": "../src/state/model/terminal-timeline-bounds",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/transcript-virtual-and-bounds.test.ts",
+      "to": "packages/terminal/src/state/model/terminal-transcript-state.ts",
+      "specifier": "../src/state/model/terminal-transcript-state",
       "kind": "import",
       "relationship": "test",
       "production": false

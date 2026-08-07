@@ -7,6 +7,7 @@ import {
   type ColorInput,
 } from "@opentui/core"
 import type { Model } from "../../state/model/terminal-state"
+import { maxMountedTranscriptEntries } from "../rendering/opentui-render-transcript-window"
 import { SidebarController } from "./opentui-sidebar-controller"
 import { Clock, Effect } from "effect"
 import { classifyMouseJunk, fromOpenTui, type Key } from "../../presentation/terminal/terminal-keymap"
@@ -62,6 +63,22 @@ export abstract class SurfacePointer extends SurfaceTranscriptScroll {
       if (this.atMountedTranscriptBottom() && this.shiftTranscriptWindow(100, true, amount, true)) return
       this.applyTranscriptPosition(this.transcriptScroll.scrollTop + amount)
       this.reportTranscriptScroll(true)
+    } else if (!mapped.ctrl && !mapped.alt && !mapped.meta && mapped.name === "home") {
+      this.cancelWheelReport()
+      this.dispatchTranscriptViewport({ _tag: "DetachCommanded", anchor: this.captureViewportAnchor() })
+      const model = this.model
+      if (model !== undefined) {
+        const minimumEnd = Math.min(maxMountedTranscriptEntries, model.items.length)
+        if (this.transcriptWindowEnd !== minimumEnd) {
+          this.transcriptWindowEnd = minimumEnd
+          this.transcriptRenderInput = undefined
+          this.update(model, false)
+          this.pendingTranscriptPosition = undefined
+        }
+        this.applyTranscriptPosition(0)
+        this.syncTranscriptScrollbar()
+        this.reportTranscriptScroll()
+      }
     } else if (!mapped.ctrl && !mapped.alt && !mapped.meta && mapped.name === "end") {
       this.cancelWheelReport()
       this.dispatchTranscriptViewport({ _tag: "FollowCommanded" })

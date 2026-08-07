@@ -13,6 +13,12 @@ import type { Fiber } from "effect"
 import type { Key } from "../../presentation/terminal/terminal-keymap"
 import type { Mode, Model } from "../../state/model/terminal-state"
 import { initialViewport, type TranscriptViewport } from "../../presentation/transcript/transcript-viewport-state"
+import {
+  transcriptVirtualIndex,
+  virtualRowOfItemPosition,
+  type TranscriptVirtualIndex,
+} from "../../presentation/transcript/transcript-virtual-index"
+import { maxMountedTranscriptEntries } from "../rendering/opentui-render-transcript-window"
 import type { WelcomeController } from "./opentui-welcome-controller"
 import type { LoaderController } from "./opentui-loader-controller"
 import type { HoverController } from "./opentui-hover-controller"
@@ -127,6 +133,9 @@ export class SurfaceState {
   protected renderedTranscriptScrollTop = 0
   protected transcriptWindowEnd = 0
   protected transcriptRowTotal = 0
+  protected transcriptVirtualKey: unknown
+  protected transcriptVirtualWidth = 0
+  protected transcriptVirtualIndex: TranscriptVirtualIndex | undefined
   protected transcriptWindowThread: string | undefined
   protected transcriptPositionFrame: (() => void) | undefined
   protected transcriptScrollbarSyncPending = false
@@ -154,16 +163,44 @@ export class SurfaceState {
     readonly windowEnd: number
     readonly rowTotal: number
     readonly following: boolean
+    readonly virtualScrollTop: number
+    readonly virtualScrollHeight: number
   } {
+    const virtual = this.transcriptVirtualMetrics()
     return {
       rows: [...this.transcriptChildren],
       keys: [...this.transcriptRecords.keys()],
       windowEnd: this.transcriptWindowEnd,
       rowTotal: this.transcriptRowTotal,
       following: this.transcriptViewport.mode._tag === "Following",
+      virtualScrollTop: virtual.rowsAbove + this.transcriptScroll.scrollTop,
+      virtualScrollHeight: virtual.scrollHeight,
     }
   }
   constructor() {
     this.transcriptViewport = initialViewport
+  }
+  protected virtualIndex(model: Model): TranscriptVirtualIndex {
+    if (this.transcriptVirtualKey !== model.items || this.transcriptVirtualWidth !== model.width) {
+      this.transcriptVirtualKey = model.items
+      this.transcriptVirtualWidth = model.width
+      this.transcriptVirtualIndex = transcriptVirtualIndex(model, model.width)
+    }
+    return this.transcriptVirtualIndex!
+  }
+  protected transcriptVirtualMetrics(): {
+    readonly scrollHeight: number
+    readonly rowsAbove: number
+  } {
+    const model = this.model
+    if (model === undefined) return { scrollHeight: 0, rowsAbove: 0 }
+    if (model.items.length <= maxMountedTranscriptEntries)
+      return { scrollHeight: this.transcriptScroll.scrollHeight, rowsAbove: 0 }
+    const index = this.virtualIndex(model)
+    const windowStartItem = Math.max(0, this.transcriptWindowEnd - maxMountedTranscriptEntries)
+    return {
+      scrollHeight: index.totalRows,
+      rowsAbove: virtualRowOfItemPosition(index, windowStartItem),
+    }
   }
 }

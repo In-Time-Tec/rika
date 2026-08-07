@@ -122,14 +122,15 @@ const expected: Record<string, ReadonlyArray<string>> = {
     "sqlite-turn-repository",
   ],
   "@rika/terminal": [
-    "terminal-performance-evaluation",
-    "terminal-transcript-presentation",
-    "transcript-viewport",
     "opentui-surface",
     "terminal-message",
+    "terminal-performance-evaluation",
+    "terminal-session",
     "terminal-state",
     "terminal-state-reducer",
-    "terminal-session",
+    "terminal-timeline-bounds",
+    "terminal-transcript-presentation",
+    "transcript-viewport",
   ],
 }
 

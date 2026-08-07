@@ -124,23 +124,6 @@ export type InteractiveEvent =
       readonly activeTurn?: Turn.Turn
     }
   | {
-      readonly _tag: "TranscriptPagePrepended"
-      readonly selectionEpoch: number
-      readonly threadId: Thread.ThreadId
-      readonly entries: ReadonlyArray<TranscriptPage.Entry>
-      readonly hasOlder: boolean
-      readonly oldestCursor?: TranscriptPage.PageCursor
-    }
-  | {
-      readonly _tag: "TranscriptPageAppended"
-      readonly selectionEpoch: number
-      readonly threadId: Thread.ThreadId
-      readonly entries: ReadonlyArray<TranscriptPage.Entry>
-      readonly hasNewer: boolean
-      readonly requestedAfter: TranscriptPage.PageCursor
-      readonly newestCursor?: TranscriptPage.PageCursor
-    }
-  | {
       readonly _tag: "ShellCompleted"
       readonly threadId: Thread.ThreadId
       readonly command: string
@@ -299,23 +282,6 @@ export const InteractiveEventSchema = Schema.Union([
       }),
     ),
     activeTurn: Schema.optionalKey(Turn.Turn),
-  }),
-  Schema.Struct({
-    _tag: Schema.tag("TranscriptPagePrepended"),
-    selectionEpoch: Schema.Int,
-    threadId: Thread.ThreadId,
-    entries: Schema.Array(TranscriptPage.EntrySchema),
-    hasOlder: Schema.Boolean,
-    oldestCursor: Schema.optionalKey(TranscriptPage.PageCursor),
-  }),
-  Schema.Struct({
-    _tag: Schema.tag("TranscriptPageAppended"),
-    selectionEpoch: Schema.Int,
-    threadId: Thread.ThreadId,
-    entries: Schema.Array(TranscriptPage.EntrySchema),
-    hasNewer: Schema.Boolean,
-    requestedAfter: TranscriptPage.PageCursor,
-    newestCursor: Schema.optionalKey(TranscriptPage.PageCursor),
   }),
   Schema.Struct({
     _tag: Schema.tag("ShellCompleted"),

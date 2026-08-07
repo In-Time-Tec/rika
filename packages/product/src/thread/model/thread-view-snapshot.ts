@@ -23,7 +23,7 @@ export type ThreadViewHeader = typeof ThreadViewHeader.Type
 const ThreadViewSnapshotStruct = Schema.Struct({
   ...headerFields,
   revision: NonNegativeRevision,
-  turns: Schema.Array(ThreadViewTurn).check(Schema.isMaxLength(limits.turns)),
+  turns: Schema.Array(ThreadViewTurn),
 })
 
 export const ThreadViewSnapshot = ThreadViewSnapshotStruct.check(
@@ -34,8 +34,6 @@ export const ThreadViewSnapshot = ThreadViewSnapshotStruct.check(
     const duplicateTurn = duplicateKey(turnIds)
     if (duplicateTurn !== undefined) issues.push({ path: ["turns"], issue: `duplicate Turn ${duplicateTurn}` })
     const units = snapshot.turns.flatMap((entry) => entry.units)
-    if (units.length > limits.timelineItems)
-      issues.push({ path: ["turns"], issue: `timeline exceeds ${limits.timelineItems} items` })
     const duplicateUnit = duplicateKey(units.map((unit) => unit.key))
     if (duplicateUnit !== undefined) issues.push({ path: ["turns"], issue: `duplicate timeline item ${duplicateUnit}` })
     for (const entry of snapshot.turns) {

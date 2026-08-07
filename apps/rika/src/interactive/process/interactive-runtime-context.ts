@@ -4,7 +4,6 @@ import { create as createTui } from "@rika/terminal/opentui-surface"
 import type { Adapter } from "@rika/terminal/terminal-session"
 import type { Model } from "@rika/terminal/terminal-state"
 import type { PathTarget } from "@rika/terminal/terminal-transcript-presentation"
-import type * as TranscriptPage from "@rika/product/transcript-page"
 import type * as Turn from "@rika/product/turn-record"
 import type * as ThreadView from "@rika/product/thread-view"
 import * as BunServices from "@effect/platform-bun/BunServices"
@@ -24,18 +23,12 @@ export interface InteractiveLoop {
   feedPreserveAnchor: boolean
   replayTurns: Map<string, Turn.Turn>
   projectionRevisions: Map<string, number>
-  transcriptHasOlder: boolean
-  transcriptHasNewer: boolean
-  transcriptOldestCursor: TranscriptPage.PageCursor | undefined
-  transcriptNewestCursor: TranscriptPage.PageCursor | undefined
   appliedDeltas: Set<string>
   activitySequence: number
   submissionSequence: number
   selectionFiber: Fiber.Fiber<void, never> | undefined
   selectionGeneration: number
   renderSuppressed: boolean
-  loadingOlder: boolean
-  pendingNewer: { readonly threadId: string; readonly cursor: string } | undefined
   selectionResyncs: Set<string>
   queueResyncs: Set<string>
   lifecycle: SubscriptionRef.SubscriptionRef<TuiLifecycle>
@@ -64,7 +57,6 @@ export interface InteractiveRuntimeContext {
 
 export interface InteractiveInputContext extends InteractiveRuntimeContext {
   readonly run: <E>(effect: Effect.Effect<void, E, BunServices.BunServices>) => void
-  readonly requestNewerPage: () => void
   readonly close: () => void
   readonly refreshTerminalTitle: () => void
   readonly openPath: (target: PathTarget) => void

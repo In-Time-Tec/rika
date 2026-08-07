@@ -230,27 +230,6 @@ export const makeProcessRuntime = (runtime: Runtime) => {
       ),
     )
   }
-  const requestNewerPage = () => {
-    const threadId = loop.model.currentThreadId
-    if (
-      !loop.transcriptHasNewer ||
-      loop.pendingNewer !== undefined ||
-      loop.transcriptNewestCursor === undefined ||
-      threadId === undefined
-    )
-      return
-    const cursor = loop.transcriptNewestCursor
-    loop.pendingNewer = { threadId, cursor: JSON.stringify(cursor) }
-    run(
-      session.loadNewer(threadId, cursor).pipe(
-        Effect.tapError(() =>
-          Effect.sync(() => {
-            loop.pendingNewer = undefined
-          }),
-        ),
-      ),
-    )
-  }
   const loadSelected = (effect: Effect.Effect<void, ProductOperation.OperationUnavailable>, generation: number) =>
     Effect.gen(function* () {
       yield* Effect.sync(() => {
@@ -431,7 +410,6 @@ export const makeProcessRuntime = (runtime: Runtime) => {
     interrupt,
     suspend,
     run,
-    requestNewerPage,
     loadSelected,
     startSelection,
     loadChangedFiles,

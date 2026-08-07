@@ -154,8 +154,6 @@ export interface InteractiveSessionInput {
   readonly dependencyContext: InteractiveDependencyContext
   readonly sessionThreadViews: Map<number, () => string | undefined>
   readonly interactiveSinks: Map<number, (origin: number, event: InteractiveEvent) => void>
-  readonly selectionInitialTurnWindow: number
-  readonly selectionInitialEntryWindow: number
   readonly encodeJson: (value: unknown) => string
   readonly isTerminalStatus: (status: ExecutionStatusStatus) => boolean
   readonly executionStartFailureMessage: string
@@ -288,8 +286,6 @@ export const makeInteractiveSession = (
       quit: implementation.quit,
       selectThread: (threadId) => state.composition.admitLocal(implementation.selectThread(threadId)),
       readQueue: (threadId) => state.composition.admitLocal(implementation.readQueue(threadId)),
-      loadOlder: (threadId, before) => state.composition.admitLocal(implementation.loadOlder(threadId, before)),
-      loadNewer: (threadId, after) => state.composition.admitLocal(implementation.loadNewer(threadId, after)),
       previewThread: (threadId) => state.composition.admitLocal(implementation.previewThread(threadId)),
       reopenThread: state.composition.admitLocal(implementation.reopenThread),
     }

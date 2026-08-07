@@ -4,7 +4,7 @@ import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import { selectTranscriptWindow } from "./transcript-window-selection"
 
 export const transcriptPageEncoder = new TextEncoder()
-export const maximumTranscriptPageBytes = 8 * 1024 * 1024
+export const maximumTranscriptPageBytes = 32 * 1024 * 1024
 export const maximumTranscriptPayloadBytes = maximumTranscriptPageBytes - 64 * 1024
 
 const sameTranscriptCursorImpl = (

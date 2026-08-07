@@ -343,7 +343,7 @@ test("coalesces repeated page keys until the transcript anchor frame", () =>
       try {
         surface.update({ ...initial("/work", "high"), entries, items, scrollFollow: false })
         yield* openTui(() => setup.flush())
-        surface.transcriptScrollbar.scrollPosition = Math.max(0, surface.transcriptScroll.scrollTop - 1)
+        surface.transcriptScrollbar.scrollPosition = Math.max(0, surface.transcriptDiagnostics().virtualScrollTop - 1)
         yield* openTui(() => setup.flush())
         surface.transcriptScroll.scrollTo(0)
         setup.renderer.requestRender()
@@ -397,7 +397,7 @@ test("preserves a pending prepend anchor through an intervening composer update"
       try {
         surface.update(base)
         yield* openTui(() => setup.flush())
-        surface.transcriptScrollbar.scrollPosition = Math.max(0, surface.transcriptScroll.scrollTop - 1)
+        surface.transcriptScrollbar.scrollPosition = Math.max(0, surface.transcriptDiagnostics().virtualScrollTop - 1)
         yield* openTui(() => setup.flush())
         surface.transcriptScroll.scrollTo(40)
         const firstBefore = /answer (\d+)/.exec(setup.captureCharFrame())?.[1]
@@ -461,7 +461,7 @@ test("keeps the nearest transcript content in view when markdown reflows", () =>
       try {
         surface.update(model)
         yield* openTui(() => setup.flush())
-        surface.transcriptScrollbar.scrollPosition = Math.max(0, surface.transcriptScroll.scrollTop - 1)
+        surface.transcriptScrollbar.scrollPosition = Math.max(0, surface.transcriptDiagnostics().virtualScrollTop - 1)
         yield* openTui(() => setup.flush())
         surface.transcriptScroll.scrollTo(80)
         setup.renderer.requestRender()

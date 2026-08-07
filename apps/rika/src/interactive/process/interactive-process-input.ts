@@ -15,7 +15,6 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
     session,
     run,
     previewTimer,
-    requestNewerPage,
     close,
     refreshTerminalTitle,
     openPath,
@@ -35,29 +34,12 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
     openPath,
     scroll: (offset) => {
       loop.model = update(loop.model, { _tag: "ScrollMoved", offset })
-      if (offset <= 0 && !loop.loadingOlder) {
-        const threadId = loop.model.currentThreadId
-        const before = loop.transcriptOldestCursor
-        if (!loop.transcriptHasOlder || threadId === undefined || before === undefined) return
-        loop.loadingOlder = true
-        run(
-          session.loadOlder(threadId, before).pipe(
-            Effect.ensuring(
-              Effect.sync(() => {
-                loop.loadingOlder = false
-              }),
-            ),
-          ),
-        )
-      }
-      if (offset > 0 && !loop.loadingOlder) requestNewerPage()
     },
     scrollGeometry: (offset) => {
       loop.model = update(loop.model, { _tag: "ScrollMoved", offset })
     },
     scrollFollow: () => {
       loop.model = update(loop.model, { _tag: "ScrollFollowed" })
-      requestNewerPage()
     },
     paste: (text) => {
       loop.model = update(loop.model, { _tag: "Pasted", text })

@@ -196,6 +196,7 @@
         "./terminal-session",
         "./terminal-state",
         "./terminal-state-reducer",
+        "./terminal-timeline-bounds",
         "./terminal-transcript-presentation",
         "./transcript-viewport"
       ]

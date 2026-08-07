@@ -41,12 +41,6 @@ export const makeEventRouter = (runtime: Runtime) => {
       loop.threadView = controlled.state.view
       if (event._tag === "ThreadViewSnapshot") {
         loop.requestedThreadId = String(event.snapshot.thread.id)
-        loop.transcriptHasOlder = event.snapshot.hasOlder
-        loop.transcriptHasNewer = event.snapshot.hasNewer
-        loop.transcriptOldestCursor = event.snapshot.source.oldestCursor
-        loop.transcriptNewestCursor = event.snapshot.source.newestCursor
-        loop.loadingOlder = false
-        loop.pendingNewer = undefined
         loop.model = update(loop.model, { _tag: "ThreadOpenCompleted" })
         if (loop.model.currentThreadId !== previousThreadId || loop.model.currentThreadTitle !== previousThreadTitle)
           refreshTerminalTitle()

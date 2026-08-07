@@ -116,7 +116,7 @@ export class Surface extends SurfaceLifecycle {
       onChange: (position) => {
         if (this.scrollbarSyncing || this.destroyed) return
         this.cancelWheelReport()
-        this.applyTranscriptPosition(position)
+        this.applyVirtualScrollbarPosition(position)
         if (!this.atTranscriptBottom() && isFollowing(this.transcriptViewport.mode))
           this.dispatchTranscriptViewport({ _tag: "DetachCommanded", anchor: this.captureViewportAnchor() })
         this.queueTranscriptScroll(() => this.reportTranscriptScroll())

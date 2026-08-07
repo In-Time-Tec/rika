@@ -47,9 +47,10 @@ test("keeps the scrollbar geometry consistent across backward transcript-window 
         yield* openTui(() => setup.flush())
         setup.mockInput.pressKey("\x1b[5~")
         yield* openTui(() => setup.flush())
-        expect(surface.transcriptScrollbar.scrollSize).toBe(surface.transcriptScroll.scrollHeight)
+        expect(surface.transcriptScrollbar.scrollSize).toBe(surface.transcriptDiagnostics().virtualScrollHeight)
+        expect(surface.transcriptScrollbar.scrollSize).toBeGreaterThan(surface.transcriptScroll.scrollHeight)
         expect(surface.transcriptScrollbar.viewportSize).toBeGreaterThanOrEqual(1)
-        expect(surface.transcriptScrollbar.scrollPosition).toBe(surface.transcriptScroll.scrollTop)
+        expect(surface.transcriptScrollbar.scrollPosition).toBe(surface.transcriptDiagnostics().virtualScrollTop)
       } finally {
         surface.destroy()
         setup.renderer.destroy()

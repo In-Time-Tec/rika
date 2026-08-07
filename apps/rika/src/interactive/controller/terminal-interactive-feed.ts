@@ -1,5 +1,6 @@
 import * as ThreadView from "@rika/product/thread-view"
 import { Function, Result } from "effect"
+import { maxInMemoryTranscriptUnits, trimTranscriptTimeline } from "@rika/terminal/terminal-timeline-bounds"
 import { applyRootUnits } from "@rika/terminal/terminal-transcript-presentation"
 import type { Model, ThreadItem } from "@rika/terminal/terminal-state"
 import { update as updateModel } from "@rika/terminal/terminal-state-reducer"
@@ -110,19 +111,22 @@ const project = (model: Model, snapshot: ThreadView.ThreadViewSnapshot): Model =
   })()
   next = updateModel(next, { _tag: "ContextUsageReplaced", contextUsage })
   const costUsd = usage.costNanoUsd === undefined ? undefined : usage.costNanoUsd / 1_000_000_000
-  return {
-    ...next,
-    costUsd,
-    usageCost:
-      costUsd === undefined
-        ? { _tag: "Unavailable" }
-        : { _tag: "Available", usd: costUsd, unpricedAttempts: usage.unpricedAttempts },
-    usageTokens:
-      usage.tokens?.total === undefined
-        ? { _tag: "Unavailable" }
-        : { _tag: "Available", total: usage.tokens.total, uncountedAttempts: usage.uncountedAttempts },
-    usageTime: usage.active,
-  }
+  return trimTranscriptTimeline(
+    {
+      ...next,
+      costUsd,
+      usageCost:
+        costUsd === undefined
+          ? { _tag: "Unavailable" }
+          : { _tag: "Available", usd: costUsd, unpricedAttempts: usage.unpricedAttempts },
+      usageTokens:
+        usage.tokens?.total === undefined
+          ? { _tag: "Unavailable" }
+          : { _tag: "Available", total: usage.tokens.total, uncountedAttempts: usage.uncountedAttempts },
+      usageTime: usage.active,
+    },
+    maxInMemoryTranscriptUnits,
+  )
 }
 
 const updateStateImpl = (state: State, event: TranscriptEvent): Update => {

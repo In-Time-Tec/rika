@@ -417,7 +417,7 @@ test("End re-engages physical following and invalidates a queued scrollbar repor
       try {
         surface.update({ ...initial("/work", "high"), entries, items })
         yield* openTui(() => setup.flush())
-        surface.transcriptScrollbar.scrollPosition = Math.max(0, surface.transcriptScroll.scrollTop - 20)
+        surface.transcriptScrollbar.scrollPosition = Math.max(0, surface.transcriptDiagnostics().virtualScrollTop - 20)
         setup.mockInput.pressKey("\x1b[F")
         yield* openTui(() => setup.flush())
 

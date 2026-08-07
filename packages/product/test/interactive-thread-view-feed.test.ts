@@ -283,21 +283,8 @@ describe("interactive ThreadView feed", () => {
     expect(JSON.stringify(feed.current())).not.toMatch(/modelCallId|modelAttemptId|raw-root|private/)
   })
 
-  it("keeps off-window live projections out of a historical page without resyncing", () => {
+  it("delivers every unit of a full snapshot without re-bounding the timeline", () => {
     const feed = makeThreadViewFeed(() => 1)
-    feed.publish({
-      _tag: "SelectionLoaded",
-      selectionEpoch: 1,
-      activitySequence: 0,
-      thread,
-      entries: [],
-      hasOlder: true,
-      hasNewer: false,
-      usage: { usage: ExecutionProjection.emptyUsageState() },
-      queueRevision: 0,
-      queue: [],
-      activeTurn: turn,
-    })
     const historyId = Turn.TurnId.make("history")
     const historyTurn: Turn.Turn = { ...turn, id: historyId, prompt: "history", createdAt: 0, updatedAt: 0 }
     const historyEntries = Array.from({ length: 130 }, (_, sequence) => ({
@@ -314,14 +301,21 @@ describe("interactive ThreadView feed", () => {
       projectionState: state("completed"),
     }))
     feed.publish({
-      _tag: "TranscriptPagePrepended",
+      _tag: "SelectionLoaded",
       selectionEpoch: 1,
-      threadId,
+      activitySequence: 0,
+      thread,
       entries: historyEntries,
       hasOlder: false,
+      hasNewer: false,
+      usage: { usage: ExecutionProjection.emptyUsageState() },
+      queueRevision: 0,
+      queue: [],
+      activeTurn: turn,
     })
-    expect(feed.current()?.hasNewer).toBe(true)
-    expect(feed.current()?.turns.map((entry) => entry.turn.id)).toEqual([historyId])
+    expect(feed.current()?.hasNewer).toBe(false)
+    expect(feed.current()?.turns.map((entry) => entry.turn.id)).toEqual([historyId, turn.id])
+    expect(feed.current()?.turns[0]?.units).toHaveLength(130)
 
     const live = feed.publish({
       _tag: "ExecutionProjectionChanged",
@@ -340,10 +334,10 @@ describe("interactive ThreadView feed", () => {
     expect(live).toMatchObject([
       {
         _tag: "ThreadViewPatch",
-        patch: { upsert: [], remove: [], turnChanges: [], header: { hasNewer: true } },
+        patch: { upsert: [{ content: { text: "live" } }] },
       },
     ])
-    expect(feed.current()?.turns.map((entry) => entry.turn.id)).toEqual([historyId])
+    expect(feed.current()?.turns.map((entry) => entry.turn.id)).toEqual([historyId, turn.id])
   })
 
   it("resyncs an unknown turn ahead of a historical window instead of dropping its units", () => {
@@ -505,7 +499,7 @@ describe("interactive ThreadView feed", () => {
     expect(feed.current()?.turns[0]?.units.map((value) => value.key)).toContain("first")
   })
 
-  it("preserves both page edges while walking backward and forward through a bounded window", () => {
+  it("keeps every delivered unit and cursor edge of a full snapshot beyond the old window bounds", () => {
     const feed = makeThreadViewFeed(() => 1)
     const pageEntry = (sequence: number) => ({
       turn,
@@ -521,57 +515,30 @@ describe("interactive ThreadView feed", () => {
       projectionState: state(),
     })
     const canonicalOldest = { createdAt: 1, turnId, orderKey: "canonical-oldest" }
+    const canonicalNewest = { createdAt: 1, turnId, orderKey: "canonical-newest" }
     feed.publish({
       _tag: "SelectionLoaded",
       selectionEpoch: 1,
       activitySequence: 0,
       thread,
-      entries: Array.from({ length: 100 }, (_, index) => pageEntry(index + 100)),
+      entries: Array.from({ length: 150 }, (_, index) => pageEntry(index)),
       hasOlder: true,
       hasNewer: false,
       oldestCursor: canonicalOldest,
+      newestCursor: canonicalNewest,
       usage: { usage: ExecutionProjection.emptyUsageState() },
       queueRevision: 0,
       queue: [],
     })
     expect(feed.current()?.source.oldestCursor).toEqual(canonicalOldest)
-    const prepended = feed.publish({
-      _tag: "TranscriptPagePrepended",
-      selectionEpoch: 1,
-      threadId,
-      entries: Array.from({ length: 50 }, (_, index) => pageEntry(index + 50)),
-      hasOlder: true,
-    })
-    expect(prepended[0]).toMatchObject({
-      _tag: "ThreadViewSnapshot",
-      snapshot: { hasOlder: true, hasNewer: true },
-    })
+    expect(feed.current()?.source.newestCursor).toEqual(canonicalNewest)
     expect(feed.current()?.turns[0]?.units.map((value) => value.key)).toEqual(
-      Array.from({ length: 120 }, (_, index) => `unit:${index + 50}`),
+      Array.from({ length: 150 }, (_, index) => `unit:${index}`),
     )
-    expect(feed.current()?.source.oldestCursor?.turnId).toBe(turnId)
-    expect(feed.current()?.source.newestCursor?.turnId).toBe(turnId)
-
-    const requestedAfter = feed.current()?.source.newestCursor
-    expect(requestedAfter).toBeDefined()
-    const appended = feed.publish({
-      _tag: "TranscriptPageAppended",
-      selectionEpoch: 1,
-      threadId,
-      entries: Array.from({ length: 50 }, (_, index) => pageEntry(index + 170)),
-      hasNewer: false,
-      requestedAfter: requestedAfter!,
-    })
-    expect(appended[0]).toMatchObject({
-      _tag: "ThreadViewSnapshot",
-      snapshot: { hasOlder: true, hasNewer: false },
-    })
-    expect(feed.current()?.turns[0]?.units.map((value) => value.key)).toEqual(
-      Array.from({ length: 120 }, (_, index) => `unit:${index + 100}`),
-    )
+    expect(feed.current()?.hasOlder).toBe(true)
   })
 
-  it("never evicts a whole 125-unit Turn when an older page is prepended", () => {
+  it("keeps the full ancestry-closed timeline of a large snapshot without evicting whole Turns", () => {
     const feed = makeThreadViewFeed(() => 1)
     const makeUnit = (key: string, sequence: number, parentId?: string) => ({
       key,
@@ -612,20 +579,8 @@ describe("interactive ThreadView feed", () => {
       cardUnit("review-retry-card", 72, "Review"),
       ...Array.from({ length: 52 }, (_, index) => makeUnit(`retry-child-${73 + index}`, 73 + index, "card-Review")),
     ]
-    const olderUnit = (key: string, sequence: number) => ({
-      ...makeUnit(key, sequence),
-      turnId: "older-turn",
-      order: [{ sequence, part: 0, key }],
-    })
-    const olderTurn: Turn.Turn = {
-      ...turn,
-      id: Turn.TurnId.make("older-turn"),
-      createdAt: 0,
-      updatedAt: 0,
-    }
-    const olderUnits = Array.from({ length: 5 }, (_, index) => olderUnit(`older-${index}`, index))
-    const entryFor = (entry: ReturnType<typeof makeUnit>, unitTurn: Turn.Turn) => ({
-      turn: unitTurn,
+    const entryFor = (entry: ReturnType<typeof makeUnit>) => ({
+      turn,
       unit: entry,
       projectionRevision: 1,
       projectionModelPhase: -1,
@@ -636,65 +591,25 @@ describe("interactive ThreadView feed", () => {
       selectionEpoch: 1,
       activitySequence: 0,
       thread,
-      entries: newestUnits.map((entry) => entryFor(entry, turn)),
-      hasOlder: true,
+      entries: newestUnits.map((entry) => entryFor(entry)),
+      hasOlder: false,
       hasNewer: false,
       usage: { usage: ExecutionProjection.emptyUsageState() },
       queueRevision: 0,
       queue: [],
     })
-    const prepended = feed.publish({
-      _tag: "TranscriptPagePrepended",
-      selectionEpoch: 1,
-      threadId,
-      entries: olderUnits.map((entry) => entryFor(entry, olderTurn)),
-      hasOlder: false,
-      oldestCursor: { createdAt: 0, turnId: "older-turn", orderKey: "older-0" },
-    })
-    expect(prepended[0]).toMatchObject({
-      _tag: "ThreadViewSnapshot",
-      snapshot: { hasOlder: false, hasNewer: true },
-    })
-    const afterPrepend = feed.current()!
-    expect(afterPrepend.turns.map((entry) => entry.turn.id)).toContain(turn.id)
-    const prependKeys = afterPrepend.turns.flatMap((entry) => entry.units.map((value) => value.key))
-    expect(prependKeys).toHaveLength(120)
-    for (const key of ["task-card", "librarian-card", "review-card", "review-retry-card"])
-      expect(prependKeys).toContain(key)
-    const prependParents = new Set(
-      afterPrepend.turns
+    const snapshot = feed.current()!
+    const keys = snapshot.turns.flatMap((entry) => entry.units.map((value) => value.key))
+    expect(keys).toHaveLength(newestUnits.length)
+    for (const key of ["task-card", "librarian-card", "review-card", "review-retry-card", "prompt"])
+      expect(keys).toContain(key)
+    const parents = new Set(
+      snapshot.turns
         .flatMap((entry) => entry.units)
         .filter((value) => value.content._tag === "Block")
         .flatMap((value) => (value.content.block._tag === "SubagentCard" ? [value.content.block.id] : [])),
     )
-    for (const entry of afterPrepend.turns.flatMap((value) => value.units))
-      if (entry.parentId !== undefined) expect(prependParents.has(entry.parentId)).toBe(true)
-
-    const appended = feed.publish({
-      _tag: "TranscriptPageAppended",
-      selectionEpoch: 1,
-      threadId,
-      entries: newestUnits.slice(115).map((entry) => entryFor(entry, turn)),
-      hasNewer: false,
-      requestedAfter: afterPrepend.source.newestCursor!,
-      newestCursor: { createdAt: 1, turnId: String(turnId), orderKey: "newest-124" },
-    })
-    expect(appended[0]).toMatchObject({
-      _tag: "ThreadViewSnapshot",
-      snapshot: { hasOlder: true, hasNewer: false },
-    })
-    const afterAppend = feed.current()!
-    const appendKeys = afterAppend.turns.flatMap((entry) => entry.units.map((value) => value.key))
-    expect(appendKeys).toHaveLength(120)
-    for (const key of ["task-card", "librarian-card", "review-card", "review-retry-card"])
-      expect(appendKeys).toContain(key)
-    const appendParents = new Set(
-      afterAppend.turns
-        .flatMap((entry) => entry.units)
-        .filter((value) => value.content._tag === "Block")
-        .flatMap((value) => (value.content.block._tag === "SubagentCard" ? [value.content.block.id] : [])),
-    )
-    for (const entry of afterAppend.turns.flatMap((value) => value.units))
-      if (entry.parentId !== undefined) expect(appendParents.has(entry.parentId)).toBe(true)
+    for (const entry of snapshot.turns.flatMap((value) => value.units))
+      if (entry.parentId !== undefined) expect(parents.has(entry.parentId)).toBe(true)
   })
 })

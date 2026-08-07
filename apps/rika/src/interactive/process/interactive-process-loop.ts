@@ -1,7 +1,6 @@
 #!/usr/bin/env bun
 import * as ProductOperation from "@rika/product/product-operation"
 import * as InteractiveSession from "@rika/product/interactive-session"
-import * as TranscriptPage from "@rika/product/transcript-page"
 import * as InteractiveFeed from "@rika/product/server-interactive-feed"
 import * as Turn from "@rika/product/turn-record"
 import { create as createTui } from "@rika/terminal/opentui-surface"
@@ -57,18 +56,12 @@ export const interactiveTui =
           feedPreserveAnchor: false,
           replayTurns: new Map<string, Turn.Turn>(),
           projectionRevisions: new Map<string, number>(),
-          transcriptHasOlder: false,
-          transcriptHasNewer: false,
-          transcriptOldestCursor: undefined as TranscriptPage.PageCursor | undefined,
-          transcriptNewestCursor: undefined as TranscriptPage.PageCursor | undefined,
           appliedDeltas: new Set<string>(),
           activitySequence: 0,
           submissionSequence: 0,
           selectionFiber: undefined as Fiber.Fiber<void, never> | undefined,
           selectionGeneration: 0,
           renderSuppressed: false,
-          loadingOlder: false,
-          pendingNewer: undefined as { readonly threadId: string; readonly cursor: string } | undefined,
           selectionResyncs: new Set<string>(),
           queueResyncs: new Set<string>(),
           lifecycle,
@@ -130,7 +123,6 @@ export const interactiveTui =
           close,
           suspend,
           run,
-          requestNewerPage,
           startSelection,
           loadChangedFiles,
           watchChangedFiles,
@@ -158,7 +150,6 @@ export const interactiveTui =
           previewTimer,
           feedTimer,
           run,
-          requestNewerPage,
           close,
           refreshTerminalTitle,
           openPath,

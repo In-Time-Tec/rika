@@ -324,35 +324,34 @@ test(
         yield* app.reload
         const reloaded = app.frame()
 
+        // The full timeline arrives in the initial snapshot: hasOlder is false immediately and no
+        // page fetches exist to walk. PageUp travels the in-memory transcript to the seeded marker.
+        expect(reachedOldest, "the full thread loads with hasOlder false").toBe(true)
+        expect(olderPageCursors.length, "one snapshot per load, no page fetches").toBe(2)
         const pagingDeadline = currentWallTime() + 20_000
-        for (;;) {
-          if (reachedOldest) break
-          if (currentWallTime() >= pagingDeadline)
-            return yield* Effect.die(`page-up never reached the oldest page: ${olderPageCursors.length} pages loaded`)
-          const before = olderPageCursors.length
+        let paged = app.frame()
+        let previous = ""
+        while (!paged.includes(marker) && paged !== previous && currentWallTime() < pagingDeadline) {
+          previous = paged
           yield* app.pressPageUp
-          for (let attempt = 0; attempt < 25; attempt += 1) {
-            if (olderPageCursors.length > before || reachedOldest) break
-            yield* Effect.sleep("10 millis")
-          }
+          paged = app.frame()
         }
-        // The seeded marker is durable regardless of the transient viewport anchor; prove the
-        // oldest page was reached through the authoritative projection (and the frame when the
-        // renderer has re-anchored it, which is timing-dependent).
-        const paged = app.frame()
         const projection = yield* app.transcript(Turn.TurnId.make("tui-pageup-thread-history"))
         const projectedMarker = projection?.units.some((unit) => JSON.stringify(unit.content).includes(marker)) === true
         expect(projectedMarker || paged.includes(marker), "page-up reaches the seeded historical window").toBe(true)
 
-        app.pressKey("\u001b[F")
-        yield* Effect.sleep("500 millis")
+        if (paged.includes(marker)) {
+          app.pressKey("\u001b[F")
+          yield* Effect.sleep("500 millis")
+        }
+        yield* app.waitTranscript(Turn.TurnId.make("tui-turn-0"), (liveProjection) =>
+          liveProjection.units.some((unit) => JSON.stringify(unit.content).includes("REALISTIC_VOLUME_ROOT_FINISHED")),
+        )
         const final = app.frame()
         yield* app.quit
 
         expect(reloadTurnIds).toContain("tui-pageup-thread-history")
         expect(reloaded).not.toContain("Execution failed")
-        expect(olderPageCursors.length, "page-up fetched repeated older pages").toBeGreaterThan(2)
-        expect(reachedOldest, "hasOlder becomes false at the true beginning").toBe(true)
         expect(final).not.toContain("Execution failed")
         const liveProjection = yield* app.transcript(Turn.TurnId.make("tui-turn-0"))
         const liveFinished =

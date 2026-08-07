@@ -3149,6 +3149,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/terminal/test/integration/opentui-transcript-instant-scroll.test.ts",
+      "path": "packages/terminal/test/integration/opentui-transcript-instant-scroll.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/terminal/test/integration/opentui-transcript-prefetch.test.ts",
       "path": "packages/terminal/test/integration/opentui-transcript-prefetch.test.ts",
       "workspace": "@rika/terminal",
@@ -3361,6 +3371,16 @@
     {
       "id": "packages/terminal/test/transcript-viewport.test.ts",
       "path": "packages/terminal/test/transcript-viewport.test.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/terminal/test/transcript-virtual-and-bounds.test.ts",
+      "path": "packages/terminal/test/transcript-virtual-and-bounds.test.ts",
       "workspace": "@rika/terminal",
       "package": "@rika/terminal",
       "kind": "source",
@@ -9087,6 +9107,30 @@
       "production": false
     },
     {
+      "from": "packages/terminal/test/integration/opentui-transcript-instant-scroll.test.ts",
+      "to": "external:@opentui/core/testing",
+      "specifier": "@opentui/core/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-instant-scroll.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/integration/opentui-transcript-instant-scroll.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/terminal/test/integration/opentui-transcript-prefetch.test.ts",
       "to": "external:@opentui/core/testing",
       "specifier": "@opentui/core/testing",
@@ -9320,6 +9364,14 @@
     },
     {
       "from": "packages/terminal/test/transcript-viewport.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/terminal/test/transcript-virtual-and-bounds.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",

@@ -4,7 +4,6 @@ import {
   type InteractiveSessionInput,
   type InteractiveSessionRuntimeResult,
 } from "../interactive/interactive-session-runtime"
-import { selectionInitialTurnWindow, selectionInitialEntryWindow } from "../interactive/interactive-session-constants"
 import { isTerminalStatus } from "../../execution/contract/execution-status"
 import {
   executionStartFailureMessage,
@@ -18,8 +17,6 @@ import { OperationError } from "../operation-error"
 
 type ProductOperationInteractiveSessionInput = Omit<
   InteractiveSessionInput,
-  | "selectionInitialTurnWindow"
-  | "selectionInitialEntryWindow"
   | "isTerminalStatus"
   | "executionStartFailureMessage"
   | "temporaryThreadTitle"
@@ -42,8 +39,6 @@ export const makeProductOperationInteractiveSession = (
   return (workspace: string, settings: { readonly initialThreadId?: string; readonly serverOwner?: boolean } = {}) => {
     const runtimeInput: InteractiveSessionInput = {
       ...input,
-      selectionInitialTurnWindow,
-      selectionInitialEntryWindow,
       encodeJson: input.encodeJson,
       isTerminalStatus,
       executionStartFailureMessage,

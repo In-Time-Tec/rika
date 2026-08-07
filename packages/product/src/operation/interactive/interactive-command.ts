@@ -1,5 +1,4 @@
 import * as Thread from "@rika/product/thread-record"
-import * as TranscriptPage from "@rika/product/transcript-page"
 import * as ExecutionRequest from "@rika/product/execution-request"
 import { Effect, Function, Schema } from "effect"
 import { ModeId } from "@rika/configuration/behavior-mode"
@@ -42,16 +41,6 @@ export const InteractiveCommand = Schema.Union([
     threadId: Schema.String,
   }),
   Schema.Struct({ _tag: Schema.tag("ReadQueue"), threadId: Schema.String }),
-  Schema.Struct({
-    _tag: Schema.tag("LoadOlder"),
-    threadId: Schema.String,
-    before: TranscriptPage.PageCursor,
-  }),
-  Schema.Struct({
-    _tag: Schema.tag("LoadNewer"),
-    threadId: Schema.String,
-    after: TranscriptPage.PageCursor,
-  }),
   Schema.Struct({ _tag: Schema.tag("PreviewThread"), threadId: Schema.String }),
   Schema.Struct({ _tag: Schema.tag("ReopenThread") }),
 ])
@@ -93,10 +82,6 @@ const executeInteractiveCommandImpl = (session: InteractiveSession, command: Int
       return session.selectThread(command.threadId)
     case "ReadQueue":
       return session.readQueue(command.threadId)
-    case "LoadOlder":
-      return session.loadOlder(command.threadId, command.before)
-    case "LoadNewer":
-      return session.loadNewer(command.threadId, command.after)
     case "PreviewThread":
       return session.previewThread(command.threadId)
     case "ReopenThread":

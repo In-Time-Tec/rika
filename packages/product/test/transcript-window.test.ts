@@ -58,8 +58,7 @@ it.effect("derives a terminal recorded shell from its authoritative Turn instead
           }),
         usage: () => Effect.succeed({ usage: { ...ExecutionProjection.emptyUsageState(), sourceComplete: true } }),
       },
-      maxTurns: 10,
-      maxEntries: 10,
+      encodeJson: (value) => JSON.stringify(value),
       fail: (message) => Effect.die(message),
     })
     expect(window.entries).toHaveLength(1)
@@ -180,15 +179,14 @@ it.effect("keeps every SubagentCard whose children are retained when a 125-unit 
           }),
         usage: () => Effect.succeed({ usage: { ...ExecutionProjection.emptyUsageState(), sourceComplete: true } }),
       },
-      maxTurns: 10,
-      maxEntries: 120,
+      encodeJson: (value) => JSON.stringify(value),
       fail: (message) => Effect.die(message),
     })
     const keys = window.entries.map((entry) => entry.unit.key)
     for (const cardKey of ["task-card", "librarian-card", "review-card", "review-retry-card"])
       expect(keys).toContain(cardKey)
     expect(keys).toContain("prompt")
-    expect(window.entries.length).toBeLessThanOrEqual(120)
+    expect(window.entries.length).toBe(units.length)
     const parentIds = new Set(units.filter((value) => value.parentId !== undefined).map((value) => value.parentId))
     const retainedParents = new Set(
       window.entries
@@ -198,5 +196,80 @@ it.effect("keeps every SubagentCard whose children are retained when a 125-unit 
     for (const entry of window.entries)
       if (entry.unit.parentId !== undefined) expect(retainedParents.has(entry.unit.parentId)).toBe(true)
     expect(Array.from(parentIds).every((id) => retainedParents.has(id))).toBe(true)
+  }),
+)
+
+it.effect("pages every Turn page and delivers the full timeline oldest-first with edge cursors", () =>
+  Effect.gen(function* () {
+    const turnFor = (id: string, createdAt: number): Turn.AgentExecutionTurn => ({
+      _tag: "AgentExecution",
+      id: Turn.TurnId.make(id),
+      threadId: thread.id,
+      prompt: `prompt ${id}`,
+      executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
+      status: "completed",
+      author: { _tag: "Human" },
+      lineage: { _tag: "Original" },
+      createdAt,
+      updatedAt: createdAt,
+    })
+    const oldest = turnFor("turn-a", 1)
+    const middle = turnFor("turn-b", 2)
+    const newest = turnFor("turn-c", 3)
+    const projection = (agentTurn: Turn.AgentExecutionTurn, key: string) => ({
+      turn: agentTurn,
+      units: [
+        {
+          key,
+          turnId: String(turn.id),
+          order: [{ sequence: 0, part: 0, key }],
+          revision: 1,
+          content: { _tag: "Entry" as const, role: "assistant" as const, text: `answer ${key}` },
+        },
+      ],
+      revision: 1,
+      checkpointGeneration: 0,
+      projectionVersion: ExecutionProjection.projectionVersion,
+      state: {
+        status: "completed" as const,
+        usage: ExecutionProjection.emptyUsageState(),
+        steering: { steeringMessages: 0, followUpMessages: 0 },
+      },
+    })
+    const window = yield* initialTranscriptWindow({
+      state: makeSelectionState(thread, 1),
+      turns: {
+        page: (threadId, options) => {
+          if (options?.before === undefined)
+            return Effect.succeed({
+              turns: [newest, middle],
+              hasOlder: true,
+              oldestCursor: { createdAt: middle.createdAt, id: middle.id },
+              newestCursor: { createdAt: newest.createdAt, id: newest.id },
+            })
+          expect(options.before).toEqual({ createdAt: middle.createdAt, id: middle.id })
+          return Effect.succeed({
+            turns: [oldest],
+            hasOlder: false,
+            oldestCursor: { createdAt: oldest.createdAt, id: oldest.id },
+            newestCursor: { createdAt: oldest.createdAt, id: oldest.id },
+          })
+        },
+      },
+      transcripts: {
+        get: (turnId) => {
+          if (String(turnId) === String(oldest.id)) return Effect.succeed(projection(oldest, "oldest-unit"))
+          if (String(turnId) === String(middle.id)) return Effect.succeed(projection(middle, "middle-unit"))
+          return Effect.succeed(projection(newest, "newest-unit"))
+        },
+        usage: () => Effect.succeed({ usage: { ...ExecutionProjection.emptyUsageState(), sourceComplete: true } }),
+      },
+      encodeJson: (value) => JSON.stringify(value),
+      fail: (message) => Effect.die(message),
+    })
+    expect(window.entries.map((entry) => entry.unit.key)).toEqual(["oldest-unit", "middle-unit", "newest-unit"])
+    expect(window.hasOlder).toBe(false)
+    expect(window.oldestCursor).toMatchObject({ createdAt: 1 })
+    expect(window.newestCursor).toMatchObject({ createdAt: 3 })
   }),
 )

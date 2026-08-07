@@ -1,5 +1,6 @@
 import { CliRenderEvents, type MouseEvent } from "@opentui/core"
 import { transcriptOverscanRows } from "../../presentation/transcript/terminal-transcript-window"
+import { itemPositionAtVirtualRow } from "../../presentation/transcript/transcript-virtual-index"
 import { clampScrollTop, isFollowing } from "../../presentation/transcript/transcript-viewport"
 import {
   maxScrollTop,
@@ -157,17 +158,41 @@ export abstract class SurfaceTranscriptScroll extends SurfaceTranscriptRendering
   protected syncTranscriptScrollbar(): void {
     if (this.destroyed) return
     const viewportHeight = this.transcriptScroll.viewport.height
-    const scrollHeight = this.transcriptScroll.scrollHeight
+    const virtual = this.transcriptVirtualMetrics()
+    const scrollHeight = virtual.scrollHeight
+    const rowsAbove = virtual.rowsAbove
+    const scrollTop = rowsAbove + this.transcriptScroll.scrollTop
     const overflowing = viewportHeight > 0 && scrollHeight > Math.max(viewportHeight, this.transcriptViewportRows)
     this.scrollbarSyncing = true
     try {
       this.transcriptScrollbar.scrollSize = scrollHeight
       this.transcriptScrollbar.viewportSize = Math.max(1, viewportHeight)
-      this.transcriptScrollbar.scrollPosition = this.transcriptScroll.scrollTop
+      this.transcriptScrollbar.scrollPosition = scrollTop
     } finally {
       this.scrollbarSyncing = false
     }
     if (this.transcriptScrollbar.visible !== overflowing) this.transcriptScrollbar.visible = overflowing
+  }
+  protected applyVirtualScrollbarPosition(position: number): void {
+    const model = this.model
+    if (model === undefined) return
+    const windowMax = Math.max(0, this.transcriptScroll.scrollHeight - this.transcriptScroll.viewport.height)
+    const rowsAbove = this.transcriptVirtualMetrics().rowsAbove
+    if (position >= rowsAbove && position - rowsAbove <= windowMax) {
+      this.applyTranscriptPosition(Math.max(0, Math.min(position - rowsAbove, windowMax)))
+      return
+    }
+    const windowStartItem = Math.max(0, this.transcriptWindowEnd - maxMountedTranscriptEntries)
+    const targetItem = itemPositionAtVirtualRow(this.virtualIndex(model), position)
+    const center = windowStartItem + Math.floor(maxMountedTranscriptEntries / 2)
+    const delta = targetItem - center
+    if (delta !== 0 && this.shiftTranscriptWindow(delta, false)) {
+      this.pendingTranscriptPosition = undefined
+      this.syncTranscriptScrollbar()
+    }
+    const afterRowsAbove = this.transcriptVirtualMetrics().rowsAbove
+    const afterMax = Math.max(0, this.transcriptScroll.scrollHeight - this.transcriptScroll.viewport.height)
+    this.applyTranscriptPosition(Math.max(0, Math.min(position - afterRowsAbove, afterMax)))
   }
   protected queueTranscriptScroll(action: () => void): void {
     const generation = this.scrollGeneration

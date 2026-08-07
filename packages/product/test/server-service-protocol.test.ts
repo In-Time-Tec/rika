@@ -396,16 +396,6 @@ describe("Rika Server protocol", () => {
       { _tag: "NewThread" },
       { _tag: "SelectThread", threadId: "thread" },
       { _tag: "ReadQueue", threadId: "thread" },
-      {
-        _tag: "LoadOlder",
-        threadId: "thread",
-        before: { createdAt: 1, turnId: "turn", orderKey: "turn:user" },
-      },
-      {
-        _tag: "LoadNewer",
-        threadId: "thread",
-        after: { createdAt: 1, turnId: "turn", orderKey: "key" },
-      },
       { _tag: "PreviewThread", threadId: "thread" },
       { _tag: "ReopenThread" },
     ]

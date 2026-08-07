@@ -15,7 +15,6 @@ import { gitOutput } from "./process-workspace"
 
 type StartupContext = InteractiveInputContext & {
   readonly input: InteractiveFeed.InteractiveInput
-  readonly requestNewerPage: () => void
   readonly close: () => void
   readonly refreshTerminalTitle: () => void
   readonly openPath: Parameters<typeof createInputHandlers>[0]["openPath"]
@@ -41,7 +40,6 @@ export const initializeRenderer = (context: StartupContext): Fiber.Fiber<void, n
     previewTimer,
     feedTimer,
     run,
-    requestNewerPage,
     close,
     refreshTerminalTitle,
     openPath,
@@ -69,7 +67,6 @@ export const initializeRenderer = (context: StartupContext): Fiber.Fiber<void, n
           renderTimer,
           previewTimer,
           feedTimer,
-          requestNewerPage,
           close,
           refreshTerminalTitle,
           openPath,
