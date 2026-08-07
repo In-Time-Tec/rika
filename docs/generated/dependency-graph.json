@@ -1701,6 +1701,14 @@
       "package": "effect"
     },
     {
+      "id": "external:effect/Scope",
+      "workspace": "root",
+      "kind": "external",
+      "production": true,
+      "publicExports": [],
+      "package": "effect"
+    },
+    {
       "id": "external:effect/testing",
       "workspace": "root",
       "kind": "external",
@@ -4092,6 +4100,16 @@
     {
       "id": "packages/product-store/test/product-operation/operation-persisted-history.test.ts",
       "path": "packages/product-store/test/product-operation/operation-persisted-history.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "path": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
       "workspace": "@rika/product-store",
       "package": "@rika/product-store",
       "kind": "source",
@@ -24823,6 +24841,142 @@
       "from": "packages/product-store/test/product-operation/operation-persisted-history.test.ts",
       "to": "packages/product/src/thread/model/turn-record.ts",
       "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "external:effect/Scope",
+      "specifier": "effect/Scope",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "packages/product-store/src/thread/sqlite-thread-repository.ts",
+      "specifier": "@rika/product-store/sqlite-thread-repository",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "packages/product-store/src/turn/sqlite-turn-repository.ts",
+      "specifier": "@rika/product-store/sqlite-turn-repository",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "packages/product-store/test/support/operation-execution-fixtures.ts",
+      "specifier": "../support/operation-execution-fixtures",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "packages/product-store/test/support/operation-layer-harness.ts",
+      "specifier": "../support/operation-layer-harness",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "packages/product-store/test/support/operation-selection-fixtures.ts",
+      "specifier": "../support/operation-selection-fixtures",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "packages/product-store/test/support/operation-session-harness.ts",
+      "specifier": "../support/operation-session-harness",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "packages/product/src/execution/contract/execution-gateway.ts",
+      "specifier": "@rika/product/execution-gateway",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "packages/product/src/execution/contract/execution-status.ts",
+      "specifier": "@rika/product/execution-status",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
+      "kind": "dynamic-import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "packages/product/src/operation/interactive/interactive-event.ts",
+      "specifier": "@rika/product/interactive-event",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "packages/product/src/operation/interactive/interactive-session.ts",
+      "specifier": "@rika/product/interactive-session",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "packages/product/src/thread/model/thread-record.ts",
+      "specifier": "@rika/product/thread-record",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "packages/product/src/thread/repository/turn-repository.ts",
+      "specifier": "@rika/product/turn-repository",
       "kind": "import",
       "relationship": "test",
       "production": false

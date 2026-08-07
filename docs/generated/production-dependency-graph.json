@@ -1231,6 +1231,14 @@
       "package": "effect"
     },
     {
+      "id": "external:effect/Scope",
+      "workspace": "root",
+      "kind": "external",
+      "production": true,
+      "publicExports": [],
+      "package": "effect"
+    },
+    {
       "id": "external:effect/testing",
       "workspace": "root",
       "kind": "external",

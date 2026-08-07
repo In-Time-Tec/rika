@@ -111,6 +111,69 @@ describe("interactive ThreadView controller", () => {
     expect(loaded.state.model.activeTurnId).toBe("turn")
   })
 
+  it("keeps editing a queued turn across snapshot re-projections", () => {
+    const pending = [
+      { id: "q1", prompt: "queued one", createdAt: 1 },
+      { id: "q2", prompt: "queued two", createdAt: 2 },
+    ]
+    const loaded = InteractiveController.update(state(), {
+      _tag: "ThreadViewSnapshot",
+      snapshot: {
+        ...snapshot(),
+        turns: [],
+        pending,
+      },
+    })
+    const model = {
+      ...loaded.state.model,
+      editingTurnId: "q2",
+      editReturn: { input: "", attachments: [] },
+      input: "queued two!",
+      cursor: 10,
+      queueSelection: "q2",
+    }
+    const projected = InteractiveController.update(
+      { ...loaded.state, model },
+      { _tag: "ThreadViewPatch", patch: patch() },
+    )
+    expect(projected.state.model.editingTurnId).toBe("q2")
+    expect(projected.state.model.input).toBe("queued two!")
+  })
+  it("exits edit mode when the edited queued turn leaves the snapshot", () => {
+    const loaded = InteractiveController.update(state(), {
+      _tag: "ThreadViewSnapshot",
+      snapshot: {
+        ...snapshot(),
+        turns: [],
+        pending: [{ id: "q1", prompt: "queued one", createdAt: 1 }],
+      },
+    })
+    const model = {
+      ...loaded.state.model,
+      editingTurnId: "q1",
+      editReturn: { input: "", attachments: [] },
+      input: "queued one!",
+      cursor: 10,
+      queueSelection: "q1",
+    }
+    const projected = InteractiveController.update(
+      { ...loaded.state, model },
+      {
+        _tag: "ThreadViewPatch",
+        patch: patch({
+          header: {
+            thread: snapshot().thread,
+            source: { projectionVersion: 1 },
+            pending: [],
+            hasOlder: false,
+            hasNewer: false,
+            usage: snapshot().usage,
+          },
+        }),
+      },
+    )
+    expect(projected.state.model.editingTurnId).toBeUndefined()
+  })
   it("derives footer cost, tokens, context, and union time only from ThreadView usage", () => {
     const loaded = InteractiveController.update(state(), {
       _tag: "ThreadViewSnapshot",

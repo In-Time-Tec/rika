@@ -70,6 +70,8 @@ export const makeInteractiveControl = (input: {
   const steerQueued = (id: string, text: string) =>
     Effect.gen(function* () {
       const turn = yield* input.active
+      if (turn._tag !== "AgentExecution" || turn.executionLink === undefined)
+        return yield* input.fail(`Turn ${turn.id} has no persisted execution link`)
       const candidate = yield* input.turns.get(Turn.TurnId.make(id))
       if (candidate?.status === "queued" && candidate.promptParts?.some((part) => part.type === "image") === true)
         return yield* input.fail("Queued turns with images cannot be steered")
@@ -83,8 +85,6 @@ export const makeInteractiveControl = (input: {
         queued.prompt ??
         text
       input.dispatch(input.queueMutation(taken.queue))
-      if (turn._tag !== "AgentExecution" || turn.executionLink === undefined)
-        return yield* input.fail(`Turn ${turn.id} has no persisted execution link`)
       const outcome = yield* Effect.exit(
         input.backend.steerTurn(turn.executionLink, {
           text: steeringText,

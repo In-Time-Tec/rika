@@ -145,7 +145,7 @@ export const promotePendingTurns = (input: {
         const result = outcome.value
         if (result === undefined) return true
         yield* input.setTurnStatus(promoted.id, result.status, yield* Clock.currentTimeMillis)
-        return result.status !== "failed" && ["completed", "cancelled"].includes(result.status)
+        return result.status !== "running" && result.status !== "waiting" && result.status !== "cancelling"
       })
     while (true) {
       if (staleRefused || (yield* input.turns.readQueue(input.thread.id)).queuedCount === 0) break

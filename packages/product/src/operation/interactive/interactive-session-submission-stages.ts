@@ -126,16 +126,13 @@ const settleInteractiveSubmissionImpl = (
           turnId: turn.id,
           failure: makeFailure(Cause.squash(outcome.cause)),
         })
+        yield* settleThread(thread, dispatch)
         return
       }
       const result = outcome.value
       if (result === undefined) return yield* settleThread(thread, dispatch)
       for (const change of result.changes) publish(change)
       yield* setTurnStatus(turn.id, result.status, yield* Clock.currentTimeMillis)
-      if (result.status === "completed") {
-        yield* settleThread(thread, dispatch)
-        return
-      }
       if (result.status === "waiting" || result.status === "running" || result.status === "cancelling") return
       if (result.status === "failed") {
         // The projector carried the run's real failure into the last Error unit; surface it
@@ -157,7 +154,7 @@ const settleInteractiveSubmissionImpl = (
           failure: makeFailure(message),
         })
       }
-      if (result.status !== "failed") yield* settleThread(thread, dispatch)
+      yield* settleThread(thread, dispatch)
     }),
   )
 }
