@@ -288,6 +288,16 @@ const checkSourceMetrics = (input: {
         "warning",
       ),
     )
+  if (input.lines > 0 && input.lines < 20 && input.exports <= 1)
+    diagnostics.push(
+      diagnostic(
+        input.path,
+        "module-depth",
+        `file has ${input.lines} lines behind ${input.exports} export`,
+        "Merge the declaration into the module that owns the concept",
+        "warning",
+      ),
+    )
   if (input.dependencies > 18)
     diagnostics.push(
       diagnostic(

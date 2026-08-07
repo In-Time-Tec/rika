@@ -83,9 +83,9 @@ export const transcriptSqliteWrites = {
               ${turn.id}, ${unit.key}, ${turn.threadId}, ${order}, ${unit.parentId ?? null},
               ${unit.revision}, ${encodeUnit(unit)}, ${turn.createdAt}, ${now}
             ) ON CONFLICT(turn_id, unit_key) DO UPDATE SET
-              revision = excluded.revision, unit_json = excluded.unit_json, updated_at = excluded.updated_at
-            WHERE rika_transcript_units.unit_order_key = excluded.unit_order_key
-              AND rika_transcript_units.parent_id IS excluded.parent_id`
+              revision = excluded.revision, unit_json = excluded.unit_json,
+              parent_id = excluded.parent_id, updated_at = excluded.updated_at
+            WHERE rika_transcript_units.unit_order_key = excluded.unit_order_key`
             }
             return "committed" as const
           }),
