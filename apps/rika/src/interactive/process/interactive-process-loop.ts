@@ -8,7 +8,7 @@ import { create as createTui } from "@rika/terminal/opentui-surface"
 import { Model, initial, withModeRouteMap } from "@rika/terminal/terminal-state"
 import type { ThreadItem } from "@rika/terminal/terminal-state"
 type ModeRoutes = Model["modeRoutes"]
-import { Effect, Fiber } from "effect"
+import { Deferred, Effect, Fiber } from "effect"
 import { terminalTitleSequence } from "./interactive-process"
 import { makeEventRouter } from "./process-events"
 import { makeProcessRuntime } from "./process-runtime"
@@ -59,6 +59,7 @@ export const interactiveTui =
             activitySequence: 0,
             submissionSequence: 0,
             fibers: new Set<Fiber.Fiber<void, never>>(),
+            signalListener: undefined as Fiber.Fiber<void, never> | undefined,
             selectionFiber: undefined as Fiber.Fiber<void, never> | undefined,
             selectionGeneration: 0,
             renderSuppressed: false,
@@ -67,6 +68,8 @@ export const interactiveTui =
             selectionResyncs: new Set<string>(),
             queueResyncs: new Set<string>(),
             closing: false,
+            forceQuit: Deferred.makeUnsafe<void>(),
+            lastInterruptAt: undefined,
             interruptCancellationRequested: false,
             submittedSinceIdle: false,
             teardownStarted: false,

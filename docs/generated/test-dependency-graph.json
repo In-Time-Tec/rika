@@ -213,6 +213,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "apps/rika/test/interactive-signal-lifecycle.test.ts",
+      "path": "apps/rika/test/interactive-signal-lifecycle.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "apps/rika/test/lazy-backend.test.ts",
       "path": "apps/rika/test/lazy-backend.test.ts",
       "workspace": "@rika/cli",
@@ -811,6 +821,14 @@
       "production": true,
       "publicExports": [],
       "package": "effect"
+    },
+    {
+      "id": "external:events",
+      "workspace": "root",
+      "kind": "external",
+      "production": true,
+      "publicExports": [],
+      "package": "events"
     },
     {
       "id": "external:fs/promises",
@@ -4022,6 +4040,38 @@
       "from": "apps/rika/test/interactive-controller-thread-view.test.ts",
       "to": "packages/product/src/execution/contract/execution-projection.ts",
       "specifier": "@rika/product/execution-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/interactive-signal-lifecycle.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/interactive-signal-lifecycle.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/interactive-signal-lifecycle.test.ts",
+      "to": "external:events",
+      "specifier": "events",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/interactive-signal-lifecycle.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
       "kind": "import",
       "relationship": "test",
       "production": false

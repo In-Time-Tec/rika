@@ -345,6 +345,24 @@
       "publicExports": []
     },
     {
+      "id": "apps/rika/src/interactive/process/process-goodbye.ts",
+      "path": "apps/rika/src/interactive/process/process-goodbye.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/interactive/process/process-interrupt.ts",
+      "path": "apps/rika/src/interactive/process/process-interrupt.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "apps/rika/src/interactive/process/process-layer.ts",
       "path": "apps/rika/src/interactive/process/process-layer.ts",
       "workspace": "@rika/cli",
@@ -374,6 +392,15 @@
     {
       "id": "apps/rika/src/interactive/process/process-runtime.ts",
       "path": "apps/rika/src/interactive/process/process-runtime.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "apps/rika/src/interactive/process/process-signals.ts",
+      "path": "apps/rika/src/interactive/process/process-signals.ts",
       "workspace": "@rika/cli",
       "package": "@rika/cli",
       "kind": "source",
@@ -1299,6 +1326,14 @@
       "package": "effect"
     },
     {
+      "id": "external:events",
+      "workspace": "root",
+      "kind": "external",
+      "production": true,
+      "publicExports": [],
+      "package": "events"
+    },
+    {
       "id": "external:fs/promises",
       "workspace": "root",
       "kind": "external",
@@ -1712,8 +1747,17 @@
       ]
     },
     {
-      "id": "packages/baton-execution/src/accounting/usage-accounting.ts",
-      "path": "packages/baton-execution/src/accounting/usage-accounting.ts",
+      "id": "packages/baton-execution/src/baton-authorization-projection.ts",
+      "path": "packages/baton-execution/src/baton-authorization-projection.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/baton-execution/src/baton-diagnostic-projection.ts",
+      "path": "packages/baton-execution/src/baton-diagnostic-projection.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1730,8 +1774,8 @@
       "publicExports": ["./baton-execution"]
     },
     {
-      "id": "packages/baton-execution/src/program/baton-program.ts",
-      "path": "packages/baton-execution/src/program/baton-program.ts",
+      "id": "packages/baton-execution/src/baton-program-bindings.ts",
+      "path": "packages/baton-execution/src/baton-program-bindings.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1739,8 +1783,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/program/baton-registration.ts",
-      "path": "packages/baton-execution/src/program/baton-registration.ts",
+      "id": "packages/baton-execution/src/baton-program.ts",
+      "path": "packages/baton-execution/src/baton-program.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1748,8 +1792,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/program/program-bindings.ts",
-      "path": "packages/baton-execution/src/program/program-bindings.ts",
+      "id": "packages/baton-execution/src/baton-projector-checkpoint.ts",
+      "path": "packages/baton-execution/src/baton-projector-checkpoint.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1757,8 +1801,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/projection/authorization-projection.ts",
-      "path": "packages/baton-execution/src/projection/authorization-projection.ts",
+      "id": "packages/baton-execution/src/baton-projector-decoding.ts",
+      "path": "packages/baton-execution/src/baton-projector-decoding.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1766,8 +1810,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/projection/diagnostic-projection.ts",
-      "path": "packages/baton-execution/src/projection/diagnostic-projection.ts",
+      "id": "packages/baton-execution/src/baton-projector-identity.ts",
+      "path": "packages/baton-execution/src/baton-projector-identity.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1775,8 +1819,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/projection/streamed-text-projection.ts",
-      "path": "packages/baton-execution/src/projection/streamed-text-projection.ts",
+      "id": "packages/baton-execution/src/baton-projector-model.ts",
+      "path": "packages/baton-execution/src/baton-projector-model.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1784,8 +1828,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/projection/subagent-card-projection.ts",
-      "path": "packages/baton-execution/src/projection/subagent-card-projection.ts",
+      "id": "packages/baton-execution/src/baton-projector-nodes.ts",
+      "path": "packages/baton-execution/src/baton-projector-nodes.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1793,8 +1837,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/projection/tool-projection.ts",
-      "path": "packages/baton-execution/src/projection/tool-projection.ts",
+      "id": "packages/baton-execution/src/baton-projector-persistence.ts",
+      "path": "packages/baton-execution/src/baton-projector-persistence.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1802,8 +1846,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/projection/tool-unit-projection.ts",
-      "path": "packages/baton-execution/src/projection/tool-unit-projection.ts",
+      "id": "packages/baton-execution/src/baton-projector-values.ts",
+      "path": "packages/baton-execution/src/baton-projector-values.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1811,8 +1855,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/projector/projector-checkpoint.ts",
-      "path": "packages/baton-execution/src/projector/projector-checkpoint.ts",
+      "id": "packages/baton-execution/src/baton-registration.ts",
+      "path": "packages/baton-execution/src/baton-registration.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1820,71 +1864,8 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/projector/projector-decoding.ts",
-      "path": "packages/baton-execution/src/projector/projector-decoding.ts",
-      "workspace": "@rika/baton-execution",
-      "package": "@rika/baton-execution",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "packages/baton-execution/src/projector/projector-identity.ts",
-      "path": "packages/baton-execution/src/projector/projector-identity.ts",
-      "workspace": "@rika/baton-execution",
-      "package": "@rika/baton-execution",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "packages/baton-execution/src/projector/projector-model.ts",
-      "path": "packages/baton-execution/src/projector/projector-model.ts",
-      "workspace": "@rika/baton-execution",
-      "package": "@rika/baton-execution",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "packages/baton-execution/src/projector/projector-nodes.ts",
-      "path": "packages/baton-execution/src/projector/projector-nodes.ts",
-      "workspace": "@rika/baton-execution",
-      "package": "@rika/baton-execution",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "packages/baton-execution/src/projector/projector-persistence.ts",
-      "path": "packages/baton-execution/src/projector/projector-persistence.ts",
-      "workspace": "@rika/baton-execution",
-      "package": "@rika/baton-execution",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "packages/baton-execution/src/projector/projector-values.ts",
-      "path": "packages/baton-execution/src/projector/projector-values.ts",
-      "workspace": "@rika/baton-execution",
-      "package": "@rika/baton-execution",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "packages/baton-execution/src/projector/tree-projector.ts",
-      "path": "packages/baton-execution/src/projector/tree-projector.ts",
-      "workspace": "@rika/baton-execution",
-      "package": "@rika/baton-execution",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "packages/baton-execution/src/routing/baton-route.ts",
-      "path": "packages/baton-execution/src/routing/baton-route.ts",
+      "id": "packages/baton-execution/src/baton-route.ts",
+      "path": "packages/baton-execution/src/baton-route.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1892,8 +1873,8 @@
       "publicExports": ["./baton-route"]
     },
     {
-      "id": "packages/baton-execution/src/routing/sandbox-identity-route.ts",
-      "path": "packages/baton-execution/src/routing/sandbox-identity-route.ts",
+      "id": "packages/baton-execution/src/baton-sandbox-identity.ts",
+      "path": "packages/baton-execution/src/baton-sandbox-identity.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1901,8 +1882,26 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/testing/baton-test-harness.ts",
-      "path": "packages/baton-execution/src/testing/baton-test-harness.ts",
+      "id": "packages/baton-execution/src/baton-streamed-text-projection.ts",
+      "path": "packages/baton-execution/src/baton-streamed-text-projection.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/baton-execution/src/baton-subagent-card-projection.ts",
+      "path": "packages/baton-execution/src/baton-subagent-card-projection.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/baton-execution/src/baton-test-harness.ts",
+      "path": "packages/baton-execution/src/baton-test-harness.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -1910,8 +1909,44 @@
       "publicExports": ["./baton-test-harness"]
     },
     {
-      "id": "packages/baton-execution/src/testing/scripted-model.ts",
-      "path": "packages/baton-execution/src/testing/scripted-model.ts",
+      "id": "packages/baton-execution/src/baton-tool-projection.ts",
+      "path": "packages/baton-execution/src/baton-tool-projection.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/baton-execution/src/baton-tool-unit-projection.ts",
+      "path": "packages/baton-execution/src/baton-tool-unit-projection.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/baton-execution/src/baton-tree-projector.ts",
+      "path": "packages/baton-execution/src/baton-tree-projector.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/baton-execution/src/baton-usage-accounting.ts",
+      "path": "packages/baton-execution/src/baton-usage-accounting.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/baton-execution/src/scripted-model.ts",
+      "path": "packages/baton-execution/src/scripted-model.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -7346,6 +7381,30 @@
       "production": true
     },
     {
+      "from": "apps/rika/src/interactive/process/process-goodbye.ts",
+      "to": "apps/rika/src/interactive/input/goodbye-message.ts",
+      "specifier": "../input/goodbye-message",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/process-goodbye.ts",
+      "to": "packages/terminal/src/state/model/terminal-state.ts",
+      "specifier": "@rika/terminal/terminal-state",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/process-interrupt.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "apps/rika/src/interactive/process/process-layer.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -7403,14 +7462,6 @@
     },
     {
       "from": "apps/rika/src/interactive/process/process-runtime.ts",
-      "to": "apps/rika/src/interactive/input/goodbye-message.ts",
-      "specifier": "../input/goodbye-message",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/interactive/process/process-runtime.ts",
       "to": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
       "specifier": "./interactive-runtime-context",
       "kind": "import",
@@ -7445,6 +7496,14 @@
       "from": "apps/rika/src/interactive/process/process-runtime.ts",
       "to": "apps/rika/src/interactive/process/process-prompt.ts",
       "specifier": "./process-prompt",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/process-runtime.ts",
+      "to": "apps/rika/src/interactive/process/process-signals.ts",
+      "specifier": "./process-signals",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -7517,6 +7576,30 @@
       "from": "apps/rika/src/interactive/process/process-runtime.ts",
       "to": "packages/terminal/src/terminal-session.ts",
       "specifier": "@rika/terminal/terminal-session",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/process-signals.ts",
+      "to": "apps/rika/src/interactive/process/process-goodbye.ts",
+      "specifier": "./process-goodbye",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/process-signals.ts",
+      "to": "apps/rika/src/interactive/process/process-interrupt.ts",
+      "specifier": "./process-interrupt",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/process-signals.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -8299,7 +8382,7 @@
     },
     {
       "from": "apps/rika/src/server/composition/server-execution-layer.ts",
-      "to": "packages/baton-execution/src/testing/scripted-model.ts",
+      "to": "packages/baton-execution/src/scripted-model.ts",
       "specifier": "@rika/baton-execution/scripted-model",
       "kind": "import",
       "relationship": "runtime",
@@ -10243,7 +10326,7 @@
     },
     {
       "from": "apps/rika/test/tui-app-backend.ts",
-      "to": "packages/baton-execution/src/testing/baton-test-harness.ts",
+      "to": "packages/baton-execution/src/baton-test-harness.ts",
       "specifier": "@rika/baton-execution/baton-test-harness",
       "kind": "import",
       "relationship": "runtime",
@@ -10291,7 +10374,7 @@
     },
     {
       "from": "apps/rika/test/tui-app-model.ts",
-      "to": "packages/baton-execution/src/testing/baton-test-harness.ts",
+      "to": "packages/baton-execution/src/baton-test-harness.ts",
       "specifier": "@rika/baton-execution/baton-test-harness",
       "kind": "import",
       "relationship": "runtime",
@@ -10767,33 +10850,41 @@
       "dependencySection": "dependencies"
     },
     {
-      "from": "packages/baton-execution/src/accounting/usage-accounting.ts",
-      "to": "external:@batonfx/runtime",
-      "specifier": "@batonfx/runtime",
+      "from": "packages/baton-execution/src/baton-authorization-projection.ts",
+      "to": "packages/baton-execution/src/baton-projector-model.ts",
+      "specifier": "./baton-projector-model",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/accounting/usage-accounting.ts",
-      "to": "packages/baton-execution/src/projector/projector-decoding.ts",
-      "specifier": "../projector/projector-decoding",
+      "from": "packages/baton-execution/src/baton-authorization-projection.ts",
+      "to": "packages/baton-execution/src/baton-projector-persistence.ts",
+      "specifier": "./baton-projector-persistence",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/accounting/usage-accounting.ts",
-      "to": "packages/baton-execution/src/projector/projector-model.ts",
-      "specifier": "../projector/projector-model",
+      "from": "packages/baton-execution/src/baton-authorization-projection.ts",
+      "to": "packages/baton-execution/src/baton-projector-values.ts",
+      "specifier": "./baton-projector-values",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/accounting/usage-accounting.ts",
-      "to": "packages/baton-execution/src/projector/projector-persistence.ts",
-      "specifier": "../projector/projector-persistence",
+      "from": "packages/baton-execution/src/baton-diagnostic-projection.ts",
+      "to": "packages/baton-execution/src/baton-projector-model.ts",
+      "specifier": "./baton-projector-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-diagnostic-projection.ts",
+      "to": "packages/baton-execution/src/baton-projector-values.ts",
+      "specifier": "./baton-projector-values",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10824,22 +10915,22 @@
     },
     {
       "from": "packages/baton-execution/src/baton-execution.ts",
-      "to": "packages/baton-execution/src/projector/tree-projector.ts",
-      "specifier": "./projector/tree-projector",
+      "to": "packages/baton-execution/src/baton-route.ts",
+      "specifier": "./baton-route",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
       "from": "packages/baton-execution/src/baton-execution.ts",
-      "to": "packages/baton-execution/src/routing/baton-route.ts",
-      "specifier": "./routing/baton-route",
+      "to": "packages/baton-execution/src/baton-tree-projector.ts",
+      "specifier": "./baton-tree-projector",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/program/baton-program.ts",
+      "from": "packages/baton-execution/src/baton-program-bindings.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
       "kind": "import",
@@ -10847,7 +10938,15 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/program/baton-program.ts",
+      "from": "packages/baton-execution/src/baton-program-bindings.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-program-bindings.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -10855,7 +10954,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/program/baton-program.ts",
+      "from": "packages/baton-execution/src/baton-program-bindings.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
       "kind": "import",
@@ -10863,23 +10962,71 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/program/baton-program.ts",
-      "to": "packages/baton-execution/src/program/baton-registration.ts",
+      "from": "packages/baton-execution/src/baton-program-bindings.ts",
+      "to": "packages/baton-execution/src/baton-program.ts",
+      "specifier": "./baton-program",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-program-bindings.ts",
+      "to": "packages/baton-execution/src/baton-registration.ts",
       "specifier": "./baton-registration",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/program/baton-program.ts",
-      "to": "packages/baton-execution/src/routing/sandbox-identity-route.ts",
-      "specifier": "../routing/sandbox-identity-route",
+      "from": "packages/baton-execution/src/baton-program-bindings.ts",
+      "to": "packages/baton-execution/src/baton-sandbox-identity.ts",
+      "specifier": "./baton-sandbox-identity",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/program/baton-program.ts",
+      "from": "packages/baton-execution/src/baton-program.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-program.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-program.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-program.ts",
+      "to": "packages/baton-execution/src/baton-registration.ts",
+      "specifier": "./baton-registration",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-program.ts",
+      "to": "packages/baton-execution/src/baton-sandbox-identity.ts",
+      "specifier": "./baton-sandbox-identity",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-program.ts",
       "to": "packages/coding-tools/src/catalog/agent-role-toolkits.ts",
       "specifier": "@rika/coding-tools/agent-role-toolkits",
       "kind": "import",
@@ -10887,23 +11034,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/program/baton-registration.ts",
-      "to": "external:@batonfx/core",
-      "specifier": "@batonfx/core",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/program/baton-registration.ts",
-      "to": "external:@batonfx/runtime",
-      "specifier": "@batonfx/runtime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/program/baton-registration.ts",
+      "from": "packages/baton-execution/src/baton-projector-checkpoint.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -10911,7 +11042,135 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/program/baton-registration.ts",
+      "from": "packages/baton-execution/src/baton-projector-checkpoint.ts",
+      "to": "packages/baton-execution/src/baton-projector-model.ts",
+      "specifier": "./baton-projector-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-projector-checkpoint.ts",
+      "to": "packages/baton-execution/src/baton-projector-nodes.ts",
+      "specifier": "./baton-projector-nodes",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-projector-checkpoint.ts",
+      "to": "packages/baton-execution/src/baton-projector-persistence.ts",
+      "specifier": "./baton-projector-persistence",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-projector-checkpoint.ts",
+      "to": "packages/baton-execution/src/baton-usage-accounting.ts",
+      "specifier": "./baton-usage-accounting",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-projector-decoding.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-projector-decoding.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-projector-decoding.ts",
+      "to": "packages/baton-execution/src/baton-projector-values.ts",
+      "specifier": "./baton-projector-values",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-projector-model.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-projector-nodes.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-projector-nodes.ts",
+      "to": "packages/baton-execution/src/baton-projector-model.ts",
+      "specifier": "./baton-projector-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-projector-nodes.ts",
+      "to": "packages/baton-execution/src/baton-projector-persistence.ts",
+      "specifier": "./baton-projector-persistence",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-projector-persistence.ts",
+      "to": "packages/baton-execution/src/baton-projector-model.ts",
+      "specifier": "./baton-projector-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-projector-values.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-registration.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-registration.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-registration.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-registration.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
       "kind": "import",
@@ -10919,15 +11178,15 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/program/baton-registration.ts",
-      "to": "packages/baton-execution/src/routing/sandbox-identity-route.ts",
-      "specifier": "../routing/sandbox-identity-route",
+      "from": "packages/baton-execution/src/baton-registration.ts",
+      "to": "packages/baton-execution/src/baton-sandbox-identity.ts",
+      "specifier": "./baton-sandbox-identity",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/program/program-bindings.ts",
+      "from": "packages/baton-execution/src/baton-route.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
       "kind": "import",
@@ -10935,439 +11194,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/program/program-bindings.ts",
-      "to": "external:@batonfx/runtime",
-      "specifier": "@batonfx/runtime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/program/program-bindings.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/program/program-bindings.ts",
-      "to": "external:effect/unstable/ai",
-      "specifier": "effect/unstable/ai",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/program/program-bindings.ts",
-      "to": "packages/baton-execution/src/program/baton-program.ts",
-      "specifier": "./baton-program",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/program/program-bindings.ts",
-      "to": "packages/baton-execution/src/program/baton-registration.ts",
-      "specifier": "./baton-registration",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/program/program-bindings.ts",
-      "to": "packages/baton-execution/src/routing/sandbox-identity-route.ts",
-      "specifier": "../routing/sandbox-identity-route",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projection/authorization-projection.ts",
-      "to": "packages/baton-execution/src/projector/projector-model.ts",
-      "specifier": "../projector/projector-model",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projection/authorization-projection.ts",
-      "to": "packages/baton-execution/src/projector/projector-persistence.ts",
-      "specifier": "../projector/projector-persistence",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projection/authorization-projection.ts",
-      "to": "packages/baton-execution/src/projector/projector-values.ts",
-      "specifier": "../projector/projector-values",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projection/diagnostic-projection.ts",
-      "to": "packages/baton-execution/src/projector/projector-model.ts",
-      "specifier": "../projector/projector-model",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projection/diagnostic-projection.ts",
-      "to": "packages/baton-execution/src/projector/projector-values.ts",
-      "specifier": "../projector/projector-values",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projection/streamed-text-projection.ts",
-      "to": "packages/baton-execution/src/projector/projector-model.ts",
-      "specifier": "../projector/projector-model",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projection/streamed-text-projection.ts",
-      "to": "packages/baton-execution/src/projector/projector-values.ts",
-      "specifier": "../projector/projector-values",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projection/subagent-card-projection.ts",
-      "to": "packages/baton-execution/src/projector/projector-decoding.ts",
-      "specifier": "../projector/projector-decoding",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projection/subagent-card-projection.ts",
-      "to": "packages/baton-execution/src/projector/projector-model.ts",
-      "specifier": "../projector/projector-model",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projection/subagent-card-projection.ts",
-      "to": "packages/baton-execution/src/projector/projector-persistence.ts",
-      "specifier": "../projector/projector-persistence",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projection/subagent-card-projection.ts",
-      "to": "packages/baton-execution/src/projector/projector-values.ts",
-      "specifier": "../projector/projector-values",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projection/subagent-card-projection.ts",
-      "to": "packages/coding-tools/src/catalog/coding-tool-catalog.ts",
-      "specifier": "@rika/coding-tools/coding-tool-catalog",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projection/tool-projection.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projection/tool-projection.ts",
-      "to": "packages/coding-tools/src/catalog/coding-tool-catalog.ts",
-      "specifier": "@rika/coding-tools/coding-tool-catalog",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projection/tool-unit-projection.ts",
-      "to": "packages/baton-execution/src/projection/tool-projection.ts",
-      "specifier": "./tool-projection",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projection/tool-unit-projection.ts",
-      "to": "packages/baton-execution/src/projector/projector-model.ts",
-      "specifier": "../projector/projector-model",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projection/tool-unit-projection.ts",
-      "to": "packages/baton-execution/src/projector/projector-values.ts",
-      "specifier": "../projector/projector-values",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/projector-checkpoint.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/projector-checkpoint.ts",
-      "to": "packages/baton-execution/src/accounting/usage-accounting.ts",
-      "specifier": "../accounting/usage-accounting",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/projector-checkpoint.ts",
-      "to": "packages/baton-execution/src/projector/projector-model.ts",
-      "specifier": "./projector-model",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/projector-checkpoint.ts",
-      "to": "packages/baton-execution/src/projector/projector-nodes.ts",
-      "specifier": "./projector-nodes",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/projector-checkpoint.ts",
-      "to": "packages/baton-execution/src/projector/projector-persistence.ts",
-      "specifier": "./projector-persistence",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/projector-decoding.ts",
-      "to": "external:@batonfx/runtime",
-      "specifier": "@batonfx/runtime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/projector-decoding.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/projector-decoding.ts",
-      "to": "packages/baton-execution/src/projector/projector-values.ts",
-      "specifier": "./projector-values",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/projector-model.ts",
-      "to": "external:@batonfx/runtime",
-      "specifier": "@batonfx/runtime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/projector-nodes.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/projector-nodes.ts",
-      "to": "packages/baton-execution/src/projector/projector-model.ts",
-      "specifier": "./projector-model",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/projector-nodes.ts",
-      "to": "packages/baton-execution/src/projector/projector-persistence.ts",
-      "specifier": "./projector-persistence",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/projector-persistence.ts",
-      "to": "packages/baton-execution/src/projector/projector-model.ts",
-      "specifier": "./projector-model",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/projector-values.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/tree-projector.ts",
-      "to": "external:@batonfx/runtime",
-      "specifier": "@batonfx/runtime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/tree-projector.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/tree-projector.ts",
-      "to": "packages/baton-execution/src/accounting/usage-accounting.ts",
-      "specifier": "../accounting/usage-accounting",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/tree-projector.ts",
-      "to": "packages/baton-execution/src/projection/authorization-projection.ts",
-      "specifier": "../projection/authorization-projection",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/tree-projector.ts",
-      "to": "packages/baton-execution/src/projection/diagnostic-projection.ts",
-      "specifier": "../projection/diagnostic-projection",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/tree-projector.ts",
-      "to": "packages/baton-execution/src/projection/streamed-text-projection.ts",
-      "specifier": "../projection/streamed-text-projection",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/tree-projector.ts",
-      "to": "packages/baton-execution/src/projection/subagent-card-projection.ts",
-      "specifier": "../projection/subagent-card-projection",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/tree-projector.ts",
-      "to": "packages/baton-execution/src/projection/tool-projection.ts",
-      "specifier": "../projection/tool-projection",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/tree-projector.ts",
-      "to": "packages/baton-execution/src/projection/tool-unit-projection.ts",
-      "specifier": "../projection/tool-unit-projection",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/tree-projector.ts",
-      "to": "packages/baton-execution/src/projector/projector-checkpoint.ts",
-      "specifier": "./projector-checkpoint",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/tree-projector.ts",
-      "to": "packages/baton-execution/src/projector/projector-decoding.ts",
-      "specifier": "./projector-decoding",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/tree-projector.ts",
-      "to": "packages/baton-execution/src/projector/projector-identity.ts",
-      "specifier": "./projector-identity",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/tree-projector.ts",
-      "to": "packages/baton-execution/src/projector/projector-model.ts",
-      "specifier": "./projector-model",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/tree-projector.ts",
-      "to": "packages/baton-execution/src/projector/projector-nodes.ts",
-      "specifier": "./projector-nodes",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/tree-projector.ts",
-      "to": "packages/baton-execution/src/projector/projector-persistence.ts",
-      "specifier": "./projector-persistence",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/projector/tree-projector.ts",
-      "to": "packages/baton-execution/src/projector/projector-values.ts",
-      "specifier": "./projector-values",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/routing/baton-route.ts",
-      "to": "external:@batonfx/core",
-      "specifier": "@batonfx/core",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/baton-execution/src/routing/baton-route.ts",
+      "from": "packages/baton-execution/src/baton-route.ts",
       "to": "external:@batonfx/providers",
       "specifier": "@batonfx/providers",
       "kind": "import",
@@ -11375,7 +11202,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/routing/baton-route.ts",
+      "from": "packages/baton-execution/src/baton-route.ts",
       "to": "external:@batonfx/runtime",
       "specifier": "@batonfx/runtime",
       "kind": "import",
@@ -11383,7 +11210,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/routing/baton-route.ts",
+      "from": "packages/baton-execution/src/baton-route.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -11391,7 +11218,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/routing/baton-route.ts",
+      "from": "packages/baton-execution/src/baton-route.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
       "kind": "import",
@@ -11399,7 +11226,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/routing/baton-route.ts",
+      "from": "packages/baton-execution/src/baton-route.ts",
       "to": "external:effect/unstable/http",
       "specifier": "effect/unstable/http",
       "kind": "import",
@@ -11407,39 +11234,39 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/routing/baton-route.ts",
-      "to": "packages/baton-execution/src/program/baton-program.ts",
-      "specifier": "../program/baton-program",
+      "from": "packages/baton-execution/src/baton-route.ts",
+      "to": "packages/baton-execution/src/baton-program-bindings.ts",
+      "specifier": "./baton-program-bindings",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/routing/baton-route.ts",
-      "to": "packages/baton-execution/src/program/baton-registration.ts",
-      "specifier": "../program/baton-registration",
+      "from": "packages/baton-execution/src/baton-route.ts",
+      "to": "packages/baton-execution/src/baton-program.ts",
+      "specifier": "./baton-program",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/routing/baton-route.ts",
-      "to": "packages/baton-execution/src/program/program-bindings.ts",
-      "specifier": "../program/program-bindings",
+      "from": "packages/baton-execution/src/baton-route.ts",
+      "to": "packages/baton-execution/src/baton-registration.ts",
+      "specifier": "./baton-registration",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/routing/baton-route.ts",
-      "to": "packages/baton-execution/src/routing/sandbox-identity-route.ts",
-      "specifier": "./sandbox-identity-route",
+      "from": "packages/baton-execution/src/baton-route.ts",
+      "to": "packages/baton-execution/src/baton-sandbox-identity.ts",
+      "specifier": "./baton-sandbox-identity",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/routing/baton-route.ts",
+      "from": "packages/baton-execution/src/baton-route.ts",
       "to": "packages/coding-tools/src/catalog/agent-role-toolkits.ts",
       "specifier": "@rika/coding-tools/agent-role-toolkits",
       "kind": "import",
@@ -11447,7 +11274,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/routing/sandbox-identity-route.ts",
+      "from": "packages/baton-execution/src/baton-sandbox-identity.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
       "kind": "import",
@@ -11455,7 +11282,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/routing/sandbox-identity-route.ts",
+      "from": "packages/baton-execution/src/baton-sandbox-identity.ts",
       "to": "external:@batonfx/runtime",
       "specifier": "@batonfx/runtime",
       "kind": "import",
@@ -11463,7 +11290,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/routing/sandbox-identity-route.ts",
+      "from": "packages/baton-execution/src/baton-sandbox-identity.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -11471,7 +11298,63 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/testing/baton-test-harness.ts",
+      "from": "packages/baton-execution/src/baton-streamed-text-projection.ts",
+      "to": "packages/baton-execution/src/baton-projector-model.ts",
+      "specifier": "./baton-projector-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-streamed-text-projection.ts",
+      "to": "packages/baton-execution/src/baton-projector-values.ts",
+      "specifier": "./baton-projector-values",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-subagent-card-projection.ts",
+      "to": "packages/baton-execution/src/baton-projector-decoding.ts",
+      "specifier": "./baton-projector-decoding",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-subagent-card-projection.ts",
+      "to": "packages/baton-execution/src/baton-projector-model.ts",
+      "specifier": "./baton-projector-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-subagent-card-projection.ts",
+      "to": "packages/baton-execution/src/baton-projector-persistence.ts",
+      "specifier": "./baton-projector-persistence",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-subagent-card-projection.ts",
+      "to": "packages/baton-execution/src/baton-projector-values.ts",
+      "specifier": "./baton-projector-values",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-subagent-card-projection.ts",
+      "to": "packages/coding-tools/src/catalog/coding-tool-catalog.ts",
+      "specifier": "@rika/coding-tools/coding-tool-catalog",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-test-harness.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
       "kind": "import",
@@ -11479,7 +11362,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/testing/baton-test-harness.ts",
+      "from": "packages/baton-execution/src/baton-test-harness.ts",
       "to": "external:@batonfx/runtime",
       "specifier": "@batonfx/runtime",
       "kind": "import",
@@ -11487,7 +11370,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/testing/baton-test-harness.ts",
+      "from": "packages/baton-execution/src/baton-test-harness.ts",
       "to": "external:@batonfx/test",
       "specifier": "@batonfx/test",
       "kind": "import",
@@ -11495,7 +11378,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/testing/baton-test-harness.ts",
+      "from": "packages/baton-execution/src/baton-test-harness.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -11503,7 +11386,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/testing/baton-test-harness.ts",
+      "from": "packages/baton-execution/src/baton-test-harness.ts",
       "to": "external:effect/unstable/ai",
       "specifier": "effect/unstable/ai",
       "kind": "import",
@@ -11511,7 +11394,207 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/testing/scripted-model.ts",
+      "from": "packages/baton-execution/src/baton-tool-projection.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-tool-projection.ts",
+      "to": "packages/coding-tools/src/catalog/coding-tool-catalog.ts",
+      "specifier": "@rika/coding-tools/coding-tool-catalog",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-tool-unit-projection.ts",
+      "to": "packages/baton-execution/src/baton-projector-model.ts",
+      "specifier": "./baton-projector-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-tool-unit-projection.ts",
+      "to": "packages/baton-execution/src/baton-projector-values.ts",
+      "specifier": "./baton-projector-values",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-tool-unit-projection.ts",
+      "to": "packages/baton-execution/src/baton-tool-projection.ts",
+      "specifier": "./baton-tool-projection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-tree-projector.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-tree-projector.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-tree-projector.ts",
+      "to": "packages/baton-execution/src/baton-authorization-projection.ts",
+      "specifier": "./baton-authorization-projection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-tree-projector.ts",
+      "to": "packages/baton-execution/src/baton-diagnostic-projection.ts",
+      "specifier": "./baton-diagnostic-projection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-tree-projector.ts",
+      "to": "packages/baton-execution/src/baton-projector-checkpoint.ts",
+      "specifier": "./baton-projector-checkpoint",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-tree-projector.ts",
+      "to": "packages/baton-execution/src/baton-projector-decoding.ts",
+      "specifier": "./baton-projector-decoding",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-tree-projector.ts",
+      "to": "packages/baton-execution/src/baton-projector-identity.ts",
+      "specifier": "./baton-projector-identity",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-tree-projector.ts",
+      "to": "packages/baton-execution/src/baton-projector-model.ts",
+      "specifier": "./baton-projector-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-tree-projector.ts",
+      "to": "packages/baton-execution/src/baton-projector-nodes.ts",
+      "specifier": "./baton-projector-nodes",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-tree-projector.ts",
+      "to": "packages/baton-execution/src/baton-projector-persistence.ts",
+      "specifier": "./baton-projector-persistence",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-tree-projector.ts",
+      "to": "packages/baton-execution/src/baton-projector-values.ts",
+      "specifier": "./baton-projector-values",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-tree-projector.ts",
+      "to": "packages/baton-execution/src/baton-streamed-text-projection.ts",
+      "specifier": "./baton-streamed-text-projection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-tree-projector.ts",
+      "to": "packages/baton-execution/src/baton-subagent-card-projection.ts",
+      "specifier": "./baton-subagent-card-projection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-tree-projector.ts",
+      "to": "packages/baton-execution/src/baton-tool-projection.ts",
+      "specifier": "./baton-tool-projection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-tree-projector.ts",
+      "to": "packages/baton-execution/src/baton-tool-unit-projection.ts",
+      "specifier": "./baton-tool-unit-projection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-tree-projector.ts",
+      "to": "packages/baton-execution/src/baton-usage-accounting.ts",
+      "specifier": "./baton-usage-accounting",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-usage-accounting.ts",
+      "to": "external:@batonfx/runtime",
+      "specifier": "@batonfx/runtime",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-usage-accounting.ts",
+      "to": "packages/baton-execution/src/baton-projector-decoding.ts",
+      "specifier": "./baton-projector-decoding",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-usage-accounting.ts",
+      "to": "packages/baton-execution/src/baton-projector-model.ts",
+      "specifier": "./baton-projector-model",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-usage-accounting.ts",
+      "to": "packages/baton-execution/src/baton-projector-persistence.ts",
+      "specifier": "./baton-projector-persistence",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/scripted-model.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
       "kind": "import",
@@ -11519,7 +11602,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/testing/scripted-model.ts",
+      "from": "packages/baton-execution/src/scripted-model.ts",
       "to": "external:@batonfx/test",
       "specifier": "@batonfx/test",
       "kind": "import",
@@ -11527,7 +11610,7 @@
       "production": true
     },
     {
-      "from": "packages/baton-execution/src/testing/scripted-model.ts",
+      "from": "packages/baton-execution/src/scripted-model.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -11552,8 +11635,8 @@
     },
     {
       "from": "packages/baton-execution/test/baton-projector-event-fixtures.ts",
-      "to": "packages/baton-execution/src/projector/tree-projector.ts",
-      "specifier": "../src/projector/tree-projector",
+      "to": "packages/baton-execution/src/baton-tree-projector.ts",
+      "specifier": "../src/baton-tree-projector",
       "kind": "import",
       "relationship": "runtime",
       "production": true

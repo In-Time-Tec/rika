@@ -8,7 +8,7 @@ import type * as TranscriptPage from "@rika/product/transcript-page"
 import type * as Turn from "@rika/product/turn-record"
 import type * as ThreadView from "@rika/product/thread-view"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Effect, Fiber } from "effect"
+import { Deferred, Effect, Fiber } from "effect"
 import type { InteractiveTuiOptions } from "./interactive-process-loop"
 
 export interface InteractiveLoop {
@@ -35,6 +35,7 @@ export interface InteractiveLoop {
   activitySequence: number
   submissionSequence: number
   fibers: Set<Fiber.Fiber<void, never>>
+  signalListener: Fiber.Fiber<void, never> | undefined
   selectionFiber: Fiber.Fiber<void, never> | undefined
   selectionGeneration: number
   renderSuppressed: boolean
@@ -43,6 +44,8 @@ export interface InteractiveLoop {
   selectionResyncs: Set<string>
   queueResyncs: Set<string>
   closing: boolean
+  forceQuit: Deferred.Deferred<void>
+  lastInterruptAt: number | undefined
   interruptCancellationRequested: boolean
   submittedSinceIdle: boolean
   teardownStarted: boolean

@@ -4,6 +4,7 @@ import * as ProcessLifecycle from "./process-lifecycle"
 import * as ProcessPrompt from "./process-prompt"
 import * as ProcessWorkspace from "./process-workspace"
 import * as ProcessLayer from "./process-layer"
+import * as ProcessSignals from "./process-signals"
 import { paletteCommand } from "../controller/interactive-palette-controller"
 import { classifyPrompt, displayInput, promptParts } from "@rika/terminal/terminal-session"
 import { execute, type Action, type Adapter, type ModelTuning } from "@rika/terminal/terminal-session"
@@ -11,13 +12,11 @@ import { update } from "@rika/terminal/terminal-state-reducer"
 import type { PathTarget } from "@rika/terminal/terminal-transcript-presentation"
 import type { Model, Mode } from "@rika/terminal/terminal-state"
 type PromptPart = ReturnType<ReturnType<typeof promptParts>>[number]
-import type { ThreadItem } from "@rika/terminal/terminal-state"
 import * as Thread from "@rika/product/thread-record"
 import * as ProductOperation from "@rika/product/product-operation"
-import { Cause, Clock, Effect, Fiber, FileSystem, Schema } from "effect"
+import { Cause, Clock, Deferred, Duration, Effect, Fiber, FileSystem, Schema } from "effect"
 import * as Logging from "../../diagnostics/diagnostic-file-logging"
 import { workspaceDirectory } from "@rika/configuration/configuration-paths"
-import { renderGoodbye } from "../input/goodbye-message"
 import type { InteractiveRuntimeContext } from "./interactive-runtime-context"
 
 type Runtime = InteractiveRuntimeContext
@@ -64,24 +63,6 @@ export const makeProcessRuntime = (runtime: Runtime) => {
       return true
     }
   }
-  const goodbye = () => {
-    const threadId = loop.model.currentThreadId
-    const threadTitle =
-      loop.model.currentThreadTitle ??
-      (loop.model.threads as ReadonlyArray<ThreadItem>).find((thread) => thread.id === threadId)?.title
-    try {
-      process.stdout.write(
-        renderGoodbye({
-          mode: loop.model.mode,
-          workspace: loop.model.workspace,
-          ...(threadId === undefined ? {} : { threadId }),
-          ...(threadTitle === undefined ? {} : { threadTitle }),
-        }),
-      )
-    } catch {
-      return
-    }
-  }
   const teardown = (showGoodbye: boolean) =>
     Effect.suspend(() => {
       if (loop.teardownStarted) return Effect.void
@@ -89,14 +70,8 @@ export const makeProcessRuntime = (runtime: Runtime) => {
       return Effect.gen(function* () {
         yield* Effect.logInfo("tui.teardown.started")
         loop.closed = true
-        process.off("SIGINT", interrupt)
-        process.off("SIGTERM", terminate)
-        process.off("SIGHUP", hangup)
-        process.off("SIGTSTP", suspend)
-        process.off("SIGCONT", continueFromSuspend)
-        process.stdin.off("end", hangup)
-        process.stdin.off("error", hangup)
-        process.stdin.off("close", hangup)
+        if (loop.signalListener !== undefined) yield* Fiber.interrupt(loop.signalListener)
+        loop.signalListener = undefined
         if (loop.previewTimer !== undefined) yield* Fiber.interrupt(loop.previewTimer)
         loop.previewTimer = undefined
         if (loop.renderTimer !== undefined) yield* Fiber.interrupt(loop.renderTimer)
@@ -107,44 +82,63 @@ export const makeProcessRuntime = (runtime: Runtime) => {
         loop.renderer?.releaseTerminal()
         if (loop.initialization !== undefined) yield* Fiber.await(loop.initialization)
         yield* interruptTrackedFibers([...loop.fibers])
-        if (showGoodbye) goodbye()
+        if (showGoodbye) ProcessSignals.writeGoodbye(loop.model)
         yield* Effect.logInfo("tui.teardown.completed")
       })
     })
   const close = (exitCode?: number, showGoodbye = true) => {
-    if (loop.closing) return
+    if (loop.closing) {
+      Deferred.doneUnsafe(loop.forceQuit, Effect.void)
+      return
+    }
     loop.closing = true
     if (exitCode !== undefined) process.exitCode = exitCode
     fork(
-      session.quit.pipe(
+      Effect.raceFirst(
+        session.quit.pipe(
+          Effect.catch((failure) =>
+            Effect.logWarning("tui.quit.stop_work.failed").pipe(
+              Effect.annotateLogs("rika.failure.kind", failure instanceof Error ? failure.name : "unknown"),
+            ),
+          ),
+        ),
+        Deferred.await(loop.forceQuit).pipe(Effect.andThen(Effect.logInfo("tui.quit.forced"))),
+      ).pipe(
         Effect.timeoutOrElse({
           duration: quitStopWorkBound,
           orElse: () => Effect.logWarning("tui.quit.stop_work.timeout"),
         }),
-        Effect.catch((failure) =>
-          Effect.logWarning("tui.quit.stop_work.failed").pipe(
-            Effect.annotateLogs("rika.failure.kind", failure instanceof Error ? failure.name : "unknown"),
-          ),
-        ),
         Effect.andThen(teardown(showGoodbye)),
         Effect.andThen(Effect.sync(() => resume(Effect.void))),
       ),
     )
   }
-  const interrupt = () => {
-    if (
-      !loop.interruptCancellationRequested &&
-      (loop.submittedSinceIdle ||
+  const interrupt = Effect.gen(function* () {
+    const now = yield* Clock.currentTimeMillis
+    const sinceLastPress = loop.lastInterruptAt === undefined ? undefined : Duration.millis(now - loop.lastInterruptAt)
+    loop.lastInterruptAt = now
+    const decision = ProcessSignals.interruptDecision({
+      quitRequested: loop.closing,
+      hasActiveWork:
+        loop.submittedSinceIdle ||
         loop.model.busy ||
         loop.model.activeTurnId !== undefined ||
-        loop.model.activity !== undefined)
-    ) {
+        loop.model.activity !== undefined,
+      cancelRequested: loop.interruptCancellationRequested,
+      sinceLastPress,
+    })
+    if (decision._tag === "Cancel") {
       loop.interruptCancellationRequested = true
       run(session.cancel)
       return
     }
+    if (decision._tag === "ForceQuit") {
+      Deferred.doneUnsafe(loop.forceQuit, Effect.void)
+      return
+    }
+    loop.renderer?.surface.showToast("Quitting… press ctrl+c again to force quit")
     close(tuiSignalExitCode("SIGINT"))
-  }
+  })
   const terminate = () => close(tuiSignalExitCode("SIGTERM"))
   const hangup = () => close(tuiSignalExitCode("SIGHUP"), false)
   const suspend = () => {
@@ -176,14 +170,9 @@ export const makeProcessRuntime = (runtime: Runtime) => {
       close(1)
     }
   }
-  process.on("SIGINT", interrupt)
-  process.once("SIGTERM", terminate)
-  process.on("SIGHUP", hangup)
-  process.stdin.once("end", hangup)
-  process.stdin.once("error", hangup)
-  process.stdin.once("close", hangup)
-  process.on("SIGTSTP", suspend)
-  process.on("SIGCONT", continueFromSuspend)
+  loop.signalListener = fork(
+    ProcessSignals.watchLifecycleSignals({ interrupt, terminate, hangup, suspend, continueFromSuspend }),
+  )
   const submit = (
     prompt: string,
     parts: ReadonlyArray<PromptPart>,
