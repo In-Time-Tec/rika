@@ -99,6 +99,36 @@ describe("interactive ThreadView feed", () => {
     expect(JSON.stringify([...selected, ...started, ...patched])).not.toMatch(/gateway:|secret-state|checkpoint/)
   })
 
+  it("carries the first turn's prompt unit in the created-thread base snapshot", () => {
+    const feed = makeThreadViewFeed(() => 1)
+    const selected = feed.publish({
+      _tag: "SelectionLoaded",
+      selectionEpoch: 1,
+      activitySequence: 0,
+      thread,
+      entries: [],
+      hasOlder: false,
+      usage: { usage: ExecutionProjection.emptyUsageState() },
+      queueRevision: 0,
+      queue: [],
+      activeTurn: { ...turn, status: "accepted" },
+    })
+    expect(selected[0]).toMatchObject({ _tag: "ThreadViewSnapshot" })
+    const snapshot = (
+      selected[0] as {
+        readonly snapshot: { readonly turns: ReadonlyArray<{ readonly units: ReadonlyArray<unknown> }> }
+      }
+    ).snapshot
+    const units = snapshot.turns.flatMap((entry) => entry.units)
+    expect(units).toContainEqual({
+      key: "turn:turn:user",
+      turnId: "turn",
+      order: [{ sequence: -1, part: 0, key: "turn:turn:user" }],
+      revision: 0,
+      content: { _tag: "Entry", role: "user", text: "prompt" },
+    })
+  })
+
   it("emits typed resync and stops patching after a projection revision gap", () => {
     const feed = makeThreadViewFeed(() => 1)
     feed.publish({

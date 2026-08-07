@@ -1551,6 +1551,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/product-store/test/product-operation/operation-first-submission-snapshot.test.ts",
+      "path": "packages/product-store/test/product-operation/operation-first-submission-snapshot.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/product-store/test/product-operation/operation-mentions-routing.test.ts",
       "path": "packages/product-store/test/product-operation/operation-mentions-routing.test.ts",
       "workspace": "@rika/product-store",
@@ -6212,6 +6222,30 @@
     },
     {
       "from": "packages/product-store/test/product-operation/operation-execution-reconciliation.test.ts",
+      "to": "packages/product/src/execution/contract/execution-gateway.ts",
+      "specifier": "@rika/product/execution-gateway",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-first-submission-snapshot.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-first-submission-snapshot.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-first-submission-snapshot.test.ts",
       "to": "packages/product/src/execution/contract/execution-gateway.ts",
       "specifier": "@rika/product/execution-gateway",
       "kind": "import",

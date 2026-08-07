@@ -18585,6 +18585,14 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-selection-projection.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-selection-projection.ts",
       "to": "packages/product/src/thread/repository/turn-repository.ts",
       "specifier": "@rika/product/turn-repository",
       "kind": "import",
@@ -19523,6 +19531,14 @@
       "from": "packages/product/src/operation/interactive/interactive-session-state.ts",
       "to": "packages/product/src/thread/model/thread-record.ts",
       "specifier": "@rika/product/thread-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-state.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
       "kind": "import",
       "relationship": "runtime",
       "production": true

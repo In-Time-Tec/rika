@@ -4060,6 +4060,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/product-store/test/product-operation/operation-first-submission-snapshot.test.ts",
+      "path": "packages/product-store/test/product-operation/operation-first-submission-snapshot.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/product-store/test/product-operation/operation-mentions-routing.test.ts",
       "path": "packages/product-store/test/product-operation/operation-mentions-routing.test.ts",
       "workspace": "@rika/product-store",
@@ -14449,6 +14459,14 @@
       "production": false
     },
     {
+      "from": "apps/rika/test/interactive-controller-thread-view.test.ts",
+      "to": "packages/terminal/src/state/reducer/terminal-state-reducer.ts",
+      "specifier": "@rika/terminal/terminal-state-reducer",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "apps/rika/test/interactive-controller-transcript-fixtures.ts",
       "to": "apps/rika/src/interactive/controller/interactive-controller.ts",
       "specifier": "../src/interactive/controller/interactive-controller",
@@ -24386,6 +24404,102 @@
       "production": false
     },
     {
+      "from": "packages/product-store/test/product-operation/operation-first-submission-snapshot.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-first-submission-snapshot.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-first-submission-snapshot.test.ts",
+      "to": "packages/product-store/src/thread/sqlite-thread-repository.ts",
+      "specifier": "@rika/product-store/sqlite-thread-repository",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-first-submission-snapshot.test.ts",
+      "to": "packages/product-store/src/turn/sqlite-turn-repository.ts",
+      "specifier": "@rika/product-store/sqlite-turn-repository",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-first-submission-snapshot.test.ts",
+      "to": "packages/product-store/test/support/operation-execution-fixtures.ts",
+      "specifier": "../support/operation-execution-fixtures",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-first-submission-snapshot.test.ts",
+      "to": "packages/product-store/test/support/operation-layer-harness.ts",
+      "specifier": "../support/operation-layer-harness",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-first-submission-snapshot.test.ts",
+      "to": "packages/product-store/test/support/operation-session-harness.ts",
+      "specifier": "../support/operation-session-harness",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-first-submission-snapshot.test.ts",
+      "to": "packages/product/src/execution/contract/execution-gateway.ts",
+      "specifier": "@rika/product/execution-gateway",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-first-submission-snapshot.test.ts",
+      "to": "packages/product/src/operation/interactive/interactive-event.ts",
+      "specifier": "@rika/product/interactive-event",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-first-submission-snapshot.test.ts",
+      "to": "packages/product/src/operation/interactive/interactive-session.ts",
+      "specifier": "@rika/product/interactive-session",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-first-submission-snapshot.test.ts",
+      "to": "packages/product/src/thread/model/thread-record.ts",
+      "specifier": "@rika/product/thread-record",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-first-submission-snapshot.test.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/product-store/test/product-operation/operation-mentions-routing.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -30419,6 +30533,14 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-selection-projection.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-selection-projection.ts",
       "to": "packages/product/src/thread/repository/turn-repository.ts",
       "specifier": "@rika/product/turn-repository",
       "kind": "import",
@@ -31453,6 +31575,14 @@
       "from": "packages/product/src/operation/interactive/interactive-session-state.ts",
       "to": "packages/product/src/thread/model/thread-record.ts",
       "specifier": "@rika/product/thread-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-state.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
       "kind": "import",
       "relationship": "runtime",
       "production": true

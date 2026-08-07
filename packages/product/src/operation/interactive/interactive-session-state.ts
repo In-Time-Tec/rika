@@ -1,4 +1,5 @@
 import * as Thread from "@rika/product/thread-record"
+import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import { Effect, Fiber, Ref, Scope, Semaphore } from "effect"
 import { OperationUnavailable } from "../contract/product-operation"
@@ -54,6 +55,7 @@ export interface InteractiveSessionState {
     thread: Thread.Thread,
     epoch: number,
     dispatch: (event: InteractiveEvent) => void,
+    activeTurn?: Turn.Turn,
   ) => Effect.Effect<void, OperationError | TurnRepository.RepositoryError, TurnRepository.Service>
   readonly selectionAdmission: Semaphore.Semaphore
   readonly transcriptPageAdmission: Semaphore.Semaphore

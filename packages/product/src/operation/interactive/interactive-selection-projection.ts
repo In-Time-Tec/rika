@@ -1,4 +1,5 @@
 import * as Thread from "@rika/product/thread-record"
+import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import { Effect, Ref } from "effect"
@@ -30,6 +31,7 @@ export const makeInteractiveSelectionProjection = (input: InteractiveSelectionPr
     thread: Thread.Thread,
     epoch: number,
     dispatch: (event: InteractiveEvent) => void,
+    activeTurn?: Turn.Turn,
   ) {
     const turns = yield* TurnRepository.Service
     const queue = yield* turns.readQueue(thread.id)
@@ -50,6 +52,7 @@ export const makeInteractiveSelectionProjection = (input: InteractiveSelectionPr
       queueRevision: queue.revision,
       queuedCount: queue.queuedCount,
       queue: queue.turns.map(queueItem),
+      ...(activeTurn === undefined ? {} : { activeTurn }),
     })
   })
   return {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import * as InteractiveController from "../src/interactive/controller/interactive-controller"
 import * as ViewState from "@rika/terminal/terminal-state"
+import { update as reduceModel } from "@rika/terminal/terminal-state-reducer"
 import * as ThreadView from "@rika/product/thread-view"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 
@@ -144,5 +145,50 @@ describe("interactive ThreadView controller", () => {
       usageTime: { _tag: "Available", accumulatedMillis: 900, activeSince: 1_000 },
       contextUsage: { _tag: "Available", inputTokens: 30, contextWindow: 100, reserveTokens: 10 },
     })
+  })
+
+  it("never returns to the welcome state after a submit while the created-thread snapshot arrives", () => {
+    const welcome = (model: ViewState.Model) => model.entries.length === 0 && model.blocks.length === 0
+    let current = state()
+    current.model = { ...current.model, input: "hello", cursor: 5 }
+    current.model = reduceModel(current.model, { _tag: "Submitted", submissionId: "submission-1" })
+    expect(welcome(current.model)).toBe(false)
+    expect(current.model.busy).toBe(true)
+    const loaded = InteractiveController.update(current, {
+      _tag: "ThreadViewSnapshot",
+      snapshot: {
+        ...snapshot(),
+        revision: 0,
+        turns: [
+          {
+            turn: {
+              kind: "agent",
+              id: "turn",
+              threadId: "thread",
+              prompt: "hello",
+              status: "accepted",
+              author: { _tag: "Human" },
+              lineage: { _tag: "Original" },
+              createdAt: 1,
+              updatedAt: 1,
+            },
+            projectionRevision: 0,
+            usage: ExecutionProjection.emptyUsageState(),
+            units: [
+              {
+                key: "turn:turn:user",
+                turnId: "turn",
+                order: [{ sequence: -1, part: 0, key: "turn:turn:user" }],
+                revision: 0,
+                content: { _tag: "Entry", role: "user", text: "hello" },
+              },
+            ],
+          },
+        ],
+      },
+    })
+    expect(welcome(loaded.state.model)).toBe(false)
+    expect(loaded.state.model.busy).toBe(true)
+    expect(loaded.state.model.activeTurnId).toBe("turn")
   })
 })

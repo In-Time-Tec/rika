@@ -299,6 +299,7 @@ export const submitInteractiveOperation = (input: InteractiveSubmissionContext) 
     const program = Effect.gen(function* () {
       const threads = yield* ThreadRepository.Service
       let thread = yield* Ref.get(interactiveThread)
+      let created = false
       if (thread === undefined) {
         thread = yield* threads.create({
           id: yield* options.makeThreadId,
@@ -306,7 +307,7 @@ export const submitInteractiveOperation = (input: InteractiveSubmissionContext) 
           title: temporaryThreadTitle(prompt),
           now: yield* Clock.currentTimeMillis,
         })
-        yield* activateCreatedThread(thread, getCurrentSelectionEpoch(), dispatch)
+        created = true
       }
       const turns = yield* TurnRepository.Service
       if (thread.title === "New thread" && (yield* turns.list(thread.id)).length === 1) {
@@ -334,6 +335,7 @@ export const submitInteractiveOperation = (input: InteractiveSubmissionContext) 
       )
       const turn = admitted as Turn.Turn
       observerTurn = turn.status === "queued" ? undefined : turn
+      if (created) yield* activateCreatedThread(thread, getCurrentSelectionEpoch(), dispatch, turn)
       if (turn.status === "queued") {
         if ("queue" in admitted && admitted.queue !== undefined)
           emitEvent(input, dispatch, queueMutationEvent(admitted.queue))
