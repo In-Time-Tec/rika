@@ -8,7 +8,7 @@ import { create as createTui } from "@rika/terminal/opentui-surface"
 import { Model, initial, withModeRouteMap } from "@rika/terminal/terminal-state"
 import type { ThreadItem } from "@rika/terminal/terminal-state"
 type ModeRoutes = Model["modeRoutes"]
-import { Deferred, Effect, Fiber } from "effect"
+import { Deferred, Effect, Exit, Fiber, FiberHandle, FiberSet, Scope } from "effect"
 import { terminalTitleSequence } from "./interactive-process"
 import { makeEventRouter } from "./process-events"
 import { makeProcessRuntime } from "./process-runtime"
@@ -31,8 +31,19 @@ export const interactiveTui =
     Effect.uninterruptible(
       Effect.gen(function* () {
         if (options.makeRenderer === undefined && (!process.stdin.isTTY || !process.stdout.isTTY)) return
-        const context = yield* Effect.context<never>()
-        const fork = Effect.runForkWith(context)
+        const appScope = yield* Scope.make()
+        const fork = yield* FiberSet.makeRuntime<never, void, never>().pipe(
+          Effect.provideService(Scope.Scope, appScope),
+        )
+        const renderTimer = yield* FiberHandle.makeRuntime<never, never, void>().pipe(
+          Effect.provideService(Scope.Scope, appScope),
+        )
+        const previewTimer = yield* FiberHandle.makeRuntime<never, never, void>().pipe(
+          Effect.provideService(Scope.Scope, appScope),
+        )
+        const feedTimer = yield* FiberHandle.makeRuntime<never, never, void>().pipe(
+          Effect.provideService(Scope.Scope, appScope),
+        )
         const resolvedModeRoutes = options.modeRoutes?.()
         return yield* Effect.callback<void, ProductOperation.OperationUnavailable>((resume) => {
           const loop: InteractiveLoop = {
@@ -43,9 +54,6 @@ export const interactiveTui =
             renderer: undefined as Effect.Success<ReturnType<typeof createTui>> | undefined,
             initialization: undefined as Fiber.Fiber<void, never> | undefined,
             closed: false,
-            previewTimer: undefined as Fiber.Fiber<void, never> | undefined,
-            renderTimer: undefined as Fiber.Fiber<void, never> | undefined,
-            feedTimer: undefined as Fiber.Fiber<void, never> | undefined,
             applyingFeedBatch: false,
             feedPreserveAnchor: false,
             replayTurns: new Map<string, Turn.Turn>(),
@@ -58,8 +66,6 @@ export const interactiveTui =
             appliedDeltas: new Set<string>(),
             activitySequence: 0,
             submissionSequence: 0,
-            fibers: new Set<Fiber.Fiber<void, never>>(),
-            signalListener: undefined as Fiber.Fiber<void, never> | undefined,
             selectionFiber: undefined as Fiber.Fiber<void, never> | undefined,
             selectionGeneration: 0,
             renderSuppressed: false,
@@ -103,24 +109,28 @@ export const interactiveTui =
             if (loop.applyingFeedBatch) return
             if (loop.renderer === undefined || loop.renderSuppressed) return
             if (immediate) {
-              if (loop.renderTimer !== undefined) fork(Fiber.interrupt(loop.renderTimer))
-              loop.renderTimer = undefined
+              renderTimer(Effect.void)
               loop.renderer.surface.update(loop.model)
               return
             }
-            if (loop.renderTimer !== undefined) return
-            loop.renderTimer = fork(
+            renderTimer(
               Effect.sleep("16 millis").pipe(
-                Effect.andThen(
-                  Effect.sync(() => {
-                    loop.renderTimer = undefined
-                    loop.renderer?.surface.update(loop.model)
-                  }),
-                ),
+                Effect.andThen(Effect.sync(() => loop.renderer?.surface.update(loop.model))),
               ),
             )
           }
-          const runtime = makeProcessRuntime({ loop, fork, session, options, recoverSession, render, resume })
+          const runtime = makeProcessRuntime({
+            loop,
+            fork,
+            renderTimer,
+            previewTimer,
+            feedTimer,
+            session,
+            options,
+            recoverSession,
+            render,
+            resume,
+          })
           const {
             teardown,
             close,
@@ -138,7 +148,7 @@ export const interactiveTui =
           } = runtime
           const { feedBatcher } = makeEventRouter({
             loop,
-            fork,
+            feedTimer,
             session,
             refreshTerminalTitle,
             render,
@@ -150,6 +160,9 @@ export const interactiveTui =
             session,
             options,
             fork,
+            renderTimer,
+            previewTimer,
+            feedTimer,
             run,
             requestNewerPage,
             close,
@@ -168,6 +181,6 @@ export const interactiveTui =
             resume,
           })
           return teardown(false)
-        })
+        }).pipe(Effect.ensuring(Scope.close(appScope, Exit.void)))
       }),
     )

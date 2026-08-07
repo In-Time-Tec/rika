@@ -7,13 +7,13 @@ import * as ThreadSelection from "../controller/terminal-thread-selection"
 import { makeFeedFrameBatcher } from "../controller/interactive-frame-batch"
 import type { InteractiveRuntimeContext } from "./interactive-runtime-context"
 
-type Runtime = Pick<InteractiveRuntimeContext, "loop" | "fork" | "session" | "render"> & {
+type Runtime = Pick<InteractiveRuntimeContext, "loop" | "feedTimer" | "session" | "render"> & {
   readonly refreshTerminalTitle: () => void
   readonly requestSelectionResync: (threadId: string) => void
 }
 
 export const makeEventRouter = (runtime: Runtime) => {
-  const { loop, fork, refreshTerminalTitle, render, requestSelectionResync } = runtime
+  const { loop, feedTimer, refreshTerminalTitle, render, requestSelectionResync } = runtime
   const dispatch = (event: InteractiveEvent.InteractiveEvent) => {
     if (loop.closed) return
     if (
@@ -178,16 +178,7 @@ export const makeEventRouter = (runtime: Runtime) => {
   }
   const feedBatcher = makeFeedFrameBatcher<InteractiveEvent.InteractiveEvent>({
     schedule: (flush) => {
-      loop.feedTimer = fork(
-        Effect.sleep("16 millis").pipe(
-          Effect.andThen(
-            Effect.sync(() => {
-              loop.feedTimer = undefined
-              flush()
-            }),
-          ),
-        ),
-      )
+      feedTimer(Effect.sleep("16 millis").pipe(Effect.andThen(Effect.sync(flush))))
     },
     apply: (events) => {
       loop.applyingFeedBatch = true

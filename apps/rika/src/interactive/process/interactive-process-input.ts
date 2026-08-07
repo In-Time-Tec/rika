@@ -1,7 +1,7 @@
 import { create as createTui } from "@rika/terminal/opentui-surface"
 import { expandPastedText, execute, promptParts, type Action } from "@rika/terminal/terminal-session"
 import { canSubmit, selectedThreadMetadata, update } from "@rika/terminal/terminal-state-reducer"
-import { Effect, Fiber } from "effect"
+import { Effect } from "effect"
 import type { InteractiveInputContext } from "./interactive-runtime-context"
 import { imagePasteBlockedNotice } from "../input/prompt-input"
 import { nextSubmissionId } from "../controller/terminal-turn-submission"
@@ -14,7 +14,7 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
     loop,
     session,
     run,
-    fork,
+    previewTimer,
     requestNewerPage,
     close,
     refreshTerminalTitle,
@@ -181,18 +181,9 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
       loop.renderer?.surface.update(loop.model)
       if (!wasChangedFilesOpen && loop.model.changedFilesOpen) run(loadChangedFiles)
       if (afterPreviewId !== undefined && afterPreviewId !== beforePreviewId) {
-        if (loop.previewTimer !== undefined) fork(Fiber.interrupt(loop.previewTimer))
-        const selectedPreviewTimer = Effect.sleep("120 millis").pipe(
-          Effect.andThen(session.previewThread(afterPreviewId)),
-          Effect.ensuring(
-            Effect.sync(() => {
-              if (loop.previewTimer === selectedPreviewTimer) loop.previewTimer = undefined
-            }),
-          ),
-          recoverSession,
-          fork,
+        previewTimer(
+          Effect.sleep("120 millis").pipe(Effect.andThen(session.previewThread(afterPreviewId)), recoverSession),
         )
-        loop.previewTimer = selectedPreviewTimer
       }
       if (submittedPrompt !== undefined && submittedPrompt.length > 0 && parts !== undefined) {
         loop.submittedSinceIdle = true

@@ -32,7 +32,6 @@ const defaultOpenArguments = ProcessFiles.defaultOpenArguments
 const editorArguments = ProcessFiles.editorArguments
 const materializePromptParts = ProcessPrompt.materializePromptParts
 const quitStopWorkBound = ProcessLifecycle.quitStopWorkBound
-const interruptTrackedFibers = ProcessLifecycle.interruptTrackedFibers
 const tuiSignalExitCode = ProcessLifecycle.tuiSignalExitCode
 
 export const makeProcessRuntime = (runtime: Runtime) => {
@@ -70,18 +69,9 @@ export const makeProcessRuntime = (runtime: Runtime) => {
       return Effect.gen(function* () {
         yield* Effect.logInfo("tui.teardown.started")
         loop.closed = true
-        if (loop.signalListener !== undefined) yield* Fiber.interrupt(loop.signalListener)
-        loop.signalListener = undefined
-        if (loop.previewTimer !== undefined) yield* Fiber.interrupt(loop.previewTimer)
-        loop.previewTimer = undefined
-        if (loop.renderTimer !== undefined) yield* Fiber.interrupt(loop.renderTimer)
-        loop.renderTimer = undefined
-        if (loop.feedTimer !== undefined) yield* Fiber.interrupt(loop.feedTimer)
-        loop.feedTimer = undefined
         Logging.settleActiveLogs()
         loop.renderer?.releaseTerminal()
         if (loop.initialization !== undefined) yield* Fiber.await(loop.initialization)
-        yield* interruptTrackedFibers([...loop.fibers])
         if (showGoodbye) ProcessSignals.writeGoodbye(loop.model)
         yield* Effect.logInfo("tui.teardown.completed")
       })
@@ -167,9 +157,7 @@ export const makeProcessRuntime = (runtime: Runtime) => {
       close(1)
     }
   }
-  loop.signalListener = fork(
-    ProcessSignals.watchLifecycleSignals({ interrupt, terminate, hangup, suspend, continueFromSuspend }),
-  )
+  fork(ProcessSignals.watchLifecycleSignals({ interrupt, terminate, hangup, suspend, continueFromSuspend }))
   const submit = (
     prompt: string,
     parts: ReadonlyArray<PromptPart>,
@@ -220,19 +208,15 @@ export const makeProcessRuntime = (runtime: Runtime) => {
                 }),
             ),
           )
-    const fiber = effect.pipe(provideLayerScoped(BunServices.layer), recoverSession, fork)
-    loop.fibers.add(fiber)
-    fork(Fiber.await(fiber).pipe(Effect.tap(() => Effect.sync(() => loop.fibers.delete(fiber)))))
+    fork(effect.pipe(provideLayerScoped(BunServices.layer), recoverSession))
   }
   const run = <E>(effect: Effect.Effect<void, E, BunServices.BunServices>) => {
-    const fiber = fork(
+    fork(
       effect.pipe(
         provideLayerScoped(BunServices.layer),
         Effect.catchCause((cause) => Effect.logError(Cause.pretty(cause))),
       ),
     )
-    loop.fibers.add(fiber)
-    fork(Fiber.await(fiber).pipe(Effect.tap(() => Effect.sync(() => loop.fibers.delete(fiber)))))
   }
   const requestNewerPage = () => {
     const threadId = loop.model.currentThreadId
@@ -281,14 +265,12 @@ export const makeProcessRuntime = (runtime: Runtime) => {
         Effect.andThen(recoverSession(loadSelected(select(), generation))),
         Effect.ensuring(
           Effect.sync(() => {
-            loop.fibers.delete(selectedFiber)
             if (loop.selectionFiber === selectedFiber) loop.selectionFiber = undefined
           }),
         ),
       ),
     )
     loop.selectionFiber = selectedFiber
-    loop.fibers.add(selectedFiber)
     return selectedFiber
   }
   requestSelectionResync = (threadId) => {

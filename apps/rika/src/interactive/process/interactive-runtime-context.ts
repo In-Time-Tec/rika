@@ -19,9 +19,6 @@ export interface InteractiveLoop {
   renderer: Effect.Success<ReturnType<typeof createTui>> | undefined
   initialization: Fiber.Fiber<void, never> | undefined
   closed: boolean
-  previewTimer: Fiber.Fiber<void, never> | undefined
-  renderTimer: Fiber.Fiber<void, never> | undefined
-  feedTimer: Fiber.Fiber<void, never> | undefined
   applyingFeedBatch: boolean
   feedPreserveAnchor: boolean
   replayTurns: Map<string, Turn.Turn>
@@ -34,8 +31,6 @@ export interface InteractiveLoop {
   appliedDeltas: Set<string>
   activitySequence: number
   submissionSequence: number
-  fibers: Set<Fiber.Fiber<void, never>>
-  signalListener: Fiber.Fiber<void, never> | undefined
   selectionFiber: Fiber.Fiber<void, never> | undefined
   selectionGeneration: number
   renderSuppressed: boolean
@@ -57,7 +52,10 @@ export interface InteractiveLoop {
 
 export interface InteractiveRuntimeContext {
   readonly loop: InteractiveLoop
-  readonly fork: <A, E>(effect: Effect.Effect<A, E, never>) => Fiber.Fiber<A, E>
+  readonly fork: (effect: Effect.Effect<void, never, never>) => Fiber.Fiber<void, never>
+  readonly renderTimer: (effect: Effect.Effect<void, never, never>) => Fiber.Fiber<void, never>
+  readonly previewTimer: (effect: Effect.Effect<void, never, never>) => Fiber.Fiber<void, never>
+  readonly feedTimer: (effect: Effect.Effect<void, never, never>) => Fiber.Fiber<void, never>
   readonly session: InteractiveSession.InteractiveSession
   readonly options: InteractiveTuiOptions
   readonly recoverSession: <R>(
