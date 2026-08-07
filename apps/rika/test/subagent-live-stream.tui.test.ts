@@ -356,7 +356,9 @@ test(
         expect(final).not.toContain("Execution failed")
         const liveProjection = yield* app.transcript(Turn.TurnId.make("tui-turn-0"))
         const liveFinished =
-          liveProjection?.units.some((unit) => JSON.stringify(unit.content).includes("REALISTIC_VOLUME_ROOT_FINISHED")) === true
+          liveProjection?.units.some((unit) =>
+            JSON.stringify(unit.content).includes("REALISTIC_VOLUME_ROOT_FINISHED"),
+          ) === true
         expect(liveFinished || final.includes("REALISTIC_VOLUME_ROOT_FINISHED")).toBe(true)
       }),
     ),
