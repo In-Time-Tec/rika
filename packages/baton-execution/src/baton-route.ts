@@ -17,7 +17,7 @@ import * as RoleToolkits from "@rika/coding-tools/agent-role-toolkits"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
 import { Config, Context, Effect, Layer, Option, Redacted, Scope } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
-import { FetchHttpClient } from "effect/unstable/http"
+import { providerHttpClientLayer } from "./baton-provider-http"
 import * as Program from "./baton-program"
 import * as ProgramBindings from "./baton-program-bindings"
 import * as Registration from "./baton-registration"
@@ -120,7 +120,7 @@ const candidateRegistryLayer = (candidate: CandidateSnapshot) => {
         config: OpenAi.decodeConfig(candidate.providerOptions),
         apiKey: apiKey(candidate),
         clientConfig: { apiUrl: Config.succeed(candidate.providerConnection.baseUrl) },
-      }).pipe(Layer.provide(FetchHttpClient.layer))
+      }).pipe(Layer.provide(providerHttpClientLayer))
     case "anthropic":
       return Anthropic.layer({
         model: candidate.model,
@@ -128,7 +128,7 @@ const candidateRegistryLayer = (candidate: CandidateSnapshot) => {
         config: Anthropic.decodeConfig(candidate.providerOptions),
         apiKey: apiKey(candidate),
         clientConfig: { apiUrl: Config.succeed(candidate.providerConnection.baseUrl) },
-      }).pipe(Layer.provide(FetchHttpClient.layer))
+      }).pipe(Layer.provide(providerHttpClientLayer))
     case "amazon-bedrock": {
       const connection = new URL(candidate.providerConnection.baseUrl)
       return AmazonBedrock.layer({

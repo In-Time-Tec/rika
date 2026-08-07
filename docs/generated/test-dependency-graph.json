@@ -1121,6 +1121,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/baton-execution/test/baton-provider-http.test.ts",
+      "path": "packages/baton-execution/test/baton-provider-http.test.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/baton-execution/test/baton-registration-identity.test.ts",
       "path": "packages/baton-execution/test/baton-registration-identity.test.ts",
       "workspace": "@rika/baton-execution",
@@ -5102,6 +5112,38 @@
       "from": "packages/baton-execution/test/baton-projector-values.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-provider-http.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-provider-http.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-provider-http.test.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-provider-http.test.ts",
+      "to": "external:effect/unstable/http",
+      "specifier": "effect/unstable/http",
       "kind": "import",
       "relationship": "test",
       "production": false
