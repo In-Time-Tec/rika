@@ -729,6 +729,14 @@
       "package": "effect"
     },
     {
+      "id": "external:effect/Scope",
+      "workspace": "root",
+      "kind": "external",
+      "production": true,
+      "publicExports": [],
+      "package": "effect"
+    },
+    {
       "id": "external:effect/testing",
       "workspace": "root",
       "kind": "external",
@@ -1583,6 +1591,16 @@
     {
       "id": "packages/product-store/test/product-operation/operation-persisted-history.test.ts",
       "path": "packages/product-store/test/product-operation/operation-persisted-history.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "path": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
       "workspace": "@rika/product-store",
       "package": "@rika/product-store",
       "kind": "source",
@@ -6361,6 +6379,54 @@
       "to": "packages/product/src/operation/contract/product-operation-service.ts",
       "specifier": "@rika/product/product-operation-service",
       "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "external:effect/Scope",
+      "specifier": "effect/Scope",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "packages/product/src/execution/contract/execution-gateway.ts",
+      "specifier": "@rika/product/execution-gateway",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "packages/product/src/execution/contract/execution-status.ts",
+      "specifier": "@rika/product/execution-status",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-queue-drain.test.ts",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
+      "kind": "dynamic-import",
       "relationship": "test",
       "production": false
     },

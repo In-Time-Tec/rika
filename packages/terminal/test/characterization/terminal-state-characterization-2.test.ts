@@ -269,8 +269,63 @@ test("keeps an unchanged changed-files snapshot stable", () => {
 
   expect(update(model, { _tag: "ChangedFilesReplaced", files: [...files] })).toBe(model)
 })
+test("navigates and controls the queue while idle after the active turn failed", () => {
+  let model = replaceQueue({ ...initial("/work"), busy: false, activeTurnId: undefined }, [
+    { id: "one", prompt: "one" },
+    { id: "two", prompt: "two" },
+  ])
+  model = update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
+  expect(model.queueSelection).toBe("two")
+  model = update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
+  expect(model.queueSelection).toBe("one")
+  model = update(model, { _tag: "KeyPressed", key: key({ name: "down" }) })
+  expect(model.queueSelection).toBe("two")
+  model = update(model, { _tag: "KeyPressed", key: key({ name: "backspace" }) })
+  expect(model.pendingAction).toEqual({ _tag: "Dequeue", id: "two" })
+  model = { ...model, pendingAction: undefined }
+  model = update(model, { _tag: "KeyPressed", key: key({ name: "e", ctrl: true }) })
+  expect(model.editingTurnId).toBe("two")
+  expect(model.input).toBe("two")
+  model = update(model, { _tag: "KeyPressed", key: key({ name: "escape" }) })
+  expect(model.editingTurnId).toBeUndefined()
+})
+test("does not steer a queued row when no turn is active", () => {
+  let model = replaceQueue({ ...initial("/work"), busy: false, activeTurnId: undefined }, [
+    { id: "one", prompt: "one" },
+    { id: "two", prompt: "two" },
+  ])
+  model = update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
+  model = update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
+  expect(model.pendingAction).toBeUndefined()
+  expect(model.queueSelection).toBe("two")
+})
+test("steers a queued row into the active turn while idle with a queue", () => {
+  let model = replaceQueue({ ...initial("/work"), busy: false, activeTurnId: "active" }, [
+    { id: "one", prompt: "one" },
+    { id: "two", prompt: "two" },
+  ])
+  model = update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
+  model = update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
+  expect(model.pendingAction).toEqual({ _tag: "SteerQueued", id: "two", prompt: "two" })
+  expect(model.pendingSteering).toEqual([{ turnId: "active", text: "two" }])
+})
+test("recalls composer history only when the queue is empty", () => {
+  let model: Model = {
+    ...initial("/work"),
+    history: ["earlier prompt"],
+    historyComposers: [],
+  }
+  model = update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
+  expect(model.input).toBe("earlier prompt")
+  const queued = replaceQueue({ ...model, input: "", cursor: 0, historyIndex: undefined }, [
+    { id: "one", prompt: "one" },
+  ])
+  const afterUp = update(queued, { _tag: "KeyPressed", key: key({ name: "up" }) })
+  expect(afterUp.input).toBe("")
+  expect(afterUp.queueSelection).toBe("one")
+})
 test("moves up into queued turns and down or Escape back to the composer", () => {
-  let model = replaceQueue({ ...initial("/work"), busy: true }, [
+  let model = replaceQueue({ ...initial("/work"), busy: true, activeTurnId: "active" }, [
     { id: "one", prompt: "one" },
     { id: "two", prompt: "two" },
   ])
@@ -290,7 +345,7 @@ test("moves up into queued turns and down or Escape back to the composer", () =>
   expect(model.pendingAction).toBeUndefined()
 })
 test("steers and dequeues only while a queued turn is selected", () => {
-  let model = replaceQueue({ ...initial("/work"), busy: true }, [
+  let model = replaceQueue({ ...initial("/work"), busy: true, activeTurnId: "active" }, [
     { id: "one", prompt: "one" },
     { id: "two", prompt: "two" },
   ])
@@ -377,7 +432,9 @@ test("edits a queued turn: Ctrl+E loads it, Enter saves EditQueued, Escape resto
   expect(cancelled.pendingAction).toBeUndefined()
 })
 test("Enter on a selected queued row without edit mode still steers", () => {
-  let model = resetQueue(busyQueueModel(initial("/work")), "t", 1, [{ id: "a", prompt: "alpha" }])
+  let model = resetQueue({ ...busyQueueModel(initial("/work")), activeTurnId: "active" }, "t", 1, [
+    { id: "a", prompt: "alpha" },
+  ])
   model = update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
   model = update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
   expect(model.pendingAction).toEqual({ _tag: "SteerQueued", id: "a", prompt: "alpha" })
