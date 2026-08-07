@@ -5373,6 +5373,15 @@
       "publicExports": []
     },
     {
+      "id": "packages/product/src/operation/operation-failure.ts",
+      "path": "packages/product/src/operation/operation-failure.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/product/src/operation/review/review-policy.ts",
       "path": "packages/product/src/operation/review/review-policy.ts",
       "workspace": "@rika/product",
@@ -29600,6 +29609,14 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-control.ts",
+      "to": "packages/product/src/operation/operation-failure.ts",
+      "specifier": "../operation-failure",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-control.ts",
       "to": "packages/product/src/thread/model/turn-record.ts",
       "specifier": "@rika/product/turn-record",
       "kind": "import",
@@ -29634,6 +29651,14 @@
       "from": "packages/product/src/operation/interactive/interactive-event.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-event.ts",
+      "to": "packages/product/src/operation/operation-failure.ts",
+      "specifier": "../operation-failure",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -29944,6 +29969,14 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-runtime-event.ts",
+      "to": "packages/product/src/operation/operation-failure.ts",
+      "specifier": "../operation-failure",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-runtime-event.ts",
       "to": "packages/product/src/thread/model/thread-record.ts",
       "specifier": "@rika/product/thread-record",
       "kind": "import",
@@ -30088,8 +30121,8 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-session-errors.ts",
-      "to": "packages/product/src/operation/operation-error.ts",
-      "specifier": "../operation-error",
+      "to": "packages/product/src/operation/operation-failure.ts",
+      "specifier": "../operation-failure",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -30098,6 +30131,14 @@
       "from": "packages/product/src/operation/interactive/interactive-session-errors.ts",
       "to": "packages/product/src/thread/model/thread-record.ts",
       "specifier": "@rika/product/thread-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-errors.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -30306,6 +30347,14 @@
       "from": "packages/product/src/operation/interactive/interactive-session-interface-controls.ts",
       "to": "packages/product/src/operation/operation-error.ts",
       "specifier": "../operation-error",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-interface-controls.ts",
+      "to": "packages/product/src/operation/operation-failure.ts",
+      "specifier": "../operation-failure",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -31120,6 +31169,14 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-session-steer.ts",
+      "to": "packages/product/src/operation/operation-failure.ts",
+      "specifier": "../operation-failure",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-steer.ts",
       "to": "packages/product/src/thread/model/turn-record.ts",
       "specifier": "@rika/product/turn-record",
       "kind": "import",
@@ -31202,6 +31259,14 @@
       "from": "packages/product/src/operation/interactive/interactive-session-submission-stages.ts",
       "to": "packages/product/src/operation/operation-error.ts",
       "specifier": "../operation-error",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-submission-stages.ts",
+      "to": "packages/product/src/operation/operation-failure.ts",
+      "specifier": "../operation-failure",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -31474,6 +31539,14 @@
       "from": "packages/product/src/operation/interactive/interactive-shell-session.ts",
       "to": "packages/product/src/operation/operation-error.ts",
       "specifier": "../operation-error",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-shell-session.ts",
+      "to": "packages/product/src/operation/operation-failure.ts",
+      "specifier": "../operation-failure",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -31872,6 +31945,14 @@
     },
     {
       "from": "packages/product/src/operation/interactive/pending-turn-promotion.ts",
+      "to": "packages/product/src/operation/operation-failure.ts",
+      "specifier": "../operation-failure",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/pending-turn-promotion.ts",
       "to": "packages/product/src/operation/review/review-policy.ts",
       "specifier": "../review/review-policy",
       "kind": "import",
@@ -32210,6 +32291,46 @@
       "from": "packages/product/src/operation/operation-error.ts",
       "to": "packages/product/src/thread/repository/turn-repository.ts",
       "specifier": "../thread/repository/turn-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/operation-failure.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/operation-failure.ts",
+      "to": "packages/product/src/execution/contract/execution-gateway.ts",
+      "specifier": "@rika/product/execution-gateway",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/operation-failure.ts",
+      "to": "packages/product/src/operation/operation-error.ts",
+      "specifier": "./operation-error",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/operation-failure.ts",
+      "to": "packages/product/src/thread/queue/pending-turn-policy.ts",
+      "specifier": "../thread/queue/pending-turn-policy",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/operation-failure.ts",
+      "to": "packages/product/src/thread/repository/turn-repository.ts",
+      "specifier": "@rika/product/turn-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true

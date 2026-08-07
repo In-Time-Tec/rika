@@ -3,7 +3,8 @@ import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import { Effect } from "effect"
-import { OperationError, operationError, operationFailureDetail } from "../operation-error"
+import { OperationError, operationError } from "../operation-error"
+import { makeFailure } from "../operation-failure"
 import type { InteractiveEvent } from "./interactive-runtime-event"
 import type { InteractiveImplementationInput } from "./interactive-session-interface"
 
@@ -36,7 +37,7 @@ const steerInteractiveTurnImpl = (input: InteractiveSteerInput, text: string, ta
           threadId: turn.threadId,
           turnId: turn.id,
           action: "steer",
-          message: operationFailureDetail(outcome.cause),
+          failure: makeFailure(outcome.cause),
           steeringText: text,
         })
       emit(sessionDispatch, {

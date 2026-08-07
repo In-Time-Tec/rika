@@ -113,17 +113,17 @@ export const makeEventRouter = (runtime: Runtime) => {
           _tag: "SteeringFailed",
           turnId: event.turnId,
           text: event.steeringText,
-          message: event.message,
+          message: event.failure.message,
         })
       if (event.action === "cancel")
         loop.model = update(loop.model, {
           _tag: "CancelFailed",
           ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
-          message: event.message,
+          message: event.failure.message,
         })
       if (event.action === "approve" || event.action === "deny")
         loop.renderer?.surface.showToast(
-          `${event.action === "approve" ? "Approval" : "Denial"} failed: ${event.message}`,
+          `${event.action === "approve" ? "Approval" : "Denial"} failed: ${event.failure.message}`,
           "#e06c75",
         )
     } else if (event._tag === "ContextDiagnostics") {
@@ -137,7 +137,7 @@ export const makeEventRouter = (runtime: Runtime) => {
       loop.model = update(loop.model, {
         _tag: "ExecutionFailed",
         ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
-        message: event.message,
+        failure: event.failure,
       })
     } else if (event._tag === "QueueFull") {
       if (loop.model.currentThreadId !== undefined && loop.model.currentThreadId !== event.threadId) return

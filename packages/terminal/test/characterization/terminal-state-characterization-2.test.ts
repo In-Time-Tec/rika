@@ -45,7 +45,11 @@ test("does not append a generic failure after the durable error arrived", () => 
     items: [{ _tag: "Block", index: 0, turnId: "turn" }],
   }
 
-  const settled = update(model, { _tag: "ExecutionFailed", turnId: "turn", message: "Execution failed" })
+  const settled = update(model, {
+    _tag: "ExecutionFailed",
+    turnId: "turn",
+    failure: { tag: "TestFailure", message: "Execution failed", retry: "user", actor: "environment" },
+  })
 
   expect(settled.blocks).toEqual([failure])
   expect(settled.items).toHaveLength(1)

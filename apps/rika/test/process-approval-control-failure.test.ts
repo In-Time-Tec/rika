@@ -35,7 +35,12 @@ describe("approval control failures", () => {
       threadId: Thread.ThreadId.make("thread"),
       turnId: Turn.TurnId.make("turn"),
       action,
-      message: "Authorization is no longer pending",
+      failure: {
+        tag: "ApprovalResponseFailure",
+        message: "Authorization is no longer pending",
+        retry: "user",
+        actor: "user",
+      },
     })
     expect(showToast).toHaveBeenCalledWith(`${label} failed: Authorization is no longer pending`, "#e06c75")
   })
@@ -48,7 +53,12 @@ describe("approval control failures", () => {
       threadId: Thread.ThreadId.make("other-thread"),
       turnId: Turn.TurnId.make("turn"),
       action: "approve",
-      message: "Authorization is no longer pending",
+      failure: {
+        tag: "ApprovalResponseFailure",
+        message: "Authorization is no longer pending",
+        retry: "user",
+        actor: "user",
+      },
     })
     expect(showToast).not.toHaveBeenCalled()
   })

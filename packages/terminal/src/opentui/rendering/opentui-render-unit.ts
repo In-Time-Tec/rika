@@ -410,8 +410,10 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     }
     if (block._tag === "Error" && block.detail.length > 0) {
       const turn = block.turnId === undefined ? "" : ` · Turn ${block.turnId}`
-      append(fg(colors.red)(`✖ ERROR: ${block.title}${turn}${expanded ? " ▾" : " ▸"}`))
-      if (expanded) append(fg(colors.red)(`\n${wrapBodyText(block.detail, width, "  ")}`))
+      // The cause belongs on the first line. Expansion carries the long tail; the only sentence
+      // that matters must not hide behind a disclosure that may never open.
+      append(fg(colors.red)(`✖ ERROR: ${block.title}${turn}`))
+      append(fg(colors.red)(`\n${wrapBodyText(block.detail, width, "  ")}`))
       if (block.recovery !== undefined)
         append(fg(colors.red)(`\n${wrapBodyText(`Next: ${block.recovery}`, width, "  ")}`))
       return

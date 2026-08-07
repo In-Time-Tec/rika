@@ -3,6 +3,7 @@ import * as ThreadSummary from "@rika/product/thread-summary"
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as Turn from "@rika/product/turn-record"
 import { Schema } from "effect"
+import { Failure } from "../operation-failure"
 import * as ExecutionProjection from "../../execution/contract/execution-projection"
 
 export interface QueueItem {
@@ -49,7 +50,7 @@ export type InteractiveEvent =
       readonly selectionEpoch: number
       readonly threadId?: Thread.ThreadId
       readonly turnId?: Turn.TurnId
-      readonly message: string
+      readonly failure: Failure
     }
   | {
       readonly _tag: "ExecutionControlFailed"
@@ -57,7 +58,7 @@ export type InteractiveEvent =
       readonly threadId?: Thread.ThreadId
       readonly turnId?: Turn.TurnId
       readonly action: "steer" | "cancel" | "approve" | "deny"
-      readonly message: string
+      readonly failure: Failure
       readonly steeringText?: string
     }
   | {
@@ -197,7 +198,7 @@ export const InteractiveEventSchema = Schema.Union([
     selectionEpoch: Schema.Int,
     threadId: Schema.optionalKey(Thread.ThreadId),
     turnId: Schema.optionalKey(Turn.TurnId),
-    message: Schema.String,
+    failure: Failure,
   }),
   Schema.Struct({
     _tag: Schema.tag("QueueUpdated"),
@@ -340,7 +341,7 @@ export const InteractiveEventSchema = Schema.Union([
     threadId: Schema.optionalKey(Thread.ThreadId),
     turnId: Schema.optionalKey(Turn.TurnId),
     action: Schema.Literals(["steer", "cancel", "approve", "deny"]),
-    message: Schema.String,
+    failure: Failure,
     steeringText: Schema.optionalKey(Schema.String),
   }),
   Schema.Struct({ _tag: Schema.tag("ThreadTitled"), threadId: Schema.String, title: Schema.String }),

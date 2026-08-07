@@ -361,10 +361,13 @@ test("streams, completes, and reports failures", () => {
   model = update(model, { _tag: "AssistantCompleted", text: "completion only" })
   expect(model.entries.at(-1)).toEqual({ role: "assistant", text: "completion only" })
   expect(model.entries).toHaveLength(3)
-  model = update(model, { _tag: "ExecutionFailed", message: "failed" })
+  model = update(model, {
+    _tag: "ExecutionFailed",
+    failure: { tag: "TestFailure", message: "failed", retry: "user", actor: "environment" },
+  })
   expect(model.blocks.at(-1)).toEqual({
     _tag: "Error",
-    title: "Message failed",
+    title: "TestFailure",
     detail: "failed",
     recovery: "Press Enter to try again.",
   })

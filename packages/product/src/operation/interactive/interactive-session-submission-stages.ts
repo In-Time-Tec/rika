@@ -7,6 +7,7 @@ import * as ExecutionRequest from "@rika/product/execution-request"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import { Cause, Clock, Effect, Exit, Ref } from "effect"
 import { admitInteractiveTurn } from "./interactive-turn-submission"
+import { makeFailure } from "../operation-failure"
 import { failureKind, operationError } from "../operation-error"
 import type { ModeId } from "@rika/configuration/behavior-mode"
 import type { InteractiveEvent } from "./interactive-runtime-event"
@@ -107,7 +108,7 @@ const settleInteractiveSubmissionImpl = (
   input: InteractiveSubmissionContext,
   state: SettleInteractiveSubmissionState,
 ) => {
-  const { setTurnStatus, settleThread, executionStartFailureMessage } = input
+  const { setTurnStatus, settleThread } = input
   const { thread, turn, outcome, publish, dispatch } = state
   return Effect.uninterruptible(
     Effect.gen(function* () {
@@ -117,12 +118,13 @@ const settleInteractiveSubmissionImpl = (
           return
         }
         yield* setTurnStatus(turn.id, "failed", yield* Clock.currentTimeMillis)
+        // The cause is right here; a hardcoded sentence would discard the one fact the user needs.
         emitEvent(input, dispatch, {
           _tag: "ExecutionFailed",
           selectionEpoch: 0,
           threadId: thread.id,
           turnId: turn.id,
-          message: executionStartFailureMessage,
+          failure: makeFailure(Cause.squash(outcome.cause)),
         })
         return
       }
@@ -135,14 +137,26 @@ const settleInteractiveSubmissionImpl = (
         return
       }
       if (result.status === "waiting" || result.status === "running" || result.status === "cancelling") return
-      if (result.status === "failed")
+      if (result.status === "failed") {
+        // The projector carried the run's real failure into the last Error unit; surface it
+        // instead of a generic status sentence.
+        const errorUnit = [...result.units].reverse().find((unit) => {
+          const content = unit.content as { _tag?: string; block?: { _tag?: string } }
+          return content._tag === "Block" && content.block?._tag === "Error"
+        })
+        const errorBlock = (errorUnit?.content as { block?: { title?: string; detail?: string } } | undefined)?.block
+        const message =
+          errorBlock?.detail !== undefined && errorBlock.detail.length > 0
+            ? errorBlock.detail
+            : (errorBlock?.title ?? `Execution ${result.status}`)
         emitEvent(input, dispatch, {
           _tag: "ExecutionFailed",
           selectionEpoch: 0,
           threadId: thread.id,
           turnId: turn.id,
-          message: `Execution ${result.status}`,
+          failure: makeFailure(message),
         })
+      }
       if (result.status !== "failed") yield* settleThread(thread, dispatch)
     }),
   )
@@ -232,7 +246,7 @@ const executeInteractiveSubmissionImpl = (
             Effect.annotateLogs("rika.failure.kind", failureKind(cause)),
           ),
     ),
-    Effect.catch((error) => Effect.sync(() => dispatchFailure(dispatch, error))),
+    Effect.catch((error) => Effect.sync(() => dispatchFailure(dispatch, error, undefined, turn.id))),
     Effect.ensuring(releaseTurnObserver(turn.id).pipe(Effect.andThen(notifyTurnChanged(turn)), Effect.ignore)),
   )
 }
@@ -347,7 +361,7 @@ export const submitInteractiveOperation = (input: InteractiveSubmissionContext) 
       .pipe(
         Effect.provide(executionDependencies),
         Effect.scoped,
-        Effect.catch((error) => Effect.sync(() => dispatchFailure(dispatch, error))),
+        Effect.catch((error) => Effect.sync(() => dispatchFailure(dispatch, error, undefined, observerTurn?.id))),
         Effect.ensuring(
           Effect.suspend(() =>
             observerTurn === undefined || executionLaunched

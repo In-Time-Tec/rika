@@ -72,8 +72,25 @@ const project = (model: Model, snapshot: ThreadView.ThreadViewSnapshot): Model =
   if (active === undefined && model.activeTurnId !== undefined) {
     const settled = snapshot.turns.find((entry) => String(entry.turn.id) === model.activeTurnId)?.turn
     if (settled?.status === "completed") next = updateModel(next, { _tag: "ExecutionCompleted", turnId: settled.id })
-    if (settled?.status === "failed")
-      next = updateModel(next, { _tag: "ExecutionFailed", turnId: settled.id, message: "Execution failed" })
+    if (settled?.status === "failed") {
+      // The snapshot carries the run's real failure in the last Error unit; a generic status
+      // sentence would discard it at the same boundary the wire schema was built to protect.
+      const turn = snapshot.turns.find((entry) => String(entry.turn.id) === model.activeTurnId)
+      const errorUnit = [...(turn?.units ?? [])].reverse().find((unit) => {
+        const content = unit.content as { _tag?: string; block?: { _tag?: string } }
+        return content._tag === "Block" && content.block?._tag === "Error"
+      })
+      const errorBlock = (errorUnit?.content as { block?: { title?: string; detail?: string } } | undefined)?.block
+      const message =
+        errorBlock?.detail !== undefined && errorBlock.detail.length > 0
+          ? errorBlock.detail
+          : (errorBlock?.title ?? "Execution failed")
+      next = updateModel(next, {
+        _tag: "ExecutionFailed",
+        turnId: settled.id,
+        failure: { tag: "TurnFailed", message, retry: "user", actor: "environment" },
+      })
+    }
     if (settled?.status === "cancelled")
       next = updateModel(next, { _tag: "ExecutionCancelled", turnId: settled.id, agentResponseArrived: false })
   }

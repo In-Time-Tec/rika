@@ -207,7 +207,15 @@ export const makeProcessRuntime = (runtime: Runtime) => {
                       }
                     }
                   }
-                  loop.model = update(restored, { _tag: "ExecutionFailed", message: failure.message })
+                  loop.model = update(restored, {
+                    _tag: "ExecutionFailed",
+                    failure: {
+                      tag: "RecoveredTurnFailed",
+                      message: failure.message,
+                      retry: "user",
+                      actor: "environment",
+                    },
+                  })
                   loop.renderer?.surface.update(loop.model)
                 }),
             ),

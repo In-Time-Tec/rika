@@ -58,7 +58,16 @@ type Message =
   | { readonly _tag: "AssistantStreamed"; readonly id?: string; readonly turnId?: string; readonly text: string }
   | { readonly _tag: "AssistantCompleted"; readonly id?: string; readonly turnId?: string; readonly text: string }
   | { readonly _tag: "ExecutionCompleted"; readonly turnId?: string }
-  | { readonly _tag: "ExecutionFailed"; readonly turnId?: string; readonly message: string }
+  | {
+      readonly _tag: "ExecutionFailed"
+      readonly turnId?: string
+      readonly failure: {
+        readonly tag: string
+        readonly message: string
+        readonly retry: "user" | "automatic" | "never"
+        readonly actor: "user" | "environment" | "rika"
+      }
+    }
   | { readonly _tag: "ExecutionCancelled"; readonly turnId?: string; readonly agentResponseArrived?: boolean }
   | { readonly _tag: "BlockAdded"; readonly block: TranscriptBlock }
   | { readonly _tag: "ReasoningStreamed"; readonly text: string }
