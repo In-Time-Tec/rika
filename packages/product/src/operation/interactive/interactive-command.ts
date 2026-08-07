@@ -46,7 +46,6 @@ export const InteractiveCommand = Schema.Union([
     _tag: Schema.tag("LoadOlder"),
     threadId: Schema.String,
     before: TranscriptPage.PageCursor,
-    loadedKeys: Schema.Array(Schema.String),
   }),
   Schema.Struct({
     _tag: Schema.tag("LoadNewer"),
@@ -95,7 +94,7 @@ const executeInteractiveCommandImpl = (session: InteractiveSession, command: Int
     case "ReadQueue":
       return session.readQueue(command.threadId)
     case "LoadOlder":
-      return session.loadOlder(command.threadId, command.before, command.loadedKeys)
+      return session.loadOlder(command.threadId, command.before)
     case "LoadNewer":
       return session.loadNewer(command.threadId, command.after)
     case "PreviewThread":

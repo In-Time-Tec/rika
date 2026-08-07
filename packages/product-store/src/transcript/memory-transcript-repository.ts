@@ -17,10 +17,11 @@ const cursorFor = (projection: Projection, unit: Unit): PageCursor => ({
   turnId: projection.turn.id,
   orderKey: TranscriptOrdering.encodeUnitOrder(unit.order),
 })
+const compareText = (left: string, right: string) => (left < right ? -1 : left > right ? 1 : 0)
 const compareCursor = (left: PageCursor, right: PageCursor) =>
   left.createdAt - right.createdAt ||
-  String(left.turnId).localeCompare(String(right.turnId)) ||
-  left.orderKey.localeCompare(right.orderKey)
+  compareText(String(left.turnId), String(right.turnId)) ||
+  compareText(left.orderKey, right.orderKey)
 const validateUnits = (turnId: TurnId, units: ReadonlyArray<Unit>) =>
   Effect.gen(function* () {
     const orders = new Set<string>()
@@ -167,7 +168,7 @@ export const makeMemory = Effect.fn("TranscriptRepository.makeMemory")(function*
       const limit = options.limit ?? 200
       if (!Number.isInteger(limit) || limit < 1 || limit > 500)
         return yield* RepositoryError.make({ message: "Transcript page limit must be from 1 to 500" })
-      const entries = [...(yield* Ref.get(state)).values()]
+      const ordered = [...(yield* Ref.get(state)).values()]
         .flatMap((projection) =>
           projection.turn.threadId !== threadId ||
           projection.turn.status === "queued" ||
@@ -175,14 +176,22 @@ export const makeMemory = Effect.fn("TranscriptRepository.makeMemory")(function*
             ? []
             : projection.units.map((unit) => ({ projection, unit, cursor: cursorFor(projection, unit) })),
         )
-        .filter(({ cursor }) =>
-          options.before === undefined
-            ? options.after === undefined || compareCursor(cursor, options.after) > 0
-            : compareCursor(cursor, options.before) < 0,
-        )
-        .toSorted((a, b) => -compareCursor(a.cursor, b.cursor))
-      const selected = entries.slice(0, limit)
-      const materialized = selected.toReversed().map(({ projection, unit }) => ({
+        .toSorted((left, right) => compareCursor(left.cursor, right.cursor))
+      const boundaryIndex = (predicate: (cursor: PageCursor) => boolean) => {
+        const index = ordered.findIndex(({ cursor }) => predicate(cursor))
+        return index < 0 ? ordered.length : index
+      }
+      const afterStart =
+        options.after === undefined ? undefined : boundaryIndex((cursor) => compareCursor(cursor, options.after!) > 0)
+      const end =
+        afterStart === undefined
+          ? options.before === undefined
+            ? ordered.length
+            : boundaryIndex((cursor) => compareCursor(cursor, options.before!) >= 0)
+          : Math.min(ordered.length, afterStart + limit)
+      const start = afterStart ?? Math.max(0, end - limit)
+      const selected = ordered.slice(start, end)
+      const materialized = selected.map(({ projection, unit }) => ({
         turn: clone(projection.turn),
         unit: clone(unit),
         projectionRevision: projection.revision,
@@ -191,10 +200,10 @@ export const makeMemory = Effect.fn("TranscriptRepository.makeMemory")(function*
       }))
       return {
         entries: materialized,
-        hasOlder: entries.length > limit,
-        ...(options.after === undefined ? {} : { hasNewer: entries.length > limit }),
-        oldestCursor: selected.at(-1)?.cursor,
-        ...(options.after === undefined ? {} : { newestCursor: selected.at(0)?.cursor }),
+        hasOlder: start > 0,
+        hasNewer: end < ordered.length,
+        oldestCursor: selected[0]?.cursor,
+        newestCursor: selected.at(-1)?.cursor,
         usage: yield* usage(threadId),
       }
     }),

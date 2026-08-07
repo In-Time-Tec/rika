@@ -32,11 +32,7 @@ export interface InteractiveSession {
   readonly newThread: Effect.Effect<void, OperationUnavailable>
   readonly selectThread: (threadId: string) => Effect.Effect<void, OperationUnavailable>
   readonly readQueue: (threadId: string) => Effect.Effect<void, OperationUnavailable>
-  readonly loadOlder: (
-    threadId: string,
-    before: TranscriptPage.PageCursor,
-    loadedKeys: ReadonlyArray<string>,
-  ) => Effect.Effect<void, OperationUnavailable>
+  readonly loadOlder: (threadId: string, before: TranscriptPage.PageCursor) => Effect.Effect<void, OperationUnavailable>
   readonly loadNewer: (threadId: string, after: TranscriptPage.PageCursor) => Effect.Effect<void, OperationUnavailable>
   readonly previewThread: (threadId: string) => Effect.Effect<void, OperationUnavailable>
   readonly reopenThread: Effect.Effect<void, OperationUnavailable>

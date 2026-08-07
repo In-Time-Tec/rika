@@ -26,7 +26,6 @@ export type InteractiveTranscriptPageLoader = (
   state: SelectionEpochState,
   dispatch: (event: InteractiveEvent) => void,
   before?: TranscriptPage.PageCursor,
-  clientLoadedKeys?: ReadonlySet<string>,
 ) => Effect.Effect<
   void,
   OperationError | TurnRepository.RepositoryError | TranscriptRepository.RepositoryError,
@@ -79,7 +78,6 @@ export const makeInteractiveTranscriptPage = (input: InteractiveTranscriptPageIn
     state: SelectionEpochState,
     dispatch: (event: InteractiveEvent) => void,
     before?: TranscriptPage.PageCursor,
-    clientLoadedKeys?: ReadonlySet<string>,
   ) {
     const thread = state.thread
     const request = state.epoch
@@ -124,10 +122,7 @@ export const makeInteractiveTranscriptPage = (input: InteractiveTranscriptPageIn
     const hasOlder = storedHasOlder
     if (transcriptPageEncoder.encode(encodeJson(entries)).byteLength > maximumTranscriptPayloadBytes)
       return yield* operationError("Transcript page exceeds the transcript event limit")
-    const deliveredEntries =
-      clientLoadedKeys === undefined
-        ? entries
-        : entries.filter((entry: TranscriptPage.Entry) => !clientLoadedKeys.has(entry.unit.key))
+    const deliveredEntries = entries
     const completedAt = yield* Clock.currentTimeMillis
     if (isCurrentSelectionState(state) !== true) return
     state.transcriptCursor = oldestCursor
@@ -135,12 +130,10 @@ export const makeInteractiveTranscriptPage = (input: InteractiveTranscriptPageIn
       state.newestTranscriptCursor =
         "newestCursor" in page ? page.newestCursor : transcriptCursorFor(page.entries.at(-1))
     state.hasOlder = hasOlder
-    if (before !== undefined) for (const entry of deliveredEntries) state.loadedKeys.add(entry.unit.key)
     if (before === undefined) {
       const queue = yield* turns.readQueue(thread.id)
       const activeTurn = yield* turns.findActive(thread.id)
       if (isCurrentSelectionState(state) !== true || (yield* Ref.get(selectionRequest)) !== request) return
-      for (const entry of entries) state.loadedKeys.add(entry.unit.key)
       yield* selectionAdmission.withPermits(1)(
         Effect.uninterruptible(
           Effect.gen(function* () {

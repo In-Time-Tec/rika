@@ -56,7 +56,6 @@ export const interactiveTui =
           applyingFeedBatch: false,
           feedPreserveAnchor: false,
           replayTurns: new Map<string, Turn.Turn>(),
-          loadedTranscriptEntries: [] as ReadonlyArray<TranscriptPage.Entry>,
           projectionRevisions: new Map<string, number>(),
           transcriptHasOlder: false,
           transcriptHasNewer: false,

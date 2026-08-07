@@ -219,8 +219,7 @@ export const makeInteractiveSupervisor = (context: SupervisorContext) => {
           yield* retryRead((session) => session.selectThread(threadId))
         }),
       readQueue: (threadId) => retryRead((session) => session.readQueue(threadId)),
-      loadOlder: (threadId, before, loadedKeys) =>
-        retryRead((session) => session.loadOlder(threadId, before, loadedKeys)),
+      loadOlder: (threadId, before) => retryRead((session) => session.loadOlder(threadId, before)),
       loadNewer: (threadId, after) => retryRead((session) => session.loadNewer(threadId, after)),
       previewThread: (threadId) => retryRead((session) => session.previewThread(threadId)),
       reopenThread: Effect.gen(function* () {

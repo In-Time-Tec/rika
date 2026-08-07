@@ -20,8 +20,8 @@ export interface Projection {
 export interface Page {
   readonly entries: ReadonlyArray<Entry>
   readonly hasOlder: boolean
-  readonly hasNewer?: boolean
+  readonly hasNewer: boolean
   readonly oldestCursor: PageCursor | undefined
-  readonly newestCursor?: PageCursor | undefined
+  readonly newestCursor: PageCursor | undefined
   readonly usage: UsageSummary
 }

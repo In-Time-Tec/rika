@@ -106,7 +106,7 @@ export const makeInteractiveSession = (options: SessionOptions): InteractiveSess
     newThread: invoke({ _tag: "NewThread" }),
     selectThread: (threadId) => invoke({ _tag: "SelectThread", threadId }),
     readQueue: (threadId) => invoke({ _tag: "ReadQueue", threadId }),
-    loadOlder: (threadId, before, loadedKeys) => invoke({ _tag: "LoadOlder", threadId, before, loadedKeys }),
+    loadOlder: (threadId, before) => invoke({ _tag: "LoadOlder", threadId, before }),
     loadNewer: (threadId, after) => invoke({ _tag: "LoadNewer", threadId, after }),
     previewThread: (threadId) => invoke({ _tag: "PreviewThread", threadId }),
     reopenThread: invoke({ _tag: "ReopenThread" }),

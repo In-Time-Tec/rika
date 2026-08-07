@@ -400,7 +400,6 @@ describe("Rika Server protocol", () => {
         _tag: "LoadOlder",
         threadId: "thread",
         before: { createdAt: 1, turnId: "turn", orderKey: "turn:user" },
-        loadedKeys: [],
       },
       {
         _tag: "LoadNewer",

@@ -73,18 +73,14 @@ export const makeInteractiveSessionSelection = (
     )
   const readQueueOperation = (id: string) =>
     safe(sessionDispatch, readQueue(Thread.ThreadId.make(id), selectionDispatch(typedGetCurrentSelectionEpoch())))
-  const loadOlder = (
-    threadId: string,
-    before: TranscriptPage.PageCursor | undefined,
-    loadedKeys: ReadonlyArray<string>,
-  ) =>
+  const loadOlder = (threadId: string, before: TranscriptPage.PageCursor | undefined) =>
     safe(
       sessionDispatch,
       Effect.gen(function* () {
         const state = getActiveSelectionState()
         if (state === undefined || String(state.thread.id) !== threadId) return
         yield* typedTranscriptPageAdmission.withPermits(1)(
-          loadTranscriptPage(state, selectionDispatch(state.epoch), before, new Set(loadedKeys)),
+          loadTranscriptPage(state, selectionDispatch(state.epoch), before),
         )
       }),
     )

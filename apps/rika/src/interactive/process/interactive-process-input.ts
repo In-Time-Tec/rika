@@ -41,13 +41,7 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
         if (!loop.transcriptHasOlder || threadId === undefined || before === undefined) return
         loop.loadingOlder = true
         run(
-          session
-            .loadOlder(
-              threadId,
-              before,
-              loop.loadedTranscriptEntries.map((entry: { readonly unit: { readonly key: string } }) => entry.unit.key),
-            )
-            .pipe(
+          session.loadOlder(threadId, before).pipe(
               Effect.ensuring(
                 Effect.sync(() => {
                   loop.loadingOlder = false

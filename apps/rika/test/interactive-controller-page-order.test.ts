@@ -56,3 +56,85 @@ it("inserts an older partial Turn page between retained opening and final entrie
   ])
   expect(state.model.entries.map((value) => value.text)).toEqual(["opening", "middle 2", "middle 3", "final"])
 })
+
+
+it("moves contiguously from five older units into a 125-unit newest Turn", () => {
+  const makePage = (id: string, createdAt: number, count: number) => {
+    const currentTurn = entries(id, createdAt)[0]!.turn
+    return Array.from({ length: count }, (_, index) => {
+      const key = `${id}-${String(index).padStart(3, "0")}`
+      return {
+        turn: currentTurn,
+        unit: {
+          key,
+          turnId: currentTurn.id,
+          order: TranscriptOrdering.unitOrder(key, index),
+          revision: index,
+          content: { _tag: "Entry" as const, role: "assistant" as const, text: key },
+        },
+        projectionRevision: count,
+        projectionModelPhase: -1,
+        projectionState: {
+          status: "completed" as const,
+          usage: { ...ExecutionProjection.emptyUsageState(), sourceComplete: true },
+          steering: { steeringMessages: 0, followUpMessages: 0 },
+        },
+      }
+    })
+  }
+  const cursor = (entry: ReturnType<typeof makePage>[number]) => ({
+    createdAt: entry.turn.createdAt,
+    turnId: entry.turn.id,
+    orderKey: TranscriptOrdering.encodeUnitOrder(entry.unit.order),
+  })
+  const older = makePage("older", 1, 5)
+  const newest = makePage("newest", 2, 125)
+  const feed = makeThreadViewFeed(() => 1)
+  const runtimeEvents = [
+    {
+      _tag: "SelectionLoaded" as const,
+      selectionEpoch: 1,
+      activitySequence: 0,
+      queueRevision: 0,
+      queue: [],
+      thread,
+      entries: newest.slice(5),
+      hasOlder: true,
+      hasNewer: false,
+      usage: { usage: ExecutionProjection.emptyUsageState() },
+      oldestCursor: cursor(newest[5]!),
+      newestCursor: cursor(newest[124]!),
+    },
+    {
+      _tag: "TranscriptPagePrepended" as const,
+      selectionEpoch: 1,
+      threadId: thread.id,
+      entries: [...older, ...newest.slice(0, 5)],
+      hasOlder: false,
+      oldestCursor: cursor(older[0]!),
+    },
+    {
+      _tag: "TranscriptPageAppended" as const,
+      selectionEpoch: 1,
+      threadId: thread.id,
+      entries: newest.slice(0, 50),
+      hasNewer: true,
+      requestedAfter: cursor(older[4]!),
+      newestCursor: cursor(newest[49]!),
+    },
+  ]
+
+  let state = initialState()
+  for (const runtimeEvent of runtimeEvents)
+    for (const event of feed.publish(runtimeEvent)) state = InteractiveController.update(state, event).state
+
+  const visibleKeys = state.view?.turns.flatMap((value) => value.units.map((unit) => unit.key))
+  expect(visibleKeys).toEqual([...older, ...newest.slice(0, 50)].map((entry) => entry.unit.key))
+  expect(new Set(visibleKeys).size).toBe(55)
+  expect(state.view).toMatchObject({
+    hasOlder: false,
+    hasNewer: true,
+    source: { oldestCursor: cursor(older[0]!), newestCursor: cursor(newest[49]!) },
+  })
+  expect(state.model.entries.map((value) => value.text)).toEqual(visibleKeys)
+})

@@ -288,8 +288,7 @@ export const makeInteractiveSession = (
       quit: implementation.quit,
       selectThread: (threadId) => state.composition.admitLocal(implementation.selectThread(threadId)),
       readQueue: (threadId) => state.composition.admitLocal(implementation.readQueue(threadId)),
-      loadOlder: (threadId, before, loadedKeys) =>
-        state.composition.admitLocal(implementation.loadOlder(threadId, before, loadedKeys)),
+      loadOlder: (threadId, before) => state.composition.admitLocal(implementation.loadOlder(threadId, before)),
       loadNewer: (threadId, after) => state.composition.admitLocal(implementation.loadNewer(threadId, after)),
       previewThread: (threadId) => state.composition.admitLocal(implementation.previewThread(threadId)),
       reopenThread: state.composition.admitLocal(implementation.reopenThread),

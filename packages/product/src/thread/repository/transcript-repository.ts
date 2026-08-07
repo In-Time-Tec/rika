@@ -56,7 +56,9 @@ export const productMemoryLayerWithTurns = Layer.succeed(
       Effect.succeed({
         entries: [],
         hasOlder: false,
+        hasNewer: false,
         oldestCursor: undefined,
+        newestCursor: undefined,
         usage: { usage: ExecutionProjection.emptyUsageState() },
       }),
     usage: () => Effect.succeed({ usage: ExecutionProjection.emptyUsageState() }),

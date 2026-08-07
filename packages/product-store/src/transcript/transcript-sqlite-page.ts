@@ -12,10 +12,11 @@ const UnitJson = Schema.fromJsonString(TranscriptUnit.Unit)
 const StateJson = Schema.fromJsonString(ExecutionProjection.ProjectionState)
 const error = (cause: unknown) =>
   Schema.is(RepositoryError)(cause) ? cause : RepositoryError.make({ message: String(cause) })
+const compareText = (left: string, right: string) => (left < right ? -1 : left > right ? 1 : 0)
 const compare = (left: PageCursor, right: PageCursor) =>
   left.createdAt - right.createdAt ||
-  String(left.turnId).localeCompare(String(right.turnId)) ||
-  left.orderKey.localeCompare(right.orderKey)
+  compareText(String(left.turnId), String(right.turnId)) ||
+  compareText(left.orderKey, right.orderKey)
 
 export const makeTranscriptSqlitePage = (sql: SqlClient): Pick<Interface, "page" | "usage"> => {
   const usage = Effect.fn("TranscriptRepository.usage")(function* (threadId: ThreadId) {
@@ -78,13 +79,22 @@ export const makeTranscriptSqlitePage = (sql: SqlClient): Pick<Interface, "page"
           return { turn, unit, cursor, revision: Number(row.projection_revision), projectionState }
         }),
       )
-      const candidates = decoded.filter(({ cursor }) =>
-        options.before === undefined
-          ? options.after === undefined || compare(cursor, options.after) > 0
-          : compare(cursor, options.before) < 0,
-      )
-      const selected = candidates.slice(0, limit)
-      const entries: ReadonlyArray<Entry> = selected.toReversed().map(({ turn, unit, revision, projectionState }) => ({
+      const ordered = decoded.toSorted((left, right) => compare(left.cursor, right.cursor))
+      const boundaryIndex = (predicate: (cursor: PageCursor) => boolean) => {
+        const index = ordered.findIndex(({ cursor }) => predicate(cursor))
+        return index < 0 ? ordered.length : index
+      }
+      const afterStart =
+        options.after === undefined ? undefined : boundaryIndex((cursor) => compare(cursor, options.after!) > 0)
+      const end =
+        afterStart === undefined
+          ? options.before === undefined
+            ? ordered.length
+            : boundaryIndex((cursor) => compare(cursor, options.before!) >= 0)
+          : Math.min(ordered.length, afterStart + limit)
+      const start = afterStart ?? Math.max(0, end - limit)
+      const selected = ordered.slice(start, end)
+      const entries: ReadonlyArray<Entry> = selected.map(({ turn, unit, revision, projectionState }) => ({
         turn,
         unit,
         projectionRevision: revision,
@@ -93,10 +103,10 @@ export const makeTranscriptSqlitePage = (sql: SqlClient): Pick<Interface, "page"
       }))
       return {
         entries,
-        hasOlder: candidates.length > limit,
-        ...(options.after === undefined ? {} : { hasNewer: candidates.length > limit }),
-        oldestCursor: selected.at(-1)?.cursor,
-        ...(options.after === undefined ? {} : { newestCursor: selected.at(0)?.cursor }),
+        hasOlder: start > 0,
+        hasNewer: end < ordered.length,
+        oldestCursor: selected[0]?.cursor,
+        newestCursor: selected.at(-1)?.cursor,
         usage: yield* usage(threadId),
       }
     }),

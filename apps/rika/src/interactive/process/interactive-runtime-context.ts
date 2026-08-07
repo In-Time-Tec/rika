@@ -23,7 +23,6 @@ export interface InteractiveLoop {
   applyingFeedBatch: boolean
   feedPreserveAnchor: boolean
   replayTurns: Map<string, Turn.Turn>
-  loadedTranscriptEntries: ReadonlyArray<TranscriptPage.Entry>
   projectionRevisions: Map<string, number>
   transcriptHasOlder: boolean
   transcriptHasNewer: boolean

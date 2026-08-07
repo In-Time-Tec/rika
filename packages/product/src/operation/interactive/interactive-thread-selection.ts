@@ -5,7 +5,6 @@ import * as Thread from "@rika/product/thread-record"
 export type SelectionEpochState = {
   readonly epoch: number
   readonly thread: Thread.Thread
-  readonly loadedKeys: Set<string>
   transcriptCursor: TranscriptPage.PageCursor | undefined
   newestTranscriptCursor: TranscriptPage.PageCursor | undefined
   hasOlder: boolean
@@ -14,7 +13,6 @@ export type SelectionEpochState = {
 const makeSelectionStateImpl = (thread: Thread.Thread, epoch: number): SelectionEpochState => ({
   epoch,
   thread,
-  loadedKeys: new Set(),
   transcriptCursor: undefined,
   newestTranscriptCursor: undefined,
   hasOlder: false,
