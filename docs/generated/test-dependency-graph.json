@@ -373,6 +373,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "apps/rika/test/server-runtime-recovery.test.ts",
+      "path": "apps/rika/test/server-runtime-recovery.test.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "apps/rika/test/server-startup.test.ts",
       "path": "apps/rika/test/server-startup.test.ts",
       "workspace": "@rika/cli",
@@ -4516,6 +4526,30 @@
       "from": "apps/rika/test/server-execution-layer.test.ts",
       "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
       "specifier": "@rika/product/execution-route-snapshot",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/server-runtime-recovery.test.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/server-runtime-recovery.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/server-runtime-recovery.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
       "kind": "import",
       "relationship": "test",
       "production": false

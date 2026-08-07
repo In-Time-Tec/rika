@@ -624,6 +624,15 @@
       "publicExports": []
     },
     {
+      "id": "apps/rika/src/server/composition/server-runtime-recovery.ts",
+      "path": "apps/rika/src/server/composition/server-runtime-recovery.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "apps/rika/src/server/composition/server-runtime-tools.ts",
       "path": "apps/rika/src/server/composition/server-runtime-tools.ts",
       "workspace": "@rika/cli",
@@ -8382,6 +8391,14 @@
     },
     {
       "from": "apps/rika/src/server/composition/server-execution-layer.ts",
+      "to": "apps/rika/src/server/composition/server-runtime-recovery.ts",
+      "specifier": "./server-runtime-recovery",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-execution-layer.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -8672,6 +8689,14 @@
       "from": "apps/rika/src/server/composition/server-repository-layer.ts",
       "to": "packages/product/src/thread/model/turn-record.ts",
       "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/server/composition/server-runtime-recovery.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true
