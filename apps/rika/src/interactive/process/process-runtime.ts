@@ -14,7 +14,7 @@ import type { Model, Mode } from "@rika/terminal/terminal-state"
 type PromptPart = ReturnType<ReturnType<typeof promptParts>>[number]
 import * as Thread from "@rika/product/thread-record"
 import * as ProductOperation from "@rika/product/product-operation"
-import { Cause, Clock, Deferred, Duration, Effect, Fiber, FileSystem, Schema } from "effect"
+import { Cause, Clock, Deferred, Effect, Fiber, FileSystem, Schema, SubscriptionRef } from "effect"
 import * as Logging from "../../diagnostics/diagnostic-file-logging"
 import { workspaceDirectory } from "@rika/configuration/configuration-paths"
 import type { InteractiveRuntimeContext } from "./interactive-runtime-context"
@@ -64,8 +64,8 @@ export const makeProcessRuntime = (runtime: Runtime) => {
   }
   const teardown = (showGoodbye: boolean) =>
     Effect.suspend(() => {
-      if (loop.teardownStarted) return Effect.void
-      loop.teardownStarted = true
+      if (Effect.runSync(SubscriptionRef.get(loop.lifecycle))._tag === "TornDown") return Effect.void
+      Effect.runSync(SubscriptionRef.set(loop.lifecycle, { _tag: "TornDown" }))
       return Effect.uninterruptible(
         Effect.gen(function* () {
           yield* Effect.logInfo("tui.teardown.started")
@@ -79,8 +79,9 @@ export const makeProcessRuntime = (runtime: Runtime) => {
       )
     })
   const close = (exitCode?: number, showGoodbye = true) => {
-    if (loop.closing) return
-    loop.closing = true
+    const current = Effect.runSync(SubscriptionRef.get(loop.lifecycle))
+    if (current._tag === "Quitting" || current._tag === "TornDown") return
+    Effect.runSync(SubscriptionRef.set(loop.lifecycle, { _tag: "Quitting", lastInterruptAt: undefined }))
     if (exitCode !== undefined) process.exitCode = exitCode
     fork(
       Effect.raceFirst(
@@ -104,20 +105,19 @@ export const makeProcessRuntime = (runtime: Runtime) => {
   }
   const interrupt = Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis
-    const sinceLastPress = loop.lastInterruptAt === undefined ? undefined : Duration.millis(now - loop.lastInterruptAt)
-    loop.lastInterruptAt = now
+    const lifecycle = yield* SubscriptionRef.get(loop.lifecycle)
     const decision = ProcessSignals.interruptDecision({
-      quitRequested: loop.closing,
+      lifecycle,
       hasActiveWork:
         loop.submittedSinceIdle ||
         loop.model.busy ||
         loop.model.activeTurnId !== undefined ||
         loop.model.activity !== undefined,
-      cancelRequested: loop.interruptCancellationRequested,
-      sinceLastPress,
+      now,
     })
+    if (decision._tag === "Ignore") return
     if (decision._tag === "Cancel") {
-      loop.interruptCancellationRequested = true
+      yield* SubscriptionRef.set(loop.lifecycle, { _tag: "Cancelling" })
       run(session.cancel)
       return
     }
@@ -125,7 +125,9 @@ export const makeProcessRuntime = (runtime: Runtime) => {
       Deferred.doneUnsafe(loop.forceQuit, Effect.void)
       return
     }
-    loop.renderer?.surface.showToast("Quitting… press ctrl+c again to force quit")
+    if (lifecycle._tag === "Running" || lifecycle._tag === "Cancelling")
+      loop.renderer?.surface.showToast("Quitting… press ctrl+c again to force quit")
+    yield* SubscriptionRef.set(loop.lifecycle, { _tag: "Quitting", lastInterruptAt: now })
     close(tuiSignalExitCode("SIGINT"))
   })
   const terminate = () => close(tuiSignalExitCode("SIGTERM"))

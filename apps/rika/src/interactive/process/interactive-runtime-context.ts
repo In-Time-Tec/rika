@@ -8,7 +8,8 @@ import type * as TranscriptPage from "@rika/product/transcript-page"
 import type * as Turn from "@rika/product/turn-record"
 import type * as ThreadView from "@rika/product/thread-view"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Deferred, Effect, Fiber } from "effect"
+import { Deferred, Effect, Fiber, SubscriptionRef } from "effect"
+import type { TuiLifecycle } from "./process-interrupt"
 import type { InteractiveTuiOptions } from "./interactive-process-loop"
 
 export interface InteractiveLoop {
@@ -38,12 +39,9 @@ export interface InteractiveLoop {
   pendingNewer: { readonly threadId: string; readonly cursor: string } | undefined
   selectionResyncs: Set<string>
   queueResyncs: Set<string>
-  closing: boolean
+  lifecycle: SubscriptionRef.SubscriptionRef<TuiLifecycle>
   forceQuit: Deferred.Deferred<void>
-  lastInterruptAt: number | undefined
-  interruptCancellationRequested: boolean
   submittedSinceIdle: boolean
-  teardownStarted: boolean
   terminalPauseCount: number
   pendingJobControlPause: boolean
   releaseJobControlPause: (() => boolean) | undefined

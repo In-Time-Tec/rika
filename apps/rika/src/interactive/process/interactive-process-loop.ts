@@ -8,12 +8,13 @@ import { create as createTui } from "@rika/terminal/opentui-surface"
 import { Model, initial, withModeRouteMap } from "@rika/terminal/terminal-state"
 import type { ThreadItem } from "@rika/terminal/terminal-state"
 type ModeRoutes = Model["modeRoutes"]
-import { Deferred, Effect, Exit, Fiber, FiberHandle, FiberSet, Scope } from "effect"
+import { Deferred, Effect, Exit, Fiber, FiberHandle, FiberSet, Scope, SubscriptionRef } from "effect"
 import { terminalTitleSequence } from "./interactive-process"
 import { makeEventRouter } from "./process-events"
 import { makeProcessRuntime } from "./process-runtime"
 import { initializeRenderer } from "./interactive-process-setup"
 import type { InteractiveLoop } from "./interactive-runtime-context"
+import type { TuiLifecycle } from "./process-interrupt"
 
 export interface InteractiveTuiOptions {
   readonly editor?: string | undefined
@@ -41,6 +42,7 @@ export const interactiveTui =
       const feedTimer = yield* FiberHandle.makeRuntime<never, never, void>().pipe(
         Effect.provideService(Scope.Scope, appScope),
       )
+      const lifecycle = yield* SubscriptionRef.make<TuiLifecycle>({ _tag: "Running" })
       const resolvedModeRoutes = options.modeRoutes?.()
       return yield* Effect.callback<void, ProductOperation.OperationUnavailable>((resume) => {
         const loop: InteractiveLoop = {
@@ -70,12 +72,9 @@ export const interactiveTui =
           pendingNewer: undefined as { readonly threadId: string; readonly cursor: string } | undefined,
           selectionResyncs: new Set<string>(),
           queueResyncs: new Set<string>(),
-          closing: false,
+          lifecycle,
           forceQuit: Deferred.makeUnsafe<void>(),
-          lastInterruptAt: undefined,
-          interruptCancellationRequested: false,
           submittedSinceIdle: false,
-          teardownStarted: false,
           terminalPauseCount: 0,
           pendingJobControlPause: false,
           releaseJobControlPause: undefined as (() => boolean) | undefined,

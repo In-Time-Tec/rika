@@ -10042,6 +10042,14 @@
     },
     {
       "from": "apps/rika/src/interactive/process/interactive-process-loop.ts",
+      "to": "apps/rika/src/interactive/process/process-interrupt.ts",
+      "specifier": "./process-interrupt",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/interactive-process-loop.ts",
       "to": "apps/rika/src/interactive/process/process-runtime.ts",
       "specifier": "./process-runtime",
       "kind": "import",
@@ -10244,6 +10252,14 @@
       "from": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
       "to": "apps/rika/src/interactive/process/interactive-process-loop.ts",
       "specifier": "./interactive-process-loop",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/interactive-runtime-context.ts",
+      "to": "apps/rika/src/interactive/process/process-interrupt.ts",
+      "specifier": "./process-interrupt",
       "kind": "import",
       "relationship": "runtime",
       "production": true

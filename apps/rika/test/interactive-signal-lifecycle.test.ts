@@ -6,45 +6,29 @@ import { interruptDecision } from "../src/interactive/process/process-interrupt"
 import { lifecycleEvents } from "../src/interactive/process/process-signals"
 
 test("first interrupt cancels active work and leaves the session running", () => {
-  expect(
-    interruptDecision({
-      quitRequested: false,
-      hasActiveWork: true,
-      cancelRequested: false,
-      sinceLastPress: undefined,
-    }),
-  ).toEqual({ _tag: "Cancel" })
+  expect(interruptDecision({ lifecycle: { _tag: "Running" }, hasActiveWork: true, now: 1_000 })).toEqual({
+    _tag: "Cancel",
+  })
 })
 
 test("interrupt without active work quits", () => {
-  expect(
-    interruptDecision({
-      quitRequested: false,
-      hasActiveWork: false,
-      cancelRequested: false,
-      sinceLastPress: undefined,
-    }),
-  ).toEqual({ _tag: "Quit" })
+  expect(interruptDecision({ lifecycle: { _tag: "Running" }, hasActiveWork: false, now: 1_000 })).toEqual({
+    _tag: "Quit",
+  })
 })
 
 test("interrupt after a requested cancellation quits instead of cancelling again", () => {
-  expect(
-    interruptDecision({
-      quitRequested: false,
-      hasActiveWork: true,
-      cancelRequested: true,
-      sinceLastPress: Duration.millis(10),
-    }),
-  ).toEqual({ _tag: "Quit" })
+  expect(interruptDecision({ lifecycle: { _tag: "Cancelling" }, hasActiveWork: true, now: 1_000 })).toEqual({
+    _tag: "Quit",
+  })
 })
 
 test("a second interrupt inside the force window escalates to a forced quit", () => {
   expect(
     interruptDecision({
-      quitRequested: true,
+      lifecycle: { _tag: "Quitting", lastInterruptAt: 800 },
       hasActiveWork: false,
-      cancelRequested: false,
-      sinceLastPress: Duration.millis(200),
+      now: 1_000,
     }),
   ).toEqual({ _tag: "ForceQuit" })
 })
@@ -52,12 +36,17 @@ test("a second interrupt inside the force window escalates to a forced quit", ()
 test("a later interrupt outside the force window keeps waiting on the quit", () => {
   expect(
     interruptDecision({
-      quitRequested: true,
+      lifecycle: { _tag: "Quitting", lastInterruptAt: 500 },
       hasActiveWork: false,
-      cancelRequested: false,
-      sinceLastPress: Duration.seconds(30),
+      now: 30_500,
     }),
   ).toEqual({ _tag: "Quit" })
+})
+
+test("an interrupt after teardown is ignored", () => {
+  expect(interruptDecision({ lifecycle: { _tag: "TornDown" }, hasActiveWork: false, now: 1_000 })).toEqual({
+    _tag: "Ignore",
+  })
 })
 
 it.live("lifecycle events publish signals and release every listener when the scope closes", () =>
