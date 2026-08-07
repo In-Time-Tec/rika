@@ -108,7 +108,7 @@ const settleInteractiveSubmissionImpl = (
   input: InteractiveSubmissionContext,
   state: SettleInteractiveSubmissionState,
 ) => {
-  const { setTurnStatus, settleThread, executionStartFailureMessage } = input
+  const { setTurnStatus, settleThread } = input
   const { thread, turn, outcome, publish, dispatch } = state
   return Effect.uninterruptible(
     Effect.gen(function* () {
