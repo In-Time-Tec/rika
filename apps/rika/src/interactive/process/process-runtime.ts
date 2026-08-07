@@ -87,10 +87,7 @@ export const makeProcessRuntime = (runtime: Runtime) => {
       })
     })
   const close = (exitCode?: number, showGoodbye = true) => {
-    if (loop.closing) {
-      Deferred.doneUnsafe(loop.forceQuit, Effect.void)
-      return
-    }
+    if (loop.closing) return
     loop.closing = true
     if (exitCode !== undefined) process.exitCode = exitCode
     fork(
