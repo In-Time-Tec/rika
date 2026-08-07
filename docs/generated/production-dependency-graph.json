@@ -1963,6 +1963,15 @@
       "publicExports": []
     },
     {
+      "id": "packages/baton-execution/src/failure-presentation.ts",
+      "path": "packages/baton-execution/src/failure-presentation.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/baton-execution/src/scripted-model.ts",
       "path": "packages/baton-execution/src/scripted-model.ts",
       "workspace": "@rika/baton-execution",
@@ -10935,6 +10944,14 @@
       "from": "packages/baton-execution/src/baton-diagnostic-projection.ts",
       "to": "packages/baton-execution/src/baton-projector-values.ts",
       "specifier": "./baton-projector-values",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-diagnostic-projection.ts",
+      "to": "packages/baton-execution/src/failure-presentation.ts",
+      "specifier": "./failure-presentation",
       "kind": "import",
       "relationship": "runtime",
       "production": true

@@ -2433,6 +2433,15 @@
       "publicExports": []
     },
     {
+      "id": "packages/baton-execution/src/failure-presentation.ts",
+      "path": "packages/baton-execution/src/failure-presentation.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/baton-execution/src/scripted-model.ts",
       "path": "packages/baton-execution/src/scripted-model.ts",
       "workspace": "@rika/baton-execution",
@@ -2603,6 +2612,16 @@
     {
       "id": "packages/baton-execution/test/baton-tree-projector.test.ts",
       "path": "packages/baton-execution/test/baton-tree-projector.test.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/baton-execution/test/failure-presentation.test.ts",
+      "path": "packages/baton-execution/test/failure-presentation.test.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -16673,6 +16692,14 @@
     },
     {
       "from": "packages/baton-execution/src/baton-diagnostic-projection.ts",
+      "to": "packages/baton-execution/src/failure-presentation.ts",
+      "specifier": "./failure-presentation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-diagnostic-projection.ts",
       "to": "packages/product/src/execution/contract/execution-transcript-contract.ts",
       "specifier": "@rika/product/execution-transcript-contract",
       "kind": "import",
@@ -18499,6 +18526,22 @@
       "from": "packages/baton-execution/test/baton-tree-projector.test.ts",
       "to": "packages/transcript/src/ordering/transcript-unit-order.ts",
       "specifier": "@rika/transcript/transcript-unit-order",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/failure-presentation.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/failure-presentation.test.ts",
+      "to": "packages/baton-execution/src/failure-presentation.ts",
+      "specifier": "../src/failure-presentation",
       "kind": "import",
       "relationship": "test",
       "production": false
