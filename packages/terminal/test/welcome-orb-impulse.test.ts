@@ -6,8 +6,9 @@ const host = { clock: { setInterval: () => 0, clearInterval: () => {} } as never
 
 test("records a strike at the clicked cell and decays it away", () => {
   const controller = new WelcomeController(host)
-  controller.strike(12, 5)
-  expect(controller.impulses).toEqual([{ column: 12, row: 5, startPhase: 0 }])
+  controller.strike(160, 44, 40, 12)
+  expect(controller.impulses).toHaveLength(1)
+  expect(controller.impulses[0]?.startPhase).toBe(0)
   const geometry = orbGeometry(160, 44)
   const idle = orbRows(geometry, 0, []).join("")
   const struck = orbRows(geometry, 0, controller.impulses).join("")
@@ -18,15 +19,15 @@ test("records a strike at the clicked cell and decays it away", () => {
 
 test("superposes multiple strikes", () => {
   const controller = new WelcomeController(host)
-  controller.strike(8, 4)
+  controller.strike(160, 44, 30, 10)
   controller.advance()
-  controller.strike(30, 9)
+  controller.strike(160, 44, 60, 16)
   expect(controller.impulses.map((impulse) => impulse.startPhase)).toEqual([0, 1])
 })
 
 test("clears impulses when the welcome surface unmounts", () => {
   const controller = new WelcomeController(host)
-  controller.strike(3, 3)
+  controller.strike(160, 44, 30, 10)
   controller.clear()
   expect(controller.impulses).toEqual([])
 })

@@ -20,7 +20,7 @@ import {
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { Command } from "effect/unstable/cli"
 import { command, version } from "../command/root/rika-command"
-import * as Logging from "../diagnostic-file-logging"
+import * as Logging from "../diagnostics/diagnostic-file-logging"
 import { layer as serverLayer } from "../transport/client/server-client-transport"
 import * as ServerProcessStartup from "../server/process/server-process"
 import { spawn as spawnServer } from "../server/process/server-process-spawn"

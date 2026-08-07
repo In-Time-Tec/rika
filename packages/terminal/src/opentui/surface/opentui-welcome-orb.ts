@@ -1,3 +1,4 @@
+import { Function } from "effect"
 export interface OrbImpulse {
   readonly column: number
   readonly row: number
@@ -30,14 +31,41 @@ const impulseWidth = 0.03
 const impulseGain = 1.4
 const impulseLifetime = 3.2
 
-export const orbGeometry = (width: number, height: number): OrbGeometry => {
-  const columns = Math.max(24, Math.min(72, width - 2))
-  const rows = Math.max(9, Math.min(22, Math.floor((columns * cellAspect) / 1.6)))
+const copyColumnWidth = 24
+
+const orbGeometryImpl = (width: number, height: number): OrbGeometry => {
+  const available = Math.max(12, Math.floor(width / 2) - 2)
+  const columns = Math.max(18, Math.min(56, available))
+  const rows = Math.max(9, Math.min(Math.max(9, height - spacingReserve), Math.round(columns * cellAspect)))
   return { columns, rows }
 }
 
-export const orbImpulseExpired = (impulse: OrbImpulse, phase: number): boolean =>
+const spacingReserve = 8
+
+export const orbCopyColumn = copyColumnWidth
+
+export const orbGeometry: {
+  (
+    arg1: Parameters<typeof orbGeometryImpl>[1],
+  ): (arg0: Parameters<typeof orbGeometryImpl>[0]) => ReturnType<typeof orbGeometryImpl>
+  (
+    arg0: Parameters<typeof orbGeometryImpl>[0],
+    arg1: Parameters<typeof orbGeometryImpl>[1],
+  ): ReturnType<typeof orbGeometryImpl>
+} = Function.dual(2, orbGeometryImpl)
+
+const orbImpulseExpiredImpl = (impulse: OrbImpulse, phase: number): boolean =>
   (phase - impulse.startPhase) * 0.09 > impulseLifetime
+
+export const orbImpulseExpired: {
+  (
+    arg1: Parameters<typeof orbImpulseExpiredImpl>[1],
+  ): (arg0: Parameters<typeof orbImpulseExpiredImpl>[0]) => ReturnType<typeof orbImpulseExpiredImpl>
+  (
+    arg0: Parameters<typeof orbImpulseExpiredImpl>[0],
+    arg1: Parameters<typeof orbImpulseExpiredImpl>[1],
+  ): ReturnType<typeof orbImpulseExpiredImpl>
+} = Function.dual(2, orbImpulseExpiredImpl)
 
 const surfaceIntensity = (nx: number, ny: number, nz: number, time: number): number => {
   const lambert = Math.max(0, nx * -0.5 + ny * -0.58 + nz * 0.65)
@@ -46,7 +74,7 @@ const surfaceIntensity = (nx: number, ny: number, nz: number, time: number): num
   return lambert * 0.92 + shimmer * 0.18 + ripple * 0.08 - (nx * nx + ny * ny) * 0.18
 }
 
-export const orbCell = (
+const orbCell = (
   geometry: OrbGeometry,
   column: number,
   row: number,
@@ -77,11 +105,25 @@ export const orbCell = (
   return rampGlyph(intensity)
 }
 
-export const orbRows = (
+const orbRowsImpl = (
   geometry: OrbGeometry,
   phase: number,
   impulses: ReadonlyArray<OrbImpulse>,
 ): ReadonlyArray<string> =>
-  Array.from({ length: geometry.rows }, (_, row) =>
-    Array.from({ length: geometry.columns }, (_, column) => orbCell(geometry, column, row, phase, impulses)).join(""),
+  Array.from({ length: geometry.rows }, (_unusedRow, row) =>
+    Array.from({ length: geometry.columns }, (_unusedColumn, column) =>
+      orbCell(geometry, column, row, phase, impulses),
+    ).join(""),
   )
+
+export const orbRows: {
+  (
+    arg1: Parameters<typeof orbRowsImpl>[1],
+    arg2: Parameters<typeof orbRowsImpl>[2],
+  ): (arg0: Parameters<typeof orbRowsImpl>[0]) => ReturnType<typeof orbRowsImpl>
+  (
+    arg0: Parameters<typeof orbRowsImpl>[0],
+    arg1: Parameters<typeof orbRowsImpl>[1],
+    arg2: Parameters<typeof orbRowsImpl>[2],
+  ): ReturnType<typeof orbRowsImpl>
+} = Function.dual(3, orbRowsImpl)

@@ -1,9 +1,9 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { assert, describe, it } from "@effect/vitest"
-import * as Diagnostic from "../src/diagnostic-file-logging-contract"
+import * as Diagnostic from "../src/diagnostics/diagnostic-file-logging-contract"
 import { Cause, Duration, Effect, FileSystem, Layer, Path, Ref, Schema } from "effect"
 import { TestClock } from "effect/testing"
-import * as Logging from "../src/diagnostic-file-logging"
+import * as Logging from "../src/diagnostics/diagnostic-file-logging"
 
 const LogRecord = Schema.fromJsonString(
   Schema.Struct({

@@ -23,9 +23,9 @@ import {
   Scope,
 } from "effect"
 import { createHash } from "node:crypto"
-import * as Logging from "../../diagnostic-file-logging"
+import * as Logging from "../../diagnostics/diagnostic-file-logging"
 import { serve as serveServer } from "../../transport/host/server-host-transport"
-import { version } from "../../application-version"
+import { version } from "../../platform/application-version"
 
 export { spawn } from "./server-process-spawn"
 

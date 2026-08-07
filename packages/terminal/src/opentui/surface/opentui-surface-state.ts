@@ -16,6 +16,7 @@ import { initialViewport, type TranscriptViewport } from "../../presentation/tra
 import type { WelcomeController } from "./opentui-welcome-controller"
 import type { LoaderController } from "./opentui-loader-controller"
 import type { HoverController } from "./opentui-hover-controller"
+import { PointerController } from "./opentui-pointer-controller"
 import type { PathTarget } from "../../presentation/transcript/transcript-tool-detail-types"
 import type {
   PendingTranscriptPosition,
@@ -94,6 +95,7 @@ export class SurfaceState {
   protected welcomeController!: WelcomeController
   protected loaderController!: LoaderController
   protected hoverController!: HoverController
+  protected readonly pointerController = new PointerController()
   protected model: Model | undefined
   protected transcriptChildren: Array<TextRenderable> = []
   protected transcriptRecords = new Map<string, TranscriptRenderableRecord>()
@@ -114,9 +116,6 @@ export class SurfaceState {
         readonly content: StyledText
       }
     | undefined
-  protected composerDrag: { readonly startY: number; readonly startHeight: number } | undefined
-  protected sidebarDrag: { readonly startX: number; readonly startWidth: number } | undefined
-  protected pointerShape = "default"
   protected changedFilesHoveredRow: number | undefined
   protected scrollProgrammatic = false
   protected wheelTimer: TimerHandle | undefined

@@ -24,8 +24,8 @@ export abstract class SurfaceLifecycleCleanup extends SurfaceLifecycle {
     this.junkTimer = undefined
     this.junkBuffer = []
     this.focusEditor(undefined)
-    this.composerDrag = undefined
-    this.sidebarDrag = undefined
+    this.pointerController.composerDrag = undefined
+    this.pointerController.sidebarDrag = undefined
     this.setPointerShape("default")
     this.model = undefined
     this.clearTranscriptChildren()

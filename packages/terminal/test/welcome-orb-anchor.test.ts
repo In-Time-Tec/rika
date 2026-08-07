@@ -40,12 +40,13 @@ test("keeps the orb bounding box fixed while an impulse expands", () => {
   expect(new Set(extents).size).toBe(1)
 })
 
+const brightness = (rows: ReadonlyArray<string>) => rows.join("").split("●").length - 1
+
 test("brightens cells near the impulse origin when it fires", () => {
   const geometry = orbGeometry(160, 44)
   const origin = { column: Math.floor(geometry.columns / 2), row: Math.floor(geometry.rows / 2) }
   const idle = orbRows(geometry, 0, [])
   const struck = orbRows(geometry, 0, [{ ...origin, startPhase: 0 }])
-  const brightness = (rows: ReadonlyArray<string>) => rows.join("").split("●").length - 1
   expect(brightness(struck)).toBeGreaterThan(brightness(idle))
 })
 

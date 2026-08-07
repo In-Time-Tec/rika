@@ -1,5 +1,8 @@
 import type { TextRenderable, Clock as OpenTuiClock, TimerHandle } from "@opentui/core"
-import { orbImpulseExpired, type OrbImpulse } from "./opentui-welcome-orb"
+import { orbGeometry, orbImpulseExpired, type OrbImpulse } from "./opentui-welcome-orb"
+import { spacing } from "../../presentation/terminal/terminal-theme"
+
+const inputReserve = spacing.inputHeight
 
 export interface WelcomeHost {
   readonly clock: OpenTuiClock
@@ -13,8 +16,11 @@ export class WelcomeController {
   public impulses: ReadonlyArray<OrbImpulse> = []
   private timer: TimerHandle | undefined
 
-  strike(column: number, row: number): void {
-    this.impulses = [...this.impulses, { column, row, startPhase: this.phase }]
+  strike(width: number, height: number, x: number, y: number): void {
+    const geometry = orbGeometry(width, height)
+    const top = Math.max(0, Math.floor((Math.max(1, height - inputReserve) - geometry.rows) / 2))
+    const left = Math.max(0, Math.floor(width / 2) - geometry.columns - 2)
+    this.impulses = [...this.impulses, { column: x - left, row: y - top, startPhase: this.phase }]
   }
 
   constructor(private readonly host: WelcomeHost) {}

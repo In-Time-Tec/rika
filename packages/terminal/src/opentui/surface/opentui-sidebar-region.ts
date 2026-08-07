@@ -13,7 +13,7 @@ export abstract class SurfaceSidebarRegion extends SurfaceTranscriptRegion {
       box: this.changedFilesBox,
       text: this.changedFilesText,
       model: () => this.model,
-      dragging: () => this.sidebarDrag !== undefined,
+      dragging: () => this.pointerController.sidebarDrag !== undefined,
       destroyed: () => this.destroyed,
       hoveredRow: () => this.changedFilesHoveredRow,
     })

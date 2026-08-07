@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { roleRuntimes } from "../src/performance-platform"
+import { roleRuntimes } from "../src/platform/performance-platform"
 
 describe("performance role runtime resolution", () => {
   test("locates source role entrypoints from the performance source directory", () => {

@@ -6240,6 +6240,15 @@
       "publicExports": []
     },
     {
+      "id": "packages/terminal/src/opentui/surface/opentui-pointer-controller.ts",
+      "path": "packages/terminal/src/opentui/surface/opentui-pointer-controller.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/terminal/src/opentui/surface/opentui-queue-presentation.ts",
       "path": "packages/terminal/src/opentui/surface/opentui-queue-presentation.ts",
       "workspace": "@rika/terminal",
@@ -35289,14 +35298,6 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-input.ts",
-      "to": "packages/terminal/src/opentui/surface/opentui-welcome-orb.ts",
-      "specifier": "./opentui-welcome-orb",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/terminal/src/opentui/surface/opentui-input.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-welcome-state.ts",
       "specifier": "./opentui-welcome-state",
       "kind": "import",
@@ -36361,6 +36362,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-pointer-controller.ts",
+      "specifier": "./opentui-pointer-controller",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-surface-transcript-types.ts",
       "specifier": "./opentui-surface-transcript-types",
       "kind": "import",
@@ -36739,6 +36748,22 @@
       "from": "packages/terminal/src/opentui/surface/opentui-welcome-controller.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-welcome-orb.ts",
       "specifier": "./opentui-welcome-orb",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-welcome-controller.ts",
+      "to": "packages/terminal/src/presentation/terminal/terminal-theme.ts",
+      "specifier": "../../presentation/terminal/terminal-theme",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-welcome-orb.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true

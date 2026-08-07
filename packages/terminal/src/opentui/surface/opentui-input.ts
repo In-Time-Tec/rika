@@ -1,5 +1,4 @@
 import {
-  CliRenderEvents,
   decodePasteBytes,
   stripAnsiSequences,
   bold,
@@ -18,7 +17,7 @@ import { activeTimeAt, activeTimeIcon, formatActiveTime } from "../../state/mode
 import { formatActivity } from "../../state/model/terminal-activity-state"
 import { pastedTextTokenAt } from "../../state/model/terminal-composer-paste"
 import { SurfaceOverlayRegion } from "./opentui-overlay-region"
-import { colors, spacing } from "../../presentation/terminal/terminal-theme"
+import { colors } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { formatTokens } from "../../presentation/terminal/terminal-format"
 import * as ContextMeter from "../../state/model/terminal-context-meter"
@@ -27,7 +26,6 @@ import { loaderFrame } from "../rendering/opentui-spinner"
 import { spinnerFrames } from "../rendering/opentui-spinner"
 import { renderSidebar } from "../rendering/opentui-render-block"
 import { panelLoading, formatCost, modeLabelWidth, welcomeContent } from "./opentui-surface-content"
-import { orbGeometry } from "./opentui-welcome-orb"
 import { welcomeAnimationActive } from "./opentui-welcome-state"
 import { contentColumnWidth } from "../../state/model/terminal-layout-state"
 
@@ -143,7 +141,7 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
         const usageText = compactUsageText()
         if (usageText.length === 0) return []
         const usage = fg(model.currentThreadId === undefined ? border : colors[model.mode])(` ${usageText} `)
-        return [this.usageLabelHovered ? bold(usage) : usage]
+        return [this.hoverController.usageHovered ? bold(usage) : usage]
       }
       const chunks: Array<TextChunk> = [fg(colors[model.mode])(contextPrefix)]
       const context = model.contextUsage
@@ -200,20 +198,21 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
         }
       }
       const modeText = fg(colors[model.mode])(`${modeLabel}${cursor}`)
-      chunks.push(this.modeLabelHovered ? bold(modeText) : modeText)
+      chunks.push(this.hoverController.modeHovered ? bold(modeText) : modeText)
       chunks.push(fg(border)(" "))
       return chunks
     }
     const initialUsage = buildUsageChunks()
-    this.usageLabelWidth = initialUsage.reduce((total, chunk) => total + modeLabelWidth(chunk.text), 0)
-    this.modeSegmentStart = this.usageLabelWidth === 0 ? 0 : this.usageLabelWidth + 1
+    this.hoverController.measure(initialUsage.reduce((total, chunk) => total + modeLabelWidth(chunk.text), 0))
     let modeChunks = buildModeChunks()
     let width = modeChunks.reduce((total, chunk) => total + modeLabelWidth(chunk.text), 0)
-    if (this.usagePointerX !== undefined && this.modeLabel.width > 0) {
+    if (this.hoverController.pointerX !== undefined && this.modeLabel.width > 0) {
       const screenX = previousRight - width
-      const hovered = this.usagePointerX >= screenX && this.usagePointerX < screenX + this.usageLabelWidth
-      if (hovered !== this.usageLabelHovered) {
-        this.usageLabelHovered = hovered
+      const hovered =
+        this.hoverController.pointerX >= screenX &&
+        this.hoverController.pointerX < screenX + this.hoverController.usageWidth
+      if (hovered !== this.hoverController.usageHovered) {
+        this.hoverController.usageHovered = hovered
         this.renderer.setMousePointer(hovered ? "pointer" : "default")
         modeChunks = buildModeChunks()
         width = modeChunks.reduce((total, chunk) => total + modeLabelWidth(chunk.text), 0)
@@ -225,22 +224,13 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
   }
 
   protected refreshUsageHoverAfterLayout(): void {
-    if (this.usagePointerX === undefined || this.usageLayoutFrame !== undefined) return
-    const refresh = () => {
-      this.renderer.off(CliRenderEvents.FRAME, refresh)
-      this.usageLayoutFrame = undefined
-      if (this.destroyed || this.usagePointerX === undefined) return
-      const hovered =
-        this.usagePointerX >= this.modeLabel.screenX &&
-        this.usagePointerX < this.modeLabel.screenX + this.usageLabelWidth
-      if (hovered === this.usageLabelHovered) return
-      this.usageLabelHovered = hovered
+    this.hoverController.scheduleRefresh(() => {
+      const hovered = this.hoverController.hoveredAt(this.modeLabel.screenX, this.hoverController.pointerX)
+      if (!this.hoverController.applyHover(hovered)) return
       this.renderer.setMousePointer(hovered ? "pointer" : "default")
       if (this.model !== undefined) this.renderModeLabel(this.model)
       this.renderer.requestRender()
-    }
-    this.usageLayoutFrame = refresh
-    this.renderer.on(CliRenderEvents.FRAME, refresh)
+    })
   }
 
   protected tickWelcome(): void {
@@ -265,12 +255,7 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
     const current = this.model
     const child = this.welcomeController.child
     if (this.destroyed || current === undefined || child === undefined) return
-    const welcomeWidth = this.welcomeWidthFor(current)
-    const geometry = orbGeometry(welcomeWidth, current.height)
-    const area = Math.max(1, current.height - spacing.inputHeight)
-    const top = Math.max(0, Math.floor((area - geometry.rows) / 2))
-    const left = Math.max(0, Math.floor(welcomeWidth / 2) - Math.floor(geometry.columns / 2) - 12)
-    this.welcomeController.strike(event.x - child.x - left, event.y - child.y - top)
+    this.welcomeController.strike(this.welcomeWidthFor(current), current.height, event.x - child.x, event.y - child.y)
     this.renderer.requestRender()
   }
 
@@ -394,8 +379,7 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
     this.handlers.resize(current.width, current.height)
   }
   protected readonly setPointerShape = (shape: "ns-resize" | "ew-resize" | "default") => {
-    if (this.pointerShape === shape) return
-    this.pointerShape = shape
+    if (!this.pointerController.changeShape(shape)) return
     const renderer = readRendererOutput(this.renderer)
     if (renderer !== undefined) {
       renderer.realStdoutWrite.call(renderer.stdout, `\u001b]22;${shape}\u001b\\`)
@@ -410,22 +394,25 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
     this.setPointerShape(active ? "ew-resize" : "default")
   }
   protected readonly onSidebarMouseMove = (event: MouseEvent) => {
-    if (this.sidebarDrag === undefined) this.setSidebarResizePointer(event.x === this.changedFilesBox.x)
+    if (this.pointerController.sidebarDrag === undefined)
+      this.setSidebarResizePointer(event.x === this.changedFilesBox.x)
   }
   protected readonly onSidebarMouseOut = () => {
-    if (this.sidebarDrag === undefined) this.setSidebarResizePointer(false)
+    if (this.pointerController.sidebarDrag === undefined) this.setSidebarResizePointer(false)
   }
   protected readonly onSidebarMouseDown = (event: MouseEvent) => {
     if (event.button !== 0 || this.model === undefined) return
     if (event.x !== this.changedFilesBox.x) return
-    this.sidebarDrag = { startX: event.x, startWidth: this.model.sidebarWidth }
+    this.pointerController.sidebarDrag = { startX: event.x, startWidth: this.model.sidebarWidth }
     this.setSidebarResizePointer(true)
     event.preventDefault()
     event.stopPropagation()
   }
   protected readonly onRootMouseDrag = (event: MouseEvent) => {
-    if (this.sidebarDrag !== undefined) {
-      this.handlers.sidebarResize?.(this.sidebarDrag.startWidth + (this.sidebarDrag.startX - event.x))
+    if (this.pointerController.sidebarDrag !== undefined) {
+      this.handlers.sidebarResize?.(
+        this.pointerController.sidebarDrag.startWidth + (this.pointerController.sidebarDrag.startX - event.x),
+      )
       event.preventDefault()
       event.stopPropagation()
       return
@@ -433,8 +420,8 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
     this.onComposerMouseDrag(event)
   }
   protected readonly onRootMouseUp = (event: MouseEvent) => {
-    if (this.sidebarDrag !== undefined) {
-      this.sidebarDrag = undefined
+    if (this.pointerController.sidebarDrag !== undefined) {
+      this.pointerController.sidebarDrag = undefined
       this.sidebarController.invalidateWidth()
       if (this.model !== undefined) this.refreshSidebarRows(this.model)
       this.setSidebarResizePointer(event.x === this.changedFilesBox.x)
@@ -448,7 +435,7 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
     this.setComposerResizePointer(this.model?.shortcutsOpen !== true && event.y === this.inputBox.y)
   }
   protected readonly onComposerMouseOut = () => {
-    if (this.composerDrag === undefined) this.setComposerResizePointer(false)
+    if (this.pointerController.composerDrag === undefined) this.setComposerResizePointer(false)
   }
   protected readonly onComposerMouseDown = (event: MouseEvent) => {
     const model = this.model
@@ -464,20 +451,22 @@ export abstract class SurfaceInput extends SurfaceOverlayRegion {
       if (token !== undefined) this.handlers.expandPaste?.(token)
       return
     }
-    this.composerDrag = { startY: event.y, startHeight: this.inputBox.height }
+    this.pointerController.composerDrag = { startY: event.y, startHeight: this.inputBox.height }
     this.setComposerResizePointer(true)
     event.preventDefault()
     event.stopPropagation()
   }
   protected readonly onComposerMouseDrag = (event: MouseEvent) => {
-    if (this.composerDrag === undefined) return
-    this.handlers.composerResize?.(this.composerDrag.startHeight - (event.y - this.composerDrag.startY))
+    if (this.pointerController.composerDrag === undefined) return
+    this.handlers.composerResize?.(
+      this.pointerController.composerDrag.startHeight - (event.y - this.pointerController.composerDrag.startY),
+    )
     event.preventDefault()
     event.stopPropagation()
   }
   protected readonly onComposerMouseUp = (event: MouseEvent) => {
-    if (this.composerDrag === undefined) return
-    this.composerDrag = undefined
+    if (this.pointerController.composerDrag === undefined) return
+    this.pointerController.composerDrag = undefined
     this.setComposerResizePointer(event.y === this.inputBox.y)
     event.preventDefault()
     event.stopPropagation()
