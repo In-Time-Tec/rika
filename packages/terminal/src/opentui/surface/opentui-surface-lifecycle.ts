@@ -1,22 +1,15 @@
 import { CliRenderEvents } from "@opentui/core"
+import { isFollowing } from "../../presentation/transcript/transcript-viewport"
+import { maxMountedTranscriptEntries } from "../rendering/opentui-render-transcript-window"
 import type { Model } from "../../state/model/terminal-state"
 import { contentColumnWidth } from "../../state/model/terminal-layout-state"
-import { isFollowing } from "../../presentation/transcript/transcript-viewport"
-import { prependedTranscriptItems } from "./opentui-lifecycle-transcript"
-import { maxMountedTranscriptEntries } from "../rendering/opentui-render-transcript-window"
 import { idleSpinnerFrame, spinnerInterval } from "../rendering/opentui-spinner"
-import { SurfaceLifecycleTranscript } from "./opentui-lifecycle-transcript-update"
 import { animationActive } from "./opentui-surface-content"
 import { welcomeAnimationActive } from "./opentui-welcome-state"
+import { prependedTranscriptItems } from "./opentui-lifecycle-transcript"
+import { SurfaceLayout } from "./opentui-surface-layout"
 
-export abstract class SurfaceLifecycle extends SurfaceLifecycleTranscript {
-  protected readonly onSelection = (selection: { getSelectedText: () => string }) => {
-    const text = selection.getSelectedText().trimEnd()
-    if (text.length === 0) return
-    this.renderer.copyToClipboardOSC52(text)
-    this.showToast("Selection copied to clipboard")
-  }
-
+export abstract class SurfaceLifecycle extends SurfaceLayout {
   update(model: Model, preserveTranscriptAnchor = false): void {
     const previousModel = this.model
     if (previousModel?.currentThreadId !== model.currentThreadId) {
@@ -121,5 +114,40 @@ export abstract class SurfaceLifecycle extends SurfaceLifecycleTranscript {
       transcriptLayout.threadSidebarVisible,
     )
     this.renderer.requestRender()
+  }
+  destroy(): void {
+    if (this.destroyed) return
+    this.destroyed = true
+    this.loaderController.release()
+    this.welcomeController.release()
+    if (this.loaderController.publishedFrame !== undefined) this.publishWorkingFrame(undefined)
+    this.scrollGeneration += 1
+    this.focusController.release()
+    if (this.transcriptPositionFrame !== undefined)
+      this.renderer.off(CliRenderEvents.FRAME, this.transcriptPositionFrame)
+    this.transcriptPositionFrame = undefined
+    this.renderer.off(CliRenderEvents.FRAME, this.recordRenderedTranscriptScroll)
+    this.sidebarController.release()
+    this.hoverController.release()
+    this.transcriptAnchorScrollBy = 0
+    this.pendingTranscriptPosition = undefined
+    this.cancelWheelReport()
+    this.toastController.release()
+    this.cancelTimer(this.junkTimer)
+    this.junkTimer = undefined
+    this.junkBuffer = []
+    this.focusEditor(undefined)
+    this.pointerController.composerDrag = undefined
+    this.pointerController.sidebarDrag = undefined
+    this.setPointerShape("default")
+    this.model = undefined
+    this.clearTranscriptChildren()
+    this.renderer.root.onMouseDrag = undefined
+    this.renderer.root.onMouseUp = undefined
+    this.renderer.root.onMouseDragEnd = undefined
+    this.renderer.keyInput.off("keypress", this.onKey)
+    this.renderer.keyInput.off("paste", this.onPaste)
+    this.renderer.off(CliRenderEvents.RESIZE, this.onResize)
+    this.renderer.off(CliRenderEvents.SELECTION, this.onSelection)
   }
 }

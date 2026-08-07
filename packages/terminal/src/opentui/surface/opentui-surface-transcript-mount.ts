@@ -1,26 +1,29 @@
-import { TextRenderable, StyledText, fg } from "@opentui/core"
+import { StyledText, fg, TextRenderable } from "@opentui/core"
+import { maxMountedTranscriptRows } from "../../presentation/transcript/terminal-transcript-window"
+import { boundedTranscriptModel } from "../rendering/opentui-render-transcript-window"
+import type { Model } from "../../state/model/terminal-state"
+import type { TranscriptRenderableDescriptor } from "./opentui-surface-transcript-types"
 import {
   contentColumnWidth,
   fileSidebarLayoutWidth,
   threadSidebarLayoutWidth,
 } from "../../state/model/terminal-layout-state"
-import type { Model } from "../../state/model/terminal-state"
-import { composerHeight } from "../../state/model/terminal-layout-composer"
-import { colors, spacing } from "../../presentation/terminal/terminal-theme"
+import { spacing, colors } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
-import { maxMountedTranscriptRows } from "../../presentation/transcript/terminal-transcript-window"
-import { transcriptUnitId, transcriptUnits } from "../../presentation/transcript/transcript-row"
-import { boundedTranscriptModel } from "../rendering/opentui-render-transcript-window"
-import { transcriptUnitRevision } from "../rendering/opentui-render-transcript-revision"
-import { transcriptUnitBuilder } from "../rendering/opentui-render-unit"
-import type { TranscriptRangeBundle, TranscriptUnitCacheEntry } from "../rendering/opentui-render-transcript-revision"
+import { cutoutBackground } from "./opentui-surface-renderables"
 import { welcomeContent } from "./opentui-surface-content"
 import { welcomeVisible } from "./opentui-welcome-state"
-import { cutoutBackground } from "./opentui-surface-construction"
-import type { TranscriptRenderableDescriptor } from "./opentui-surface-transcript-types"
-import { SurfaceLifecycleToast } from "./opentui-lifecycle-toast"
+import { composerHeight } from "../../state/model/terminal-layout-composer"
+import { transcriptUnitId, transcriptUnits } from "../../presentation/transcript/transcript-row"
+import {
+  transcriptUnitRevision,
+  type TranscriptRangeBundle,
+  type TranscriptUnitCacheEntry,
+} from "../rendering/opentui-render-transcript-revision"
+import { transcriptUnitBuilder } from "../rendering/opentui-render-unit"
+import { SurfaceModeLabel } from "./opentui-surface-mode-label"
 
-export abstract class SurfaceLifecycleTranscript extends SurfaceLifecycleToast {
+export abstract class SurfaceTranscriptMount extends SurfaceModeLabel {
   protected renderTranscript(model: Model): {
     readonly sidebarWidth: number
     readonly contentLeft: number

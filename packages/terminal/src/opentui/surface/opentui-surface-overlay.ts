@@ -1,12 +1,12 @@
-import { StyledText, dim, fg } from "@opentui/core"
 import stringWidth from "string-width"
-import { filter } from "../../presentation/terminal/command-palette"
+import { StyledText, dim, fg } from "@opentui/core"
+import type { Model } from "../../state/model/terminal-state"
 import { colors } from "../../presentation/terminal/terminal-theme"
+import { filter } from "../../presentation/terminal/command-palette"
 import { contextDetails } from "../../presentation/terminal/terminal-context-details"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { fitOverlayHints, overlayHintWidth } from "../../presentation/terminal/terminal-overlay-hints"
 import { filteredFiles } from "../../state/model/terminal-thread-navigation"
-import { type Model } from "../../state/model/terminal-state"
 import { paletteContent, modePickerContent } from "./opentui-composer-region"
 import { modeIds } from "@rika/configuration/behavior-mode"
 import {
@@ -14,11 +14,11 @@ import {
   modeSelectorLabels,
 } from "../../presentation/terminal/terminal-mode-selector-layout"
 import { filePickerContent, threadSwitcherContent, threadSwitcherListWidth } from "./opentui-overlay-content"
-import type { ProjectedEditorRenderable } from "./opentui-surface-construction"
-import { SurfaceSidebarRegion } from "./opentui-sidebar-region"
+import { type ProjectedEditorRenderable } from "./opentui-surface-renderables"
 import { FocusController, type FocusableEditor } from "./opentui-focus-controller"
+import { SurfacePointer } from "./opentui-surface-pointer"
 
-export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
+export abstract class SurfaceOverlay extends SurfacePointer {
   private overlayDivider(label: string, width: number): StyledText {
     return new StyledText([
       fg(colors.text)("├─ "),
@@ -26,7 +26,6 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
       fg(colors.text)(` ${"─".repeat(Math.max(0, width - label.length - 5))}┤`),
     ])
   }
-
   private renderOverlayHints(
     labels: ReadonlyArray<string>,
     color: string,
@@ -54,7 +53,6 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
       cursor -= 2
     }
   }
-
   protected syncOverlayEditor(text: string, cursor: number, top: number, height: number, width: number): void {
     this.overlayEditor.visible = true
     this.overlayEditor.top = top
@@ -62,16 +60,13 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
     this.overlayEditor.height = Math.max(1, height)
     this.overlayEditor.sync(text, cursor)
   }
-
   protected focusController!: FocusController
   protected initializeFocus(): void {
     this.focusController = new FocusController({ renderer: this.renderer, destroyed: () => this.destroyed })
   }
-
   protected focusEditor(editor: FocusableEditor | undefined): void {
     this.focusController.focus(editor)
   }
-
   protected restoreFocusedCursor(): void {
     this.focusController.restoreCursor()
   }

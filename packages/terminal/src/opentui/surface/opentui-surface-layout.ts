@@ -1,30 +1,30 @@
-import { StyledText, bold, dim, fg, type TextChunk } from "@opentui/core"
 import stringWidth from "string-width"
-import { boundedThreadSidebarWidth, isNarrow } from "../../state/model/terminal-layout-state"
+import { StyledText, dim, fg, bold, type TextChunk } from "@opentui/core"
 import type { Model } from "../../state/model/terminal-state"
-import { queueContentWidth, wrappedRowCount } from "../../state/model/terminal-layout-composer"
-import { displayInput } from "../../state/model/terminal-composer-state"
-import { formatActivity } from "../../state/model/terminal-activity-state"
-import { readyOr } from "../../state/model/terminal-loadable-state"
-import { type QueueItem } from "../../state/model/terminal-queue-item"
+import { boundedThreadSidebarWidth, isNarrow } from "../../state/model/terminal-layout-state"
 import { colors } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
+import { shortcutsContent } from "./opentui-composer-region"
+import { formatActivity } from "../../state/model/terminal-activity-state"
 import { truncateToWidth } from "../../presentation/terminal/terminal-format"
+import { loaderFrame, spinnerFrames } from "../rendering/opentui-spinner"
 import { renderSidebar } from "../rendering/opentui-render-block"
+import { panelLoading, compactWorkspace } from "./opentui-surface-content"
+import { queueContentWidth, wrappedRowCount } from "../../state/model/terminal-layout-composer"
+import { displayInput } from "../../state/model/terminal-composer-state"
+import { readyOr } from "../../state/model/terminal-loadable-state"
+import type { QueueItem } from "../../state/model/terminal-queue-item"
 import {
   fittingQueueHint,
   queueEditingHint,
   queueNavigationHint,
   queueHintWidth,
   queueItemLabel,
+  displayCursorOffset,
 } from "./opentui-queue-presentation"
-import { SurfaceInput } from "./opentui-input"
-import { compactWorkspace, panelLoading } from "./opentui-surface-content"
-import { shortcutsContent } from "./opentui-composer-region"
-import { displayCursorOffset } from "./opentui-queue-presentation"
-import { loaderFrame, spinnerFrames } from "../rendering/opentui-spinner"
+import { SurfaceTranscriptMount } from "./opentui-surface-transcript-mount"
 
-export abstract class SurfaceLifecycleLayout extends SurfaceInput {
+export abstract class SurfaceLayout extends SurfaceTranscriptMount {
   protected renderLayout(
     model: Model,
     previousModel: Model | undefined,
