@@ -544,9 +544,7 @@ export const runServerClientCommands = Effect.fn("ServerClient.runCommands")(fun
                       callbacks += 1
                       yield* emit({ type: "interactive-callback", callbacks })
                       const events = yield* Queue.unbounded<string>()
-                      yield* Effect.forkChild(
-                        session.events((event) => Queue.offerUnsafe(events, event._tag)),
-                      )
+                      yield* Effect.forkChild(session.events((event) => Queue.offerUnsafe(events, event._tag)))
                       yield* emit({ type: "initial-read", tag: yield* Queue.take(events) })
                       yield* emit({ type: "upgrade-survived", tag: yield* Queue.take(events), callbacks })
                       return yield* Effect.never

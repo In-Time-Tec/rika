@@ -1,8 +1,6 @@
 {
   "$schema": "./node_modules/@effect/tsgo/oxlint-schema.json",
-  "plugins": [
-    "effecttsgo"
-  ],
+  "plugins": ["effecttsgo"],
   "options": {
     "typeAware": true
   },
@@ -111,18 +109,11 @@
   },
   "overrides": [
     {
-      "files": [
-        "**/test/**"
-      ],
+      "files": ["**/test/**"],
       "rules": {
         "no-await-in-loop": "off"
       }
     }
   ],
-  "ignorePatterns": [
-    "dist",
-    "node_modules",
-    ".turbo",
-    "repos"
-  ]
+  "ignorePatterns": ["dist", "node_modules", ".turbo", "repos"]
 }
