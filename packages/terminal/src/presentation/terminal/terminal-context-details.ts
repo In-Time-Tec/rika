@@ -22,7 +22,7 @@ const contextDetailsImpl = (model: Model, width: number, height: number, now: nu
     if (chunks.length > 0) chunks.push(fg(colors.text)("\n"))
     chunks.push(style(truncateToWidth(text, width)))
   }
-  const compact = width < 40 || height < 11
+  const compact = width < 40 || height < 16
   const context = model.contextUsage
   const availableContext = context?._tag === "Available" ? context : undefined
   const usable = availableContext === undefined ? undefined : ContextMeter.usableTokens(availableContext)
@@ -65,10 +65,14 @@ const contextDetailsImpl = (model: Model, width: number, height: number, now: nu
   if (!compact) line("")
   line(compact ? `Used       ${used}` : `Used        ${used}`)
   line(compact ? `Available  ${available}` : `Available   ${available}`)
+  if (!compact) line("")
   line(" ".repeat(width), (value) => dim(fg(colors.text)(value)))
+  if (!compact) line("")
   line(`Usable     ${usableText}`)
   line(`Full       ${full}`)
+  if (!compact) line("")
   line(" ".repeat(width), (value) => dim(fg(colors.text)(value)))
+  if (!compact) line("")
   line(`Cost       ${cost(model)}`)
   line(`Active     ${time(model, now)}`)
   if (!compact) line("")

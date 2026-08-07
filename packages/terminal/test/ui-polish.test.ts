@@ -36,12 +36,12 @@ test("uses padded full-size mode and context sections while compact content stay
         contextUsage: { _tag: "Available", inputTokens: 1_000, contextWindow: 10_000, reserveTokens: 1_000 },
       },
       54,
-      13,
+      16,
       0,
     ).chunks,
   )
-  expect(context).toContain("\n" + " ".repeat(54) + "\nUsable")
-  expect(context).toContain("\n" + " ".repeat(54) + "\nCost")
+  expect(context).toContain("\n\n" + " ".repeat(54) + "\n\nUsable")
+  expect(context).toContain("\n\n" + " ".repeat(54) + "\n\nCost")
   expect(text(modePickerContent(model, 32).chunks)).not.toContain("├─ Route ")
 })
 

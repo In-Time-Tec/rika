@@ -163,7 +163,7 @@ export abstract class SurfaceOverlay extends SurfacePointer {
       cursorEditor = undefined
     } else if (overlay === "context") {
       const boxWidth = Math.min(68, contentWidth)
-      const boxHeight = model.width <= 24 ? Math.min(12, model.height) : Math.min(14, Math.max(1, composerTop))
+      const boxHeight = model.width <= 24 ? Math.min(12, model.height) : Math.min(18, Math.max(1, composerTop))
       this.paletteBox.width = boxWidth
       this.paletteBox.height = boxHeight
       this.paletteBox.left = contentLeft + Math.max(0, contentWidth - boxWidth)
@@ -190,7 +190,7 @@ export abstract class SurfaceOverlay extends SurfacePointer {
         this.contextDividerTwo.top = 6
         this.contextDividerOne.visible = true
         this.contextDividerTwo.visible = true
-      } else if (boxHeight >= 14) {
+      } else if (boxHeight >= 18) {
         this.paletteBox.overflow = "visible"
         this.contextDividerOne.content = this.overlayDivider("Window", boxWidth)
         this.contextDividerTwo.content = this.overlayDivider("Session", boxWidth)
@@ -198,8 +198,8 @@ export abstract class SurfaceOverlay extends SurfacePointer {
         this.contextDividerTwo.width = boxWidth
         this.contextDividerOne.left = -1
         this.contextDividerTwo.left = -1
-        this.contextDividerOne.top = 5
-        this.contextDividerTwo.top = 8
+        this.contextDividerOne.top = 6
+        this.contextDividerTwo.top = 11
         this.contextDividerOne.visible = true
         this.contextDividerTwo.visible = true
       }
