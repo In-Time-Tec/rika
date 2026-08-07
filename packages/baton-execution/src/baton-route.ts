@@ -616,11 +616,10 @@ const programCall = (
   Effect.gen(function* () {
     const context = yield* Layer.build(services)
     const route = yield* ToolExecutor.routeToolkit(Program.toolkit).pipe(Effect.provide(context))
-    const controller = new AbortController()
-    yield* Effect.addFinalizer(() => Effect.sync(() => controller.abort()))
+    const signal = yield* Effect.abortSignal
     return {
       route,
-      context: { signal: controller.signal, emit: () => Effect.void, sessionId: runId, runId },
+      context: { signal, emit: () => Effect.void, sessionId: runId, runId },
       sessionId: runId,
     }
   })

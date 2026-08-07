@@ -7,9 +7,9 @@ import { Config, Effect, FileSystem, Function, Option, Path, PlatformError, Sche
 const mkdirImpl = (path: string, options?: { readonly recursive?: boolean }) =>
   FileSystem.FileSystem.pipe(Effect.flatMap((fileSystem) => fileSystem.makeDirectory(path, options)))
 export const mkdir: {
-  (): (path: string) => ReturnType<typeof mkdirImpl>
+  (options?: { readonly recursive?: boolean }): (path: string) => ReturnType<typeof mkdirImpl>
   (path: string, options?: { readonly recursive?: boolean }): ReturnType<typeof mkdirImpl>
-} = Function.dual((args) => args.length >= 1, mkdirImpl)
+} = Function.dual((args) => typeof args[0] === "string", mkdirImpl)
 const realpath = (path: string) => FileSystem.FileSystem.pipe(Effect.flatMap((fileSystem) => fileSystem.realPath(path)))
 const rmImpl = (path: string, options?: { readonly force?: boolean }) =>
   FileSystem.FileSystem.pipe(
@@ -18,9 +18,9 @@ const rmImpl = (path: string, options?: { readonly force?: boolean }) =>
     ),
   )
 export const rm: {
-  (): (path: string) => ReturnType<typeof rmImpl>
+  (options?: { readonly force?: boolean }): (path: string) => ReturnType<typeof rmImpl>
   (path: string, options?: { readonly force?: boolean }): ReturnType<typeof rmImpl>
-} = Function.dual((args) => args.length >= 1, rmImpl)
+} = Function.dual((args) => typeof args[0] === "string", rmImpl)
 const stat = (path: string) => FileSystem.FileSystem.pipe(Effect.flatMap((fileSystem) => fileSystem.stat(path)))
 
 const workspaceGlobError = (workspace: string, method: string, cause: unknown) =>

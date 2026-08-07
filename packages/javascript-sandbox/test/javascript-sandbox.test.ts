@@ -139,6 +139,7 @@ it.live("interrupts active and suspended source at the wall-time limit", () =>
 
 it.live("cancels a pending capability call from the request AbortSignal", () =>
   Effect.gen(function* () {
+    // @effect-diagnostics-next-line abortControllerInEffect:off
     const controller = new AbortController()
     const started = yield* Deferred.make<void>()
     let interrupted = false

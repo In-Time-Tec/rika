@@ -132,11 +132,29 @@ const expected: Record<string, ReadonlyArray<string>> = {
   ],
 }
 
-it("every frozen export target exists and resolves through Bun", () =>
-  Effect.gen(function* () {
-    for (const [packageName, names] of Object.entries(expected))
-      for (const name of names) yield* Effect.tryPromise(() => import(`${packageName}/${name}`))
-  }))
+it.effect("every frozen export target resolves to a source file", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const context = yield* Layer.build(BunServices.layer)
+      const path = Context.get(context, Path.Path)
+      const fileSystem = Context.get(context, FileSystem.FileSystem)
+      for (const [packageName, names] of Object.entries(expected)) {
+        const packagePath = packageName.slice("@rika/".length)
+        const manifest = yield* Schema.decodeUnknownEffect(PackageManifestJson)(
+          yield* fileSystem.readFileString(path.resolve("packages", packagePath, "package.json")),
+        )
+        for (const name of names) {
+          const target = manifest.exports[`./${name}`]
+          expect(target, `${packageName}/${name} is missing an exports entry`).toBeDefined()
+          expect(
+            yield* fileSystem.exists(path.resolve("packages", packagePath, target!)),
+            `${packageName}/${name} points at a missing file`,
+          ).toBe(true)
+        }
+      }
+    }),
+  ),
+)
 
 for (const [packageName, names] of Object.entries(expected)) {
   const packagePath = packageName.slice("@rika/".length)

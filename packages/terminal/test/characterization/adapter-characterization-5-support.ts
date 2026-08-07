@@ -80,8 +80,10 @@ export const _agentToolBlock: {
     arg0: Parameters<typeof _agentToolBlockImpl>[0],
     arg1?: Parameters<typeof _agentToolBlockImpl>[1],
   ): ReturnType<typeof _agentToolBlockImpl>
-  (): (arg0: Parameters<typeof _agentToolBlockImpl>[0]) => ReturnType<typeof _agentToolBlockImpl>
-} = Function.dual((args) => args.length > 0, _agentToolBlockImpl)
+  (
+    arg1?: Parameters<typeof _agentToolBlockImpl>[1],
+  ): (arg0: Parameters<typeof _agentToolBlockImpl>[0]) => ReturnType<typeof _agentToolBlockImpl>
+} = Function.dual((args) => typeof args[0] === "string", _agentToolBlockImpl)
 
 export const handlers = (): Handlers => ({ key: vi.fn(), resize: vi.fn() })
 

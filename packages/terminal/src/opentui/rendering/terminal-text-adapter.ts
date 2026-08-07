@@ -83,8 +83,10 @@ export const renderMarkdownLines: {
     arg0: Parameters<typeof renderMarkdownLinesImpl>[0],
     arg1?: Parameters<typeof renderMarkdownLinesImpl>[1],
   ): ReturnType<typeof renderMarkdownLinesImpl>
-  (): (arg0: Parameters<typeof renderMarkdownLinesImpl>[0]) => ReturnType<typeof renderMarkdownLinesImpl>
-} = Function.dual((args) => args.length > 0, renderMarkdownLinesImpl)
+  (
+    arg1?: Parameters<typeof renderMarkdownLinesImpl>[1],
+  ): (arg0: Parameters<typeof renderMarkdownLinesImpl>[0]) => ReturnType<typeof renderMarkdownLinesImpl>
+} = Function.dual((args) => typeof args[0] === "string", renderMarkdownLinesImpl)
 const renderMarkdownStyledImpl = (source: string, width?: number): StyledText =>
   toOpenText(markdownStyled(source, width))
 
@@ -93,8 +95,10 @@ export const renderMarkdownStyled: {
     arg0: Parameters<typeof renderMarkdownStyledImpl>[0],
     arg1?: Parameters<typeof renderMarkdownStyledImpl>[1],
   ): ReturnType<typeof renderMarkdownStyledImpl>
-  (): (arg0: Parameters<typeof renderMarkdownStyledImpl>[0]) => ReturnType<typeof renderMarkdownStyledImpl>
-} = Function.dual((args) => args.length > 0, renderMarkdownStyledImpl)
+  (
+    arg1?: Parameters<typeof renderMarkdownStyledImpl>[1],
+  ): (arg0: Parameters<typeof renderMarkdownStyledImpl>[0]) => ReturnType<typeof renderMarkdownStyledImpl>
+} = Function.dual((args) => typeof args[0] === "string", renderMarkdownStyledImpl)
 export const highlightShellCommand = (source: string): ReadonlyArray<ReadonlyArray<TextChunk>> =>
   highlightCommand(source).map((line) => line.map(toOpenChunk))
 const wrapStyledLineImpl = (line: ReadonlyArray<TextChunk>, width: number): ReadonlyArray<ReadonlyArray<TextChunk>> =>

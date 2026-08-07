@@ -53,8 +53,9 @@ export const readCall: {
   ): ReturnType<typeof readCallImpl>
   (
     arg1: Parameters<typeof readCallImpl>[1],
+    arg2?: Parameters<typeof readCallImpl>[2],
   ): (arg0: Parameters<typeof readCallImpl>[0]) => ReturnType<typeof readCallImpl>
-} = Function.dual((args) => args.length > 0, readCallImpl)
+} = Function.dual((args) => args.length >= 2, readCallImpl)
 
 const _editFileImpl = (id: string, path: string) => ({
   key: id,

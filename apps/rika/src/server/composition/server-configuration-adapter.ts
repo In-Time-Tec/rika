@@ -24,9 +24,9 @@ export const provideLayerScoped =
 const mkdirImpl = (path: string, options?: { readonly recursive?: boolean }) =>
   FileSystem.FileSystem.pipe(Effect.flatMap((fileSystem) => fileSystem.makeDirectory(path, options)))
 export const mkdir: {
-  (): (path: string) => ReturnType<typeof mkdirImpl>
+  (options?: { readonly recursive?: boolean }): (path: string) => ReturnType<typeof mkdirImpl>
   (path: string, options?: { readonly recursive?: boolean }): ReturnType<typeof mkdirImpl>
-} = Function.dual((args) => args.length >= 1, mkdirImpl)
+} = Function.dual((args) => typeof args[0] === "string", mkdirImpl)
 
 const workspaceGlobError = (workspace: string, method: string, cause: unknown) =>
   PlatformError.systemError({

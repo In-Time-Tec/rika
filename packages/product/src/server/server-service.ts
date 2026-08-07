@@ -7,6 +7,7 @@ import {
   FileSystem,
   Function,
   Layer,
+  Option,
   Path,
   Ref,
   Runtime,
@@ -165,13 +166,21 @@ const makeLifecycle = (changed: (state: LifecycleState) => Effect.Effect<void>) 
           ),
         ),
       ready: Ref.modify(value, (current) => {
-        if (current.state !== "starting") return [undefined, current] as const
+        if (current.state !== "starting") return [Option.none<number | undefined>(), current] as const
         const next =
           current.clients === 0
             ? { ...current, state: "grace" as const, clients: 0, graceGeneration: current.graceGeneration + 1 }
             : { ...current, state: "ready" as const }
-        return [next.state === "grace" ? next.graceGeneration : undefined, next] as const
-      }).pipe(Effect.tap((generation) => changed(generation === undefined ? "ready" : "grace"))),
+        return [Option.some(next.state === "grace" ? next.graceGeneration : undefined), next] as const
+      }).pipe(
+        Effect.tap(
+          Option.match({
+            onNone: () => Effect.void,
+            onSome: (generation) => changed(generation === undefined ? "ready" : "grace"),
+          }),
+        ),
+        Effect.map(Option.getOrUndefined),
+      ),
       tryAttach: admission.withPermits(1)(
         Ref.modify(
           value,

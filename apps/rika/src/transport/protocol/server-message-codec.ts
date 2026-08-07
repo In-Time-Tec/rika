@@ -312,9 +312,11 @@ export const maxClientMessageBytes = maxFrameBytes * maxClientMessageChunks
 const transportErrorImpl = (message: string, reason: ServerService.ServerServiceError["reason"] = "transport-failed") =>
   ServerService.ServerServiceError.make({ reason, message })
 export const transportError: {
-  (): (message: string) => ServerService.ServerServiceError
+  (
+    reason?: ServerService.ServerServiceError["reason"],
+  ): (message: string) => ServerService.ServerServiceError
   (message: string, reason?: ServerService.ServerServiceError["reason"]): ServerService.ServerServiceError
-} = Function.dual((args) => args.length >= 1, transportErrorImpl)
+} = Function.dual((args) => typeof args[0] === "string" && args.length >= 1, transportErrorImpl)
 
 export const failureKind = (cause: Cause.Cause<unknown>) => {
   const failure = Cause.squash(cause)

@@ -376,8 +376,12 @@ const execute =
       const { wallTimeMillis, outputBytes } = request.limits
       const capabilities = yield* ProgramCapabilities.ProgramCapabilities
       const clock = yield* Clock.Clock
-      const localController = new AbortController()
-      const signal = AbortSignal.any([request.signal, localController.signal])
+      const lifecycleSignal = yield* Effect.abortSignal
+      const timeout = yield* Effect.acquireRelease(
+        Effect.sync(() => new AbortController()),
+        (controller) => Effect.sync(() => controller.abort()),
+      )
+      const signal = AbortSignal.any([request.signal, lifecycleSignal, timeout.signal])
       const { context, deferred, runtime } = yield* Effect.acquireRelease(
         Effect.tryPromise({
           try: () => modulePromise,
@@ -402,7 +406,6 @@ const execute =
         ),
         (resource) =>
           Effect.sync(() => {
-            localController.abort()
             for (const pending of resource.deferred) pending.dispose()
             if (resource.context.alive) resource.context.dispose()
             if (resource.runtime.alive) resource.runtime.dispose()
@@ -436,7 +439,7 @@ const execute =
             return yield* failure
           }
           if ((yield* Clock.currentTimeMillis) >= deadline) {
-            localController.abort()
+            timeout.abort()
             return yield* executionFailure("Program execution timed out")
           }
           if (signal.aborted) return yield* cancelled()

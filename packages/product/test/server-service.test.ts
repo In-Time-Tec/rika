@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Cause, Deferred, Effect, Exit, Fiber, FiberSet, Ref } from "effect"
 import * as ServerService from "../src/server/server-service"
 describe("Rika Server lifecycle", () => {
-  it("cancels grace when another authenticated client attaches", () =>
+  it.effect("cancels grace when another authenticated client attaches", () =>
     Effect.gen(function* () {
       const states = yield* Effect.gen(function* () {
         const observed = yield* Ref.make<Array<string>>([])
@@ -16,9 +16,10 @@ describe("Rika Server lifecycle", () => {
         return yield* Ref.get(observed)
       }).pipe(Effect.withSpan("ServerService.test"))
       expect(states).toEqual(["ready", "grace", "ready"])
-    }))
+    }),
+  )
 
-  it("drains only after the final client grace expires", () =>
+  it.effect("drains only after the final client grace expires", () =>
     Effect.gen(function* () {
       const state = yield* Effect.gen(function* () {
         const lifecycle = yield* ServerService.ServiceRuntime.makeLifecycle(() => Effect.void)
@@ -34,9 +35,10 @@ describe("Rika Server lifecycle", () => {
         return yield* lifecycle.state
       }).pipe(Effect.withSpan("ServerService.test"))
       expect(state).toBe("draining")
-    }))
+    }),
+  )
 
-  it("does not let a stale grace timer stop a reattached service", () =>
+  it.effect("does not let a stale grace timer stop a reattached service", () =>
     Effect.gen(function* () {
       const state = yield* Effect.gen(function* () {
         const lifecycle = yield* ServerService.ServiceRuntime.makeLifecycle(() => Effect.void)
@@ -49,9 +51,10 @@ describe("Rika Server lifecycle", () => {
         return yield* lifecycle.state
       }).pipe(Effect.withSpan("ServerService.test"))
       expect(state).toBe("grace")
-    }))
+    }),
+  )
 
-  it("never admits a client after draining starts", () =>
+  it.effect("never admits a client after draining starts", () =>
     Effect.gen(function* () {
       const result = yield* Effect.gen(function* () {
         const lifecycle = yield* ServerService.ServiceRuntime.makeLifecycle(() => Effect.void)
@@ -64,9 +67,10 @@ describe("Rika Server lifecycle", () => {
         return { attached, state: yield* lifecycle.state }
       }).pipe(Effect.withSpan("ServerService.test"))
       expect(result).toEqual({ attached: false, state: "draining" })
-    }))
+    }),
+  )
 
-  it("begins cooperative drain monotonically", () =>
+  it.effect("begins cooperative drain monotonically", () =>
     Effect.gen(function* () {
       const result = yield* Effect.gen(function* () {
         const lifecycle = yield* ServerService.ServiceRuntime.makeLifecycle(() => Effect.void)
@@ -77,9 +81,10 @@ describe("Rika Server lifecycle", () => {
         return { attached: yield* lifecycle.tryAttach, state: yield* lifecycle.state }
       }).pipe(Effect.withSpan("ServerService.test"))
       expect(result).toEqual({ attached: false, state: "draining" })
-    }))
+    }),
+  )
 
-  it("never reports ready after draining starts", () =>
+  it.effect("never reports ready after draining starts", () =>
     Effect.gen(function* () {
       const observed = yield* Ref.make<Array<string>>([])
       const lifecycle = yield* ServerService.ServiceRuntime.makeLifecycle((state) =>
@@ -92,9 +97,10 @@ describe("Rika Server lifecycle", () => {
       yield* lifecycle.stopped
       yield* lifecycle.ready
       expect(yield* Ref.get(observed)).toEqual(["ready", "draining", "stopped"])
-    }))
+    }),
+  )
 
-  it("atomically rejects work once draining starts", () =>
+  it.effect("atomically rejects work once draining starts", () =>
     Effect.gen(function* () {
       const result = yield* Effect.scoped(
         Effect.gen(function* () {
@@ -107,9 +113,10 @@ describe("Rika Server lifecycle", () => {
         }),
       )
       expect(result).toEqual({ admitted: false, size: 0 })
-    }))
+    }),
+  )
 
-  it("serializes work admission with drain and lets the host interrupt accepted work", () =>
+  it.effect("serializes work admission with drain and lets the host interrupt accepted work", () =>
     Effect.gen(function* () {
       const result = yield* Effect.scoped(
         Effect.gen(function* () {
@@ -139,9 +146,10 @@ describe("Rika Server lifecycle", () => {
         }),
       )
       expect(result).toEqual({ interrupted: true, finalized: true, admittedAfterDrain: false })
-    }))
+    }),
+  )
 
-  it("keeps work admission closed after an idle replacement decision", () =>
+  it.effect("keeps work admission closed after an idle replacement decision", () =>
     Effect.gen(function* () {
       const lifecycle = yield* ServerService.ServiceRuntime.makeLifecycle(() => Effect.void)
       const inspectionStarted = yield* Deferred.make<void>()
@@ -166,9 +174,10 @@ describe("Rika Server lifecycle", () => {
       expect(yield* Fiber.join(decision)).toBe("supersede")
       expect(yield* Fiber.join(admission)).toBeUndefined()
       expect(yield* lifecycle.state).toBe("draining")
-    }))
+    }),
+  )
 
-  it("blocks attachment during replacement inspection and refuses it after authorization", () =>
+  it.effect("blocks attachment during replacement inspection and refuses it after authorization", () =>
     Effect.gen(function* () {
       const lifecycle = yield* ServerService.ServiceRuntime.makeLifecycle(() => Effect.void)
       const inspectionStarted = yield* Deferred.make<void>()
@@ -192,9 +201,10 @@ describe("Rika Server lifecycle", () => {
       yield* Deferred.succeed(finishInspection, undefined)
       expect(yield* Fiber.join(decision)).toBe("supersede")
       expect(yield* Fiber.join(attachment)).toBe(false)
-    }))
+    }),
+  )
 
-  it("defers for admitted work, leaves the server usable, and authorizes retry after release", () =>
+  it.effect("defers for admitted work, leaves the server usable, and authorizes retry after release", () =>
     Effect.gen(function* () {
       const lifecycle = yield* ServerService.ServiceRuntime.makeLifecycle(() => Effect.void)
       yield* lifecycle.ready
@@ -208,5 +218,6 @@ describe("Rika Server lifecycle", () => {
       yield* next!
       expect(yield* lifecycle.authorizeReplacement(Effect.succeed(false))).toBe("supersede")
       expect(yield* lifecycle.state).toBe("draining")
-    }))
+    }),
+  )
 })

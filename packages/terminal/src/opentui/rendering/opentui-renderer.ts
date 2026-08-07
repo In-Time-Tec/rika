@@ -38,12 +38,17 @@ const preserveColorIdentity = (chunks: ReadonlyArray<TextChunk>): void => {
   }
 }
 
+export interface TranscriptBuild {
+  readonly styled: StyledText
+  readonly ranges: ReadonlyArray<UnitLineRange>
+}
+
 export const buildTranscript: {
-  (model: Model, spinnerFrame?: string): { styled: StyledText; ranges: ReadonlyArray<UnitLineRange> }
-  (spinnerFrame?: string): (model: Model) => { styled: StyledText; ranges: ReadonlyArray<UnitLineRange> }
+  (model: Model, spinnerFrame?: string): TranscriptBuild
+  (spinnerFrame?: string): (model: Model) => TranscriptBuild
 } = Function.dual(
   (args) => typeof args[0] !== "string",
-  (model: Model, spinnerFrame = idleSpinnerFrame): { styled: StyledText; ranges: ReadonlyArray<UnitLineRange> } => {
+  (model: Model, spinnerFrame = idleSpinnerFrame): TranscriptBuild => {
     const builder = transcriptUnitBuilder(model, spinnerFrame)
     const chunks: Array<TextChunk> = []
     const ranges: Array<UnitLineRange> = []

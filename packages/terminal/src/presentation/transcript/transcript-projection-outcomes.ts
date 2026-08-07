@@ -168,5 +168,6 @@ export const updateExecutionOutcomes: {
     arg1: Parameters<typeof updateExecutionOutcomesImpl>[1],
     arg2: Parameters<typeof updateExecutionOutcomesImpl>[2],
     arg3: Parameters<typeof updateExecutionOutcomesImpl>[3],
+    arg4?: Parameters<typeof updateExecutionOutcomesImpl>[4],
   ): (arg0: Parameters<typeof updateExecutionOutcomesImpl>[0]) => ReturnType<typeof updateExecutionOutcomesImpl>
-} = Function.dual((args) => args.length > 0, updateExecutionOutcomesImpl)
+} = Function.dual((args) => args.length >= 4, updateExecutionOutcomesImpl)

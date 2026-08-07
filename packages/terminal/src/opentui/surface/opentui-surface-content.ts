@@ -124,6 +124,7 @@ export const welcomeContent: {
     arg1: Parameters<typeof welcomeContentImpl>[1],
     arg2: Parameters<typeof welcomeContentImpl>[2],
     arg3: Parameters<typeof welcomeContentImpl>[3],
+    arg4?: Parameters<typeof welcomeContentImpl>[4],
   ): (arg0: Parameters<typeof welcomeContentImpl>[0]) => ReturnType<typeof welcomeContentImpl>
   (
     arg0: Parameters<typeof welcomeContentImpl>[0],
