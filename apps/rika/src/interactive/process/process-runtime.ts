@@ -66,15 +66,17 @@ export const makeProcessRuntime = (runtime: Runtime) => {
     Effect.suspend(() => {
       if (loop.teardownStarted) return Effect.void
       loop.teardownStarted = true
-      return Effect.gen(function* () {
-        yield* Effect.logInfo("tui.teardown.started")
-        loop.closed = true
-        Logging.settleActiveLogs()
-        loop.renderer?.releaseTerminal()
-        if (loop.initialization !== undefined) yield* Fiber.await(loop.initialization)
-        if (showGoodbye) ProcessSignals.writeGoodbye(loop.model)
-        yield* Effect.logInfo("tui.teardown.completed")
-      })
+      return Effect.uninterruptible(
+        Effect.gen(function* () {
+          yield* Effect.logInfo("tui.teardown.started")
+          loop.closed = true
+          Logging.settleActiveLogs()
+          loop.renderer?.releaseTerminal()
+          if (loop.initialization !== undefined) yield* Fiber.await(loop.initialization)
+          if (showGoodbye) ProcessSignals.writeGoodbye(loop.model)
+          yield* Effect.logInfo("tui.teardown.completed")
+        }),
+      )
     })
   const close = (exitCode?: number, showGoodbye = true) => {
     if (loop.closing) return
