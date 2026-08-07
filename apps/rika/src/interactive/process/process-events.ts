@@ -1,6 +1,6 @@
 import * as InteractiveEvent from "@rika/product/interactive-event"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import { Effect, Schema } from "effect"
+import { Clock, Effect, Schema } from "effect"
 import { selectedThreadMetadata, update } from "@rika/terminal/terminal-state-reducer"
 import * as InteractiveController from "../controller/interactive-controller"
 import * as ThreadSelection from "../controller/terminal-thread-selection"
@@ -126,6 +126,17 @@ export const makeEventRouter = (runtime: Runtime) => {
         _tag: "BlockAdded",
         block: { _tag: "Notification", title: "Context resolution", detail: event.messages.join("\n") },
       })
+    } else if (event._tag === "TurnRetryScheduled") {
+      if (loop.model.currentThreadId !== event.threadId) return
+      loop.model = update(loop.model, {
+        _tag: "TurnRetryScheduled",
+        turnId: event.turnId,
+        attempt: event.attempt,
+        budget: event.budget,
+        message: event.message,
+        nextAt: event.nextAt,
+        retryCountdown: Math.max(0, Math.ceil((event.nextAt - Effect.runSync(Clock.currentTimeMillis)) / 1000)),
+      })
     } else if (event._tag === "ExecutionFailed") {
       if (event.threadId !== undefined && loop.model.currentThreadId !== event.threadId) return
       loop.model = update(loop.model, {
@@ -165,6 +176,7 @@ export const makeEventRouter = (runtime: Runtime) => {
       loop.submittedSinceIdle = false
     render(
       event._tag === "ContextDiagnostics" ||
+        event._tag === "TurnRetryScheduled" ||
         event._tag === "ExecutionFailed" ||
         event._tag === "QueueFull" ||
         event._tag === "ExecutionControlled",

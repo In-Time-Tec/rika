@@ -79,7 +79,8 @@ const ErrorBlock = Schema.TaggedStruct("Error", {
   title: Schema.String,
   detail: Schema.String,
   turnId: Schema.optionalKey(Schema.String),
-  recovery: Schema.optionalKey(Schema.String),
+  category: Schema.optionalKey(Schema.String),
+  retryable: Schema.optionalKey(Schema.Boolean),
 })
 const SubagentCard = Schema.TaggedStruct("SubagentCard", {
   id: Schema.String,

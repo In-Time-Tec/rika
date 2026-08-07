@@ -46,6 +46,17 @@ export type InteractiveEvent =
     }
   | { readonly _tag: "AssistantCompleted"; readonly text: string }
   | {
+      readonly _tag: "TurnRetryScheduled"
+      readonly selectionEpoch: number
+      readonly threadId: Thread.ThreadId
+      readonly turnId: Turn.TurnId
+      readonly retryTurnId: Turn.TurnId
+      readonly attempt: number
+      readonly budget: number
+      readonly message: string
+      readonly nextAt: number
+    }
+  | {
       readonly _tag: "ExecutionFailed"
       readonly selectionEpoch: number
       readonly threadId?: Thread.ThreadId

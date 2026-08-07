@@ -230,7 +230,7 @@ const operationError = (cause: unknown): RuntimeOperationError => {
 const actionableMessage = (details: FailureDetails) =>
   `${details.message.replace(/[.\s]+$/, "")}. ${
     details.outcome === "known" ? "The call did not change state." : "The call may have changed state."
-  } Next action: ${details.nextAction.replace(/[.\s]+$/, "")}.`
+  }`
 
 const toolError = (request: Request, cause: unknown, kind: "operation" | "timeout") => {
   const unsafe = contract(request).idempotency === "unsafe"

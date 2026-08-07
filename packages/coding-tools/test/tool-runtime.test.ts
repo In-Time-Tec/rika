@@ -242,7 +242,7 @@ describe("Runtime", () => {
           outcome: "known",
           recovery: "after_change",
         })
-        expect(failure.message).toContain("Next action:")
+        expect(failure.message).not.toContain("Next action:")
       }
       expect(selected.text).toBe("2: needle\n3: last")
     }).pipe(provide(environment.runtime))
@@ -286,9 +286,9 @@ describe("Runtime", () => {
       expect(edited.diff).toContain("+new")
       expect(environment.files.get("/workspace/new/file.txt")).toBe("new")
       expect(stale).toMatchObject({ category: "conflict", outcome: "known", recovery: "after_change" })
-      expect(stale.message).toContain("Reread new/file.txt")
+      expect(stale.message).toContain("old_str was not found in the current file")
       expect(ambiguous).toMatchObject({ category: "conflict", outcome: "known", recovery: "after_change" })
-      expect(ambiguous.message).toContain("more surrounding context")
+      expect(ambiguous.message).toContain("old_str is not unique")
       expect(replacedAll.diff).toContain("+changed changed")
     }).pipe(provide(environment.runtime))
   })
@@ -369,10 +369,10 @@ describe("Runtime", () => {
         recovery: "after_change",
       })
       expect(read.message).toContain("File not found")
-      expect(read.message).toContain("Search for the file")
+      expect(read.message).not.toContain("Next action:")
       expect(shell).toMatchObject({ _tag: "ToolError", tool: "bash" })
       expect(shell).toMatchObject({ category: "access_denied", outcome: "unknown", recovery: "never" })
-      expect(shell.message).toContain("Inspect the workspace and process state")
+      expect(shell.message).toContain("The operating system denied access")
     }).pipe(provide(environment.runtime))
   })
 
@@ -393,7 +393,7 @@ describe("Runtime", () => {
         recovery: "never",
       })
       expect(failure.message).toContain("after 120000ms")
-      expect(failure.message).toContain("must not be repeated unchanged")
+      expect(failure.message).toContain("may have changed state")
     }).pipe(provide(environment.runtime))
   })
 
@@ -413,7 +413,7 @@ describe("Runtime", () => {
         recovery: "later",
       })
       expect(failure.message).toContain("after 30000ms")
-      expect(failure.message).toContain("Retry once later")
+      expect(failure.message).toContain("did not change state")
     }).pipe(provide(environment.runtime))
   })
 
@@ -611,15 +611,15 @@ describe("Runtime", () => {
         recovery: "after_change",
         outcome: "known",
       })
-      expect(unavailableFailure.message).toContain("Configure a provider")
+      expect(unavailableFailure.message).toContain("No configured web search provider")
       expect(rateFailure).toMatchObject({ category: "rate_limited", recovery: "later", outcome: "known" })
-      expect(rateFailure.message).toContain("Retry later")
+      expect(rateFailure.message).toContain("rate limited")
       expect(pageFailure).toMatchObject({
         category: "dependency_unavailable",
         recovery: "after_change",
         outcome: "known",
       })
-      expect(pageFailure.message).toContain("Configure PARALLEL_API_KEY")
+      expect(pageFailure.message).toContain("PARALLEL_API_KEY is not configured")
     }),
   )
 })

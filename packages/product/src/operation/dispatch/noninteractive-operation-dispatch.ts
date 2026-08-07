@@ -4,9 +4,11 @@ import * as ThreadResult from "@rika/product/thread-result"
 import * as TurnRepository from "../../thread/repository/turn-repository"
 import { clampThreadTitle } from "../../thread/query/thread-title-policy"
 import { isReviewRouteMode, reviewIntent, reviewRouteMode } from "../review/review-policy"
-import { Cause, Clock, Console, Effect } from "effect"
+import { Cause, Clock, Console, Duration, Effect } from "effect"
 import type * as ExecutionProjection from "../../execution/contract/execution-projection"
 import { compareUnitOrder } from "@rika/transcript/transcript-unit-order"
+import { turnFailure } from "../failure-message"
+import { shouldRetryTurn, turnRetryBudget, turnRetryDelay } from "../turn-retry-policy"
 import type {
   AgentExecutionTurn,
   Dependencies,
@@ -14,10 +16,7 @@ import type {
   PreparedExecutionTurn,
 } from "./noninteractive-operation-contract"
 
-const turnFailureReason = (units: ReadonlyArray<import("@rika/transcript/transcript-unit").Unit>) =>
-  units
-    .toSorted((left, right) => compareUnitOrder(left.order, right.order))
-    .findLast((unit) => unit.executionOutcome?.status === "failed")?.executionOutcome?.reason
+// turnFailure lives in failure-policy.ts; see imports above.
 
 export const run = Effect.fn("NoninteractiveOperation.run")(function* (
   input: NoninteractiveInput,
@@ -132,7 +131,7 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
       )
       const result = execution
       const completedAt = yield* Clock.currentTimeMillis
-      const settledFailure = turnFailureReason([...units.values()])
+      const settledFailure = turnFailure([...units.values()])
       yield* result.status === "failed"
         ? Effect.logError("turn.failed").pipe(
             Effect.annotateLogs({
@@ -227,7 +226,49 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
       return yield* dependencies.operationError(`Turn ${submitted.id} already has an execution observer`)
     if (!ThreadResult.TurnResult.isAgentExecution(submitted))
       return yield* dependencies.operationError(`Turn ${submitted.id} is not an executable turn`)
-    const completed = yield* runTurn(submitted).pipe(Effect.ensuring(dependencies.releaseTurnObserver(submitted.id)))
+    const runTurnWithRetry = Effect.fn("ProductOperation.runTurnWithRetry")(function* () {
+      let attempt = 0
+      let current = submitted
+      let last = yield* runTurn(current).pipe(Effect.ensuring(dependencies.releaseTurnObserver(current.id)))
+      while (true) {
+        attempt += 1
+        if (last.result.status !== "failed") return last
+        const failure = turnFailure(last.units)
+        const retryable = failure?.retryable ?? false
+        if (!shouldRetryTurn({ retryable, retry: retryable ? "automatic" : "none", attempt })) return last
+        const delay = turnRetryDelay({ attempt })
+        const retryTurnId = yield* dependencies.makeTurnId
+        dependencies.publishInteractiveActivity(0, {
+          _tag: "TurnRetryScheduled",
+          selectionEpoch: 0,
+          threadId: thread.id,
+          turnId: current.id,
+          retryTurnId,
+          attempt,
+          budget: turnRetryBudget,
+          message: failure?.message ?? "Execution failed",
+          nextAt: (yield* Clock.currentTimeMillis) + Duration.toMillis(delay),
+        })
+        yield* Effect.sleep(delay)
+        const retried = yield* dependencies.createObservedSubmission(turns, {
+          id: retryTurnId,
+          threadId: thread.id,
+          prompt: current.prompt,
+          ...(current.promptParts === undefined ? {} : { promptParts: current.promptParts }),
+          executionRoute: current.executionRoute,
+          queueCapacity: dependencies.pendingTurnCapacity,
+          now: yield* Clock.currentTimeMillis,
+        })
+        const retryTurn = retried.turn
+        if (retryTurn.status === "queued") return last
+        if (!retried.claimed) return last
+        if (!ThreadResult.TurnResult.isAgentExecution(retryTurn)) return last
+        yield* dependencies.ensureTurnSummary(retryTurn)
+        current = retryTurn
+        last = yield* runTurn(current).pipe(Effect.ensuring(dependencies.releaseTurnObserver(current.id)))
+      }
+    })
+    const completed = yield* runTurnWithRetry()
     yield* drainRunQueue()
     if (input._tag === "Run" && input.streamJson) {
       yield* Effect.forEach(completed.changes, (change) => Console.log(JSON.stringify(change)), { discard: true })
@@ -242,9 +283,9 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
     if (completed.result.status === "cancelled")
       return yield* dependencies.operationError(`Turn ${submitted.id} was cancelled before it completed`)
     if (completed.result.status === "failed") {
-      const failure = turnFailureReason(ordered)
+      const failure = turnFailure(ordered)
       return yield* dependencies.operationError(
-        failure === undefined ? `Turn ${submitted.id} failed` : `Turn ${submitted.id} failed: ${failure}`,
+        failure === undefined ? `Turn ${submitted.id} failed` : `Turn ${submitted.id} failed: ${failure.message}`,
       )
     }
     if (completed.result.status === "completed" && text.length === 0)

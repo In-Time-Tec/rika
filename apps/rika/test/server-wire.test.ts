@@ -172,7 +172,14 @@ describe("server message frames", () => {
       event: {
         _tag: "ExecutionFailed",
         selectionEpoch: 1,
-        failure: { tag: "TestFailure", message: "x".repeat(1_100_000), retry: "user", actor: "environment" },
+        failure: {
+          tag: "TestFailure",
+          message: "x".repeat(1_100_000),
+          category: "operation",
+          retryable: false,
+          retry: "none",
+          actor: "environment",
+        },
       },
     })
     const frames = serverMessageFrames("message", message)
@@ -193,7 +200,14 @@ describe("server message frames", () => {
       event: {
         _tag: "ExecutionFailed",
         selectionEpoch: 1,
-        failure: { tag: "TestFailure", message: "x".repeat(1_100_000), retry: "user", actor: "environment" },
+        failure: {
+          tag: "TestFailure",
+          message: "x".repeat(1_100_000),
+          category: "operation",
+          retryable: false,
+          retry: "none",
+          actor: "environment",
+        },
       },
     })
     const frames = serverMessageFrames("message", message)
@@ -224,7 +238,14 @@ describe("server message frames", () => {
           event: {
             _tag: "ExecutionFailed",
             selectionEpoch: 1,
-            failure: { tag: "TestFailure", message: "x".repeat(1_100_000), retry: "user", actor: "environment" },
+            failure: {
+              tag: "TestFailure",
+              message: "x".repeat(1_100_000),
+              category: "operation",
+              retryable: false,
+              retry: "none",
+              actor: "environment",
+            },
           },
         }),
       ),
@@ -242,7 +263,14 @@ describe("server message frames", () => {
       event: {
         _tag: "ExecutionFailed",
         selectionEpoch: 1,
-        failure: { tag: "TestFailure", message: "y".repeat(1_100_000), retry: "user", actor: "environment" },
+        failure: {
+          tag: "TestFailure",
+          message: "y".repeat(1_100_000),
+          category: "operation",
+          retryable: false,
+          retry: "none",
+          actor: "environment",
+        },
       },
     })
     expect(serverMessageFrames("reused", message).map(decodeFrame).filter(Boolean)).toEqual([message])
@@ -261,7 +289,14 @@ describe("server message frames", () => {
         event: {
           _tag: "ExecutionFailed",
           selectionEpoch: 1,
-          failure: { tag: "TestFailure", message: text, retry: "user", actor: "environment" },
+          failure: {
+            tag: "TestFailure",
+            message: text,
+            category: "operation",
+            retryable: false,
+            retry: "none",
+            actor: "environment",
+          },
         },
       })
     const first = serverMessageFrames("first", makeMessage(1, "x".repeat(1_100_000)))
@@ -286,7 +321,14 @@ describe("server message frames", () => {
       event: {
         _tag: "ExecutionFailed",
         selectionEpoch: 1,
-        failure: { tag: "TestFailure", message: "x".repeat(20_000_000), retry: "user", actor: "environment" },
+        failure: {
+          tag: "TestFailure",
+          message: "x".repeat(20_000_000),
+          category: "operation",
+          retryable: false,
+          retry: "none",
+          actor: "environment",
+        },
       },
     })
     const decodeFrame = makeServerMessageFrameDecoder()

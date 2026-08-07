@@ -1209,16 +1209,6 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/baton-execution/test/failure-presentation.test.ts",
-      "path": "packages/baton-execution/test/failure-presentation.test.ts",
-      "workspace": "@rika/baton-execution",
-      "package": "@rika/baton-execution",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
       "id": "packages/baton-execution/test/review-integration.test.ts",
       "path": "packages/baton-execution/test/review-integration.test.ts",
       "workspace": "@rika/baton-execution",
@@ -1681,6 +1671,16 @@
     {
       "id": "packages/product-store/test/product-operation/thread-summary-edit-totals.test.ts",
       "path": "packages/product-store/test/product-operation/thread-summary-edit-totals.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "path": "packages/product-store/test/product-operation/turn-retry.test.ts",
       "workspace": "@rika/product-store",
       "package": "@rika/product-store",
       "kind": "source",
@@ -2211,6 +2211,26 @@
     {
       "id": "packages/product/test/openai-auth-token.test.ts",
       "path": "packages/product/test/openai-auth-token.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/operation/failure-policy.test.ts",
+      "path": "packages/product/test/operation/failure-policy.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/operation/turn-retry-policy.test.ts",
+      "path": "packages/product/test/operation/turn-retry-policy.test.ts",
       "workspace": "@rika/product",
       "package": "@rika/product",
       "kind": "source",
@@ -5451,14 +5471,6 @@
       "production": false
     },
     {
-      "from": "packages/baton-execution/test/failure-presentation.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
       "from": "packages/baton-execution/test/review-integration.test.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
@@ -6731,6 +6743,54 @@
       "production": false
     },
     {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "external:effect/Scope",
+      "specifier": "effect/Scope",
+      "kind": "dynamic-import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "external:effect/testing",
+      "specifier": "effect/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "packages/product/src/execution/contract/execution-gateway.ts",
+      "specifier": "@rika/product/execution-gateway",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
+      "kind": "dynamic-import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/product-store/test/sqlite-queue-1.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
@@ -7756,6 +7816,38 @@
     },
     {
       "from": "packages/product/test/openai-auth-token.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation/failure-policy.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation/failure-policy.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation/turn-retry-policy.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation/turn-retry-policy.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",

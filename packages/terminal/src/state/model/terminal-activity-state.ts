@@ -13,6 +13,12 @@ export const Activity = Schema.Union([
     tools: Schema.optionalKey(Schema.Finite),
   }),
   Schema.TaggedStruct("Compacting", {}),
+  Schema.TaggedStruct("Retrying", {
+    attempt: Schema.Finite,
+    budget: Schema.Finite,
+    message: Schema.String,
+    nextAt: Schema.Finite,
+  }),
 ])
 export type Activity = typeof Activity.Type
 
@@ -30,8 +36,12 @@ export const utf8ByteLength = (value: string): number => {
 
 export const formatActivityCounter = formatTokens
 
-export const formatActivity = (activity: Activity | undefined): string | undefined => {
+const formatActivityImpl = (activity: Activity | undefined, countdownSeconds?: number): string | undefined => {
   if (activity === undefined) return undefined
+  if (activity._tag === "Retrying") {
+    const seconds = countdownSeconds ?? 0
+    return `${activity.message} — retrying in ${seconds}s (attempt ${activity.attempt} of ${activity.budget})`
+  }
   if (activity._tag === "RunningTools") {
     const labels = [
       ...(activity.subagents === undefined || activity.subagents === 0 ? [] : [plural(activity.subagents, "subagent")]),
@@ -46,6 +56,11 @@ export const formatActivity = (activity: Activity | undefined): string | undefin
   }
   return activity._tag
 }
+
+export const formatActivity: {
+  (activity: Activity | undefined, countdownSeconds?: number): string | undefined
+  (activity: Activity | undefined): (countdownSeconds?: number) => string | undefined
+} = Function.dual((args) => typeof args[0] !== "number", formatActivityImpl)
 
 export const runningToolsActivity = (model: Model): Activity => {
   const nestedBlocks = new Set(

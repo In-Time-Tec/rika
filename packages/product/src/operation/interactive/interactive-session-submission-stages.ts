@@ -5,10 +5,12 @@ import * as TurnRepository from "@rika/product/turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionRequest from "@rika/product/execution-request"
 import * as ExecutionProjection from "@rika/product/execution-projection"
-import { Cause, Clock, Effect, Exit, Ref } from "effect"
+import { Cause, Clock, Duration, Effect, Exit, Ref } from "effect"
 import { admitInteractiveTurn } from "./interactive-turn-submission"
+import { turnFailure } from "../failure-message"
 import { makeFailure } from "../operation-failure"
-import { failureKind, operationError } from "../operation-error"
+import { shouldRetryTurn, turnRetryBudget, turnRetryDelay } from "../turn-retry-policy"
+import { failureKind, operationError, operationFailureDetail } from "../operation-error"
 import type { ModeId } from "@rika/configuration/behavior-mode"
 import type { InteractiveEvent } from "./interactive-runtime-event"
 import type { InteractiveRuntimeContext } from "./interactive-session-runtime"
@@ -96,12 +98,22 @@ export const admitInteractiveSubmission: {
   ): ReturnType<typeof admitInteractiveSubmissionImpl>
 } = Function.dual(8, admitInteractiveSubmissionImpl)
 
+type SettleInteractiveSubmissionResult =
+  | {
+      readonly _tag: "retry"
+      readonly attempt: number
+      readonly sourceTurnId: string
+      readonly message: string
+    }
+  | { readonly _tag: "settled" }
+
 interface SettleInteractiveSubmissionState {
   readonly thread: Thread.Thread
   readonly turn: Turn.AgentExecutionTurn
   readonly outcome: Exit.Exit<ExecutionProjection.Result | undefined, unknown>
   readonly publish: (change: ExecutionProjection.Change) => void
   readonly dispatch: (event: InteractiveEvent) => void
+  readonly retry?: { readonly attempt: number; readonly sourceTurnId: string }
 }
 
 const settleInteractiveSubmissionImpl = (
@@ -109,13 +121,13 @@ const settleInteractiveSubmissionImpl = (
   state: SettleInteractiveSubmissionState,
 ) => {
   const { setTurnStatus, settleThread } = input
-  const { thread, turn, outcome, publish, dispatch } = state
+  const { thread, turn, outcome, publish, dispatch, retry } = state
   return Effect.uninterruptible(
     Effect.gen(function* () {
       if (outcome._tag === "Failure") {
         if (Cause.hasInterruptsOnly(outcome.cause)) {
           yield* setTurnStatus(turn.id, "cancelled", yield* Clock.currentTimeMillis)
-          return
+          return { _tag: "settled" }
         }
         yield* setTurnStatus(turn.id, "failed", yield* Clock.currentTimeMillis)
         // The cause is right here; a hardcoded sentence would discard the one fact the user needs.
@@ -127,25 +139,31 @@ const settleInteractiveSubmissionImpl = (
           failure: makeFailure(Cause.squash(outcome.cause)),
         })
         yield* settleThread(thread, dispatch)
-        return
+        return { _tag: "settled" }
       }
       const result = outcome.value
-      if (result === undefined) return yield* settleThread(thread, dispatch)
+      if (result === undefined) {
+        yield* settleThread(thread, dispatch)
+        return { _tag: "settled" }
+      }
       for (const change of result.changes) publish(change)
       yield* setTurnStatus(turn.id, result.status, yield* Clock.currentTimeMillis)
-      if (result.status === "waiting" || result.status === "running" || result.status === "cancelling") return
+      if (result.status === "waiting" || result.status === "running" || result.status === "cancelling")
+        return { _tag: "settled" }
       if (result.status === "failed") {
-        // The projector carried the run's real failure into the last Error unit; surface it
-        // instead of a generic status sentence.
-        const errorUnit = [...result.units].reverse().find((unit) => {
-          const content = unit.content as { _tag?: string; block?: { _tag?: string } }
-          return content._tag === "Block" && content.block?._tag === "Error"
-        })
-        const errorBlock = (errorUnit?.content as { block?: { title?: string; detail?: string } } | undefined)?.block
-        const message =
-          errorBlock?.detail !== undefined && errorBlock.detail.length > 0
-            ? errorBlock.detail
-            : (errorBlock?.title ?? `Execution ${result.status}`)
+        // The projector carried the run's real failure into the last Error unit with its
+        // classification; surface it instead of a generic status sentence.
+        const failure = turnFailure(result.units)
+        const attempt = retry?.attempt ?? 1
+        const retryable = failure?.retryable ?? false
+        if (shouldRetryTurn({ retryable, retry: retryable ? "automatic" : "none", attempt }))
+          return {
+            _tag: "retry",
+            attempt,
+            sourceTurnId: retry?.sourceTurnId ?? turn.id,
+            message: failure?.message ?? "Execution failed",
+          }
+        const message = failure?.message ?? `Execution ${result.status}`
         emitEvent(input, dispatch, {
           _tag: "ExecutionFailed",
           selectionEpoch: 0,
@@ -155,6 +173,7 @@ const settleInteractiveSubmissionImpl = (
         })
       }
       yield* settleThread(thread, dispatch)
+      return { _tag: "settled" }
     }),
   )
 }
@@ -181,58 +200,111 @@ const executeInteractiveSubmissionImpl = (
     input
   return Effect.gen(function* () {
     const clock = yield* Clock.Clock
-    const startedAt = clock.currentTimeMillisUnsafe()
-    const delivered = new Set<string>()
-    const publish = (change: ExecutionProjection.Change) => {
-      const key = `${change._tag}:${change.revision}`
-      if (delivered.has(key)) return
-      delivered.add(key)
-      emitEvent(input, dispatch, {
-        _tag: "ExecutionProjectionChanged",
-        threadId: thread.id,
-        turn: { ...turn, status: change.state.status, updatedAt: clock.currentTimeMillisUnsafe() },
-        change,
-      })
-    }
-    const outcome = yield* Effect.exit(
-      Effect.gen(function* () {
-        const prepared = yield* prepareExecution(turn, thread.workspace)
-        if (prepared.messages.length > 0)
-          emitEvent(input, dispatch, {
-            _tag: "ContextDiagnostics",
-            selectionEpoch: 0,
-            threadId: thread.id,
-            turnId: turn.id,
-            messages: prepared.messages,
-          })
-        const running = yield* setTurnStatus(turn.id, "running", startedAt)
-        if (running.status !== "running") return undefined
+    let current = turn
+    let attempt = 1
+    let sourceTurnId = turn.id
+    let submission = submissionId
+    for (;;) {
+      const delivered = new Set<string>()
+      const startedAt = clock.currentTimeMillisUnsafe()
+      const publish = (change: ExecutionProjection.Change) => {
+        const key = `${change._tag}:${change.revision}`
+        if (delivered.has(key)) return
+        delivered.add(key)
         emitEvent(input, dispatch, {
-          _tag: "TurnStarted",
-          selectionEpoch: 0,
-          activitySequence: 0,
+          _tag: "ExecutionProjectionChanged",
           threadId: thread.id,
-          turn: running,
-          ...(submissionId === undefined ? {} : { submissionId }),
+          turn: { ...current, status: change.state.status, updatedAt: clock.currentTimeMillisUnsafe() },
+          change,
         })
-        const turns = yield* TurnRepository.Service
-        const titleIntent =
-          (yield* turns.list(thread.id)).length === 1 && thread.title === input.temporaryThreadTitle(turn.prompt)
-            ? ({ _tag: "GenerateThreadTitle", expectedTitle: thread.title } as const)
-            : undefined
-        yield* rootTurnOwner.startTurn({
-          threadId: thread.id,
-          turnId: turn.id,
-          workspace: thread.workspace,
-          prompt: prepared.prompt,
-          ...(prepared.promptParts === undefined ? {} : { promptParts: prepared.promptParts }),
-          executionRoute: turn.executionRoute,
-          ...(titleIntent === undefined ? {} : { titleIntent }),
-        })
-        return yield* rootTurnOwner.watchTurn(turn.id, publish)
-      }),
-    )
-    yield* settleInteractiveSubmission(input, { thread, turn, outcome, publish, dispatch })
+      }
+      const outcome = yield* Effect.exit(
+        Effect.gen(function* () {
+          const prepared = yield* prepareExecution(current, thread.workspace)
+          if (prepared.messages.length > 0)
+            emitEvent(input, dispatch, {
+              _tag: "ContextDiagnostics",
+              selectionEpoch: 0,
+              threadId: thread.id,
+              turnId: current.id,
+              messages: prepared.messages,
+            })
+          const running = yield* setTurnStatus(current.id, "running", startedAt)
+          if (running.status !== "running") return undefined
+          emitEvent(input, dispatch, {
+            _tag: "TurnStarted",
+            selectionEpoch: 0,
+            activitySequence: 0,
+            threadId: thread.id,
+            turn: running,
+            ...(submission === undefined ? {} : { submissionId: submission }),
+          })
+          const turns = yield* TurnRepository.Service
+          const titleIntent =
+            (yield* turns.list(thread.id)).length === 1 && thread.title === input.temporaryThreadTitle(current.prompt)
+              ? ({ _tag: "GenerateThreadTitle", expectedTitle: thread.title } as const)
+              : undefined
+          yield* rootTurnOwner.startTurn({
+            threadId: thread.id,
+            turnId: current.id,
+            workspace: thread.workspace,
+            prompt: prepared.prompt,
+            ...(prepared.promptParts === undefined ? {} : { promptParts: prepared.promptParts }),
+            executionRoute: current.executionRoute,
+            ...(titleIntent === undefined ? {} : { titleIntent }),
+          })
+          return yield* rootTurnOwner.watchTurn(current.id, publish)
+        }),
+      )
+      const decision = yield* settleInteractiveSubmission(input, {
+        thread,
+        turn: current,
+        outcome,
+        publish,
+        dispatch,
+        retry: { attempt, sourceTurnId },
+      })
+      if (decision._tag !== "retry") return
+      const retryDecision = decision as Extract<SettleInteractiveSubmissionResult, { readonly _tag: "retry" }>
+      const turns = yield* TurnRepository.Service
+      const retryTurn = yield* turns.createForSubmission({
+        id: yield* input.options.makeTurnId,
+        threadId: thread.id,
+        prompt: current.prompt,
+        ...(current.promptParts === undefined ? {} : { promptParts: current.promptParts }),
+        executionRoute: current.executionRoute,
+        lineage: { _tag: "Retried", sourceTurnId },
+        queueCapacity: input.pendingTurnCapacity,
+        now: yield* Clock.currentTimeMillis,
+      })
+      const claimed = yield* input.rootTurnOwner
+        .claim(retryTurn.id, retryTurn.status)
+        .pipe(Effect.mapError((error) => operationError(operationFailureDetail(error), error)))
+      if (!claimed) return
+      emitEvent(input, dispatch, {
+        _tag: "SubmissionAdmitted",
+        selectionEpoch: 0,
+        threadId: thread.id,
+        turnId: retryTurn.id,
+        status: "active",
+      })
+      const delay = turnRetryDelay({ attempt })
+      emitEvent(input, dispatch, {
+        _tag: "TurnRetryScheduled",
+        selectionEpoch: 0,
+        threadId: thread.id,
+        turnId: current.id,
+        retryTurnId: retryTurn.id,
+        attempt,
+        budget: turnRetryBudget,
+        message: retryDecision.message,
+        nextAt: (yield* Clock.currentTimeMillis) + Duration.toMillis(delay),
+      })
+      yield* Effect.sleep(delay)
+      current = retryTurn
+      attempt += 1
+      submission = undefined
+    }
   }).pipe(
     Effect.provide(input.executionDependencies),
     Effect.scoped,
@@ -293,10 +365,10 @@ export const submitInteractiveOperation = (input: InteractiveSubmissionContext) 
   ) {
     let observerTurn: Turn.Turn | undefined
     let executionLaunched = false
+    let created = false
     const program = Effect.gen(function* () {
       const threads = yield* ThreadRepository.Service
       let thread = yield* Ref.get(interactiveThread)
-      let created = false
       if (thread === undefined) {
         thread = yield* threads.create({
           id: yield* options.makeThreadId,

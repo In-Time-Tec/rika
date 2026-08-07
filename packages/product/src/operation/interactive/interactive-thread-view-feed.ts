@@ -481,6 +481,7 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
     }
     switch (event._tag) {
       case "ContextDiagnostics":
+      case "TurnRetryScheduled":
       case "ExecutionFailed":
       case "ExecutionControlFailed":
       case "QueueFull":

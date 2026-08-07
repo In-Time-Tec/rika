@@ -25,6 +25,7 @@ export const queueItem = (turn: Turn.AgentExecutionTurn): QueueItem => {
 
 export type InteractiveQueueInput = Pick<
   InteractiveRuntimeContext,
+  | "options"
   | "pendingTurnCapacity"
   | "rootTurnOwner"
   | "prepareExecution"
@@ -78,9 +79,11 @@ export const makeInteractiveQueue = (input: InteractiveQueueInput) => {
   ): Effect.Effect<
     number,
     | OperationError
+    | TurnRepository.QueueFull
     | ExecutionGateway.StartTurnFailure
     | ExecutionGateway.WatchTurnFailure
-    | TurnRepository.RepositoryError,
+    | TurnRepository.RepositoryError
+    | import("@rika/product/transcript-repository").RepositoryError,
     | ResolvedContext.Service
     | ThreadRepository.Service
     | TurnRepository.Service
@@ -118,6 +121,7 @@ export const makeInteractiveQueue = (input: InteractiveQueueInput) => {
           ),
         emit,
         releaseTurnObserver,
+        makeTurnId: () => input.options.makeTurnId,
         failureMessage: executionStartFailureMessage,
       })
     })

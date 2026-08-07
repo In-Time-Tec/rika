@@ -65,6 +65,9 @@ const expected: Record<string, ReadonlyArray<string>> = {
   "@rika/product": [
     "agent-profile",
     "execution-authority-reconciliation",
+    "failure-message",
+    "failure-policy",
+    "operation-failure",
     "openai-auth-contract",
     "openai-auth-service",
     "context-file-system",

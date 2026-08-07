@@ -59,13 +59,25 @@ type Message =
   | { readonly _tag: "AssistantCompleted"; readonly id?: string; readonly turnId?: string; readonly text: string }
   | { readonly _tag: "ExecutionCompleted"; readonly turnId?: string }
   | {
+      readonly _tag: "TurnRetryScheduled"
+      readonly turnId: string
+      readonly attempt: number
+      readonly budget: number
+      readonly message: string
+      readonly nextAt: number
+      readonly retryCountdown: number
+    }
+  | {
       readonly _tag: "ExecutionFailed"
       readonly turnId?: string
       readonly failure: {
         readonly tag: string
+        readonly category: string
         readonly message: string
-        readonly retry: "user" | "automatic" | "never"
+        readonly retryable: boolean
+        readonly retry: "automatic" | "none"
         readonly actor: "user" | "environment" | "rika"
+        readonly correlationId?: string
       }
     }
   | { readonly _tag: "ExecutionCancelled"; readonly turnId?: string; readonly agentResponseArrived?: boolean }

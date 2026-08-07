@@ -89,8 +89,12 @@ export const renderBlock: {
         return `${completedCompactionIcon} Auto-compacted${block.summary.length === 0 ? "" : `\n${body(block.summary)}`}`
       case "Notification":
         return `${head(`! ${block.title}`)}\n${body(block.detail)}`
-      case "Error":
-        return `${head(`✖ ERROR: ${block.title}${block.turnId === undefined ? "" : ` · Turn ${block.turnId}`}`)}\n${body(block.detail)}${block.recovery === undefined ? "" : `\n${body(`Next: ${block.recovery}`)}`}`
+      case "Error": {
+        const title = wrapTextToWidth(block.title, Math.max(1, width)).join("\n")
+        const detail =
+          block.detail.length === 0 ? "" : `\n${wrapTextToWidth(block.detail, Math.max(1, width)).join("\n")}`
+        return `${title}${detail}`
+      }
       case "SubagentCard": {
         let icon = "✗"
         if (block.status === "running" || block.status === "waiting" || block.status === "cancelling") icon = "⠿"

@@ -2132,6 +2132,8 @@
         "./execution-status",
         "./execution-transcript-contract",
         "./extension-operation",
+        "./failure-message",
+        "./failure-policy",
         "./interactive-command",
         "./interactive-event",
         "./interactive-operation",
@@ -2140,6 +2142,7 @@
         "./model-registration-identity",
         "./openai-auth-contract",
         "./openai-auth-service",
+        "./operation-failure",
         "./pending-turn",
         "./product-operation",
         "./product-operation-service",
@@ -2443,15 +2446,6 @@
       "publicExports": []
     },
     {
-      "id": "packages/baton-execution/src/failure-presentation.ts",
-      "path": "packages/baton-execution/src/failure-presentation.ts",
-      "workspace": "@rika/baton-execution",
-      "package": "@rika/baton-execution",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
       "id": "packages/baton-execution/src/scripted-model.ts",
       "path": "packages/baton-execution/src/scripted-model.ts",
       "workspace": "@rika/baton-execution",
@@ -2622,16 +2616,6 @@
     {
       "id": "packages/baton-execution/test/baton-tree-projector.test.ts",
       "path": "packages/baton-execution/test/baton-tree-projector.test.ts",
-      "workspace": "@rika/baton-execution",
-      "package": "@rika/baton-execution",
-      "kind": "source",
-      "production": false,
-      "publicExports": [],
-      "testKind": "unit-test"
-    },
-    {
-      "id": "packages/baton-execution/test/failure-presentation.test.ts",
-      "path": "packages/baton-execution/test/failure-presentation.test.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -4226,6 +4210,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "path": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/product-store/test/recording-sql.ts",
       "path": "packages/product-store/test/recording-sql.ts",
       "workspace": "@rika/product-store",
@@ -5082,6 +5076,24 @@
       "publicExports": []
     },
     {
+      "id": "packages/product/src/operation/failure-message.ts",
+      "path": "packages/product/src/operation/failure-message.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./failure-message"]
+    },
+    {
+      "id": "packages/product/src/operation/failure-policy.ts",
+      "path": "packages/product/src/operation/failure-policy.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./failure-policy"]
+    },
+    {
       "id": "packages/product/src/operation/interactive/interactive-command.ts",
       "path": "packages/product/src/operation/interactive/interactive-command.ts",
       "workspace": "@rika/product",
@@ -5457,7 +5469,7 @@
       "package": "@rika/product",
       "kind": "source",
       "production": true,
-      "publicExports": []
+      "publicExports": ["./operation-failure"]
     },
     {
       "id": "packages/product/src/operation/review/review-policy.ts",
@@ -5467,6 +5479,15 @@
       "kind": "source",
       "production": true,
       "publicExports": ["./review-policy"]
+    },
+    {
+      "id": "packages/product/src/operation/turn-retry-policy.ts",
+      "path": "packages/product/src/operation/turn-retry-policy.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
     },
     {
       "id": "packages/product/src/server/server-interactive-feed.ts",
@@ -6098,6 +6119,26 @@
     {
       "id": "packages/product/test/openai-auth-token.test.ts",
       "path": "packages/product/test/openai-auth-token.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/operation/failure-policy.test.ts",
+      "path": "packages/product/test/operation/failure-policy.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/operation/turn-retry-policy.test.ts",
+      "path": "packages/product/test/operation/turn-retry-policy.test.ts",
       "workspace": "@rika/product",
       "package": "@rika/product",
       "kind": "source",
@@ -16806,16 +16847,24 @@
     },
     {
       "from": "packages/baton-execution/src/baton-diagnostic-projection.ts",
-      "to": "packages/baton-execution/src/failure-presentation.ts",
-      "specifier": "./failure-presentation",
+      "to": "packages/product/src/execution/contract/execution-transcript-contract.ts",
+      "specifier": "@rika/product/execution-transcript-contract",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
       "from": "packages/baton-execution/src/baton-diagnostic-projection.ts",
-      "to": "packages/product/src/execution/contract/execution-transcript-contract.ts",
-      "specifier": "@rika/product/execution-transcript-contract",
+      "to": "packages/product/src/operation/failure-message.ts",
+      "specifier": "@rika/product/failure-message",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-diagnostic-projection.ts",
+      "to": "packages/product/src/operation/failure-policy.ts",
+      "specifier": "@rika/product/failure-policy",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -18640,22 +18689,6 @@
       "from": "packages/baton-execution/test/baton-tree-projector.test.ts",
       "to": "packages/transcript/src/ordering/transcript-unit-order.ts",
       "specifier": "@rika/transcript/transcript-unit-order",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/baton-execution/test/failure-presentation.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/baton-execution/test/failure-presentation.test.ts",
-      "to": "packages/baton-execution/src/failure-presentation.ts",
-      "specifier": "../src/failure-presentation",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -25965,6 +25998,158 @@
       "production": false
     },
     {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "external:effect/Scope",
+      "specifier": "effect/Scope",
+      "kind": "dynamic-import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "external:effect/testing",
+      "specifier": "effect/testing",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "packages/product-store/src/thread/sqlite-thread-repository.ts",
+      "specifier": "@rika/product-store/sqlite-thread-repository",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "packages/product-store/src/transcript/sqlite-transcript-repository.ts",
+      "specifier": "@rika/product-store/sqlite-transcript-repository",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "packages/product-store/src/turn/sqlite-turn-repository.ts",
+      "specifier": "@rika/product-store/sqlite-turn-repository",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "packages/product-store/test/support/operation-execution-fixtures.ts",
+      "specifier": "../support/operation-execution-fixtures",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "packages/product-store/test/support/operation-layer-harness.ts",
+      "specifier": "../support/operation-layer-harness",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "packages/product-store/test/support/operation-selection-fixtures.ts",
+      "specifier": "../support/operation-selection-fixtures",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "packages/product-store/test/support/operation-session-harness.ts",
+      "specifier": "../support/operation-session-harness",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "packages/product/src/execution/contract/execution-gateway.ts",
+      "specifier": "@rika/product/execution-gateway",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "packages/product/src/operation/contract/product-operation-service.ts",
+      "specifier": "@rika/product/product-operation-service",
+      "kind": "dynamic-import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "packages/product/src/operation/interactive/interactive-event.ts",
+      "specifier": "@rika/product/interactive-event",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "packages/product/src/operation/interactive/interactive-session.ts",
+      "specifier": "@rika/product/interactive-session",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "packages/product/src/thread/model/thread-record.ts",
+      "specifier": "@rika/product/thread-record",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "packages/product/src/thread/repository/turn-repository.ts",
+      "specifier": "@rika/product/turn-repository",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/turn-retry.test.ts",
+      "to": "packages/transcript/src/ordering/transcript-unit-order.ts",
+      "specifier": "@rika/transcript/transcript-unit-order",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/product-store/test/recording-sql.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -28302,8 +28487,24 @@
     },
     {
       "from": "packages/product/src/operation/dispatch/noninteractive-operation-dispatch.ts",
+      "to": "packages/product/src/operation/failure-message.ts",
+      "specifier": "../failure-message",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/noninteractive-operation-dispatch.ts",
       "to": "packages/product/src/operation/review/review-policy.ts",
       "specifier": "../review/review-policy",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/dispatch/noninteractive-operation-dispatch.ts",
+      "to": "packages/product/src/operation/turn-retry-policy.ts",
+      "specifier": "../turn-retry-policy",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -28353,14 +28554,6 @@
       "to": "packages/transcript/src/ordering/transcript-unit-order.ts",
       "specifier": "@rika/transcript/transcript-unit-order",
       "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "packages/product/src/operation/dispatch/noninteractive-operation-dispatch.ts",
-      "to": "packages/transcript/src/schema/transcript-unit.ts",
-      "specifier": "@rika/transcript/transcript-unit",
-      "kind": "dynamic-import",
       "relationship": "runtime",
       "production": true
     },
@@ -30157,6 +30350,38 @@
       "production": true
     },
     {
+      "from": "packages/product/src/operation/failure-message.ts",
+      "to": "packages/product/src/operation/failure-policy.ts",
+      "specifier": "./failure-policy",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/failure-message.ts",
+      "to": "packages/transcript/src/ordering/transcript-unit-order.ts",
+      "specifier": "@rika/transcript/transcript-unit-order",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/failure-message.ts",
+      "to": "packages/transcript/src/schema/transcript-unit.ts",
+      "specifier": "@rika/transcript/transcript-unit",
+      "kind": "dynamic-import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/failure-policy.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/product/src/operation/interactive/interactive-command.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -31326,6 +31551,14 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-session-queue.ts",
+      "to": "packages/product/src/thread/repository/transcript-repository.ts",
+      "specifier": "@rika/product/transcript-repository",
+      "kind": "dynamic-import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-queue.ts",
       "to": "packages/product/src/thread/repository/turn-repository.ts",
       "specifier": "@rika/product/turn-repository",
       "kind": "import",
@@ -31862,6 +32095,14 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-session-submission-stages.ts",
+      "to": "packages/product/src/operation/failure-message.ts",
+      "specifier": "../failure-message",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-submission-stages.ts",
       "to": "packages/product/src/operation/interactive/interactive-runtime-event.ts",
       "specifier": "./interactive-runtime-event",
       "kind": "import",
@@ -31904,6 +32145,14 @@
       "from": "packages/product/src/operation/interactive/interactive-session-submission-stages.ts",
       "to": "packages/product/src/operation/operation-failure.ts",
       "specifier": "../operation-failure",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-submission-stages.ts",
+      "to": "packages/product/src/operation/turn-retry-policy.ts",
+      "specifier": "../turn-retry-policy",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -32542,6 +32791,14 @@
     },
     {
       "from": "packages/product/src/operation/interactive/pending-turn-promotion.ts",
+      "to": "packages/product/src/operation/failure-message.ts",
+      "specifier": "../failure-message",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/pending-turn-promotion.ts",
       "to": "packages/product/src/operation/interactive/interactive-runtime-event.ts",
       "specifier": "./interactive-runtime-event",
       "kind": "import",
@@ -32582,6 +32839,14 @@
     },
     {
       "from": "packages/product/src/operation/interactive/pending-turn-promotion.ts",
+      "to": "packages/product/src/operation/turn-retry-policy.ts",
+      "specifier": "../turn-retry-policy",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/pending-turn-promotion.ts",
       "to": "packages/product/src/thread/model/thread-record.ts",
       "specifier": "@rika/product/thread-record",
       "kind": "import",
@@ -32609,6 +32874,14 @@
       "to": "packages/product/src/thread/queue/root-turn-owner.ts",
       "specifier": "../../thread/queue/root-turn-owner",
       "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/pending-turn-promotion.ts",
+      "to": "packages/product/src/thread/repository/transcript-repository.ts",
+      "specifier": "@rika/product/transcript-repository",
+      "kind": "dynamic-import",
       "relationship": "runtime",
       "production": true
     },
@@ -32950,6 +33223,14 @@
     },
     {
       "from": "packages/product/src/operation/operation-failure.ts",
+      "to": "packages/product/src/operation/failure-policy.ts",
+      "specifier": "./failure-policy",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/operation-failure.ts",
       "to": "packages/product/src/operation/operation-error.ts",
       "specifier": "./operation-error",
       "kind": "import",
@@ -32976,6 +33257,14 @@
       "from": "packages/product/src/operation/review/review-policy.ts",
       "to": "packages/product/src/execution/contract/review-intent.ts",
       "specifier": "../../execution/contract/review-intent",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/turn-retry-policy.ts",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -35128,6 +35417,62 @@
       "from": "packages/product/test/openai-auth-token.test.ts",
       "to": "packages/product/test/openai-auth-test-service.ts",
       "specifier": "./openai-auth-test-service",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation/failure-policy.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation/failure-policy.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation/failure-policy.test.ts",
+      "to": "packages/product/src/operation/failure-message.ts",
+      "specifier": "../../src/operation/failure-message",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation/failure-policy.test.ts",
+      "to": "packages/product/src/operation/failure-policy.ts",
+      "specifier": "../../src/operation/failure-policy",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation/turn-retry-policy.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation/turn-retry-policy.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/operation/turn-retry-policy.test.ts",
+      "to": "packages/product/src/operation/turn-retry-policy.ts",
+      "specifier": "../../src/operation/turn-retry-policy",
       "kind": "import",
       "relationship": "test",
       "production": false

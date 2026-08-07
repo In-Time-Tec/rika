@@ -363,13 +363,21 @@ test("streams, completes, and reports failures", () => {
   expect(model.entries).toHaveLength(3)
   model = update(model, {
     _tag: "ExecutionFailed",
-    failure: { tag: "TestFailure", message: "failed", retry: "user", actor: "environment" },
+    failure: {
+      tag: "TestFailure",
+      message: "failed",
+      category: "operation",
+      retryable: false,
+      retry: "none",
+      actor: "environment",
+    },
   })
   expect(model.blocks.at(-1)).toEqual({
     _tag: "Error",
     title: "TestFailure",
     detail: "failed",
-    recovery: "Press Enter to try again.",
+    category: "operation",
+    retryable: false,
   })
   expect(model.items.at(-1)).toEqual({ _tag: "Block", index: 0 })
   expect(model.busy).toBe(false)

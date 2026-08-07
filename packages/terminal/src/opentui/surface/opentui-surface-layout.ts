@@ -142,10 +142,16 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
       ? ""
       : ` ${compactWorkspace(model.workspace)}${model.branch === undefined ? "" : ` (${model.branch})`} `
     const panelLoadingLabel = panelLoading(model)
-    const activityLabel = formatActivity(model.activity)
+    const activityLabel = formatActivity(
+      model.activity,
+      model.activity?._tag === "Retrying"
+        ? Math.max(0, Math.ceil((model.activity.nextAt - this.currentTimeMillis()) / 1000))
+        : model.retryCountdown,
+    )
     const statusChanged =
       previousModel === undefined ||
       previousModel.activity !== model.activity ||
+      previousModel.retryCountdown !== model.retryCountdown ||
       previousModel.busy !== model.busy ||
       panelLoading(previousModel) !== panelLoadingLabel
     if (statusChanged) {

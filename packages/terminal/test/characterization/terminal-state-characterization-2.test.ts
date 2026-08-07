@@ -48,7 +48,14 @@ test("does not append a generic failure after the durable error arrived", () => 
   const settled = update(model, {
     _tag: "ExecutionFailed",
     turnId: "turn",
-    failure: { tag: "TestFailure", message: "Execution failed", retry: "user", actor: "environment" },
+    failure: {
+      tag: "TestFailure",
+      message: "Execution failed",
+      category: "operation",
+      retryable: false,
+      retry: "none",
+      actor: "environment",
+    },
   })
 
   expect(settled.blocks).toEqual([failure])
@@ -573,4 +580,58 @@ test("navigates threads and deduplicates replay", () => {
   const replayed = update(model, { _tag: "EventReplayed", event })
   expect(replayed).toBe(model)
   expect(model).toMatchObject({ eventCursor: "42", seenEventIds: ["stable"] })
+})
+
+test("shows the retry status with a countdown until the retry turn starts", () => {
+  let model = update(initial("/work"), { _tag: "TurnStarted", turnId: "turn-a", prompt: "hi" })
+  const nextAt = 1_000_004_000
+  model = update(model, {
+    _tag: "TurnRetryScheduled",
+    turnId: "turn-a",
+    attempt: 1,
+    budget: 3,
+    message: "The provider rate-limited the request.",
+    nextAt,
+    retryCountdown: 4,
+  })
+  expect(model.activity).toEqual({
+    _tag: "Retrying",
+    attempt: 1,
+    budget: 3,
+    message: "The provider rate-limited the request.",
+    nextAt,
+  })
+  expect(model.retryCountdown).toBeGreaterThanOrEqual(3)
+  expect(model.retryCountdown).toBeLessThanOrEqual(4)
+  model = update(model, { _tag: "AnimationTicked" })
+  expect(model.retryCountdown).toBeLessThanOrEqual(4)
+  model = update(model, { _tag: "TurnStarted", turnId: "turn-b", prompt: "hi" })
+  expect(model.activity?._tag).not.toBe("Retrying")
+  expect(model.busy).toBe(true)
+})
+test("a terminal failure clears the retry status", () => {
+  let model = update(initial("/work"), { _tag: "TurnStarted", turnId: "turn-a", prompt: "hi" })
+  model = update(model, {
+    _tag: "TurnRetryScheduled",
+    turnId: "turn-a",
+    attempt: 1,
+    budget: 3,
+    message: "The provider rate-limited the request.",
+    nextAt: 1_000_004_000,
+    retryCountdown: 4,
+  })
+  model = update(model, {
+    _tag: "ExecutionFailed",
+    turnId: "turn-a",
+    failure: {
+      tag: "TurnFailed",
+      category: "rate-limit",
+      message: "The provider limited how often requests are accepted.",
+      retryable: false,
+      retry: "none",
+      actor: "environment",
+    },
+  })
+  expect(model.activity).toBeUndefined()
+  expect(model.busy).toBe(false)
 })

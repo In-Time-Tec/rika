@@ -195,6 +195,20 @@ const reduceOverlayImpl = (
         activity: settledActivity(model.activeTurnId, model.activity, taken.rest.length),
       }
     }
+    case "TurnRetryScheduled": {
+      if (model.activeTurnId !== message.turnId && model.activeTurnId !== undefined) return model
+      return {
+        ...model,
+        activity: {
+          _tag: "Retrying",
+          attempt: message.attempt,
+          budget: message.budget,
+          message: message.message,
+          nextAt: message.nextAt,
+        },
+        retryCountdown: message.retryCountdown,
+      }
+    }
     case "ExecutionFailed": {
       const turnId = message.turnId ?? model.activeTurnId
       const taken = takeSubmittedDraftFor(model.submittedDrafts, turnId === undefined ? {} : { turnId })
@@ -383,27 +397,17 @@ const errorTitle = (failure: { readonly tag: string }): string => {
   }
 }
 
-const errorRecovery = (failure: {
-  readonly retry: "user" | "automatic" | "never"
-  readonly actor: "user" | "environment" | "rika"
-}): string | undefined => {
-  if (failure.retry === "automatic") return "Rika will retry automatically."
-  if (failure.retry === "user") return "Press Enter to try again."
-  if (failure.actor === "environment") return "Fix the issue above, then resend."
-  if (failure.actor === "rika") return "This is a Rika defect. Restart Rika if it keeps happening."
-  return undefined
-}
-
 const errorBlock = (failure: {
   readonly tag: string
+  readonly category: string
   readonly message: string
-  readonly retry: "user" | "automatic" | "never"
-  readonly actor: "user" | "environment" | "rika"
+  readonly retryable: boolean
 }) => ({
   _tag: "Error" as const,
   title: errorTitle(failure),
   detail: failure.message,
-  recovery: errorRecovery(failure),
+  category: failure.category,
+  retryable: failure.retryable,
 })
 
 export const reduceOverlay: {

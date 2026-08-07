@@ -7,9 +7,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import { Clock, Effect, Semaphore } from "effect"
 
-export const missingExecutionMessage =
-  "The durable execution for this Turn is unavailable. Start a new Turn to retry the request."
-export const missingExecutionRecovery = "Start a new Turn to retry the request."
+export const missingExecutionMessage = "The durable execution for this Turn is unavailable."
 
 export interface Result {
   readonly active: ReadonlyArray<Turn.AgentExecutionTurn>
@@ -51,7 +49,8 @@ const failureUnit = (
         title: "Execution unavailable",
         detail,
         turnId: turn.id,
-        recovery: missingExecutionRecovery,
+        category: "execution-unavailable",
+        retryable: false,
       },
     },
   }

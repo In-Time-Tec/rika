@@ -132,6 +132,7 @@ const make = (
     localId,
     put,
     unit,
+    get: (key) => units.get(key),
   })
 
   const { putAuthorization, resolveAuthorization, settleAuthorizations } = makeAuthorizationProjection({
@@ -397,21 +398,10 @@ const make = (
         return
       }
       case "ModelRetryScheduled":
-        return notice(
-          node,
-          "retry",
-          "Retrying model request",
-          `${event.reason}; retrying after ${event.delayMillis} ms.`,
-          `${event.modelCallId}:${event.attempt}`,
-        )
       case "ModelFallbackScheduled":
-        return notice(
-          node,
-          "fallback",
-          "Trying another model",
-          `${event.fromProvider}/${event.fromModel} → ${event.toProvider}/${event.toModel}`,
-          `${event.modelCallId}:${event.attempt}`,
-        )
+        // Retry activity belongs to the single turn-retry status surface; per-attempt
+        // notices would make the transcript itself a retry mechanism.
+        return
       case "ModelCallFailed": {
         const key = `${node.rawRunId}\u0000${event.modelCallId}`
         const call = modelCalls.get(key)

@@ -79,14 +79,15 @@ it.effect("settles every stale nonterminal Turn whose durable execution is missi
         expect.objectContaining({
           executionOutcome: {
             status: "failed",
-            reason: "The durable execution for this Turn is unavailable. Start a new Turn to retry the request.",
+            reason: "The durable execution for this Turn is unavailable.",
           },
           content: {
             _tag: "Block",
             block: expect.objectContaining({
               _tag: "Error",
               title: "Execution unavailable",
-              recovery: "Start a new Turn to retry the request.",
+              category: "execution-unavailable",
+              retryable: false,
             }),
           },
         }),

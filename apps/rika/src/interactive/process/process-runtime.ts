@@ -211,8 +211,10 @@ export const makeProcessRuntime = (runtime: Runtime) => {
                     _tag: "ExecutionFailed",
                     failure: {
                       tag: "RecoveredTurnFailed",
+                      category: "operation",
                       message: failure.message,
-                      retry: "user",
+                      retryable: false,
+                      retry: "none",
                       actor: "environment",
                     },
                   })

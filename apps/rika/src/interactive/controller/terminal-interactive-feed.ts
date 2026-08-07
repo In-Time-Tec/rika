@@ -82,15 +82,27 @@ const project = (model: Model, snapshot: ThreadView.ThreadViewSnapshot): Model =
         const content = unit.content as { _tag?: string; block?: { _tag?: string } }
         return content._tag === "Block" && content.block?._tag === "Error"
       })
-      const errorBlock = (errorUnit?.content as { block?: { title?: string; detail?: string } } | undefined)?.block
+      const errorBlock = (
+        errorUnit?.content as
+          | { block?: { title?: string; detail?: string; category?: string; retryable?: boolean } }
+          | undefined
+      )?.block
       const message =
         errorBlock?.detail !== undefined && errorBlock.detail.length > 0
           ? errorBlock.detail
           : (errorBlock?.title ?? "Execution failed")
+      const retryable = errorBlock?.retryable ?? false
       next = updateModel(next, {
         _tag: "ExecutionFailed",
         turnId: settled.id,
-        failure: { tag: "TurnFailed", message, retry: "user", actor: "environment" },
+        failure: {
+          tag: "TurnFailed",
+          category: errorBlock?.category ?? "operation",
+          message,
+          retryable,
+          retry: retryable ? "automatic" : "none",
+          actor: "environment",
+        },
       })
     }
     if (settled?.status === "cancelled")

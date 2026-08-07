@@ -17,5 +17,8 @@ export const TurnLineage = Schema.Union([
     sourceThreadId: ThreadId,
     sourceTurnId: Schema.String,
   }),
+  Schema.TaggedStruct("Retried", {
+    sourceTurnId: Schema.String,
+  }),
 ])
 export type TurnLineage = typeof TurnLineage.Type

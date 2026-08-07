@@ -74,5 +74,15 @@ export const InteractiveEventSchema = Schema.Union([
     turns: Schema.Array(Schema.Struct({ prompt: Schema.String, units: Schema.Array(Schema.Unknown) })),
   }),
   Schema.Struct({ _tag: Schema.tag("ThreadPreviewFailed"), threadId: Schema.String, message: Schema.String }),
+  Schema.Struct({
+    _tag: Schema.tag("TurnRetryScheduled"),
+    threadId: Thread.ThreadId,
+    turnId: Turn.TurnId,
+    retryTurnId: Turn.TurnId,
+    attempt: Schema.Int,
+    budget: Schema.Int,
+    message: Schema.String,
+    nextAt: Schema.Finite,
+  }),
 ])
 export type InteractiveEvent = typeof InteractiveEventSchema.Type
