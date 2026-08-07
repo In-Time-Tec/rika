@@ -45,10 +45,11 @@ const boundTurnEntriesImpl = (
   detail: number,
 ): { readonly entries: ReadonlyArray<TranscriptPage.Entry>; readonly contiguousFrom: number } => {
   if (detail >= entries.length) return { entries, contiguousFrom: 0 }
+  const semantic = entries.filter(isSemanticTranscriptEntry).length
   const selection = selectTranscriptWindow({
     values: entries,
     unit: (entry) => entry.unit,
-    maximum: detail,
+    maximum: Math.max(0, detail - semantic),
     focus: "newest",
     retain: isSemanticTranscriptEntry,
   })

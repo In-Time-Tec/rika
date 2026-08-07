@@ -1,14 +1,14 @@
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionStatus from "@rika/product/execution-status"
-import { OperationError } from "../operation-error"
+import { operationError, OperationError } from "../operation-error"
 import type { InteractiveOperationFeed } from "./interactive-operation-feed"
 import * as ThreadResult from "@rika/product/thread-result"
 import * as TurnRepository from "@rika/product/turn-repository"
-import * as ThreadRepository from "@rika/product/thread-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
+import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
 import * as ExecutionAuthorityReconciliation from "../../execution/lifecycle/execution-authority-reconciliation"
-import { Cause, Clock, Effect, Option, PubSub } from "effect"
+import { Effect, PubSub } from "effect"
 import type { InteractiveEvent } from "./interactive-runtime-event"
 import type {
   InteractiveExecutionContext,
@@ -64,7 +64,6 @@ export const makeInteractiveSupervision = (
     dirtyTurnObservers,
     isTerminalStatus,
     setTurnStatus,
-    settleThread,
     notifyTurnChanged,
     observeTurn,
     serverOwner,
@@ -123,31 +122,22 @@ export const makeInteractiveSupervision = (
             }),
           ),
         )
-      const settleTurnFromBackend = (turn: Turn.AgentExecutionTurn, status: ExecutionStatus.Status) =>
-        Effect.gen(function* () {
-          const current = yield* turns.get(turn.id)
-          if (current === undefined || isTerminalStatus(current.status)) return
-          yield* setTurnStatus(turn.id, status, yield* Clock.currentTimeMillis)
-          const threads = yield* ThreadRepository.Service
-          const thread = yield* threads.get(turn.threadId)
-          if (thread !== undefined) yield* settleThread(thread, publishObserved)
-        }).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("turn.settle_from_backend.failed").pipe(
-              Effect.annotateLogs("rika.failure.kind", Cause.pretty(cause)),
-              Effect.annotateLogs("rika.turn.id", String(turn.id)),
-            ),
-          ),
-        )
       const recover = Effect.gen(function* () {
         if (serverOwner) yield* rootTurnOwner.recoverExecutionAdmissions
         const transcripts = yield* TranscriptRepository.Service
+        const summaryRepository = yield* ThreadSummaryRepository.Service
+        const setSettledStatus = (id: Turn.TurnId, status: ExecutionStatus.Status, now: number) =>
+          setTurnStatus(id, status, now).pipe(
+            Effect.provideService(TurnRepository.Service, turns),
+            Effect.provideService(ThreadSummaryRepository.Service, summaryRepository),
+            Effect.map((turn) => turn as Turn.AgentExecutionTurn),
+          )
         const reconciled = yield* ExecutionAuthorityReconciliation.make({
           turns,
           transcripts,
           backend: acquiredBackend,
-          setTurnStatus,
-        })
+          setTurnStatus: setSettledStatus,
+        }).pipe(Effect.mapError((error) => operationError(String(error), error)))
         for (const turn of reconciled.active) yield* launch(turn)
       })
       const scanDirty = Effect.gen(function* () {

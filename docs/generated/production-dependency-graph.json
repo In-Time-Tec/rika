@@ -1645,6 +1645,7 @@
         "./configuration-operation",
         "./context-file-system",
         "./context-resolution-service",
+        "./execution-authority-reconciliation",
         "./execution-gateway",
         "./execution-projection",
         "./execution-request",
@@ -3331,6 +3332,15 @@
       "publicExports": ["./resolved-context"]
     },
     {
+      "id": "packages/product/src/execution/lifecycle/execution-authority-reconciliation.ts",
+      "path": "packages/product/src/execution/lifecycle/execution-authority-reconciliation.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./execution-authority-reconciliation"]
+    },
+    {
       "id": "packages/product/src/execution/lifecycle/execution-projection-reconciliation.ts",
       "path": "packages/product/src/execution/lifecycle/execution-projection-reconciliation.ts",
       "workspace": "@rika/product",
@@ -4386,6 +4396,15 @@
     {
       "id": "packages/product/src/transcript/transcript-repair.ts",
       "path": "packages/product/src/transcript/transcript-repair.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/product/src/transcript/transcript-window-selection.ts",
+      "path": "packages/product/src/transcript/transcript-window-selection.ts",
       "workspace": "@rika/product",
       "package": "@rika/product",
       "kind": "source",
@@ -16309,6 +16328,54 @@
       "production": true
     },
     {
+      "from": "packages/product/src/execution/lifecycle/execution-authority-reconciliation.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/execution/lifecycle/execution-authority-reconciliation.ts",
+      "to": "packages/product/src/thread/model/turn-record.ts",
+      "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/execution/lifecycle/execution-authority-reconciliation.ts",
+      "to": "packages/product/src/thread/repository/transcript-repository.ts",
+      "specifier": "@rika/product/transcript-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/execution/lifecycle/execution-authority-reconciliation.ts",
+      "to": "packages/product/src/thread/repository/turn-repository.ts",
+      "specifier": "@rika/product/turn-repository",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/execution/lifecycle/execution-authority-reconciliation.ts",
+      "to": "packages/transcript/src/ordering/transcript-unit-order.ts",
+      "specifier": "@rika/transcript/transcript-unit-order",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/execution/lifecycle/execution-authority-reconciliation.ts",
+      "to": "packages/transcript/src/schema/transcript-unit.ts",
+      "specifier": "@rika/transcript/transcript-unit",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/product/src/execution/service/execution-route-resolution.ts",
       "to": "external:crypto",
       "specifier": "crypto",
@@ -19638,6 +19705,14 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-session-supervision.ts",
+      "to": "packages/product/src/execution/lifecycle/execution-authority-reconciliation.ts",
+      "specifier": "../../execution/lifecycle/execution-authority-reconciliation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-supervision.ts",
       "to": "packages/product/src/operation/interactive/interactive-operation-feed.ts",
       "specifier": "./interactive-operation-feed",
       "kind": "import",
@@ -19702,8 +19777,8 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-session-supervision.ts",
-      "to": "packages/product/src/thread/repository/thread-repository.ts",
-      "specifier": "@rika/product/thread-repository",
+      "to": "packages/product/src/thread/repository/thread-summary-repository.ts",
+      "specifier": "@rika/product/thread-summary-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -19929,6 +20004,14 @@
       "to": "packages/product/src/thread/model/turn-record.ts",
       "specifier": "@rika/product/turn-record",
       "kind": "dynamic-import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-thread-view-feed.ts",
+      "to": "packages/product/src/transcript/transcript-window-selection.ts",
+      "specifier": "../../transcript/transcript-window-selection",
+      "kind": "import",
       "relationship": "runtime",
       "production": true
     },
@@ -21686,8 +21769,24 @@
     },
     {
       "from": "packages/product/src/transcript/transcript-bounds.ts",
+      "to": "packages/product/src/transcript/transcript-window-selection.ts",
+      "specifier": "./transcript-window-selection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/transcript/transcript-bounds.ts",
       "to": "packages/transcript/src/ordering/transcript-unit-order.ts",
       "specifier": "@rika/transcript/transcript-unit-order",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/transcript/transcript-window-selection.ts",
+      "to": "packages/transcript/src/schema/transcript-unit.ts",
+      "specifier": "@rika/transcript/transcript-unit",
       "kind": "import",
       "relationship": "runtime",
       "production": true

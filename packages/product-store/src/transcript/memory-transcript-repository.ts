@@ -17,7 +17,11 @@ const cursorFor = (projection: Projection, unit: Unit): PageCursor => ({
   turnId: projection.turn.id,
   orderKey: TranscriptOrdering.encodeUnitOrder(unit.order),
 })
-const compareText = (left: string, right: string) => (left < right ? -1 : left > right ? 1 : 0)
+const compareText = (left: string, right: string) => {
+  if (left < right) return -1
+  if (left > right) return 1
+  return 0
+}
 const compareCursor = (left: PageCursor, right: PageCursor) =>
   left.createdAt - right.createdAt ||
   compareText(String(left.turnId), String(right.turnId)) ||
@@ -183,12 +187,10 @@ export const makeMemory = Effect.fn("TranscriptRepository.makeMemory")(function*
       }
       const afterStart =
         options.after === undefined ? undefined : boundaryIndex((cursor) => compareCursor(cursor, options.after!) > 0)
-      const end =
-        afterStart === undefined
-          ? options.before === undefined
-            ? ordered.length
-            : boundaryIndex((cursor) => compareCursor(cursor, options.before!) >= 0)
-          : Math.min(ordered.length, afterStart + limit)
+      let end: number
+      if (afterStart !== undefined) end = Math.min(ordered.length, afterStart + limit)
+      else if (options.before === undefined) end = ordered.length
+      else end = boundaryIndex((cursor) => compareCursor(cursor, options.before!) >= 0)
       const start = afterStart ?? Math.max(0, end - limit)
       const selected = ordered.slice(start, end)
       const materialized = selected.map(({ projection, unit }) => ({

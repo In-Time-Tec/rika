@@ -42,12 +42,12 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
         loop.loadingOlder = true
         run(
           session.loadOlder(threadId, before).pipe(
-              Effect.ensuring(
-                Effect.sync(() => {
-                  loop.loadingOlder = false
-                }),
-              ),
+            Effect.ensuring(
+              Effect.sync(() => {
+                loop.loadingOlder = false
+              }),
             ),
+          ),
         )
       }
       if (offset > 0 && !loop.loadingOlder) requestNewerPage()

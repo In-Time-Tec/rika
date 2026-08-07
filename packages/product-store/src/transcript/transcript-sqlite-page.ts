@@ -12,7 +12,11 @@ const UnitJson = Schema.fromJsonString(TranscriptUnit.Unit)
 const StateJson = Schema.fromJsonString(ExecutionProjection.ProjectionState)
 const error = (cause: unknown) =>
   Schema.is(RepositoryError)(cause) ? cause : RepositoryError.make({ message: String(cause) })
-const compareText = (left: string, right: string) => (left < right ? -1 : left > right ? 1 : 0)
+const compareText = (left: string, right: string) => {
+  if (left < right) return -1
+  if (left > right) return 1
+  return 0
+}
 const compare = (left: PageCursor, right: PageCursor) =>
   left.createdAt - right.createdAt ||
   compareText(String(left.turnId), String(right.turnId)) ||
@@ -86,12 +90,10 @@ export const makeTranscriptSqlitePage = (sql: SqlClient): Pick<Interface, "page"
       }
       const afterStart =
         options.after === undefined ? undefined : boundaryIndex((cursor) => compare(cursor, options.after!) > 0)
-      const end =
-        afterStart === undefined
-          ? options.before === undefined
-            ? ordered.length
-            : boundaryIndex((cursor) => compare(cursor, options.before!) >= 0)
-          : Math.min(ordered.length, afterStart + limit)
+      let end: number
+      if (afterStart !== undefined) end = Math.min(ordered.length, afterStart + limit)
+      else if (options.before === undefined) end = ordered.length
+      else end = boundaryIndex((cursor) => compare(cursor, options.before!) >= 0)
       const start = afterStart ?? Math.max(0, end - limit)
       const selected = ordered.slice(start, end)
       const entries: ReadonlyArray<Entry> = selected.map(({ turn, unit, revision, projectionState }) => ({

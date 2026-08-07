@@ -57,7 +57,6 @@ it("inserts an older partial Turn page between retained opening and final entrie
   expect(state.model.entries.map((value) => value.text)).toEqual(["opening", "middle 2", "middle 3", "final"])
 })
 
-
 it("moves contiguously from five older units into a 125-unit newest Turn", () => {
   const makePage = (id: string, createdAt: number, count: number) => {
     const currentTurn = entries(id, createdAt)[0]!.turn

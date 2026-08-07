@@ -1541,6 +1541,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/product-store/test/product-operation/operation-execution-reconciliation.test.ts",
+      "path": "packages/product-store/test/product-operation/operation-execution-reconciliation.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/product-store/test/product-operation/operation-mentions-routing.test.ts",
       "path": "packages/product-store/test/product-operation/operation-mentions-routing.test.ts",
       "workspace": "@rika/product-store",
@@ -1723,6 +1733,16 @@
     {
       "id": "packages/product-store/test/transcript-reparent.test.ts",
       "path": "packages/product-store/test/transcript-reparent.test.ts",
+      "workspace": "@rika/product-store",
+      "package": "@rika/product-store",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product-store/test/transcript-repository-pagination.test.ts",
+      "path": "packages/product-store/test/transcript-repository-pagination.test.ts",
       "workspace": "@rika/product-store",
       "package": "@rika/product-store",
       "kind": "source",
@@ -6175,6 +6195,30 @@
       "production": false
     },
     {
+      "from": "packages/product-store/test/product-operation/operation-execution-reconciliation.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-execution-reconciliation.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/product-operation/operation-execution-reconciliation.test.ts",
+      "to": "packages/product/src/execution/contract/execution-gateway.ts",
+      "specifier": "@rika/product/execution-gateway",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/product-store/test/product-operation/operation-mentions-routing.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -6746,6 +6790,38 @@
       "from": "packages/product-store/test/transcript-reparent.test.ts",
       "to": "packages/product/src/execution/contract/execution-projection.ts",
       "specifier": "@rika/product/execution-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/transcript-repository-pagination.test.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/transcript-repository-pagination.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/transcript-repository-pagination.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product-store/test/transcript-repository-pagination.test.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -7722,6 +7798,14 @@
       "from": "packages/product/test/transcript-window.test.ts",
       "to": "packages/product/src/execution/contract/execution-projection.ts",
       "specifier": "@rika/product/execution-projection",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/transcript-window.test.ts",
+      "to": "packages/product/src/execution/contract/execution-route-snapshot.ts",
+      "specifier": "@rika/product/execution-route-snapshot",
       "kind": "import",
       "relationship": "test",
       "production": false

@@ -72,7 +72,7 @@ export const selectTranscriptWindow = <A>(input: {
   for (const [index, value] of input.values.entries()) {
     if (input.retain?.(value) !== true) continue
     const lineage = missingLineage(index, units, parents, selected)
-    if (lineage !== undefined) for (const value of lineage) selected.add(value)
+    if (lineage !== undefined) for (const ancestor of lineage) selected.add(ancestor)
   }
   if (maximum > 0) {
     let budget = maximum
@@ -86,7 +86,7 @@ export const selectTranscriptWindow = <A>(input: {
       considered.add(index)
       const lineage = missingLineage(index, units, parents, selected)
       if (lineage === undefined || lineage.length > budget) continue
-      for (const value of lineage) selected.add(value)
+      for (const ancestor of lineage) selected.add(ancestor)
       budget -= lineage.length
     }
   }
@@ -100,24 +100,22 @@ export const selectTranscriptWindow = <A>(input: {
     contiguousLast = -1
     while (contiguousLast + 1 < units.length && selected.has(contiguousLast + 1)) contiguousLast += 1
   }
+  let contiguousStart: A | undefined
+  if (input.focus === "newest") {
+    contiguousStart = contiguousFirst < units.length ? input.values[contiguousFirst] : undefined
+  } else {
+    contiguousStart = selected.has(0) ? input.values[0] : undefined
+  }
+  let contiguousEnd: A | undefined
+  if (input.focus === "oldest") {
+    contiguousEnd = contiguousLast >= 0 ? input.values[contiguousLast] : undefined
+  } else {
+    contiguousEnd = selected.has(units.length - 1) ? input.values.at(-1) : undefined
+  }
   return {
     values,
     truncated: selected.size < units.length,
-    contiguousStart:
-      input.focus === "newest"
-        ? contiguousFirst < units.length
-          ? input.values[contiguousFirst]
-          : undefined
-        : selected.has(0)
-          ? input.values[0]
-          : undefined,
-    contiguousEnd:
-      input.focus === "oldest"
-        ? contiguousLast >= 0
-          ? input.values[contiguousLast]
-          : undefined
-        : selected.has(units.length - 1)
-          ? input.values.at(-1)
-          : undefined,
+    contiguousStart,
+    contiguousEnd,
   }
 }

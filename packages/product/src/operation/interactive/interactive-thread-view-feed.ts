@@ -47,7 +47,7 @@ const boundedTurns = (
     const key = String(value.entry.turn.id)
     const current = grouped.get(key)
     if (current === undefined) grouped.set(key, { ...value.entry, units: [value.unit] })
-    else current.units.push(value.unit)
+    else grouped.set(key, { ...current, units: [...current.units, value.unit] })
   }
   return [...grouped.values()]
 }
@@ -229,7 +229,7 @@ const snapshotFromSelection = (
     })
   }
   const groupedTurns = [...grouped.values()]
-  const turns = boundedTurns(groupedTurns, "oldest")
+  const turns = boundedTurns(groupedTurns, "newest")
   return {
     thread: event.thread,
     revision,

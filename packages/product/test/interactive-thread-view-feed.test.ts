@@ -594,9 +594,9 @@ describe("interactive ThreadView feed", () => {
       updatedAt: 0,
     }
     const olderUnits = Array.from({ length: 5 }, (_, index) => olderUnit(`older-${index}`, index))
-    const entryFor = (unit: ReturnType<typeof makeUnit>, unitTurn: Turn.Turn) => ({
+    const entryFor = (entry: ReturnType<typeof makeUnit>, unitTurn: Turn.Turn) => ({
       turn: unitTurn,
-      unit,
+      unit: entry,
       projectionRevision: 1,
       projectionModelPhase: -1,
       projectionState: state("completed"),
@@ -606,7 +606,7 @@ describe("interactive ThreadView feed", () => {
       selectionEpoch: 1,
       activitySequence: 0,
       thread,
-      entries: newestUnits.map((unit) => entryFor(unit, turn)),
+      entries: newestUnits.map((entry) => entryFor(entry, turn)),
       hasOlder: true,
       hasNewer: false,
       usage: { usage: ExecutionProjection.emptyUsageState() },
@@ -617,7 +617,7 @@ describe("interactive ThreadView feed", () => {
       _tag: "TranscriptPagePrepended",
       selectionEpoch: 1,
       threadId,
-      entries: olderUnits.map((unit) => entryFor(unit, olderTurn)),
+      entries: olderUnits.map((entry) => entryFor(entry, olderTurn)),
       hasOlder: false,
       oldestCursor: { createdAt: 0, turnId: "older-turn", orderKey: "older-0" },
     })
@@ -627,15 +627,15 @@ describe("interactive ThreadView feed", () => {
     })
     const afterPrepend = feed.current()!
     expect(afterPrepend.turns.map((entry) => entry.turn.id)).toContain(turn.id)
-    const prependKeys = afterPrepend.turns.flatMap((entry) => entry.units.map((unit) => unit.key))
+    const prependKeys = afterPrepend.turns.flatMap((entry) => entry.units.map((value) => value.key))
     expect(prependKeys).toHaveLength(120)
     for (const key of ["task-card", "librarian-card", "review-card", "review-retry-card"])
       expect(prependKeys).toContain(key)
     const prependParents = new Set(
       afterPrepend.turns
         .flatMap((entry) => entry.units)
-        .filter((unit) => unit.content._tag === "Block")
-        .flatMap((unit) => (unit.content.block._tag === "SubagentCard" ? [unit.content.block.id] : [])),
+        .filter((value) => value.content._tag === "Block")
+        .flatMap((value) => (value.content.block._tag === "SubagentCard" ? [value.content.block.id] : [])),
     )
     for (const entry of afterPrepend.turns.flatMap((value) => value.units))
       if (entry.parentId !== undefined) expect(prependParents.has(entry.parentId)).toBe(true)
@@ -644,7 +644,7 @@ describe("interactive ThreadView feed", () => {
       _tag: "TranscriptPageAppended",
       selectionEpoch: 1,
       threadId,
-      entries: newestUnits.slice(115).map((unit) => entryFor(unit, turn)),
+      entries: newestUnits.slice(115).map((entry) => entryFor(entry, turn)),
       hasNewer: false,
       requestedAfter: afterPrepend.source.newestCursor!,
       newestCursor: { createdAt: 1, turnId: String(turnId), orderKey: "newest-124" },
@@ -654,15 +654,15 @@ describe("interactive ThreadView feed", () => {
       snapshot: { hasOlder: true, hasNewer: false },
     })
     const afterAppend = feed.current()!
-    const appendKeys = afterAppend.turns.flatMap((entry) => entry.units.map((unit) => unit.key))
+    const appendKeys = afterAppend.turns.flatMap((entry) => entry.units.map((value) => value.key))
     expect(appendKeys).toHaveLength(120)
     for (const key of ["task-card", "librarian-card", "review-card", "review-retry-card"])
       expect(appendKeys).toContain(key)
     const appendParents = new Set(
       afterAppend.turns
         .flatMap((entry) => entry.units)
-        .filter((unit) => unit.content._tag === "Block")
-        .flatMap((unit) => (unit.content.block._tag === "SubagentCard" ? [unit.content.block.id] : [])),
+        .filter((value) => value.content._tag === "Block")
+        .flatMap((value) => (value.content.block._tag === "SubagentCard" ? [value.content.block.id] : [])),
     )
     for (const entry of afterAppend.turns.flatMap((value) => value.units))
       if (entry.parentId !== undefined) expect(appendParents.has(entry.parentId)).toBe(true)

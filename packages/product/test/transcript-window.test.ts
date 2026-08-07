@@ -189,17 +189,14 @@ it.effect("keeps every SubagentCard whose children are retained when a 125-unit 
       expect(keys).toContain(cardKey)
     expect(keys).toContain("prompt")
     expect(window.entries.length).toBeLessThanOrEqual(120)
-    const parentIds = new Set(
-      units.filter((value) => value.parentId !== undefined).map((value) => value.parentId),
-    )
+    const parentIds = new Set(units.filter((value) => value.parentId !== undefined).map((value) => value.parentId))
     const retainedParents = new Set(
       window.entries
         .filter((entry) => entry.unit.content._tag === "Block")
         .flatMap((entry) => (entry.unit.content.block._tag === "SubagentCard" ? [entry.unit.content.block.id] : [])),
     )
     for (const entry of window.entries)
-      if (entry.unit.parentId !== undefined)
-        expect(retainedParents.has(entry.unit.parentId)).toBe(true)
+      if (entry.unit.parentId !== undefined) expect(retainedParents.has(entry.unit.parentId)).toBe(true)
     expect(Array.from(parentIds).every((id) => retainedParents.has(id))).toBe(true)
   }),
 )

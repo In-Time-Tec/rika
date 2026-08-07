@@ -27,23 +27,25 @@ const staleTurns = staleStatuses.map((status, index): Turn.AgentExecutionTurn =>
 
 const makeBackend = (status: { readonly _tag: "unavailable" } | { readonly _tag: "running" }) =>
   Effect.gen(function* () {
-  const inspectCount = yield* Ref.make(0)
-  const cancelCount = yield* Ref.make(0)
-  const backend = ExecutionGateway.Service.of({
-    startTurn: (input) =>
-      Effect.succeed({ runId: `started-${input.turnId}`, turnId: input.turnId, threadId: input.threadId }),
-    cancelTurn: () => Ref.update(cancelCount, (count) => count + 1),
-    steerTurn: () => Effect.void,
-    approveTurn: () => Effect.void,
-    denyTurn: () => Effect.void,
-    watchTurn: () => Stream.empty,
-    inspectTurn: () =>
-      Ref.updateAndGet(inspectCount, (count) => count + 1).pipe(
-        Effect.as(status._tag === "unavailable" ? ({ status: "unavailable" } as const) : ({ status: "running" } as const)),
-      ),
+    const inspectCount = yield* Ref.make(0)
+    const cancelCount = yield* Ref.make(0)
+    const backend = ExecutionGateway.Service.of({
+      startTurn: (input) =>
+        Effect.succeed({ runId: `started-${input.turnId}`, turnId: input.turnId, threadId: input.threadId }),
+      cancelTurn: () => Ref.update(cancelCount, (count) => count + 1),
+      steerTurn: () => Effect.void,
+      approveTurn: () => Effect.void,
+      denyTurn: () => Effect.void,
+      watchTurn: () => Stream.empty,
+      inspectTurn: () =>
+        Ref.updateAndGet(inspectCount, (count) => count + 1).pipe(
+          Effect.as(
+            status._tag === "unavailable" ? ({ status: "unavailable" } as const) : ({ status: "running" } as const),
+          ),
+        ),
+    })
+    return { inspectCount, cancelCount, backend }
   })
-  return { inspectCount, cancelCount, backend }
-})
 
 it.effect("settles every stale nonterminal Turn whose durable execution is missing and stays idempotent", () =>
   Effect.gen(function* () {
@@ -112,7 +114,7 @@ it.effect("leaves live durable executions active and never cancels them during r
       { ...live, status: "running", executionLink: { runId: "live-run", turnId: live.id, threadId: live.threadId } },
     ])
     const transcripts = yield* TranscriptRepository.makeMemory({ turns })
-    const { inspectCount, cancelCount, backend } = yield* makeBackend({ _tag: "running" })
+    const { cancelCount, backend } = yield* makeBackend({ _tag: "running" })
     const result = yield* ExecutionAuthorityReconciliation.make({
       turns,
       transcripts,

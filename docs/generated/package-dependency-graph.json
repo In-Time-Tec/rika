@@ -105,6 +105,7 @@
         "./configuration-operation",
         "./context-file-system",
         "./context-resolution-service",
+        "./execution-authority-reconciliation",
         "./execution-gateway",
         "./execution-projection",
         "./execution-request",

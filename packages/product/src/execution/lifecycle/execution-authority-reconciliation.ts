@@ -67,10 +67,10 @@ export const make = Effect.fn("ExecutionAuthorityReconciliation.make")(function*
     const projection = yield* input.transcripts.get(turn.id)
     if (projection?.units.some((unit) => unit.key === failureKey(turn.id)) !== true) {
       const revision = (projection?.units.reduce((maximum, unit) => Math.max(maximum, unit.revision), -1) ?? -1) + 1
-      yield* input.transcripts.replaceUnits(
-        { ...turn, status: "failed", updatedAt: now },
-        [...(projection?.units ?? []), failureUnit(turn, revision, kind)],
-      )
+      yield* input.transcripts.replaceUnits({ ...turn, status: "failed", updatedAt: now }, [
+        ...(projection?.units ?? []),
+        failureUnit(turn, revision, kind),
+      ])
     }
     yield* input.setTurnStatus(turn.id, "failed", now)
     yield* Effect.logWarning("execution.authority.missing").pipe(
