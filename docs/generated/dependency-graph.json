@@ -6141,6 +6141,15 @@
       "publicExports": []
     },
     {
+      "id": "packages/terminal/src/opentui/surface/opentui-hover-controller.ts",
+      "path": "packages/terminal/src/opentui/surface/opentui-hover-controller.ts",
+      "workspace": "@rika/terminal",
+      "package": "@rika/terminal",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/terminal/src/opentui/surface/opentui-input.ts",
       "path": "packages/terminal/src/opentui/surface/opentui-input.ts",
       "workspace": "@rika/terminal",
@@ -35215,6 +35224,14 @@
       "production": true
     },
     {
+      "from": "packages/terminal/src/opentui/surface/opentui-hover-controller.ts",
+      "to": "external:@opentui/core",
+      "specifier": "@opentui/core",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/terminal/src/opentui/surface/opentui-input.ts",
       "to": "external:@opentui/core",
       "specifier": "@opentui/core",
@@ -36160,6 +36177,14 @@
     },
     {
       "from": "packages/terminal/src/opentui/surface/opentui-surface-construction.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-hover-controller.ts",
+      "specifier": "./opentui-hover-controller",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-surface-construction.ts",
       "to": "packages/terminal/src/opentui/surface/opentui-lifecycle-cleanup.ts",
       "specifier": "./opentui-lifecycle-cleanup",
       "kind": "import",
@@ -36314,6 +36339,14 @@
       "from": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
       "to": "packages/terminal/src/opentui/rendering/opentui-render-transcript-revision.ts",
       "specifier": "../rendering/opentui-render-transcript-revision",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/terminal/src/opentui/surface/opentui-surface-state.ts",
+      "to": "packages/terminal/src/opentui/surface/opentui-hover-controller.ts",
+      "specifier": "./opentui-hover-controller",
       "kind": "import",
       "relationship": "runtime",
       "production": true

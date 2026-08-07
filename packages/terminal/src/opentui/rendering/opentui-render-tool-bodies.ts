@@ -24,7 +24,19 @@ import {
 } from "./opentui-render-tool-detail"
 import { toolDetails } from "../../presentation/transcript/transcript-tool-detail"
 import { isToolOutputDisplayed } from "../../presentation/transcript/transcript-agent-response"
+import { isExpandableBody, toolBody } from "../../presentation/transcript/transcript-tool-body"
 import type { UnitLineRange } from "./opentui-render-transcript-window"
+
+const numberedLine = /^(\d+):\s?(.*)$/
+const readWindowPatch = (block: Extract<TranscriptBlock, { _tag: "ToolCall" }>): string | undefined => {
+  const body = toolBody(block)
+  if (body._tag !== "FileWindow") return undefined
+  const lines = body.lines.split("\n")
+  const parsed = lines.map((line) => numberedLine.exec(line))
+  if (parsed.some((match) => match === null)) return undefined
+  const content = parsed.map((match) => ` ${match![2]}`).join("\n")
+  return `--- a/${body.path}\n+++ b/${body.path}\n@@ -${body.start},${lines.length} +${body.start},${lines.length} @@\n${content}`
+}
 
 export interface ToolBodyContext {
   readonly model: Model
@@ -89,12 +101,19 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
             : undefined
         if (output !== undefined) append(dim(fg(colors.text)(` ${output}`)))
         const childOutput = isToolOutputDisplayed(unit.block) ? unit.block.output : undefined
-        const childExpandable = childOutput !== undefined && childOutput.length > 0
+        const childExpandable = isExpandableBody(toolBody(unit.block))
         if (childExpandable) append(marker(rowExpanded(childId)))
         const headerEnd = context.line()
         if (childExpandable && rowExpanded(childId)) {
           append(fg(colors.text)("\n"))
-          append(dim(fg(colors.text)(wrapBodyText(childOutput, transcriptWrapWidth(model.width), "    "))))
+          const window = readWindowPatch(unit.block)
+          const styled =
+            window === undefined
+              ? undefined
+              : renderPierreDiff(window, { width: Math.max(8, transcriptWrapWidth(model.width) - 4), indent: 4 })
+          if (styled === undefined)
+            append(dim(fg(colors.text)(wrapBodyText(childOutput ?? "", transcriptWrapWidth(model.width), "    "))))
+          else appendAll(styled)
         }
         context.nestedRanges.push({
           start,

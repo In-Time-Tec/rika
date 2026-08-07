@@ -1,4 +1,3 @@
-import { Renderable } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { expect, test } from "vitest"
 import { Effect } from "effect"
@@ -23,18 +22,12 @@ test("keeps a large expanded subagent tree in one mounted row window", () =>
         const firstBefore = Number(/cmd-(\d+)/.exec(setup.captureCharFrame())?.[1])
         setup.mockInput.pressKey("\x1b[5~")
         yield* openTui(() => setup.flush())
-        const state = surface as unknown as {
-          readonly transcriptWindowEnd: number
-          readonly transcriptRowWindow: { readonly end: number }
-          readonly transcriptRowTotal: number
-          readonly transcriptChildren: ReadonlyArray<Renderable>
-        }
-        expect(state.transcriptWindowEnd).toBe(model.items.length)
-        expect(state.transcriptRowTotal).toBeGreaterThan(240)
-        expect(state.transcriptRowTotal).toBeLessThan(maxMountedTranscriptRows)
-        expect(state.transcriptRowWindow.end).toBe(0)
+        const state = surface.transcriptDiagnostics()
+        expect(state.windowEnd).toBe(model.items.length)
+        expect(state.rowTotal).toBeGreaterThan(240)
+        expect(state.rowTotal).toBeLessThan(maxMountedTranscriptRows)
         expect(Number(/cmd-(\d+)/.exec(setup.captureCharFrame())?.[1])).toBe(firstBefore)
-        expect(state.transcriptChildren.length).toBeLessThanOrEqual(maxMountedTranscriptRows * 2)
+        expect(state.rows.length).toBeLessThanOrEqual(maxMountedTranscriptRows * 2)
       } finally {
         surface.destroy()
         setup.renderer.destroy()

@@ -13,10 +13,11 @@ import type { Fiber } from "effect"
 import type { Key } from "../../presentation/terminal/terminal-keymap"
 import type { Mode, Model } from "../../state/model/terminal-state"
 import { initialViewport, type TranscriptViewport } from "../../presentation/transcript/transcript-viewport-state"
-import type { RowWindowState } from "../../presentation/transcript/transcript-row-window-state"
+import type { WelcomeController } from "./opentui-welcome-controller"
+import type { LoaderController } from "./opentui-loader-controller"
+import type { HoverController } from "./opentui-hover-controller"
 import type { PathTarget } from "../../presentation/transcript/transcript-tool-detail-types"
 import type {
-  ChangedFileRow,
   PendingTranscriptPosition,
   TranscriptRenderableRecord,
   TranscriptRenderInput,
@@ -89,18 +90,10 @@ export class SurfaceState {
   public statusLabel!: TextRenderable
   public toastBox!: BoxRenderable
   public toast!: TextRenderable
-  protected welcomeChild: TextRenderable | undefined
-  protected welcomeKey = ""
-  protected welcomePhase = 0
-  protected welcomeTimer: TimerHandle | undefined
-  protected toastTimer: Fiber.Fiber<void> | undefined
-  protected usageLabelWidth = 0
-  protected usageLabelHovered = false
-  protected modeLabelHovered = false
-  protected modeSegmentStart = 0
-  protected usagePointerX: number | undefined
-  protected usageLayoutFrame: (() => void) | undefined
   protected lastPaste: { readonly text: string; readonly at: number } | undefined
+  protected welcomeController!: WelcomeController
+  protected loaderController!: LoaderController
+  protected hoverController!: HoverController
   protected model: Model | undefined
   protected transcriptChildren: Array<TextRenderable> = []
   protected transcriptRecords = new Map<string, TranscriptRenderableRecord>()
@@ -124,29 +117,16 @@ export class SurfaceState {
   protected composerDrag: { readonly startY: number; readonly startHeight: number } | undefined
   protected sidebarDrag: { readonly startX: number; readonly startWidth: number } | undefined
   protected pointerShape = "default"
-  protected changedRows: ReadonlyArray<ChangedFileRow> = []
   protected changedFilesHoveredRow: number | undefined
-  protected sidebarRowsSource: unknown
-  protected sidebarRowsView: "changed" | "workspace" | undefined
-  protected sidebarRowsWidth = 0
-  protected sidebarWindowStart = -1
-  protected sidebarWindowEnd = -1
-  protected sidebarWindowHoveredRow: number | undefined
-  protected sidebarLayoutFrame: (() => void) | undefined
   protected scrollProgrammatic = false
   protected wheelTimer: TimerHandle | undefined
   protected transcriptViewport: TranscriptViewport
-  protected loaderPhase = 0
-  protected loaderTimer: TimerHandle | undefined
-  protected publishedWorkingFrame: string | undefined
-  protected workingFramePublished = false
   protected clock!: OpenTuiClock
   protected currentTimeMillis!: () => number
   protected toolSpinner!: { step(): void; toBraille(): string }
   protected transcriptViewportRows = 0
   protected renderedTranscriptScrollTop = 0
   protected transcriptWindowEnd = 0
-  protected transcriptRowWindow!: RowWindowState
   protected transcriptRowTotal = 0
   protected transcriptWindowThread: string | undefined
   protected transcriptPositionFrame: (() => void) | undefined
@@ -158,8 +138,6 @@ export class SurfaceState {
   protected scrollbarSyncing = false
   protected scrollGeneration = 0
   protected destroyed = false
-  protected focusedEditor: (EditBufferRenderable & { sync(text: string, cursor: number): void }) | undefined
-  protected cursorRestoreFrame: (() => void) | undefined
   protected junkBuffer: Array<Key> = []
   protected junkTimer: Fiber.Fiber<void> | undefined
   protected renderer!: CliRenderer
@@ -170,6 +148,21 @@ export class SurfaceState {
   }
   public mountedTranscriptRowCount(): number {
     return this.transcriptChildren.length
+  }
+  public transcriptDiagnostics(): {
+    readonly rows: ReadonlyArray<TextRenderable>
+    readonly keys: ReadonlyArray<string>
+    readonly windowEnd: number
+    readonly rowTotal: number
+    readonly following: boolean
+  } {
+    return {
+      rows: [...this.transcriptChildren],
+      keys: [...this.transcriptRecords.keys()],
+      windowEnd: this.transcriptWindowEnd,
+      rowTotal: this.transcriptRowTotal,
+      following: this.transcriptViewport.mode._tag === "Following",
+    }
   }
   constructor() {
     this.transcriptViewport = initialViewport

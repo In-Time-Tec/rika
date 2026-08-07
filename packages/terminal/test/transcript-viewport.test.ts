@@ -18,7 +18,7 @@ import {
   type WheelPhase,
 } from "../src/presentation/transcript/transcript-viewport-state"
 import { reduceViewport } from "../src/presentation/transcript/transcript-viewport-reducer"
-import { type ViewportEvent } from "../src/presentation/transcript/transcript-viewport-events"
+import { type ViewportEvent } from "../src/presentation/transcript/transcript-viewport-protocol"
 
 const anchor = (unitId: string, offset: number): ViewportAnchor => ({ unitId, offset })
 const metrics = (scrollTop: number, scrollHeight: number, viewportHeight: number) => ({

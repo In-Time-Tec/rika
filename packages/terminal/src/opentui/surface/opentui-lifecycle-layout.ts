@@ -154,7 +154,7 @@ export abstract class SurfaceLifecycleLayout extends SurfaceInput {
         this.inputBox.bottomTitle = ""
         this.statusLabel.content = new StyledText([
           fg(toOpenColor(colors.text))(" "),
-          fg(toOpenColor(colors.blue))(loaderFrame(statusName, this.loaderPhase)),
+          fg(toOpenColor(colors.blue))(loaderFrame(statusName, this.loaderController.phase)),
           dim(fg(toOpenColor(colors.text))(` ${statusName} `)),
         ])
       } else {
@@ -200,7 +200,7 @@ export abstract class SurfaceLifecycleLayout extends SurfaceInput {
       previousModel.height !== model.height
     if (sidebarChanged)
       this.sidebar.content = threadSidebarVisible
-        ? renderSidebar(model, spinnerFrames[this.loaderPhase % spinnerFrames.length]!)
+        ? renderSidebar(model, spinnerFrames[this.loaderController.phase % spinnerFrames.length]!)
         : ""
     this.changedFilesBox.visible = sidebarVisible
     if (this.changedFilesBox.visible) {

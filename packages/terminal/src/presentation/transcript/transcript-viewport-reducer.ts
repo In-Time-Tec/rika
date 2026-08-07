@@ -1,10 +1,8 @@
 import { Function } from "effect"
-import type { ViewportEvent } from "./transcript-viewport-events"
-import type { ViewportEffect } from "./transcript-viewport-effects"
-import type { ViewportDecision } from "./transcript-viewport-decision"
 import type { TranscriptViewport } from "./transcript-viewport-state"
-import { anchored, isAnchored, isFollowing } from "./transcript-viewport"
+import type { ViewportEvent, ViewportEffect, ViewportDecision } from "./transcript-viewport-protocol"
 import { following, wheelIdle } from "./transcript-viewport-state"
+import { anchored, isAnchored, isFollowing } from "./transcript-viewport"
 
 const reduceWheelObserved = (
   viewport: TranscriptViewport,

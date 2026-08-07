@@ -1,15 +1,12 @@
 import { CliRenderEvents, type MouseEvent } from "@opentui/core"
-import {
-  maxMountedTranscriptRows,
-  resolveRowEnd,
-  shiftRowEnd,
-} from "../../presentation/transcript/terminal-transcript-window"
+import { transcriptOverscanRows } from "../../presentation/transcript/terminal-transcript-window"
 import { clampScrollTop, isFollowing } from "../../presentation/transcript/transcript-viewport"
 import { maxScrollTop } from "../../presentation/transcript/transcript-viewport-metrics"
 import { atBottomWithin } from "../../presentation/transcript/transcript-viewport-metrics"
 import { reduceViewport } from "../../presentation/transcript/transcript-viewport-reducer"
+import { topmostVisibleAnchor } from "../../presentation/transcript/transcript-anchor-geometry"
 import type { ViewportAnchor } from "../../presentation/transcript/transcript-viewport-state"
-import type { ViewportEvent } from "../../presentation/transcript/transcript-viewport-events"
+import type { ViewportEvent } from "../../presentation/transcript/transcript-viewport-protocol"
 import type { ViewportMetrics } from "../../presentation/transcript/transcript-viewport-metrics"
 import { maxMountedTranscriptEntries } from "../rendering/opentui-render-transcript-window"
 import type { Model } from "../../state/model/terminal-state"
@@ -27,11 +24,14 @@ export abstract class SurfaceTranscriptRegion extends SurfaceTranscriptRendering
       viewportHeight: this.transcriptScroll.viewport.height,
     }
   }
-  protected readonly atMountedTranscriptBottom = (): boolean => atBottomWithin(this.transcriptMetrics(), 1)
+  protected readonly atMountedTranscriptBottom = (): boolean =>
+    atBottomWithin(this.transcriptMetrics(), this.transcriptOverscan())
+  protected transcriptOverscan(): number {
+    return Math.max(transcriptOverscanRows, this.transcriptScroll.viewport.height)
+  }
   protected readonly atTranscriptBottom = (near = false): boolean =>
     atBottomWithin(this.transcriptMetrics(), near ? 1 : 0) &&
-    this.transcriptWindowEnd >= (this.model?.items.length ?? 0) &&
-    (this.transcriptRowWindow.end === 0 || this.transcriptRowWindow.end >= this.transcriptRowTotal)
+    this.transcriptWindowEnd >= (this.model?.items.length ?? 0)
   protected dispatchTranscriptViewport(event: ViewportEvent): void {
     const previousMode = this.transcriptViewport.mode
     const decision = reduceViewport(this.transcriptViewport, event)
@@ -91,15 +91,20 @@ export abstract class SurfaceTranscriptRegion extends SurfaceTranscriptRendering
     return anchor === undefined ? undefined : { unitId: anchor.key, offset: anchor.screenY }
   }
   protected captureTranscriptAnchor(): TranscriptAnchor | undefined {
-    const viewportTop = this.transcriptScroll.screenY
-    const drift = this.transcriptScroll.scrollTop - this.renderedTranscriptScrollTop
-    const first = [...this.transcriptRecords.values()]
-      .filter(({ renderable }) => renderable.height > 0 && renderable.screenY + drift + renderable.height > viewportTop)
-      .toSorted((left, right) => left.renderable.screenY - right.renderable.screenY)[0]
-    return first === undefined ? undefined : { key: first.key, screenY: first.renderable.screenY + drift }
+    return topmostVisibleAnchor(
+      [...this.transcriptRecords.values()].map(({ key, renderable }) => ({
+        key,
+        screenY: renderable.screenY,
+        height: renderable.height,
+      })),
+      {
+        viewportTop: this.transcriptScroll.screenY,
+        drift: this.transcriptScroll.scrollTop - this.renderedTranscriptScrollTop,
+      },
+    )
   }
   protected handleTranscriptScroll(): void {
-    if (this.transcriptScroll.scrollTop <= 1 && this.shiftTranscriptWindow(-100, true)) return
+    if (this.transcriptScroll.scrollTop <= this.transcriptOverscan() && this.shiftTranscriptWindow(-100, true)) return
     this.reportTranscriptScroll()
   }
   protected handleTranscriptWheel(event: MouseEvent): void {
@@ -125,27 +130,10 @@ export abstract class SurfaceTranscriptRegion extends SurfaceTranscriptRendering
   protected shiftTranscriptWindow(delta: number, preserveAnchor: boolean, scrollBy = 0, nearBottom = false): boolean {
     const model = this.model
     if (model === undefined) return false
-    const limit = maxMountedTranscriptRows
-    const currentRowEnd = resolveRowEnd(this.transcriptRowWindow, this.transcriptRowTotal, limit)
-    const shiftedRowEnd = shiftRowEnd(this.transcriptRowWindow, delta, this.transcriptRowTotal, limit)
-    if (shiftedRowEnd !== currentRowEnd) {
-      this.transcriptRowWindow = {
-        end: currentRowEnd,
-        pendingDelta: delta,
-        ...(this.transcriptRowWindow.anchorKey === undefined ? {} : { anchorKey: this.transcriptRowWindow.anchorKey }),
-      }
-      this.transcriptRenderInput = undefined
-      this.transcriptAnchorScrollBy = scrollBy
-      this.transcriptAnchorNearBottom = nearBottom
-      this.update(model, preserveAnchor)
-      return true
-    }
     const minimumEnd = Math.min(maxMountedTranscriptEntries, model.items.length)
-    const end = Math.min(model.items.length, Math.max(minimumEnd, this.transcriptWindowEnd + delta))
-    if (end === this.transcriptWindowEnd) return false
-    this.transcriptWindowEnd = end
-    if (this.transcriptRowWindow.end !== 0)
-      this.transcriptRowWindow = { ...this.transcriptRowWindow, pendingDelta: delta }
+    const windowEnd = Math.min(model.items.length, Math.max(minimumEnd, this.transcriptWindowEnd + delta))
+    if (windowEnd === this.transcriptWindowEnd) return false
+    this.transcriptWindowEnd = windowEnd
     this.transcriptRenderInput = undefined
     this.transcriptAnchorScrollBy = scrollBy
     this.transcriptAnchorNearBottom = nearBottom

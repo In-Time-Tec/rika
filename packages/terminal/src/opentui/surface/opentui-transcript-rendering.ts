@@ -5,16 +5,16 @@ import { escapePathTarget } from "../../presentation/transcript/transcript-tool-
 import { transcriptUnitBuilder } from "../rendering/opentui-render-unit"
 import type { TranscriptUnit } from "../../presentation/transcript/transcript-tool-types"
 import { splitStyledLines } from "./opentui-overlay-content"
+import { mergePinnedRecords } from "../../presentation/transcript/transcript-record-order"
 import type { Model } from "../../state/model/terminal-state"
 import { SurfaceState } from "./opentui-surface-state"
 import type { TranscriptRangeBundle, TranscriptUnitCacheEntry } from "../rendering/opentui-render-transcript-revision"
-import type { TranscriptRenderableDescriptor, TranscriptRenderableRecord } from "./opentui-surface-transcript-types"
-import { pinnedRowWindow } from "../../presentation/transcript/transcript-row-window-state"
+import type { TranscriptRenderableDescriptor } from "./opentui-surface-transcript-types"
 
 export abstract class SurfaceTranscriptRendering extends SurfaceState {
   protected abstract restoreFocusedCursor(): void
   protected clearTranscriptChildren(): void {
-    this.welcomeChild = undefined
+    this.welcomeController.clear()
     for (const child of this.transcriptChildren) {
       this.transcriptScroll.content.remove(child)
       child.destroy()
@@ -23,7 +23,6 @@ export abstract class SurfaceTranscriptRendering extends SurfaceState {
     this.transcriptRecords.clear()
     this.transcriptUnitCache.clear()
     this.transcriptRenderInput = undefined
-    this.transcriptRowWindow = pinnedRowWindow
     this.transcriptRowTotal = 0
   }
   protected buildTranscriptUnitBundles(
@@ -88,7 +87,7 @@ export abstract class SurfaceTranscriptRendering extends SurfaceState {
     this.transcriptScroll.content.add(child)
   }
   protected reconcileTranscript(descriptors: ReadonlyArray<TranscriptRenderableDescriptor>): void {
-    if (this.welcomeChild !== undefined) this.clearTranscriptChildren()
+    if (this.welcomeController.child !== undefined) this.clearTranscriptChildren()
     const desiredKeys = new Set(descriptors.map((descriptor) => descriptor.key))
     const selection = this.renderer.getSelection()
     const selected = new Set(selection?.touchedRenderables ?? [])
@@ -158,13 +157,7 @@ export abstract class SurfaceTranscriptRendering extends SurfaceState {
       return record
     })
     const previousOrder = new Map(this.transcriptChildren.map((child, index) => [child, index]))
-    const positionOf = (record: TranscriptRenderableRecord) => previousOrder.get(record.renderable) ?? -1
-    const records = [...desired]
-    for (const record of pinned) {
-      const previous = positionOf(record)
-      const insertion = records.findIndex((candidate) => positionOf(candidate) > previous)
-      records.splice(insertion === -1 ? records.length : insertion, 0, record)
-    }
+    const records = mergePinnedRecords(desired, pinned, previousOrder)
     const children = records.map((record) => record.renderable)
     const current = [...this.transcriptScroll.content.getChildren()]
     children.forEach((child, index) => {
@@ -184,7 +177,6 @@ export abstract class SurfaceTranscriptRendering extends SurfaceState {
     readonly detailSelection: Model["detailSelection"]
     readonly width: number
     readonly windowEnd: number
-    readonly rowWindowEnd: number
     readonly animationTick: number
   }): boolean {
     const previous = this.transcriptRenderInput
@@ -197,7 +189,6 @@ export abstract class SurfaceTranscriptRendering extends SurfaceState {
       previous.detailSelection !== input.detailSelection ||
       previous.width !== input.width ||
       previous.windowEnd !== input.windowEnd ||
-      previous.rowWindowEnd !== input.rowWindowEnd ||
       previous.animationTick !== input.animationTick
     )
   }

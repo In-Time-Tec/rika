@@ -17,6 +17,9 @@ import { colors, spacing } from "../../presentation/terminal/terminal-theme"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { ToolSpinner } from "../rendering/opentui-spinner"
 import { SurfaceLifecycleCleanup } from "./opentui-lifecycle-cleanup"
+import { WelcomeController } from "./opentui-welcome-controller"
+import { LoaderController } from "./opentui-loader-controller"
+import { HoverController } from "./opentui-hover-controller"
 import { type Handlers, type SurfaceOptions } from "./opentui-surface-state"
 
 class SidebarScrollBoxRenderable extends ScrollBoxRenderable {
@@ -76,6 +79,9 @@ export class SurfaceConstruction extends SurfaceLifecycleCleanup {
     this.options = options
     this.toolSpinner = new ToolSpinner()
     this.clock = options.clock ?? new SystemClock()
+    this.welcomeController = new WelcomeController({ clock: this.clock, destroyed: () => this.destroyed })
+    this.loaderController = new LoaderController({ clock: this.clock })
+    this.hoverController = new HoverController({ renderer, destroyed: () => this.destroyed })
     const monotonicStartedAt = this.clock.now()
     const epochStartedAt = options.epochMillis ?? Effect.runSync(Clock.currentTimeMillis)
     this.currentTimeMillis = options.currentTimeMillis ?? (() => epochStartedAt + this.clock.now() - monotonicStartedAt)
@@ -206,17 +212,19 @@ export class SurfaceConstruction extends SurfaceLifecycleCleanup {
     })
     this.modeLabel.onMouseDown = (event) => {
       const column = event.x - this.modeLabel.screenX
-      if (column >= 0 && column < this.usageLabelWidth) (this.handlers.contextToggle ?? this.handlers.usageToggle)?.()
-      else if (column >= this.modeSegmentStart && column < this.modeLabel.width) this.handlers.modeToggle?.()
+      if (column >= 0 && column < this.hoverController.usageWidth)
+        (this.handlers.contextToggle ?? this.handlers.usageToggle)?.()
+      else if (column >= this.hoverController.modeSegmentStart && column < this.modeLabel.width)
+        this.handlers.modeToggle?.()
     }
     const updateUsageHover = (event: MouseEvent) => {
-      this.usagePointerX = event.x
+      this.hoverController.pointerX = event.x
       const column = event.x - this.modeLabel.screenX
-      const hovered = column >= 0 && column < this.usageLabelWidth
-      const modeHovered = column >= this.modeSegmentStart && column < this.modeLabel.width
-      if (hovered === this.usageLabelHovered && modeHovered === this.modeLabelHovered) return
-      this.usageLabelHovered = hovered
-      this.modeLabelHovered = modeHovered
+      const hovered = column >= 0 && column < this.hoverController.usageWidth
+      const modeHovered = column >= this.hoverController.modeSegmentStart && column < this.modeLabel.width
+      if (hovered === this.hoverController.usageHovered && modeHovered === this.hoverController.modeHovered) return
+      this.hoverController.usageHovered = hovered
+      this.hoverController.modeHovered = modeHovered
       this.renderer.setMousePointer(hovered || modeHovered ? "pointer" : "default")
       if (this.model !== undefined) this.renderModeLabel(this.model)
       this.renderer.requestRender()
@@ -224,10 +232,10 @@ export class SurfaceConstruction extends SurfaceLifecycleCleanup {
     this.modeLabel.onMouseOver = updateUsageHover
     this.modeLabel.onMouseMove = updateUsageHover
     this.modeLabel.onMouseOut = () => {
-      this.usagePointerX = undefined
-      if (!this.usageLabelHovered && !this.modeLabelHovered) return
-      this.usageLabelHovered = false
-      this.modeLabelHovered = false
+      this.hoverController.pointerX = undefined
+      if (!this.hoverController.usageHovered && !this.hoverController.modeHovered) return
+      this.hoverController.usageHovered = false
+      this.hoverController.modeHovered = false
       this.renderer.setMousePointer("default")
       if (this.model !== undefined) this.renderModeLabel(this.model)
       this.renderer.requestRender()
@@ -372,21 +380,24 @@ export class SurfaceConstruction extends SurfaceLifecycleCleanup {
       wrapMode: "none",
     })
     this.changedFilesBox.add(this.changedFilesText)
+    this.initializeSidebar()
+    this.initializeFocus()
+    this.initializeToast()
     this.changedFilesBox.verticalScrollBar.on?.("change", () => {
       this.changedFilesBox.syncVirtualScroll()
       this.refreshSidebarWindow()
     })
     this.changedFilesText.onMouseDown = (event) => {
       if (event.button !== 0) return
-      const row = this.sidebarWindowStart + Math.floor(event.y - this.changedFilesText.screenY)
-      const file = this.changedRows[row]?.file
+      const row = this.sidebarController.windowStart + Math.floor(event.y - this.changedFilesText.screenY)
+      const file = this.sidebarController.rows[row]?.file
       if (file === undefined) return
       event.stopPropagation()
       this.handlers.openPath?.({ path: file.path })
     }
     const updateChangedFilesHover = (event: MouseEvent) => {
-      const row = this.sidebarWindowStart + Math.floor(event.y - this.changedFilesText.screenY)
-      const hoveredRow = this.changedRows[row]?.file === undefined ? undefined : row
+      const row = this.sidebarController.windowStart + Math.floor(event.y - this.changedFilesText.screenY)
+      const hoveredRow = this.sidebarController.rows[row]?.file === undefined ? undefined : row
       if (hoveredRow === this.changedFilesHoveredRow) return
       this.changedFilesHoveredRow = hoveredRow
       this.refreshSidebarWindow(true)

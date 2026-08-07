@@ -35,7 +35,11 @@ for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
         try {
           surface.update(base)
           yield* openTui(() => setup.flush())
-          const state = surface as unknown as { readonly transcriptChildren: ReadonlyArray<Renderable> }
+          const state = {
+            get transcriptChildren() {
+              return surface.transcriptDiagnostics().rows
+            },
+          }
           const mounted = [...state.transcriptChildren]
           for (let index = 0; index < 2; index += 1)
             surface.update({ ...base, input: `next ${index}`, cursor: `next ${index}`.length })
@@ -78,9 +82,13 @@ for (const panel of ["changed", "workspace"] as const) {
         try {
           surface.update(base)
           yield* openTui(() => setup.flush())
-          const state = surface as unknown as {
-            readonly changedRows: ReadonlyArray<unknown>
-            readonly transcriptChildren: ReadonlyArray<Renderable>
+          const state = {
+            get changedRows() {
+              return surface.sidebarRows()
+            },
+            get transcriptChildren() {
+              return surface.transcriptDiagnostics().rows
+            },
           }
           const sidebarRows = state.changedRows
           expect(surface.changedFilesBox.scrollHeight).toBe(sidebarRows.length)
@@ -275,8 +283,10 @@ for (const [width, height] of [
             if (surface.sidebar.visible) bounded("thread sidebar", surface.sidebar)
             if (surface.changedFilesBox.visible) {
               bounded("file sidebar", surface.changedFilesBox)
-              const state = surface as unknown as {
-                readonly changedRows: ReadonlyArray<{ readonly chunks: ReadonlyArray<{ readonly text: string }> }>
+              const state = {
+                get changedRows() {
+                  return surface.sidebarRows()
+                },
               }
               const innerWidth = Math.max(1, surface.changedFilesBox.width - 6)
               expect(

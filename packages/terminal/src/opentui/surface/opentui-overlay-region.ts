@@ -1,10 +1,10 @@
-import { CliRenderEvents, StyledText, dim, fg } from "@opentui/core"
+import { StyledText, dim, fg } from "@opentui/core"
 import stringWidth from "string-width"
 import { filter } from "../../presentation/terminal/command-palette"
 import { colors } from "../../presentation/terminal/terminal-theme"
 import { contextDetails } from "../../presentation/terminal/terminal-context-details"
 import { toOpenColor } from "../rendering/terminal-text-adapter"
-import { truncateToWidth } from "../../presentation/terminal/terminal-format"
+import { fitOverlayHints, overlayHintWidth } from "../../presentation/terminal/terminal-overlay-hints"
 import { filteredFiles } from "../../state/model/terminal-thread-navigation"
 import { type Model } from "../../state/model/terminal-state"
 import { paletteContent, modePickerContent } from "./opentui-composer-region"
@@ -16,6 +16,7 @@ import {
 import { filePickerContent, threadSwitcherContent, threadSwitcherListWidth } from "./opentui-overlay-content"
 import type { ProjectedEditorRenderable } from "./opentui-surface-construction"
 import { SurfaceSidebarRegion } from "./opentui-sidebar-region"
+import { FocusController, type FocusableEditor } from "./opentui-focus-controller"
 
 export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
   private overlayDivider(label: string, width: number): StyledText {
@@ -33,27 +34,10 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
   ): void {
     const hints = [this.overlayHintOne, this.overlayHintTwo]
     for (const hint of hints) hint.visible = false
-    const widthOf = (label: string): number => stringWidth(label.replaceAll("↔", "x"))
-    const available = Math.max(0, bounds.width - 4)
-    const fitted: Array<string> = []
-    let used = 0
-    let truncated = false
-    for (const label of labels) {
-      const separator = fitted.length === 0 ? 0 : 2
-      const remaining = available - used - separator
-      if (remaining <= 0) break
-      const width = widthOf(label)
-      let value = label
-      if (width > remaining) value = remaining === 1 ? "…" : `${truncateToWidth(label, remaining - 1)}…`
-      fitted.push(value)
-      used += separator + widthOf(value)
-      if (width > remaining) {
-        truncated = true
-        break
-      }
-    }
+    const widthOf = overlayHintWidth
+    const { labels: fitted, truncated } = fitOverlayHints(labels, Math.max(0, bounds.width - 4))
     const boxRight = Math.min(this.renderer.terminalWidth - 1, bounds.left + bounds.width - 1)
-    let cursor = truncated || fitted.length < labels.length ? boxRight : boxRight - 1
+    let cursor = truncated ? boxRight : boxRight - 1
     for (let index = fitted.length - 1; index >= 0; index -= 1) {
       const label = fitted[index]!
       const hint = hints[fitted.length - 1 - index]
@@ -79,26 +63,17 @@ export abstract class SurfaceOverlayRegion extends SurfaceSidebarRegion {
     this.overlayEditor.sync(text, cursor)
   }
 
-  protected focusEditor(editor: typeof this.focusedEditor): void {
-    if (editor === this.focusedEditor) return
-    this.focusedEditor?.blur()
-    this.focusedEditor = editor
-    this.focusedEditor?.focus()
-    if (this.focusedEditor !== undefined) this.focusedEditor.showCursor = true
+  protected focusController!: FocusController
+  protected initializeFocus(): void {
+    this.focusController = new FocusController({ renderer: this.renderer, destroyed: () => this.destroyed })
+  }
+
+  protected focusEditor(editor: FocusableEditor | undefined): void {
+    this.focusController.focus(editor)
   }
 
   protected restoreFocusedCursor(): void {
-    if (this.focusedEditor === undefined || this.cursorRestoreFrame !== undefined) return
-    const restore = () => {
-      this.cursorRestoreFrame = undefined
-      if (this.destroyed || this.focusedEditor === undefined) return
-      this.focusedEditor.focus()
-      this.focusedEditor.showCursor = true
-      this.renderer.requestRender()
-    }
-    this.cursorRestoreFrame = restore
-    this.renderer.once(CliRenderEvents.FRAME, restore)
-    this.renderer.requestRender()
+    this.focusController.restoreCursor()
   }
   protected updateOverlay(
     model: Model,

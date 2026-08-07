@@ -54,7 +54,15 @@ describe("read tool detail is inspectable", () => {
 
   test("expanded shows every line of the window, not a 12-line slice", () => {
     const output = rendered(model(["tool:read-1", "tool-child:read-1"]))
-    expect(output).toContain("100: line 100")
-    expect(output).toContain("139: line 139")
+    expect(output).toContain("100")
+    expect(output).toContain("line 100")
+    expect(output).toContain("139")
+    expect(output).toContain("line 139")
+  })
+
+  test("a read window renders through the Pierre gutter rather than raw numbered text", () => {
+    const output = rendered(model(["tool:read-1", "tool-child:read-1"]))
+    expect(output).not.toContain("100: line 100")
+    expect(output).toMatch(/100\s+line 100/)
   })
 })

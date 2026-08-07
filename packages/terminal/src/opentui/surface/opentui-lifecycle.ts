@@ -1,7 +1,6 @@
 import { CliRenderEvents } from "@opentui/core"
 import type { Model } from "../../state/model/terminal-state"
 import { contentColumnWidth } from "../../state/model/terminal-layout-state"
-import { pinnedRowWindow } from "../../presentation/transcript/transcript-row-window-state"
 import { isFollowing } from "../../presentation/transcript/transcript-viewport"
 import { prependedTranscriptItems } from "./opentui-lifecycle-transcript"
 import { maxMountedTranscriptEntries } from "../rendering/opentui-render-transcript-window"
@@ -53,7 +52,6 @@ export abstract class SurfaceLifecycle extends SurfaceLifecycleTranscript {
       this.transcriptAnchorNearBottom = false
       this.transcriptWindowThread = model.currentThreadId
       this.transcriptWindowEnd = model.items.length
-      this.transcriptRowWindow = pinnedRowWindow
       this.transcriptRowTotal = 0
     } else if (preserveTranscriptAnchor)
       this.transcriptWindowEnd = Math.min(
@@ -62,7 +60,6 @@ export abstract class SurfaceLifecycle extends SurfaceLifecycleTranscript {
       )
     else if (scrollFollow || this.transcriptWindowEnd === 0) {
       this.transcriptWindowEnd = model.items.length
-      this.transcriptRowWindow = pinnedRowWindow
     } else
       this.transcriptWindowEnd =
         model.items.length <= maxMountedTranscriptEntries
@@ -109,19 +106,13 @@ export abstract class SurfaceLifecycle extends SurfaceLifecycleTranscript {
       })
     }
     const loaderActive = animationActive(model)
-    if (this.options.animate !== false && loaderActive && this.loaderTimer === undefined) {
-      this.loaderTimer = this.clock.setInterval(() => this.tickLoader(), spinnerInterval)
-    } else if ((this.options.animate === false || !loaderActive) && this.loaderTimer !== undefined) {
-      this.clock.clearInterval(this.loaderTimer)
-      this.loaderTimer = undefined
-    }
+    if (this.options.animate !== false && loaderActive) {
+      this.loaderController.start(spinnerInterval, () => this.tickLoader())
+    } else if (this.options.animate === false || !loaderActive) this.loaderController.stop()
     const welcomeActive = welcomeAnimationActive(model)
-    if (this.options.animate !== false && welcomeActive && this.welcomeTimer === undefined) {
-      this.welcomeTimer = this.clock.setInterval(() => this.tickWelcome(), spinnerInterval)
-    } else if ((this.options.animate === false || !welcomeActive) && this.welcomeTimer !== undefined) {
-      this.clock.clearInterval(this.welcomeTimer)
-      this.welcomeTimer = undefined
-    }
+    if (this.options.animate !== false && welcomeActive) {
+      this.welcomeController.start(spinnerInterval, () => this.tickWelcome())
+    } else if (this.options.animate === false || !welcomeActive) this.welcomeController.stop()
     this.updateOverlay(
       model,
       transcriptLayout.contentLeft,

@@ -48,7 +48,6 @@ export interface TranscriptRenderInput {
   readonly detailSelection: Model["detailSelection"]
   readonly width: number
   readonly windowEnd: number
-  readonly rowWindowEnd: number
   readonly animationTick: number
 }
 

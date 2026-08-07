@@ -1,7 +1,7 @@
 import { Function } from "effect"
 import type { ViewportAnchor, ViewportState } from "./transcript-viewport-state"
-import type { ViewportMetrics } from "./transcript-viewport-metrics"
 import { following } from "./transcript-viewport-state"
+import type { ViewportMetrics } from "./transcript-viewport-metrics"
 
 export const anchored = (anchor: ViewportAnchor): ViewportState => ({ _tag: "Anchored", anchor })
 export const isFollowing = (state: ViewportState): boolean => state._tag === "Following"

@@ -1,4 +1,14 @@
-import type { ViewportAnchor, WheelDirection } from "./transcript-viewport-state"
+import type { TranscriptViewport, ViewportAnchor, WheelDirection } from "./transcript-viewport-state"
+
+export type ViewportEffect =
+  | { readonly _tag: "ProjectState" }
+  | { readonly _tag: "RequestFollowPosition" }
+  | { readonly _tag: "NotifyDetached" }
+  | { readonly _tag: "NotifyFollowed" }
+  | { readonly _tag: "QueueAnchorScroll"; readonly scrollBy: number }
+  | { readonly _tag: "ScheduleWheelSettle"; readonly token: number }
+  | { readonly _tag: "PageForward"; readonly scrollBy: number }
+  | { readonly _tag: "ReportSettled" }
 
 export type ViewportEvent =
   | {
@@ -21,3 +31,8 @@ export type ViewportEvent =
   | { readonly _tag: "FollowCommanded" }
   | { readonly _tag: "ResetCommanded" }
   | { readonly _tag: "BottomSettled" }
+
+export interface ViewportDecision {
+  readonly viewport: TranscriptViewport
+  readonly effects: ReadonlyArray<ViewportEffect>
+}
