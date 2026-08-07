@@ -1,22 +1,23 @@
 import { CliRenderEvents, type MouseEvent } from "@opentui/core"
 import { transcriptOverscanRows } from "../../presentation/transcript/terminal-transcript-window"
 import { clampScrollTop, isFollowing } from "../../presentation/transcript/transcript-viewport"
-import { maxScrollTop } from "../../presentation/transcript/transcript-viewport-metrics"
-import { atBottomWithin } from "../../presentation/transcript/transcript-viewport-metrics"
+import {
+  maxScrollTop,
+  atBottomWithin,
+  type ViewportMetrics,
+} from "../../presentation/transcript/transcript-viewport-metrics"
 import { reduceViewport } from "../../presentation/transcript/transcript-viewport-reducer"
 import { topmostVisibleAnchor } from "../../presentation/transcript/transcript-anchor-geometry"
 import type { ViewportAnchor } from "../../presentation/transcript/transcript-viewport-state"
 import type { ViewportEvent } from "../../presentation/transcript/transcript-viewport-protocol"
-import type { ViewportMetrics } from "../../presentation/transcript/transcript-viewport-metrics"
 import { maxMountedTranscriptEntries } from "../rendering/opentui-render-transcript-window"
 import type { Model } from "../../state/model/terminal-state"
 import type { PendingTranscriptPosition, TranscriptAnchor } from "./opentui-surface-transcript-types"
+import { Effect, Fiber, Schedule } from "effect"
 import { SurfaceTranscriptRendering } from "./opentui-transcript-rendering"
 
-export abstract class SurfaceTranscriptRegion extends SurfaceTranscriptRendering {
+export abstract class SurfaceTranscriptScroll extends SurfaceTranscriptRendering {
   protected abstract update(model: Model, preserveTranscriptAnchor?: boolean): void
-  protected abstract defer(action: () => void): void
-  protected abstract override restoreFocusedCursor(): void
   protected transcriptMetrics(): ViewportMetrics {
     return {
       scrollTop: this.transcriptScroll.scrollTop,
@@ -205,5 +206,23 @@ export abstract class SurfaceTranscriptRegion extends SurfaceTranscriptRendering
     this.transcriptPositionFrame = apply
     this.renderer.once(CliRenderEvents.FRAME, apply)
     this.renderer.requestRender()
+  }
+  protected cancelTimer(timer: Fiber.Fiber<void> | undefined): void {
+    timer?.interruptUnsafe()
+  }
+  protected defer(action: () => void): void {
+    Effect.runFork(Effect.yieldNow.pipe(Effect.andThen(Effect.sync(action))))
+  }
+  protected delayed(duration: number, action: () => void): Fiber.Fiber<void> {
+    return Effect.runFork(Effect.sleep(duration).pipe(Effect.andThen(Effect.sync(action))))
+  }
+  protected repeated(duration: number, action: () => void): Fiber.Fiber<void> {
+    return Effect.runFork(
+      Effect.sleep(duration).pipe(
+        Effect.andThen(Effect.sync(action)),
+        Effect.repeat(Schedule.spaced(duration)),
+        Effect.asVoid,
+      ),
+    )
   }
 }
