@@ -267,8 +267,10 @@ export const renderFileRows: {
     arg0: Parameters<typeof renderFileRowsImpl>[0],
     arg1?: Parameters<typeof renderFileRowsImpl>[1],
   ): ReturnType<typeof renderFileRowsImpl>
-  (): (arg0: Parameters<typeof renderFileRowsImpl>[0]) => ReturnType<typeof renderFileRowsImpl>
-} = Function.dual((args) => args.length > 0, renderFileRowsImpl)
+  (
+    arg1?: Parameters<typeof renderFileRowsImpl>[1],
+  ): (arg0: Parameters<typeof renderFileRowsImpl>[0]) => ReturnType<typeof renderFileRowsImpl>
+} = Function.dual((args) => Array.isArray(args[0]), renderFileRowsImpl)
 export const renderChangedFiles: {
   (model: Model, innerWidth: number, hoveredRow?: number): StyledText
   (innerWidth: number, hoveredRow?: number): (model: Model) => StyledText

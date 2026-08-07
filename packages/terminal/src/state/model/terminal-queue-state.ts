@@ -76,20 +76,14 @@ export const resetQueue: {
   }),
 )
 
+export interface QueueDeltaResult {
+  readonly model: Model
+  readonly resync: boolean
+}
+
 export const applyQueueDelta: {
-  (
-    model: Model,
-    threadId: string,
-    revision: number,
-    change: QueueChange,
-    queuedCount?: number,
-  ): { readonly model: Model; readonly resync: boolean }
-  (
-    threadId: string,
-    revision: number,
-    change: QueueChange,
-    queuedCount?: number,
-  ): (model: Model) => { readonly model: Model; readonly resync: boolean }
+  (model: Model, threadId: string, revision: number, change: QueueChange, queuedCount?: number): QueueDeltaResult
+  (threadId: string, revision: number, change: QueueChange, queuedCount?: number): (model: Model) => QueueDeltaResult
 } = Function.dual(
   (args) => typeof args[0] !== "string",
   (model: Model, threadId: string, revision: number, change: QueueChange, queuedCount?: number) => {

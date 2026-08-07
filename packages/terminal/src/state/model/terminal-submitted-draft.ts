@@ -30,8 +30,9 @@ export const bindSubmittedDraft: {
   ): ReturnType<typeof bindSubmittedDraftImpl>
   (
     arg1: Parameters<typeof bindSubmittedDraftImpl>[1],
+    arg2?: Parameters<typeof bindSubmittedDraftImpl>[2],
   ): (arg0: Parameters<typeof bindSubmittedDraftImpl>[0]) => ReturnType<typeof bindSubmittedDraftImpl>
-} = Function.dual((args) => args.length > 0, bindSubmittedDraftImpl)
+} = Function.dual((args) => Array.isArray(args[0]), bindSubmittedDraftImpl)
 
 const dropSubmittedDraftsImpl = (
   drafts: ReadonlyArray<SubmittedDraft>,

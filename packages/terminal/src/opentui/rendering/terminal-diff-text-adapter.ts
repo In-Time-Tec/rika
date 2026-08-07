@@ -72,5 +72,7 @@ export const renderToolSummary: {
     arg0: Parameters<typeof renderToolSummaryImpl>[0],
     arg1?: Parameters<typeof renderToolSummaryImpl>[1],
   ): ReturnType<typeof renderToolSummaryImpl>
-  (): (arg0: Parameters<typeof renderToolSummaryImpl>[0]) => ReturnType<typeof renderToolSummaryImpl>
+  (
+    arg1?: Parameters<typeof renderToolSummaryImpl>[1],
+  ): (arg0: Parameters<typeof renderToolSummaryImpl>[0]) => ReturnType<typeof renderToolSummaryImpl>
 } = Function.dual((args) => args.length > 0, renderToolSummaryImpl)

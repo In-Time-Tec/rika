@@ -68,8 +68,10 @@ export const iconChar: {
   ): ReturnType<typeof iconCharImpl>
   (
     arg1: Parameters<typeof iconCharImpl>[1],
+    arg2?: Parameters<typeof iconCharImpl>[2],
+    arg3?: Parameters<typeof iconCharImpl>[3],
   ): (arg0: Parameters<typeof iconCharImpl>[0]) => ReturnType<typeof iconCharImpl>
-} = Function.dual((args) => args.length > 0, iconCharImpl)
+} = Function.dual((args) => args.length >= 2 && typeof args[1] === "boolean", iconCharImpl)
 
 export const markerText = (expanded: boolean): string => (expanded ? " ▾" : " ▸")
 

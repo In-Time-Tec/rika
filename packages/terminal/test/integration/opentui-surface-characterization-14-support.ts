@@ -46,8 +46,10 @@ export const _streamingShell: {
     arg0: Parameters<typeof _streamingShellImpl>[0],
     arg1?: Parameters<typeof _streamingShellImpl>[1],
   ): ReturnType<typeof _streamingShellImpl>
-  (): (arg0: Parameters<typeof _streamingShellImpl>[0]) => ReturnType<typeof _streamingShellImpl>
-} = Function.dual((args) => args.length > 0, _streamingShellImpl)
+  (
+    arg1?: Parameters<typeof _streamingShellImpl>[1],
+  ): (arg0: Parameters<typeof _streamingShellImpl>[0]) => ReturnType<typeof _streamingShellImpl>
+} = Function.dual((args) => typeof args[0] === "string", _streamingShellImpl)
 
 export const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
   workspace: "/work",

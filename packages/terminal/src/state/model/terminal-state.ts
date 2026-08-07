@@ -244,9 +244,11 @@ export const withModeRouteMap: {
 const initialPublicImpl = (workspace: string, mode: Mode = "medium"): Model => initialImpl(workspace, mode)
 
 export const initial: {
-  (): (arg0: Parameters<typeof initialPublicImpl>[0]) => ReturnType<typeof initialPublicImpl>
   (
     arg0: Parameters<typeof initialPublicImpl>[0],
     arg1?: Parameters<typeof initialPublicImpl>[1],
   ): ReturnType<typeof initialPublicImpl>
-} = Function.dual((args) => args.length > 0, initialPublicImpl)
+  (
+    arg1?: Parameters<typeof initialPublicImpl>[1],
+  ): (arg0: Parameters<typeof initialPublicImpl>[0]) => ReturnType<typeof initialPublicImpl>
+} = Function.dual((args) => args.length >= 1 && typeof args[0] === "string", initialPublicImpl)
