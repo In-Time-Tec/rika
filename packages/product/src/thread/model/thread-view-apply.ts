@@ -33,11 +33,7 @@ const validateCurrent = (snapshot: ThreadViewSnapshot): ThreadViewApplyError | u
   if (duplicateUnit !== undefined) return duplicateError(snapshot, "snapshot-units", duplicateUnit)
   const duplicatePending = duplicateKey(snapshot.pending.map((pending) => String(pending.id)))
   if (duplicatePending !== undefined) return duplicateError(snapshot, "pending", duplicatePending)
-  if (
-    snapshot.turns.length > limits.turns ||
-    units.length > limits.timelineItems ||
-    snapshot.pending.length > limits.pending
-  )
+  if (snapshot.turns.length > limits.turns || snapshot.pending.length > limits.pending)
     return invalidError(snapshot, "bounds-exceeded")
   for (const entry of snapshot.turns) {
     if (String(entry.turn.threadId) !== threadId)

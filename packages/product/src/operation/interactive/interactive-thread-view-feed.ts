@@ -2,6 +2,7 @@ import * as ExecutionProjection from "../../execution/contract/execution-project
 import { promptUnit } from "./interactive-prompt-unit"
 import * as ThreadView from "@rika/product/thread-view"
 import { compareUnitOrder, encodeUnitOrder } from "@rika/transcript/transcript-unit-order"
+import { selectTranscriptWindow } from "../../transcript/transcript-window-selection"
 import { Result } from "effect"
 import type { InteractiveEvent as ClientEvent } from "./interactive-event"
 import type { InteractiveEvent as RuntimeEvent, QueueItem } from "./interactive-runtime-event"
@@ -31,25 +32,24 @@ const orderedTurns = (turns: ReadonlyArray<ThreadView.ThreadViewTurn>): Readonly
 
 const boundedTurns = (
   turns: ReadonlyArray<ThreadView.ThreadViewTurn>,
-  edge: "oldest" | "newest",
+  focus: "oldest" | "newest",
 ): ReadonlyArray<ThreadView.ThreadViewTurn> => {
   const ordered = orderedTurns(turns)
-  const retained = (
-    edge === "oldest" ? ordered.slice(-ThreadView.limits.turns) : ordered.slice(0, ThreadView.limits.turns)
-  ).map((entry) => Object.assign({}, entry, { units: [...entry.units] }))
-  while (retained.length > 1) {
-    const count = retained.reduce((total, entry) => total + entry.units.length, 0)
-    if (count <= ThreadView.limits.timelineItems) break
-    if (edge === "oldest") retained.shift()
-    else retained.pop()
+  const flat = ordered.flatMap((entry) => entry.units.map((unit) => ({ entry, unit })))
+  const selection = selectTranscriptWindow({
+    values: flat,
+    unit: (value) => value.unit,
+    maximum: ThreadView.limits.timelineItems,
+    focus,
+  })
+  const grouped = new Map<string, ThreadView.ThreadViewTurn>()
+  for (const value of selection.values) {
+    const key = String(value.entry.turn.id)
+    const current = grouped.get(key)
+    if (current === undefined) grouped.set(key, { ...value.entry, units: [value.unit] })
+    else current.units.push(value.unit)
   }
-  const only = retained.length === 1 ? retained[0]! : undefined
-  if (only !== undefined && only.units.length > ThreadView.limits.timelineItems)
-    only.units =
-      edge === "oldest"
-        ? only.units.slice(-ThreadView.limits.timelineItems)
-        : only.units.slice(0, ThreadView.limits.timelineItems)
-  return retained
+  return [...grouped.values()]
 }
 
 const sourceFor = (
@@ -525,7 +525,7 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
       }
       const combined = [...byTurn.values()]
       const prepended = event._tag === "TranscriptPagePrepended"
-      const turns = boundedTurns(combined, prepended ? "newest" : "oldest")
+      const turns = boundedTurns(combined, prepended ? "oldest" : "newest")
       const truncated = unitCount(turns) < unitCount(combined)
       return replace({
         ...current,

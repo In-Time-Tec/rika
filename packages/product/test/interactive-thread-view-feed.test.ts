@@ -540,4 +540,131 @@ describe("interactive ThreadView feed", () => {
       Array.from({ length: 120 }, (_, index) => `unit:${index + 100}`),
     )
   })
+
+  it("never evicts a whole 125-unit Turn when an older page is prepended", () => {
+    const feed = makeThreadViewFeed(() => 1)
+    const makeUnit = (key: string, sequence: number, parentId?: string) => ({
+      key,
+      turnId: String(turnId),
+      order: [{ sequence, part: 0, key }],
+      revision: 1,
+      ...(parentId === undefined ? {} : { parentId }),
+      content: { _tag: "Entry" as const, role: "assistant" as const, text: key },
+    })
+    const cardUnit = (key: string, sequence: number, name: string) => ({
+      key,
+      turnId: String(turnId),
+      order: [{ sequence, part: 0, key }],
+      revision: 1,
+      content: {
+        _tag: "Block" as const,
+        block: {
+          _tag: "SubagentCard" as const,
+          id: `card-${name}`,
+          name,
+          prompt: name,
+          promptTruncated: false,
+          summary: "",
+          status: "complete" as const,
+          activity: [],
+        },
+      },
+    })
+    const newestUnits: Array<ReturnType<typeof makeUnit>> = [
+      makeUnit("prompt", 0),
+      makeUnit("root-reasoning", 1),
+      cardUnit("task-card", 2, "Task"),
+      ...Array.from({ length: 15 }, (_, index) => makeUnit(`task-child-${index}`, 3 + index, "card-Task")),
+      cardUnit("librarian-card", 18, "Librarian"),
+      ...Array.from({ length: 6 }, (_, index) => makeUnit(`librarian-child-${index}`, 19 + index, "card-Librarian")),
+      cardUnit("review-card", 25, "Review"),
+      ...Array.from({ length: 46 }, (_, index) => makeUnit(`review-child-${index}`, 26 + index, "card-Review")),
+      cardUnit("review-retry-card", 72, "Review"),
+      ...Array.from({ length: 52 }, (_, index) => makeUnit(`retry-child-${73 + index}`, 73 + index, "card-Review")),
+    ]
+    const olderUnit = (key: string, sequence: number) => ({
+      ...makeUnit(key, sequence),
+      turnId: "older-turn",
+      order: [{ sequence, part: 0, key }],
+    })
+    const olderTurn: Turn.Turn = {
+      ...turn,
+      id: Turn.TurnId.make("older-turn"),
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    const olderUnits = Array.from({ length: 5 }, (_, index) => olderUnit(`older-${index}`, index))
+    const entryFor = (unit: ReturnType<typeof makeUnit>, unitTurn: Turn.Turn) => ({
+      turn: unitTurn,
+      unit,
+      projectionRevision: 1,
+      projectionModelPhase: -1,
+      projectionState: state("completed"),
+    })
+    feed.publish({
+      _tag: "SelectionLoaded",
+      selectionEpoch: 1,
+      activitySequence: 0,
+      thread,
+      entries: newestUnits.map((unit) => entryFor(unit, turn)),
+      hasOlder: true,
+      hasNewer: false,
+      usage: { usage: ExecutionProjection.emptyUsageState() },
+      queueRevision: 0,
+      queue: [],
+    })
+    const prepended = feed.publish({
+      _tag: "TranscriptPagePrepended",
+      selectionEpoch: 1,
+      threadId,
+      entries: olderUnits.map((unit) => entryFor(unit, olderTurn)),
+      hasOlder: false,
+      oldestCursor: { createdAt: 0, turnId: "older-turn", orderKey: "older-0" },
+    })
+    expect(prepended[0]).toMatchObject({
+      _tag: "ThreadViewSnapshot",
+      snapshot: { hasOlder: false, hasNewer: true },
+    })
+    const afterPrepend = feed.current()!
+    expect(afterPrepend.turns.map((entry) => entry.turn.id)).toContain(turn.id)
+    const prependKeys = afterPrepend.turns.flatMap((entry) => entry.units.map((unit) => unit.key))
+    expect(prependKeys).toHaveLength(120)
+    for (const key of ["task-card", "librarian-card", "review-card", "review-retry-card"])
+      expect(prependKeys).toContain(key)
+    const prependParents = new Set(
+      afterPrepend.turns
+        .flatMap((entry) => entry.units)
+        .filter((unit) => unit.content._tag === "Block")
+        .flatMap((unit) => (unit.content.block._tag === "SubagentCard" ? [unit.content.block.id] : [])),
+    )
+    for (const entry of afterPrepend.turns.flatMap((value) => value.units))
+      if (entry.parentId !== undefined) expect(prependParents.has(entry.parentId)).toBe(true)
+
+    const appended = feed.publish({
+      _tag: "TranscriptPageAppended",
+      selectionEpoch: 1,
+      threadId,
+      entries: newestUnits.slice(115).map((unit) => entryFor(unit, turn)),
+      hasNewer: false,
+      requestedAfter: afterPrepend.source.newestCursor!,
+      newestCursor: { createdAt: 1, turnId: String(turnId), orderKey: "newest-124" },
+    })
+    expect(appended[0]).toMatchObject({
+      _tag: "ThreadViewSnapshot",
+      snapshot: { hasOlder: true, hasNewer: false },
+    })
+    const afterAppend = feed.current()!
+    const appendKeys = afterAppend.turns.flatMap((entry) => entry.units.map((unit) => unit.key))
+    expect(appendKeys).toHaveLength(120)
+    for (const key of ["task-card", "librarian-card", "review-card", "review-retry-card"])
+      expect(appendKeys).toContain(key)
+    const appendParents = new Set(
+      afterAppend.turns
+        .flatMap((entry) => entry.units)
+        .filter((unit) => unit.content._tag === "Block")
+        .flatMap((unit) => (unit.content.block._tag === "SubagentCard" ? [unit.content.block.id] : [])),
+    )
+    for (const entry of afterAppend.turns.flatMap((value) => value.units))
+      if (entry.parentId !== undefined) expect(appendParents.has(entry.parentId)).toBe(true)
+  })
 })

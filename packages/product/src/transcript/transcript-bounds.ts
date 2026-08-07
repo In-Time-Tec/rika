@@ -1,6 +1,7 @@
 import { Function } from "effect"
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
+import { selectTranscriptWindow } from "./transcript-window-selection"
 
 export const transcriptPageEncoder = new TextEncoder()
 export const maximumTranscriptPageBytes = 8 * 1024 * 1024
@@ -43,12 +44,22 @@ const boundTurnEntriesImpl = (
   entries: ReadonlyArray<TranscriptPage.Entry>,
   detail: number,
 ): { readonly entries: ReadonlyArray<TranscriptPage.Entry>; readonly contiguousFrom: number } => {
-  const semantic = new Set(entries.flatMap((entry, index) => (isSemanticTranscriptEntry(entry) ? [index] : [])))
-  const contiguousFrom = Math.max(0, entries.length - Math.max(0, detail - semantic.size))
-  return {
-    entries: entries.filter((_, index) => semantic.has(index) || index >= contiguousFrom),
-    contiguousFrom,
-  }
+  if (detail >= entries.length) return { entries, contiguousFrom: 0 }
+  const selection = selectTranscriptWindow({
+    values: entries,
+    unit: (entry) => entry.unit,
+    maximum: detail,
+    focus: "newest",
+    retain: isSemanticTranscriptEntry,
+  })
+  const contiguousFrom =
+    selection.contiguousStart === undefined
+      ? entries.length
+      : Math.max(
+          0,
+          entries.findIndex((entry) => entry.unit.key === selection.contiguousStart!.unit.key),
+        )
+  return { entries: selection.values, contiguousFrom }
 }
 
 export const boundTurnEntries: {
