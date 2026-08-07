@@ -127,7 +127,12 @@ const make = (
     }
   }
 
-  const { notice, error } = makeDiagnosticProjection({ turnId, localId, put, unit })
+  const { notice, error, modelFailureError, executionFailureError } = makeDiagnosticProjection({
+    turnId,
+    localId,
+    put,
+    unit,
+  })
 
   const { putAuthorization, resolveAuthorization, settleAuthorizations } = makeAuthorizationProjection({
     core,
@@ -412,13 +417,7 @@ const make = (
         const call = modelCalls.get(key)
         if (call?.requestOrdinal === usage.pendingContextOrdinal()) usage.awaitContext(undefined)
         modelCalls.delete(key)
-        return error(
-          node,
-          "model-call",
-          "Model request failed",
-          `${event.category}: ${event.classification}`,
-          event.modelCallId,
-        )
+        return modelFailureError(node, event.modelCallId, event.category, event.classification)
       }
       case "CompactionStarted": {
         const key = localId("compaction", node.publicId, event.compactionId)
@@ -512,7 +511,7 @@ const make = (
           node.status = "failed"
           return
         }
-        error(node, "execution", "Execution failed", event.error.message, "failed", {
+        executionFailureError(node, event.error.message, {
           status: "failed",
           ...(event.error.message.length === 0 ? {} : { reason: event.error.message }),
         })

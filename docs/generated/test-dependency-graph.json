@@ -1201,6 +1201,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/baton-execution/test/failure-presentation.test.ts",
+      "path": "packages/baton-execution/test/failure-presentation.test.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/baton-execution/test/review-integration.test.ts",
       "path": "packages/baton-execution/test/review-integration.test.ts",
       "workspace": "@rika/baton-execution",
@@ -5366,6 +5376,14 @@
     },
     {
       "from": "packages/baton-execution/test/baton-tree-projector.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/failure-presentation.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
