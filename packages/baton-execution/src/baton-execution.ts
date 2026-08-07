@@ -180,7 +180,6 @@ const make = (options: Options, sandbox: SandboxExecutor.Interface) =>
                         key: lane.key,
                         selection: "Review",
                         prompt: lane.prompt,
-                        sessionId: input.threadId,
                         metadata: {
                           threadId: input.threadId,
                           turnId: input.turnId,
@@ -202,7 +201,6 @@ const make = (options: Options, sandbox: SandboxExecutor.Interface) =>
               selection: "Title",
               prompt: `Generate a title for this request:\n\n${input.prompt}`,
               idempotencyKey: `${input.turnId}:title`,
-              sessionId: input.threadId,
               metadata: {
                 threadId: input.threadId,
                 turnId: input.turnId,
