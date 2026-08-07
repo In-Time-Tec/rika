@@ -112,7 +112,10 @@ const settleInteractiveSubmissionImpl = (
   return Effect.uninterruptible(
     Effect.gen(function* () {
       if (outcome._tag === "Failure") {
-        if (Cause.hasInterruptsOnly(outcome.cause)) return
+        if (Cause.hasInterruptsOnly(outcome.cause)) {
+          yield* setTurnStatus(turn.id, "cancelled", yield* Clock.currentTimeMillis)
+          return
+        }
         yield* setTurnStatus(turn.id, "failed", yield* Clock.currentTimeMillis)
         emitEvent(input, dispatch, {
           _tag: "ExecutionFailed",

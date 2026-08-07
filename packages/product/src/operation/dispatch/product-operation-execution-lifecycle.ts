@@ -1,7 +1,7 @@
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
-import { Context, Effect } from "effect"
+import { Clock, Context, Effect } from "effect"
 import { operationError } from "../operation-error"
 import type { InteractiveEvent } from "../interactive/interactive-runtime-event"
 import type { InteractiveDependencyContext } from "../interactive/interactive-session-runtime"
@@ -44,6 +44,16 @@ export const makeExecutionLifecycle = (input: {
           )
           continue
         }
+        yield* turns.setStatus(turn.id, "cancelled", yield* Clock.currentTimeMillis).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("execution.cancel.settle.failed").pipe(
+              Effect.annotateLogs({
+                "rika.turn.id": String(turn.id),
+                "rika.failure.kind": String(error),
+              }),
+            ),
+          ),
+        )
       }
     }).pipe(Effect.withSpan("ProductOperation.stopActiveExecutionWorkWithProjection"))
     yield* Effect.provideService(

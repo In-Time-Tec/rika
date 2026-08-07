@@ -168,7 +168,22 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
             ? turn.status
             : "running"
         const state = last?.state ??
-          stored?.state ?? {
+          stored?.state ??
+          (yield* Effect.option(backend.inspectTurn(executionLink)).pipe(
+            Effect.map((inspection) =>
+              inspection._tag === "Some" &&
+              inspection.value.status !== "unavailable" &&
+              inspection.value.status !== "accepted" &&
+              inspection.value.status !== "queued"
+                ? {
+                    status: inspection.value.status,
+                    usage: ExecutionProjection.emptyUsageState(),
+                    steering: { steeringMessages: 0, followUpMessages: 0 },
+                  }
+                : undefined,
+            ),
+            Effect.orElseSucceed(() => undefined),
+          )) ?? {
             status: fallbackStatus,
             usage: ExecutionProjection.emptyUsageState(),
             steering: { steeringMessages: 0, followUpMessages: 0 },

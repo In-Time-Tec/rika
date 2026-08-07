@@ -117,6 +117,8 @@ const makeInteractiveSupervisionComponentsImpl = (
     turnChanges: input.turnChanges,
     dirtyTurnObservers: input.dirtyTurnObservers,
     isTerminalStatus: input.isTerminalStatus,
+    setTurnStatus: input.setTurnStatus,
+    settleThread: execution.settleThread,
     notifyTurnChanged: input.notifyTurnChanged,
     claimTurnObserver: input.claimTurnObserver,
     observeTurn: following.observeTurn,

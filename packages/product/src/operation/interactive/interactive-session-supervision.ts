@@ -1,17 +1,20 @@
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
+import * as ExecutionStatus from "@rika/product/execution-status"
 import { OperationError } from "../operation-error"
 import type { InteractiveOperationFeed } from "./interactive-operation-feed"
 import * as ThreadResult from "@rika/product/thread-result"
 import * as TurnRepository from "@rika/product/turn-repository"
+import * as ThreadRepository from "@rika/product/thread-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
-import { Effect, PubSub } from "effect"
+import { Cause, Clock, Effect, Option, PubSub } from "effect"
 import type { InteractiveEvent } from "./interactive-runtime-event"
 import type {
   InteractiveExecutionContext,
   InteractiveExecutionContextServices,
   InteractiveSessionInput,
 } from "./interactive-session-runtime"
+import type { makeInteractiveExecution } from "./interactive-session-execution"
 import type { makeInteractiveFollowing } from "./interactive-session-following"
 
 const interactiveEventThreadId = (event: InteractiveEvent): string | undefined => {
@@ -27,6 +30,8 @@ export interface InteractiveSupervisionInput {
   readonly turnChanges: PubSub.PubSub<void>
   readonly dirtyTurnObservers: Set<Turn.TurnId>
   readonly isTerminalStatus: InteractiveSessionInput["isTerminalStatus"]
+  readonly setTurnStatus: InteractiveSessionInput["setTurnStatus"]
+  readonly settleThread: ReturnType<typeof makeInteractiveExecution>["settleThread"]
   readonly notifyTurnChanged: InteractiveSessionInput["notifyTurnChanged"]
   readonly claimTurnObserver: InteractiveSessionInput["claimTurnObserver"]
   readonly observeTurn: ReturnType<typeof makeInteractiveFollowing>["observeTurn"]
@@ -57,6 +62,8 @@ export const makeInteractiveSupervision = (
     turnChanges,
     dirtyTurnObservers,
     isTerminalStatus,
+    setTurnStatus,
+    settleThread,
     notifyTurnChanged,
     observeTurn,
     serverOwner,
@@ -115,13 +122,36 @@ export const makeInteractiveSupervision = (
             }),
           ),
         )
+      const settleTurnFromBackend = (turn: Turn.AgentExecutionTurn, status: ExecutionStatus.Status) =>
+        Effect.gen(function* () {
+          const current = yield* turns.get(turn.id)
+          if (current === undefined || isTerminalStatus(current.status)) return
+          yield* setTurnStatus(turn.id, status, yield* Clock.currentTimeMillis)
+          const threads = yield* ThreadRepository.Service
+          const thread = yield* threads.get(turn.threadId)
+          if (thread !== undefined) yield* settleThread(thread, publishObserved)
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("turn.settle_from_backend.failed").pipe(
+              Effect.annotateLogs("rika.failure.kind", Cause.pretty(cause)),
+              Effect.annotateLogs("rika.turn.id", String(turn.id)),
+            ),
+          ),
+        )
       const recover = Effect.gen(function* () {
         if (serverOwner) yield* rootTurnOwner.recoverExecutionAdmissions
         const nonterminal = yield* turns.listNonterminal
         for (const turn of nonterminal)
           if (turn.status !== "queued" && turn.executionLink !== undefined) {
-            const view = yield* acquiredBackend.inspectTurn(turn.executionLink)
-            if (view.status !== "unavailable") yield* launch(turn)
+            const inspected = yield* Effect.option(acquiredBackend.inspectTurn(turn.executionLink))
+            if (Option.isNone(inspected)) continue
+            const view = inspected.value
+            if (view.status === "unavailable") continue
+            if (isTerminalStatus(view.status)) {
+              yield* settleTurnFromBackend(turn, view.status)
+              continue
+            }
+            yield* launch(turn)
           }
       })
       const scanDirty = Effect.gen(function* () {

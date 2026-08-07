@@ -180,3 +180,35 @@ it.effect("recovers every dual-database admission crash window into one idempote
     yield* scenario("after-link")
   }),
 )
+
+it.effect("settles a turn whose backend run is terminal when the watch stream yields no changes", () =>
+  Effect.gen(function* () {
+    const owner = yield* make(
+      { get: () => Effect.succeed(turn) } as TurnRepository.Interface,
+      { get: () => Effect.void } as TranscriptRepository.Interface,
+      {
+        watchTurn: () => Stream.empty,
+        inspectTurn: () => Effect.succeed({ status: "completed" as const }),
+      } as ExecutionGateway.Interface,
+    )
+    const result = yield* owner.watchTurn(turn.id)
+    expect(result.status).toBe("completed")
+    expect(result.state.status).toBe("completed")
+  }),
+)
+
+it.effect("falls back to the persisted running status when the backend run is unavailable", () =>
+  Effect.gen(function* () {
+    const owner = yield* make(
+      { get: () => Effect.succeed(turn) } as TurnRepository.Interface,
+      { get: () => Effect.void } as TranscriptRepository.Interface,
+      {
+        watchTurn: () => Stream.empty,
+        inspectTurn: () => Effect.succeed({ status: "unavailable" as const }),
+      } as ExecutionGateway.Interface,
+    )
+    const result = yield* owner.watchTurn(turn.id)
+    expect(result.status).toBe("running")
+    expect(result.state.status).toBe("running")
+  }),
+)

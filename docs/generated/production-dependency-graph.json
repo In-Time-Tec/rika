@@ -19515,6 +19515,14 @@
     },
     {
       "from": "packages/product/src/operation/interactive/interactive-session-supervision.ts",
+      "to": "packages/product/src/operation/interactive/interactive-session-execution.ts",
+      "specifier": "./interactive-session-execution",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-supervision.ts",
       "to": "packages/product/src/operation/interactive/interactive-session-following.ts",
       "specifier": "./interactive-session-following",
       "kind": "import",
@@ -19549,6 +19557,14 @@
       "from": "packages/product/src/operation/interactive/interactive-session-supervision.ts",
       "to": "packages/product/src/thread/model/turn-record.ts",
       "specifier": "@rika/product/turn-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/operation/interactive/interactive-session-supervision.ts",
+      "to": "packages/product/src/thread/repository/thread-repository.ts",
+      "specifier": "@rika/product/thread-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
