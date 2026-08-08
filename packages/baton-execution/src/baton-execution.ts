@@ -2,15 +2,10 @@ import { ModelRegistry, SandboxExecutor } from "@batonfx/core"
 import { Approval, Run, RunTree, Runtime } from "@batonfx/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import type { Status } from "@rika/product/execution-status"
-import { ProviderCredentialStore } from "@rika/product/provider-credential-store"
+import { ProviderCredentialStore, type ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
 export type { ProviderCredentialStore } from "@rika/product/provider-credential-store"
-
-const noopCredentialStoreLayer = Layer.succeed(ProviderCredentialStore, {
-  load: () => Effect.succeed(Option.none()),
-  save: () => Effect.void,
-  remove: () => Effect.succeed(false),
-})
-import { Cause, Context, Effect, Layer, Option, Schedule, Schema, Stream } from "effect"
+export type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
+import { Cause, Context, Effect, Layer, Schedule, Schema, Stream } from "effect"
 import type { AgentToolHandlers } from "./baton-route"
 import { configure, makeResolver } from "./baton-route"
 import { TreeProjector, titleInvocationId } from "./baton-tree-projector"
@@ -274,17 +269,25 @@ export const layer = (
     Effect.gen(function* () {
       const context = yield* Effect.context<SandboxService>()
       const sandbox = Context.get(context, SandboxExecutor.SandboxExecutor)
+      const credentialStore: ProviderCredentialStoreShape | undefined =
+        options.credentialStore === undefined
+          ? undefined
+          : Context.get(yield* Layer.build(options.credentialStore), ProviderCredentialStore)
       const runtimeLayer = Runtime.layerSqlite({
         filename: options.filename,
-        resolver: makeResolver({ ...options, sandbox }),
+        resolver: makeResolver({
+          sandbox,
+          ...(credentialStore === undefined ? {} : { credentialStore }),
+          ...(options.agentServices === undefined ? {} : { agentServices: options.agentServices }),
+          ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
+        }),
         addresses: [],
         ...(options.subscriberQueueCapacity === undefined
           ? {}
           : { subscriberQueueCapacity: options.subscriberQueueCapacity }),
       })
-      const credentialStore = options.credentialStore ?? noopCredentialStoreLayer
       const executionLayer = Layer.effect(ExecutionGateway.Service, make(options, sandbox)).pipe(
-        Layer.provide(Layer.mergeAll(runtimeLayer, credentialStore)),
+        Layer.provide(runtimeLayer),
       )
       return executionLayer.pipe(
         Layer.catchCause((cause) =>

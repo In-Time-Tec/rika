@@ -15,7 +15,7 @@ import { AmazonBedrock, Anthropic, Deterministic, ModelRoute, OpenAi, OpenRouter
 import { ChildRuns, Errors, ExecutableRegistration, ExecutableResolver } from "@batonfx/runtime"
 import * as RoleToolkits from "@rika/coding-tools/agent-role-toolkits"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
-import { ProviderCredentialStore } from "@rika/product/provider-credential-store"
+import type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
 import { Config, Context, Effect, Layer, Option, Redacted, Scope } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import { providerHttpClientLayer } from "./baton-provider-http"
@@ -113,21 +113,19 @@ const apiKey = (candidate: CandidateSnapshot) =>
 
 const storedCredentialApiKey = (
   candidate: CandidateSnapshot,
+  store: ProviderCredentialStoreShape | undefined,
 ): Effect.Effect<Config.Config<Redacted.Redacted<string>>> => {
   const identity = candidate.providerConnection.credentialIdentity
-  if (identity === undefined) return Effect.succeed(apiKey(candidate))
-  return Effect.gen(function* () {
-    const store = yield* Effect.serviceOption(ProviderCredentialStore)
-    if (Option.isNone(store)) return apiKey(candidate)
-    const credential = yield* store.value
-      .load(identity)
-      .pipe(Effect.orElseSucceed(() => Option.none<Redacted.Redacted<string>>()))
-    return Option.isSome(credential) ? Config.succeed(credential.value) : apiKey(candidate)
-  })
+  if (identity === undefined || store === undefined) return Effect.succeed(apiKey(candidate))
+  return store.load(identity).pipe(
+    Effect.orElseSucceed(() => Option.none<Redacted.Redacted<string>>()),
+    Effect.map((credential) => (Option.isSome(credential) ? Config.succeed(credential.value) : apiKey(candidate))),
+  )
 }
 
 const candidateRegistryLayer = (
   candidate: CandidateSnapshot,
+  credentialStore: ProviderCredentialStoreShape | undefined,
 ): Layer.Layer<ModelRegistry.ModelRegistry, Config.ConfigError> => {
   const registrationKey = candidate.registrationIdentity
   switch (candidate.providerConnection.protocol) {
@@ -149,7 +147,7 @@ const candidateRegistryLayer = (
       }).pipe(Layer.provide(providerHttpClientLayer))
     case "openrouter":
       return Layer.unwrap(
-        storedCredentialApiKey(candidate).pipe(
+        storedCredentialApiKey(candidate, credentialStore).pipe(
           Effect.map((resolvedApiKey) =>
             OpenRouter.layer({
               model: candidate.model,
@@ -201,12 +199,16 @@ const registrationsFrom = (layer: Layer.Layer<ModelRegistry.ModelRegistry>) =>
     ),
   )
 
-const routedModel = (route: ModelSnapshot, override?: Layer.Layer<ModelRegistry.ModelRegistry>) =>
+const routedModel = (
+  route: ModelSnapshot,
+  override: Layer.Layer<ModelRegistry.ModelRegistry> | undefined,
+  credentialStore: ProviderCredentialStoreShape | undefined,
+) =>
   Effect.gen(function* () {
     const available =
       override === undefined
         ? yield* Effect.forEach(route.candidates, (candidate) =>
-            registrationsFrom(Layer.orDie(candidateRegistryLayer(candidate))),
+            registrationsFrom(Layer.orDie(candidateRegistryLayer(candidate, credentialStore))),
           ).pipe(Effect.map((groups) => groups.flat()))
         : yield* registrationsFrom(override)
     const candidates = route.candidates.map((candidate) => {
@@ -394,8 +396,12 @@ const roleExecutors: Readonly<Record<ExecutorRole, RoleExecutor>> = {
   Task: (handlers) => roleExecutor(RoleToolkits.task, true, handlers),
 }
 
+export interface ConfigureOptionsWithCredentialStore extends ConfigureOptions {
+  readonly credentialStore?: ProviderCredentialStoreShape
+}
+
 export const configure = (
-  options: ConfigureOptions,
+  options: ConfigureOptionsWithCredentialStore,
 ): Effect.Effect<
   ConfiguredExecutable,
   ModelRoute.AvailabilitySemanticsMissing | Errors.ExecutableRegistrationInvalid
@@ -418,7 +424,9 @@ export const configure = (
     } as const
     const routed = Object.fromEntries(
       yield* Effect.forEach(Object.entries(routes), ([name, model]) =>
-        routedModel(model, options.modelServices).pipe(Effect.map((value) => [name, value] as const)),
+        routedModel(model, options.modelServices, options.credentialStore).pipe(
+          Effect.map((value) => [name, value] as const),
+        ),
       ),
     ) as Record<keyof typeof routes, RoutedModel>
     const compactionIdentity: AgentManifest.CompactionIdentity = {
@@ -699,7 +707,11 @@ const resolveProgram = (
     }).resolve(input)
   })
 
-export const makeResolver = (options: ResolverOptions): ExecutableResolver.Interface =>
+export interface ResolverOptionsWithCredentialStore extends ResolverOptions {
+  readonly credentialStore?: ProviderCredentialStoreShape
+}
+
+export const makeResolver = (options: ResolverOptionsWithCredentialStore): ExecutableResolver.Interface =>
   ExecutableResolver.ExecutableResolver.of({
     resolve: (input) =>
       Effect.gen(function* () {
@@ -711,6 +723,7 @@ export const makeResolver = (options: ResolverOptions): ExecutableResolver.Inter
           executionRoute: context.executionRoute,
           workspace: context.workspace,
           sandbox: options.sandbox,
+          ...(options.credentialStore === undefined ? {} : { credentialStore: options.credentialStore }),
           ...(options.agentServices === undefined ? {} : { agentServices: options.agentServices(context.workspace) }),
           ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
         }).pipe(Effect.mapError(invalid))
