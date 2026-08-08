@@ -1,6 +1,7 @@
 # M3 — Desktop fork + Rika-native port (execution plan)
 
 Status: M0 (rename) + M0 (apps/server extraction) + M1 (P1 crypto, P4 spawn/health) + M2 (@rika/client) are DONE and committed on `refactor/apps-desktop` (7 commits, all gates green). This document is the execution plan for M3.
+
 > **Step 2 DONE (2026-08-08): fork workspace restored (own bun install, 1623 pkgs, catalog), baseline `electron-vite build` green (~18s), desktop app launches (main/renderer/sidecar, window verified); Rika gates 23/23. Steps 3–5 pending.**
 
 ## Goal (from issue #284)

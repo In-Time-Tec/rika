@@ -20,39 +20,39 @@ opencode-shaped client to the UI while executing Rika operations.
 
 ## Adapter method contract (UI calls → Rika)
 
-| opencode v2 client method | Rika operation | Notes |
-|---|---|---|
-| `session.list({directory, search, limit})` | `Thread list` (+ `Thread search`) | workspace = directory |
-| `session.get(sessionID)` | interactive attach → `ThreadViewSnapshot` | via `runThreadFeed` |
-| `session.create({title, directory})` | `Thread new` | then attach |
-| `session.prompt(sessionID, {prompt})` | interactive `Submit` on attached session | incl. promptParts (text/image) |
-| `session.promptAsync(...)` | `Run` input (non-interactive) | |
-| `session.abort(sessionID)` | interactive `Cancel` | |
-| `session.interrupt(sessionID)` | `InterruptAndSend` / `Cancel` | |
-| `session.update` (rename) | `Thread rename` | archive → defer |
-| `session.delete(sessionID)` | — (no Rika delete op) | **CUT** in Phase D; UI hides |
-| `session.status(sessionID)` | interactive status events | via session feed |
-| `session.todo(sessionID)` | todo events | via session feed |
-| `session.fork` | `Thread fork` | |
-| `session.command/shell` | `Shell` command | terminal support |
-| `session.summarize` | — | **CUT** (no Rika summarize) |
-| `session.revert/unrevert/share/unshare` | — | **CUT** (snapshot/revert + share not in Rika) |
-| `permission.reply/respond` | `ApproveAuthorization` / `DenyAuthorization` | authorizationId from permission event |
-| `question.reply/reject` | `ApproveAuthorization` / `DenyAuthorization` | questionId maps to authorizationId |
-| `event.subscribe(...)` | session `events(dispatch)` | translation layer → opencode Event shapes (port-map §Phase B) |
-| `project.list/current` | workspace (clientWorkspace) scoping | project = workspace in Rika |
-| `project.update/initGit/directories` | — | **CUT/defers**; workspace config in Phase E |
-| `config.get/update` | `Config edit` | Rika settings shape |
-| `global.health` | `/health` (HTTP) or connection ping | |
-| `global.dispose/event` | connection close | |
-| `command.list` | Rika CLI commands | defer to Phase E |
-| `vcs.get/status/diff/apply` | Rika VCS events (branch.updated) | diff/apply **CUT** in Phase D |
-| `find.files/symbols/text` | — | **CUT** (LSP/search not in Rika) |
-| `file.list/read` | Rika file ops (workspace FS) | Phase E |
-| `tool.list/ids` | `ToolCatalog list/show` | |
-| `agent.list`, `app.agents/log/skills` | — | **CUT** (agents/skills in Rika differ; defer) |
-| `auth.set/remove`, `provider.*` | `Auth` (Rika provider config) | provider-OAuth UI **CUT**; Rika auth via config |
-| `mcp.*` | `Mcp add` + Rika MCP tools | NOT cut — Rika has MCP (server catalog: @batonfx/mcp); map in Phase E |
+| opencode v2 client method                  | Rika operation                               | Notes                                                                 |
+| ------------------------------------------ | -------------------------------------------- | --------------------------------------------------------------------- |
+| `session.list({directory, search, limit})` | `Thread list` (+ `Thread search`)            | workspace = directory                                                 |
+| `session.get(sessionID)`                   | interactive attach → `ThreadViewSnapshot`    | via `runThreadFeed`                                                   |
+| `session.create({title, directory})`       | `Thread new`                                 | then attach                                                           |
+| `session.prompt(sessionID, {prompt})`      | interactive `Submit` on attached session     | incl. promptParts (text/image)                                        |
+| `session.promptAsync(...)`                 | `Run` input (non-interactive)                |                                                                       |
+| `session.abort(sessionID)`                 | interactive `Cancel`                         |                                                                       |
+| `session.interrupt(sessionID)`             | `InterruptAndSend` / `Cancel`                |                                                                       |
+| `session.update` (rename)                  | `Thread rename`                              | archive → defer                                                       |
+| `session.delete(sessionID)`                | — (no Rika delete op)                        | **CUT** in Phase D; UI hides                                          |
+| `session.status(sessionID)`                | interactive status events                    | via session feed                                                      |
+| `session.todo(sessionID)`                  | todo events                                  | via session feed                                                      |
+| `session.fork`                             | `Thread fork`                                |                                                                       |
+| `session.command/shell`                    | `Shell` command                              | terminal support                                                      |
+| `session.summarize`                        | —                                            | **CUT** (no Rika summarize)                                           |
+| `session.revert/unrevert/share/unshare`    | —                                            | **CUT** (snapshot/revert + share not in Rika)                         |
+| `permission.reply/respond`                 | `ApproveAuthorization` / `DenyAuthorization` | authorizationId from permission event                                 |
+| `question.reply/reject`                    | `ApproveAuthorization` / `DenyAuthorization` | questionId maps to authorizationId                                    |
+| `event.subscribe(...)`                     | session `events(dispatch)`                   | translation layer → opencode Event shapes (port-map §Phase B)         |
+| `project.list/current`                     | workspace (clientWorkspace) scoping          | project = workspace in Rika                                           |
+| `project.update/initGit/directories`       | —                                            | **CUT/defers**; workspace config in Phase E                           |
+| `config.get/update`                        | `Config edit`                                | Rika settings shape                                                   |
+| `global.health`                            | `/health` (HTTP) or connection ping          |                                                                       |
+| `global.dispose/event`                     | connection close                             |                                                                       |
+| `command.list`                             | Rika CLI commands                            | defer to Phase E                                                      |
+| `vcs.get/status/diff/apply`                | Rika VCS events (branch.updated)             | diff/apply **CUT** in Phase D                                         |
+| `find.files/symbols/text`                  | —                                            | **CUT** (LSP/search not in Rika)                                      |
+| `file.list/read`                           | Rika file ops (workspace FS)                 | Phase E                                                               |
+| `tool.list/ids`                            | `ToolCatalog list/show`                      |                                                                       |
+| `agent.list`, `app.agents/log/skills`      | —                                            | **CUT** (agents/skills in Rika differ; defer)                         |
+| `auth.set/remove`, `provider.*`            | `Auth` (Rika provider config)                | provider-OAuth UI **CUT**; Rika auth via config                       |
+| `mcp.*`                                    | `Mcp add` + Rika MCP tools                   | NOT cut — Rika has MCP (server catalog: @batonfx/mcp); map in Phase E |
 
 ## Event translation (Rika → opencode shapes)
 
