@@ -100,11 +100,14 @@
         "./model-registration-identity",
         "./openai-auth-contract",
         "./openai-auth-service",
+        "./openrouter-auth-contract",
+        "./openrouter-auth-service",
         "./operation-failure",
         "./pending-turn",
         "./product-operation",
         "./product-operation-service",
         "./provider-connection-snapshot",
+        "./provider-credential-store",
         "./resolved-context",
         "./review-intent",
         "./review-policy",
@@ -658,5 +661,7 @@
       "dependencySection": "dependencies"
     }
   ],
-  "violations": []
+  "violations": [
+    "apps/server/src/server/composition/server-auth-layer.ts: unresolved internal or asset import ../../provider/openrouter/openrouter-provider-auth"
+  ]
 }

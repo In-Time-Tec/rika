@@ -2,6 +2,9 @@ import { ModelRegistry, SandboxExecutor } from "@batonfx/core"
 import { Approval, Run, RunTree, Runtime } from "@batonfx/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import type { Status } from "@rika/product/execution-status"
+import { ProviderCredentialStore, type ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
+export type { ProviderCredentialStore } from "@rika/product/provider-credential-store"
+export type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
 import { Cause, Context, Effect, Layer, Schedule, Schema, Stream } from "effect"
 import type { AgentToolHandlers } from "./baton-route"
 import { configure, makeResolver } from "./baton-route"
@@ -15,6 +18,7 @@ export interface Options {
   readonly filename: string
   readonly agentServices?: (workspace: string) => Layer.Layer<AgentToolServices, never, never>
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry, never, never>
+  readonly credentialStore?: Layer.Layer<ProviderCredentialStore, never, never>
   readonly subscriberQueueCapacity?: number
 }
 
@@ -76,7 +80,11 @@ const status = (value: Run.RunStatus): Status => {
   }
 }
 
-const make = (options: Options, sandbox: SandboxExecutor.Interface) =>
+const make = (
+  options: Options,
+  sandbox: SandboxExecutor.Interface,
+  credentialStore: ProviderCredentialStoreShape | undefined,
+) =>
   Effect.gen(function* () {
     const runtime = yield* Runtime.Runtime
     // A replayPolicy:"never" operation interrupted by cancellation parks the Run in
@@ -160,6 +168,7 @@ const make = (options: Options, sandbox: SandboxExecutor.Interface) =>
             executionRoute: input.executionRoute,
             workspace: input.workspace,
             sandbox,
+            ...(credentialStore === undefined ? {} : { credentialStore }),
             ...(options.agentServices === undefined ? {} : { agentServices: options.agentServices(input.workspace) }),
             ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
           })
@@ -265,16 +274,27 @@ export const layer = (
     Effect.gen(function* () {
       const context = yield* Effect.context<SandboxService>()
       const sandbox = Context.get(context, SandboxExecutor.SandboxExecutor)
+      const credentialStore: ProviderCredentialStoreShape | undefined =
+        options.credentialStore === undefined
+          ? undefined
+          : Context.get(yield* Layer.build(options.credentialStore), ProviderCredentialStore)
       const runtimeLayer = Runtime.layerSqlite({
         filename: options.filename,
-        resolver: makeResolver({ ...options, sandbox }),
+        resolver: makeResolver({
+          sandbox,
+          ...(credentialStore === undefined ? {} : { credentialStore }),
+          ...(options.agentServices === undefined ? {} : { agentServices: options.agentServices }),
+          ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
+        }),
         addresses: [],
         ...(options.subscriberQueueCapacity === undefined
           ? {}
           : { subscriberQueueCapacity: options.subscriberQueueCapacity }),
       })
-      return Layer.effect(ExecutionGateway.Service, make(options, sandbox)).pipe(
+      const executionLayer = Layer.effect(ExecutionGateway.Service, make(options, sandbox, credentialStore)).pipe(
         Layer.provide(runtimeLayer),
+      )
+      return executionLayer.pipe(
         Layer.catchCause((cause) =>
           Layer.effectContext(
             Effect.fail(ExecutionGateway.StartTurnFailure.make({ message: message(Cause.squash(cause)) })),

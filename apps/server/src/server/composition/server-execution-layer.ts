@@ -10,6 +10,7 @@ import { validateWebSearchProviders } from "./server-configuration-adapter"
 export const configuredBackendLayer = (options: {
   readonly filename: string
   readonly agentServices?: (workspace: string) => Layer.Layer<BatonExecution.AgentToolServices, never, never>
+  readonly credentialStore?: Layer.Layer<BatonExecution.ProviderCredentialStore, never, never>
   readonly testModel?: { readonly script?: string; readonly response?: string }
 }) => {
   const backend = (): Layer.Layer<
@@ -20,6 +21,7 @@ export const configuredBackendLayer = (options: {
     BatonExecution.layer({
       filename: options.filename,
       ...(options.agentServices === undefined ? {} : { agentServices: options.agentServices }),
+      ...(options.credentialStore === undefined ? {} : { credentialStore: options.credentialStore }),
       ...(options.testModel === undefined ? {} : { modelServices: ScriptedModel.layer(options.testModel) }),
     })
   // A Baton upgrade changes the runtime schema checksum, so an install carried across
@@ -33,7 +35,8 @@ export const configuredBackendLayer = (options: {
         : Layer.effectContext(Effect.failCause(cause)),
     ),
   )
-  return Layer.provide(recovered, JavaScriptSandbox.layer())
+  const provided = Layer.provide(recovered, JavaScriptSandbox.layer())
+  return options.credentialStore === undefined ? provided : Layer.provide(provided, options.credentialStore)
 }
 
 export { validateWebSearchProviders }

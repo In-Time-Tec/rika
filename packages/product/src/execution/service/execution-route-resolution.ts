@@ -68,6 +68,8 @@ const providerOptions = (route: ModelRouteResolution.ResolvedModelRoute): Readon
       return { ...route.options, max_output_tokens: route.maxOutputTokens }
     case "anthropic":
       return { ...route.options, max_tokens: route.maxOutputTokens }
+    case "openrouter":
+      return { ...route.options, max_tokens: route.maxOutputTokens }
     case "amazon-bedrock":
       return { ...route.options, maxTokens: route.maxOutputTokens }
   }
@@ -88,6 +90,9 @@ const snapshot = (
         : ("none" as const),
     ...(connection.protocol !== "amazon-bedrock" && connection.apiKeyEnv !== undefined
       ? { apiKeyEnvironment: connection.apiKeyEnv }
+      : {}),
+    ...(connection.protocol !== "amazon-bedrock" && connection.credentialIdentity !== undefined
+      ? { credentialIdentity: connection.credentialIdentity }
       : {}),
   }
   const candidates = route.candidates.map(

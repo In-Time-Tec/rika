@@ -127,6 +127,7 @@ const createOperationLayerImpl = (
       const backendLayer = configuredBackendLayer({
         filename: options.batonDatabase,
         agentServices,
+        credentialStore: ServerAuth.createProviderCredentialStoreLayer(options.database, options.profileIdentity),
         ...(testModel === undefined ? {} : { testModel }),
       })
       const configAdapter = ServerConfiguration.productConfigAdapter(editor)

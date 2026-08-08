@@ -46,7 +46,7 @@ export type PresetId = (typeof presetIds)[number]
 
 export const presets = {
   openai: {
-    protocols: ["openai"] as ReadonlyArray<string>,
+    protocols: ["openai", "openrouter"] as ReadonlyArray<string>,
     optionKeys: ["reasoning", "service_tier"] as ReadonlyArray<string>,
     efforts: supportedEfforts as ReadonlyArray<ModelRoute.Effort>,
     limits: { contextWindow: 272_000, maxInputTokens: 258_400, maxOutputTokens: 128_000, keepRecentTokens: 32_000 },

@@ -17,6 +17,12 @@ export const providerDefaults = {
     protocol: "amazon-bedrock",
     authMode: "default",
   },
+  openrouter: {
+    protocol: "openrouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+    apiKeyEnv: "OPENROUTER_API_KEY",
+    credentialIdentity: "openrouter",
+  },
 } as const
 
 export const defaultCompaction = {
