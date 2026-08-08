@@ -14,6 +14,8 @@ One-time fork of the opencode desktop application, taken on 2026-08-08 and owned
 - `schema/` — opencode data-model types (used as view-model types during the port)
 - `core/src/util/` — ONLY the util subpaths the renderer imports (encode/path/binary/retry/array); no engine code
 - `app/vendor/opencode-ai-client-1.17.13-v2.tgz` — vendored client tarball (type contract only; runtime replaced by @rika/client)
+- `sdk/` — the opencode v2 SDK client (app's server-client layer; replaced by @rika/client during the port)
+- `script/` — build-tooling package (imported only by desktop/ui build scripts)
 
 ## Staging rules
 - `package.json` files are STRIPPED so the staged code does NOT join the Rika workspace and cannot break `bun run check`. The next M3 phase adds package.json + workspace integration deliberately.
