@@ -242,7 +242,9 @@ const program = Effect.gen(function* () {
                       failure: {
                         tag: "TestFailure",
                         message: "x".repeat(20_000_000),
-                        retry: "user",
+                        category: "operation",
+                        retryable: false,
+                        retry: "none",
                         actor: "environment",
                       },
                     }),
@@ -254,7 +256,9 @@ const program = Effect.gen(function* () {
                       failure: {
                         tag: "TestFailure",
                         message: kind.at(-1)!.repeat(8_000_000),
-                        retry: "user",
+                        category: "operation",
+                        retryable: false,
+                        retry: "none",
                         actor: "environment",
                       },
                     }),
@@ -335,7 +339,9 @@ const program = Effect.gen(function* () {
                         failure: {
                           tag: "TestFailure",
                           message: "x".repeat(1_100_000),
-                          retry: "user",
+                          category: "operation",
+                          retryable: false,
+                          retry: "none",
                           actor: "environment",
                         },
                       })

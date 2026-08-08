@@ -38,7 +38,9 @@ describe("approval control failures", () => {
       failure: {
         tag: "ApprovalResponseFailure",
         message: "Authorization is no longer pending",
-        retry: "user",
+        category: "operation",
+        retryable: false,
+        retry: "none",
         actor: "user",
       },
     })
@@ -56,7 +58,9 @@ describe("approval control failures", () => {
       failure: {
         tag: "ApprovalResponseFailure",
         message: "Authorization is no longer pending",
-        retry: "user",
+        category: "operation",
+        retryable: false,
+        retry: "none",
         actor: "user",
       },
     })
