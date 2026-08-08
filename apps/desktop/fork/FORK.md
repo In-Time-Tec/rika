@@ -21,3 +21,24 @@ One-time fork of the opencode desktop application, taken on 2026-08-08 and owned
 - `package.json` files are STRIPPED so the staged code does NOT join the Rika workspace and cannot break `bun run check`. The next M3 phase adds package.json + workspace integration deliberately.
 - MIT license notices preserved from upstream (see `LICENSE` files under each staged package; upstream is MIT — sst/opencode).
 - Execution plan: `docs/m3-desktop-port-plan.md` (this repo).
+
+## Step 2 status (workspace integration + baseline build) — DONE
+
+- Original package.json manifests restored at package roots (from `.manifests/`);
+  `sdk/js/package.json` restored from upstream; `core/package.json` is a minimal
+  manifest (the app only imports `@opencode-ai/core/util/*` — zero-dep pure utils).
+- Fork root `package.json`: private workspace (`rika-desktop-fork`) with the
+  upstream catalog (nested in `workspaces.catalog`), bun@1.3.14, and
+  `trustedDependencies` (electron + node-pty + esbuild).
+- The fork has its OWN `bun install` (own node_modules + bun.lock) and does NOT
+  join Rika's workspace — Rika gates untouched (23/23, 1548 tests).
+- `opencode/dist/node/node.js` is a STUB for `virtual:opencode-server` (the
+  desktop main's sidecar imports `Server.listen`); opencode's server bundle is
+  not vendored by design. The M3 port replaces this with Rika's server.
+- Baseline build: `cd desktop && bunx electron-vite build` — green in ~18s
+  (main + preload + renderer bundles).
+- Baseline launch: `bunx electron .` — window opens; main + renderer + sidecar
+  processes run; logs show "server ready" + the expected stub-era
+  `global-sdk event stream failed` (that layer is exactly what the Rika port
+  replaces). Electron 42.3.3 binary installed via the cached package's install.js
+  (bun does not run electron's postinstall by default).

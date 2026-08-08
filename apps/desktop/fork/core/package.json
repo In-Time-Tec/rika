@@ -1,0 +1,10 @@
+{
+  "name": "@opencode-ai/core",
+  "version": "1.18.15",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./package.json": "./package.json",
+    "./*": "./src/*.ts"
+  }
+}
