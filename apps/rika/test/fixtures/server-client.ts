@@ -5,7 +5,7 @@ import { Clock, Config, Effect, FileSystem, Layer, Logger, Path, Ref, Schema, St
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { make } from "../../src/transport/client/server-client-startup"
 
-import * as ServerProcessStartup from "../../src/server/process/server-process-launch"
+import * as ServerProcessStartup from "@rika/server/server-process-launch"
 import { runServerClientCommands } from "./server-client-commands"
 
 const JsonLine = Schema.UnknownFromJsonString

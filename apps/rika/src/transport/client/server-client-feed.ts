@@ -3,7 +3,7 @@ import * as InteractiveSession from "@rika/product/interactive-session"
 import * as ProductOperation from "@rika/product/product-operation"
 import * as ServerFeed from "@rika/product/server-interactive-feed"
 import * as ServerService from "@rika/product/server-service"
-import { clientMessageFrames } from "../protocol/server-message-codec"
+import { clientMessageFrames } from "@rika/server/server-message-codec"
 import { Deferred, Effect, Function, Queue, Schema } from "effect"
 
 const traceInteractiveEventImpl = (name: string, seen: Set<string>, event: InteractiveEvent.InteractiveEvent) => {

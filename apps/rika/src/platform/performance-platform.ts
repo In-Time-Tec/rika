@@ -32,9 +32,11 @@ export const roleRuntimes = (input: {
   readonly packaged: boolean
   readonly executable: string
   readonly sourceDirectory: string
+  readonly serverSourceDirectory?: string
 }): Readonly<Record<PerformanceRole, RoleRuntime>> => {
   const sibling = (name: string) => `${input.sourceDirectory}/${name}`
   const source = (name: string) => `${input.sourceDirectory}/${name}-main.ts`
+  const serverSource = (name: string) => `${input.serverSourceDirectory ?? input.sourceDirectory}/${name}-main.ts`
   return {
     launcher: {
       executable: input.packaged ? sibling("rika") : input.executable,
@@ -46,7 +48,7 @@ export const roleRuntimes = (input: {
       : { executable: input.executable, arguments: [source("interactive")], evidencePath: source("interactive") },
     server: input.packaged
       ? { executable: sibling(".rika-server"), arguments: [], evidencePath: sibling(".rika-server") }
-      : { executable: input.executable, arguments: [source("server")], evidencePath: source("server") },
+      : { executable: input.executable, arguments: [serverSource("server")], evidencePath: serverSource("server") },
   }
 }
 
@@ -145,7 +147,16 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
   const sourceDirectory = path.dirname(moduleDirectory)
   const packaged = import.meta.path?.startsWith("/$bunfs/") ?? false
   const directory = packaged ? path.dirname(process.execPath) : sourceDirectory
-  const runtimes = roleRuntimes({ packaged, executable: process.execPath, sourceDirectory: directory })
+  const runtimes = roleRuntimes(
+    packaged
+      ? { packaged, executable: process.execPath, sourceDirectory: directory }
+      : {
+          packaged,
+          executable: process.execPath,
+          sourceDirectory: directory,
+          serverSourceDirectory: path.join(sourceDirectory, "..", "..", "server", "src"),
+        },
+  )
   const executableBytes = yield* Effect.all(
     Object.entries(runtimes).map(([role, runtime]) =>
       fileSystem.stat(runtime.evidencePath).pipe(Effect.map((info) => [role, Number(info.size)] as const)),

@@ -57,11 +57,21 @@ const allowedPackageEdges: Readonly<Record<string, ReadonlySet<string>>> = {
   "@rika/store": new Set(["@rika/product", "@rika/transcript"]),
   "@rika/product": new Set(["@rika/config", "@rika/extensions", "@rika/tools", "@rika/transcript"]),
   "@rika/terminal": new Set(["@rika/config", "@rika/transcript"]),
+  "@rika/server": new Set([
+    "@rika/config",
+    "@rika/execution",
+    "@rika/extensions",
+    "@rika/product",
+    "@rika/sandbox",
+    "@rika/store",
+    "@rika/tools",
+  ]),
   "@rika/cli": new Set([
     "@rika/execution",
     "@rika/config",
     "@rika/extensions",
     "@rika/sandbox",
+    "@rika/server",
     "@rika/store",
     "@rika/tools",
     "@rika/transcript",
@@ -84,6 +94,7 @@ const allDependencies = (manifest: PackageManifest) => [
 const isProvider = (name: string) => languageModelProviderPackages.has(name) || name.startsWith("@ai-sdk/")
 const packageOwner = (filePath: string) => {
   if (filePath.startsWith("apps/rika/")) return "@rika/cli"
+  if (filePath.startsWith("apps/server/")) return "@rika/server"
   const match = /^packages\/([^/]+)\//.exec(filePath)
   return match?.[1] === undefined ? undefined : `@rika/${match[1]}`
 }

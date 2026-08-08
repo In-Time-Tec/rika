@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "vitest"
 import { Effect } from "effect"
-import { resolve } from "../src/server/process/server-endpoint"
+import { resolve } from "@rika/server/server-endpoint"
 import { makeRoot, run, waitUntil } from "./server-transport-runtime"
 import { cleanRoot, fileExists, fileStat, readText } from "./server-transport-files"
 import { alive, attachedEffect, start } from "./server-transport-process"

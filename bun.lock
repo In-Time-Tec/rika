@@ -58,6 +58,7 @@
         "@rika/extensions": "workspace:*",
         "@rika/product": "workspace:*",
         "@rika/sandbox": "workspace:*",
+        "@rika/server": "workspace:*",
         "@rika/store": "workspace:*",
         "@rika/terminal": "workspace:*",
         "@rika/tools": "workspace:*",
@@ -79,6 +80,27 @@
         "@opentui/core-linux-x64-musl": "catalog:",
         "@opentui/core-win32-arm64": "catalog:",
         "@opentui/core-win32-x64": "catalog:",
+      },
+    },
+    "apps/server": {
+      "name": "@rika/server",
+      "version": "0.3.17",
+      "dependencies": {
+        "@effect/platform-bun": "catalog:",
+        "@rika/config": "workspace:*",
+        "@rika/execution": "workspace:*",
+        "@rika/extensions": "workspace:*",
+        "@rika/product": "workspace:*",
+        "@rika/sandbox": "workspace:*",
+        "@rika/store": "workspace:*",
+        "@rika/tools": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
       },
     },
     "packages/config": {
@@ -660,6 +682,8 @@
     "@rika/repository-policy": ["@rika/repository-policy@workspace:tooling/repository-policy"],
 
     "@rika/sandbox": ["@rika/sandbox@workspace:packages/sandbox"],
+
+    "@rika/server": ["@rika/server@workspace:apps/server"],
 
     "@rika/store": ["@rika/store@workspace:packages/store"],
 

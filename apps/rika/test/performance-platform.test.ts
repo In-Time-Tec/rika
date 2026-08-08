@@ -7,13 +7,14 @@ describe("performance role runtime resolution", () => {
       packaged: false,
       executable: "/usr/bin/bun",
       sourceDirectory: "/repo/apps/rika/src",
+      serverSourceDirectory: "/repo/apps/server/src",
     })
     expect(runtimes.interactive).toEqual({
       executable: "/usr/bin/bun",
       arguments: ["/repo/apps/rika/src/interactive-main.ts"],
       evidencePath: "/repo/apps/rika/src/interactive-main.ts",
     })
-    expect(runtimes.server.arguments).toEqual(["/repo/apps/rika/src/server-main.ts"])
+    expect(runtimes.server.arguments).toEqual(["/repo/apps/server/src/server-main.ts"])
   })
 
   test("locates packaged role executables beside the performance executable", () => {

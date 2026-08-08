@@ -1,7 +1,7 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Config, Context, Effect, Layer } from "effect"
-import * as Logging from "../../src/diagnostics/diagnostic-file-logging"
+import * as Logging from "@rika/server/diagnostic-file-logging"
 
 const provideScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>

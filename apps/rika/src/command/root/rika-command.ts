@@ -14,7 +14,7 @@ import { reviewCommand } from "../product/review-command"
 import { dispatch, type CliOperationService } from "./cli-operation-dispatch"
 import { executeRun, runCommand } from "./noninteractive-run-command"
 import * as ReleaseUpdate from "../../release/release-update"
-import { version } from "../../platform/application-version"
+import { version } from "@rika/server/application-version"
 
 export { version }
 

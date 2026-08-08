@@ -11,8 +11,8 @@ import * as ThreadView from "@rika/product/thread-view"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import type * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Config, Console, Effect, Exit, FileSystem, Layer, Logger, Path, Ref, Schema, Scope } from "effect"
-import { serve } from "../../src/transport/host/server-host-transport"
-import * as ServerProcessStartup from "../../src/server/process/server-process-launch"
+import { serve } from "@rika/server/server-host-transport"
+import * as ServerProcessStartup from "@rika/server/server-process-launch"
 
 let activeWork = 0
 

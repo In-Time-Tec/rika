@@ -139,6 +139,27 @@
       "publicExports": ["./javascript-sandbox"]
     },
     {
+      "id": "package:@rika/server",
+      "package": "@rika/server",
+      "workspace": "@rika/server",
+      "kind": "package",
+      "production": true,
+      "publicExports": [
+        "./application-version",
+        "./diagnostic-file-logging",
+        "./diagnostic-file-logging-contract",
+        "./server-endpoint",
+        "./server-host-transport",
+        "./server-message-codec",
+        "./server-process",
+        "./server-process-launch",
+        "./server-process-spawn",
+        "./server-protocol",
+        "./server-protocol-handshake",
+        "./server-startup"
+      ]
+    },
+    {
       "id": "package:@rika/store",
       "package": "@rika/store",
       "workspace": "@rika/store",
@@ -269,6 +290,15 @@
     },
     {
       "from": "package:@rika/cli",
+      "to": "package:@rika/server",
+      "specifier": "@rika/server",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
+    {
+      "from": "package:@rika/cli",
       "to": "package:@rika/store",
       "specifier": "@rika/store",
       "kind": "package",
@@ -437,6 +467,69 @@
       "relationship": "test",
       "production": false,
       "dependencySection": "devDependencies"
+    },
+    {
+      "from": "package:@rika/server",
+      "to": "package:@rika/config",
+      "specifier": "@rika/config",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
+    {
+      "from": "package:@rika/server",
+      "to": "package:@rika/execution",
+      "specifier": "@rika/execution",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
+    {
+      "from": "package:@rika/server",
+      "to": "package:@rika/extensions",
+      "specifier": "@rika/extensions",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
+    {
+      "from": "package:@rika/server",
+      "to": "package:@rika/product",
+      "specifier": "@rika/product",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
+    {
+      "from": "package:@rika/server",
+      "to": "package:@rika/sandbox",
+      "specifier": "@rika/sandbox",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
+    {
+      "from": "package:@rika/server",
+      "to": "package:@rika/store",
+      "specifier": "@rika/store",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
+    {
+      "from": "package:@rika/server",
+      "to": "package:@rika/tools",
+      "specifier": "@rika/tools",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
     },
     {
       "from": "package:@rika/store",

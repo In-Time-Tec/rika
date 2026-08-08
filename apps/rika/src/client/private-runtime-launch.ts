@@ -17,18 +17,23 @@ export const privateRuntime = Effect.fn("ClientProcess.privateRuntime")(function
   const testExecutable = yield* Config.option(Config.string("RIKA_TEST_RUNTIME_EXECUTABLE"))
   if (Option.isSome(testExecutable))
     return { executable: testExecutable.value, prefixArguments: [], replaceProcess: false }
-  const entrypoint = role === "interactive" ? "interactive-main.ts" : "server-main.ts"
-  return import.meta.path.startsWith("/$bunfs/")
-    ? {
-        executable: path.join(path.dirname(process.execPath), `.rika-${role}`),
-        prefixArguments: [],
-        replaceProcess: role === "interactive",
-      }
-    : {
-        executable: process.execPath,
-        prefixArguments: [path.join(import.meta.dir, "..", entrypoint)],
-        replaceProcess: false,
-      }
+  if (import.meta.path.startsWith("/$bunfs/"))
+    return {
+      executable: path.join(path.dirname(process.execPath), `.rika-${role}`),
+      prefixArguments: [],
+      replaceProcess: role === "interactive",
+    }
+  if (role === "interactive")
+    return {
+      executable: process.execPath,
+      prefixArguments: [path.join(import.meta.dir, "..", "interactive-main.ts")],
+      replaceProcess: false,
+    }
+  return {
+    executable: process.execPath,
+    prefixArguments: [path.join(import.meta.dir, "..", "..", "..", "server", "src", "server-main.ts")],
+    replaceProcess: false,
+  }
 })
 
 export const inheritedEnvironment = (): Record<string, string> =>

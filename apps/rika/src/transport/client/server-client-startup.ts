@@ -3,10 +3,10 @@ import * as ServerService from "@rika/product/server-service"
 import { Clock, Crypto, Deferred, Effect, Exit, FileSystem, Function, Path, Schema, Scope } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import * as Socket from "effect/unstable/socket/Socket"
-import { readOrCreateToken, resolve } from "../../server/process/server-endpoint"
-import * as ServerProcessStartup from "../../server/process/server-process"
-import { claimStartup } from "../../server/process/server-startup"
-import { transportError } from "../protocol/server-message-codec"
+import { readOrCreateToken, resolve } from "@rika/server/server-endpoint"
+import * as ServerProcessStartup from "@rika/server/server-process"
+import { claimStartup } from "@rika/server/server-startup"
+import { transportError } from "@rika/server/server-message-codec"
 
 const mapServerSocketFailure = (cause: unknown, accepted: boolean): ServerService.ServerServiceError => {
   if (Socket.SocketError.is(cause) && cause.reason._tag === "SocketCloseError") {

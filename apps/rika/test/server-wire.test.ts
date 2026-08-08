@@ -8,8 +8,8 @@ import {
   maxClientMessageBytes,
   outputFrames,
   serverMessageFrames,
-} from "../src/transport/protocol/server-message-codec"
-import { maxFrameBytes, parse } from "../src/transport/protocol/server-protocol"
+} from "@rika/server/server-message-codec"
+import { maxFrameBytes, parse } from "@rika/server/server-protocol"
 
 const decode = Schema.decodeUnknownSync(ServerService.ServerMessage)
 const encoder = new TextEncoder()

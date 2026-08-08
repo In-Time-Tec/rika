@@ -1,5 +1,5 @@
 import * as ServerService from "@rika/product/server-service"
-import * as ServerProcessStartup from "../server/process/server-process"
+import * as ServerProcessStartup from "@rika/server/server-process"
 
 export const cleanInteractiveRuntimeExit = (exitCode: number): boolean =>
   exitCode === 0 || exitCode === 130 || exitCode === 129

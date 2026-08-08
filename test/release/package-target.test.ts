@@ -34,7 +34,7 @@ const resolveSource = async (path: string) => {
 const sourceGraph = async (entrypoint: string) => {
   const root = fileURLToPath(new URL("../..", import.meta.url))
   const packages = new Map<string, { readonly root: string; readonly exports: Record<string, string> }>()
-  for (const directory of await readdir(join(root, "packages"))) {
+  for (const directory of [...(await readdir(join(root, "packages"))), ...(await readdir(join(root, "apps")))]) {
     const manifestPath = join(root, "packages", directory, "package.json")
     try {
       await access(manifestPath)
@@ -49,7 +49,7 @@ const sourceGraph = async (entrypoint: string) => {
   }
   const files = new Set<string>()
   const external = new Set<string>()
-  const pending = [join(root, "apps/rika/src", entrypoint)]
+  const pending = [join(root, entrypoint)]
   while (pending.length > 0) {
     const file = pending.pop()!
     if (files.has(file)) continue
@@ -115,7 +115,7 @@ describe("release target construction", () => {
   })
 
   test("keeps the full public client graph out of the server, SQL, model, and TUI runtimes", async () => {
-    const graph = await sourceGraph("client-main.ts")
+    const graph = await sourceGraph("apps/rika/src/client-main.ts")
     const files = [...graph.files].join("\n")
     const external = [...graph.external].join("\n")
     for (const forbidden of [
@@ -135,8 +135,8 @@ describe("release target construction", () => {
   })
 
   test("keeps executable dependency sets separated", async () => {
-    const interactive = await sourceGraph("interactive-main.ts")
-    const server = await sourceGraph("server-main.ts")
+    const interactive = await sourceGraph("apps/rika/src/interactive-main.ts")
+    const server = await sourceGraph("apps/server/src/server-main.ts")
     const interactiveFiles = [...interactive.files].join("\n")
     const serverFiles = [...server.files].join("\n")
     expect(interactiveFiles).not.toContain("/transport/host/server-host-transport.ts")

@@ -14,9 +14,9 @@ import { makeClientMessageWriter, makePhysicalFeed, traceInteractiveEvent } from
 import type { ClientRequest, PhysicalFeed } from "./server-client-feed"
 import { makeInteractiveSession } from "./server-client-session"
 import { serverSocketFailure } from "./server-client-reconnect"
-import { clientMessageFrames, makeServerMessageFrameDecoder, transportError } from "../protocol/server-message-codec"
-import { defaultOutboundCapacity, json, maxFrameBytes } from "../protocol/server-protocol"
-import { makeClientHandshakePair, verifyServerHandshake } from "../protocol/server-protocol-handshake"
+import { clientMessageFrames, makeServerMessageFrameDecoder, transportError } from "@rika/server/server-message-codec"
+import { defaultOutboundCapacity, json, maxFrameBytes } from "@rika/server/server-protocol"
+import { makeClientHandshakePair, verifyServerHandshake } from "@rika/server/server-protocol-handshake"
 
 const gapEvent = (event: InteractiveEvent.InteractiveEvent): InteractiveEvent.InteractiveEvent | undefined => {
   if (event._tag === "ResyncRequired") return event

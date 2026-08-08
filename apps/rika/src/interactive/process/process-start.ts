@@ -90,7 +90,10 @@ export const start = () => {
   else if (environment.editor._tag === "Some") editor = environment.editor.value
   const serverRuntime = import.meta.path.startsWith("/$bunfs/")
     ? { executable: join(dirname(process.execPath), ".rika-server"), arguments: [] }
-    : { executable: process.execPath, arguments: [join(import.meta.dir, "..", "..", "server-main.ts")] }
+    : {
+        executable: process.execPath,
+        arguments: [join(import.meta.dir, "..", "..", "..", "..", "server", "src", "server-main.ts")],
+      }
   let clientModeRoutes: ModeRoutes | undefined
   const clientOwnedInteractiveFunction = interactiveTui({ editor, modeRoutes: () => clientModeRoutes })
 

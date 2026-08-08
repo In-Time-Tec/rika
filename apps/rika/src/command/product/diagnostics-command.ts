@@ -3,7 +3,7 @@ import { Argument, Command } from "effect/unstable/cli"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import * as DataRoot from "@rika/config/canonical-data-root"
 import { resolveProfileDataPaths } from "@rika/config/profile-data-paths"
-import * as Logging from "../../diagnostics/diagnostic-file-logging"
+import * as Logging from "@rika/server/diagnostic-file-logging"
 
 const dataRoot = Effect.fn("DiagnosticsCommand.dataRoot")(function* () {
   const home = yield* Config.option(Config.string("HOME"))

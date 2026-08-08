@@ -1,6 +1,6 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Effect, Function, Layer, Scope } from "effect"
-import * as ServerEndpoint from "../src/server/process/server-endpoint"
+import * as ServerEndpoint from "@rika/server/server-endpoint"
 import { alive } from "./server-transport-process"
 import { awaitExit } from "./server-process-exit"
 

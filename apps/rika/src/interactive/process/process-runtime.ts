@@ -15,7 +15,7 @@ type PromptPart = ReturnType<ReturnType<typeof promptParts>>[number]
 import * as Thread from "@rika/product/thread-record"
 import * as ProductOperation from "@rika/product/product-operation"
 import { Cause, Clock, Deferred, Effect, Fiber, FileSystem, Schema, SubscriptionRef } from "effect"
-import * as Logging from "../../diagnostics/diagnostic-file-logging"
+import * as Logging from "@rika/server/diagnostic-file-logging"
 import { workspaceDirectory } from "@rika/config/configuration-paths"
 import type { InteractiveRuntimeContext } from "./interactive-runtime-context"
 

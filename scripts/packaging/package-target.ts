@@ -61,7 +61,7 @@ const program = Effect.gen(function* () {
         try: () => {
           const metadata = targets[target]
           return Bun.build({
-            entrypoints: [path.join(root, "apps/rika/src", entrypoint)],
+            entrypoints: [path.join(root, entrypoint)],
             compile: { target: metadata.bun, outfile },
             minify: true,
             external: ["msgpackr-extract"],
@@ -110,10 +110,20 @@ const program = Effect.gen(function* () {
         () =>
           Effect.gen(function* () {
             const { identity } = yield* buildIdentity()
-            yield* checkedBuild("client-main.ts", path.join(bin, "rika"), target, identity)
-            yield* checkedBuild("interactive-main.ts", path.join(bin, ".rika-interactive"), target, identity)
-            yield* checkedBuild("server-main.ts", path.join(bin, ".rika-server"), target, identity)
-            yield* checkedBuild("performance-main.ts", path.join(bin, ".rika-performance"), target, identity)
+            yield* checkedBuild("apps/rika/src/client-main.ts", path.join(bin, "rika"), target, identity)
+            yield* checkedBuild(
+              "apps/rika/src/interactive-main.ts",
+              path.join(bin, ".rika-interactive"),
+              target,
+              identity,
+            )
+            yield* checkedBuild("apps/server/src/server-main.ts", path.join(bin, ".rika-server"), target, identity)
+            yield* checkedBuild(
+              "apps/rika/src/performance-main.ts",
+              path.join(bin, ".rika-performance"),
+              target,
+              identity,
+            )
             yield* fileSystem.writeFileString(
               path.join(stage, "INSTALL"),
               "Install bin/rika on PATH. Keep the private executables in bin beside it.\n",
