@@ -18,15 +18,13 @@
     "./server-startup": "./src/server/process/server-startup.ts",
     "./server-process-launch": "./src/server/process/server-process-launch.ts",
     "./server-host-transport": "./src/transport/host/server-host-transport.ts",
-    "./server-message-codec": "./src/transport/protocol/server-message-codec.ts",
-    "./server-protocol": "./src/transport/protocol/server-protocol.ts",
-    "./server-protocol-handshake": "./src/transport/protocol/server-protocol-handshake.ts",
     "./application-version": "./src/platform/application-version.ts",
     "./diagnostic-file-logging": "./src/diagnostics/diagnostic-file-logging.ts",
     "./diagnostic-file-logging-contract": "./src/diagnostics/diagnostic-file-logging-contract.ts"
   },
   "dependencies": {
     "@effect/platform-bun": "catalog:",
+    "@rika/client": "workspace:*",
     "@rika/config": "workspace:*",
     "@rika/execution": "workspace:*",
     "@rika/extensions": "workspace:*",

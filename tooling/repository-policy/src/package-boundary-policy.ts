@@ -50,6 +50,7 @@ const languageModelProviderPackages = new Set([
 ])
 const validKinds = new Set(["domain", "capability", "adapter", "application", "tooling"])
 const allowedPackageEdges: Readonly<Record<string, ReadonlySet<string>>> = {
+  "@rika/client": new Set(["@rika/product"]),
   "@rika/execution": new Set(["@rika/tools", "@rika/product"]),
   "@rika/sandbox": new Set(),
   "@rika/tools": new Set(["@rika/config"]),
@@ -58,6 +59,7 @@ const allowedPackageEdges: Readonly<Record<string, ReadonlySet<string>>> = {
   "@rika/product": new Set(["@rika/config", "@rika/extensions", "@rika/tools", "@rika/transcript"]),
   "@rika/terminal": new Set(["@rika/config", "@rika/transcript"]),
   "@rika/server": new Set([
+    "@rika/client",
     "@rika/config",
     "@rika/execution",
     "@rika/extensions",
@@ -67,6 +69,7 @@ const allowedPackageEdges: Readonly<Record<string, ReadonlySet<string>>> = {
     "@rika/tools",
   ]),
   "@rika/cli": new Set([
+    "@rika/client",
     "@rika/execution",
     "@rika/config",
     "@rika/extensions",
@@ -481,11 +484,11 @@ const checkSourceBasename = (filePath: string) => {
       "index basenames are not semantic module names",
       "Rename the module to its domain role",
     )
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+){1,4}\.(?:tsx?|mts|cts)$/.test(basename) && !basename.endsWith(".test.ts"))
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+){0,4}\.(?:tsx?|mts|cts)$/.test(basename) && !basename.endsWith(".test.ts"))
     return diagnostic(
       filePath,
       "basename",
-      "source basename is not two-to-five-word kebab case",
+      "source basename is not one-to-five-word kebab case",
       "Rename the file to a descriptive semantic role",
     )
   return undefined

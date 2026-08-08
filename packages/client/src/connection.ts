@@ -2,21 +2,20 @@ import * as ProductOperation from "@rika/product/product-operation"
 import * as InteractiveSession from "@rika/product/interactive-session"
 import * as InteractiveEvent from "@rika/product/interactive-event"
 import type { InteractiveCommand } from "@rika/product/interactive-command"
-import * as BunSocket from "@effect/platform-bun/BunSocket"
 import * as ServerHandshake from "@rika/product/server-service-handshake"
 import * as ServerFeed from "@rika/product/server-interactive-feed"
 import * as ServerService from "@rika/product/server-service"
 import * as ThreadView from "@rika/product/thread-view"
 import * as Thread from "@rika/product/thread-record"
-import { Context, Crypto, Deferred, Effect, Exit, Layer, Queue, Ref, Schema, Scope, Semaphore } from "effect"
+import { Crypto, Deferred, Effect, Exit, Queue, Ref, Schema, Scope, Semaphore } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
-import { makeClientMessageWriter, makePhysicalFeed, traceInteractiveEvent } from "./server-client-feed"
-import type { ClientRequest, PhysicalFeed } from "./server-client-feed"
-import { makeInteractiveSession } from "./server-client-session"
-import { serverSocketFailure } from "./server-client-reconnect"
-import { clientMessageFrames, makeServerMessageFrameDecoder, transportError } from "@rika/server/server-message-codec"
-import { defaultOutboundCapacity, json, maxFrameBytes } from "@rika/server/server-protocol"
-import { makeClientHandshakePair, verifyServerHandshake } from "@rika/server/server-protocol-handshake"
+import { makeClientMessageWriter, makePhysicalFeed, traceInteractiveEvent } from "./feed"
+import type { ClientRequest, PhysicalFeed } from "./feed"
+import { makeInteractiveSession } from "./session"
+import { serverSocketFailure } from "./reconnect"
+import { clientMessageFrames, makeServerMessageFrameDecoder, transportError } from "./protocol/server-message-codec"
+import { defaultOutboundCapacity, json, maxFrameBytes } from "./protocol/server-protocol"
+import { makeClientHandshakePair, verifyServerHandshake } from "./protocol/server-protocol-handshake"
 
 const gapEvent = (event: InteractiveEvent.InteractiveEvent): InteractiveEvent.InteractiveEvent | undefined => {
   if (event._tag === "ResyncRequired") return event
@@ -55,12 +54,7 @@ export const connect = Effect.fn("ServerTransport.connect")(function* (options: 
   const crypto = yield* Crypto.Crypto
   const connectionScope = yield* Scope.make()
   yield* Effect.addFinalizer(() => Scope.close(connectionScope, Exit.void))
-  const webSocketContext = yield* Scope.provide(Layer.build(BunSocket.layerWebSocketConstructor), connectionScope)
-  const webSocketConstructor = Context.get(webSocketContext, Socket.WebSocketConstructor)
-  const socket = yield* Scope.provide(
-    Socket.makeWebSocket(options.url).pipe(Effect.provideService(Socket.WebSocketConstructor, webSocketConstructor)),
-    connectionScope,
-  )
+  const socket = yield* Scope.provide(Socket.makeWebSocket(options.url), connectionScope)
   const rawWriter = yield* Scope.provide(socket.writer, connectionScope)
   const outbound = yield* Queue.bounded<string | Socket.CloseEvent>(defaultOutboundCapacity)
   const closing = yield* Deferred.make<void>()

@@ -17,6 +17,7 @@
   "dependencies": {
     "@effect/platform-bun": "catalog:",
     "@opentui/core": "catalog:",
+    "@rika/client": "workspace:*",
     "@rika/config": "workspace:*",
     "@rika/execution": "workspace:*",
     "@rika/extensions": "workspace:*",

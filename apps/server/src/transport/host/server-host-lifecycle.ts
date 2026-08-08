@@ -29,7 +29,7 @@ import type { Owner } from "./server-host-operation"
 import { makeConnectionHandler } from "./server-host-connection"
 import { isServerPath } from "./server-websocket-server"
 import { makeInteractiveRouter } from "./server-host-feed"
-import { defaultOutboundCapacity, json } from "../protocol/server-protocol"
+import { defaultOutboundCapacity, json } from "@rika/client/protocol/server-protocol"
 export const host = Effect.fn("ServerTransport.host")(function* (options: {
   readonly port: number
   readonly identity: string

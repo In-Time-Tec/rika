@@ -19,8 +19,8 @@ import {
   Semaphore,
 } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
-import { failureKind, outputFrames } from "../protocol/server-message-codec"
-import { json } from "../protocol/server-protocol"
+import { failureKind, outputFrames } from "@rika/client/protocol/server-message-codec"
+import { json } from "@rika/client/protocol/server-protocol"
 import { formatOutput } from "./server-host-command"
 import type { ServerRoute } from "./server-host-types"
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Socket from "effect/unstable/socket/Socket"
-import { serverSocketFailure } from "../src/transport/client/server-client-reconnect"
+import { serverSocketFailure } from "@rika/client/reconnect"
 
 const closeFailure = (code: number) => Socket.SocketError.make({ reason: Socket.SocketCloseError.make({ code }) })
 

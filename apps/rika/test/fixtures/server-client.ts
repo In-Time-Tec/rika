@@ -1,5 +1,6 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
+import * as BunSocket from "@effect/platform-bun/BunSocket"
 
 import { Clock, Config, Effect, FileSystem, Layer, Logger, Path, Ref, Schema, Stdio, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
@@ -104,7 +105,12 @@ const statusLogger = Logger.make(({ message }) => {
   supersedeStatusCount += 1
   process.stdout.write(`${JSON.stringify({ type: "server-status", callbacks: supersedeStatusCount })}\n`)
 })
-const MainLayer = Layer.mergeAll(BunServices.layer, Logger.layer([statusLogger]), Sha256BunLayer)
+const MainLayer = Layer.mergeAll(
+  BunServices.layer,
+  Logger.layer([statusLogger]),
+  Sha256BunLayer,
+  BunSocket.layerWebSocketConstructor,
+)
 
 BunRuntime.runMain(
   Effect.scoped(

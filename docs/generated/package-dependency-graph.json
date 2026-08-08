@@ -11,6 +11,23 @@
       "publicExports": []
     },
     {
+      "id": "package:@rika/client",
+      "package": "@rika/client",
+      "workspace": "@rika/client",
+      "kind": "package",
+      "production": true,
+      "publicExports": [
+        "./connection",
+        "./feed",
+        "./protocol/server-message-codec",
+        "./protocol/server-protocol",
+        "./protocol/server-protocol-handshake",
+        "./reconnect",
+        "./session",
+        "./sha256"
+      ]
+    },
+    {
       "id": "package:@rika/config",
       "package": "@rika/config",
       "workspace": "@rika/config",
@@ -154,12 +171,9 @@
         "./diagnostic-file-logging-contract",
         "./server-endpoint",
         "./server-host-transport",
-        "./server-message-codec",
         "./server-process",
         "./server-process-launch",
         "./server-process-spawn",
-        "./server-protocol",
-        "./server-protocol-handshake",
         "./server-startup"
       ]
     },
@@ -247,6 +261,15 @@
     }
   ],
   "edges": [
+    {
+      "from": "package:@rika/cli",
+      "to": "package:@rika/client",
+      "specifier": "@rika/client",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
     {
       "from": "package:@rika/cli",
       "to": "package:@rika/config",
@@ -338,6 +361,15 @@
       "dependencySection": "dependencies"
     },
     {
+      "from": "package:@rika/client",
+      "to": "package:@rika/product",
+      "specifier": "@rika/product",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
+    {
       "from": "package:@rika/execution",
       "to": "package:@rika/config",
       "specifier": "@rika/config",
@@ -471,6 +503,15 @@
       "relationship": "test",
       "production": false,
       "dependencySection": "devDependencies"
+    },
+    {
+      "from": "package:@rika/server",
+      "to": "package:@rika/client",
+      "specifier": "@rika/client",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
     },
     {
       "from": "package:@rika/server",

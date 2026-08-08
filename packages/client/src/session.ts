@@ -5,8 +5,8 @@ import * as ProductOperation from "@rika/product/product-operation"
 import * as ServerService from "@rika/product/server-service"
 import { Deferred, Effect, Queue } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
-import { json } from "@rika/server/server-protocol"
-import type { PhysicalFeed } from "./server-client-feed"
+import { json } from "./protocol/server-protocol"
+import type { PhysicalFeed } from "./feed"
 
 type SessionOptions = {
   readonly feed: PhysicalFeed

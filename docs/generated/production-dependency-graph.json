@@ -489,42 +489,6 @@
       "publicExports": []
     },
     {
-      "id": "apps/rika/src/transport/client/server-client-connection.ts",
-      "path": "apps/rika/src/transport/client/server-client-connection.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "apps/rika/src/transport/client/server-client-feed.ts",
-      "path": "apps/rika/src/transport/client/server-client-feed.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "apps/rika/src/transport/client/server-client-reconnect.ts",
-      "path": "apps/rika/src/transport/client/server-client-reconnect.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
-      "id": "apps/rika/src/transport/client/server-client-session.ts",
-      "path": "apps/rika/src/transport/client/server-client-session.ts",
-      "workspace": "@rika/cli",
-      "package": "@rika/cli",
-      "kind": "source",
-      "production": true,
-      "publicExports": []
-    },
-    {
       "id": "apps/rika/src/transport/client/server-client-startup.ts",
       "path": "apps/rika/src/transport/client/server-client-startup.ts",
       "workspace": "@rika/cli",
@@ -955,33 +919,6 @@
       "kind": "source",
       "production": true,
       "publicExports": []
-    },
-    {
-      "id": "apps/server/src/transport/protocol/server-message-codec.ts",
-      "path": "apps/server/src/transport/protocol/server-message-codec.ts",
-      "workspace": "@rika/server",
-      "package": "@rika/server",
-      "kind": "source",
-      "production": true,
-      "publicExports": ["./server-message-codec"]
-    },
-    {
-      "id": "apps/server/src/transport/protocol/server-protocol-handshake.ts",
-      "path": "apps/server/src/transport/protocol/server-protocol-handshake.ts",
-      "workspace": "@rika/server",
-      "package": "@rika/server",
-      "kind": "source",
-      "production": true,
-      "publicExports": ["./server-protocol-handshake"]
-    },
-    {
-      "id": "apps/server/src/transport/protocol/server-protocol.ts",
-      "path": "apps/server/src/transport/protocol/server-protocol.ts",
-      "workspace": "@rika/server",
-      "package": "@rika/server",
-      "kind": "source",
-      "production": true,
-      "publicExports": ["./server-protocol"]
     },
     {
       "id": "external:@batonfx/core",
@@ -1568,6 +1505,23 @@
       "publicExports": []
     },
     {
+      "id": "package:@rika/client",
+      "package": "@rika/client",
+      "workspace": "@rika/client",
+      "kind": "package",
+      "production": true,
+      "publicExports": [
+        "./connection",
+        "./feed",
+        "./protocol/server-message-codec",
+        "./protocol/server-protocol",
+        "./protocol/server-protocol-handshake",
+        "./reconnect",
+        "./session",
+        "./sha256"
+      ]
+    },
+    {
       "id": "package:@rika/config",
       "package": "@rika/config",
       "workspace": "@rika/config",
@@ -1711,12 +1665,9 @@
         "./diagnostic-file-logging-contract",
         "./server-endpoint",
         "./server-host-transport",
-        "./server-message-codec",
         "./server-process",
         "./server-process-launch",
         "./server-process-spawn",
-        "./server-protocol",
-        "./server-protocol-handshake",
         "./server-startup"
       ]
     },
@@ -1801,6 +1752,78 @@
         "./transcript-unit-identity",
         "./transcript-unit-order"
       ]
+    },
+    {
+      "id": "packages/client/src/connection.ts",
+      "path": "packages/client/src/connection.ts",
+      "workspace": "@rika/client",
+      "package": "@rika/client",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./connection"]
+    },
+    {
+      "id": "packages/client/src/feed.ts",
+      "path": "packages/client/src/feed.ts",
+      "workspace": "@rika/client",
+      "package": "@rika/client",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./feed"]
+    },
+    {
+      "id": "packages/client/src/protocol/server-message-codec.ts",
+      "path": "packages/client/src/protocol/server-message-codec.ts",
+      "workspace": "@rika/client",
+      "package": "@rika/client",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./protocol/server-message-codec"]
+    },
+    {
+      "id": "packages/client/src/protocol/server-protocol-handshake.ts",
+      "path": "packages/client/src/protocol/server-protocol-handshake.ts",
+      "workspace": "@rika/client",
+      "package": "@rika/client",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./protocol/server-protocol-handshake"]
+    },
+    {
+      "id": "packages/client/src/protocol/server-protocol.ts",
+      "path": "packages/client/src/protocol/server-protocol.ts",
+      "workspace": "@rika/client",
+      "package": "@rika/client",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./protocol/server-protocol"]
+    },
+    {
+      "id": "packages/client/src/reconnect.ts",
+      "path": "packages/client/src/reconnect.ts",
+      "workspace": "@rika/client",
+      "package": "@rika/client",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./reconnect"]
+    },
+    {
+      "id": "packages/client/src/session.ts",
+      "path": "packages/client/src/session.ts",
+      "workspace": "@rika/client",
+      "package": "@rika/client",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./session"]
+    },
+    {
+      "id": "packages/client/src/sha256.ts",
+      "path": "packages/client/src/sha256.ts",
+      "workspace": "@rika/client",
+      "package": "@rika/client",
+      "kind": "source",
+      "production": true,
+      "publicExports": ["./sha256"]
     },
     {
       "id": "packages/config/src/model-routing/behavior-mode.ts",
@@ -7602,16 +7625,16 @@
     },
     {
       "from": "apps/rika/src/interactive/process/process-prompt.ts",
-      "to": "apps/server/src/transport/protocol/server-message-codec.ts",
-      "specifier": "@rika/server/server-message-codec",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
       "from": "apps/rika/src/interactive/process/process-prompt.ts",
-      "to": "external:effect",
-      "specifier": "effect",
+      "to": "packages/client/src/protocol/server-message-codec.ts",
+      "specifier": "@rika/client/protocol/server-message-codec",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -8217,342 +8240,6 @@
       "production": true
     },
     {
-      "from": "apps/rika/src/transport/client/server-client-connection.ts",
-      "to": "apps/rika/src/transport/client/server-client-feed.ts",
-      "specifier": "./server-client-feed",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-connection.ts",
-      "to": "apps/rika/src/transport/client/server-client-reconnect.ts",
-      "specifier": "./server-client-reconnect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-connection.ts",
-      "to": "apps/rika/src/transport/client/server-client-session.ts",
-      "specifier": "./server-client-session",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-connection.ts",
-      "to": "apps/server/src/transport/protocol/server-message-codec.ts",
-      "specifier": "@rika/server/server-message-codec",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-connection.ts",
-      "to": "apps/server/src/transport/protocol/server-protocol-handshake.ts",
-      "specifier": "@rika/server/server-protocol-handshake",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-connection.ts",
-      "to": "apps/server/src/transport/protocol/server-protocol.ts",
-      "specifier": "@rika/server/server-protocol",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-connection.ts",
-      "to": "external:@effect/platform-bun/BunSocket",
-      "specifier": "@effect/platform-bun/BunSocket",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-connection.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-connection.ts",
-      "to": "external:effect/unstable/socket/Socket",
-      "specifier": "effect/unstable/socket/Socket",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-connection.ts",
-      "to": "packages/product/src/operation/interactive/interactive-command.ts",
-      "specifier": "@rika/product/interactive-command",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-connection.ts",
-      "to": "packages/product/src/operation/interactive/interactive-event.ts",
-      "specifier": "@rika/product/interactive-event",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-connection.ts",
-      "to": "packages/product/src/operation/interactive/interactive-session.ts",
-      "specifier": "@rika/product/interactive-session",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-connection.ts",
-      "to": "packages/product/src/server/server-interactive-feed.ts",
-      "specifier": "@rika/product/server-interactive-feed",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-connection.ts",
-      "to": "packages/product/src/server/server-service-handshake.ts",
-      "specifier": "@rika/product/server-service-handshake",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-connection.ts",
-      "to": "packages/product/src/server/server-service.ts",
-      "specifier": "@rika/product/server-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-connection.ts",
-      "to": "packages/product/src/thread/model/thread-record.ts",
-      "specifier": "@rika/product/thread-record",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-connection.ts",
-      "to": "packages/product/src/thread/model/thread-view.ts",
-      "specifier": "@rika/product/thread-view",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-feed.ts",
-      "to": "apps/server/src/transport/protocol/server-message-codec.ts",
-      "specifier": "@rika/server/server-message-codec",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-feed.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-feed.ts",
-      "to": "external:effect/unstable/socket/Socket",
-      "specifier": "effect/unstable/socket/Socket",
-      "kind": "dynamic-import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-feed.ts",
-      "to": "packages/product/src/operation/interactive/interactive-event.ts",
-      "specifier": "@rika/product/interactive-event",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-feed.ts",
-      "to": "packages/product/src/operation/interactive/interactive-session.ts",
-      "specifier": "@rika/product/interactive-session",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-feed.ts",
-      "to": "packages/product/src/server/server-interactive-feed.ts",
-      "specifier": "@rika/product/server-interactive-feed",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-feed.ts",
-      "to": "packages/product/src/server/server-service.ts",
-      "specifier": "@rika/product/server-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-reconnect.ts",
-      "to": "apps/server/src/transport/protocol/server-message-codec.ts",
-      "specifier": "@rika/server/server-message-codec",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-reconnect.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-reconnect.ts",
-      "to": "external:effect/unstable/socket/Socket",
-      "specifier": "effect/unstable/socket/Socket",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-reconnect.ts",
-      "to": "packages/product/src/operation/interactive/interactive-event.ts",
-      "specifier": "@rika/product/interactive-event",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-reconnect.ts",
-      "to": "packages/product/src/operation/interactive/interactive-session.ts",
-      "specifier": "@rika/product/interactive-session",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-reconnect.ts",
-      "to": "packages/product/src/server/server-interactive-feed.ts",
-      "specifier": "@rika/product/server-interactive-feed",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-reconnect.ts",
-      "to": "packages/product/src/server/server-service.ts",
-      "specifier": "@rika/product/server-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-reconnect.ts",
-      "to": "packages/product/src/thread/model/thread-record.ts",
-      "specifier": "@rika/product/thread-record",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-session.ts",
-      "to": "apps/rika/src/transport/client/server-client-feed.ts",
-      "specifier": "./server-client-feed",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-session.ts",
-      "to": "apps/server/src/transport/protocol/server-protocol.ts",
-      "specifier": "@rika/server/server-protocol",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-session.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-session.ts",
-      "to": "external:effect/unstable/socket/Socket",
-      "specifier": "effect/unstable/socket/Socket",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-session.ts",
-      "to": "packages/product/src/operation/interactive/interactive-command.ts",
-      "specifier": "@rika/product/interactive-command",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-session.ts",
-      "to": "packages/product/src/operation/interactive/interactive-event.ts",
-      "specifier": "@rika/product/interactive-event",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-session.ts",
-      "to": "packages/product/src/operation/interactive/interactive-session.ts",
-      "specifier": "@rika/product/interactive-session",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-session.ts",
-      "to": "packages/product/src/server/server-service.ts",
-      "specifier": "@rika/product/server-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-startup.ts",
-      "to": "apps/rika/src/transport/client/server-client-connection.ts",
-      "specifier": "./server-client-connection",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-startup.ts",
-      "to": "apps/rika/src/transport/client/server-client-reconnect.ts",
-      "specifier": "./server-client-reconnect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
       "from": "apps/rika/src/transport/client/server-client-startup.ts",
       "to": "apps/server/src/server/process/server-endpoint.ts",
       "specifier": "@rika/server/server-endpoint",
@@ -8578,14 +8265,6 @@
     },
     {
       "from": "apps/rika/src/transport/client/server-client-startup.ts",
-      "to": "apps/server/src/transport/protocol/server-message-codec.ts",
-      "specifier": "@rika/server/server-message-codec",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/transport/client/server-client-startup.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -8604,6 +8283,30 @@
       "from": "apps/rika/src/transport/client/server-client-startup.ts",
       "to": "external:effect/unstable/socket/Socket",
       "specifier": "effect/unstable/socket/Socket",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/transport/client/server-client-startup.ts",
+      "to": "packages/client/src/connection.ts",
+      "specifier": "@rika/client/connection",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/transport/client/server-client-startup.ts",
+      "to": "packages/client/src/protocol/server-message-codec.ts",
+      "specifier": "@rika/client/protocol/server-message-codec",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/transport/client/server-client-startup.ts",
+      "to": "packages/client/src/reconnect.ts",
+      "specifier": "@rika/client/reconnect",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -8636,6 +8339,14 @@
       "from": "apps/rika/src/transport/client/server-client-transport.ts",
       "to": "apps/rika/src/transport/client/server-client-startup.ts",
       "specifier": "./server-client-startup",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/transport/client/server-client-transport.ts",
+      "to": "external:@effect/platform-bun/BunSocket",
+      "specifier": "@effect/platform-bun/BunSocket",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10474,22 +10185,6 @@
     },
     {
       "from": "apps/server/src/transport/host/server-host-connection.ts",
-      "to": "apps/server/src/transport/protocol/server-message-codec.ts",
-      "specifier": "../protocol/server-message-codec",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/server/src/transport/host/server-host-connection.ts",
-      "to": "apps/server/src/transport/protocol/server-protocol.ts",
-      "specifier": "../protocol/server-protocol",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/server/src/transport/host/server-host-connection.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -10508,6 +10203,22 @@
       "from": "apps/server/src/transport/host/server-host-connection.ts",
       "to": "external:effect/unstable/socket/Socket",
       "specifier": "effect/unstable/socket/Socket",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/server/src/transport/host/server-host-connection.ts",
+      "to": "packages/client/src/protocol/server-message-codec.ts",
+      "specifier": "@rika/client/protocol/server-message-codec",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/server/src/transport/host/server-host-connection.ts",
+      "to": "packages/client/src/protocol/server-protocol.ts",
+      "specifier": "@rika/client/protocol/server-protocol",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10546,22 +10257,6 @@
     },
     {
       "from": "apps/server/src/transport/host/server-host-feed.ts",
-      "to": "apps/server/src/transport/protocol/server-message-codec.ts",
-      "specifier": "../protocol/server-message-codec",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/server/src/transport/host/server-host-feed.ts",
-      "to": "apps/server/src/transport/protocol/server-protocol.ts",
-      "specifier": "../protocol/server-protocol",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/server/src/transport/host/server-host-feed.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -10572,6 +10267,22 @@
       "from": "apps/server/src/transport/host/server-host-feed.ts",
       "to": "external:effect/Crypto",
       "specifier": "effect/Crypto",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/server/src/transport/host/server-host-feed.ts",
+      "to": "packages/client/src/protocol/server-message-codec.ts",
+      "specifier": "@rika/client/protocol/server-message-codec",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/server/src/transport/host/server-host-feed.ts",
+      "to": "packages/client/src/protocol/server-protocol.ts",
+      "specifier": "@rika/client/protocol/server-protocol",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10666,14 +10377,6 @@
     },
     {
       "from": "apps/server/src/transport/host/server-host-lifecycle.ts",
-      "to": "apps/server/src/transport/protocol/server-protocol.ts",
-      "specifier": "../protocol/server-protocol",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/server/src/transport/host/server-host-lifecycle.ts",
       "to": "external:@effect/platform-bun/BunHttpServer",
       "specifier": "@effect/platform-bun/BunHttpServer",
       "kind": "import",
@@ -10692,6 +10395,14 @@
       "from": "apps/server/src/transport/host/server-host-lifecycle.ts",
       "to": "external:effect/unstable/http",
       "specifier": "effect/unstable/http",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/server/src/transport/host/server-host-lifecycle.ts",
+      "to": "packages/client/src/protocol/server-protocol.ts",
+      "specifier": "@rika/client/protocol/server-protocol",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10738,22 +10449,6 @@
     },
     {
       "from": "apps/server/src/transport/host/server-host-operation.ts",
-      "to": "apps/server/src/transport/protocol/server-message-codec.ts",
-      "specifier": "../protocol/server-message-codec",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/server/src/transport/host/server-host-operation.ts",
-      "to": "apps/server/src/transport/protocol/server-protocol.ts",
-      "specifier": "../protocol/server-protocol",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/server/src/transport/host/server-host-operation.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -10764,6 +10459,22 @@
       "from": "apps/server/src/transport/host/server-host-operation.ts",
       "to": "external:effect/unstable/socket/Socket",
       "specifier": "effect/unstable/socket/Socket",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/server/src/transport/host/server-host-operation.ts",
+      "to": "packages/client/src/protocol/server-message-codec.ts",
+      "specifier": "@rika/client/protocol/server-message-codec",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/server/src/transport/host/server-host-operation.ts",
+      "to": "packages/client/src/protocol/server-protocol.ts",
+      "specifier": "@rika/client/protocol/server-protocol",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10826,16 +10537,16 @@
     },
     {
       "from": "apps/server/src/transport/host/server-host-transport.ts",
-      "to": "apps/server/src/transport/protocol/server-protocol.ts",
-      "specifier": "../protocol/server-protocol",
+      "to": "external:effect",
+      "specifier": "effect",
       "kind": "import",
       "relationship": "runtime",
       "production": true
     },
     {
       "from": "apps/server/src/transport/host/server-host-transport.ts",
-      "to": "external:effect",
-      "specifier": "effect",
+      "to": "packages/client/src/protocol/server-protocol.ts",
+      "specifier": "@rika/client/protocol/server-protocol",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -10873,76 +10584,13 @@
       "production": true
     },
     {
-      "from": "apps/server/src/transport/protocol/server-message-codec.ts",
-      "to": "apps/server/src/transport/protocol/server-protocol.ts",
-      "specifier": "./server-protocol",
-      "kind": "import",
+      "from": "package:@rika/cli",
+      "to": "package:@rika/client",
+      "specifier": "@rika/client",
+      "kind": "package",
       "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/server/src/transport/protocol/server-message-codec.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/server/src/transport/protocol/server-message-codec.ts",
-      "to": "packages/product/src/server/server-service.ts",
-      "specifier": "@rika/product/server-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/server/src/transport/protocol/server-protocol-handshake.ts",
-      "to": "apps/server/src/transport/protocol/server-protocol.ts",
-      "specifier": "./server-protocol",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/server/src/transport/protocol/server-protocol-handshake.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/server/src/transport/protocol/server-protocol-handshake.ts",
-      "to": "packages/product/src/server/server-service-handshake.ts",
-      "specifier": "@rika/product/server-service-handshake",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/server/src/transport/protocol/server-protocol-handshake.ts",
-      "to": "packages/product/src/server/server-service.ts",
-      "specifier": "@rika/product/server-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/server/src/transport/protocol/server-protocol.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/server/src/transport/protocol/server-protocol.ts",
-      "to": "packages/product/src/server/server-service.ts",
-      "specifier": "@rika/product/server-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
+      "production": true,
+      "dependencySection": "dependencies"
     },
     {
       "from": "package:@rika/cli",
@@ -11035,6 +10683,15 @@
       "dependencySection": "dependencies"
     },
     {
+      "from": "package:@rika/client",
+      "to": "package:@rika/product",
+      "specifier": "@rika/product",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
+    {
       "from": "package:@rika/execution",
       "to": "package:@rika/product",
       "specifier": "@rika/product",
@@ -11083,6 +10740,15 @@
       "from": "package:@rika/product",
       "to": "package:@rika/transcript",
       "specifier": "@rika/transcript",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
+    {
+      "from": "package:@rika/server",
+      "to": "package:@rika/client",
+      "specifier": "@rika/client",
       "kind": "package",
       "relationship": "runtime",
       "production": true,
@@ -11204,6 +10870,422 @@
       "relationship": "runtime",
       "production": true,
       "dependencySection": "dependencies"
+    },
+    {
+      "from": "packages/client/src/connection.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/connection.ts",
+      "to": "external:effect/unstable/socket/Socket",
+      "specifier": "effect/unstable/socket/Socket",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/connection.ts",
+      "to": "packages/client/src/feed.ts",
+      "specifier": "./feed",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/connection.ts",
+      "to": "packages/client/src/protocol/server-message-codec.ts",
+      "specifier": "./protocol/server-message-codec",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/connection.ts",
+      "to": "packages/client/src/protocol/server-protocol-handshake.ts",
+      "specifier": "./protocol/server-protocol-handshake",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/connection.ts",
+      "to": "packages/client/src/protocol/server-protocol.ts",
+      "specifier": "./protocol/server-protocol",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/connection.ts",
+      "to": "packages/client/src/reconnect.ts",
+      "specifier": "./reconnect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/connection.ts",
+      "to": "packages/client/src/session.ts",
+      "specifier": "./session",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/connection.ts",
+      "to": "packages/product/src/operation/interactive/interactive-command.ts",
+      "specifier": "@rika/product/interactive-command",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/connection.ts",
+      "to": "packages/product/src/operation/interactive/interactive-event.ts",
+      "specifier": "@rika/product/interactive-event",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/connection.ts",
+      "to": "packages/product/src/operation/interactive/interactive-session.ts",
+      "specifier": "@rika/product/interactive-session",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/connection.ts",
+      "to": "packages/product/src/server/server-interactive-feed.ts",
+      "specifier": "@rika/product/server-interactive-feed",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/connection.ts",
+      "to": "packages/product/src/server/server-service-handshake.ts",
+      "specifier": "@rika/product/server-service-handshake",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/connection.ts",
+      "to": "packages/product/src/server/server-service.ts",
+      "specifier": "@rika/product/server-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/connection.ts",
+      "to": "packages/product/src/thread/model/thread-record.ts",
+      "specifier": "@rika/product/thread-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/connection.ts",
+      "to": "packages/product/src/thread/model/thread-view.ts",
+      "specifier": "@rika/product/thread-view",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/feed.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/feed.ts",
+      "to": "external:effect/unstable/socket/Socket",
+      "specifier": "effect/unstable/socket/Socket",
+      "kind": "dynamic-import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/feed.ts",
+      "to": "packages/client/src/protocol/server-message-codec.ts",
+      "specifier": "./protocol/server-message-codec",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/feed.ts",
+      "to": "packages/product/src/operation/interactive/interactive-event.ts",
+      "specifier": "@rika/product/interactive-event",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/feed.ts",
+      "to": "packages/product/src/operation/interactive/interactive-session.ts",
+      "specifier": "@rika/product/interactive-session",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/feed.ts",
+      "to": "packages/product/src/server/server-interactive-feed.ts",
+      "specifier": "@rika/product/server-interactive-feed",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/feed.ts",
+      "to": "packages/product/src/server/server-service.ts",
+      "specifier": "@rika/product/server-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/protocol/server-message-codec.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/protocol/server-message-codec.ts",
+      "to": "packages/client/src/protocol/server-protocol.ts",
+      "specifier": "./server-protocol",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/protocol/server-message-codec.ts",
+      "to": "packages/product/src/server/server-service.ts",
+      "specifier": "@rika/product/server-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/protocol/server-protocol-handshake.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/protocol/server-protocol-handshake.ts",
+      "to": "packages/client/src/protocol/server-protocol.ts",
+      "specifier": "./server-protocol",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/protocol/server-protocol-handshake.ts",
+      "to": "packages/product/src/server/server-service-handshake.ts",
+      "specifier": "@rika/product/server-service-handshake",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/protocol/server-protocol-handshake.ts",
+      "to": "packages/product/src/server/server-service.ts",
+      "specifier": "@rika/product/server-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/protocol/server-protocol.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/protocol/server-protocol.ts",
+      "to": "packages/product/src/server/server-service.ts",
+      "specifier": "@rika/product/server-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/reconnect.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/reconnect.ts",
+      "to": "external:effect/unstable/socket/Socket",
+      "specifier": "effect/unstable/socket/Socket",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/reconnect.ts",
+      "to": "packages/client/src/protocol/server-message-codec.ts",
+      "specifier": "./protocol/server-message-codec",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/reconnect.ts",
+      "to": "packages/product/src/operation/interactive/interactive-event.ts",
+      "specifier": "@rika/product/interactive-event",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/reconnect.ts",
+      "to": "packages/product/src/operation/interactive/interactive-session.ts",
+      "specifier": "@rika/product/interactive-session",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/reconnect.ts",
+      "to": "packages/product/src/server/server-interactive-feed.ts",
+      "specifier": "@rika/product/server-interactive-feed",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/reconnect.ts",
+      "to": "packages/product/src/server/server-service.ts",
+      "specifier": "@rika/product/server-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/reconnect.ts",
+      "to": "packages/product/src/thread/model/thread-record.ts",
+      "specifier": "@rika/product/thread-record",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/session.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/session.ts",
+      "to": "external:effect/unstable/socket/Socket",
+      "specifier": "effect/unstable/socket/Socket",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/session.ts",
+      "to": "packages/client/src/feed.ts",
+      "specifier": "./feed",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/session.ts",
+      "to": "packages/client/src/protocol/server-protocol.ts",
+      "specifier": "./protocol/server-protocol",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/session.ts",
+      "to": "packages/product/src/operation/interactive/interactive-command.ts",
+      "specifier": "@rika/product/interactive-command",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/session.ts",
+      "to": "packages/product/src/operation/interactive/interactive-event.ts",
+      "specifier": "@rika/product/interactive-event",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/session.ts",
+      "to": "packages/product/src/operation/interactive/interactive-session.ts",
+      "specifier": "@rika/product/interactive-session",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/session.ts",
+      "to": "packages/product/src/server/server-service.ts",
+      "specifier": "@rika/product/server-service",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/sha256.ts",
+      "to": "packages/product/src/server/server-service-sha256-bun.ts",
+      "specifier": "@rika/product/server-service-sha256-bun",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/sha256.ts",
+      "to": "packages/product/src/server/server-service-sha256-node.ts",
+      "specifier": "@rika/product/server-service-sha256-node",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/sha256.ts",
+      "to": "packages/product/src/server/server-service-sha256-web.ts",
+      "specifier": "@rika/product/server-service-sha256-web",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/client/src/sha256.ts",
+      "to": "packages/product/src/server/server-service-sha256.ts",
+      "specifier": "@rika/product/server-service-sha256",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
     },
     {
       "from": "packages/config/src/model-routing/behavior-mode.ts",

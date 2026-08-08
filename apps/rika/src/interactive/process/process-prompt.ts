@@ -1,5 +1,5 @@
 import * as ExecutionRequest from "@rika/product/execution-request"
-import { maxClientMessageBytes } from "@rika/server/server-message-codec"
+import { maxClientMessageBytes } from "@rika/client/protocol/server-message-codec"
 import { promptParts } from "@rika/terminal/terminal-session"
 type PromptPart = ReturnType<ReturnType<typeof promptParts>>[number]
 import { Effect, FileSystem, Function, Schema } from "effect"

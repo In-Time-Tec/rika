@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/client",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/client/src packages/client/test",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit",
+    "test": "bun --bun vitest run packages/client"
+  },
+  "exports": {
+    "./connection": "./src/connection.ts",
+    "./session": "./src/session.ts",
+    "./feed": "./src/feed.ts",
+    "./reconnect": "./src/reconnect.ts",
+    "./protocol/server-protocol": "./src/protocol/server-protocol.ts",
+    "./protocol/server-message-codec": "./src/protocol/server-message-codec.ts",
+    "./protocol/server-protocol-handshake": "./src/protocol/server-protocol-handshake.ts",
+    "./sha256": "./src/sha256.ts"
+  },
+  "dependencies": {
+    "@rika/product": "workspace:*",
+    "effect": "catalog:"
+  },
+  "rika": {
+    "kind": "capability",
+    "domain": "client"
+  }
+}

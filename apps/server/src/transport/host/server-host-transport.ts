@@ -2,7 +2,7 @@ import * as ServerService from "@rika/product/server-service"
 import { Config, Deferred, Effect, FileSystem, Path } from "effect"
 import { readOrCreateToken, resolve, type ServerEndpoint } from "../../server/process/server-endpoint"
 import { releaseAdoptedStartup } from "../../server/process/server-startup"
-import { defaultOutboundCapacity } from "../protocol/server-protocol"
+import { defaultOutboundCapacity } from "@rika/client/protocol/server-protocol"
 import { host } from "./server-host-lifecycle"
 import type { Owner } from "./server-host-operation"
 

@@ -4034,6 +4034,14 @@
     },
     {
       "from": "apps/rika/test/fixtures/server-client.ts",
+      "to": "external:@effect/platform-bun/BunSocket",
+      "specifier": "@effect/platform-bun/BunSocket",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/fixtures/server-client.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",

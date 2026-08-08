@@ -6,8 +6,8 @@ import * as ServerService from "@rika/product/server-service"
 import { Deferred, Effect, Fiber, Function, Queue, Ref, Schema, Semaphore } from "effect"
 import type { Crypto as CryptoShape } from "effect/Crypto"
 import type { ServerRoute, ServerSession } from "./server-host-types"
-import { json } from "../protocol/server-protocol"
-import { serverMessageFrames } from "../protocol/server-message-codec"
+import { json } from "@rika/client/protocol/server-protocol"
+import { serverMessageFrames } from "@rika/client/protocol/server-message-codec"
 
 export const interactiveFeedInFlightCapacity = 32
 

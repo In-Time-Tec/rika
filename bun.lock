@@ -53,6 +53,7 @@
       "dependencies": {
         "@effect/platform-bun": "catalog:",
         "@opentui/core": "catalog:",
+        "@rika/client": "workspace:*",
         "@rika/config": "workspace:*",
         "@rika/execution": "workspace:*",
         "@rika/extensions": "workspace:*",
@@ -87,6 +88,7 @@
       "version": "0.3.17",
       "dependencies": {
         "@effect/platform-bun": "catalog:",
+        "@rika/client": "workspace:*",
         "@rika/config": "workspace:*",
         "@rika/execution": "workspace:*",
         "@rika/extensions": "workspace:*",
@@ -101,6 +103,14 @@
         "@types/bun": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",
+      },
+    },
+    "packages/client": {
+      "name": "@rika/client",
+      "version": "0.0.0",
+      "dependencies": {
+        "@rika/product": "workspace:*",
+        "effect": "catalog:",
       },
     },
     "packages/config": {
@@ -668,6 +678,8 @@
     "@pierre/theming": ["@pierre/theming@0.0.1", "", { "peerDependencies": { "@pierre/theme": "^1.0.0", "@shikijs/themes": "^3.0.0 || ^4.0.0", "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0", "shiki": "^3.0.0 || ^4.0.0" }, "optionalPeers": ["@pierre/theme", "@shikijs/themes", "react", "react-dom", "shiki"] }, "sha512-1thlEtJbqdyLzc1ZS2KQa1q7FzDGHT4dTEdKHoyQjOMeWWOmbVG5/ndEfOKfAb5Fzkz8cNJrOjFLiZoDH/A03A=="],
 
     "@rika/cli": ["@rika/cli@workspace:apps/rika"],
+
+    "@rika/client": ["@rika/client@workspace:packages/client"],
 
     "@rika/config": ["@rika/config@workspace:packages/config"],
 

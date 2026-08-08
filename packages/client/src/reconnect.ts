@@ -6,7 +6,7 @@ import * as ServerService from "@rika/product/server-service"
 import * as Thread from "@rika/product/thread-record"
 import { Cause, Clock, Deferred, Duration, Effect, Fiber, Function, Ref, Schedule, Schema } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
-import { failureKind, transportError } from "@rika/server/server-message-codec"
+import { failureKind, transportError } from "./protocol/server-message-codec"
 
 const mapServerSocketFailure = (cause: unknown, accepted: boolean): ServerService.ServerServiceError => {
   if (Socket.SocketError.is(cause) && cause.reason._tag === "SocketCloseError") {

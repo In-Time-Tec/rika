@@ -7,7 +7,7 @@ import * as Socket from "effect/unstable/socket/Socket"
 import { readOrCreateToken, resolve } from "@rika/server/server-endpoint"
 import * as ServerProcessStartup from "@rika/server/server-process"
 import { claimStartup } from "@rika/server/server-startup"
-import { transportError } from "@rika/server/server-message-codec"
+import { transportError } from "@rika/client/protocol/server-message-codec"
 
 const mapServerSocketFailure = (cause: unknown, accepted: boolean): ServerService.ServerServiceError => {
   if (Socket.SocketError.is(cause) && cause.reason._tag === "SocketCloseError") {
@@ -32,9 +32,17 @@ export const serverSocketFailure: {
   (accepted: boolean): (cause: unknown) => ServerService.ServerServiceError
   (cause: unknown, accepted: boolean): ServerService.ServerServiceError
 } = Function.dual(2, mapServerSocketFailure)
-import { connect } from "./server-client-connection"
-import { makeInteractiveSupervisor } from "./server-client-reconnect"
+import { connect } from "@rika/client/connection"
+import { makeInteractiveSupervisor } from "@rika/client/reconnect"
 export const make = Effect.fn("ServerTransport.make")(() =>
+  Effect.gen(function* () {
+    const webSocketConstructor = yield* Socket.WebSocketConstructor
+    return yield* makeWithConstructor(webSocketConstructor)
+  }),
+)
+const makeWithConstructor = (
+  webSocketConstructor: (url: string, protocols?: string | string[] | undefined) => WebSocket,
+) =>
   Effect.succeed(
     ServerService.Service.of({
       getOrCreate: (input) =>
@@ -55,6 +63,7 @@ export const make = Effect.fn("ServerTransport.make")(() =>
                 connect({ ...endpoint, ...input, token, connectRole, role: "attached" }).pipe(
                   Scope.provide(attemptScope),
                   Effect.provideService(Sha256, sha256),
+                  Effect.provideService(Socket.WebSocketConstructor, webSocketConstructor),
                 ),
               )
               if (result._tag === "Failure") {
@@ -271,5 +280,4 @@ export const make = Effect.fn("ServerTransport.make")(() =>
           ),
         ),
     }),
-  ),
-)
+  )
