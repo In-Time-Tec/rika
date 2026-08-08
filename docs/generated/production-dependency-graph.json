@@ -480,6 +480,15 @@
       "publicExports": []
     },
     {
+      "id": "apps/rika/src/server-entry.ts",
+      "path": "apps/rika/src/server-entry.ts",
+      "workspace": "@rika/cli",
+      "package": "@rika/cli",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "apps/rika/src/transport/client/server-client-connection.ts",
       "path": "apps/rika/src/transport/client/server-client-connection.ts",
       "workspace": "@rika/cli",
@@ -6465,6 +6474,14 @@
     },
     {
       "from": "apps/rika/src/client/private-runtime-launch.ts",
+      "to": "apps/rika/src/server-entry.ts",
+      "specifier": "../server-entry",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/client/private-runtime-launch.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -7921,6 +7938,14 @@
     },
     {
       "from": "apps/rika/src/interactive/process/process-startup-dispatcher.ts",
+      "to": "apps/rika/src/server-entry.ts",
+      "specifier": "../../server-entry",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/process-startup-dispatcher.ts",
       "to": "apps/server/src/diagnostics/diagnostic-file-logging.ts",
       "specifier": "@rika/server/diagnostic-file-logging",
       "kind": "import",
@@ -8107,6 +8132,14 @@
       "from": "apps/rika/src/platform/application-performance-evaluation.ts",
       "to": "packages/terminal/src/performance/terminal-performance-evaluation.ts",
       "specifier": "@rika/terminal/terminal-performance-evaluation",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/platform/performance-platform.ts",
+      "to": "apps/rika/src/server-entry.ts",
+      "specifier": "../server-entry",
       "kind": "import",
       "relationship": "runtime",
       "production": true

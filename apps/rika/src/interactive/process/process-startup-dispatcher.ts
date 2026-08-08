@@ -7,6 +7,7 @@ import * as ProductOperation from "@rika/product/product-operation"
 import * as ServerHandshake from "@rika/product/server-service-handshake"
 import * as ServerService from "@rika/product/server-service"
 import { Sha256 } from "@rika/product/server-service-sha256"
+import { devServerEntry } from "../../server-entry"
 import { Sha256BunLayer } from "@rika/product/server-service-sha256-bun"
 import * as DataRoot from "@rika/config/canonical-data-root"
 import { Effect, Layer, Cause, Clock, References, Schema } from "effect"
@@ -20,7 +21,6 @@ type DispatcherContext = {
   readonly database: string
   readonly globalConfig: string
   readonly workspaceConfig: string
-  readonly serverRuntime: { readonly executable: string; readonly arguments: ReadonlyArray<string> }
   readonly environment: any
   readonly restartThreadId: string | undefined
   readonly runtimeRestarted: boolean
@@ -35,7 +35,6 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
     database,
     globalConfig,
     workspaceConfig,
-    serverRuntime,
     environment,
     restartThreadId,
     runtimeRestarted,
@@ -44,6 +43,14 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
     setClientModeRoutes,
     runtimeRestartRequest,
   } = context
+  const serverRuntime = import.meta.path.startsWith("/$bunfs/")
+    ? {
+        executable: process
+          .getBuiltinModule("node:path")
+          .join(process.getBuiltinModule("node:path").dirname(process.execPath), ".rika-server"),
+        arguments: [],
+      }
+    : { executable: process.execPath, arguments: [devServerEntry()] }
   const observedProgram = <A, E, R>(role: Logging.ProcessRole, dataRoot: string, program: Effect.Effect<A, E, R>) =>
     Clock.currentTimeMillis.pipe(
       Effect.flatMap((startedAt) =>

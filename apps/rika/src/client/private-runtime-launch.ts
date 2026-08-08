@@ -32,7 +32,7 @@ export const privateRuntime = Effect.fn("ClientProcess.privateRuntime")(function
     }
   return {
     executable: process.execPath,
-    prefixArguments: [yield* devServerEntry()],
+    prefixArguments: [devServerEntry()],
     replaceProcess: false,
   }
 })

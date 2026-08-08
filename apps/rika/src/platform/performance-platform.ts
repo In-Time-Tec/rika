@@ -148,7 +148,7 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
   const sourceDirectory = path.dirname(moduleDirectory)
   const packaged = import.meta.path?.startsWith("/$bunfs/") ?? false
   const directory = packaged ? path.dirname(process.execPath) : sourceDirectory
-  const serverSourceDirectory = packaged ? undefined : path.dirname(yield* devServerEntry())
+  const serverSourceDirectory = packaged ? undefined : path.dirname(devServerEntry())
   const runtimes = roleRuntimes(
     packaged
       ? { packaged, executable: process.execPath, sourceDirectory: directory }

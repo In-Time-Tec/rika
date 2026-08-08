@@ -9,10 +9,9 @@ import { create as createTui, probeNativeAsset } from "@rika/terminal/opentui-su
 import type { Model } from "@rika/terminal/terminal-state"
 type ModeRoutes = Model["modeRoutes"]
 import { FetchHttpClient } from "effect/unstable/http"
-import { Config, Console, Context, Effect, Layer, Option, Path, Runtime } from "effect"
+import { Config, Console, Effect, Layer, Option, Runtime } from "effect"
 import { Command } from "effect/unstable/cli"
 import { command, version } from "../../command/root/rika-command"
-import { devServerEntry } from "../../server-entry"
 import { interactiveTui } from "./interactive-process-loop"
 import { relaunchArguments } from "../../release/relaunch-argument"
 import { layer as serverLayer } from "../../transport/client/server-client-transport"
@@ -28,12 +27,6 @@ const main = Command.run(command, { version }).pipe(
       Console.error(error.message).pipe(Effect.andThen(Effect.fail(error))),
   }),
 )
-
-const startupPathService = Effect.runSync(Effect.scoped(Layer.build(Path.layer))).pipe((context) =>
-  Context.get(context, Path.Path),
-)
-const dirname = startupPathService.dirname
-const join = startupPathService.join
 
 export interface InteractiveTuiOptions {
   readonly editor?: string | undefined
@@ -89,12 +82,6 @@ export const start = () => {
   let editor: string | undefined
   if (environment.visual._tag === "Some") editor = environment.visual.value
   else if (environment.editor._tag === "Some") editor = environment.editor.value
-  const serverRuntime = import.meta.path.startsWith("/$bunfs/")
-    ? { executable: join(dirname(process.execPath), ".rika-server"), arguments: [] }
-    : {
-        executable: process.execPath,
-        arguments: [Effect.runSync(devServerEntry().pipe(Effect.provideService(Path.Path, startupPathService)))],
-      }
   let clientModeRoutes: ModeRoutes | undefined
   const clientOwnedInteractiveFunction = interactiveTui({ editor, modeRoutes: () => clientModeRoutes })
 
@@ -102,7 +89,6 @@ export const start = () => {
     database,
     globalConfig,
     workspaceConfig,
-    serverRuntime,
     environment,
     restartThreadId,
     runtimeRestarted,
