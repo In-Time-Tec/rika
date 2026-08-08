@@ -1,6 +1,6 @@
 import * as ServerService from "@rika/product/server-service"
-import { Config, Deferred, Effect, FileSystem } from "effect"
-import { readOrCreateToken, resolve } from "../../server/process/server-endpoint"
+import { Config, Deferred, Effect, FileSystem, Path } from "effect"
+import { readOrCreateToken, resolve, type ServerEndpoint } from "../../server/process/server-endpoint"
 import { releaseAdoptedStartup } from "../../server/process/server-startup"
 import { defaultOutboundCapacity } from "../protocol/server-protocol"
 import { host } from "./server-host-lifecycle"
@@ -14,7 +14,9 @@ export const serve = Effect.fn("ServerTransport.serve")(function* (options: {
   readonly ownerDrainMilliseconds?: number
   readonly startupHoldMilliseconds?: number
   readonly outboundCapacity?: number
-  readonly onReady?: Effect.Effect<void, ServerService.ServerServiceError, FileSystem.FileSystem>
+  readonly onReady?: (
+    endpoint: ServerEndpoint,
+  ) => Effect.Effect<void, ServerService.ServerServiceError, FileSystem.FileSystem | Path.Path>
   readonly owner: Owner
 }) {
   const endpoint = yield* resolve(options.profile, options.dataRoot)
@@ -41,7 +43,7 @@ export const serve = Effect.fn("ServerTransport.serve")(function* (options: {
     outboundCapacity: Math.max(1, Math.floor(options.outboundCapacity ?? defaultOutboundCapacity)),
     stopped,
     ready,
-    onReady: options.onReady ?? Effect.void,
+    onReady: options.onReady === undefined ? Effect.void : options.onReady(endpoint),
     owner: options.owner,
   }).pipe(Effect.ensuring(releaseAdoptedStartup(endpoint.startupPath, endpoint.identity, process.pid)))
 })

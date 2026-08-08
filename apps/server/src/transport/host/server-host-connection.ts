@@ -129,7 +129,7 @@ export const makeConnectionHandler = (context: ConnectionContext) => {
             if (message === undefined) return
             if (!isAttached) {
               if (!("family" in message)) return yield* close(4401)
-              const result = ServerHandshake.HandshakeProtocol.validateHandshake(message, {
+              const result = yield* ServerHandshake.HandshakeProtocol.validateHandshake(message, {
                 identity: options.identity,
                 token: options.token,
                 buildIdentity: ServerHandshake.HandshakeProtocol.buildIdentity,
@@ -167,7 +167,11 @@ export const makeConnectionHandler = (context: ConnectionContext) => {
                   yield* writer(
                     json({
                       ...response,
-                      serverProof: ServerHandshake.HandshakeProtocol.serverProof(options.token, message, response),
+                      serverProof: yield* ServerHandshake.HandshakeProtocol.serverProof(
+                        options.token,
+                        message,
+                        response,
+                      ),
                     } satisfies ServerHandshake.HandshakeIncompatible),
                   )
                   if (replacementDelayed)
@@ -207,7 +211,11 @@ export const makeConnectionHandler = (context: ConnectionContext) => {
                 buildIdentity: ServerHandshake.HandshakeProtocol.buildIdentity,
                 serverPid: process.pid,
               }
-              const acceptedProof = ServerHandshake.HandshakeProtocol.serverProof(options.token, message, response)
+              const acceptedProof = yield* ServerHandshake.HandshakeProtocol.serverProof(
+                options.token,
+                message,
+                response,
+              )
               yield* writer(
                 json({
                   ...response,

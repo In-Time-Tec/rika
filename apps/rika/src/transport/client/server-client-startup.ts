@@ -1,4 +1,5 @@
 import * as ServerHandshake from "@rika/product/server-service-handshake"
+import { Sha256 } from "@rika/product/server-service-sha256"
 import * as ServerService from "@rika/product/server-service"
 import { Clock, Crypto, Deferred, Effect, Exit, FileSystem, Function, Path, Schema, Scope } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
@@ -45,6 +46,7 @@ export const make = Effect.fn("ServerTransport.make")(() =>
           const fileSystem = yield* FileSystem.FileSystem
           const path = yield* Path.Path
           const connectionScope = yield* Scope.make()
+          const sha256 = yield* Sha256
           yield* Effect.addFinalizer((exit) => Scope.close(connectionScope, exit))
           const attach = (connectRole: ServerHandshake.ConnectRole) =>
             Effect.gen(function* () {
@@ -52,6 +54,7 @@ export const make = Effect.fn("ServerTransport.make")(() =>
               const result = yield* Effect.exit(
                 connect({ ...endpoint, ...input, token, connectRole, role: "attached" }).pipe(
                   Scope.provide(attemptScope),
+                  Effect.provideService(Sha256, sha256),
                 ),
               )
               if (result._tag === "Failure") {
@@ -227,6 +230,7 @@ export const make = Effect.fn("ServerTransport.make")(() =>
               Effect.provideService(Crypto.Crypto, crypto),
               Effect.provideService(FileSystem.FileSystem, fileSystem),
               Effect.provideService(Path.Path, path),
+              Effect.provideService(Sha256, sha256),
               Effect.mapError((error) =>
                 Schema.is(ServerService.ServerServiceError)(error) ||
                 Schema.is(ServerService.ServerRestartRequired)(error)

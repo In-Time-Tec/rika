@@ -3,6 +3,8 @@ import * as ProductOperation from "@rika/product/product-operation"
 import * as Operation from "@rika/product/product-operation-service"
 import * as ServerHandshake from "@rika/product/server-service-handshake"
 import * as ServerService from "@rika/product/server-service"
+import { Sha256 } from "@rika/product/server-service-sha256"
+import { Sha256BunLayer } from "@rika/product/server-service-sha256-bun"
 import {
   Config,
   Console,
@@ -89,6 +91,7 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
     Operation.Service,
     Effect.gen(function* () {
       const server = yield* ServerService.Service
+      const sha256 = yield* Sha256
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
       const stdio = yield* Stdio.Stdio
       const platform = yield* Effect.context<
@@ -222,6 +225,7 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
             ).pipe(provideLayerScoped(Logging.layer({ dataRoot, role: "client", version })))
           }).pipe(
             Effect.provide(platform),
+            Effect.provideService(Sha256, sha256),
             Effect.mapError((error) => operationFailure(input, error)),
           )
         }),
@@ -245,7 +249,9 @@ export const run = Effect.fn("ClientMain.run")(function* (argv?: ReadonlyArray<s
       "rika.version": version,
     }),
   )
-  return yield* program.pipe(provideLayerScoped(dispatcherLayer(argv).pipe(Layer.provide(serverLayer))))
+  return yield* program.pipe(
+    provideLayerScoped(dispatcherLayer(argv).pipe(Layer.provide(serverLayer), Layer.provide(Sha256BunLayer))),
+  )
 })
 
 export const isInteractiveClientLaunch = (): boolean => interactiveClientLaunch

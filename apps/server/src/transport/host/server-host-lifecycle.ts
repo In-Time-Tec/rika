@@ -13,13 +13,16 @@ import {
   Fiber,
   FiberSet,
   FileSystem,
+  Path,
   Queue,
   Ref,
   Scope,
   Semaphore,
 } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
-import { readOrCreateToken, resolve } from "../../server/process/server-endpoint"
+import * as ServerHandshake from "@rika/product/server-service-handshake"
+import { version } from "../../platform/application-version"
+import { readOrCreateToken, resolve, type ServerEndpoint } from "../../server/process/server-endpoint"
 import { releaseAdoptedStartup } from "../../server/process/server-startup"
 import { hardExit, makeExecutionControls } from "./server-host-operation"
 import type { Owner } from "./server-host-operation"
@@ -38,7 +41,7 @@ export const host = Effect.fn("ServerTransport.host")(function* (options: {
   readonly outboundCapacity: number
   readonly stopped: Deferred.Deferred<void>
   readonly ready: Deferred.Deferred<void>
-  readonly onReady: Effect.Effect<void, ServerService.ServerServiceError, FileSystem.FileSystem>
+  readonly onReady: Effect.Effect<void, ServerService.ServerServiceError, FileSystem.FileSystem | Path.Path>
   readonly owner: Owner
 }) {
   const crypto = yield* Crypto.Crypto
@@ -186,6 +189,12 @@ export const host = Effect.fn("ServerTransport.host")(function* (options: {
   })
   const app = Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest
+    if (request.url === "/health")
+      return yield* HttpServerResponse.json({
+        status: "ok",
+        version,
+        protocolVersion: ServerHandshake.HandshakeProtocol.protocolVersion,
+      })
     if (!isServerPath(request.url)) return HttpServerResponse.empty({ status: 404 })
     const socket = yield* request.upgrade
     yield* handle(socket)
@@ -213,7 +222,9 @@ export const serve = Effect.fn("ServerTransport.serve")(function* (options: {
   readonly ownerDrainMilliseconds?: number
   readonly startupHoldMilliseconds?: number
   readonly outboundCapacity?: number
-  readonly onReady?: Effect.Effect<void, ServerService.ServerServiceError, FileSystem.FileSystem>
+  readonly onReady?: (
+    endpoint: ServerEndpoint,
+  ) => Effect.Effect<void, ServerService.ServerServiceError, FileSystem.FileSystem | Path.Path>
   readonly owner: Owner
 }) {
   const endpoint = yield* resolve(options.profile, options.dataRoot)
@@ -240,7 +251,7 @@ export const serve = Effect.fn("ServerTransport.serve")(function* (options: {
     outboundCapacity: Math.max(1, Math.floor(options.outboundCapacity ?? defaultOutboundCapacity)),
     stopped,
     ready,
-    onReady: options.onReady ?? Effect.void,
+    onReady: options.onReady === undefined ? Effect.void : options.onReady(endpoint),
     owner: options.owner,
   }).pipe(Effect.ensuring(releaseAdoptedStartup(endpoint.startupPath, endpoint.identity, process.pid)))
 })

@@ -4,6 +4,15 @@ import { Crypto, Effect, Encoding, FileSystem, Option, Path } from "effect"
 const tokenName = "server.token"
 const serverLog = /^server-.+-(\d+)\.open\.jsonl$/
 
+export interface ServerEndpoint {
+  readonly identity: string
+  readonly canonicalDataRoot: string
+  readonly port: number
+  readonly url: string
+  readonly tokenPath: string
+  readonly startupPath: string
+}
+
 export const resolve = Effect.fn("ServerEndpoint.resolve")(function* (profile: string, dataRoot: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -20,7 +29,7 @@ export const resolve = Effect.fn("ServerEndpoint.resolve")(function* (profile: s
     url: `ws://127.0.0.1:${port}/server`,
     tokenPath: path.join(canonicalDataRoot, tokenName),
     startupPath: path.join(canonicalDataRoot, `server-${identity}.startup`),
-  }
+  } satisfies ServerEndpoint
 })
 
 export const recordedServerProcesses = Effect.fn("ServerEndpoint.recordedProcesses")(function* (endpoint: {

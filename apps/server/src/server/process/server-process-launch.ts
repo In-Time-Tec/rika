@@ -5,6 +5,8 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Operation from "@rika/product/product-operation-service"
 import * as ServerService from "@rika/product/server-service"
+import * as ServerHandshake from "@rika/product/server-service-handshake"
+import { Sha256BunLayer } from "@rika/product/server-service-sha256-bun"
 import { globalPaths, workspacePaths } from "@rika/config/configuration-paths"
 import { resolveProfileDataPaths } from "@rika/config/profile-data-paths"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -16,6 +18,7 @@ import {
   Effect,
   FileSystem,
   Layer,
+  Path,
   Option,
   Ref,
   References,
@@ -58,6 +61,27 @@ const signal = (message: typeof StartupMessage.Type) =>
 
 export const signalReady = signal({ _tag: "ready" })
 export const signalFailure = (message: string) => signal({ _tag: "failed", message })
+
+const writeServerJson = (endpoint: {
+  readonly port: number
+  readonly canonicalDataRoot: string
+  readonly tokenPath: string
+}) => {
+  const encoded = `${JSON.stringify({
+    port: endpoint.port,
+    pid: process.pid,
+    tokenPath: endpoint.tokenPath,
+    version,
+    protocolVersion: ServerHandshake.HandshakeProtocol.protocolVersion,
+  })}\n`
+  return Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    yield* fileSystem
+      .writeFileString(path.join(endpoint.canonicalDataRoot, "server.json"), encoded, { mode: 0o600 })
+      .pipe(Effect.mapError((cause) => startupError("startup-failed", `Could not write server.json: ${String(cause)}`)))
+  })
+}
 
 type Owner = (
   interactive: (
@@ -362,7 +386,7 @@ export const start = () => {
             startupHoldMilliseconds: Number(
               environment.serverStartupHold._tag === "Some" ? environment.serverStartupHold.value : "10000",
             ),
-            onReady: signalReady,
+            onReady: (endpoint) => writeServerJson(endpoint).pipe(Effect.andThen(signalReady)),
             owner: serverOwner,
           }),
         ).pipe(
@@ -374,7 +398,9 @@ export const start = () => {
                 : String(failure)
             return signalFailure(message).pipe(Effect.ignore)
           }),
-          provideLayerScoped(Layer.mergeAll(BunServices.layer, BunCrypto.layer, FetchHttpClient.layer)),
+          provideLayerScoped(
+            Layer.mergeAll(BunServices.layer, BunCrypto.layer, FetchHttpClient.layer, Sha256BunLayer, Path.layer),
+          ),
         )
   const removeSigintIsolation = installServerSigintIsolation()
   const fiber = Effect.runFork(observedProgram("server", paths.dataRoot, hostProgram))

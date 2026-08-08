@@ -96,7 +96,7 @@ const annotationSchemas: Readonly<Record<string, AnnotationSchema>> = {
   "rika.reconciliation.terminal": boolean,
   "rika.reconciliation.tree.verified": boolean,
   "rika.reconnect.attempt": boundedNumber,
-  "rika.server.client.kind": oneOf("interactive", "run", "thread-continue", "product"),
+  "rika.server.client.kind": oneOf("interactive", "run", "thread-continue", "product", "desktop", "web"),
   "rika.server.command.sequence": boundedNumber,
   "rika.server.connection.duration.ms": boundedNumber,
   "rika.server.connection.failures": boundedNumber,

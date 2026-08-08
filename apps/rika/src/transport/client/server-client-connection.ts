@@ -92,7 +92,7 @@ export const connect = Effect.fn("ServerTransport.connect")(function* (options: 
   const inbound = yield* Semaphore.make(1)
   const receivedDeltas = new Set<string>()
   const requests = yield* Ref.make(new Map<string, ClientRequest>())
-  const { handshake, signedHandshake } = makeClientHandshakePair({
+  const { handshake, signedHandshake } = yield* makeClientHandshakePair({
     identity: options.identity,
     token: options.token,
     clientNonce,
@@ -116,58 +116,64 @@ export const connect = Effect.fn("ServerTransport.connect")(function* (options: 
               if (message._tag === "accepted" || message._tag === "incompatible") {
                 if (message.identity !== options.identity || message.clientNonce !== clientNonce)
                   return Effect.fail(transportError("Foreign server listener", "foreign-listener"))
-                if (!verifyServerHandshake(options.token, signedHandshake, message))
-                  return Effect.fail(transportError("Foreign server listener", "foreign-listener"))
-                if (message._tag === "incompatible") {
-                  const validDisposition =
-                    options.connectRole === "launch"
-                      ? message.disposition === "supersede" || message.disposition === "defer"
-                      : message.disposition === "restart"
-                  if (!validDisposition)
-                    return Effect.fail(
-                      transportError("Server returned an invalid upgrade disposition", "foreign-listener"),
+                return verifyServerHandshake(options.token, signedHandshake, message).pipe(
+                  Effect.flatMap((authenticated) => {
+                    if (!authenticated)
+                      return Effect.fail(transportError("Foreign server listener", "foreign-listener"))
+                    if (message._tag === "incompatible") {
+                      const validDisposition =
+                        options.connectRole === "launch"
+                          ? message.disposition === "supersede" || message.disposition === "defer"
+                          : message.disposition === "restart"
+                      if (!validDisposition)
+                        return Effect.fail(
+                          transportError("Server returned an invalid upgrade disposition", "foreign-listener"),
+                        )
+                      if (!ServerHandshake.HandshakeProtocol.isValidIncompatibility(options.connectRole, message))
+                        return Effect.fail(
+                          transportError(
+                            "Server returned an incompatible response for a compatible handshake",
+                            "foreign-listener",
+                          ),
+                        )
+                      if (message.disposition === "defer")
+                        return Effect.fail(
+                          ServerService.ServerServiceError.make({
+                            reason: "replacement-delayed",
+                            message: `Rika server replacement is delayed because server${message.serverPid === undefined ? "" : ` PID ${message.serverPid}`} owns active execution work. Try again after that work completes`,
+                            ...(message.serverPid === undefined ? {} : { serverPid: message.serverPid }),
+                          }),
+                        )
+                      return Effect.fail(
+                        ServerService.ServerServiceError.make({
+                          reason: "incompatible-server",
+                          message: `An incompatible Rika server${message.serverPid === undefined ? "" : ` (PID ${message.serverPid})`} is still running at ${options.url}; close other Rika clients, then run rika again`,
+                          ...(message.serverPid === undefined ? {} : { serverPid: message.serverPid }),
+                        }),
+                      )
+                    }
+                    if (message.protocolVersion !== ServerHandshake.HandshakeProtocol.protocolVersion)
+                      return Effect.fail(
+                        transportError(
+                          `An incompatible Rika server${message.serverPid === undefined ? "" : ` (PID ${message.serverPid})`} is still running at ${options.url}; close other Rika clients, then run rika again`,
+                          "incompatible-server",
+                        ),
+                      )
+                    if (
+                      options.connectRole === "launch" &&
+                      message.buildIdentity !== ServerHandshake.HandshakeProtocol.buildIdentity
                     )
-                  if (!ServerHandshake.HandshakeProtocol.isValidIncompatibility(options.connectRole, message))
-                    return Effect.fail(
-                      transportError(
-                        "Server returned an incompatible response for a compatible handshake",
-                        "foreign-listener",
-                      ),
+                      return Effect.fail(transportError("Server accepted an incompatible launch", "foreign-listener"))
+                    return Effect.sync(() => (acceptedConnectionId = message.connectionId)).pipe(
+                      Effect.andThen(Deferred.succeed(accepted, message)),
+                      Effect.asVoid,
                     )
-                  if (message.disposition === "defer")
-                    return Effect.fail(
-                      ServerService.ServerServiceError.make({
-                        reason: "replacement-delayed",
-                        message: `Rika server replacement is delayed because server${message.serverPid === undefined ? "" : ` PID ${message.serverPid}`} owns active execution work. Try again after that work completes`,
-                        ...(message.serverPid === undefined ? {} : { serverPid: message.serverPid }),
-                      }),
-                    )
-                  return Effect.fail(
-                    ServerService.ServerServiceError.make({
-                      reason: "incompatible-server",
-                      message: `An incompatible Rika server${message.serverPid === undefined ? "" : ` (PID ${message.serverPid})`} is still running at ${options.url}; close other Rika clients, then run rika again`,
-                      ...(message.serverPid === undefined ? {} : { serverPid: message.serverPid }),
-                    }),
-                  )
-                }
-                if (message.protocolVersion !== ServerHandshake.HandshakeProtocol.protocolVersion)
-                  return Effect.fail(
-                    transportError(
-                      `An incompatible Rika server${message.serverPid === undefined ? "" : ` (PID ${message.serverPid})`} is still running at ${options.url}; close other Rika clients, then run rika again`,
-                      "incompatible-server",
-                    ),
-                  )
-                if (
-                  options.connectRole === "launch" &&
-                  message.buildIdentity !== ServerHandshake.HandshakeProtocol.buildIdentity
-                )
-                  return Effect.fail(transportError("Server accepted an incompatible launch", "foreign-listener"))
-                return Effect.sync(() => (acceptedConnectionId = message.connectionId)).pipe(
-                  Effect.andThen(Deferred.succeed(accepted, message)),
+                  }),
                 )
               }
               if (message._tag === "rejected")
                 return Deferred.fail(connectionFailure, transportError("Rika Server is draining", "server-draining"))
+
               if (message._tag === "pong")
                 return Effect.gen(function* () {
                   const pending = (yield* Ref.get(pongs)).get(message.id)

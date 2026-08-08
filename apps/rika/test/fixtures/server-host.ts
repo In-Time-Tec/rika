@@ -12,6 +12,7 @@ import * as ExecutionProjection from "@rika/product/execution-projection"
 import type * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Config, Console, Effect, Exit, FileSystem, Layer, Logger, Path, Ref, Schema, Scope } from "effect"
 import { serve } from "@rika/server/server-host-transport"
+import { Sha256BunLayer } from "@rika/product/server-service-sha256-bun"
 import * as ServerProcessStartup from "@rika/server/server-process-launch"
 
 let activeWork = 0
@@ -172,7 +173,7 @@ const program = Effect.gen(function* () {
     abandonMilliseconds,
     startupHoldMilliseconds: Number(startupHold),
     outboundCapacity,
-    onReady: ServerProcessStartup.signalReady,
+    onReady: () => ServerProcessStartup.signalReady,
     owner: (interactive) =>
       Effect.gen(function* () {
         yield* append("owner-acquisitions.log", `${process.pid}\n`)
@@ -449,7 +450,9 @@ const program = Effect.gen(function* () {
 BunRuntime.runMain(
   Effect.scoped(
     Effect.gen(function* () {
-      const context = yield* Layer.build(Layer.mergeAll(BunServices.layer, BunCrypto.layer, Logger.layer([])))
+      const context = yield* Layer.build(
+        Layer.mergeAll(BunServices.layer, BunCrypto.layer, Logger.layer([]), Sha256BunLayer),
+      )
       yield* Effect.provide(program, context)
     }),
   ),

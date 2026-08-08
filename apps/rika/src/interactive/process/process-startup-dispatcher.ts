@@ -6,6 +6,8 @@ import * as Operation from "@rika/product/product-operation-service"
 import * as ProductOperation from "@rika/product/product-operation"
 import * as ServerHandshake from "@rika/product/server-service-handshake"
 import * as ServerService from "@rika/product/server-service"
+import { Sha256 } from "@rika/product/server-service-sha256"
+import { Sha256BunLayer } from "@rika/product/server-service-sha256-bun"
 import * as DataRoot from "@rika/config/canonical-data-root"
 import { Effect, Layer, Cause, Clock, References, Schema } from "effect"
 import * as Logging from "@rika/server/diagnostic-file-logging"
@@ -42,7 +44,7 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
     setClientModeRoutes,
     runtimeRestartRequest,
   } = context
-  const observedProgram = <A, E>(role: Logging.ProcessRole, dataRoot: string, program: Effect.Effect<A, E>) =>
+  const observedProgram = <A, E, R>(role: Logging.ProcessRole, dataRoot: string, program: Effect.Effect<A, E, R>) =>
     Clock.currentTimeMillis.pipe(
       Effect.flatMap((startedAt) =>
         Effect.logInfo("process.started").pipe(
@@ -92,139 +94,146 @@ export const makeDispatcherLayer = (context: DispatcherContext) => {
     Operation.Service,
     Effect.gen(function* () {
       const server = yield* ServerService.Service
+      const sha256 = yield* Sha256
       return Operation.Service.of({
-        run: Effect.fn("Operation.dispatch")((input) =>
-          DataRoot.canonicalDataRoot(database).pipe(
-            Effect.flatMap((dataRoot) =>
-              observedProgram(
-                "client",
-                dataRoot,
-                Effect.scoped(
-                  Effect.gen(function* () {
-                    const workspaceInput = withClientWorkspace(input, process.cwd())
-                    const clientInput =
-                      workspaceInput._tag === "Interactive" && restartThreadId !== undefined
-                        ? { ...workspaceInput, threadId: restartThreadId, last: false }
-                        : workspaceInput
-                    const requestRuntimeRestart = (error: ServerService.ServerRestartRequired) =>
-                      Effect.sync(() => {
-                        runtimeRestartRequest.value = error.threadId === undefined ? {} : { threadId: error.threadId }
-                      }).pipe(
-                        Effect.andThen(
-                          ServerProcessStartup.runtimeRestart.signalRuntimeRestart(error.threadId).pipe(Effect.ignore),
-                        ),
-                        Effect.andThen(
-                          ProductOperation.OperationUnavailable.make({
-                            operation: clientInput._tag,
-                            message: "Rika was upgraded; restarting this session",
-                          }),
-                        ),
-                      )
-                    let clientKind: ServerHandshake.Handshake["clientKind"]
-                    if (clientInput._tag === "Interactive") clientKind = "interactive"
-                    else if (clientInput._tag === "Run") clientKind = "run"
-                    else clientKind = "product"
-                    const connected = yield* Effect.result(
-                      server
-                        .getOrCreate({
-                          profile: "default",
-                          dataRoot,
-                          ...(runtimeRestarted ? { allowSupersede: false } : {}),
-                          clientKind,
-                          startHost: () =>
-                            spawnServer({
-                              executable: serverRuntime.executable,
-                              arguments: serverRuntime.arguments,
-                              environment: {
-                                RIKA_INTERNAL_SERVER_HOST: "1",
-                                RIKA_INTERNAL_SERVER_PROFILE: "default",
-                                RIKA_INTERNAL_SERVER_DATA_ROOT: dataRoot,
-                                ...(environment.serverGrace._tag === "None"
-                                  ? {}
-                                  : { RIKA_INTERNAL_SERVER_GRACE: environment.serverGrace.value }),
-                                ...(environment.serverStartupHold._tag === "None"
-                                  ? {}
-                                  : { RIKA_INTERNAL_SERVER_STARTUP_HOLD: environment.serverStartupHold.value }),
-                                ...(environment.testModelResponse._tag === "None"
-                                  ? {}
-                                  : { RIKA_TEST_MODEL_RESPONSE: environment.testModelResponse.value }),
-                                ...(environment.testModelScript._tag === "None"
-                                  ? {}
-                                  : { RIKA_TEST_MODEL_SCRIPT: environment.testModelScript.value }),
-                                ...(environment.testMediaAnalyzerResponse._tag === "None"
-                                  ? {}
-                                  : { RIKA_TEST_MEDIA_ANALYZER_RESPONSE: environment.testMediaAnalyzerResponse.value }),
-                                ...(environment.testMediaAnalyzerError._tag === "None"
-                                  ? {}
-                                  : { RIKA_TEST_MEDIA_ANALYZER_ERROR: environment.testMediaAnalyzerError.value }),
-                              },
-                            }).pipe(Effect.tap(() => Effect.logInfo("server.spawned"))),
-                        })
-                        .pipe(provideLayerScoped(Layer.merge(BunServices.layer, BunCrypto.layer))),
-                    )
-                    if (connected._tag === "Success") {
-                      const connection = connected.success
-                      yield* Effect.logInfo("server.connected")
-                      yield* connection
-                        .run(clientInput, {
-                          stdout: (text) => Effect.sync(() => process.stdout.write(text)),
-                          stderr: (text) => Effect.sync(() => process.stderr.write(text)),
-                          ...(clientInput._tag === "Interactive"
-                            ? { interactive: clientOwnedInteractiveFunction }
-                            : {}),
-                        })
-                        .pipe(
-                          Effect.tapError((error) =>
-                            Schema.is(ServerService.ServerRestartRequired)(error)
-                              ? Effect.sync(() => {
-                                  runtimeRestartRequest.value =
-                                    error.threadId === undefined ? {} : { threadId: error.threadId }
-                                }).pipe(
-                                  Effect.andThen(
-                                    ServerProcessStartup.runtimeRestart
-                                      .signalRuntimeRestart(error.threadId)
-                                      .pipe(Effect.ignore),
-                                  ),
-                                )
-                              : Effect.void,
+        run: Effect.fn("Operation.dispatch")(
+          (input) =>
+            DataRoot.canonicalDataRoot(database).pipe(
+              Effect.flatMap((dataRoot) =>
+                observedProgram(
+                  "client",
+                  dataRoot,
+                  Effect.scoped(
+                    Effect.gen(function* () {
+                      const workspaceInput = withClientWorkspace(input, process.cwd())
+                      const clientInput =
+                        workspaceInput._tag === "Interactive" && restartThreadId !== undefined
+                          ? { ...workspaceInput, threadId: restartThreadId, last: false }
+                          : workspaceInput
+                      const requestRuntimeRestart = (error: ServerService.ServerRestartRequired) =>
+                        Effect.sync(() => {
+                          runtimeRestartRequest.value = error.threadId === undefined ? {} : { threadId: error.threadId }
+                        }).pipe(
+                          Effect.andThen(
+                            ServerProcessStartup.runtimeRestart
+                              .signalRuntimeRestart(error.threadId)
+                              .pipe(Effect.ignore),
                           ),
-                          Effect.mapError((error) =>
-                            Schema.is(ProductOperation.OperationUnavailable)(error)
-                              ? error
-                              : ProductOperation.OperationUnavailable.make({
-                                  operation: clientInput._tag,
-                                  message: Schema.is(ServerService.ServerRestartRequired)(error)
-                                    ? "Rika was upgraded; restarting this session"
-                                    : error.message,
-                                }),
+                          Effect.andThen(
+                            ProductOperation.OperationUnavailable.make({
+                              operation: clientInput._tag,
+                              message: "Rika was upgraded; restarting this session",
+                            }),
                           ),
-                          Effect.ensuring(connection.close),
                         )
-                      return
-                    }
-                    if (Schema.is(ServerService.ServerRestartRequired)(connected.failure))
-                      return yield* requestRuntimeRestart(connected.failure)
-                    return yield* ProductOperation.OperationUnavailable.make({
-                      operation: clientInput._tag,
-                      message: connected.failure.message,
-                    })
-                  }),
-                ).pipe(
-                  Effect.tap(() => Effect.logInfo("operation.completed")),
-                  Effect.tapError(() => Effect.logError("operation.failed")),
-                  Effect.annotateLogs("rika.operation", input._tag),
+                      let clientKind: ServerHandshake.Handshake["clientKind"]
+                      if (clientInput._tag === "Interactive") clientKind = "interactive"
+                      else if (clientInput._tag === "Run") clientKind = "run"
+                      else clientKind = "product"
+                      const connected = yield* Effect.result(
+                        server
+                          .getOrCreate({
+                            profile: "default",
+                            dataRoot,
+                            ...(runtimeRestarted ? { allowSupersede: false } : {}),
+                            clientKind,
+                            startHost: () =>
+                              spawnServer({
+                                executable: serverRuntime.executable,
+                                arguments: serverRuntime.arguments,
+                                environment: {
+                                  RIKA_INTERNAL_SERVER_HOST: "1",
+                                  RIKA_INTERNAL_SERVER_PROFILE: "default",
+                                  RIKA_INTERNAL_SERVER_DATA_ROOT: dataRoot,
+                                  ...(environment.serverGrace._tag === "None"
+                                    ? {}
+                                    : { RIKA_INTERNAL_SERVER_GRACE: environment.serverGrace.value }),
+                                  ...(environment.serverStartupHold._tag === "None"
+                                    ? {}
+                                    : { RIKA_INTERNAL_SERVER_STARTUP_HOLD: environment.serverStartupHold.value }),
+                                  ...(environment.testModelResponse._tag === "None"
+                                    ? {}
+                                    : { RIKA_TEST_MODEL_RESPONSE: environment.testModelResponse.value }),
+                                  ...(environment.testModelScript._tag === "None"
+                                    ? {}
+                                    : { RIKA_TEST_MODEL_SCRIPT: environment.testModelScript.value }),
+                                  ...(environment.testMediaAnalyzerResponse._tag === "None"
+                                    ? {}
+                                    : {
+                                        RIKA_TEST_MEDIA_ANALYZER_RESPONSE: environment.testMediaAnalyzerResponse.value,
+                                      }),
+                                  ...(environment.testMediaAnalyzerError._tag === "None"
+                                    ? {}
+                                    : { RIKA_TEST_MEDIA_ANALYZER_ERROR: environment.testMediaAnalyzerError.value }),
+                                },
+                              }).pipe(Effect.tap(() => Effect.logInfo("server.spawned"))),
+                          })
+                          .pipe(provideLayerScoped(Layer.merge(BunServices.layer, BunCrypto.layer))),
+                      )
+                      if (connected._tag === "Success") {
+                        const connection = connected.success
+                        yield* Effect.logInfo("server.connected")
+                        yield* connection
+                          .run(clientInput, {
+                            stdout: (text) => Effect.sync(() => process.stdout.write(text)),
+                            stderr: (text) => Effect.sync(() => process.stderr.write(text)),
+                            ...(clientInput._tag === "Interactive"
+                              ? { interactive: clientOwnedInteractiveFunction }
+                              : {}),
+                          })
+                          .pipe(
+                            Effect.tapError((error) =>
+                              Schema.is(ServerService.ServerRestartRequired)(error)
+                                ? Effect.sync(() => {
+                                    runtimeRestartRequest.value =
+                                      error.threadId === undefined ? {} : { threadId: error.threadId }
+                                  }).pipe(
+                                    Effect.andThen(
+                                      ServerProcessStartup.runtimeRestart
+                                        .signalRuntimeRestart(error.threadId)
+                                        .pipe(Effect.ignore),
+                                    ),
+                                  )
+                                : Effect.void,
+                            ),
+                            Effect.mapError((error) =>
+                              Schema.is(ProductOperation.OperationUnavailable)(error)
+                                ? error
+                                : ProductOperation.OperationUnavailable.make({
+                                    operation: clientInput._tag,
+                                    message: Schema.is(ServerService.ServerRestartRequired)(error)
+                                      ? "Rika was upgraded; restarting this session"
+                                      : error.message,
+                                  }),
+                            ),
+                            Effect.ensuring(connection.close),
+                          )
+                        return
+                      }
+                      if (Schema.is(ServerService.ServerRestartRequired)(connected.failure))
+                        return yield* requestRuntimeRestart(connected.failure)
+                      return yield* ProductOperation.OperationUnavailable.make({
+                        operation: clientInput._tag,
+                        message: connected.failure.message,
+                      })
+                    }),
+                  ).pipe(
+                    Effect.tap(() => Effect.logInfo("operation.completed")),
+                    Effect.tapError(() => Effect.logError("operation.failed")),
+                    Effect.annotateLogs("rika.operation", input._tag),
+                  ),
                 ),
               ),
+              provideLayerScoped(BunServices.layer),
+              Effect.mapError((error) =>
+                Schema.is(ProductOperation.OperationUnavailable)(error)
+                  ? error
+                  : ProductOperation.OperationUnavailable.make({ operation: input._tag, message: String(error) }),
+              ),
             ),
-            provideLayerScoped(BunServices.layer),
-            Effect.mapError((error) =>
-              Schema.is(ProductOperation.OperationUnavailable)(error)
-                ? error
-                : ProductOperation.OperationUnavailable.make({ operation: input._tag, message: String(error) }),
-            ),
-          ),
+          Effect.provideService(Sha256, sha256),
         ),
       })
     }),
-  )
+  ).pipe(Layer.provide(Sha256BunLayer))
 }

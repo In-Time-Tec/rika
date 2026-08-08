@@ -19,6 +19,7 @@ import { ChildProcessSpawner } from "effect/unstable/process"
 import * as Feed from "./server-interactive-feed"
 import * as Request from "./server-operation-request"
 import * as Handshake from "./server-service-handshake"
+import { Sha256 } from "./server-service-sha256"
 import { OperationUnavailable } from "../operation/contract/product-operation"
 import { Input } from "../operation/contract/product-operation"
 import type { InteractiveSession } from "../operation/interactive/interactive-session"
@@ -116,7 +117,7 @@ interface Interface {
   }) => Effect.Effect<
     Connection,
     ServerServiceError | ServerRestartRequired,
-    Crypto.Crypto | FileSystem.FileSystem | Path.Path | Scope.Scope | ChildProcessSpawner.ChildProcessSpawner
+    Crypto.Crypto | FileSystem.FileSystem | Path.Path | Scope.Scope | ChildProcessSpawner.ChildProcessSpawner | Sha256
   >
 }
 class Service extends Context.Service<Service, Interface>()("@rika/product/server/server-service/Service") {}

@@ -1839,6 +1839,16 @@
       "testKind": "unit-test"
     },
     {
+      "id": "packages/product/test/server-service-sha256.test.ts",
+      "path": "packages/product/test/server-service-sha256.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/product/test/server-service.test.ts",
       "path": "packages/product/test/server-service.test.ts",
       "workspace": "@rika/product",
@@ -6696,6 +6706,22 @@
     },
     {
       "from": "packages/product/test/server-service-protocol.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/server-service-sha256.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/server-service-sha256.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",

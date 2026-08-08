@@ -6,6 +6,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { make } from "../../src/transport/client/server-client-startup"
 
 import * as ServerProcessStartup from "@rika/server/server-process-launch"
+import { Sha256BunLayer } from "@rika/product/server-service-sha256-bun"
 import { runServerClientCommands } from "./server-client-commands"
 
 const JsonLine = Schema.UnknownFromJsonString
@@ -103,7 +104,7 @@ const statusLogger = Logger.make(({ message }) => {
   supersedeStatusCount += 1
   process.stdout.write(`${JSON.stringify({ type: "server-status", callbacks: supersedeStatusCount })}\n`)
 })
-const MainLayer = Layer.mergeAll(BunServices.layer, Logger.layer([statusLogger]))
+const MainLayer = Layer.mergeAll(BunServices.layer, Logger.layer([statusLogger]), Sha256BunLayer)
 
 BunRuntime.runMain(
   Effect.scoped(

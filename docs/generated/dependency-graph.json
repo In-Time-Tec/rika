@@ -4098,6 +4098,42 @@
       "publicExports": ["./server-service-handshake"]
     },
     {
+      "id": "packages/product/src/server/server-service-sha256-bun.ts",
+      "path": "packages/product/src/server/server-service-sha256-bun.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/product/src/server/server-service-sha256-node.ts",
+      "path": "packages/product/src/server/server-service-sha256-node.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/product/src/server/server-service-sha256-web.ts",
+      "path": "packages/product/src/server/server-service-sha256-web.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
+      "id": "packages/product/src/server/server-service-sha256.ts",
+      "path": "packages/product/src/server/server-service-sha256.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": true,
+      "publicExports": []
+    },
+    {
       "id": "packages/product/src/server/server-service.ts",
       "path": "packages/product/src/server/server-service.ts",
       "workspace": "@rika/product",
@@ -4788,6 +4824,16 @@
     {
       "id": "packages/product/test/server-service-protocol.test.ts",
       "path": "packages/product/test/server-service-protocol.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/server-service-sha256.test.ts",
+      "path": "packages/product/test/server-service-sha256.test.ts",
       "workspace": "@rika/product",
       "package": "@rika/product",
       "kind": "source",
@@ -9362,6 +9408,14 @@
       "production": true
     },
     {
+      "from": "apps/rika/src/client-main.ts",
+      "to": "packages/product/src/server/server-service-handshake.ts",
+      "specifier": "@rika/product/server-service-handshake",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "apps/rika/src/client/client-process-exit.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -11043,6 +11097,14 @@
     },
     {
       "from": "apps/rika/src/interactive/process/process-start.ts",
+      "to": "packages/product/src/server/server-service-handshake.ts",
+      "specifier": "@rika/product/server-service-handshake",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/rika/src/interactive/process/process-start.ts",
       "to": "packages/product/src/server/server-service.ts",
       "specifier": "@rika/product/server-service",
       "kind": "import",
@@ -12610,6 +12672,14 @@
       "production": false
     },
     {
+      "from": "apps/rika/test/fixtures/server-client.ts",
+      "to": "packages/product/src/server/server-service-handshake.ts",
+      "specifier": "@rika/product/server-service-handshake",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "apps/rika/test/fixtures/server-host.ts",
       "to": "apps/server/src/server/process/server-process-launch.ts",
       "specifier": "@rika/server/server-process-launch",
@@ -12693,6 +12763,14 @@
       "from": "apps/rika/test/fixtures/server-host.ts",
       "to": "packages/product/src/operation/interactive/interactive-event.ts",
       "specifier": "@rika/product/interactive-event",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/fixtures/server-host.ts",
+      "to": "packages/product/src/server/server-service-handshake.ts",
+      "specifier": "@rika/product/server-service-handshake",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -15507,6 +15585,14 @@
     },
     {
       "from": "apps/server/src/server/process/server-process-launch.ts",
+      "to": "apps/server/src/server/process/server-endpoint.ts",
+      "specifier": "./server-endpoint",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/server/src/server/process/server-process-launch.ts",
       "to": "apps/server/src/server/process/server-process-spawn.ts",
       "specifier": "./server-process-spawn",
       "kind": "import",
@@ -15622,6 +15708,14 @@
       "to": "packages/product/src/server/server-interactive-feed.ts",
       "specifier": "@rika/product/server-interactive-feed",
       "kind": "dynamic-import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/server/src/server/process/server-process-launch.ts",
+      "to": "packages/product/src/server/server-service-handshake.ts",
+      "specifier": "@rika/product/server-service-handshake",
+      "kind": "import",
       "relationship": "runtime",
       "production": true
     },
@@ -15899,6 +15993,14 @@
     },
     {
       "from": "apps/server/src/transport/host/server-host-lifecycle.ts",
+      "to": "apps/server/src/platform/application-version.ts",
+      "specifier": "../../platform/application-version",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/server/src/transport/host/server-host-lifecycle.ts",
       "to": "apps/server/src/server/process/server-endpoint.ts",
       "specifier": "../../server/process/server-endpoint",
       "kind": "import",
@@ -15997,6 +16099,14 @@
       "from": "apps/server/src/transport/host/server-host-lifecycle.ts",
       "to": "packages/product/src/operation/interactive/interactive-session.ts",
       "specifier": "@rika/product/interactive-session",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "apps/server/src/transport/host/server-host-lifecycle.ts",
+      "to": "packages/product/src/server/server-service-handshake.ts",
+      "specifier": "@rika/product/server-service-handshake",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -26059,6 +26169,102 @@
       "production": true
     },
     {
+      "from": "packages/product/src/server/server-service-handshake.ts",
+      "to": "packages/product/src/server/server-service-sha256-bun.ts",
+      "specifier": "./server-service-sha256-bun",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/server/server-service-handshake.ts",
+      "to": "packages/product/src/server/server-service-sha256-node.ts",
+      "specifier": "./server-service-sha256-node",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/server/server-service-handshake.ts",
+      "to": "packages/product/src/server/server-service-sha256-web.ts",
+      "specifier": "./server-service-sha256-web",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/server/server-service-handshake.ts",
+      "to": "packages/product/src/server/server-service-sha256.ts",
+      "specifier": "./server-service-sha256",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/server/server-service-sha256-bun.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/server/server-service-sha256-bun.ts",
+      "to": "packages/product/src/server/server-service-sha256.ts",
+      "specifier": "./server-service-sha256",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/server/server-service-sha256-node.ts",
+      "to": "external:crypto",
+      "specifier": "crypto",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/server/server-service-sha256-node.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/server/server-service-sha256-node.ts",
+      "to": "packages/product/src/server/server-service-sha256.ts",
+      "specifier": "./server-service-sha256",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/server/server-service-sha256-web.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/server/server-service-sha256-web.ts",
+      "to": "packages/product/src/server/server-service-sha256.ts",
+      "specifier": "./server-service-sha256",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/product/src/server/server-service-sha256.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
       "from": "packages/product/src/server/server-service.ts",
       "to": "external:effect",
       "specifier": "effect",
@@ -28494,6 +28700,30 @@
       "from": "packages/product/test/server-service-protocol.test.ts",
       "to": "packages/product/test/product-test-layer.ts",
       "specifier": "./product-test-layer",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/server-service-sha256.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/server-service-sha256.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/server-service-sha256.test.ts",
+      "to": "packages/product/src/server/server-service-handshake.ts",
+      "specifier": "../src/server/server-service-handshake",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -46622,6 +46852,14 @@
       "from": "scripts/benchmark/warm-server-benchmark.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "scripts/benchmark/warm-server-benchmark.ts",
+      "to": "packages/product/src/server/server-service-handshake.ts",
+      "specifier": "@rika/product/server-service-handshake",
       "kind": "import",
       "relationship": "runtime",
       "production": true

@@ -2,6 +2,7 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as ServerService from "@rika/product/server-service"
+import { Sha256BunLayer } from "@rika/product/server-service-sha256-bun"
 import { Config, Effect, Layer, Option, Schema } from "effect"
 import { layer as serverLayer } from "../../apps/rika/src/transport/client/server-client-transport"
 
@@ -36,7 +37,7 @@ const program = Effect.gen(function* () {
   return yield* Schema.encodeEffect(WarmOutputJson)({ warmed: true, role: connection.role })
 })
 
-const services = Layer.mergeAll(BunServices.layer, BunCrypto.layer, serverLayer).pipe(Layer.orDie)
+const services = Layer.mergeAll(BunServices.layer, BunCrypto.layer, serverLayer, Sha256BunLayer).pipe(Layer.orDie)
 
 if (import.meta.main)
   BunRuntime.runMain(
