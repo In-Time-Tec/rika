@@ -10005,7 +10005,5 @@
       "production": false
     }
   ],
-  "violations": [
-    "apps/server/src/server/composition/server-auth-layer.ts: unresolved internal or asset import ../../provider/openrouter/openrouter-provider-auth"
-  ]
+  "violations": []
 }
