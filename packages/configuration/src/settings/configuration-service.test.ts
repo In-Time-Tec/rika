@@ -93,6 +93,12 @@ describe("ConfigService", () => {
           apiKeyEnv: "GLOBAL_ANTHROPIC_KEY",
         },
         bedrock: { protocol: "amazon-bedrock", authMode: "default" },
+        openrouter: {
+          protocol: "openrouter",
+          baseUrl: ConfigContract.defaults.providers.openrouter.baseUrl,
+          apiKeyEnv: "OPENROUTER_API_KEY",
+          credentialIdentity: "openrouter",
+        },
       })
     }).pipe(
       provideLayer(

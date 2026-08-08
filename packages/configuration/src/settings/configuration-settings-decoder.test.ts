@@ -2,11 +2,12 @@ import { describe, expect, it } from "@effect/vitest"
 import * as SettingsDefaults from "./configuration-defaults"
 import * as SettingsDecoder from "./configuration-settings-decoder"
 import * as ModelResolution from "../model-routing/model-route-resolution"
+import * as Merge from "./configuration-merge"
 import { isStreamingOnlyBaseUrl } from "../model-routing/model-route"
 import { catalog } from "../model-routing/model-catalog"
 import type { ConfigurationSettings } from "./configuration-settings"
 
-const ConfigContract = { ...SettingsDefaults, ...SettingsDecoder, ...ModelResolution, isStreamingOnlyBaseUrl }
+const ConfigContract = { ...SettingsDefaults, ...SettingsDecoder, ...ModelResolution, ...Merge, isStreamingOnlyBaseUrl }
 const Models = { catalog }
 
 describe("ConfigContract", () => {
@@ -49,6 +50,70 @@ describe("ConfigContract", () => {
         providers: { custom: { baseUrl: "https://models.test" } },
       }),
     ).toThrowError(/unknown key custom/)
+  })
+
+  it("accepts the openrouter provider override with a stored credential identity", () => {
+    const input = {
+      providers: {
+        openrouter: {
+          baseUrl: "https://openrouter.ai/api/v1",
+          apiKeyEnv: "OPENROUTER_API_KEY",
+          credentialIdentity: "openrouter",
+        },
+      },
+    } as const
+    expect(ConfigContract.decodeSettingsInput("settings.json", input)).toBe(input)
+    expect(() =>
+      ConfigContract.decodeSettingsInput("settings.json", {
+        providers: { openrouter: { credentialIdentity: "" } },
+      }),
+    ).toThrowError(/credentialIdentity must be a non-empty string/)
+  })
+
+  it("resolves openrouter aliases through the openai preset into every route role", () => {
+    const settings: ConfigurationSettings = ConfigContract.mergeConfigurationSettings({
+      global: {
+        providers: { openrouter: { apiKeyEnv: "OPENROUTER_API_KEY" } },
+        modelAliases: {
+          "mg-flash": {
+            preset: "openai",
+            provider: "openrouter",
+            candidates: ["~deepseek/deepseek-v4-flash-latest"],
+            displayName: "DeepSeek V4 Flash",
+          },
+        },
+        modelRoutes: {
+          modes: { medium: { main: "mg-flash", oracle: "mg-flash" } },
+          title: "mg-flash",
+          compaction: "mg-flash",
+        },
+      },
+      workspace: {},
+    })
+    expect(settings.providers.openrouter).toMatchObject({
+      protocol: "openrouter",
+      baseUrl: "https://openrouter.ai/api/v1",
+      apiKeyEnv: "OPENROUTER_API_KEY",
+      credentialIdentity: "openrouter",
+    })
+    for (const [mode, role] of [
+      ["medium", "main"],
+      ["medium", "oracle"],
+    ] as const) {
+      expect(ConfigContract.resolveModelRoute(settings, mode, role)).toMatchObject({
+        providerId: "openrouter",
+        model: "~deepseek/deepseek-v4-flash-latest",
+        options: { reasoning: { effort: expect.any(String) } },
+      })
+    }
+    expect(ConfigContract.resolveThreadTitleRoute(settings)).toMatchObject({
+      providerId: "openrouter",
+      model: "~deepseek/deepseek-v4-flash-latest",
+    })
+    expect(ConfigContract.resolveCompactionSummaryRoute(settings)).toMatchObject({
+      providerId: "openrouter",
+      model: "~deepseek/deepseek-v4-flash-latest",
+    })
   })
 
   it("accepts Bedrock identity and structured SSO refresh settings", () => {

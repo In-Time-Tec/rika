@@ -80,16 +80,19 @@ export const mergeConfigurationSettings = ({
         ...(bedrock?.authRefresh === undefined ? {} : { authRefresh: bedrock.authRefresh }),
       }
     }
-    const httpOverride = override !== undefined && !("authMode" in override) ? override : undefined
+    const httpOverride: ModelRoute.HttpProviderOverride | undefined =
+      override === undefined || isBedrockOverride(override) ? undefined : (override as ModelRoute.HttpProviderOverride)
     const baseUrl = httpOverride?.baseUrl ?? builtIn.baseUrl
     const streamingOnly =
       httpOverride?.streamingOnly ?? builtIn.streamingOnly ?? (isStreamingOnlyBaseUrl(baseUrl) ? true : undefined)
     const promptCaching = httpOverride?.promptCaching ?? builtIn.promptCaching
+    const credentialIdentity = httpOverride?.credentialIdentity ?? builtIn.credentialIdentity
     if (override === undefined) return streamingOnly === undefined ? builtIn : { ...builtIn, streamingOnly }
     return {
       protocol: builtIn.protocol,
       baseUrl,
       ...(httpOverride?.apiKeyEnv === undefined ? {} : { apiKeyEnv: httpOverride.apiKeyEnv }),
+      ...(credentialIdentity === undefined ? {} : { credentialIdentity }),
       ...(streamingOnly === undefined ? {} : { streamingOnly }),
       ...(promptCaching === undefined ? {} : { promptCaching }),
     }
@@ -99,6 +102,7 @@ export const mergeConfigurationSettings = ({
       openai: provider("openai"),
       anthropic: provider("anthropic"),
       bedrock: provider("bedrock"),
+      openrouter: provider("openrouter"),
     },
     models:
       global.modelAliases === undefined && workspace.modelAliases === undefined

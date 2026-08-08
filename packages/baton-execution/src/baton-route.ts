@@ -11,10 +11,11 @@ import {
   ToolExecutor,
   TurnPolicy,
 } from "@batonfx/core"
-import { AmazonBedrock, Anthropic, Deterministic, ModelRoute, OpenAi } from "@batonfx/providers"
+import { AmazonBedrock, Anthropic, Deterministic, ModelRoute, OpenAi, OpenRouter } from "@batonfx/providers"
 import { ChildRuns, Errors, ExecutableRegistration, ExecutableResolver } from "@batonfx/runtime"
 import * as RoleToolkits from "@rika/coding-tools/agent-role-toolkits"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
+import { ProviderCredentialStore } from "@rika/product/provider-credential-store"
 import { Config, Context, Effect, Layer, Option, Redacted, Scope } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import { providerHttpClientLayer } from "./baton-provider-http"
@@ -110,7 +111,24 @@ const apiKey = (candidate: CandidateSnapshot) =>
     ? Config.succeed(Redacted.make(""))
     : Config.redacted(candidate.providerConnection.apiKeyEnvironment)
 
-const candidateRegistryLayer = (candidate: CandidateSnapshot) => {
+const storedCredentialApiKey = (
+  candidate: CandidateSnapshot,
+): Effect.Effect<Config.Config<Redacted.Redacted<string>>> => {
+  const identity = candidate.providerConnection.credentialIdentity
+  if (identity === undefined) return Effect.succeed(apiKey(candidate))
+  return Effect.gen(function* () {
+    const store = yield* Effect.serviceOption(ProviderCredentialStore)
+    if (Option.isNone(store)) return apiKey(candidate)
+    const credential = yield* store.value
+      .load(identity)
+      .pipe(Effect.orElseSucceed(() => Option.none<Redacted.Redacted<string>>()))
+    return Option.isSome(credential) ? Config.succeed(credential.value) : apiKey(candidate)
+  })
+}
+
+const candidateRegistryLayer = (
+  candidate: CandidateSnapshot,
+): Layer.Layer<ModelRegistry.ModelRegistry, Config.ConfigError> => {
   const registrationKey = candidate.registrationIdentity
   switch (candidate.providerConnection.protocol) {
     case "openai":
@@ -129,6 +147,20 @@ const candidateRegistryLayer = (candidate: CandidateSnapshot) => {
         apiKey: apiKey(candidate),
         clientConfig: { apiUrl: Config.succeed(candidate.providerConnection.baseUrl) },
       }).pipe(Layer.provide(providerHttpClientLayer))
+    case "openrouter":
+      return Layer.unwrap(
+        storedCredentialApiKey(candidate).pipe(
+          Effect.map((resolvedApiKey) =>
+            OpenRouter.layer({
+              model: candidate.model,
+              registrationKey,
+              config: OpenRouter.decodeConfig(candidate.providerOptions),
+              apiKey: resolvedApiKey,
+              clientConfig: { apiUrl: Config.succeed(candidate.providerConnection.baseUrl) },
+            }).pipe(Layer.provide(providerHttpClientLayer)),
+          ),
+        ),
+      )
     case "amazon-bedrock": {
       const connection = new URL(candidate.providerConnection.baseUrl)
       return AmazonBedrock.layer({

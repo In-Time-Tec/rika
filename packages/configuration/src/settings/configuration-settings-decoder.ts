@@ -142,7 +142,13 @@ export const decodeSettingsInput: {
       }
       continue
     }
-    exactKeys(path, `Provider ${name}`, providerConnection, ["baseUrl", "apiKeyEnv", "streamingOnly", "promptCaching"])
+    exactKeys(path, `Provider ${name}`, providerConnection, [
+      "baseUrl",
+      "apiKeyEnv",
+      "credentialIdentity",
+      "streamingOnly",
+      "promptCaching",
+    ])
     if (providerConnection.streamingOnly !== undefined && typeof providerConnection.streamingOnly !== "boolean")
       throw ConfigurationSettingsFileError.make({ path, message: `Provider ${name} streamingOnly must be a boolean` })
     if (providerConnection.promptCaching !== undefined && typeof providerConnection.promptCaching !== "boolean")
@@ -157,6 +163,14 @@ export const decodeSettingsInput: {
       })
     if (providerConnection.baseUrl !== undefined && typeof providerConnection.baseUrl !== "string")
       throw ConfigurationSettingsFileError.make({ path, message: `Provider ${name} baseUrl must be a string` })
+    if (
+      providerConnection.credentialIdentity !== undefined &&
+      (typeof providerConnection.credentialIdentity !== "string" || providerConnection.credentialIdentity.length === 0)
+    )
+      throw ConfigurationSettingsFileError.make({
+        path,
+        message: `Provider ${name} credentialIdentity must be a non-empty string`,
+      })
     if (providerConnection.baseUrl === undefined) continue
     if (!/^https?:\/\/[^\s\\]+$/i.test(providerConnection.baseUrl))
       throw ConfigurationSettingsFileError.make({

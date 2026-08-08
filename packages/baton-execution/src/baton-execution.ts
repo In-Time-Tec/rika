@@ -2,7 +2,15 @@ import { ModelRegistry, SandboxExecutor } from "@batonfx/core"
 import { Approval, Run, RunTree, Runtime } from "@batonfx/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import type { Status } from "@rika/product/execution-status"
-import { Cause, Context, Effect, Layer, Schedule, Schema, Stream } from "effect"
+import { ProviderCredentialStore } from "@rika/product/provider-credential-store"
+export type { ProviderCredentialStore } from "@rika/product/provider-credential-store"
+
+const noopCredentialStoreLayer = Layer.succeed(ProviderCredentialStore, {
+  load: () => Effect.succeed(Option.none()),
+  save: () => Effect.void,
+  remove: () => Effect.succeed(false),
+})
+import { Cause, Context, Effect, Layer, Option, Schedule, Schema, Stream } from "effect"
 import type { AgentToolHandlers } from "./baton-route"
 import { configure, makeResolver } from "./baton-route"
 import { TreeProjector, titleInvocationId } from "./baton-tree-projector"
@@ -15,6 +23,7 @@ export interface Options {
   readonly filename: string
   readonly agentServices?: (workspace: string) => Layer.Layer<AgentToolServices, never, never>
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry, never, never>
+  readonly credentialStore?: Layer.Layer<ProviderCredentialStore, never, never>
   readonly subscriberQueueCapacity?: number
 }
 
@@ -273,8 +282,11 @@ export const layer = (
           ? {}
           : { subscriberQueueCapacity: options.subscriberQueueCapacity }),
       })
-      return Layer.effect(ExecutionGateway.Service, make(options, sandbox)).pipe(
-        Layer.provide(runtimeLayer),
+      const credentialStore = options.credentialStore ?? noopCredentialStoreLayer
+      const executionLayer = Layer.effect(ExecutionGateway.Service, make(options, sandbox)).pipe(
+        Layer.provide(Layer.mergeAll(runtimeLayer, credentialStore)),
+      )
+      return executionLayer.pipe(
         Layer.catchCause((cause) =>
           Layer.effectContext(
             Effect.fail(ExecutionGateway.StartTurnFailure.make({ message: message(Cause.squash(cause)) })),

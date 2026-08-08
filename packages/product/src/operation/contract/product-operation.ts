@@ -121,8 +121,9 @@ const Auth = Schema.Struct({
   ...ClientWorkspace,
   _tag: Schema.tag("Auth"),
   action: Schema.Literals(["login", "status", "logout"]),
-  provider: Schema.tag("openai"),
+  provider: Schema.Union([Schema.tag("openai"), Schema.tag("openrouter")]),
   deviceCode: Schema.optionalKey(Schema.Boolean),
+  apiKey: Schema.optionalKey(Schema.String),
 })
 
 const McpNoInput = Schema.Struct({

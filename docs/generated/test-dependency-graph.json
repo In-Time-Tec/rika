@@ -1025,6 +1025,14 @@
       "package": "quickjs-emscripten-core"
     },
     {
+      "id": "external:readline",
+      "workspace": "root",
+      "kind": "external",
+      "production": true,
+      "publicExports": [],
+      "package": "readline"
+    },
+    {
       "id": "external:string-width",
       "workspace": "root",
       "kind": "external",
@@ -1201,6 +1209,16 @@
     {
       "id": "packages/baton-execution/test/baton-tree-projector.test.ts",
       "path": "packages/baton-execution/test/baton-tree-projector.test.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/baton-execution/test/openrouter-continuity.test.ts",
+      "path": "packages/baton-execution/test/openrouter-continuity.test.ts",
       "workspace": "@rika/baton-execution",
       "package": "@rika/baton-execution",
       "kind": "source",
@@ -2211,6 +2229,16 @@
     {
       "id": "packages/product/test/openai-auth-token.test.ts",
       "path": "packages/product/test/openai-auth-token.test.ts",
+      "workspace": "@rika/product",
+      "package": "@rika/product",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/product/test/openrouter-auth.test.ts",
+      "path": "packages/product/test/openrouter-auth.test.ts",
       "workspace": "@rika/product",
       "package": "@rika/product",
       "kind": "source",
@@ -5471,6 +5499,54 @@
       "production": false
     },
     {
+      "from": "packages/baton-execution/test/openrouter-continuity.test.ts",
+      "to": "external:@batonfx/core",
+      "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openrouter-continuity.test.ts",
+      "to": "external:@batonfx/providers",
+      "specifier": "@batonfx/providers",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openrouter-continuity.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openrouter-continuity.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openrouter-continuity.test.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/openrouter-continuity.test.ts",
+      "to": "external:effect/unstable/http",
+      "specifier": "effect/unstable/http",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/baton-execution/test/review-integration.test.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
@@ -7818,6 +7894,30 @@
       "from": "packages/product/test/openai-auth-token.test.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/openrouter-auth.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/openrouter-auth.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/product/test/openrouter-auth.test.ts",
+      "to": "external:effect/unstable/http",
+      "specifier": "effect/unstable/http",
       "kind": "import",
       "relationship": "test",
       "production": false

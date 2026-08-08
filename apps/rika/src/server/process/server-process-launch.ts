@@ -151,6 +151,7 @@ export const start = () => {
     },
     database,
     batonDatabase: paths.batonDatabase,
+    profileIdentity,
     globalConfig,
     workspaceConfig,
     editor,
