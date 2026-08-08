@@ -1,4 +1,5 @@
 import { Data, Effect, FileSystem, Path } from "effect"
+import { devServerEntry } from "../server-entry"
 
 export type PerformanceRole = "launcher" | "interactive" | "server"
 
@@ -147,6 +148,7 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
   const sourceDirectory = path.dirname(moduleDirectory)
   const packaged = import.meta.path?.startsWith("/$bunfs/") ?? false
   const directory = packaged ? path.dirname(process.execPath) : sourceDirectory
+  const serverSourceDirectory = packaged ? undefined : path.dirname(yield* devServerEntry())
   const runtimes = roleRuntimes(
     packaged
       ? { packaged, executable: process.execPath, sourceDirectory: directory }
@@ -154,7 +156,7 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
           packaged,
           executable: process.execPath,
           sourceDirectory: directory,
-          serverSourceDirectory: path.join(sourceDirectory, "..", "..", "server", "src"),
+          ...(serverSourceDirectory === undefined ? {} : { serverSourceDirectory }),
         },
   )
   const executableBytes = yield* Effect.all(

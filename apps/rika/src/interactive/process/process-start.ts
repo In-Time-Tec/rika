@@ -12,6 +12,7 @@ import { FetchHttpClient } from "effect/unstable/http"
 import { Config, Console, Context, Effect, Layer, Option, Path, Runtime } from "effect"
 import { Command } from "effect/unstable/cli"
 import { command, version } from "../../command/root/rika-command"
+import { devServerEntry } from "../../server-entry"
 import { interactiveTui } from "./interactive-process-loop"
 import { relaunchArguments } from "../../release/relaunch-argument"
 import { layer as serverLayer } from "../../transport/client/server-client-transport"
@@ -92,7 +93,7 @@ export const start = () => {
     ? { executable: join(dirname(process.execPath), ".rika-server"), arguments: [] }
     : {
         executable: process.execPath,
-        arguments: [join(import.meta.dir, "..", "..", "..", "..", "server", "src", "server-main.ts")],
+        arguments: [Effect.runSync(devServerEntry().pipe(Effect.provideService(Path.Path, startupPathService)))],
       }
   let clientModeRoutes: ModeRoutes | undefined
   const clientOwnedInteractiveFunction = interactiveTui({ editor, modeRoutes: () => clientModeRoutes })

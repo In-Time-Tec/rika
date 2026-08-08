@@ -1,4 +1,5 @@
 import { Config, Effect, Function, Option, Path, Schema } from "effect"
+import { devServerEntry } from "../server-entry"
 
 const encodeLaunchArgumentsImpl = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)))
 export const encodeLaunchArguments: {
@@ -31,7 +32,7 @@ export const privateRuntime = Effect.fn("ClientProcess.privateRuntime")(function
     }
   return {
     executable: process.execPath,
-    prefixArguments: [path.join(import.meta.dir, "..", "..", "..", "server", "src", "server-main.ts")],
+    prefixArguments: [yield* devServerEntry()],
     replaceProcess: false,
   }
 })
