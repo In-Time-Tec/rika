@@ -562,11 +562,11 @@ const checkWorkspaceTestTopology = Effect.fn("RepositoryPolicy.checkWorkspaceTes
   const path = yield* Path
   const sources = yield* fileSystem.glob("{apps,packages}/**/src/**/*.ts", {
     root,
-    exclude: ["**/node_modules/**", "**/dist/**", "**/.turbo/**"],
+    exclude: ["**/node_modules/**", "**/dist/**", "**/.turbo/**", "apps/desktop/fork/**"],
   })
   const tests = yield* fileSystem.glob("{apps,packages}/**/test/**/*.ts", {
     root,
-    exclude: ["**/node_modules/**", "**/dist/**", "**/.turbo/**"],
+    exclude: ["**/node_modules/**", "**/dist/**", "**/.turbo/**", "apps/desktop/fork/**"],
   })
   const relative = (value: string) =>
     (path.isAbsolute(value) ? path.relative(root, value) : value).replaceAll("\\", "/")
@@ -638,7 +638,7 @@ const scanSourcePolicies = Effect.fn("RepositoryPolicy.scanSourcePolicies")(func
   const path = yield* Path
   const paths = (yield* fileSystem.glob("{apps,packages,scripts,test,tooling}/**/*.{ts,tsx,mts,cts}", {
     root,
-    exclude: ["**/node_modules/**", "**/dist/**"],
+    exclude: ["**/node_modules/**", "**/dist/**", "apps/desktop/fork/**"],
   })).filter((candidate) => {
     const segments = candidate.split(/[\\/]+/)
     return !segments.includes("node_modules") && !segments.includes("dist")

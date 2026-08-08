@@ -115,5 +115,5 @@
       }
     }
   ],
-  "ignorePatterns": ["dist", "node_modules", ".turbo", "repos"]
+  "ignorePatterns": ["dist", "node_modules", ".turbo", "repos", "apps/desktop/fork"]
 }

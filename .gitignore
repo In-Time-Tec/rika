@@ -16,3 +16,5 @@ bun.lockb
 /repos/
 __pycache__/
 *.py[cod]
+
+apps/desktop/fork

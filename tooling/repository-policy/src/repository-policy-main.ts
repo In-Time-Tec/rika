@@ -23,7 +23,7 @@ const checkedInOutputDiagnostics = Effect.fn("RepositoryPolicy.checkedInOutputDi
   const path = yield* Path
   const JavaScriptFiles = yield* fileSystem.glob("{apps,packages,scripts,test,tooling}/**/*.{js,jsx,mjs,cjs}", {
     root,
-    exclude: ["**/node_modules/**", "**/dist/**"],
+    exclude: ["**/node_modules/**", "**/dist/**", "apps/desktop/fork/**"],
   })
   const diagnostics: PolicyDiagnostic[] = []
   for (const file of JavaScriptFiles) {

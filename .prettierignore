@@ -6,3 +6,5 @@ node_modules
 repos
 artifacts
 packages/terminal/test/fixtures/visual/*.styles.json
+
+apps/desktop/fork
