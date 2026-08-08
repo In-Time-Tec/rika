@@ -80,7 +80,11 @@ const status = (value: Run.RunStatus): Status => {
   }
 }
 
-const make = (options: Options, sandbox: SandboxExecutor.Interface) =>
+const make = (
+  options: Options,
+  sandbox: SandboxExecutor.Interface,
+  credentialStore: ProviderCredentialStoreShape | undefined,
+) =>
   Effect.gen(function* () {
     const runtime = yield* Runtime.Runtime
     // A replayPolicy:"never" operation interrupted by cancellation parks the Run in
@@ -164,6 +168,7 @@ const make = (options: Options, sandbox: SandboxExecutor.Interface) =>
             executionRoute: input.executionRoute,
             workspace: input.workspace,
             sandbox,
+            ...(credentialStore === undefined ? {} : { credentialStore }),
             ...(options.agentServices === undefined ? {} : { agentServices: options.agentServices(input.workspace) }),
             ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
           })
@@ -286,7 +291,7 @@ export const layer = (
           ? {}
           : { subscriberQueueCapacity: options.subscriberQueueCapacity }),
       })
-      const executionLayer = Layer.effect(ExecutionGateway.Service, make(options, sandbox)).pipe(
+      const executionLayer = Layer.effect(ExecutionGateway.Service, make(options, sandbox, credentialStore)).pipe(
         Layer.provide(runtimeLayer),
       )
       return executionLayer.pipe(
