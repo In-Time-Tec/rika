@@ -47,7 +47,7 @@
       "dompurify": "3.3.1",
       "drizzle-kit": "1.0.0-rc.2",
       "drizzle-orm": "1.0.0-rc.2",
-      "effect": "4.0.0-beta.83",
+      "effect": "4.0.0-beta.98",
       "ai": "6.0.168",
       "cross-spawn": "7.0.6",
       "hono": "4.10.7",
@@ -85,5 +85,8 @@
     "@lydell/node-pty",
     "@lydell/node-pty-darwin-arm64",
     "esbuild"
-  ]
+  ],
+  "dependencies": {
+    "effect": "catalog:"
+  }
 }

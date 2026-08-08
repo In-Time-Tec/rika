@@ -18,9 +18,98 @@
     "outDir": "node_modules/.ts-dist",
     "isolatedModules": true,
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": [
+        "./src/*"
+      ],
+      "@rika/config/behavior-mode": [
+        "../../../../packages/config/src/model-routing/behavior-mode.ts"
+      ],
+      "@rika/product/execution-request": [
+        "../../../../packages/product/src/execution/contract/execution-request.ts"
+      ],
+      "@rika/product/interactive-command": [
+        "../../../../packages/product/src/operation/interactive/interactive-command.ts"
+      ],
+      "@rika/product/interactive-event": [
+        "../../../../packages/product/src/operation/interactive/interactive-event.ts"
+      ],
+      "@rika/product/interactive-session": [
+        "../../../../packages/product/src/operation/interactive/interactive-session.ts"
+      ],
+      "@rika/product/product-operation": [
+        "../../../../packages/product/src/operation/contract/product-operation.ts"
+      ],
+      "@rika/product/server-interactive-feed": [
+        "../../../../packages/product/src/server/server-interactive-feed.ts"
+      ],
+      "@rika/product/server-service": [
+        "../../../../packages/product/src/server/server-service.ts"
+      ],
+      "@rika/product/server-service-handshake": [
+        "../../../../packages/product/src/server/server-service-handshake.ts"
+      ],
+      "@rika/product/server-service-sha256": [
+        "../../../../packages/product/src/server/server-service-sha256.ts"
+      ],
+      "@rika/product/server-service-sha256-bun": [
+        "../../../../packages/product/src/server/server-service-sha256-bun.ts"
+      ],
+      "@rika/product/server-service-sha256-node": [
+        "../../../../packages/product/src/server/server-service-sha256-node.ts"
+      ],
+      "@rika/product/server-service-sha256-web": [
+        "../../../../packages/product/src/server/server-service-sha256-web.ts"
+      ],
+      "@rika/product/thread-record": [
+        "../../../../packages/product/src/thread/model/thread-record.ts"
+      ],
+      "@rika/product/thread-summary": [
+        "../../../../packages/product/src/thread/model/thread-summary.ts"
+      ],
+      "@rika/product/thread-view": [
+        "../../../../packages/product/src/thread/model/thread-view.ts"
+      ],
+      "@rika/product/turn-record": [
+        "../../../../packages/product/src/thread/model/turn-record.ts"
+      ],
+      "@rika/client/connection": [
+        "../../../../packages/client/src/connection.ts"
+      ],
+      "@rika/client/session": [
+        "../../../../packages/client/src/session.ts"
+      ],
+      "@rika/client/feed": [
+        "../../../../packages/client/src/feed.ts"
+      ],
+      "@rika/client/reconnect": [
+        "../../../../packages/client/src/reconnect.ts"
+      ],
+      "@rika/client/sha256": [
+        "../../../../packages/client/src/sha256.ts"
+      ],
+      "@rika/client/protocol/server-protocol": [
+        "../../../../packages/client/src/protocol/server-protocol.ts"
+      ],
+      "@rika/client/protocol/server-message-codec": [
+        "../../../../packages/client/src/protocol/server-message-codec.ts"
+      ],
+      "@rika/client/protocol/server-protocol-handshake": [
+        "../../../../packages/client/src/protocol/server-protocol-handshake.ts"
+      ],
+      "effect": [
+        "../../../../node_modules/effect"
+      ],
+      "effect/*": [
+        "../../../../node_modules/effect/*"
+      ]
     }
   },
-  "include": ["src", "package.json"],
-  "exclude": ["dist", "ts-dist"]
+  "include": [
+    "src",
+    "package.json"
+  ],
+  "exclude": [
+    "dist",
+    "ts-dist"
+  ]
 }

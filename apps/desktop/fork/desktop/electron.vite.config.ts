@@ -1,4 +1,5 @@
 import { sentryVitePlugin } from "@sentry/vite-plugin"
+import * as path from "node:path"
 import { defineConfig } from "electron-vite"
 import appPlugin from "@opencode-ai/app/vite"
 import * as fs from "node:fs/promises"
@@ -91,7 +92,49 @@ const require = __cjs_mod__.createRequire(import.meta.url);
     },
   },
   renderer: {
-    plugins: [appPlugin, sentry],
+    resolve: {
+      alias: [
+        { find: /^effect$/, replacement: path.resolve(__dirname, "../../../../node_modules/effect") },
+        { find: "@rika/client/connection", replacement: path.resolve(__dirname, "../../../../packages/client/src/connection.ts") },
+        { find: "@rika/client/session", replacement: path.resolve(__dirname, "../../../../packages/client/src/session.ts") },
+        { find: "@rika/client/feed", replacement: path.resolve(__dirname, "../../../../packages/client/src/feed.ts") },
+        { find: "@rika/client/reconnect", replacement: path.resolve(__dirname, "../../../../packages/client/src/reconnect.ts") },
+        { find: "@rika/client/sha256", replacement: path.resolve(__dirname, "../../../../packages/client/src/sha256.ts") },
+        { find: "@rika/config/behavior-mode", replacement: path.resolve(__dirname, "../../../../packages/config/src/model-routing/behavior-mode.ts") },
+        { find: "@rika/product/execution-request", replacement: path.resolve(__dirname, "../../../../packages/product/src/execution/contract/execution-request.ts") },
+        { find: "@rika/product/interactive-command", replacement: path.resolve(__dirname, "../../../../packages/product/src/operation/interactive/interactive-command.ts") },
+        { find: "@rika/product/interactive-event", replacement: path.resolve(__dirname, "../../../../packages/product/src/operation/interactive/interactive-event.ts") },
+        { find: "@rika/product/interactive-session", replacement: path.resolve(__dirname, "../../../../packages/product/src/operation/interactive/interactive-session.ts") },
+        { find: "@rika/product/product-operation", replacement: path.resolve(__dirname, "../../../../packages/product/src/operation/contract/product-operation.ts") },
+        { find: "@rika/product/server-interactive-feed", replacement: path.resolve(__dirname, "../../../../packages/product/src/server/server-interactive-feed.ts") },
+        { find: "@rika/product/server-service", replacement: path.resolve(__dirname, "../../../../packages/product/src/server/server-service.ts") },
+        { find: "@rika/product/server-service-handshake", replacement: path.resolve(__dirname, "../../../../packages/product/src/server/server-service-handshake.ts") },
+        { find: "@rika/product/server-service-sha256", replacement: path.resolve(__dirname, "../../../../packages/product/src/server/server-service-sha256.ts") },
+        { find: "@rika/product/server-service-sha256-bun", replacement: path.resolve(__dirname, "../../../../packages/product/src/server/server-service-sha256-bun.ts") },
+        { find: "@rika/product/server-service-sha256-node", replacement: path.resolve(__dirname, "../../../../packages/product/src/server/server-service-sha256-node.ts") },
+        { find: "@rika/product/server-service-sha256-web", replacement: path.resolve(__dirname, "../../../../packages/product/src/server/server-service-sha256-web.ts") },
+        { find: "@rika/product/thread-record", replacement: path.resolve(__dirname, "../../../../packages/product/src/thread/model/thread-record.ts") },
+        { find: "@rika/product/thread-summary", replacement: path.resolve(__dirname, "../../../../packages/product/src/thread/model/thread-summary.ts") },
+        { find: "@rika/product/thread-view", replacement: path.resolve(__dirname, "../../../../packages/product/src/thread/model/thread-view.ts") },
+        { find: "@rika/product/turn-record", replacement: path.resolve(__dirname, "../../../../packages/product/src/thread/model/turn-record.ts") },
+      ],
+    },
+    plugins: [
+      {
+        name: "rika:effect-subpaths",
+        resolveId(source) {
+          if (source.startsWith("effect/")) {
+            const target = path.resolve(
+              __dirname,
+              `../../../../node_modules/effect/dist/${source.slice("effect/".length)}.js`,
+            )
+            return target
+          }
+        },
+      },
+      appPlugin,
+      sentry,
+    ],
     publicDir: "../../../app/public",
     root: "src/renderer",
     build: {

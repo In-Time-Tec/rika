@@ -42,3 +42,21 @@ One-time fork of the opencode desktop application, taken on 2026-08-08 and owned
   `global-sdk event stream failed` (that layer is exactly what the Rika port
   replaces). Electron 42.3.3 binary installed via the cached package's install.js
   (bun does not run electron's postinstall by default).
+
+## Phase A status (Rika transport in the fork) — DONE
+
+- `app/src/rika/` — `endpoint.ts` (server.json/token resolution + identity),
+  `connection.ts` (`connectRika`: @rika/client connect, clientKind "desktop",
+  WebCrypto-backed effect Crypto, WebSocket factory), `events.ts`
+  (`runThreadFeed`: interactive session attach).
+- `app/tsconfig.json` paths + `desktop/electron.vite.config.ts` renderer
+  aliases map `@rika/client/*` and `@rika/product/*` into Rika's packages and
+  unify `effect` on the Rika instance (4.0.0-beta.98; fork catalog bumped from
+  beta.83). `effect/<sub>` subpaths resolve via a small resolveId plugin
+  (vite cannot apply effect's `./*` exports wildcard; string aliases match
+  prefixes, so the bare `effect` alias is a regex).
+- Verification: `bun test app/src/rika/connection.test.ts` — 2/2 green
+  (spawns the REAL Rika Server, connects with clientKind "desktop", pings).
+  Renderer build green; desktop app launches.
+- Test spawns `apps/server/dist/server-main.js` with an isolated HOME
+  (settings-file decode requires a clean profile) and waits for server.json.

@@ -44,7 +44,7 @@ reply, session create/rename/delete/archive, project list/open, todo update.
 
 ## File-by-file port plan
 
-### Phase A — transport (new `app/src/rika/`, gate-excluded until wired)
+### Phase A — transport (new `app/src/rika/`) — **DONE**
 1. `rika/connection.ts` — `@rika/client` `connect()` wrapper: URL from Rika
    server.json/port derivation (env `RIKA_INTERNAL_SERVER_*` + dataRoot), token
    from `<dataRoot>/server.token`, `clientKind: "desktop"`, reconnect policy.
