@@ -1,5 +1,5 @@
 import { Function, Schema } from "effect"
-import { ModeId } from "@rika/configuration/behavior-mode"
+import { ModeId } from "@rika/config/behavior-mode"
 import { idle as loadableIdle, loadableSchemas } from "./terminal-loadable-state"
 import { Activity } from "./terminal-activity-state"
 import { UsageDisplay, UsageTime } from "./terminal-usage-state"

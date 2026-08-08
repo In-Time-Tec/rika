@@ -1,8 +1,8 @@
 import { Input } from "./product-operation"
 export { Input }
 export type ConfigurationOperation = Input
-import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
-import * as ConfigurationService from "@rika/configuration/configuration-service"
+import * as ModelRouteResolution from "@rika/config/model-route-resolution"
+import * as ConfigurationService from "@rika/config/configuration-service"
 import { Console, Context, Effect, Layer, Schema } from "effect"
 
 export class AdapterError extends Schema.TaggedErrorClass<AdapterError>()("ConfigOperationsAdapterError", {

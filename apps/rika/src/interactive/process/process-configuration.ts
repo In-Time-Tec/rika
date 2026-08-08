@@ -1,4 +1,4 @@
-import * as SettingsDecoder from "@rika/configuration/configuration-settings"
+import * as SettingsDecoder from "@rika/config/configuration-settings"
 import * as ProductOperation from "@rika/product/product-operation"
 import { Cause, Effect, FileSystem, Function, Schema } from "effect"
 

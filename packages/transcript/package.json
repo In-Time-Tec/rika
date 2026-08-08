@@ -14,7 +14,7 @@
     "./transcript-unit": "./src/schema/transcript-unit.ts"
   },
   "dependencies": {
-    "@rika/coding-tools": "workspace:*",
+    "@rika/tools": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

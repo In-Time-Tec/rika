@@ -89,7 +89,7 @@ A `SelectionLoaded` may carry `activeTurn`, and the base snapshot then contains 
 
 ## Why it was invisible
 
-- No session-level test asserts the event ordering of a first submission; `packages/product-store/test/product-operation/*` tests submit against already-open threads or never inspect the first snapshot.
+- No session-level test asserts the event ordering of a first submission; `packages/store/test/product-operation/*` tests submit against already-open threads or never inspect the first snapshot.
 - The TUI test "echoes an idle submission in the next frame before server admission" (`apps/rika/test/app-submission.tui.test.ts:9`) holds admission, so it only sees the optimistic frame and the final completion frame — the empty snapshot is published after release and is never asserted against.
 - The controller tests (`apps/rika/test/interactive-controller-thread-view.test.ts`) start from a pre-loaded snapshot; none feeds `Submitted` followed by the created-thread snapshot sequence.
 
@@ -138,7 +138,7 @@ if (created) yield * activateCreatedThread(thread, getCurrentSelectionEpoch(), d
 
 Ordering notes (verified against the code):
 
-- The admitted turn for a created thread always has status `"accepted"` (`createForSubmission` sets `accepted` when no active turn exists — `packages/product-store/src/turn/turn-memory-submission.ts:33`; a created thread has no active turn). `accepted` is one of the statuses `project()` treats as active, so the base snapshot also sets `busy: true` and `activeTurnId` — no busy flap.
+- The admitted turn for a created thread always has status `"accepted"` (`createForSubmission` sets `accepted` when no active turn exists — `packages/store/src/turn/turn-memory-submission.ts:33`; a created thread has no active turn). `accepted` is one of the statuses `project()` treats as active, so the base snapshot also sets `busy: true` and `activeTurnId` — no busy flap.
 - `SubmissionAdmitted` now arrives before `ThreadActivated`/`SelectionLoaded`. The client handles it (`process-events.ts` applies when `currentThreadId === undefined`) and binds the provisional entry; the subsequent snapshot replaces it with the server's prompt unit in the same visual frame.
 - The feed drops `TurnStarted`/`ExecutionProjectionChanged` until `current` exists (`interactive-thread-view-feed.ts`), and activation now happens synchronously between admission and the execution fork, so no event is lost.
 - The queued-turn `queueMutationEvent` branch is dead for the created-thread path (`admitInteractiveSubmission` returns the turn, not a `{ queue }` envelope), and `SelectionLoaded` reads the queue after admission anyway.
@@ -148,7 +148,7 @@ Ordering notes (verified against the code):
 
 1. **Feed level** — `packages/product/test/interactive-thread-view-feed.test.ts`: add a test that publishing `SelectionLoaded` with `entries: []` and an `activeTurn` (the created-thread shape) yields a `ThreadViewSnapshot` whose turns contain the prompt unit (`key: "turn:<id>:user"`, `content.role === "user"`, `text === turn.prompt`), and that the following `TurnStarted` produces a valid patch with `baseRevision: 0`.
 
-2. **Session level** — new test in `packages/product-store/test/product-operation/` (pattern from `minimal-drain.test.ts` / `operation-queue-drain.test.ts`): open an interactive session with `holdSession` + `openInteractiveSession`, attach `session.events`, `session.submit("first message")`, settle; assert the first `ThreadViewSnapshot` received for the created thread already contains the prompt unit — i.e., no empty snapshot precedes a snapshot with the turn.
+2. **Session level** — new test in `packages/store/test/product-operation/` (pattern from `minimal-drain.test.ts` / `operation-queue-drain.test.ts`): open an interactive session with `holdSession` + `openInteractiveSession`, attach `session.events`, `session.submit("first message")`, settle; assert the first `ThreadViewSnapshot` received for the created thread already contains the prompt unit — i.e., no empty snapshot precedes a snapshot with the turn.
 
 3. **Controller level** — `apps/rika/test/interactive-controller-thread-view.test.ts`: feed `Submitted` (with a non-empty input and `submissionId`) into a fresh model, then a `ThreadViewSnapshot` whose turns carry the prompt unit; assert `welcomeVisible(model)` is false after the snapshot (never true after submit) and `busy` stays true. This is the client invariant the server fix preserves.
 
@@ -164,7 +164,7 @@ Optional but recommended: extend `apps/rika/test/app-submission.tui.test.ts`'s "
 ## Verification
 
 ```bash
-bun --bun vitest run --project unit   packages/product/test/interactive-thread-view-feed.test.ts   packages/product-store/test/product-operation   apps/rika/test/interactive-controller-thread-view.test.ts
+bun --bun vitest run --project unit   packages/product/test/interactive-thread-view-feed.test.ts   packages/store/test/product-operation   apps/rika/test/interactive-controller-thread-view.test.ts
 bun run check
 ```
 

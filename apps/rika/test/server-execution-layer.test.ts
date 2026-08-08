@@ -3,7 +3,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { Database } from "bun:sqlite"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
-import * as JavaScriptSandbox from "@rika/javascript-sandbox/javascript-sandbox"
+import * as JavaScriptSandbox from "@rika/sandbox/javascript-sandbox"
 import { Context, Effect, FileSystem, Layer, Random, Schema, Stream } from "effect"
 import { configuredBackendLayer } from "../src/server/composition/server-execution-layer"
 

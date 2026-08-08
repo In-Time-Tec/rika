@@ -1,7 +1,7 @@
-import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
-import * as SettingsDefaults from "@rika/configuration/configuration-settings"
+import * as ModelRouteResolution from "@rika/config/model-route-resolution"
+import * as SettingsDefaults from "@rika/config/configuration-settings"
 import { Schema } from "effect"
-import { ModeId, modeIds } from "@rika/configuration/behavior-mode"
+import { ModeId, modeIds } from "@rika/config/behavior-mode"
 
 const ModeRouteLabelSchema = Schema.Struct({ name: Schema.String, effort: Schema.String, fast: Schema.Boolean })
 const ModeRouteMapSchema = Schema.Record(

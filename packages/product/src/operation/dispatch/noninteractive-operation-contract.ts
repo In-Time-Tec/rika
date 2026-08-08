@@ -8,7 +8,7 @@ import type { Input, OperationUnavailable } from "../contract/product-operation"
 import type { OperationError } from "../operation-error"
 import type { InteractiveEvent } from "../interactive/interactive-runtime-event"
 import type { PreparedTurn } from "../interactive/interactive-session-runtime"
-import type { ModeId } from "@rika/configuration/behavior-mode"
+import type { ModeId } from "@rika/config/behavior-mode"
 import type { CreateInput } from "../../thread/repository/turn-repository-contract"
 import type { Effect } from "effect"
 

@@ -1,12 +1,12 @@
 import * as ProductOperation from "@rika/product/product-operation"
-import * as ConfigurationService from "@rika/configuration/configuration-service"
-import * as SettingsDecoder from "@rika/configuration/configuration-settings"
+import * as ConfigurationService from "@rika/config/configuration-service"
+import * as SettingsDecoder from "@rika/config/configuration-settings"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Operation from "@rika/product/product-operation-service"
 import * as ServerService from "@rika/product/server-service"
-import { globalPaths, workspacePaths } from "@rika/configuration/configuration-paths"
-import { resolveProfileDataPaths } from "@rika/configuration/profile-data-paths"
+import { globalPaths, workspacePaths } from "@rika/config/configuration-paths"
+import { resolveProfileDataPaths } from "@rika/config/profile-data-paths"
 import { FetchHttpClient } from "effect/unstable/http"
 import {
   Cause,

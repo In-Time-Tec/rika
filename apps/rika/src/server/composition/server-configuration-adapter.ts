@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
-import * as SettingsDecoder from "@rika/configuration/configuration-settings"
-import * as ConfigurationService from "@rika/configuration/configuration-service"
+import * as SettingsDecoder from "@rika/config/configuration-settings"
+import * as ConfigurationService from "@rika/config/configuration-service"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as WorkspaceIndex from "@rika/coding-tools/workspace-file-search"
-import * as WebSearchProvider from "@rika/coding-tools/web-search-provider"
+import * as WorkspaceIndex from "@rika/tools/workspace-file-search"
+import * as WebSearchProvider from "@rika/tools/web-search-provider"
 import { Cause, Context, Effect, FileSystem, Function, Layer, PlatformError, Redacted, Schema } from "effect"
 
 export { adapter as productConfigAdapter } from "./server-product-config"

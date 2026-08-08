@@ -1,5 +1,5 @@
-import { Catalog as CodingToolCatalog } from "@rika/coding-tools/coding-tool-catalog"
-import type * as ConfigurationSettings from "@rika/configuration/configuration-settings"
+import { Catalog as CodingToolCatalog } from "@rika/tools/coding-tool-catalog"
+import type * as ConfigurationSettings from "@rika/config/configuration-settings"
 import * as ThreadQuery from "@rika/product/thread-query-service"
 import * as ThreadToolAction from "@rika/product/thread-tool-action"
 import { Effect, Layer } from "effect"

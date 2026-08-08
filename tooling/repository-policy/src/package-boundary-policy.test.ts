@@ -34,7 +34,7 @@ describe("repository policy", () => {
         manifest("@rika/cli", { "@batonfx/core": "file:/private/tmp/rika-autoresearch-links/a.tgz" }),
       ]),
     ).toEqual([])
-    expect(checkDependencyManifests([manifest("@rika/coding-tools", { "parallel-web": "1.1.0" })])).toEqual([])
+    expect(checkDependencyManifests([manifest("@rika/tools", { "parallel-web": "1.1.0" })])).toEqual([])
   })
 
   test("admits the Baton adapter as the CLI execution boundary", () => {
@@ -42,13 +42,13 @@ describe("repository policy", () => {
       checkPackageEdges([
         manifest(
           "@rika/cli",
-          { "@rika/baton-execution": "workspace:*" },
+          { "@rika/execution": "workspace:*" },
           {
             rika: { kind: "application", domain: "cli" },
           },
         ),
         manifest(
-          "@rika/baton-execution",
+          "@rika/execution",
           { "@rika/product": "workspace:*" },
           {
             rika: { kind: "adapter", domain: "execution" },
@@ -61,10 +61,10 @@ describe("repository policy", () => {
 
   test("rejects model providers only in tools", () => {
     expect(
-      checkDependencyManifests([manifest("@rika/coding-tools", { openai: "6.0.0", "@ai-sdk/anthropic": "2.0.0" })]),
+      checkDependencyManifests([manifest("@rika/tools", { openai: "6.0.0", "@ai-sdk/anthropic": "2.0.0" })]),
     ).toEqual([
-      "@rika/coding-tools/package.json: @rika/coding-tools cannot depend on language-model provider openai",
-      "@rika/coding-tools/package.json: @rika/coding-tools cannot depend on language-model provider @ai-sdk/anthropic",
+      "@rika/tools/package.json: @rika/tools cannot depend on language-model provider openai",
+      "@rika/tools/package.json: @rika/tools cannot depend on language-model provider @ai-sdk/anthropic",
     ])
   })
 

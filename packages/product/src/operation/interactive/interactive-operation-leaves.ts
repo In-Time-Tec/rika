@@ -7,7 +7,7 @@ import type { InteractiveEvent } from "./interactive-runtime-event"
 import { Effect } from "effect"
 import { operationError } from "../operation-error"
 import { clampThreadTitle } from "../../thread/query/thread-title-policy"
-import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
+import * as ToolRuntime from "@rika/tools/coding-tool-runtime"
 export const executionStartFailureMessage =
   "Rika could not start this message. Run rika diagnostics status if it keeps happening."
 export const ingestFailureMessage =

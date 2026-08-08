@@ -1,5 +1,5 @@
-import * as SettingsDefaults from "@rika/configuration/configuration-settings"
-import * as ConfigurationService from "@rika/configuration/configuration-service"
+import * as SettingsDefaults from "@rika/config/configuration-settings"
+import * as ConfigurationService from "@rika/config/configuration-service"
 import { expect, it } from "@effect/vitest"
 import * as ConfigOperations from "../src/operation/contract/configuration-operation"
 import { Effect, Layer, Redacted, Ref } from "effect"

@@ -293,7 +293,7 @@ test("shows a nested agent title and renders its prompt once in the expanded bod
       {
         ...subagentToolBlock,
         id: "child",
-        detail: "Read-only explore packages/configuration, extensions, and tools with concise source-file evidence.",
+        detail: "Read-only explore packages/config, extensions, and tools with concise source-file evidence.",
       },
       shell("grandchild", "git status", "clean"),
       shell("following", "git status", "clean"),

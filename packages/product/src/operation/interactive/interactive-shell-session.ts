@@ -1,6 +1,6 @@
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as Thread from "@rika/product/thread-record"
-import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
+import * as ToolRuntime from "@rika/tools/coding-tool-runtime"
 import { OperationError } from "../operation-error"
 import { Clock, Context, Effect, Layer, Ref } from "effect"
 import { clampThreadTitle } from "../../thread/query/thread-title-policy"

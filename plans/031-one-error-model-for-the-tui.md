@@ -43,7 +43,7 @@ for any error that is not one of four recognized types. This is the default path
 
 ### Retry exists in one place
 
-Ten `Schedule`/`retry` occurrences across all of `src`, one of them on the execution path: `packages/baton-execution/src/baton-execution.ts:129`. There is no shared policy, no classification of what is retryable, and no user-visible retry state. A transient provider blip and a permanently bad configuration are handled identically: not at all.
+Ten `Schedule`/`retry` occurrences across all of `src`, one of them on the execution path: `packages/execution/src/baton-execution.ts:129`. There is no shared policy, no classification of what is retryable, and no user-visible retry state. A transient provider blip and a permanently bad configuration are handled identically: not at all.
 
 ### Presentation is spread across four surfaces
 

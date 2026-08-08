@@ -5,7 +5,7 @@ import * as McpConfig from "@rika/extensions/mcp-configuration"
 import * as McpOAuth from "@rika/extensions/mcp-oauth-service"
 import * as SkillRegistry from "@rika/extensions/skill-registry"
 import { Console, Context, Effect, FileSystem, Layer, Path, PlatformError, Schema, Semaphore } from "effect"
-import { workspacePaths } from "@rika/configuration/configuration-paths"
+import { workspacePaths } from "@rika/config/configuration-paths"
 
 export interface Options {
   readonly globalRoot: string

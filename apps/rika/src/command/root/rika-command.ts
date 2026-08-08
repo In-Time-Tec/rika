@@ -1,7 +1,7 @@
 import * as ProductOperation from "@rika/product/product-operation"
 import { Console, Effect, FileSystem, Option, Stdio } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
-import { modeIds, type ModeId } from "@rika/configuration/behavior-mode"
+import { modeIds, type ModeId } from "@rika/config/behavior-mode"
 import { authCommand } from "../product/auth-command"
 import { configurationCommand } from "../product/configuration-command"
 import { diagnosticsCommand } from "../product/diagnostics-command"

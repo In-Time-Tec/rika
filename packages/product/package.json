@@ -59,9 +59,9 @@
     "./workspace-record": "./src/thread/model/workspace-record.ts"
   },
   "dependencies": {
-    "@rika/configuration": "workspace:*",
+    "@rika/config": "workspace:*",
     "@rika/extensions": "workspace:*",
-    "@rika/coding-tools": "workspace:*",
+    "@rika/tools": "workspace:*",
     "@rika/transcript": "workspace:*",
     "effect": "catalog:"
   },

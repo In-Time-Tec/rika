@@ -1,5 +1,5 @@
-import * as LocalPath from "@rika/coding-tools/local-path"
-import * as WorkspaceIndex from "@rika/coding-tools/workspace-file-search"
+import * as LocalPath from "@rika/tools/local-path"
+import * as WorkspaceIndex from "@rika/tools/workspace-file-search"
 import type { ChangedFile } from "@rika/terminal/terminal-state"
 import type { PathTarget } from "@rika/terminal/terminal-transcript-presentation"
 import { Config, Effect, FileSystem, Function, Option, Path, PlatformError, Schema } from "effect"

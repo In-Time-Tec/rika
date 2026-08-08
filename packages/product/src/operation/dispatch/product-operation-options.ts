@@ -19,7 +19,7 @@ export interface ProductLayerOptions<
   >
   readonly backendLayer: import("effect").Layer.Layer<import("@rika/product/execution-gateway").Service, BackendError>
   readonly resolveExecutionRoute?: (
-    mode: import("@rika/configuration/behavior-mode").ModeId,
+    mode: import("@rika/config/behavior-mode").ModeId,
     tuning?: { readonly fastMode?: boolean },
     workspace?: string,
   ) => import("effect").Effect.Effect<
@@ -30,7 +30,7 @@ export interface ProductLayerOptions<
   readonly toolRuntimeLayer?: (
     workspace: string,
   ) => import("effect").Layer.Layer<
-    import("@rika/coding-tools/coding-tool-runtime").Service,
+    import("@rika/tools/coding-tool-runtime").Service,
     import("../operation-error").OperationError,
     never
   >

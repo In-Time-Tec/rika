@@ -3,7 +3,7 @@ import { OperationUnavailable } from "../contract/product-operation"
 import type { InteractiveSession } from "./interactive-session"
 import { makeInteractiveShell } from "./interactive-shell-session"
 import type { InteractiveOperationFeed } from "./interactive-operation-feed"
-import type { ModeId } from "@rika/configuration/behavior-mode"
+import type { ModeId } from "@rika/config/behavior-mode"
 import type * as ExecutionRequest from "@rika/product/execution-request"
 import type { InteractiveImplementationInput } from "./interactive-session-interface"
 

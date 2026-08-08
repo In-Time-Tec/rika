@@ -122,9 +122,9 @@ describe("release target construction", () => {
       "/transport/host/server-host-transport.ts",
       "/apps/rika/src/main.ts",
       "/product-database.ts",
-      "/packages/product-store/src/thread-repository.ts",
-      "/packages/product-store/src/turn-repository.ts",
-      "/packages/product-store/src/transcript-repository.ts",
+      "/packages/store/src/thread-repository.ts",
+      "/packages/store/src/turn-repository.ts",
+      "/packages/store/src/transcript-repository.ts",
       "/execution-backend.ts",
       "/packages/terminal/",
     ])

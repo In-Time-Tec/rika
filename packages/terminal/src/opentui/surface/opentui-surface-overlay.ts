@@ -8,7 +8,7 @@ import { toOpenColor } from "../rendering/terminal-text-adapter"
 import { fitOverlayHints, overlayHintWidth } from "../../presentation/terminal/terminal-overlay-hints"
 import { filteredFiles } from "../../state/model/terminal-thread-navigation"
 import { paletteContent, modePickerContent } from "./opentui-composer-region"
-import { modeIds } from "@rika/configuration/behavior-mode"
+import { modeIds } from "@rika/config/behavior-mode"
 import {
   modeSelectorIndexAtColumn,
   modeSelectorLabels,

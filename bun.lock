@@ -19,7 +19,7 @@
         "@effect/sql-pg": "4.0.0-beta.98",
         "@effect/sql-sqlite-bun": "catalog:",
         "@rika/product": "workspace:*",
-        "@rika/product-store": "workspace:*",
+        "@rika/store": "workspace:*",
         "@rika/transcript": "workspace:*",
         "drizzle-orm": "1.0.0-rc.3",
         "effect": "catalog:",
@@ -46,21 +46,21 @@
     },
     "apps/rika": {
       "name": "@rika/cli",
-      "version": "0.3.10",
+      "version": "0.3.17",
       "bin": {
         "rika": "./dist/client-main.js",
       },
       "dependencies": {
         "@effect/platform-bun": "catalog:",
         "@opentui/core": "catalog:",
-        "@rika/baton-execution": "workspace:*",
-        "@rika/coding-tools": "workspace:*",
-        "@rika/configuration": "workspace:*",
+        "@rika/config": "workspace:*",
+        "@rika/execution": "workspace:*",
         "@rika/extensions": "workspace:*",
-        "@rika/javascript-sandbox": "workspace:*",
         "@rika/product": "workspace:*",
-        "@rika/product-store": "workspace:*",
+        "@rika/sandbox": "workspace:*",
+        "@rika/store": "workspace:*",
         "@rika/terminal": "workspace:*",
+        "@rika/tools": "workspace:*",
         "@rika/transcript": "workspace:*",
         "effect": "catalog:",
       },
@@ -81,52 +81,36 @@
         "@opentui/core-win32-x64": "catalog:",
       },
     },
-    "packages/baton-execution": {
-      "name": "@rika/baton-execution",
+    "packages/config": {
+      "name": "@rika/config",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/platform-bun": "catalog:",
+        "@effect/vitest": "catalog:",
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "packages/execution": {
+      "name": "@rika/execution",
       "version": "0.0.0",
       "dependencies": {
         "@batonfx/core": "catalog:",
         "@batonfx/providers": "catalog:",
         "@batonfx/runtime": "catalog:",
         "@batonfx/test": "catalog:",
-        "@rika/coding-tools": "workspace:*",
         "@rika/product": "workspace:*",
+        "@rika/tools": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {
         "@effect/vitest": "catalog:",
-        "@rika/configuration": "workspace:*",
-        "@rika/javascript-sandbox": "workspace:*",
-        "@types/bun": "catalog:",
-        "typescript": "catalog:",
-        "vitest": "catalog:",
-      },
-    },
-    "packages/coding-tools": {
-      "name": "@rika/coding-tools",
-      "version": "0.0.0",
-      "dependencies": {
-        "@rika/configuration": "workspace:*",
-        "effect": "catalog:",
-        "parallel-web": "catalog:",
-      },
-      "devDependencies": {
-        "@effect/platform-bun": "catalog:",
-        "@effect/vitest": "catalog:",
-        "@types/bun": "catalog:",
-        "typescript": "catalog:",
-        "vitest": "catalog:",
-      },
-    },
-    "packages/configuration": {
-      "name": "@rika/configuration",
-      "version": "0.0.0",
-      "dependencies": {
-        "effect": "catalog:",
-      },
-      "devDependencies": {
-        "@effect/platform-bun": "catalog:",
-        "@effect/vitest": "catalog:",
+        "@rika/config": "workspace:*",
+        "@rika/sandbox": "workspace:*",
         "@types/bun": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",
@@ -149,8 +133,25 @@
         "vitest": "catalog:",
       },
     },
-    "packages/javascript-sandbox": {
-      "name": "@rika/javascript-sandbox",
+    "packages/product": {
+      "name": "@rika/product",
+      "version": "0.0.0",
+      "dependencies": {
+        "@rika/config": "workspace:*",
+        "@rika/extensions": "workspace:*",
+        "@rika/tools": "workspace:*",
+        "@rika/transcript": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "packages/sandbox": {
+      "name": "@rika/sandbox",
       "version": "0.0.0",
       "dependencies": {
         "@batonfx/core": "catalog:",
@@ -165,25 +166,8 @@
         "vitest": "catalog:",
       },
     },
-    "packages/product": {
-      "name": "@rika/product",
-      "version": "0.0.0",
-      "dependencies": {
-        "@rika/coding-tools": "workspace:*",
-        "@rika/configuration": "workspace:*",
-        "@rika/extensions": "workspace:*",
-        "@rika/transcript": "workspace:*",
-        "effect": "catalog:",
-      },
-      "devDependencies": {
-        "@effect/vitest": "catalog:",
-        "@types/bun": "catalog:",
-        "typescript": "catalog:",
-        "vitest": "catalog:",
-      },
-    },
-    "packages/product-store": {
-      "name": "@rika/product-store",
+    "packages/store": {
+      "name": "@rika/store",
       "version": "0.0.0",
       "dependencies": {
         "@effect/sql-sqlite-bun": "catalog:",
@@ -194,9 +178,9 @@
       "devDependencies": {
         "@effect/platform-bun": "catalog:",
         "@effect/vitest": "catalog:",
-        "@rika/coding-tools": "workspace:*",
-        "@rika/configuration": "workspace:*",
+        "@rika/config": "workspace:*",
         "@rika/extensions": "workspace:*",
+        "@rika/tools": "workspace:*",
         "@types/bun": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",
@@ -208,7 +192,7 @@
       "dependencies": {
         "@opentui/core": "catalog:",
         "@pierre/diffs": "catalog:",
-        "@rika/configuration": "workspace:*",
+        "@rika/config": "workspace:*",
         "@rika/transcript": "workspace:*",
         "cli-spinners": "catalog:",
         "effect": "catalog:",
@@ -224,11 +208,27 @@
         "vitest": "catalog:",
       },
     },
+    "packages/tools": {
+      "name": "@rika/tools",
+      "version": "0.0.0",
+      "dependencies": {
+        "@rika/config": "workspace:*",
+        "effect": "catalog:",
+        "parallel-web": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/platform-bun": "catalog:",
+        "@effect/vitest": "catalog:",
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "packages/transcript": {
       "name": "@rika/transcript",
       "version": "0.0.0",
       "dependencies": {
-        "@rika/coding-tools": "workspace:*",
+        "@rika/tools": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {
@@ -248,12 +248,12 @@
         "prettier": "catalog:",
       },
       "devDependencies": {
-        "@rika/coding-tools": "workspace:*",
-        "@rika/configuration": "workspace:*",
+        "@rika/config": "workspace:*",
         "@rika/extensions": "workspace:*",
         "@rika/product": "workspace:*",
-        "@rika/product-store": "workspace:*",
+        "@rika/store": "workspace:*",
         "@rika/terminal": "workspace:*",
+        "@rika/tools": "workspace:*",
         "@rika/transcript": "workspace:*",
         "@types/bun": "catalog:",
         "@typescript-eslint/parser": "catalog:",
@@ -645,27 +645,27 @@
 
     "@pierre/theming": ["@pierre/theming@0.0.1", "", { "peerDependencies": { "@pierre/theme": "^1.0.0", "@shikijs/themes": "^3.0.0 || ^4.0.0", "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0", "shiki": "^3.0.0 || ^4.0.0" }, "optionalPeers": ["@pierre/theme", "@shikijs/themes", "react", "react-dom", "shiki"] }, "sha512-1thlEtJbqdyLzc1ZS2KQa1q7FzDGHT4dTEdKHoyQjOMeWWOmbVG5/ndEfOKfAb5Fzkz8cNJrOjFLiZoDH/A03A=="],
 
-    "@rika/baton-execution": ["@rika/baton-execution@workspace:packages/baton-execution"],
-
     "@rika/cli": ["@rika/cli@workspace:apps/rika"],
 
-    "@rika/coding-tools": ["@rika/coding-tools@workspace:packages/coding-tools"],
+    "@rika/config": ["@rika/config@workspace:packages/config"],
 
-    "@rika/configuration": ["@rika/configuration@workspace:packages/configuration"],
+    "@rika/execution": ["@rika/execution@workspace:packages/execution"],
 
     "@rika/extensions": ["@rika/extensions@workspace:packages/extensions"],
 
-    "@rika/javascript-sandbox": ["@rika/javascript-sandbox@workspace:packages/javascript-sandbox"],
-
     "@rika/product": ["@rika/product@workspace:packages/product"],
-
-    "@rika/product-store": ["@rika/product-store@workspace:packages/product-store"],
 
     "@rika/repository-graph": ["@rika/repository-graph@workspace:tooling/repository-graph"],
 
     "@rika/repository-policy": ["@rika/repository-policy@workspace:tooling/repository-policy"],
 
+    "@rika/sandbox": ["@rika/sandbox@workspace:packages/sandbox"],
+
+    "@rika/store": ["@rika/store@workspace:packages/store"],
+
     "@rika/terminal": ["@rika/terminal@workspace:packages/terminal"],
+
+    "@rika/tools": ["@rika/tools@workspace:packages/tools"],
 
     "@rika/transcript": ["@rika/transcript@workspace:packages/transcript"],
 

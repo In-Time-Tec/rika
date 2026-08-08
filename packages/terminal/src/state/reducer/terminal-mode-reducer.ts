@@ -1,4 +1,4 @@
-import { modeIds } from "@rika/configuration/behavior-mode"
+import { modeIds } from "@rika/config/behavior-mode"
 import { Function } from "effect"
 import type { Message } from "../model/terminal-message"
 import { contentColumnWidth } from "../model/terminal-layout-state"

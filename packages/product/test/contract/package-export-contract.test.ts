@@ -6,7 +6,7 @@ const PackageManifest = Schema.Struct({ exports: Schema.Record(Schema.String, Sc
 const PackageManifestJson = Schema.fromJsonString(PackageManifest)
 
 const expected: Record<string, ReadonlyArray<string>> = {
-  "@rika/configuration": [
+  "@rika/config": [
     "behavior-mode",
     "model-route",
     "model-route-label",
@@ -17,7 +17,7 @@ const expected: Record<string, ReadonlyArray<string>> = {
     "configuration-settings",
     "configuration-service",
   ],
-  "@rika/coding-tools": [
+  "@rika/tools": [
     "agent-role-toolkits",
     "coding-tool-catalog",
     "thread-tool-contract",
@@ -116,7 +116,7 @@ const expected: Record<string, ReadonlyArray<string>> = {
     "turn-repository",
     "thread-query-service",
   ],
-  "@rika/product-store": [
+  "@rika/store": [
     "product-database-layer",
     "sqlite-thread-search-repository",
     "sqlite-thread-summary-repository",

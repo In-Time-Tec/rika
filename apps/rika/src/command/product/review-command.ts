@@ -1,5 +1,5 @@
 import * as ProductOperation from "@rika/product/product-operation"
-import { modeIds, type ModeId } from "@rika/configuration/behavior-mode"
+import { modeIds, type ModeId } from "@rika/config/behavior-mode"
 import { Option } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import { dispatch } from "../root/cli-operation-dispatch"

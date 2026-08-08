@@ -1,4 +1,4 @@
-import { Catalog } from "@rika/coding-tools/coding-tool-catalog"
+import { Catalog } from "@rika/tools/coding-tool-catalog"
 import { Function } from "effect"
 import type { Block } from "../schema/transcript-presentation-model"
 

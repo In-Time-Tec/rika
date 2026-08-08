@@ -25,14 +25,14 @@ describe("dependency-cruiser compatibility spike", () => {
           return Effect.sync(() => {
             expect(module?.dependencies.map((dependency) => dependency.module).toSorted()).toEqual([
               "./prompt.prompt.txt",
-              "@rika/configuration/canonical-data-root",
+              "@rika/config/canonical-data-root",
               "effect",
             ])
             expect(
               module?.dependencies.find((dependency) => dependency.module === "./prompt.prompt.txt")?.couldNotResolve,
             ).toBe(false)
             expect(
-              module?.dependencies.find((dependency) => dependency.module === "@rika/configuration/canonical-data-root")
+              module?.dependencies.find((dependency) => dependency.module === "@rika/config/canonical-data-root")
                 ?.couldNotResolve,
             ).toBe(true)
           })

@@ -24,7 +24,7 @@ type CreateInput = import("../../thread/repository/turn-repository-contract").Cr
 type QueueSubmission = import("../../thread/repository/turn-repository-queue").Submission
 type QueueClaim = import("../../thread/repository/turn-repository-queue").QueueClaim
 type RootTurnOwnerInterface = import("../../thread/queue/root-turn-owner").Interface
-type ModeId = import("@rika/configuration/behavior-mode").ModeId
+type ModeId = import("@rika/config/behavior-mode").ModeId
 type InteractiveSession = import("./interactive-session").InteractiveSession
 type InteractiveEvent = import("./interactive-runtime-event").InteractiveEvent
 type ProductLayerOptions<

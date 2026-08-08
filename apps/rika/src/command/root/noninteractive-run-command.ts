@@ -1,7 +1,7 @@
 import * as ProductOperation from "@rika/product/product-operation"
 import { Effect, Option, Schema, Stdio, Stream } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
-import { modeIds, type ModeId } from "@rika/configuration/behavior-mode"
+import { modeIds, type ModeId } from "@rika/config/behavior-mode"
 import { dispatch } from "./cli-operation-dispatch"
 
 const mode = Flag.choice("mode", modeIds).pipe(Flag.withAlias("m"), Flag.optional)

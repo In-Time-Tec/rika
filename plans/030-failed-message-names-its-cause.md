@@ -92,9 +92,9 @@ If replacement is blocked by active execution work, say which variable diverged 
 
 `operation-error.ts:45` becomes the last resort for a genuinely unknown defect, not the default. A typed failure that carries a message keeps it. The `"cursor did not advance"` substring test at `:42` is deleted — a message-text match is not a classification.
 
-Provider credential failures get a named shape rather than a decoded `ConfigError`. `packages/baton-execution/src/baton-route.ts:108` already knows the variable name and provider when it builds `Config.redacted(...)`; a missing variable should fail as a typed Rika error naming the variable, the provider, and the settings path that requested it.
+Provider credential failures get a named shape rather than a decoded `ConfigError`. `packages/execution/src/baton-route.ts:108` already knows the variable name and provider when it builds `Config.redacted(...)`; a missing variable should fail as a typed Rika error naming the variable, the provider, and the settings path that requested it.
 
-`packages/baton-execution/test/baton-route.test.ts` already asserts the readable form for a missing key. That test passes today, so this is a plumbing gap between Baton and the transcript, not a Baton defect.
+`packages/execution/test/baton-route.test.ts` already asserts the readable form for a missing key. That test passes today, so this is a plumbing gap between Baton and the transcript, not a Baton defect.
 
 ### 3. Put the cause on the first line
 

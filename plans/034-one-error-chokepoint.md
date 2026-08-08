@@ -23,13 +23,13 @@ shows retry — modeled on OpenCode, which does this well.
 
 ### User-visible errors still carry instructions
 
-- Error blocks render `Next: <recovery>` (`packages/terminal/src/opentui/rendering/opentui-render-block.ts`, Error case) fed by `recovery` strings from `packages/baton-execution/src/failure-presentation.ts`, `packages/product/src/execution/lifecycle/execution-authority-reconciliation.ts` (`missingExecutionRecovery`), and `packages/terminal/src/state/reducer/terminal-overlay-reducer.ts` (`errorRecovery` maps `retry` → "Press Enter to try again." / "Fix the issue above, then resend.").
+- Error blocks render `Next: <recovery>` (`packages/terminal/src/opentui/rendering/opentui-render-block.ts`, Error case) fed by `recovery` strings from `packages/execution/src/failure-presentation.ts`, `packages/product/src/execution/lifecycle/execution-authority-reconciliation.ts` (`missingExecutionRecovery`), and `packages/terminal/src/state/reducer/terminal-overlay-reducer.ts` (`errorRecovery` maps `retry` → "Press Enter to try again." / "Fix the issue above, then resend.").
 - Tool failures embed prose instructions into their messages: `coding-tool-runtime.ts` builds `"... Next action: <nextAction>."` from ~15 `nextAction` strings.
 - Baton's internal retries surface as Notification blocks: "Retrying model request …", "Trying another model …" (`baton-tree-projector.ts` `ModelRetryScheduled` / `ModelFallbackScheduled`).
 
 ### Four areas classify retry, inconsistently
 
-1. `packages/baton-execution/src/failure-presentation.ts` — model categories + `transient | terminal` classification from Baton, collapsed into prose (title/detail/recovery).
+1. `packages/execution/src/failure-presentation.ts` — model categories + `transient | terminal` classification from Baton, collapsed into prose (title/detail/recovery).
 2. `packages/product/src/operation/operation-failure.ts` — `Failure { tag, message, retry: "user"|"automatic"|"never", actor }` + `makeFailure` substring classification. **"automatic" is never produced** (dead branch); `retry` is consumed only by the prose generator.
 3. `packages/terminal/src/state/reducer/terminal-overlay-reducer.ts` — `errorTitle`/`errorRecovery` turn the enum into copy.
 4. Hardcoded `retry: "user"` at five sites: `terminal-interactive-feed.ts:93`, `process-runtime.ts:215`, `server-message-codec.ts:45`, `server-client-reconnect.ts:118/147/160`.

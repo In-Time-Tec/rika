@@ -1,7 +1,7 @@
 import * as Thread from "@rika/product/thread-record"
 import * as ExecutionRequest from "@rika/product/execution-request"
 import { Effect } from "effect"
-import { ModeId } from "@rika/configuration/behavior-mode"
+import { ModeId } from "@rika/config/behavior-mode"
 import { OperationUnavailable } from "../contract/product-operation"
 import type { InteractiveEvent } from "./interactive-event"
 

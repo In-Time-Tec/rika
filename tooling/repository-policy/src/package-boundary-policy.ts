@@ -50,20 +50,20 @@ const languageModelProviderPackages = new Set([
 ])
 const validKinds = new Set(["domain", "capability", "adapter", "application", "tooling"])
 const allowedPackageEdges: Readonly<Record<string, ReadonlySet<string>>> = {
-  "@rika/baton-execution": new Set(["@rika/coding-tools", "@rika/product"]),
-  "@rika/javascript-sandbox": new Set(),
-  "@rika/coding-tools": new Set(["@rika/configuration"]),
-  "@rika/transcript": new Set(["@rika/coding-tools"]),
-  "@rika/product-store": new Set(["@rika/product", "@rika/transcript"]),
-  "@rika/product": new Set(["@rika/configuration", "@rika/extensions", "@rika/coding-tools", "@rika/transcript"]),
-  "@rika/terminal": new Set(["@rika/configuration", "@rika/transcript"]),
+  "@rika/execution": new Set(["@rika/tools", "@rika/product"]),
+  "@rika/sandbox": new Set(),
+  "@rika/tools": new Set(["@rika/config"]),
+  "@rika/transcript": new Set(["@rika/tools"]),
+  "@rika/store": new Set(["@rika/product", "@rika/transcript"]),
+  "@rika/product": new Set(["@rika/config", "@rika/extensions", "@rika/tools", "@rika/transcript"]),
+  "@rika/terminal": new Set(["@rika/config", "@rika/transcript"]),
   "@rika/cli": new Set([
-    "@rika/baton-execution",
-    "@rika/configuration",
+    "@rika/execution",
+    "@rika/config",
     "@rika/extensions",
-    "@rika/javascript-sandbox",
-    "@rika/product-store",
-    "@rika/coding-tools",
+    "@rika/sandbox",
+    "@rika/store",
+    "@rika/tools",
     "@rika/transcript",
     "@rika/product",
     "@rika/terminal",
@@ -91,8 +91,8 @@ const sourcePackageEdges: Readonly<Record<string, ReadonlySet<string>>> = allowe
 const extensionFrameworks = new Set(["@batonfx/core", "@batonfx/mcp", "@batonfx/skills"])
 const isReleasedFrameworkImport = (owner: string | undefined, specifier: string) =>
   (owner === "@rika/extensions" && extensionFrameworks.has(specifier)) ||
-  (owner === "@rika/javascript-sandbox" && specifier === "@batonfx/core") ||
-  (owner === "@rika/baton-execution" && specifier.startsWith("@batonfx/"))
+  (owner === "@rika/sandbox" && specifier === "@batonfx/core") ||
+  (owner === "@rika/execution" && specifier.startsWith("@batonfx/"))
 const sourceImportDiagnostics = (filePath: string, text: string): PolicyDiagnostic[] => {
   const owner = packageOwner(filePath)
   if (owner === undefined) return []
@@ -152,8 +152,8 @@ const checkDependencyManifests = (manifests: ReadonlyArray<NamedManifest>): stri
       if (isForbiddenLocalLink(version)) return [`${path}: ${name} uses ${version}`]
       if (externalFrameworks.has(name) && version.startsWith("workspace:"))
         return [`${path}: ${name} uses external workspace linking`]
-      if (manifest.name === "@rika/coding-tools" && isProvider(name))
-        return [`${path}: @rika/coding-tools cannot depend on language-model provider ${name}`]
+      if (manifest.name === "@rika/tools" && isProvider(name))
+        return [`${path}: @rika/tools cannot depend on language-model provider ${name}`]
       return []
     }),
   )

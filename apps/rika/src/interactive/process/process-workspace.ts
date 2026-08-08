@@ -1,6 +1,6 @@
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { Effect, FileSystem, Function, Option, Stream } from "effect"
-import { workspaceDirectory, workspacePaths } from "@rika/configuration/configuration-paths"
+import { workspaceDirectory, workspacePaths } from "@rika/config/configuration-paths"
 import { mkdir, rm, parseChangedFiles } from "./process-files"
 import { Schema } from "effect"
 

@@ -1,6 +1,6 @@
 import { Console, Context, Effect, FileSystem, Function, Layer, Option, Path } from "effect"
 import * as ConfigOperations from "../contract/configuration-operation"
-import * as ConfigurationService from "@rika/configuration/configuration-service"
+import * as ConfigurationService from "@rika/config/configuration-service"
 import type { Input, OperationUnavailable } from "../contract/product-operation"
 import type { ProductConfigOperations } from "./product-operation-integrations"
 import type { ProductOperationRunFactory } from "./product-operation-run-branches"

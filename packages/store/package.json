@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/store",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./product-database-layer": "./src/database/product-database-layer.ts",
+    "./sqlite-thread-search-repository": "./src/search/sqlite-thread-search-repository.ts",
+    "./sqlite-thread-summary-repository": "./src/summary/sqlite-thread-summary-repository.ts",
+    "./sqlite-thread-repository": "./src/thread/sqlite-thread-repository.ts",
+    "./sqlite-transcript-repository": "./src/transcript/sqlite-transcript-repository.ts",
+    "./sqlite-turn-repository": "./src/turn/sqlite-turn-repository.ts"
+  },
+  "dependencies": {
+    "@effect/sql-sqlite-bun": "catalog:",
+    "@rika/transcript": "workspace:*",
+    "effect": "catalog:",
+    "@rika/product": "workspace:*"
+  },
+  "devDependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@types/bun": "catalog:",
+    "@rika/config": "workspace:*",
+    "@rika/tools": "workspace:*",
+    "@rika/extensions": "workspace:*",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "rika": {
+    "kind": "adapter",
+    "domain": "product-store"
+  },
+  "scripts": {
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/store/src packages/store/test",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
+  }
+}

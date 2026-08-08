@@ -1,5 +1,5 @@
 import { Function } from "effect"
-import { modeIds } from "@rika/configuration/behavior-mode"
+import { modeIds } from "@rika/config/behavior-mode"
 import type { Message } from "../model/terminal-message"
 import type { Model } from "../model/terminal-state"
 import { idle } from "../model/terminal-loadable-state"

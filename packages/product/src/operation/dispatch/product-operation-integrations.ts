@@ -1,4 +1,4 @@
-import * as ConfigurationService from "@rika/configuration/configuration-service"
+import * as ConfigurationService from "@rika/config/configuration-service"
 import * as ConfigOperations from "./../contract/configuration-operation"
 import * as ExtensionOperations from "./../contract/extension-operation"
 import type { Effect, Layer } from "effect"

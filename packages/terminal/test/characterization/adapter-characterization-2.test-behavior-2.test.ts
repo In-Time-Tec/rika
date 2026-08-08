@@ -358,7 +358,7 @@ test("renders an expanded delegation prompt as markdown", () => {
           activeLabel: "Subagent working",
           completeLabel: "Subagent finished",
         },
-        detail: "Review `packages/coding-tools` first.\n\n1. Check the resolver\n2. Check the tests",
+        detail: "Review `packages/tools` first.\n\n1. Check the resolver\n2. Check the tests",
         files: [],
       },
     ],
@@ -366,8 +366,8 @@ test("renders an expanded delegation prompt as markdown", () => {
   })
   const built = buildTranscript(state)
   const text = built.styled.chunks.map((chunk) => chunk.text).join("")
-  expect(text).toContain("packages/coding-tools")
-  expect(text).not.toContain("`packages/coding-tools`")
+  expect(text).toContain("packages/tools")
+  expect(text).not.toContain("`packages/tools`")
   expect(text).toContain("1. Check the resolver")
 })
 test("keeps the exit code on a failed shell row with nested process waits", () => {

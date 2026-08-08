@@ -1,4 +1,4 @@
-import * as ToolPolicy from "@rika/coding-tools/coding-tool-policy"
+import * as ToolPolicy from "@rika/tools/coding-tool-policy"
 import { describe, expect, it } from "vitest"
 import { Presentation } from "../src/schema/transcript-presentation-model"
 

@@ -17,13 +17,13 @@
   "dependencies": {
     "@effect/platform-bun": "catalog:",
     "@opentui/core": "catalog:",
-    "@rika/baton-execution": "workspace:*",
+    "@rika/execution": "workspace:*",
     "@rika/product": "workspace:*",
-    "@rika/configuration": "workspace:*",
+    "@rika/config": "workspace:*",
     "@rika/extensions": "workspace:*",
-    "@rika/javascript-sandbox": "workspace:*",
-    "@rika/product-store": "workspace:*",
-    "@rika/coding-tools": "workspace:*",
+    "@rika/sandbox": "workspace:*",
+    "@rika/store": "workspace:*",
+    "@rika/tools": "workspace:*",
     "@rika/terminal": "workspace:*",
     "@rika/transcript": "workspace:*",
     "effect": "catalog:"

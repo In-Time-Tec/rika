@@ -1,5 +1,5 @@
 import { Runtime, Schema } from "effect"
-import { ModeId } from "@rika/configuration/behavior-mode"
+import { ModeId } from "@rika/config/behavior-mode"
 
 const Mode = ModeId
 const ClientWorkspace = { clientWorkspace: Schema.optionalKey(Schema.String) }

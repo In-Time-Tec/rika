@@ -1,5 +1,5 @@
-import * as ThreadToolkits from "@rika/coding-tools/thread-tool-contract"
-import { ThreadContract } from "@rika/coding-tools/thread-tool-contract"
+import * as ThreadToolkits from "@rika/tools/thread-tool-contract"
+import { ThreadContract } from "@rika/tools/thread-tool-contract"
 import * as Turn from "@rika/product/turn-record"
 import { Effect } from "effect"
 import * as ThreadQuery from "../query/thread-query-service"

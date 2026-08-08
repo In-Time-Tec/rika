@@ -254,7 +254,7 @@ const program = (options: { readonly batonRelease: string; readonly target?: str
         yield* Effect.log(`Verified ${name}@${version} from ${filename} at ${installedRealPath}`)
       }
 
-      for (const consumer of ["packages/baton-execution", "packages/extensions", "packages/javascript-sandbox"])
+      for (const consumer of ["packages/execution", "packages/extensions", "packages/sandbox"])
         yield* run("bun", ["run", "typecheck"], path.join(temporary, consumer), environment)
       yield* run("bun", ["run", "package", "--", "--target", target], temporary, environment)
       yield* run("bun", ["run", "release-smoke", "--", "--target", target], temporary, environment)

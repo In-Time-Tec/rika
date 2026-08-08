@@ -1,4 +1,4 @@
-import { modeIds } from "@rika/configuration/behavior-mode"
+import { modeIds } from "@rika/config/behavior-mode"
 import type { Mode } from "./terminal-state"
 
 export const nextMode = (mode: Mode): Mode => modeIds[(modeIds.indexOf(mode) + 1) % modeIds.length]!

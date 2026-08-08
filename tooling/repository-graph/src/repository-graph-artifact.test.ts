@@ -11,7 +11,7 @@ describe("repository graph artifacts", () => {
   test("supports graph queries over generated projections", () => {
     const program = Effect.gen(function* () {
       const dependencies = yield* queryGraph("package", "dependencies", "package:@rika/product")
-      expect(dependencies).toContain("package:@rika/configuration")
+      expect(dependencies).toContain("package:@rika/config")
       expect(yield* queryGraph("all", "violations")).toEqual([])
       expect(yield* queryGraph("all", "check", "packages/product/src/operation/contract/product-operation.ts")).toEqual(
         expect.objectContaining({ affectedPackages: expect.any(Array), commands: expect.any(Array) }),

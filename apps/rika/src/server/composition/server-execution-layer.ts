@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
-import * as BatonExecution from "@rika/baton-execution/baton-execution"
-import * as ScriptedModel from "@rika/baton-execution/scripted-model"
-import * as JavaScriptSandbox from "@rika/javascript-sandbox/javascript-sandbox"
+import * as BatonExecution from "@rika/execution/baton-execution"
+import * as ScriptedModel from "@rika/execution/scripted-model"
+import * as JavaScriptSandbox from "@rika/sandbox/javascript-sandbox"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { Cause, Effect, Layer } from "effect"
 import { archiveIncompatibleRuntime, isSchemaChecksumMismatch } from "./server-runtime-recovery"

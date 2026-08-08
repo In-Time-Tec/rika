@@ -85,7 +85,7 @@ test("renders a subagent tool tree and expands each child independently", () =>
               completeLabel: "Subagent finished",
             },
             detail:
-              "Read-only explore packages/configuration, extensions, and tools. Report concise public responsibilities with source-file evidence.",
+              "Read-only explore packages/config, extensions, and tools. Report concise public responsibilities with source-file evidence.",
             files: [],
           },
           {

@@ -26,10 +26,10 @@
     "typescript": "catalog:",
     "vitest": "catalog:",
     "@rika/product": "workspace:*",
-    "@rika/configuration": "workspace:*",
+    "@rika/config": "workspace:*",
     "@rika/extensions": "workspace:*",
-    "@rika/product-store": "workspace:*",
-    "@rika/coding-tools": "workspace:*",
+    "@rika/store": "workspace:*",
+    "@rika/tools": "workspace:*",
     "@rika/transcript": "workspace:*",
     "@rika/terminal": "workspace:*",
     "@typescript-eslint/parser": "catalog:"

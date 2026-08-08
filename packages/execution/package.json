@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/execution",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./baton-execution": "./src/baton-execution.ts",
+    "./baton-route": "./src/baton-route.ts",
+    "./scripted-model": "./src/scripted-model.ts",
+    "./baton-test-harness": "./src/baton-test-harness.ts"
+  },
+  "dependencies": {
+    "@batonfx/core": "catalog:",
+    "@batonfx/providers": "catalog:",
+    "@batonfx/runtime": "catalog:",
+    "@batonfx/test": "catalog:",
+    "@rika/tools": "workspace:*",
+    "@rika/product": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@rika/config": "workspace:*",
+    "@rika/sandbox": "workspace:*",
+    "@types/bun": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "rika": {
+    "kind": "adapter",
+    "domain": "execution"
+  },
+  "scripts": {
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/execution/src packages/execution/test",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
+  }
+}
