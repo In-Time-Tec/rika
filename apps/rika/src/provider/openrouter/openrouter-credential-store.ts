@@ -60,9 +60,14 @@ export const layer: {
           try: () => lstat(name),
           catch: (cause) =>
             code(cause) === "ENOENT"
-              ? failure("missing", "Credential storage path is missing")
+              ? failure("missing", "Credential storage directory is missing")
               : failure("io", "Credential storage operation failed"),
-        }).pipe(Effect.map(Option.some))
+        }).pipe(
+          Effect.map(Option.some),
+          Effect.catchTag("ProviderCredentialStoreError", (error) =>
+            error.kind === "missing" ? Effect.succeed(Option.none()) : Effect.fail(error),
+          ),
+        )
 
       const ensureParent = Effect.gen(function* () {
         const resolvedParent = resolve(parent)
