@@ -75,3 +75,11 @@ Refinement events are now capped at 200 per scope, because each one copies every
 The cost is that a refinement older than the bound can no longer be rolled back — its event is gone. That compounds with the rollback limitation above, where only the newest refinement can be undone in practice, so the reachable window is already far smaller than 200.
 
 Entry counts are deliberately left unbounded. Capacity is checked against the entries a proposal would leave behind, so binding it would start refusing a model's writes once a scope filled up, which is a worse failure than a large file.
+
+## Artifacts are shared across sessions on purpose, and now fail loudly on a collision
+
+Every Session on a machine reads and writes one `<dataRoot>/artifacts` directory, and an id is a 64-bit hash of the encoded content. That is content addressing: the same value stored twice yields one id and one file, which is deduplication rather than a defect. The directory is `0o700` and each file `0o600`, so another user cannot read them.
+
+Reading another session's artifact requires guessing a 64-bit id derived from content you would have to already know, so the guessability concern is weak. The real hazard was that two different values hashing alike would silently overwrite, and a later read would return a value its own id did not describe. A put that finds a different value already under its id now fails instead.
+
+What remains open is per-session isolation. It is a real boundary and not a small change, and nothing about the current layout makes one session's artifacts discoverable by another.

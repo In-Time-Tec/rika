@@ -41,4 +41,26 @@ testLayer(BunServices.layer)("artifact store", (it) => {
       }),
     ),
   )
+
+  it.effect("refuses to overwrite an artifact whose identifier a different value already names", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // Identifiers are a 64-bit hash of the content, so two values can name one file. Overwriting
+        // silently would hand a later read a value its own id did not describe.
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const dataRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-artifact-collision-" })
+        const context = yield* Layer.build(layer(dataRoot))
+        const store = Context.get(context, ArtifactStore)
+        const stored = yield* store.put({ value: { first: true } })
+        yield* fileSystem.writeFileString(
+          path.join(dataRoot, "artifacts", `${stored.id}.json`),
+          `{"value":{"second":true}}`,
+        )
+        const collided = yield* Effect.exit(store.put({ value: { first: true } }))
+        expect(collided._tag).toBe("Failure")
+        expect(yield* store.get(stored.id)).toEqual({ second: true })
+      }),
+    ),
+  )
 })

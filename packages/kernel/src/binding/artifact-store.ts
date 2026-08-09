@@ -51,6 +51,16 @@ const make = (dataRoot: string): Effect.Effect<Interface, never, FileSystem.File
           yield* fileSystem
             .makeDirectory(directory, { recursive: true, mode: 0o700 })
             .pipe(Effect.mapError((error) => unavailable(id, "io", error.message)))
+          /**
+           * An id is a 64-bit hash of the content, so two different values can name one file. That
+           * is rare enough never to be seen and silent when it happens, which is the wrong way round
+           * for a store a model reads back by id.
+           */
+          const existing = yield* fileSystem
+            .readFileString(fileOf(id))
+            .pipe(Effect.catchTag("PlatformError", () => Effect.succeed("")))
+          if (existing !== "" && existing !== encoded)
+            return yield* unavailable(id, "corrupt", `A different artifact is already stored under ${id}`)
           yield* fileSystem
             .writeFileString(fileOf(id), encoded, { mode: 0o600 })
             .pipe(Effect.mapError((error) => unavailable(id, "io", error.message)))
