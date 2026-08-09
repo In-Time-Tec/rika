@@ -26,11 +26,9 @@ The policy has no exemption for a composition boundary, which is the honest gap:
 
 Polling a process reaps it: `shell-process-registry.ts:179` drops the entry as soon as a poll observes an exit, and starting a process polls once to return its first output. A command that finishes in that window is therefore gone before the id it returned can be used, and `status` or `stop` naming it reports an unknown process. Verified against the packaged binary: `echo hi` cannot be watched, while `sleep 3; echo done` can be started, watched to completion, and reports its output.
 
-Reaping on exit is what keeps the registry from growing without bound, so the fix is not simply to stop deleting. A finished process needs to stay nameable for long enough that the caller holding its id can ask about it once — a short grace, or an entry that survives until its output has been read.
+Reaping on exit is deliberate and tested — `process-registry.test.ts:61` names it "retires completed ids" — and it is what keeps the registry from growing without bound. The tension is that a binding surface hands a cell an id whose lifetime it does not explain: `start` returns one, and whether it still means anything depends on how fast the command was. Either the id stays nameable until the caller that holds it has read the output once, or `start` says plainly that a finished command has already been reported and its id is spent.
 
-## A stopped process is a separate question
-
-`processes.stop` resolves `ShellProcessRegistry.Service` from the binding surface while start and status reach the registry the coding-tool runtime builds for itself, so the two may not be the same instance. That is worth confirming separately now that the reaping behaviour above explains what first looked like a missing process.
+Confirmed by the same runs: `stop` works. A `sleep 30` started and then stopped reports "Stopped process 1", so start, status, and stop do reach the same registry after all — an earlier note here claimed otherwise and was wrong.
 
 ## Workspace search needs a tool the product does not ship
 
