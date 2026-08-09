@@ -390,7 +390,10 @@ test(
           workspaceFiles: { "slow.txt": "SLOW_BODY" },
           script: [
             model.turn([
-              model.binding({ module: "processes", operation: "start", input: { command: "sleep 2" } }, "slow-cell"),
+              model.binding(
+                { module: "processes", operation: "start", input: { command: "sleep 2", timeoutMillis: 8_000 } },
+                "slow-cell",
+              ),
             ]),
             model.text("ACTIVITY_LANE_COMPLETE"),
           ],

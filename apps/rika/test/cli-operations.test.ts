@@ -1,4 +1,4 @@
-import { OperationUnavailable } from "@rika/product/product-operation"
+import { InvalidInput, OperationUnavailable } from "@rika/product/product-operation"
 import * as ConfigurationService from "@rika/configuration/configuration-service"
 import * as SettingsDecoder from "@rika/configuration/configuration-settings"
 import * as ConfigurationSettingsInput from "@rika/configuration/configuration-settings"

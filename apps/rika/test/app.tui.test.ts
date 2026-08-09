@@ -472,8 +472,8 @@ test(
         const completed = yield* app.waitFrame("FINAL_OUTPUT", 20_000)
         expect(completed).not.toContain("Waited for")
         expect(completed).not.toContain("Waiting for")
-        // A cell shows its own source, and the launching cell's result echoes the command it ran,
-        // so the command appears once per cell that names it rather than once in the frame.
+        // The one expanded cell shows its own source and its result, and the result of a started
+        // process echoes the command back, so the command it launched appears in both.
         expect(completed.match(/printf EARLY_OUTPUT; sleep 1; printf FINAL_OUTPUT/g) ?? []).toHaveLength(2)
         yield* app.quit
       }),
@@ -712,6 +712,7 @@ test(
         // its own session identity, and the arithmetic that seemed to explain it described the
         // symptom. This holds the real depth open so a regression reads as one.
         const app = yield* TuiApp.tuiApp({
+          inspectTranscript: true,
           workspaceFiles: { "deep.txt": "DEEP_BODY" },
           lanes: [
             {
@@ -743,6 +744,11 @@ test(
         app.pressEnter()
         yield* app.waitFrame("ROOT_DEEP_DONE", 30_000)
         yield* app.settled
+        const durable = yield* app.transcript(Turn.TurnId.make("tui-turn-0"))
+        const texts = (durable?.units ?? []).flatMap((unit) =>
+          unit.content._tag === "Entry" ? [unit.content.text] : [],
+        )
+        expect(texts).toContain("GRANDCHILD_DONE")
         expect(app.frame()).toContain("Subagent finished")
         yield* app.quit
       }),

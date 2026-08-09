@@ -1,0 +1,7 @@
+# Tests are not type-checked in two packages
+
+**Gain:** `typecheck` runs per package and stays fast, and each package declares the files it owns. Most packages check `src` and `test` together, so a fixture that drifts from the shape it stands in for fails the same gate as the source it exercises.
+
+**Cost:** `apps/rika/tsconfig.json` and `packages/product/tsconfig.json` include only `src`, so nothing type-checks their tests. `diagnostics` reads every file in the repository but reports Effect's own rules rather than type errors, which is easy to mistake for coverage: a value of the wrong type placed in `apps/rika/test` passes `typecheck`, `diagnostics`, `lint`, and the suite itself, while the same value in `apps/rika/src` fails `typecheck` immediately. A test may therefore pass an option no schema carries, and the option is dropped on the way out with nothing to report it — which is how a step asking a process fixture to match rendered text instead of raw bytes ran for a while without doing so.
+
+**Rejected:** including the two test directories today surfaces roughly ninety errors, almost all fixtures standing in for branded identities with plain strings. They are worth correcting, but as their own change rather than inside a migration, because the files are unrelated to it and a large mechanical edit hides whatever real defect sits among them. One such defect was already found this way and fixed separately: a test referenced an error type it never imported, on a path only a failing assertion reaches.
