@@ -1,12 +1,10 @@
 # Open issues
 
-## A finished subagent keeps its name on the activity line
+## A finished subagent kept its name on the activity line, once
 
-A real session left `Running 1 subagent` on the activity line minutes after the turn that delegated had completed. Durable state was correct throughout: every turn `completed`, the `SubagentCard` read `complete`, and all Baton runs succeeded. The projection also tracked the child correctly _while_ it ran. Only the live client's own model kept a card in a running status.
+A real session left `Running 1 subagent` on the line minutes after the turn that delegated had completed, while durable state was correct throughout. A later session on the packaged binary, delegating the same way with a live model, did not reproduce it: the card settled to its terminal label and the line returned to idle within seconds and stayed there.
 
-Not reproduced by any harness. The in-process suite clears the line in both the single-turn and second-turn shapes, so `terminal-overlay-reducer`'s guard on a matching active turn is not the mechanism — that hypothesis was tested and refuted. `apps/rika/test/subagent-live-stream.tui.test.ts` now holds the property a reader depends on and fails when a snapshot retains a stale activity.
-
-Reproducing it needs the real client with a child that answers, which the process harness cannot script today. See the note below.
+So this is either fixed by something landed since, or it needs a condition the second run did not meet. `apps/rika/test/subagent-live-stream.tui.test.ts` holds the property either way and fails when a snapshot retains a stale activity, which is the shape the original observation had.
 
 ## The process harness serves one script to every profile
 
