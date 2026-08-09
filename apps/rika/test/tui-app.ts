@@ -87,19 +87,18 @@ export const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | 
 const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const context = yield* Effect.context<never>()
-  const runFork = Effect.runForkWith(context)
   const temporaryDirectory = yield* Config.string("TMPDIR").pipe(Config.withDefault("/tmp"))
   const root =
     options.root ??
     (yield* fileSystem.makeTempDirectoryScoped({ directory: temporaryDirectory, prefix: "rika-tui-app-" }))
   const workspace = path.join(root, "workspace")
   const resourceScope = yield* Scope.make()
-  yield* Effect.addFinalizer(() =>
-    Effect.sync(() => {
-      runFork(Scope.close(resourceScope, Exit.void))
-    }),
-  )
+  /**
+   * Teardown is awaited rather than forked. These resources include a pool of real kernel workers,
+   * and a fire-and-forget close returns before any of them dies, so the next test in the file starts
+   * while the previous one's workers are still running and competing for the machine.
+   */
+  yield* Effect.addFinalizer(() => Scope.close(resourceScope, Exit.void))
   yield* fileSystem.makeDirectory(workspace, { recursive: true })
   for (const [name, content] of Object.entries(options.workspaceFiles ?? {})) {
     const target = path.join(workspace, name)
@@ -222,11 +221,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
       })
       .pipe(Effect.orDie),
   )
-  yield* Effect.addFinalizer(() =>
-    Effect.sync(() => {
-      runFork(Fiber.interrupt(operationFiber))
-    }),
-  )
+  yield* Effect.addFinalizer(() => Fiber.interrupt(operationFiber).pipe(Effect.asVoid))
   const frame = () => setup.captureCharFrame()
   const waitFor = (predicate: (frame: string) => boolean, timeoutMillis: number) =>
     Effect.gen(function* () {

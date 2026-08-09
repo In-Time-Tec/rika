@@ -69,7 +69,6 @@ export const runningToolsActivity = (model: Model): Activity => {
   const blockItems = items.flatMap((item) => (item._tag === "Block" ? [item] : []))
   const indexById = new Map(blockItems.flatMap((item) => (item.id === undefined ? [] : [[item.id, item.index]])))
   const parentById = new Map(blockItems.flatMap((item) => (item.id === undefined ? [] : [[item.id, item.parentId]])))
-  const tagAt = (index: number) => (model.blocks[index] as TranscriptBlock | undefined)?._tag
   /**
    * A card counts only when no ANCESTOR card owns it, so a subagent's own subagents are reported by
    * the one the user delegated to rather than counted again beside it. Every card now hangs off the
