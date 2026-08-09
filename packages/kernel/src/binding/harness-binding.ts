@@ -217,9 +217,21 @@ export const make = (options: Options): HostBindingRegistry.Module<HarnessStore.
       operation({
         name: "snapshot",
         input: SnapshotInput,
-        output: HarnessState.HarnessState,
+        /**
+         * The snapshot carries the identity a write has to name, because a cell cannot derive it:
+         * it is a digest of the state the host holds, and asking for one a caller cannot compute
+         * makes every write a guess.
+         */
+        output: Schema.Struct({
+          ...HarnessState.HarnessState.fields,
+          snapshotId: HarnessEntry.HarnessSnapshotId,
+        }),
         failure: Failure,
-        handle: (input) => (input.scope === undefined ? merged : load(input.scope)),
+        handle: (input) =>
+          Effect.map(input.scope === undefined ? merged : load(input.scope), (state) => ({
+            ...state,
+            snapshotId: HarnessState.snapshotId(state),
+          })),
       }),
       operation({
         name: "overview",

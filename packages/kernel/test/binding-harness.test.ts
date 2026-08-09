@@ -213,4 +213,16 @@ describe("harness binding", () => {
       expect([...backing.states.keys(), "thread:child:run-abc:inv-1"]).toContain("thread:child:run-abc:inv-1")
     }),
   )
+
+  it.effect("gives a snapshot the identity a write has to name", () =>
+    Effect.gen(function* () {
+      // Every test derived this host-side, so nothing noticed a cell could not: a write demands a
+      // baseSnapshot and the snapshot a cell reads is the only place it could come from.
+      const mounted = yield* registry()
+      const response = yield* mounted.invoke({ module: "harness", operation: "snapshot", input: {} })
+      expect(response._tag).toBe("Success")
+      if (response._tag === "Success")
+        expect((response.output as { readonly snapshotId: string }).snapshotId).toMatch(/^harness-snapshot:v1:sha256:/)
+    }),
+  )
 })
