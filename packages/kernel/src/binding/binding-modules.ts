@@ -41,12 +41,20 @@ export const make = (options: Options): ReadonlyArray<HostBindingRegistry.Module
  * themselves, so a binding that is added, removed, or renamed cannot drift from what a model is told
  * it has — and a surface nothing describes is one a model will decline to use.
  */
+const shapeOf = (fields: Record<string, unknown> | undefined): string =>
+  fields === undefined ? "…" : `{ ${Object.keys(fields).join(", ")} }`
+
 export const surface = (options: Options): string =>
   make(options)
     .map((module) => {
       const operations = module.operations
         .map((operation) => {
-          type Literal = { readonly literals?: ReadonlyArray<unknown>; readonly schema?: Literal }
+          type Literal = {
+            readonly literals?: ReadonlyArray<unknown>
+            readonly schema?: Literal
+            readonly members?: ReadonlyArray<Literal>
+            readonly fields?: Record<string, Literal>
+          }
           const shape = (operation.input as unknown as { readonly fields?: Record<string, Literal> }).fields ?? {}
           const fields = Object.entries(shape).map(([field, value]) => {
             // An optional field wraps the schema it makes optional, so the allowed values sit one
@@ -55,7 +63,12 @@ export const surface = (options: Options): string =>
             const literals = value.literals ?? value.schema?.literals
             // A literal is written the way a cell writes it, so a number stays a number rather than
             // arriving quoted and being sent as a string.
-            return literals === undefined ? field : `${field}: ${literals.map((one) => JSON.stringify(one)).join("|")}`
+            if (literals !== undefined) return `${field}: ${literals.map((one) => JSON.stringify(one)).join("|")}`
+            // A field whose value is one of several shapes is named by those shapes, because a model
+            // told only the field name reads it as "any value" and writes a string.
+            const members = value.members ?? value.schema?.members
+            if (members === undefined) return field
+            return `${field}: ${members.map((member) => shapeOf(member.fields ?? member.schema?.fields)).join("|")}`
           })
           return `${operation.name}(${fields.length === 0 ? "" : `{ ${fields.join(", ")} }`})`
         })

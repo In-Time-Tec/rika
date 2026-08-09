@@ -22,8 +22,18 @@ export class Service extends Context.Service<Service, Interface>()(
   "@rika/coding-tools/workspace/workspace-file-search/Service",
 ) {}
 
-const indexError = (operation: Operation, cause: unknown) =>
-  WorkspaceIndexError.make({ operation, message: cause instanceof Error ? cause.message : String(cause) })
+/**
+ * Search runs ripgrep, which a machine that installed this product has not necessarily installed.
+ * A spawn that cannot find the program reports that rather than the search it was attempting, so a
+ * reader is told what is missing instead of that a search went wrong.
+ */
+const indexError = (operation: Operation, cause: unknown) => {
+  const message = cause instanceof Error ? cause.message : String(cause)
+  return WorkspaceIndexError.make({
+    operation,
+    message: /ENOENT|not found|No such file/i.test(message) ? `ripgrep (rg) is not installed: ${message}` : message,
+  })
+}
 
 const ignoreGlobs = ["!**/node_modules/**", "!**/.git/**", "!**/dist/**", "!**/.rika/**"] as const
 

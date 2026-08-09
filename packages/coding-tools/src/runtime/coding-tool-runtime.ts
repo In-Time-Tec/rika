@@ -126,6 +126,13 @@ const boundResult = (request: Request, result: Result): Result => {
 
 const runtimeError = (details: FailureDetails) => new RuntimeOperationError(details)
 
+const missingRipgrep = (message: string): boolean => message.startsWith("ripgrep (rg) is not installed")
+
+const searchMessage = (operation: string, message: string): string => {
+  if (operation === "initialize") return "The workspace search tools are unavailable"
+  return missingRipgrep(message) ? message : `Workspace search could not complete ${operation}`
+}
+
 const tagOf = (cause: unknown) =>
   cause !== null && typeof cause === "object" && "_tag" in cause && typeof cause._tag === "string"
     ? cause._tag
@@ -195,14 +202,11 @@ const operationError = (cause: unknown): RuntimeOperationError => {
   if (Schema.is(WorkspaceIndex.WorkspaceIndexError)(cause))
     return runtimeError({
       category: cause.operation === "initialize" ? "dependency_unavailable" : "operation",
-      message:
-        cause.operation === "initialize"
-          ? "The workspace search tools are unavailable"
-          : `Workspace search could not complete ${cause.operation}`,
+      message: searchMessage(cause.operation, cause.message),
       outcome: "known",
       recovery: cause.operation === "initialize" ? "after_change" : "later",
       nextAction:
-        cause.operation === "initialize"
+        cause.operation === "initialize" || missingRipgrep(cause.message)
           ? "Confirm the workspace path is readable and that ripgrep (rg) is installed"
           : "Retry once later or use a narrower direct file operation",
     })

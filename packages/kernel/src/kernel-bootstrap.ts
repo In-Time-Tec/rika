@@ -40,7 +40,9 @@ globalThis.rika.mcp = (() => {
             discovered.set(server, new Set(tools.map((entry) => entry.name).concat(tools.map((entry) => entry.rawName))))
           }
           if (!discovered.get(server).has(tool)) return notFound(server, tool)
-          return flat.call({ server, tool, input })
+          // A tool taking no argument is called with none, and JSON carries no undefined, so the
+          // empty object it stands for is sent rather than a key that leaves the request.
+          return flat.call({ server, tool, input: input === undefined ? {} : input })
         }
       },
     })
