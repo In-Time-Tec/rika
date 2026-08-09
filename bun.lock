@@ -18,6 +18,7 @@
         "@effect/platform-bun": "catalog:",
         "@effect/sql-pg": "4.0.0-beta.98",
         "@effect/sql-sqlite-bun": "catalog:",
+        "@rika/kernel": "workspace:*",
         "@rika/product": "workspace:*",
         "@rika/product-store": "workspace:*",
         "@rika/transcript": "workspace:*",

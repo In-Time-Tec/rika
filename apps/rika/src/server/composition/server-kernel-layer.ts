@@ -20,7 +20,7 @@ import * as ScopePolicy from "@rika/kernel/harness-scope-policy"
 import { HarnessMerge } from "@batonfx/harness"
 import * as GoalService from "@rika/product/goal-service"
 import * as ThreadQuery from "@rika/product/thread-query-service"
-import { Crypto, Effect, Encoding, Function, Layer } from "effect"
+import { Crypto, Effect, Encoding, FileSystem, Function, Layer, Path } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { runtimeAgentPortLayer } from "./server-agent-port"
 
@@ -159,8 +159,19 @@ export const layer = (
        * explicitly here so the mounted surface and the pinned profile can never disagree.
        */
       const trustMode = "trusted-local" as const
+      /**
+       * A compiled executable has no file for the module the worker was built from, so the packaged
+       * binaries ship one beside them. Reaching for it only when the resolved default is absent keeps
+       * an ordinary install on the path its own package resolves.
+       */
+      const workerFileSystem = yield* FileSystem.FileSystem
+      const workerPath = yield* Path.Path
+      const workerModule = (yield* workerFileSystem.exists(KernelComposition.defaultWorkerModule).pipe(Effect.orDie))
+        ? undefined
+        : workerPath.join(workerPath.dirname(process.execPath), ".rika-kernel-worker.js")
       const kernelOptions = {
         trustMode,
+        ...(workerModule === undefined ? {} : { workerModule }),
         workspace: options.workspace,
         workspaceDigest: digest,
         dataRoot: options.dataRoot,

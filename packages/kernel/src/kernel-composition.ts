@@ -1,5 +1,11 @@
 import { KernelPool, KernelStateStore } from "@batonfx/repl"
 import { BunKernelPool, workerModule } from "@batonfx/repl/bun"
+
+/**
+ * Where the kernel worker lives in an ordinary install. A packaging step needs it to ship the worker
+ * beside a compiled binary, and only the package that owns the worker can answer where it is.
+ */
+export const defaultWorkerModule: string = workerModule
 import { HostBindingRegistry } from "@batonfx/repl"
 import { Duration, Layer } from "effect"
 import type { FileSystem, Path } from "effect"

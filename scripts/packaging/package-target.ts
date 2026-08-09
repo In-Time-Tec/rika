@@ -1,3 +1,4 @@
+import { defaultWorkerModule } from "@rika/kernel/kernel-composition"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Data, Effect, FileSystem, Layer, Path, Schema } from "effect"
@@ -114,6 +115,11 @@ const program = Effect.gen(function* () {
             yield* checkedBuild("interactive-main.ts", path.join(bin, ".rika-interactive"), target, identity)
             yield* checkedBuild("server-main.ts", path.join(bin, ".rika-server"), target, identity)
             yield* checkedBuild("performance-main.ts", path.join(bin, ".rika-performance"), target, identity)
+            /**
+             * A kernel is spawned as a file, and a compiled executable has no file for the module it
+             * was built from, so the worker ships beside the binaries that spawn it.
+             */
+            yield* fileSystem.copyFile(defaultWorkerModule, path.join(bin, ".rika-kernel-worker.js"))
             yield* fileSystem.writeFileString(
               path.join(stage, "INSTALL"),
               "Install bin/rika on PATH. Keep the private executables in bin beside it.\n",
