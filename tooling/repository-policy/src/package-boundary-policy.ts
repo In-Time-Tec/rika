@@ -60,6 +60,7 @@ const allowedPackageEdges: Readonly<Record<string, ReadonlySet<string>>> = {
   "@rika/cli": new Set([
     "@rika/baton-execution",
     "@rika/configuration",
+    "@rika/kernel",
     "@rika/extensions",
     "@rika/product-store",
     "@rika/coding-tools",
@@ -88,10 +89,18 @@ const packageOwner = (filePath: string) => {
 }
 const sourcePackageEdges: Readonly<Record<string, ReadonlySet<string>>> = allowedPackageEdges
 const extensionFrameworks = new Set(["@batonfx/core", "@batonfx/mcp", "@batonfx/skills"])
-const isReleasedFrameworkImport = (owner: string | undefined, specifier: string) =>
+/**
+ * The application composes the durable runtime it runs on, so its composition boundary names Baton
+ * directly, and the tests that drive that boundary name it too. Everywhere else in the app a
+ * framework import belongs behind the package that owns it.
+ */
+const isReleasedFrameworkImport = (owner: string | undefined, specifier: string, filePath: string) =>
   (owner === "@rika/extensions" && extensionFrameworks.has(specifier)) ||
   (owner === "@rika/baton-execution" && specifier.startsWith("@batonfx/")) ||
-  (owner === "@rika/kernel" && specifier.startsWith("@batonfx/"))
+  (owner === "@rika/kernel" && specifier.startsWith("@batonfx/")) ||
+  (owner === "@rika/cli" &&
+    (filePath.startsWith("apps/rika/src/server/composition/") || filePath.startsWith("apps/rika/test/")) &&
+    specifier.startsWith("@batonfx/"))
 const sourceImportDiagnostics = (filePath: string, text: string): PolicyDiagnostic[] => {
   const owner = packageOwner(filePath)
   if (owner === undefined) return []
@@ -120,7 +129,7 @@ const sourceImportDiagnostics = (filePath: string, text: string): PolicyDiagnost
         ),
       )
     if (specifier.startsWith("@batonfx/") || isProvider(specifier)) {
-      if (!isReleasedFrameworkImport(owner, specifier))
+      if (!isReleasedFrameworkImport(owner, specifier, filePath))
         diagnostics.push(
           diagnostic(
             `${filePath}:${line}`,
