@@ -93,6 +93,17 @@ const instructions = {
   Task: "Complete the bounded task autonomously and return the result with verification evidence.",
 } as const
 
+/**
+ * An agent that runs cells is told what its cell can reach. The Title agent carries no tool, so it
+ * keeps the one sentence it was given rather than a description of a surface it cannot use.
+ */
+export const agentInstructionsWith: {
+  (own: string): (surface: string) => string
+  (surface: string, own: string): string
+} = Function.dual(2, (surface: string, own: string): string =>
+  own === instructions.title ? own : [own, "", surface].join("\n"),
+)
+
 const applicationPin = (route: RouteSnapshot, workspace: string) =>
   Pins.makeCapability({ ...Registration.codecs.applicationContext.identity, route, workspace })
 
@@ -481,7 +492,7 @@ export const configure = (
       trustMode: options.kernel.trustMode ?? "trusted-local",
       servers: [],
     } as never)
-    const withSurface = (own: string) => (own === instructions.title ? own : [own, "", cellSurface].join("\n"))
+    const withSurface = (own: string) => agentInstructionsWith(cellSurface, own)
     const profileInstructions = {
       Title: instructions.title,
       Oracle: instructions.Oracle,
