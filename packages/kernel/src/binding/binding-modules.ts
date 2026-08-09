@@ -44,8 +44,8 @@ export const make = (options: Options): ReadonlyArray<HostBindingRegistry.Module
 const shapeOf = (fields: Record<string, unknown> | undefined): string =>
   fields === undefined ? "…" : `{ ${Object.keys(fields).join(", ")} }`
 
-export const surface = (options: Options): string =>
-  make(options)
+export const surfaceOf = (modules: ReadonlyArray<HostBindingRegistry.Module<BindingRequirements>>): string =>
+  modules
     .map((module) => {
       const operations = module.operations
         .map((operation) => {
@@ -133,6 +133,8 @@ export const bindingsDigest = (environment?: Environment): string =>
  * rather than a catalogue, because a model shown a bare list of module names answers with one of
  * them as a tool name — and the only tool that exists is the cell.
  */
+export const surface = (options: Options): string => surfaceOf(make(options))
+
 export const cellInstructions = (options: Options): string =>
   [
     "You have exactly one tool, named typescript. It runs a cell in a persistent Bun kernel.",

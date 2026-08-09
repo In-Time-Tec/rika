@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import * as McpDiscovery from "@rika/extensions/mcp-discovery"
-import { cellInstructions, make, surface } from "../src/binding/binding-modules"
+import { Schema } from "effect"
+import { cellInstructions, surface, surfaceOf } from "../src/binding/binding-modules"
 
 const options = {
   workspace: "/workspace",
@@ -10,27 +11,27 @@ const options = {
 } as never
 
 describe("mounted surface", () => {
-  it("describes every module and operation a cell can reach", () => {
-    // A model only uses what it is told it has, and the description is prose while the surface is
-    // code, so the two are compared rather than trusted to agree.
-    const mounted = make({
-      workspace: "/workspace",
-      workspaceDigest: "digest",
-      trustMode: "trusted-local",
-      servers: [] as ReadonlyArray<McpDiscovery.ConfiguredServer>,
-    } as never)
-    const lines = surface({
-      workspace: "/workspace",
-      workspaceDigest: "digest",
-      trustMode: "trusted-local",
-      servers: [] as ReadonlyArray<McpDiscovery.ConfiguredServer>,
-    } as never).split("\n")
-    expect(lines).toHaveLength(mounted.length)
-    for (const [index, module] of mounted.entries()) {
-      const line = lines[index] ?? ""
-      expect(line).toContain(`rika.${module.name} -> `)
-      for (const operation of module.operations) expect(line).toContain(`${operation.name}(`)
-    }
+  it("names each field, its allowed values, and the shapes a union accepts", () => {
+    // Asserting only on names derived from the same modules passes an implementation that prints no
+    // arguments at all, which is the whole thing this description exists to carry.
+    const probe = [
+      {
+        name: "probe",
+        operations: [
+          { name: "one", input: Schema.Struct({ path: Schema.String, mode: Schema.Literals(["a", "b"]) }) },
+          {
+            name: "two",
+            input: Schema.Struct({
+              pick: Schema.Union([Schema.Struct({ kind: Schema.String }), Schema.Struct({ id: Schema.Int })]),
+            }),
+          },
+          { name: "none", input: Schema.Struct({}) },
+        ],
+      },
+    ] as unknown as Parameters<typeof surfaceOf>[0]
+    expect(surfaceOf(probe)).toBe(
+      '//   rika.probe -> one({ path, mode: "a"|"b" }), two({ pick: { kind }|{ id } }), none()',
+    )
   })
 
   it("names the one tool that exists and shows the bindings as code", () => {
