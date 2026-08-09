@@ -22,9 +22,17 @@ describe("harness scope policy", () => {
     expect(() => ScopePolicy.scopeString("workspace", { ...identity, workspaceDigest: "/Users/ada/code" })).toThrow()
   })
 
-  it("refuses a thread id carrying a separator", () => {
-    expect(() => ScopePolicy.scopeString("thread", { ...identity, thread: "a:b" })).toThrow()
+  it("refuses an empty thread id", () => {
     expect(() => ScopePolicy.scopeString("thread", { ...identity, thread: "" })).toThrow()
+  })
+
+  it("scopes a subagent by the derived session Baton gives it", () => {
+    expect(ScopePolicy.scopeString("thread", { ...identity, thread: "child:run-abc:inv-1" })).toBe(
+      "thread:child:run-abc:inv-1",
+    )
+    expect(ScopePolicy.scopeString("thread", { ...identity, thread: "fanout:fan-1:lane-a" })).toBe(
+      "thread:fanout:fan-1:lane-a",
+    )
   })
 
   it("orders merge outer to inner so a thread entry wins over workspace and global", () => {

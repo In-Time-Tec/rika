@@ -16,11 +16,12 @@ const store = () => {
   }
 }
 
-const registry = (backing = store(), nested?: NestedOperation.Interface) =>
+const registry = (backing = store(), nested?: NestedOperation.Interface, sessionId?: string) =>
   mountModules({
     modules: [HarnessBinding.make({ workspaceDigest: "digest" })],
     services: Context.make(HarnessStore.HarnessStore, backing.service),
     nested,
+    ...(sessionId === undefined ? {} : { sessionId }),
   })
 
 const emptySnapshot = HarnessState.snapshotId(HarnessState.empty("thread:session"))
@@ -200,6 +201,16 @@ describe("harness binding", () => {
       })
       expect(recorder.kinds).toEqual(["harness.refine"])
       expect(recorder.policies).toEqual(["never"])
+    }),
+  )
+
+  it.effect("scopes a subagent by its derived session rather than failing to scope it at all", () =>
+    Effect.gen(function* () {
+      const backing = store()
+      const mounted = yield* registry(backing, undefined, "child:run-abc:inv-1")
+      const response = yield* mounted.invoke({ module: "harness", operation: "snapshot", input: {} })
+      expect(response._tag).toBe("Success")
+      expect([...backing.states.keys(), "thread:child:run-abc:inv-1"]).toContain("thread:child:run-abc:inv-1")
     }),
   )
 })

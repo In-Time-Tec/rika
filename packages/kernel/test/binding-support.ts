@@ -45,13 +45,18 @@ export const mountModules = <R>(input: {
   readonly modules: ReadonlyArray<HostBindingRegistry.Module<R>>
   readonly services: Context.Context<never>
   readonly nested?: NestedOperation.Interface | undefined
-}) => {
+  readonly sessionId?: string
+}): Effect.Effect<HostBindingRegistry.Interface, HostBindingRegistry.HostBindingConflict> => {
   const { modules, services } = input
   const nested = input.nested ?? { run: (_request, effect) => effect }
+  const context =
+    input.sessionId === undefined
+      ? toolContext
+      : ToolContext.ToolContext.of({ ...toolContext, sessionId: input.sessionId })
   return Effect.provideContext(
     HostBindingRegistry.make(modules),
     services.pipe(
-      Context.add(ToolContext.ToolContext, toolContext),
+      Context.add(ToolContext.ToolContext, context),
       Context.add(NestedOperation.NestedOperations, NestedOperation.NestedOperations.of(nested)),
     ) as Context.Context<R>,
   )
