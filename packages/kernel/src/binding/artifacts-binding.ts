@@ -8,7 +8,12 @@ export const name = "artifacts"
 const Failure = Schema.Union([ArtifactUnavailable, NestedOperationFailed])
 
 const PutInput = Schema.Struct({ value: Schema.Unknown, mediaType: Schema.optionalKey(Schema.String) })
-const GetInput = Schema.Struct({ id: Schema.String })
+/**
+ * An identifier is the digest a put returned, and it names a file. Accepting any string would let a
+ * cell name a path outside the directory artifacts live in, so the shape a put mints is the shape a
+ * get will take.
+ */
+const GetInput = Schema.Struct({ id: Schema.String.check(Schema.isPattern(/^[0-9a-f]{16}$/)) })
 const Loaded = Schema.Struct({ value: Schema.Unknown })
 
 export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<ArtifactStore | Requirements>> = [
