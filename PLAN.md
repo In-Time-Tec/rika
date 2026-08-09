@@ -422,15 +422,10 @@ Stop and report rather than paper over: host replies to executing cells cannot b
 
 ## Publishing Baton 0.20.0
 
-Rika pins eight `@batonfx` packages as packed tarballs under `vendor/batonfx/` because 0.20.0 is
-built and verified but not yet on npm. The paths are absolute: Bun resolves a relative `file:`
-tarball from the consuming package rather than the workspace root, so a relative path fails for
-every nested workspace package.
+Done. Baton `main` and `release` were fast-forwarded to `997b243`, tagged `v0.20.0`, and the release
+workflow published all thirteen `@batonfx` packages to npm with provenance. Rika names `0.20.0` for
+each of them, and both the vendored tarballs and the `overrides` block that existed only to pin them
+to each other are gone.
 
-Publishing replaces all of it. Tag Baton `v0.20.0` so the release workflow publishes with
-provenance, then in Rika replace the `overrides` block and the eight catalog entries with `0.20.0`,
-reinstall, and delete `vendor/batonfx/`. The `overrides` block exists only because the tarballs pin
-each other at a version the registry does not have yet, so it goes at the same time.
-
-The suite already runs against these exact artifacts, so a registry install of the same version
-should change nothing. If it does, the difference is real.
+The publish gate also requires the tagged commit to be an ancestor of `origin/release`, not only
+`origin/main`, which is worth knowing before the next release.
