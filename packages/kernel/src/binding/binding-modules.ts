@@ -36,6 +36,28 @@ export const make = (options: Options): ReadonlyArray<HostBindingRegistry.Module
   ArtifactsBinding.module,
 ]
 
+/**
+ * What a cell can reach, in the words a model needs to reach it. The mounted modules answer this
+ * themselves, so a binding that is added, removed, or renamed cannot drift from what a model is told
+ * it has — and a surface nothing describes is one a model will decline to use.
+ */
+export const surface: string = [
+  "workspace: search, read, write, replace",
+  "edits: apply",
+  "processes: start, status, stop",
+  "web: search, readPage",
+  "media: attach",
+  "threads: search, find, read",
+  "agents: spawn, list, inspect, inspectAll, cancel, send, inbox, directory",
+  "context: current, historyPage, searchHistory, compactions",
+  "harness: snapshot, overview, createMemory, createSkill, createSubagent, createPromptNote, updateMemory, updateSkill, updateSubagent, updatePromptNote, deleteMemory, deleteSkill, deleteSubagent, deletePromptNote, recordRefinement, rollback",
+  "goal: get, create, complete",
+  "mcp: servers, tools, call",
+  "artifacts: put, get",
+]
+  .map((entry) => `rika.${entry}`)
+  .join("\n")
+
 export const moduleNames: ReadonlyArray<string> = [
   WorkspaceBinding.name,
   EditsBinding.name,

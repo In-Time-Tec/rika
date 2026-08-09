@@ -15,6 +15,7 @@ import type { HarnessState } from "@batonfx/harness"
 import { CellTool, KernelPool, type KernelProfile } from "@batonfx/repl"
 import * as CellCallContext from "./baton-cell-call-context"
 import * as RoleToolkits from "@rika/coding-tools/agent-role-toolkits"
+import * as BindingModules from "@rika/kernel/binding-modules"
 import * as ExecutionPins from "@rika/kernel/execution-pins"
 import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registration"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
@@ -81,7 +82,12 @@ export interface ResolverOptions {
 }
 
 const instructions = {
-  root: "Work directly on the user's request. Inspect relevant evidence, make necessary changes, and verify the result.",
+  root: [
+    "Work directly on the user's request. Inspect relevant evidence, make necessary changes, and verify the result.",
+    "",
+    "Your one tool runs TypeScript in a persistent Bun kernel. These bindings are already in scope:",
+    BindingModules.surface,
+  ].join("\n"),
   title: "Return a concise title for the supplied request and nothing else.",
   Oracle: "Analyze the supplied problem deeply. Return a precise recommendation with risks and supporting reasoning.",
   Librarian: "Research the supplied question and return a concise evidence-backed report.",
