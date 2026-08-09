@@ -51,7 +51,7 @@ describe("agents binding", () => {
         operation: "spawn",
         input: { profile: "Review", prompt: "review the boundary" },
       })
-      expect(keys).toEqual(["operation#0:Review"])
+      expect(keys).toEqual(["Review#0"])
     }),
   )
 
@@ -71,7 +71,7 @@ describe("agents binding", () => {
         operation: "spawn",
         input: { profile: "Review", prompt: "p", key: "forged", parentRunId: "victim" },
       })
-      expect(keys).toEqual(["operation#0:Review"])
+      expect(keys).toEqual(["Review#0"])
     }),
   )
 
@@ -95,7 +95,7 @@ describe("agents binding", () => {
       })
       expect(response).toEqual({
         _tag: "Success",
-        output: { childRunId: "child-operation#0:Task", key: "operation#0:Task", duplicate: false },
+        output: { childRunId: "child-Task#0", key: "Task#0", duplicate: false },
       })
     }),
   )

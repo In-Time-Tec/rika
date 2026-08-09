@@ -1,5 +1,4 @@
 import { Clock, Effect, Schema } from "effect"
-import { ToolContext } from "@batonfx/core"
 import type { HostBindingRegistry } from "@batonfx/repl"
 import { AdmitReceipt, ChildInspection, DirectoryEntry, MailboxEntry, MessageReceipt } from "./agent-directory-contract"
 import { AgentDirectoryUnavailable, AgentPort } from "./agent-port"
@@ -52,12 +51,12 @@ const Empty = Schema.Struct({})
 /**
  * The admission key is derived from the ambient operation identity and the host-assigned ordinal,
  * never from cell input, so two cells cannot collide and a replayed cell cannot mint a second child.
+ *
+ * The operation identity is named once, by the ordinal's own scope: Baton composes the invocation
+ * from the tool call and the origin it is given, so repeating the operation key here would embed the
+ * same identity twice and grow it at every level of nesting.
  */
-const admissionKey = (profile: string, ordinal: number) =>
-  Effect.map(
-    ToolContext.ToolContext,
-    (context) => `${context.operationKey ?? context.toolCallId ?? "cell"}#${ordinal}:${profile}`,
-  )
+const admissionKey = (profile: string, ordinal: number) => Effect.succeed(`${profile}#${ordinal}`)
 
 export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<AgentPort | Requirements>> = [
   operation({

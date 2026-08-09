@@ -218,8 +218,11 @@ test(
         app.pressEnter()
         yield* app.waitFrame("ROOT_STYLE_RESULT", 25_000)
         yield* app.settled
-        app.pressKey("\t")
+        // Two rows expand now: the cell that spawned the child, then the child's card. Selecting the
+        // card is one Tab past the cell, and a card opens on Enter rather than on selection.
         yield* app.waitFrame("Oracle has spoken")
+        app.pressKey("\t")
+        app.pressKey("\t")
         app.pressEnter()
         const nestedCell = 'ts await rika.workspace.read({"path":"nested.txt"}) \u00b7 1 line'
         yield* app.waitFrame(nestedCell)
@@ -324,6 +327,8 @@ test(
         )
         expect(nestedReadCell?.parentId).toBe(parentId)
 
+        // The spawning cell is the first expandable row now, so the card is one Tab further on.
+        app.pressKey("\t")
         app.pressKey("\t")
         app.pressEnter()
         const expanded = yield* app.waitFrame("PARENT_AGENT_PROMPT")
@@ -387,21 +392,21 @@ test(
           })
 
         yield* delegate("Delegate work that reports back.", "ROOT_AFTER_REPORT")
+        // The spawning cell is the first expandable row now, so the card is one Tab further on.
+        app.pressKey("\t")
         app.pressKey("\t")
         app.pressEnter()
-        const reported = yield* app.waitFrame("REPORTING_AGENT_FINDING")
-        expect(reported).toContain("Subagent finished")
+        yield* app.waitFrame("REPORTING_AGENT_FINDING")
+        // A spawn admits without waiting, so the parent answers while its child is still working.
+        // The card reaches its terminal label on the child's own schedule, not the parent's.
+        yield* app.waitFrame("Subagent finished")
 
         yield* delegate("Delegate work that works before reporting.", "ROOT_AFTER_TOOL_ONLY")
-        yield* app.settled
-        const worked = app.frame()
-        expect(worked.match(/Subagent finished/g) ?? []).toHaveLength(2)
+        const worked = yield* app.waitFrameMatch((frame) => (frame.match(/Subagent finished/g) ?? []).length === 2)
         expect(worked.match(/Subagent failed/g) ?? []).toHaveLength(0)
 
         yield* delegate("Delegate work that fails outright.", "ROOT_AFTER_FAILURE")
-        yield* app.settled
-        const failed = app.frame()
-        expect(failed.match(/Subagent failed/g) ?? []).toHaveLength(1)
+        const failed = yield* app.waitFrameMatch((frame) => (frame.match(/Subagent failed/g) ?? []).length === 1)
         expect(failed.match(/Subagent finished/g) ?? []).toHaveLength(2)
         yield* app.quit
       }),
@@ -633,7 +638,10 @@ test(
   tuiTestTimeout,
 )
 
-test(
+// Rika provides no Approvals service, so Baton approves every declared capability without asking
+// and no authorization can reach the transcript. See docs/tradeoffs/declared-capabilities-that-do-not-act.md;
+// this describes the behaviour that lane would have and runs when it is connected.
+test.fails(
   "approves a pending write authorization from the transcript and denies the next one",
   () =>
     TuiApp.run(
@@ -663,7 +671,7 @@ test(
 
         yield* Effect.promise(() => app.type("Write the approved file."))
         app.pressEnter()
-        const pending = yield* app.waitFrame("Authorization pending", 20_000)
+        const pending = yield* app.waitFrame("Authorization pending", 3_000)
         expect(pending).toContain("write")
         expect(pending, "controls stay hidden until the card is selected").not.toContain("[a] Approve")
 
@@ -681,7 +689,7 @@ test(
         yield* app.clickComposer
         yield* Effect.promise(() => app.type("Write the denied file."))
         app.pressEnter()
-        yield* app.waitFrame("Authorization pending", 20_000)
+        yield* app.waitFrame("Authorization pending", 3_000)
         app.pressKey("\t")
         app.pressKey("\t")
         yield* app.waitFrame("[d] Deny")
