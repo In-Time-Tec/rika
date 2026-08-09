@@ -90,8 +90,10 @@ Running `subagent-live-stream.tui.test.ts` as a whole file exits 1 with five of 
 
 The lane it dies in is the largest one, and it dies after its renderer starts and before teardown. It passes alone, four times out of four. With its five predecessors it fails three times out of three, and with one or two predecessors it is intermittent, so the earlier lanes push something over a threshold rather than any pair being wrong together.
 
-Ruled out: renderer height, transcript volume, JS heap size, pool isolation, leaked kernel worker processes, a native crash, the OpenTUI test renderer itself (twelve create-and-destroy cycles cost two megabytes), and the kernel pool's scope.
+Ruled out: renderer height, transcript volume, JS heap size, pool isolation, leaked kernel worker processes, a native crash, the OpenTUI test renderer itself, and the kernel pool's scope.
 
-Eight identical lanes in a scratch file measure the residue directly, and it scales with what a lane does rather than how large it is. A lane that builds the app and quits leaves about five megabytes behind. A lane that runs one turn leaves about thirty. A lane whose turn spawns a child leaves about fifty-five, and the worker dies on the eighth. Running a turn at all also raises the starting baseline by roughly two hundred megabytes that never comes back.
+Eight identical lanes in a scratch file measure the residue directly, and it scales with what a lane does rather than how large it is. A lane that builds the app and quits leaves about five megabytes behind, a lane that runs one turn leaves about thirty, and a lane whose turn spawns a child leaves about fifty-five and kills the worker on the eighth.
 
-So something is retained per turn, and again per child run, that closing the lane's scope does not release. Naming it needs a heap snapshot diff between two lanes. Per-lane runs pass, which is how this was previously recorded as a green gate; it is not one.
+A heap snapshot taken after a forced collection at the second and sixth of those lanes settles where it is not: the JavaScript heap shrank by twenty-seven megabytes while resident memory grew by three hundred, and the largest single class differed by a third of a megabyte. Nothing is retained in JavaScript, so the growth is native — SQLite pages, terminal buffers, process resources, or memory an allocator never returns. The SQLite repositories and the renderer are both already released with the lane's scope.
+
+Worth stating plainly: the shipped product runs one session per process, while this suite builds up to fourteen complete product stacks inside one worker. Per-lane runs pass, which is how this was previously recorded as a green gate; it is not one.
