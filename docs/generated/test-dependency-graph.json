@@ -1135,6 +1135,16 @@
       "package": "vitest"
     },
     {
+      "id": "packages/baton-execution/test/agent-instructions.test.ts",
+      "path": "packages/baton-execution/test/agent-instructions.test.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/baton-execution/test/baton-cell-call-context.test.ts",
       "path": "packages/baton-execution/test/baton-cell-call-context.test.ts",
       "workspace": "@rika/baton-execution",
@@ -1613,6 +1623,26 @@
       "production": false,
       "publicExports": [],
       "testKind": "contract-test"
+    },
+    {
+      "id": "packages/kernel/test/artifact-store.test.ts",
+      "path": "packages/kernel/test/artifact-store.test.ts",
+      "workspace": "@rika/kernel",
+      "package": "@rika/kernel",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/kernel/test/artifacts-binding.test.ts",
+      "path": "packages/kernel/test/artifacts-binding.test.ts",
+      "workspace": "@rika/kernel",
+      "package": "@rika/kernel",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
     },
     {
       "id": "packages/kernel/test/binding-agents.test.ts",
@@ -5455,6 +5485,14 @@
       "production": false
     },
     {
+      "from": "packages/baton-execution/test/agent-instructions.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/baton-execution/test/baton-cell-call-context.test.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
@@ -5690,6 +5728,14 @@
       "from": "packages/baton-execution/test/baton-route.test.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-route.test.ts",
+      "to": "external:@batonfx/harness",
+      "specifier": "@batonfx/harness",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -6671,6 +6717,46 @@
       "production": false
     },
     {
+      "from": "packages/kernel/test/artifact-store.test.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/kernel/test/artifact-store.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/kernel/test/artifact-store.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/kernel/test/artifacts-binding.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/kernel/test/artifacts-binding.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/kernel/test/binding-agents.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -6816,6 +6902,14 @@
     },
     {
       "from": "packages/kernel/test/binding-schema-round-trip.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/kernel/test/binding-surface.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",

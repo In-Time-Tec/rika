@@ -9257,14 +9257,6 @@
     },
     {
       "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
-      "to": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
-      "specifier": "@rika/coding-tools/coding-tool-runtime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
       "to": "packages/configuration/src/path-resolution/configuration-paths.ts",
       "specifier": "@rika/configuration/configuration-paths",
       "kind": "import",
@@ -9331,22 +9323,6 @@
       "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
       "to": "packages/product/src/thread/goal/goal-service.ts",
       "specifier": "@rika/product/goal-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
-      "to": "packages/product/src/thread/query/thread-query-service.ts",
-      "specifier": "@rika/product/thread-query-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
-      "to": "packages/product/src/thread/repository/goal-repository.ts",
-      "specifier": "@rika/product/goal-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -12413,6 +12389,14 @@
       "from": "packages/baton-execution/src/baton-route.ts",
       "to": "packages/kernel/src/harness/execution-pins.ts",
       "specifier": "@rika/kernel/execution-pins",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-route.ts",
+      "to": "packages/kernel/src/harness/harness-prompt-sections.ts",
+      "specifier": "@rika/kernel/harness-prompt-sections",
       "kind": "import",
       "relationship": "runtime",
       "production": true

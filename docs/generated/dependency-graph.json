@@ -2650,6 +2650,16 @@
       "publicExports": ["./scripted-model"]
     },
     {
+      "id": "packages/baton-execution/test/agent-instructions.test.ts",
+      "path": "packages/baton-execution/test/agent-instructions.test.ts",
+      "workspace": "@rika/baton-execution",
+      "package": "@rika/baton-execution",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
       "id": "packages/baton-execution/test/baton-cell-call-context.test.ts",
       "path": "packages/baton-execution/test/baton-cell-call-context.test.ts",
       "workspace": "@rika/baton-execution",
@@ -4127,6 +4137,26 @@
       "kind": "source",
       "production": true,
       "publicExports": ["./kernel-state-store-file-system"]
+    },
+    {
+      "id": "packages/kernel/test/artifact-store.test.ts",
+      "path": "packages/kernel/test/artifact-store.test.ts",
+      "workspace": "@rika/kernel",
+      "package": "@rika/kernel",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
+    },
+    {
+      "id": "packages/kernel/test/artifacts-binding.test.ts",
+      "path": "packages/kernel/test/artifacts-binding.test.ts",
+      "workspace": "@rika/kernel",
+      "package": "@rika/kernel",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "unit-test"
     },
     {
       "id": "packages/kernel/test/binding-agents.test.ts",
@@ -12891,14 +12921,6 @@
     },
     {
       "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
-      "to": "packages/coding-tools/src/runtime/coding-tool-runtime.ts",
-      "specifier": "@rika/coding-tools/coding-tool-runtime",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
       "to": "packages/configuration/src/path-resolution/configuration-paths.ts",
       "specifier": "@rika/configuration/configuration-paths",
       "kind": "import",
@@ -12965,22 +12987,6 @@
       "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
       "to": "packages/product/src/thread/goal/goal-service.ts",
       "specifier": "@rika/product/goal-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
-      "to": "packages/product/src/thread/query/thread-query-service.ts",
-      "specifier": "@rika/product/thread-query-service",
-      "kind": "import",
-      "relationship": "runtime",
-      "production": true
-    },
-    {
-      "from": "apps/rika/src/server/composition/server-kernel-layer.ts",
-      "to": "packages/product/src/thread/repository/goal-repository.ts",
-      "specifier": "@rika/product/goal-repository",
       "kind": "import",
       "relationship": "runtime",
       "production": true
@@ -19104,6 +19110,14 @@
     },
     {
       "from": "packages/baton-execution/src/baton-route.ts",
+      "to": "packages/kernel/src/harness/harness-prompt-sections.ts",
+      "specifier": "@rika/kernel/harness-prompt-sections",
+      "kind": "import",
+      "relationship": "runtime",
+      "production": true
+    },
+    {
+      "from": "packages/baton-execution/src/baton-route.ts",
       "to": "packages/kernel/src/kernel-profile-registration.ts",
       "specifier": "@rika/kernel/kernel-profile-registration",
       "kind": "import",
@@ -19519,6 +19533,22 @@
       "production": true
     },
     {
+      "from": "packages/baton-execution/test/agent-instructions.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/agent-instructions.test.ts",
+      "to": "packages/baton-execution/src/baton-route.ts",
+      "specifier": "../src/baton-route",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/baton-execution/test/baton-cell-call-context.test.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
@@ -19890,6 +19920,14 @@
       "from": "packages/baton-execution/test/baton-route.test.ts",
       "to": "external:@batonfx/core",
       "specifier": "@batonfx/core",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/baton-execution/test/baton-route.test.ts",
+      "to": "external:@batonfx/harness",
+      "specifier": "@batonfx/harness",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -24983,6 +25021,62 @@
       "production": true
     },
     {
+      "from": "packages/kernel/test/artifact-store.test.ts",
+      "to": "external:@effect/platform-bun/BunServices",
+      "specifier": "@effect/platform-bun/BunServices",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/kernel/test/artifact-store.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/kernel/test/artifact-store.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/kernel/test/artifact-store.test.ts",
+      "to": "packages/kernel/src/binding/artifact-store.ts",
+      "specifier": "../src/binding/artifact-store",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/kernel/test/artifacts-binding.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/kernel/test/artifacts-binding.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/kernel/test/artifacts-binding.test.ts",
+      "to": "packages/kernel/src/binding/artifacts-binding.ts",
+      "specifier": "../src/binding/artifacts-binding",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
       "from": "packages/kernel/test/binding-agents.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
@@ -25301,6 +25395,14 @@
       "kind": "import",
       "relationship": "runtime",
       "production": true
+    },
+    {
+      "from": "packages/kernel/test/binding-surface.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
     },
     {
       "from": "packages/kernel/test/binding-surface.test.ts",
