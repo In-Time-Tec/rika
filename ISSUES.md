@@ -51,3 +51,11 @@ that cached the list is done.
 `harnessSupplement` and `agentInstructionsWith` are each held by tests, but nothing unit-level holds the line that joins them: an agent's instructions live in its closure, and the manifest a configured route exposes carries tools and pins rather than prompt text. A test asserting the join by composing the two functions itself passes when the product stops composing them, which is the shape that let the harness stay disconnected through this whole migration.
 
 The join is covered by running the packaged binary: a memory written in one turn appears four times in the next turn's prompt, and zero times with the wiring removed. That is a real proof and it is not a gate, so a regression here fails only when someone runs it.
+
+## Rolling back anything but the newest refinement fails, and says the wrong thing
+
+`harness.rollback` derives its proposal from the stored event, and the derivation pins `baseSnapshot` to the snapshot as it stood immediately after that refinement (`refinement.js:175`), then applies it against the current state. Verified against the packaged binary: create `m1`, update `m1`, then roll back the create, and the call fails with `entry already exists` — the inverse of a create is a delete, and it is being applied to a state where the entry has since been edited rather than to the one it was derived against.
+
+So rollback is usable for the most recent refinement and nothing else, and the reason it gives describes the entry rather than the ordering. Either the derived proposal should not carry a historical baseline, or a non-latest rollback should say that plainly.
+
+Worth noting for whoever fixes it: `rollback` is the one binding operation reaching `applyTrustedProposal` rather than `applyProposal`, which is correct — the inverse of a delete has to restore the original version and timestamps — and it is safe because the proposal is derived from a stored event rather than from cell input.
