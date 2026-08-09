@@ -72,6 +72,23 @@ it("marks a disabled server unreachable while still listing it", () =>
     }),
   ))
 
+it("honours a disabled server in a configuration that names no servers key", () =>
+  withConfig((configPath) =>
+    Effect.gen(function* () {
+      // A configuration may be the bare server map, and a server disabled there stayed reachable
+      // because the list was only read from the wrapped form.
+      yield* write(configPath, { files: { command: "server" }, legacy: { command: "old" } })
+      const both = yield* McpDiscovery.discover({ configPath })
+      expect(both.servers.map((entry) => entry.enabled)).toEqual([true, true])
+      yield* write(configPath, { files: { command: "server" }, legacy: { command: "old" }, disabled: ["legacy"] })
+      const discovered = yield* McpDiscovery.discover({ configPath })
+      expect(discovered.servers.map((entry) => [entry.server.name, entry.enabled])).toEqual([
+        ["files", true],
+        ["legacy", false],
+      ])
+    }),
+  ))
+
 it("fails typed when a disabled name matches no configured server", () =>
   withConfig((configPath) =>
     Effect.gen(function* () {

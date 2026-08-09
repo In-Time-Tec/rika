@@ -46,7 +46,12 @@ export const discover = Effect.fn("McpDiscovery.discover")(function* (options: O
   const document = yield* Schema.decodeUnknownEffect(Document)(content).pipe(
     Effect.mapError((cause) => invalid(options.configPath, String(cause))),
   )
-  const declared = Object.hasOwn(document, "servers") ? document["disabled"] : undefined
+  /**
+   * A configuration may name its servers under `servers` or be the bare map itself, and both forms
+   * may disable one. Reading the list only in the wrapped form left a server a user had disabled
+   * reachable in the other.
+   */
+  const declared = document["disabled"]
   if (declared !== undefined && (!Array.isArray(declared) || !declared.every((name) => typeof name === "string")))
     return yield* invalid(options.configPath, "Invalid disabled: expected an array of strings")
   const disabled = new Set<string>(declared === undefined ? [] : (declared as ReadonlyArray<string>))
