@@ -475,23 +475,15 @@ export const configure = (
       if (name === "Title" || name === "Compaction") return Layer.orDie(model)
       return Layer.orDie(Layer.mergeAll(model, compactionLayer, cellLayer))
     }
-    const surface = BindingModules.surface({
-      workspace: options.workspace,
-      workspaceDigest: "",
-      trustMode: options.kernel.trustMode ?? "trusted-local",
-      servers: [],
-    } as never)
     const rootInstructions = [
       instructions.root,
       "",
-      "You have exactly one tool, named typescript. It runs a cell in a persistent Bun kernel.",
-      "The kernel exposes a `rika` object your cell code can await. It is not a tool; the only tool",
-      "name that exists is typescript. Example cell body:",
-      "",
-      '  const found = await rika.workspace.search({ pattern: "secret" })',
-      "",
-      "// available on rika:",
-      surface,
+      BindingModules.cellInstructions({
+        workspace: options.workspace,
+        workspaceDigest: "",
+        trustMode: options.kernel.trustMode ?? "trusted-local",
+        servers: [],
+      } as never),
     ].join("\n")
     const profileInstructions = {
       Title: instructions.title,

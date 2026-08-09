@@ -106,3 +106,20 @@ const environmentEntries = (environment: Environment | undefined): ReadonlyArray
  */
 export const bindingsDigest = (environment?: Environment): string =>
   KernelProfile.bindingsDigest([...moduleNames, `bootstrap:${source(moduleNames)}`, ...environmentEntries(environment)])
+
+/**
+ * What a model is told about its one tool. The list of bindings reads as code beside an example
+ * rather than a catalogue, because a model shown a bare list of module names answers with one of
+ * them as a tool name — and the only tool that exists is the cell.
+ */
+export const cellInstructions = (options: Options): string =>
+  [
+    "You have exactly one tool, named typescript. It runs a cell in a persistent Bun kernel.",
+    "The kernel exposes a `rika` object your cell code can await. It is not a tool; the only tool",
+    "name that exists is typescript. Example cell body:",
+    "",
+    '  const found = await rika.workspace.search({ pattern: "secret" })',
+    "",
+    "// available on rika:",
+    surface(options),
+  ].join("\n")
