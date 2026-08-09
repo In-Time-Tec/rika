@@ -114,7 +114,11 @@ const discoverImplementation = (
       const workspaceSkill = yield* workspace.get(name).pipe(Effect.mapError(failure.bind(undefined, "discover", name)))
       const origin: Origin = workspaceSkill === undefined ? "global" : "workspace"
       const root = path.resolve(origin === "global" ? options.globalRoot : options.workspaceRoot)
-      const directory = path.join(root, name)
+      /**
+       * The source says where it found the skill, because it reads its root recursively and a name
+       * does not locate a directory. A source that does not say falls back to the flat layout.
+       */
+      const directory = skill.directory ?? path.join(root, name)
       const manifestPath = path.join(directory, "package.json")
       /**
        * Discovery reads its root recursively and follows what it finds, so a link inside the root
@@ -185,7 +189,7 @@ const discoverImplementation = (
           .get(name)
           .pipe(Effect.mapError(failure.bind(undefined, "activate", name)))
         const root = workspaceSkill === undefined ? options.globalRoot : options.workspaceRoot
-        const directory = path.join(path.resolve(root), name)
+        const directory = skill.directory ?? path.join(path.resolve(root), name)
         const exists = yield* skillFileSystem
           .exists(directory)
           .pipe(Effect.mapError((cause) => failure("activate", directory, cause)))
