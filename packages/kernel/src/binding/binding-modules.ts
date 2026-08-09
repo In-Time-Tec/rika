@@ -46,14 +46,16 @@ export const surface = (options: Options): string =>
     .map((module) => {
       const operations = module.operations
         .map((operation) => {
-          type Literal = { readonly literals?: ReadonlyArray<string>; readonly schema?: Literal }
+          type Literal = { readonly literals?: ReadonlyArray<unknown>; readonly schema?: Literal }
           const shape = (operation.input as unknown as { readonly fields?: Record<string, Literal> }).fields ?? {}
           const fields = Object.entries(shape).map(([field, value]) => {
             // An optional field wraps the schema it makes optional, so the allowed values sit one
             // level in. Naming them matters more than naming the field: a model that invents one
             // spends a turn discovering the field would only ever have taken a few.
             const literals = value.literals ?? value.schema?.literals
-            return literals === undefined ? field : `${field}: ${literals.map((one) => `"${one}"`).join("|")}`
+            // A literal is written the way a cell writes it, so a number stays a number rather than
+            // arriving quoted and being sent as a string.
+            return literals === undefined ? field : `${field}: ${literals.map((one) => JSON.stringify(one)).join("|")}`
           })
           return `${operation.name}(${fields.length === 0 ? "" : `{ ${fields.join(", ")} }`})`
         })
