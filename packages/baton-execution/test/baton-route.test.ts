@@ -1,5 +1,6 @@
 import { expect, it } from "@effect/vitest"
 import { ExecutableManifest } from "@batonfx/core"
+import { HarnessState } from "@batonfx/harness"
 import { CellTool } from "@batonfx/repl"
 import { ExecutableRegistration } from "@batonfx/runtime"
 import * as Settings from "@rika/configuration/configuration-settings"
@@ -656,5 +657,34 @@ it.effect("keeps the admitted executable stable when skill discovery order churn
       skills: skills.toReversed(),
     })
     expect(reversed.executable.ref.active).toBe(forward.executable.ref.active)
+  }),
+)
+
+it.effect("carries a harness refinement into the instructions the root agent is given", () =>
+  Effect.gen(function* () {
+    const executionRoute = testExecutionRoute()
+    const empty = HarnessState.empty("global")
+    const harnessSnapshot = {
+      ...empty,
+      entries: {
+        ...empty.entries,
+        memory: [
+          {
+            id: "carried",
+            kind: "memory" as const,
+            scope: "global",
+            title: "Carried memory",
+            content: "PROOF_OF_A_CARRIED_REFINEMENT",
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+            version: 1,
+          },
+        ],
+      },
+    }
+    const configured = yield* configure({ executionRoute, workspace: "/workspace", kernel, harnessSnapshot })
+    const root = configured.resolverEntries[0]!
+    const instructions = "agent" in root ? (root.agent.instructions ?? "") : ""
+    expect(instructions).toContain("PROOF_OF_A_CARRIED_REFINEMENT")
   }),
 )

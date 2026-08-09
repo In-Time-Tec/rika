@@ -66,4 +66,4 @@ Worth noting for whoever fixes it: `rollback` is the one binding operation reach
 
 That matters because a marker written by a cell appears in the stream anyway — echoed back inside the source of the turn that wrote it. Counting occurrences of a marker across two runs therefore proves nothing about the prompt, and reads as a convincing pass. The release-smoke round trip asserts on a value the second cell computed by reading the harness back, which is a claim the stream can actually support: a refinement one run stores is readable by the next.
 
-What still has no automated proof is the last hop, that the supplement reaches the model's instructions. It is a one-line composition covered by inspection only, for the reason recorded above.
+The last hop, that the supplement reaches the model's instructions, is asserted in `baton-route.test.ts` by reading `resolverEntries[0].agent.instructions` — an agent carries its instructions as a readable property, so the composition is reachable after all. An earlier note here claimed it was not; that was wrong, and it was wrong because a first attempt recreated the composition rather than looking for it.
