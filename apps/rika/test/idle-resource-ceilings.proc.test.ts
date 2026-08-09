@@ -19,6 +19,7 @@ const idleRssCeiling: Readonly<Record<IdleRole, number>> = {
 }
 
 const rssGrowthCeiling = 150
+const turnGrowthCeiling = 60
 
 const median = (values: ReadonlyArray<number>): number => {
   const sorted = [...values].sort((left, right) => left - right)
@@ -29,6 +30,37 @@ const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | Scope.S
   Effect.runPromise(
     Effect.scoped(Effect.flatMap(Layer.build(BunServices.layer), (context) => Effect.provide(effect, context))),
   )
+
+/**
+ * A Server keeps about twenty-five megabytes of every interactive turn, which a long session feels
+ * and no other gate sees. This is deliberately red: the ceiling describes what the product should
+ * do, and raising it to match what the product does would retire the only thing measuring it.
+ */
+test.skipIf(process.platform !== "darwin").fails(
+  "holds a Server's size steady across turns rather than keeping part of each one",
+  () =>
+    run(
+      Effect.gen(function* () {
+        const observation = yield* observeIdleProcessTree({
+          repositoryRoot,
+          samples: 1,
+          sampleMillis: 500,
+          readyTimeoutMillis: 60_000,
+          settleMillis: 1_000,
+          turns: ["turn one", "turn two", "turn three", "turn four", "turn five", "turn six"],
+          turnSettleMillis: 4_000,
+        })
+        const perTurn = observation.perTurnServerRss
+        const half = Math.ceil(perTurn.length / 2)
+        const growth = Math.max(...perTurn.slice(half)) - Math.max(...perTurn.slice(0, half))
+        expect(
+          growth,
+          `server RSS across turns [${perTurn.map((value) => value.toFixed(0)).join(", ")}] MiB`,
+        ).toBeLessThanOrEqual(turnGrowthCeiling)
+      }),
+    ),
+  240_000,
+)
 
 test.skipIf(process.platform !== "darwin")(
   "holds every idle process role under its CPU and memory ceiling and leaves nothing running after shutdown",

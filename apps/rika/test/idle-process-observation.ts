@@ -119,10 +119,17 @@ export const observeIdleProcessTree = Effect.fn("IdleGate.observe")(function* (i
           return yield* new IdleFixtureError({
             message: `The isolated launcher exposed ${roles.size} of 3 roles before the readiness ceiling.`,
           })
+        /**
+         * A Server warms up over its first turns and then holds. Sampling only after the last turn
+         * cannot tell a plateau from a climb, so each turn's resting size is recorded as it happens.
+         */
+        const perTurnServerRss: Array<number> = []
         for (const turn of input.turns) {
           yield* Effect.sync(() => launcher.stdin.write(`${turn}\r`))
           yield* Effect.sync(() => launcher.stdin.flush())
           yield* Effect.sleep(input.turnSettleMillis)
+          const server = (yield* track).get("server")
+          if (server !== undefined) perTurnServerRss.push(server.rss / 1_024)
         }
         yield* Effect.sleep(input.settleMillis)
 
@@ -153,6 +160,7 @@ export const observeIdleProcessTree = Effect.fn("IdleGate.observe")(function* (i
             cpuPercent: entry.cpu,
             rssMebibytes: entry.rss,
           })),
+          perTurnServerRss,
           ownedPids: [...owned],
         }
       }),

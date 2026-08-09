@@ -98,4 +98,6 @@ A heap snapshot taken after a forced collection at the second and sixth of those
 
 Worth stating plainly: the shipped product runs one session per process, while this suite builds up to fourteen complete product stacks inside one worker. Per-lane runs pass, which is how this was previously recorded as a green gate; it is not one.
 
-The product itself does not carry this. A packaged binary driven through repeated turns against one Server warms up and then stops: plain cell turns settle at 558 MiB from the fourth turn through the twenty-fourth, and turns that spawn a subagent settle at 612 MiB from the sixth through the thirtieth. The first few turns pay for lazy initialisation and nothing accumulates after that. A session is one stack; the suite is up to fourteen.
+The product carries a smaller version of it. A real interactive session holding one thread grows steadily: server RSS across twelve turns runs 305, 547, 572, 597, 628, 653, 677, 713, 747, 762, 774, 790 MiB. The first step is lazy initialisation, and everything after it is a steady twenty-five megabytes a turn that has not flattened by the twelfth.
+
+An earlier measurement here claimed a plateau. It was taken with repeated `rika run` invocations, which are fresh clients against a Server that has already warmed, so the thing that grows was never held across the turns being counted. The interactive gate holds one session, which is the shape a user has.
