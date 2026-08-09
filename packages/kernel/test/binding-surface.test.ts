@@ -42,4 +42,12 @@ describe("mounted surface", () => {
     expect(text).toContain('await rika.workspace.search({ pattern: "secret" })')
     expect(text).toContain("search({ pattern, regex })")
   })
+
+  it("names the values a field will accept when it accepts only a few", () => {
+    // A model spent a turn inventing a scope that does not exist, and another guessing at profiles.
+    // A field with a closed set of values is cheaper to name than to discover.
+    const text = surface(options)
+    expect(text).toContain('scope: "thread"|"workspace"|"global"')
+    expect(text).toContain('profile: "Oracle"')
+  })
 })
