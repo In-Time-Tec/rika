@@ -1,3 +1,4 @@
+import { Pins } from "@batonfx/core"
 import { Clock, Effect, Schema } from "effect"
 import type { HostBindingRegistry } from "@batonfx/repl"
 import { AdmitReceipt, ChildInspection, DirectoryEntry, MailboxEntry, MessageReceipt } from "./agent-directory-contract"
@@ -152,14 +153,21 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<AgentPor
     failure: Failure,
     handle: (input) =>
       Effect.flatMap(AgentPort, (port) =>
-        Effect.flatMap(admissionKey("send", 0), (idempotencyKey) =>
-          port.send({
+        port.send({
+          to: input.to,
+          prompt: input.prompt,
+          /**
+           * A message is deduplicated by sender, recipient, and key together, so the key has to
+           * change between two sends a cell makes to one agent while staying the same when that
+           * cell is replayed. The message itself is the only thing with both properties.
+           */
+          idempotencyKey: Pins.digest({
             to: input.to,
             prompt: input.prompt,
-            idempotencyKey,
             ...(input.inReplyTo === undefined ? {} : { inReplyTo: input.inReplyTo }),
           }),
-        ),
+          ...(input.inReplyTo === undefined ? {} : { inReplyTo: input.inReplyTo }),
+        }),
       ),
   }),
   operation({

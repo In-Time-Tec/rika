@@ -265,4 +265,24 @@ describe("agents binding", () => {
         expect(response.failure).toMatchObject({ _tag: "AgentDirectoryUnavailable", reason: "parentage" })
     }),
   )
+
+  it.effect("gives each send from one cell its own identity", () =>
+    Effect.gen(function* () {
+      // A message is deduplicated by sender, recipient, and key together, so a key that does not
+      // move between two sends makes the second a repeat and the recipient never sees it.
+      const keys: Array<string> = []
+      const mounted = yield* registry(
+        port({
+          send: (input) => {
+            keys.push(input.idempotencyKey)
+            return Effect.succeed({ messageId: "m", entryId: "e", duplicate: false })
+          },
+        }),
+      )
+      for (const prompt of ["first", "second"])
+        yield* mounted.invoke({ module: "agents", operation: "send", input: { to: "run:child", prompt } })
+      expect(keys[0]).not.toBe(keys[1])
+      expect(keys.every((key) => key.length > 0)).toBe(true)
+    }),
+  )
 })
