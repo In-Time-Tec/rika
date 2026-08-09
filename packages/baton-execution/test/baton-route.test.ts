@@ -686,5 +686,21 @@ it.effect("carries a harness refinement into the instructions the root agent is 
     const root = configured.resolverEntries[0]!
     const instructions = "agent" in root ? (root.agent.instructions ?? "") : ""
     expect(instructions).toContain("PROOF_OF_A_CARRIED_REFINEMENT")
+    expect(
+      configured.resolverEntries.flatMap((entry) =>
+        "agent" in entry && entry.agent.name !== "rika-title"
+          ? [[entry.agent.name, (entry.agent.instructions ?? "").includes("PROOF_OF_A_CARRIED_REFINEMENT")]]
+          : [],
+      ),
+    ).toEqual([
+      ["rika-root", true],
+      ["rika-oracle", true],
+      ["rika-librarian", true],
+      ["rika-painter", true],
+      ["rika-readthread", true],
+      ["rika-review", true],
+      ["rika-surgeon", true],
+      ["rika-task", true],
+    ])
   }),
 )
