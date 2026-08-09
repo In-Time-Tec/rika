@@ -702,3 +702,50 @@ test.fails(
     ),
   tuiTestTimeout,
 )
+
+test(
+  "delegates two levels deep, each level using a tool",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        // Delegation depth was thought to be bounded by scheduler slots. It was not: a child died on
+        // its own session identity, and the arithmetic that seemed to explain it described the
+        // symptom. This holds the real depth open so a regression reads as one.
+        const app = yield* TuiApp.tuiApp({
+          workspaceFiles: { "deep.txt": "DEEP_BODY" },
+          lanes: [
+            {
+              steps: [
+                model.turn([model.spawnAndWait([{ profile: "Task", prompt: "L1" }], "l1", 25_000)]),
+                model.text("ROOT_DEEP_DONE"),
+              ],
+            },
+            {
+              profile: "Task",
+              steps: [
+                model.turn([model.spawnAndWait([{ profile: "Oracle", prompt: "L2" }], "l2", 20_000)]),
+                model.text("CHILD_DEEP_DONE"),
+              ],
+            },
+            {
+              profile: "Oracle",
+              steps: [
+                model.turn([
+                  model.binding({ module: "workspace", operation: "read", input: { path: "deep.txt" } }, "deep-read"),
+                ]),
+                model.text("GRANDCHILD_DONE"),
+              ],
+            },
+          ],
+          height: 48,
+        })
+        yield* Effect.promise(() => app.type("Delegate deep work."))
+        app.pressEnter()
+        yield* app.waitFrame("ROOT_DEEP_DONE", 30_000)
+        yield* app.settled
+        expect(app.frame()).toContain("Subagent finished")
+        yield* app.quit
+      }),
+    ),
+  tuiTestTimeout,
+)

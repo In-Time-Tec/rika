@@ -117,8 +117,8 @@ export const step = {
    * parent's next step. Waiting here is what makes the parent outlive the work it delegated, which
    * is the sequencing a lane asserting on a child's result depends on.
    *
-   * One level only. Every Run in a delegation chain holds a scheduler slot at once, so a lane whose
-   * child delegates again never sees that child's next turn, however long anything waits.
+   * A waiting parent holds its scheduler slot for the length of the wait, so a lane is bounded by
+   * how many Runs wait at the same moment rather than by how deep its chain goes.
    */
   spawnAndWait: (children: ReadonlyArray<SpawnRequest>, id: string, waitMillis = 10_000): Part =>
     step.cell(
