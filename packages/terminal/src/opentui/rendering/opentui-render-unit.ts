@@ -24,6 +24,8 @@ import {
 import type {
   AgentOutcome,
   AgentResponseState,
+  CellTranscriptUnit,
+  NestedTranscriptUnit,
   ToolTranscriptUnit,
   TranscriptUnit,
 } from "../../presentation/transcript/transcript-tool-types"
@@ -235,6 +237,35 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
       } else append(dim(fg(colors.text)(wrapBodyText(output, transcriptWrapWidth(model.width), "  "))))
     }
   }
+  const renderNestedCell = (unit: CellTranscriptUnit, prefix: string, last: boolean) => {
+    const block = model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "Cell" }>
+    const expanded = rowExpanded(transcriptUnitId(model, unit))
+    const rowWidth = transcriptWrapWidth(model.width)
+    const visiblePrefix = truncateToWidth(prefix, Math.max(0, rowWidth - 8))
+    const continuationPrefix = `${visiblePrefix}${last ? " " : "│"} `
+    append(fg(colors.text)("\n"))
+    append(dim(fg(colors.subtle)(`${visiblePrefix}${last ? "└" : "├"} `)))
+    const start = line
+    // The cell body is authored against the left margin, so its own line breaks are re-indented
+    // onto this branch rather than escaping the subagent's timeline.
+    const appendIndented = (chunk: TextChunk | TerminalTextChunk) =>
+      append(
+        chunk.text.includes("\n") ? { ...chunk, text: chunk.text.replaceAll("\n", `\n${continuationPrefix}`) } : chunk,
+      )
+    renderCellBody(block, false, expanded, rowWidth - stringWidth(continuationPrefix), spinnerFrame, appendIndented)
+    nestedRanges.push({
+      start,
+      end: line,
+      headerEnd: start,
+      unit: transcriptUnitId(model, unit),
+      expandable: true,
+      animated: block.status === "running",
+    })
+  }
+  const renderNested = (unit: NestedTranscriptUnit, prefix: string, last: boolean) => {
+    if (unit.kind === "cell") renderNestedCell(unit, prefix, last)
+    else renderNestedTool(unit, prefix, last)
+  }
   const renderNestedTool = (unit: ToolTranscriptUnit, prefix: string, last: boolean) => {
     const index = unit.blocks[0]!
     const block = model.blocks[index] as Extract<TranscriptBlock, { _tag: "ToolCall" }>
@@ -336,7 +367,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     }
     if (expanded)
       for (const [childIndex, child] of children.entries())
-        renderNestedTool(child, bodyIndent, childIndex === children.length - 1 && unit.agentResponse === undefined)
+        renderNested(child, bodyIndent, childIndex === children.length - 1 && unit.agentResponse === undefined)
     if (expanded && unit.agentResponse !== undefined) {
       const timeline = children.length > 0
       const terminalPrefix = timeline ? `${bodyIndent}│   ` : bodyIndent
@@ -366,7 +397,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     if (block.promptTruncated)
       append(dim(fg(colors.amber)("\n  Prompt truncated; inspect the source request for full detail.")))
     for (const [childIndex, child] of unit.children.entries())
-      renderNestedTool(child, "  ", childIndex === unit.children.length - 1 && unit.agentResponse === undefined)
+      renderNested(child, "  ", childIndex === unit.children.length - 1 && unit.agentResponse === undefined)
     if (unit.agentResponse !== undefined) {
       const timeline = unit.children.length > 0
       const prefix = timeline ? "  │   " : "  "
@@ -448,11 +479,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
       )
       if (expanded)
         for (const [childIndex, child] of (unit.children ?? []).entries())
-          renderNestedTool(
-            child,
-            "  ",
-            childIndex === (unit.children?.length ?? 0) - 1 && unit.agentResponse === undefined,
-          )
+          renderNested(child, "  ", childIndex === (unit.children?.length ?? 0) - 1 && unit.agentResponse === undefined)
       if (expanded && unit.agentResponse !== undefined) {
         const timeline = (unit.children?.length ?? 0) > 0
         const prefix = timeline ? "  │   " : "  "

@@ -11,19 +11,20 @@ export type ToolTranscriptUnit = {
   readonly group: ToolGroupKind
   readonly blocks: ReadonlyArray<number>
   readonly diffs: ReadonlyArray<number>
-  readonly children?: ReadonlyArray<ToolTranscriptUnit>
+  readonly children?: ReadonlyArray<NestedTranscriptUnit>
   readonly agentResponse?: AgentResponseState
 }
 export type SubagentTranscriptUnit = {
   readonly kind: "subagent"
   readonly block: number
-  readonly children: ReadonlyArray<ToolTranscriptUnit>
+  readonly children: ReadonlyArray<NestedTranscriptUnit>
   readonly agentResponse?: AgentResponseState
 }
 export type CellTranscriptUnit = {
   readonly kind: "cell"
   readonly block: number
 }
+export type NestedTranscriptUnit = ToolTranscriptUnit | CellTranscriptUnit
 export type TranscriptUnit =
   | { readonly kind: "entry"; readonly entry: number }
   | ToolTranscriptUnit

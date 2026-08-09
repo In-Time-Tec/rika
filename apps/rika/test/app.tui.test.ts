@@ -221,19 +221,20 @@ test(
         app.pressKey("\t")
         yield* app.waitFrame("Oracle has spoken")
         app.pressEnter()
-        yield* app.waitFrame("Read nested.txt")
+        const nestedCell = 'ts await rika.workspace.read({"path":"nested.txt"}) \u00b7 1 line'
+        yield* app.waitFrame(nestedCell)
         yield* app.settled
         const completed = app.frame()
         expect(completed.match(/Oracle has spoken/g) ?? []).toHaveLength(1)
-        expect(completed.match(/Read nested\.txt/g) ?? []).toHaveLength(1)
+        expect(completed.split(nestedCell)).toHaveLength(2)
         expect(completed).toContain("Oracle result")
         expect(completed).toContain("ORACLE_STYLE_RESULT")
         expect(completed).not.toContain("## Oracle result")
         expect(completed).not.toContain("The subagent finished without a final message.")
         expect(completed).not.toContain("Collected subagents")
         expect(completed).not.toContain("Waiting for subagents")
-        expect(spanHasColor(app, "Read", "192,192,192,255"), "Read primary span").toBe(true)
-        expect(spanHasColor(app, " nested.txt", "128,128,128,255"), "Read path span").toBe(true)
+        expect(spanHasColor(app, nestedCell, "192,192,192,255"), "nested cell summary span").toBe(true)
+        expect(spanHasColor(app, "\u251c ", "128,128,128,255"), "nested cell branch span").toBe(true)
         yield* app.quit
       }),
     ),
