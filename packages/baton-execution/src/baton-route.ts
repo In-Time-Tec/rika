@@ -10,7 +10,7 @@ import {
   TurnPolicy,
 } from "@batonfx/core"
 import { AmazonBedrock, Anthropic, Deterministic, ModelRoute, OpenAi, OpenRouter } from "@batonfx/providers"
-import { Errors, ExecutableRegistration, ExecutableResolver } from "@batonfx/runtime"
+import { Errors, ExecutableRegistration, ExecutableResolver, Runtime } from "@batonfx/runtime"
 import type { HarnessState } from "@batonfx/harness"
 import { CellTool, KernelPool, type KernelProfile } from "@batonfx/repl"
 import * as CellCallContext from "./baton-cell-call-context"
@@ -19,7 +19,7 @@ import * as ExecutionPins from "@rika/kernel/execution-pins"
 import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registration"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
 import type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
-import { Config, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { Config, Context, Effect, Function, Layer, Option, Redacted, Schema } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import { providerHttpClientLayer } from "./baton-provider-http"
 import * as Registration from "./baton-registration"
@@ -60,6 +60,7 @@ export interface ConfigureOptions {
     never,
     Scope.Scope
   >
+  readonly durableRuntime?: Effect.Effect<Option.Option<Runtime.Runtime["Service"]>>
   readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
   readonly harnessSnapshot?: HarnessState.HarnessState
   readonly agentServices?: Layer.Layer<AgentToolHandlers>
@@ -81,6 +82,7 @@ export interface ResolverOptions {
     never,
     Scope.Scope
   >
+  readonly durableRuntime?: Effect.Effect<Option.Option<Runtime.Runtime["Service"]>>
   readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
   readonly harnessSnapshot?: HarnessState.HarnessState
   readonly agentServices?: (workspace: string) => Layer.Layer<AgentToolHandlers>
@@ -364,9 +366,13 @@ const missingKernel = (tool: string) =>
  * The cell route resolves its KernelPool per call rather than at layer-build time, so the ambient
  * per-call ToolContext the Baton host installs around each tool execution is the one the cell sees.
  * Binding it when the layer is built would freeze one call's identity into every later cell.
+ *
+ * The durable Runtime is supplied around `enter` rather than awaited before it, so a host that has
+ * no Runtime still runs cells: only `rika.agents` needs one, and it reports its own absence.
  */
 const cellExecutor = (
   pool: Effect.Effect<Context.Context<KernelPool.KernelPool | CellCallContext.CellCallContext>, never, Scope.Scope>,
+  runtime: Effect.Effect<Option.Option<Runtime.Runtime["Service"]>> | undefined,
 ): Layer.Layer<ToolExecutor.ToolExecutor> =>
   Layer.succeed(
     ToolExecutor.ToolExecutor,
@@ -375,17 +381,22 @@ const cellExecutor = (
         CellTool.route.matches(request)
           ? Effect.scoped(
               Effect.flatMap(pool, (context) =>
-                Context.get(context, CellCallContext.CellCallContext)
-                  .enter(request.sessionId)
-                  .pipe(
-                    Effect.andThen(
-                      CellTool.route
-                        .execute(request)
-                        .pipe(
-                          Effect.provideService(KernelPool.KernelPool, Context.get(context, KernelPool.KernelPool)),
-                        ),
+                Effect.flatMap(runtime ?? Effect.succeedNone, (durable) =>
+                  Context.get(context, CellCallContext.CellCallContext)
+                    .enter(request.sessionId)
+                    .pipe(
+                      Option.isNone(durable)
+                        ? Function.identity
+                        : Effect.provideService(Runtime.Runtime, durable.value),
+                      Effect.andThen(
+                        CellTool.route
+                          .execute(request)
+                          .pipe(
+                            Effect.provideService(KernelPool.KernelPool, Context.get(context, KernelPool.KernelPool)),
+                          ),
+                      ),
                     ),
-                  ),
+                ),
               ),
             )
           : missingKernel(request.call.name),
@@ -467,7 +478,10 @@ export const configure = (
         ? { capabilities: [], registrations: [] }
         : ExecutionPins.harness(options.harnessSnapshot)
     const pinnedCapabilities = { skills: skillPins.capabilities, services: harnessPins.capabilities }
-    const cellLayer = options.kernelPool === undefined ? unavailableKernelExecutor : cellExecutor(options.kernelPool)
+    const cellLayer =
+      options.kernelPool === undefined
+        ? unavailableKernelExecutor
+        : cellExecutor(options.kernelPool, options.durableRuntime)
     const environment = (name: keyof typeof routes): AgentEnvironment => {
       const model = routed[name].layer
       if (name === "Title" || name === "Compaction") return Layer.orDie(model)
@@ -661,6 +675,7 @@ export const makeResolver = (options: ResolverOptionsWithCredentialStore): Execu
           workspace: context.workspace,
           kernel: options.kernel,
           ...(options.kernelPool === undefined ? {} : { kernelPool: options.kernelPool }),
+          ...(options.durableRuntime === undefined ? {} : { durableRuntime: options.durableRuntime }),
           ...(options.skills === undefined ? {} : { skills: options.skills }),
           ...(options.harnessSnapshot === undefined ? {} : { harnessSnapshot: options.harnessSnapshot }),
           ...(options.credentialStore === undefined ? {} : { credentialStore: options.credentialStore }),

@@ -72,8 +72,13 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<AgentPor
     failure: Failure,
     handle: (input) => Effect.flatMap(AgentPort, (port) => port.inspect(input.childRunId)),
   }),
+  /**
+   * Named for what it does. A cell runs under a deadline the host enforces, so a call that blocked
+   * until children settled would turn a slow child into the deadline of the cell that spawned it.
+   * Admission is non-blocking and observation is explicit; a cell that wants to wait polls this.
+   */
   operation({
-    name: "join",
+    name: "inspectAll",
     input: JoinInput,
     output: Schema.Array(ChildInspection),
     failure: Failure,

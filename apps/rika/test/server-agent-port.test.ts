@@ -60,6 +60,16 @@ it.effect("reports Baton's duplicate admission rather than always claiming a fre
     const admitted = yield* withPort(
       {
         spawn: () => Effect.succeed({ runId: "child-1", messageId: "m", acceptedSequence: 1, duplicate: true }),
+        inspectTree: () =>
+          Effect.succeed({
+            _tag: "Active",
+            rootRunId: "run-self",
+            cursor: "c",
+            runs: [],
+            usage: [],
+            compactions: [],
+            activeRunIds: [],
+          } as never),
       },
       (value) => value.spawn({ profile: "Task", prompt: "p", key: "k" }),
     )

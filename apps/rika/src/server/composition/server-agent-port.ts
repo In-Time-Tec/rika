@@ -140,6 +140,19 @@ const make: Effect.Effect<AgentPort["Service"]> = Effect.sync(() => {
         Effect.mapError(failed),
       ),
     )
+  /**
+   * The ordinal a spawn is admitted under, counted from the children this operation has already
+   * admitted in durable state rather than from an in-process counter.
+   *
+   * The ordinal is what makes two spawns of the SAME profile from one cell distinct: the admission
+   * key the binding supplies names only the profile, so without this both would carry one key and
+   * Baton would treat the second as a duplicate of the first and admit one child instead of two.
+   */
+  const originFor = (self: { readonly runId: string; readonly toolCallId: string }) =>
+    Effect.map(children(self.runId), (admitted) => ({
+      operationKey: self.toolCallId,
+      ordinal: admitted.filter((child) => child.origin?.operationKey === self.toolCallId).length,
+    }))
   const ownedChild = (parentRunId: string, childRunId: string) =>
     Effect.flatMap(children(parentRunId), (all) => {
       const found = all.find((child) => child.childRunId === childRunId)
@@ -150,20 +163,31 @@ const make: Effect.Effect<AgentPort["Service"]> = Effect.sync(() => {
   return AgentPort.of({
     spawn: (input) =>
       Effect.flatMap(identity, (self) =>
-        Effect.flatMap(ambientRuntime, (runtime) =>
-          runtime
-            .spawn({
-              parentRunId: self.runId,
-              invocationId: ChildAdmission.invocationIdFor({ toolCallId: self.toolCallId, key: input.key }),
-              selection: input.profile,
-              prompt: input.prompt,
-              idempotencyKey: input.key,
-              metadata: { productIntent: "cell-child", originOperation: self.toolCallId },
-            })
-            .pipe(
-              Effect.map((receipt) => ({ childRunId: receipt.runId, key: input.key, duplicate: receipt.duplicate })),
-              Effect.mapError(failed),
-            ),
+        Effect.flatMap(originFor(self), (origin) =>
+          Effect.flatMap(ambientRuntime, (runtime) =>
+            runtime
+              .spawn({
+                parentRunId: self.runId,
+                invocationId: ChildAdmission.invocationIdFor({
+                  toolCallId: self.toolCallId,
+                  key: input.key,
+                  origin,
+                }),
+                selection: input.profile,
+                prompt: input.prompt,
+                /**
+                 * The ordinal travels in the idempotency key as well as the invocation id. Two
+                 * spawns of one profile from one cell share the binding's admission key, so
+                 * without it Baton would read the second as a repeat of the first.
+                 */
+                idempotencyKey: `${input.key}#${origin.ordinal}`,
+                metadata: { productIntent: "cell-child", originOperation: self.toolCallId },
+              })
+              .pipe(
+                Effect.map((receipt) => ({ childRunId: receipt.runId, key: input.key, duplicate: receipt.duplicate })),
+                Effect.mapError(failed),
+              ),
+          ),
         ),
       ),
     list: Effect.flatMap(identity, (self) => children(self.runId)),

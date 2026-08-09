@@ -29,7 +29,7 @@ describe("agents binding", () => {
       expect(mounted.descriptors).toEqual([
         {
           module: "agents",
-          operations: ["spawn", "list", "inspect", "join", "cancel", "send", "inbox", "directory"],
+          operations: ["spawn", "list", "inspect", "inspectAll", "cancel", "send", "inbox", "directory"],
         },
       ])
     }),
@@ -100,7 +100,7 @@ describe("agents binding", () => {
     }),
   )
 
-  it.effect("join reads current child state without blocking or polling", () =>
+  it.effect("inspectAll reads current child state without blocking or polling", () =>
     Effect.gen(function* () {
       let reads = 0
       const mounted = yield* registry(
@@ -113,7 +113,7 @@ describe("agents binding", () => {
       )
       const response = yield* mounted.invoke({
         module: "agents",
-        operation: "join",
+        operation: "inspectAll",
         input: { childRunIds: ["a", "b"] },
       })
       expect(reads).toBe(2)
@@ -138,7 +138,7 @@ describe("agents binding", () => {
       yield* mounted.invoke({ module: "agents", operation: "spawn", input: { profile: "Task", prompt: "p" } })
       yield* mounted.invoke({ module: "agents", operation: "list", input: {} })
       yield* mounted.invoke({ module: "agents", operation: "inspect", input: { childRunId: "a" } })
-      yield* mounted.invoke({ module: "agents", operation: "join", input: { childRunIds: ["a"] } })
+      yield* mounted.invoke({ module: "agents", operation: "inspectAll", input: { childRunIds: ["a"] } })
       yield* mounted.invoke({ module: "agents", operation: "cancel", input: { childRunId: "a" } })
       yield* mounted.invoke({ module: "agents", operation: "inbox", input: { limit: 10 } })
       yield* mounted.invoke({ module: "agents", operation: "directory", input: {} })
