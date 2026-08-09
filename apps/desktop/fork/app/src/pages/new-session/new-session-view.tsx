@@ -1,5 +1,5 @@
 import { Tooltip } from "@opencode-ai/ui/tooltip"
-import { Logo } from "@opencode-ai/ui/logo"
+import { WordmarkV2 } from "@opencode-ai/ui/v2/wordmark-v2"
 import { Show, type Accessor } from "solid-js"
 import { Portal } from "solid-js/web"
 import { PromptInputV2Composer } from "@/components/prompt-input-v2"
@@ -25,7 +25,7 @@ export function NewSessionView(props: {
       >
         <div class="absolute inset-x-0 top-[25.375%] flex justify-center px-6">
           <div class={NEW_SESSION_CONTENT_WIDTH}>
-            <Logo class="mx-auto h-28 w-28" />
+            <WordmarkV2 class="h-auto w-full text-v2-background-bg-inverse" />
             <div class="mt-8 flex flex-col gap-8">
               <PromptInputV2Composer controller={props.input} />
               <Show when={props.project.empty()}>

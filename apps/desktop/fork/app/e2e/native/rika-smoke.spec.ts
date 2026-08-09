@@ -21,6 +21,7 @@ test("submits a prompt through the native Rika WebSocket", async ({ page }) => {
   await page.locator('[data-action="home-new-session"]').click()
   const prompt = page.getByRole("textbox", { name: "Prompt" })
   await expect(prompt).toBeVisible()
+  await expect(page.locator('svg[data-component="logo-wordmark"]')).toBeVisible()
   await prompt.fill("Reply exactly RIKA_OK")
   await page.getByRole("button", { name: "Send" }).click()
   await expect(page.getByText("RIKA_OK", { exact: true })).toBeVisible({ timeout: 30_000 })

@@ -1,4 +1,5 @@
 import { type ComponentProps } from "solid-js"
+import { RikaWordmarkPaths } from "./rika-wordmark"
 
 const src = "/rika-logo.png"
 
@@ -20,5 +21,17 @@ export const Splash = (props: Pick<ComponentProps<"img">, "ref" | "class">) => {
 }
 
 export const Logo = (props: { class?: string }) => {
-  return <img data-component="logo-wordmark" src={src} alt="Rika" class={`object-contain ${props.class ?? ""}`} />
+  return (
+    <svg
+      data-component="logo-wordmark"
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 234 42"
+      fill="none"
+      role="img"
+      aria-label="Rika"
+      classList={{ [props.class ?? ""]: !!props.class }}
+    >
+      <RikaWordmarkPaths leadingFill="var(--icon-base)" trailingFill="var(--icon-strong-base)" />
+    </svg>
+  )
 }
