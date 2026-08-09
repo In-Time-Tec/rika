@@ -43,7 +43,7 @@ const withPlatform = <A, E, R>(body: Effect.Effect<A, E, R>) =>
 const runUpdate = (options: {
   readonly currentVersion: string
   readonly executable: string
-  readonly host?: ReleaseUpdate.ReleaseHost
+  readonly host?: Parameters<typeof ReleaseUpdate.hostReleaseTarget>[0]
   readonly environment: Readonly<Record<string, string>>
   readonly routes: Readonly<Record<string, StubRoute>>
   readonly seen: Array<string>

@@ -15,3 +15,9 @@ Reproducing it needs the real client with a child that answers, which the proces
 Closing this means giving the scripted model the same per-profile registration and applying those identities in the server when a test script is present. That places test-only routing in production composition, which is a real cost and the reason it has not been done for a presentation defect alone.
 
 Dispatching on the incoming prompt instead was considered and rejected: a model request carries no profile, so the only discriminator is the instruction text, and coupling a harness to prompt wording breaks the moment anyone rewords an instruction.
+
+## Twenty-two size findings the policy still reports
+
+`repository-policy` reports 15 export counts, 6 dependency counts, and 2 file sizes over their limits. Most predate this migration; the ones it added are the Server's kernel and product composition, which name every binding module, store, and service the runtime is built from. A composition root has high fan-in by nature, and splitting one to satisfy a count moves the wiring somewhere it reads worse.
+
+The policy has no exemption for a composition boundary, which is the honest gap: either it grows one, or those two files are counted like any other and stay reported. Both are decisions about the rule rather than the code, so neither was made here.

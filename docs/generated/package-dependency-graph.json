@@ -8,7 +8,13 @@
       "workspace": "@rika/baton-execution",
       "kind": "package",
       "production": true,
-      "publicExports": ["./baton-execution", "./baton-route", "./baton-test-harness", "./scripted-model"]
+      "publicExports": [
+        "./baton-cell-call-context",
+        "./baton-execution",
+        "./baton-route",
+        "./baton-test-harness",
+        "./scripted-model"
+      ]
     },
     {
       "id": "package:@rika/cli",
@@ -29,11 +35,13 @@
         "./bash-tool",
         "./coding-tool-catalog",
         "./coding-tool-policy",
+        "./coding-tool-result",
         "./coding-tool-runtime",
         "./edit-file-tool",
         "./grep-files-tool",
         "./local-path",
         "./local-safety-policy",
+        "./media-view-contract",
         "./media-view-service",
         "./parallel-web-search",
         "./read-file-tool",
@@ -44,6 +52,7 @@
         "./thread-tool-contract",
         "./unified-diff",
         "./view-media-tool",
+        "./web-search-input-contract",
         "./web-search-provider",
         "./web-search-service",
         "./web-search-tool",
@@ -78,21 +87,50 @@
       "publicExports": [
         "./execution-extension-service",
         "./mcp-configuration",
+        "./mcp-discovery",
         "./mcp-oauth-service",
         "./mcp-runtime",
         "./plugin-contract",
         "./plugin-digest",
         "./plugin-registry",
+        "./skill-file-system",
+        "./skill-prompt-listing",
         "./skill-registry"
       ]
     },
     {
-      "id": "package:@rika/javascript-sandbox",
-      "package": "@rika/javascript-sandbox",
-      "workspace": "@rika/javascript-sandbox",
+      "id": "package:@rika/kernel",
+      "package": "@rika/kernel",
+      "workspace": "@rika/kernel",
       "kind": "package",
       "production": true,
-      "publicExports": ["./javascript-sandbox"]
+      "publicExports": [
+        "./agent-port",
+        "./agents-binding",
+        "./artifact-store",
+        "./artifacts-binding",
+        "./binding-modules",
+        "./context-binding",
+        "./edits-binding",
+        "./execution-pins",
+        "./goal-binding",
+        "./harness-binding",
+        "./harness-prompt-sections",
+        "./harness-scope-policy",
+        "./harness-snapshot-pin",
+        "./harness-store-locations",
+        "./kernel-bootstrap",
+        "./kernel-composition",
+        "./kernel-profile-registration",
+        "./kernel-state-store-file-system",
+        "./mcp-binding",
+        "./media-binding",
+        "./nested-operation-envelope",
+        "./processes-binding",
+        "./threads-binding",
+        "./web-binding",
+        "./workspace-binding"
+      ]
     },
     {
       "id": "package:@rika/product",
@@ -116,6 +154,9 @@
         "./extension-operation",
         "./failure-message",
         "./failure-policy",
+        "./goal-record",
+        "./goal-repository",
+        "./goal-service",
         "./interactive-command",
         "./interactive-event",
         "./interactive-operation",
@@ -166,6 +207,7 @@
       "production": true,
       "publicExports": [
         "./product-database-layer",
+        "./sqlite-goal-repository",
         "./sqlite-thread-repository",
         "./sqlite-thread-search-repository",
         "./sqlite-thread-summary-repository",
@@ -214,6 +256,7 @@
       "kind": "package",
       "production": true,
       "publicExports": [
+        "./cell-presentation",
         "./partial-tool-input",
         "./recorded-shell-presentation",
         "./subagent-presentation",
@@ -245,12 +288,12 @@
     },
     {
       "from": "package:@rika/baton-execution",
-      "to": "package:@rika/javascript-sandbox",
-      "specifier": "@rika/javascript-sandbox",
+      "to": "package:@rika/kernel",
+      "specifier": "@rika/kernel",
       "kind": "package",
-      "relationship": "test",
-      "production": false,
-      "dependencySection": "devDependencies"
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
     },
     {
       "from": "package:@rika/baton-execution",
@@ -299,8 +342,8 @@
     },
     {
       "from": "package:@rika/cli",
-      "to": "package:@rika/javascript-sandbox",
-      "specifier": "@rika/javascript-sandbox",
+      "to": "package:@rika/kernel",
+      "specifier": "@rika/kernel",
       "kind": "package",
       "relationship": "runtime",
       "production": true,
@@ -346,6 +389,42 @@
       "from": "package:@rika/coding-tools",
       "to": "package:@rika/configuration",
       "specifier": "@rika/configuration",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
+    {
+      "from": "package:@rika/kernel",
+      "to": "package:@rika/coding-tools",
+      "specifier": "@rika/coding-tools",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
+    {
+      "from": "package:@rika/kernel",
+      "to": "package:@rika/configuration",
+      "specifier": "@rika/configuration",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
+    {
+      "from": "package:@rika/kernel",
+      "to": "package:@rika/extensions",
+      "specifier": "@rika/extensions",
+      "kind": "package",
+      "relationship": "runtime",
+      "production": true,
+      "dependencySection": "dependencies"
+    },
+    {
+      "from": "package:@rika/kernel",
+      "to": "package:@rika/product",
+      "specifier": "@rika/product",
       "kind": "package",
       "relationship": "runtime",
       "production": true,
