@@ -113,8 +113,15 @@ const discoverImplementation = (
       const name = skill.frontmatter.name
       const workspaceSkill = yield* workspace.get(name).pipe(Effect.mapError(failure.bind(undefined, "discover", name)))
       const origin: Origin = workspaceSkill === undefined ? "global" : "workspace"
-      const directory = path.join(path.resolve(origin === "global" ? options.globalRoot : options.workspaceRoot), name)
+      const root = path.resolve(origin === "global" ? options.globalRoot : options.workspaceRoot)
+      const directory = path.join(root, name)
       const manifestPath = path.join(directory, "package.json")
+      /**
+       * Discovery reads its root recursively and follows what it finds, so a link inside the root
+       * can name a directory outside it. A skill is executable content, so where it really lives
+       * decides whether the root bounded anything.
+       */
+
       const present = yield* skillFileSystem
         .exists(manifestPath)
         .pipe(Effect.mapError((cause) => failure("discover", manifestPath, cause)))
@@ -126,6 +133,16 @@ const discoverImplementation = (
       const realDirectory = yield* skillFileSystem
         .realPath(directory)
         .pipe(Effect.mapError((cause) => failure("discover", directory, cause)))
+      /**
+       * Discovery reads its root recursively and follows what it finds, so a link inside the root
+       * can name a directory outside it. A skill is executable content, so where it really lives
+       * decides whether the root bounded anything.
+       */
+      const realRoot = yield* skillFileSystem
+        .realPath(root)
+        .pipe(Effect.mapError((cause) => failure("discover", root, cause)))
+      if (!contained(path, realRoot, realDirectory))
+        return yield* failure("discover", directory, "Skill directory escapes its configured root")
       const realManifest = yield* skillFileSystem
         .realPath(manifestPath)
         .pipe(Effect.mapError((cause) => failure("discover", manifestPath, cause)))

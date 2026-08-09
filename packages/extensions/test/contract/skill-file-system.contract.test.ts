@@ -132,3 +132,29 @@ test("an executable manifest that points outside its skill directory is refused"
     ),
   )
 })
+
+test("a skill directory reached by a link out of the root is refused", () => {
+  const program = Effect.scoped(
+    Effect.gen(function* () {
+      // Discovery reads its root recursively and follows what it finds, so a link inside the root
+      // can name a directory outside it. A skill is executable content.
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-skills-link-" })
+      const workspaceRoot = `${root}/workspace`
+      yield* fileSystem.makeDirectory(`${root}/outside/secret`, { recursive: true })
+      yield* fileSystem.makeDirectory(`${root}/global`, { recursive: true })
+      yield* fileSystem.makeDirectory(workspaceRoot, { recursive: true })
+      yield* fileSystem.writeFileString(`${root}/outside/secret/SKILL.md`, document("secret", "outside", "body"))
+      yield* fileSystem.writeFileString(`${root}/outside/secret/package.json`, '{ "name": "secret" }')
+      yield* fileSystem.symlink(`${root}/outside/secret`, `${workspaceRoot}/secret`)
+      const discovered = yield* Effect.exit(SkillRegistry.discover({ globalRoot: `${root}/global`, workspaceRoot }))
+      expect(discovered._tag).toBe("Failure")
+    }),
+  )
+  return Effect.runPromise(
+    provideLayer(
+      program,
+      Layer.mergeAll(SkillFileSystem.fileSystemLayer.pipe(Layer.provide(BunServices.layer)), BunServices.layer),
+    ),
+  )
+})
