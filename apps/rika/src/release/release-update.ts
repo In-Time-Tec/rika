@@ -13,7 +13,7 @@ const architectureNames: Readonly<Record<string, string>> = {
   x64: "x64",
   x86_64: "x64",
 }
-interface ReleaseHost {
+export interface ReleaseHost {
   readonly platform: string
   readonly architecture: string
 }

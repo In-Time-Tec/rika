@@ -12,8 +12,6 @@ import * as ServerKernel from "../src/server/composition/server-kernel-layer"
 export interface BackendOptions {
   readonly filename: string
   readonly kernelPool: Context.Context<BatonExecution.KernelPoolServices>
-  readonly workspace: string
-  readonly dataRoot: string
   readonly registryLayer: LaneModels["registryLayer"]
   readonly toolRuntimeLayer: Layer.Layer<ToolRuntime.Service>
   readonly queryFactoryLayer: Layer.Layer<ThreadQuery.Factory>

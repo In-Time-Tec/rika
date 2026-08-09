@@ -31,7 +31,6 @@ describe("approval control failures", () => {
     const { dispatch, showToast } = router()
     dispatch({
       _tag: "ExecutionControlFailed",
-      selectionEpoch: 0,
       threadId: Thread.ThreadId.make("thread"),
       turnId: Turn.TurnId.make("turn"),
       action,
@@ -51,7 +50,6 @@ describe("approval control failures", () => {
     const { dispatch, showToast } = router()
     dispatch({
       _tag: "ExecutionControlFailed",
-      selectionEpoch: 0,
       threadId: Thread.ThreadId.make("other-thread"),
       turnId: Turn.TurnId.make("turn"),
       action: "approve",
