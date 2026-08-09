@@ -69,9 +69,20 @@ const program = Effect.scoped(
     yield* fileSystem
       .writeFileString(path.join(workspace, "smoke.txt"), "release-smoke-needle\n")
       .pipe(mapFailure("seed workspace"))
-    const grepScript = yield* Schema.encodeUnknownEffect(UnknownJson)([
+    /**
+     * A cell is the only tool a model is given, and it runs in a kernel the packaged binary has to
+     * spawn as a file. Reading the seeded workspace through one is what proves the packaged product
+     * can do its own work, rather than only start.
+     */
+    const cellScript = yield* Schema.encodeUnknownEffect(UnknownJson)([
       {
-        parts: [{ type: "toolCall", name: "grep", params: { pattern: "release-smoke-needle", regex: false } }],
+        parts: [
+          {
+            type: "toolCall",
+            name: "typescript",
+            params: { code: `await rika.workspace.search({"pattern":"release-smoke-needle"})` },
+          },
+        ],
       },
       { parts: [{ type: "text", text: "SMOKE_COMPLETE" }] },
     ]).pipe(mapFailure("encode model script"))
@@ -79,7 +90,7 @@ const program = Effect.scoped(
       HOME: home,
       RIKA_DATABASE: path.join(state, "rika.db"),
       RIKA_INTERNAL_SERVER_GRACE: "0",
-      RIKA_TEST_MODEL_SCRIPT: grepScript,
+      RIKA_TEST_MODEL_SCRIPT: cellScript,
     }
     const output = (
       command: ReadonlyArray<string>,
@@ -145,11 +156,20 @@ const program = Effect.scoped(
       !("schemaVersion" in decodedPerformance)
     )
       return yield* failure("performance runtime", "Packaged performance report is invalid")
-    const executed = yield* output(["run", "find the needle"])
+    const executed = yield* output(["run", "--stream-json", "find the needle"])
+    /**
+     * The seeded line proves the cell RAN: a model that answers without its kernel still reaches its
+     * own final text, so the answer alone says nothing about whether any work happened.
+     */
+    if (!executed.includes("release-smoke-needle"))
+      return yield* failure(
+        "packaged cell",
+        `Packaged run did not carry a cell result back: ${executed.slice(0, 2_000)}`,
+      )
     if (!executed.includes("SMOKE_COMPLETE"))
       return yield* failure(
         "packaged run",
-        `Deterministic packaged run did not complete a grep tool turn: ${executed.slice(0, 2_000)}`,
+        `Deterministic packaged run did not complete a cell turn: ${executed.slice(0, 2_000)}`,
       )
     const threads = yield* output(["threads", "list"])
     const decoded = yield* Schema.decodeUnknownEffect(ThreadsJson)(threads).pipe(mapFailure("decode threads list"))
